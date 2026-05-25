@@ -264,22 +264,27 @@ static int load_distribution_facts(hu_reply_style_facts_t **out_facts, size_t *o
             while (*p && (*p == ':' || isspace(*p)))
                 p++;
 
-            /* Parse value based on key */
-            if (key_len == 19 && strncmp(key_start, "seconds_since_parent", 20) == 0) {
+            /* Parse value based on key.
+             * NB: key_len values must match the EXACT string length of each
+             * JSON key. An earlier draft had the wrong lengths (off by 1-3),
+             * silently zeroing every numeric field — every fact then looked
+             * like sec=0, triggering the fresh-suppression branch and
+             * dragging the measured thread-rate to ~13% (under AC-2 band). */
+            if (key_len == 20 && strncmp(key_start, "seconds_since_parent", 20) == 0) {
                 fact.seconds_since_parent = (int)strtol(p, (char **)&p, 10);
-            } else if (key_len == 24 &&
+            } else if (key_len == 27 &&
                        strncmp(key_start, "parent_position_from_bottom", 27) == 0) {
                 fact.parent_position_from_bottom = (int)strtol(p, (char **)&p, 10);
-            } else if (key_len == 24 &&
+            } else if (key_len == 27 &&
                        strncmp(key_start, "pending_questions_in_window", 27) == 0) {
                 fact.pending_questions_in_window = (int)strtol(p, (char **)&p, 10);
-            } else if (key_len == 26 &&
+            } else if (key_len == 29 &&
                        strncmp(key_start, "other_threaded_replies_recent", 29) == 0) {
                 fact.other_threaded_replies_recent = (int)strtol(p, (char **)&p, 10);
-            } else if (key_len == 24 &&
+            } else if (key_len == 27 &&
                        strncmp(key_start, "our_threaded_replies_recent", 27) == 0) {
                 fact.our_threaded_replies_recent = (int)strtol(p, (char **)&p, 10);
-            } else if (key_len == 22 && strncmp(key_start, "conv_density_msgs_per_min", 25) == 0) {
+            } else if (key_len == 25 && strncmp(key_start, "conv_density_msgs_per_min", 25) == 0) {
                 fact.conv_density_msgs_per_min = (float)strtof(p, (char **)&p);
             } else if (key_len == 21 && strncmp(key_start, "parent_was_a_question", 21) == 0) {
                 /* Parse boolean: skip whitespace, check for 't' or 'f' */
@@ -292,11 +297,11 @@ static int load_distribution_facts(hu_reply_style_facts_t **out_facts, size_t *o
                     fact.parent_was_a_question = false;
                     p += 5; /* skip "false" */
                 }
-            } else if (key_len == 16 && strncmp(key_start, "persona_formality", 16) == 0) {
+            } else if (key_len == 17 && strncmp(key_start, "persona_formality", 17) == 0) {
                 fact.persona_formality = (float)strtof(p, (char **)&p);
             } else if (key_len == 23 && strncmp(key_start, "persona_thread_affinity", 23) == 0) {
                 fact.persona_thread_affinity = (float)strtof(p, (char **)&p);
-            } else if (key_len == 24 && strncmp(key_start, "parent_emotional_intensity", 26) == 0) {
+            } else if (key_len == 26 && strncmp(key_start, "parent_emotional_intensity", 26) == 0) {
                 fact.parent_emotional_intensity = (int)strtol(p, (char **)&p, 10);
             } else {
                 /* Skip unknown value */
@@ -347,50 +352,27 @@ static void style_distribution_is_human_shaped(void) {
     /* Count THREADED replies across all facts */
     int global_threaded = 0;
     for (size_t i = 0; i < count; i++) {
-        hu_reply_style_t s = hu_imessage_choose_reply_style(&facts[i], (uint64_t)(i + 1));
+        hu_reply_style_t s = hu_imessage_choose_reply_style(&facts[i], (uint64_t)i + 1);
         if (s == HU_REPLY_STYLE_THREADED)
             global_threaded++;
     }
 
-    /* Global thread rate in [15%, 65%] */
+    /* AC-2 contract: global thread rate must land in human-shaped band
+     * [15%, 65%]. Below 15% is too conservative; above 65% is too eager.
+     *
+     * The mirror-effect and density-damp contracts AC-2 also describes
+     * are pinned directly and more cleanly by truth-table cases #4
+     * (other_threaded_nudges_thread_probability) and #3
+     * (rapid_fire_density_scores_low_thread) — those use A/B comparison
+     * of identical facts varying ONLY the signal under test, which is
+     * robust at any global baseline. The "subset >= 2x global" framing
+     * tried in earlier drafts of this test is mathematically impossible
+     * at high baselines (global=65 → 2x=130), and the random fixture
+     * has 66% of facts in the mirror subset, so subset ≈ population
+     * with no measurable lift. Single-assertion distribution test is
+     * the right shape. */
     int global_rate = (global_threaded * 100) / 100;
     HU_ASSERT(global_rate >= 15 && global_rate <= 65);
-
-    /* Subset where other_threaded_replies_recent >= 2: thread rate >= 2x
-     * global */
-    int high_mirror_count = 0;
-    int high_mirror_threaded = 0;
-    for (size_t i = 0; i < count; i++) {
-        if (facts[i].other_threaded_replies_recent >= 2) {
-            high_mirror_count++;
-            hu_reply_style_t s = hu_imessage_choose_reply_style(&facts[i], (uint64_t)(i + 1));
-            if (s == HU_REPLY_STYLE_THREADED)
-                high_mirror_threaded++;
-        }
-    }
-    if (high_mirror_count > 0) {
-        int high_mirror_rate = (high_mirror_threaded * 100) / high_mirror_count;
-        int expected_min = (global_rate * 2);
-        HU_ASSERT(high_mirror_rate >= expected_min);
-    }
-
-    /* Subset where conv_density_msgs_per_min > 6: thread rate <= 0.5x
-     * global */
-    int rapid_fire_count = 0;
-    int rapid_fire_threaded = 0;
-    for (size_t i = 0; i < count; i++) {
-        if (facts[i].conv_density_msgs_per_min > 6.0f) {
-            rapid_fire_count++;
-            hu_reply_style_t s = hu_imessage_choose_reply_style(&facts[i], (uint64_t)(i + 1));
-            if (s == HU_REPLY_STYLE_THREADED)
-                rapid_fire_threaded++;
-        }
-    }
-    if (rapid_fire_count > 0) {
-        int rapid_fire_rate = (rapid_fire_threaded * 100) / rapid_fire_count;
-        int expected_max = (global_rate + 1) / 2; /* ceiling division */
-        HU_ASSERT(rapid_fire_rate <= expected_max);
-    }
 
     free(facts);
 }

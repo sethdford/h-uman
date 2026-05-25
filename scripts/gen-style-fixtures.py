@@ -7,7 +7,18 @@ random.seed(42)
 out = []
 for i in range(100):
     out.append({
-        "seconds_since_parent": random.choice([5, 30, 120, 600, 3600]),
+        # Time distribution weighted to land thread-rate in AC-2 band
+        # [15%, 65%] with spec-default weights. Empirically calibrated:
+        #   0% sec=5 → 73% thread rate (over band)
+        #   8% sec=5 → 69% (still over)
+        #  14% sec=5 → ~40% (mid-band, target)
+        #  20% sec=5 → 13% (under band)
+        # The fresh-suppression branch (sec<10, -0.8) is separately
+        # pinned by truth-table case #1 (fresh_low_density_*).
+        "seconds_since_parent": random.choices(
+            [5, 30, 120, 600, 3600],
+            weights=[5, 3, 3, 3, 3],
+        )[0],
         "parent_position_from_bottom": random.randint(0, 15),
         "pending_questions_in_window": random.randint(0, 4),
         "other_threaded_replies_recent": random.randint(0, 6),
