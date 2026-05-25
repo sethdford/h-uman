@@ -13,12 +13,12 @@
  * Per test-source-gate-symmetry rule: production symbol lives in
  * src/channels/telegram_reactions.c (gated by HU_ENABLE_TELEGRAM in
  * CMakeLists.txt). We use the internal-#ifdef-wrap-with-stub-runner
- * pattern: the test bodies are gated on HU_HAS_TELEGRAM so non-telegram
+ * pattern: the test bodies are gated on HU_ENABLE_TELEGRAM so non-telegram
  * build variants link cleanly. */
 
 #include "test_framework.h"
 
-#ifdef HU_HAS_TELEGRAM
+#ifdef HU_ENABLE_TELEGRAM
 
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
@@ -309,10 +309,10 @@ void run_telegram_reactions_tests(void) {
     HU_RUN_TEST(test_telegram_reaction_question_is_neutral);
 }
 
-#else /* !HU_HAS_TELEGRAM */
+#else /* !HU_ENABLE_TELEGRAM — stub runner so the symbol resolves */
 
 void run_telegram_reactions_tests(void) {
     (void)0;
 }
 
-#endif
+#endif /* HU_ENABLE_TELEGRAM */

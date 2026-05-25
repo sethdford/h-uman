@@ -754,6 +754,37 @@ hu_error_t hu_tom_user_beliefs_init_table(sqlite3 *db) {
     return HU_OK;
 }
 
+/* Spec 4 Q-TOM-B / Phase B follow-up: when a belief is recorded, mark
+ * any matching unresolved expectations on the same (contact_id, topic) as
+ * resolved. Closes the expectation→belief→resolution loop so the GC tick
+ * has rows to delete and the clarify directive stops firing on topics
+ * the agent now actually knows about.
+ *
+ * Best-effort: failures don't fail the caller's belief write. Logged
+ * once per process on the first invocation to confirm the loop is alive. */
+static void resolve_expectations_for_belief(sqlite3 *db, const char *contact_id, const char *topic,
+                                            size_t topic_len, int64_t now_ts_ms) {
+    if (!db || !contact_id || !topic || topic_len == 0)
+        return;
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "UPDATE tom_user_expectations "
+                                "SET resolved_ts_ms = ? "
+                                "WHERE contact_id = ? AND topic = ? "
+                                "  AND resolved_ts_ms IS NULL",
+                                -1, &st, NULL);
+    if (rc != SQLITE_OK) {
+        if (st)
+            sqlite3_finalize(st);
+        return;
+    }
+    sqlite3_bind_int64(st, 1, now_ts_ms);
+    sqlite3_bind_text(st, 2, contact_id, (int)strlen(contact_id), SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, topic, (int)topic_len, SQLITE_STATIC);
+    (void)sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
 hu_error_t hu_tom_persist_belief(sqlite3 *db, const char *contact_id, const char *topic,
                                  size_t topic_len, hu_belief_type_t belief_type, float confidence,
                                  const char *session_key, size_t session_key_len,
@@ -804,8 +835,10 @@ hu_error_t hu_tom_persist_belief(sqlite3 *db, const char *contact_id, const char
     sqlite3_finalize(upd);
     if (rc != SQLITE_DONE)
         return HU_ERR_IO;
-    if (sqlite3_changes(db) > 0)
+    if (sqlite3_changes(db) > 0) {
+        resolve_expectations_for_belief(db, contact_id, topic, tlen, now_ts_ms);
         return HU_OK;
+    }
 
     /* No row matched — INSERT. */
     sqlite3_stmt *ins = NULL;
@@ -829,7 +862,11 @@ hu_error_t hu_tom_persist_belief(sqlite3 *db, const char *contact_id, const char
     sqlite3_bind_int64(ins, 7, now_ts_ms);
     rc = sqlite3_step(ins);
     sqlite3_finalize(ins);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
+    if (rc == SQLITE_DONE) {
+        resolve_expectations_for_belief(db, contact_id, topic, tlen, now_ts_ms);
+        return HU_OK;
+    }
+    return HU_ERR_IO;
 }
 
 hu_error_t hu_tom_user_beliefs_count_for_contact_session(sqlite3 *db, const char *contact_id,

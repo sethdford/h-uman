@@ -15,6 +15,10 @@
 #include <unistd.h>
 #endif
 #include "human/persona.h"
+/* Phase 4b — hu_kv_quant_from_string / hu_kv_quant_to_string for the
+ * inference doctor check. Header is gate-free so it compiles even when
+ * HU_ENABLE_LLAMACPP is OFF (the actual GGML wiring is what's gated). */
+#include "human/providers/llamacpp.h"
 #if HU_HAS_IMESSAGE
 #include "human/channels/imessage.h"
 #endif
@@ -272,6 +276,165 @@ static hu_error_t doctor_check_local_inference(hu_allocator_t *alloc, hu_diag_it
         alloc, buf, n, cap, HU_DIAG_WARN,
         "[doctor] Embedded model provider: not compiled in (HU_ENABLE_EMBEDDED_MODEL=OFF)");
 #endif
+}
+
+/* ── Phase 4b — inference throughput config checks ──────────────────── */
+
+/* Helper: emit a line with a heap-allocated message (printf-formatted)
+ * so callers don't have to allocate per-call. Borrowed pattern from
+ * the imessage diagnose path. */
+#include <stdarg.h>
+
+static hu_error_t doctor_push_fmt(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
+                                  size_t *cap, hu_diag_severity_t sev, const char *fmt, ...) {
+    char tmp[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int wrote = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+    va_end(ap);
+    if (wrote < 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    return doctor_push_line(alloc, buf, n, cap, sev, tmp);
+}
+
+hu_error_t hu_doctor_check_inference(hu_allocator_t *alloc, hu_diag_item_t **items, size_t *count,
+                                     size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_error_t e;
+
+    /* KV quant: detect typos via the parser's recognized-flag. */
+    const char *kv = getenv("HU_LLAMACPP_KV_QUANT");
+    if (!kv || !*kv) {
+        e = doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                             "[doctor] HU_LLAMACPP_KV_QUANT: unset (FP16 default)");
+        if (e != HU_OK)
+            return e;
+    } else {
+        bool recognized = false;
+        hu_kv_quant_t parsed = hu_kv_quant_from_string(kv, &recognized);
+        if (recognized) {
+            e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                                "[doctor] HU_LLAMACPP_KV_QUANT=%s → %s (recognized)", kv,
+                                hu_kv_quant_to_string(parsed));
+        } else {
+            e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] HU_LLAMACPP_KV_QUANT=%s UNRECOGNIZED — "
+                                "factory silently falls back to FP16. "
+                                "Accepted: fp16/f16/16, q8_0/q8/8, q4_0/q4/4 (case-insensitive)",
+                                kv);
+        }
+        if (e != HU_OK)
+            return e;
+    }
+
+    /* Flash Attention: detect values that aren't a recognized off-token.
+     * Factory's off-tokens are exactly {"off","0","false"}; anything else
+     * keeps FA on (the operator-intended default for Mac Metal). Warn on
+     * values that look like an attempt to disable that won't actually
+     * disable (e.g. "no", "False", "OFF" — case mismatches). */
+    const char *fa = getenv("HU_LLAMACPP_FLASH_ATTN");
+    if (!fa || !*fa) {
+        e = doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                             "[doctor] HU_LLAMACPP_FLASH_ATTN: unset (FA on, default)");
+    } else if (strcmp(fa, "off") == 0 || strcmp(fa, "0") == 0 || strcmp(fa, "false") == 0) {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] HU_LLAMACPP_FLASH_ATTN=%s → FA OFF (recognized)", fa);
+    } else if (strcmp(fa, "on") == 0 || strcmp(fa, "1") == 0 || strcmp(fa, "true") == 0) {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] HU_LLAMACPP_FLASH_ATTN=%s → FA ON (default behavior)", fa);
+    } else {
+        /* Adversarial: e.g. "OFF" (case mismatch), "no", "disable", etc.
+         * Factory keeps FA on. Operator probably meant to disable it. */
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                            "[doctor] HU_LLAMACPP_FLASH_ATTN=%s — factory keeps FA ON. "
+                            "To disable, use exactly 'off', '0', or 'false' (lowercase)",
+                            fa);
+    }
+    if (e != HU_OK)
+        return e;
+
+    /* Draft model: verify the file exists on disk. Factory silently
+     * disables spec decode if the path doesn't resolve at provider
+     * create time — operator might think they're getting Phase 3b
+     * benefits and never see the warning. */
+    const char *draft = getenv("HU_LLAMACPP_DRAFT_MODEL");
+    if (!draft || !*draft) {
+        e = doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                             "[doctor] HU_LLAMACPP_DRAFT_MODEL: unset (spec decode disabled)");
+    } else if (access(draft, R_OK) == 0) {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] HU_LLAMACPP_DRAFT_MODEL=%s (readable, spec decode ready)",
+                            draft);
+    } else {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_ERR,
+                            "[doctor] HU_LLAMACPP_DRAFT_MODEL=%s NOT READABLE — "
+                            "spec decode will silently fail at provider creation. "
+                            "Run: scripts/fetch-gemma.sh --draft <url> --draft-sha <sha>",
+                            draft);
+    }
+    if (e != HU_OK)
+        return e;
+
+    /* Numeric overrides: validate ranges. Out-of-range silently degrades
+     * to 0 (upstream default) at the factory; the operator never sees a
+     * surface-level warning. */
+    const char *min_p_s = getenv("HU_LLAMACPP_DRAFT_MIN_P");
+    if (min_p_s && *min_p_s) {
+        char *end = NULL;
+        double v = strtod(min_p_s, &end);
+        if (!end || end == min_p_s || v < 0.0 || v > 1.0) {
+            e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] HU_LLAMACPP_DRAFT_MIN_P=%s out of [0,1] — "
+                                "factory ignores, upstream default used",
+                                min_p_s);
+            if (e != HU_OK)
+                return e;
+        }
+    }
+    const char *max_t_s = getenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    if (max_t_s && *max_t_s) {
+        char *end = NULL;
+        long v = strtol(max_t_s, &end, 10);
+        if (!end || end == max_t_s || v <= 0 || v >= 64) {
+            e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] HU_LLAMACPP_DRAFT_MAX_TOKENS=%s out of (0,64) — "
+                                "factory ignores, upstream default used",
+                                max_t_s);
+            if (e != HU_OK)
+                return e;
+        }
+    }
+
+    /* Phase 2c — opt-in KV cache skip-decode (Phase 2b.2). STRICT
+     * on-token matching (1 / on / true) is by design: mis-enabling can
+     * silently corrupt KV in real linked-libllama builds. The doctor's
+     * job here is to make mis-enable attempts VISIBLE — operator sets
+     * "yes" thinking it'll enable; factory keeps default OFF; without
+     * this check the operator never knows the opt-in didn't take. */
+    const char *skip = getenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    if (!skip || !*skip) {
+        e = doctor_push_line(
+            alloc, items, count, cap, HU_DIAG_OK,
+            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE: unset (Phase 2b SAFE path)");
+    } else if (strcmp(skip, "1") == 0 || strcmp(skip, "on") == 0 || strcmp(skip, "true") == 0) {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE=%s → ON "
+                            "(Phase 2b.2 opt-in active — TTFT win on warm hits)",
+                            skip);
+    } else {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE=%s NOT a recognized "
+                            "on-token — factory keeps SAFE default OFF. To enable, "
+                            "use exactly '1', 'on', or 'true' (lowercase). "
+                            "Strict matching is intentional: mis-enabling can corrupt KV.",
+                            skip);
+    }
+    if (e != HU_OK)
+        return e;
+
+    return HU_OK;
 }
 
 /* ── Security checks ─────────────────────────────────────────────────── */
@@ -841,10 +1004,10 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
     hu_diag_item_t it;
 
     if (!cfg->default_provider || !cfg->default_provider[0]) {
-        it = (hu_diag_item_t){HU_DIAG_ERR, hu_strdup(alloc, "config"),
-                              hu_strdup(alloc,
-                                        "no default_provider configured "
-                                        "(run 'human onboard' or set mlx_local/apple for no API key)")};
+        it = (hu_diag_item_t){
+            HU_DIAG_ERR, hu_strdup(alloc, "config"),
+            hu_strdup(alloc, "no default_provider configured "
+                             "(run 'human onboard' or set mlx_local/apple for no API key)")};
         buf[n++] = it;
     } else {
         char *msg = hu_sprintf(alloc, "provider: %s", cfg->default_provider);
@@ -994,6 +1157,14 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
     }
 
     ext_err = hu_doctor_check_security(alloc, &buf, &n, &cap);
+    if (ext_err != HU_OK) {
+        doctor_free_diag_items(alloc, buf, n, cap);
+        return ext_err;
+    }
+
+    /* Phase 4b — surface inference-config misconfigurations the
+     * factory's friendly-to-typos parsers silenced. */
+    ext_err = hu_doctor_check_inference(alloc, &buf, &n, &cap);
     if (ext_err != HU_OK) {
         doctor_free_diag_items(alloc, buf, n, cap);
         return ext_err;

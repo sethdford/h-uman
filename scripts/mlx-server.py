@@ -116,6 +116,16 @@ _MLX_TOKENIZER = None  # mlx_lm tokenizer (or None)
 _CURRENT_ADAPTER = ""
 _TENSORS_LOADED = 0
 
+# Phase 3b — cross-model speculative decoding state. When the operator
+# sets HU_MLX_DRAFT_MODEL (or --draft-model), we load a small draft
+# model alongside the target and pass it through to mlx_lm.stream_generate
+# via the `draft_model=` kwarg (mlx_lm >= 0.21). Newer mlx_lm exposes
+# the kwarg; older versions silently ignore extras, so the fallback is
+# graceful — spec decode is off but inference still works.
+_MLX_DRAFT_MODEL = None
+_MLX_DRAFT_TOKENIZER = None
+_MLX_DRAFT_PATH = ""
+
 
 def _try_load_mlx_model(model_id: str) -> bool:
     """Best-effort. Returns True if the model loaded successfully."""
@@ -128,6 +138,34 @@ def _try_load_mlx_model(model_id: str) -> bool:
         return True
     except Exception as exc:  # noqa: BLE001 — mlx_lm raises a variety
         print(f"[mlx-server] load({model_id!r}) failed: {exc}", flush=True)
+        return False
+
+
+def _try_load_draft_model(draft_path: str) -> bool:
+    """Phase 3b — load a draft model for speculative decoding. Returns
+    True on success. Failure is non-fatal: spec decode silently turns
+    off and inference proceeds against the target only. The draft must
+    use the SAME tokenizer family as the target — caller's responsibility
+    (a future doctor check could detect mismatched tokenizers, but the
+    fallback is correct regardless: divergent drafts just lower the
+    acceptance rate, they don't break output)."""
+    global _MLX_DRAFT_MODEL, _MLX_DRAFT_TOKENIZER, _MLX_DRAFT_PATH
+    if not draft_path:
+        return False
+    if not have_mlx_lm():
+        return False
+    try:
+        from mlx_lm import load
+        _MLX_DRAFT_MODEL, _MLX_DRAFT_TOKENIZER = load(draft_path)
+        _MLX_DRAFT_PATH = draft_path
+        print(f"[mlx-server] draft model loaded: {draft_path!r}", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlx-server] draft load({draft_path!r}) failed (spec decode "
+              f"disabled): {exc}", flush=True)
+        _MLX_DRAFT_MODEL = None
+        _MLX_DRAFT_TOKENIZER = None
+        _MLX_DRAFT_PATH = ""
         return False
 
 
@@ -283,6 +321,8 @@ def _chat_completion_inline(body):
     # Apply the model's chat template if the tokenizer supports it; else
     # fall back to a simple concatenation. Either way produces a prompt
     # string suitable for generate().
+    prompt_tokens = 0
+    completion_tokens = 0
     if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
         try:
             from mlx_lm import generate
@@ -303,12 +343,28 @@ def _chat_completion_inline(body):
                 _MLX_MODEL, _MLX_TOKENIZER,
                 prompt=prompt, max_tokens=max_tokens,
             )
+            # Phase 0.1 — honest token accounting. Without this, every
+            # bench-gemma-perf.py run against the inline path reports
+            # tps=0 because completion_tokens=0. The tokenizer's
+            # encode() is the same one apply_chat_template used, so the
+            # counts are the actual decoded tokens (not an estimate).
+            try:
+                prompt_tokens = len(tok.encode(prompt))
+            except Exception:
+                prompt_tokens = 0
+            try:
+                # text is the assistant reply only — generate() returns
+                # the continuation, not prompt + continuation.
+                completion_tokens = len(tok.encode(text))
+            except Exception:
+                completion_tokens = 0
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
     else:
         # No real model loaded — return a deterministic stub so the
-        # transport contract is still testable.
+        # transport contract is still testable. Token counts stay 0 in
+        # this branch; bench callers can detect stub mode by health probe.
         last = messages[-1].get("content", "") if messages else ""
         text = f"[stub] echoing {len(last)} chars from last user message"
 
@@ -321,7 +377,11 @@ def _chat_completion_inline(body):
             "message": {"role": "assistant", "content": text},
             "finish_reason": "stop",
         }],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
     }
 
 
@@ -368,6 +428,11 @@ class SwapHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "active_adapter": _CURRENT_ADAPTER,
                 "model_loaded": _MLX_MODEL is not None,
+                # Phase 3b — expose draft-model state so the bench
+                # harness can verify spec decode is actually configured
+                # (vs the operator forgetting to set HU_MLX_DRAFT_MODEL).
+                "draft_model_loaded": _MLX_DRAFT_MODEL is not None,
+                "draft_model": _MLX_DRAFT_PATH,
             })
         if self.path == "/v1/adapters/current":
             return self._send_json(200, {
@@ -411,8 +476,167 @@ class SwapHandler(BaseHTTPRequestHandler):
             # completions through the swapped adapter, otherwise the
             # M3 personalization loop has no served-turn proof.
             # OpenAI-compatible request shape: messages=[{role, content}].
+            #
+            # Phase 3a (Gemma throughput program): when the client
+            # passes stream=true, switch to SSE so perceived TTFT
+            # collapses to first-token latency instead of full-response
+            # latency. The existing buffered path stays for stream=false
+            # consumers and for backwards compatibility with anything
+            # that POSTed without the field.
+            if body.get("stream") is True:
+                return self._stream_chat_completion(body)
             status, resp = _chat_completion_inline(body)
             return self._send_json(status, resp)
+
+    def _stream_chat_completion(self, body):
+        """SSE response path. Emits OpenAI-compatible chunks until the
+        model halts (max_tokens or eos), then a final chunk with
+        finish_reason='stop' plus a `data: [DONE]\\n\\n` sentinel.
+
+        Falls back gracefully when mlx_lm isn't importable: emits ONE
+        delta chunk with the stub text + DONE. This keeps the SSE
+        contract testable in stub mode without a real model.
+        """
+        messages = body.get("messages", [])
+        if not isinstance(messages, list) or not messages:
+            return self._send_json(400, {"error": "missing or empty messages"})
+        max_tokens = int(body.get("max_tokens", 256))
+        model_name = body.get("model", "mlx-inline")
+
+        # Begin chunked SSE response. No Content-Length (chunked encoding
+        # via close-on-EOF; HTTPServer's chunk handling is good enough
+        # here because each `self.wfile.write` flushes a TCP packet).
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        # No Content-Length intentionally — keep the connection
+        # streaming until the closing [DONE] sentinel.
+        self.end_headers()
+
+        def emit(delta_text: str, finish_reason=None, usage=None):
+            chunk = {
+                "id": "chatcmpl-mlx-inline",
+                "object": "chat.completion.chunk",
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": delta_text} if delta_text else {},
+                        "finish_reason": finish_reason,
+                    }
+                ],
+            }
+            if usage is not None:
+                chunk["usage"] = usage
+            payload = "data: " + json.dumps(chunk) + "\n\n"
+            try:
+                self.wfile.write(payload.encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # Client disconnected mid-stream. Re-raise as a sentinel
+                # the outer loop catches to stop generation cleanly.
+                raise
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        try:
+            if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
+                try:
+                    from mlx_lm import stream_generate
+                except ImportError:
+                    # mlx_lm < 0.20 didn't expose stream_generate at the
+                    # top level. Fall back to one-shot generate +
+                    # emit-as-one-chunk so the SSE contract still holds.
+                    stream_generate = None
+
+                tok = _MLX_TOKENIZER
+                if hasattr(tok, "apply_chat_template"):
+                    prompt = tok.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    prompt = "\n".join(
+                        f"{m.get('role', 'user')}: {m.get('content', '')}"
+                        for m in messages
+                    )
+                try:
+                    prompt_tokens = len(tok.encode(prompt))
+                except Exception:
+                    prompt_tokens = 0
+
+                if stream_generate is not None:
+                    # Phase 3b — pass the draft model when loaded. Older
+                    # mlx_lm ignores unknown kwargs in **kwargs, newer
+                    # ones consume draft_model. We use a try/except
+                    # around the iterator construction itself in case a
+                    # specific version raises on unknown kwargs.
+                    sg_kwargs = {
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                    }
+                    if _MLX_DRAFT_MODEL is not None:
+                        sg_kwargs["draft_model"] = _MLX_DRAFT_MODEL
+                    try:
+                        iterator = stream_generate(
+                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
+                    except TypeError:
+                        # mlx_lm rejected draft_model — retry without it.
+                        sg_kwargs.pop("draft_model", None)
+                        iterator = stream_generate(
+                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
+                    for item in iterator:
+                        # mlx_lm yields different shapes across versions:
+                        # newer GenerationResponse objects have `.text`;
+                        # older paths yield bare strings.
+                        delta = getattr(item, "text", None)
+                        if delta is None and isinstance(item, str):
+                            delta = item
+                        if delta is None:
+                            delta = str(item)
+                        if delta:
+                            emit(delta)
+                            completion_tokens += 1
+                else:
+                    # Fallback: one-shot then emit as a single chunk.
+                    from mlx_lm import generate as _generate
+                    text = _generate(
+                        _MLX_MODEL, _MLX_TOKENIZER,
+                        prompt=prompt, max_tokens=max_tokens,
+                    )
+                    try:
+                        completion_tokens = len(tok.encode(text))
+                    except Exception:
+                        completion_tokens = 0
+                    if text:
+                        emit(text)
+            else:
+                # Stub mode: emit one delta chunk + DONE so the SSE
+                # contract is exercisable in CI without mlx_lm installed.
+                last = messages[-1].get("content", "") if messages else ""
+                stub = f"[stub] echoing {len(last)} chars from last user message"
+                emit(stub)
+                completion_tokens = 0
+        except (BrokenPipeError, ConnectionResetError):
+            return  # client gone, no point sending finish chunk
+        except Exception as exc:  # noqa: BLE001 — mlx_lm raises a variety
+            print(f"[mlx-server] stream generate failed: {exc}", flush=True)
+            # Best-effort finish chunk + DONE so the client doesn't hang.
+            try:
+                emit("", finish_reason="error")
+            except Exception:
+                pass
+
+        # Final chunk + DONE sentinel.
+        try:
+            emit("", finish_reason="stop", usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            })
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
         return self._send_json(404, {"error": f"no route: {self.path}"})
 
@@ -485,6 +709,11 @@ def main():
     ap.add_argument("--model", default=os.environ.get(
                         "HUMAN_MLX_MODEL", "mlx-community/gemma-4-26b-a4b-it-4bit"),
                     help="Model id to load (only used when mlx_lm is installed)")
+    ap.add_argument("--draft-model", default=os.environ.get("HU_MLX_DRAFT_MODEL", ""),
+                    help="Phase 3b — speculative decoding draft model id or local "
+                         "path. When set AND mlx_lm is installed, loaded alongside "
+                         "the target and passed to stream_generate via draft_model=. "
+                         "Empty disables spec decode (default).")
     ap.add_argument("--prefer-upstream", action="store_true",
                     help="If gemma-realtime is installed AND exposes "
                          "/v1/adapters/swap, delegate to it. Default is to "
@@ -528,6 +757,12 @@ def main():
             sys.modules["__main__"] = mod
             spec.loader.exec_module(mod)
             return 0
+
+    # Phase 3b — attempt draft-model load before booting the server so
+    # the first request can already use spec decode. Failure is non-
+    # fatal; the server runs without spec decode.
+    if args.draft_model:
+        _try_load_draft_model(args.draft_model)
 
     # Default path (and AC-M3-1 (a)): inline swap server.
     _run_inline_server(args.port, args.adapter, args.model)

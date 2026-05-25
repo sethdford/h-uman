@@ -124,7 +124,8 @@ static void sb_append(char *dst, size_t cap, size_t *off, const char *s) {
 size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
                                      const char *contact_handle, const char *channel,
                                      const char *incoming_text, const char *persona_summary,
-                                     char *out, size_t cap) {
+                                     const struct hu_personal_model *contact_model,
+                                     int64_t now_unix, char *out, size_t cap) {
     if (!out || cap < 2)
         return 0;
     out[0] = '\0';
@@ -162,6 +163,55 @@ size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
         sb_append(out, cap, &n, persona_summary);
         sb_append(out, cap, &n, "\n");
     }
+
+    /* Inject contact insights (top-3 facts by effective confidence). */
+    if (contact_model && contact_model->fact_count > 0) {
+        typedef struct {
+            const hu_heuristic_fact_t *fact;
+            float eff_conf;
+        } scored_fact_t;
+
+        scored_fact_t scored[HU_PM_MAX_FACTS];
+        size_t scored_count = 0;
+        scored_fact_t tmp;
+
+        /* Collect facts with effective confidence >= 0.1. */
+        for (size_t i = 0; i < contact_model->fact_count && scored_count < HU_PM_MAX_FACTS; i++) {
+            float eff = hu_heuristic_fact_effective_confidence(&contact_model->facts[i], now_unix);
+            if (eff >= 0.1f) {
+                scored[scored_count].fact = &contact_model->facts[i];
+                scored[scored_count].eff_conf = eff;
+                scored_count++;
+            }
+        }
+
+        /* Bubble-sort top-3 by effective confidence (descending). */
+        for (size_t i = 0; i < scored_count - 1 && i < 2; i++) {
+            for (size_t j = i + 1; j < scored_count; j++) {
+                if (scored[j].eff_conf > scored[i].eff_conf) {
+                    tmp = scored[i];
+                    scored[i] = scored[j];
+                    scored[j] = tmp;
+                }
+            }
+        }
+
+        /* Emit top-3 facts. */
+        size_t top_k = (scored_count < 3) ? scored_count : 3;
+        if (top_k > 0) {
+            sb_append(out, cap, &n, "\nContact insights:\n");
+            for (size_t i = 0; i < top_k; i++) {
+                sb_append(out, cap, &n, "- ");
+                sb_append(out, cap, &n, scored[i].fact->subject);
+                sb_append(out, cap, &n, " ");
+                sb_append(out, cap, &n, scored[i].fact->predicate);
+                sb_append(out, cap, &n, " ");
+                sb_append(out, cap, &n, scored[i].fact->object);
+                sb_append(out, cap, &n, "\n");
+            }
+        }
+    }
+
     sb_append(out, cap, &n, "\nIncoming message:\n");
     sb_append(out, cap, &n, (incoming_text && *incoming_text) ? incoming_text : "(empty)");
     sb_append(out, cap, &n, "\n\nReply:");
@@ -393,9 +443,23 @@ hu_error_t hu_autoresponder_generate_reply(hu_allocator_t *alloc,
         hu_personal_model_build_prompt((const hu_personal_model_t *)model, persona_buf,
                                        sizeof(persona_buf));
 
+    /* Load per-contact personal model (best-effort). */
+    hu_personal_model_t contact_model = {0};
+    char pm_path[512];
+    if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+        (void)hu_personal_model_load_for_contact(&contact_model, contact_handle, pm_path);
+    }
+
+    /* Ingest the incoming message into contact model (best-effort). */
+    if (incoming_text && *incoming_text) {
+        (void)hu_personal_model_ingest_for_contact(&contact_model, contact_handle, incoming_text,
+                                                   strlen(incoming_text), /*from_user=*/true,
+                                                   now_unix, pm_path);
+    }
+
     char prompt[4096];
-    hu_autoresponder_build_prompt(cfg, contact_handle, channel, incoming_text, persona_buf, prompt,
-                                  sizeof(prompt));
+    hu_autoresponder_build_prompt(cfg, contact_handle, channel, incoming_text, persona_buf,
+                                  &contact_model, now_unix, prompt, sizeof(prompt));
 
     /* Load default provider. Same pattern as predictive_drafts. */
     hu_config_t loaded_cfg;

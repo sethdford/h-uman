@@ -205,6 +205,9 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
 
     hu_agent_set_current_for_tools(agent);
 
+    /* Reset per-turn state so behavior-log stash sees a clean slate. */
+    hu_agent_turn_state_reset(agent);
+
     hu_agent_internal_process_mailbox_messages(agent);
 
     char *slash_resp = hu_agent_handle_slash_command(agent, msg, msg_len);
@@ -292,6 +295,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         *response_len_out = 0;
 
     hu_agent_set_current_for_tools(agent);
+
+    /* Reset per-turn state so behavior-log stash sees a clean slate. */
+    hu_agent_turn_state_reset(agent);
+
     hu_agent_internal_process_mailbox_messages(agent);
 
     /* Free any previously-built humanness context, then build fresh for this turn */
@@ -1542,15 +1549,36 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                          * detect "I am an AI"-class phrases. Without this gate, the
                          * twin-break shipped to the user. */
                         if (!hu_persona_voice_response_is_clean(safe_content, safe_content_len)) {
+                            /* 2026-05-24 companion fix to agent_turn.c:6395 batch-path
+                             * fallback: install a canonical short safe reply so the
+                             * function's contract holds (safe_content non-NULL when
+                             * downstream code reaches line ~1612). The streaming bytes
+                             * have already been sent to the client by this point, so
+                             * the user already saw the rejected text — but the AGENT'S
+                             * HISTORY would otherwise miss this turn entirely,
+                             * conditioning subsequent responses on a phantom turn.
+                             * Installing the fallback keeps history honest about
+                             * "an assistant turn happened, and this is what we'd say
+                             * if we could rewind." Wording differs slightly from
+                             * agent_turn's "hold on, let me think on that" so logs
+                             * can distinguish which path fired. */
                             hu_log_error("agent_stream", agent->observer,
                                          "persona_voice REJECT: stream retry produced "
-                                         "AI-disclosure (len=%zu) — suppressing twin-break",
+                                         "AI-disclosure (len=%zu) — installing safe fallback",
                                          safe_content_len);
                             agent->alloc->free(agent->alloc->ctx, safe_content,
                                                safe_content_len + 1);
-                            safe_content = NULL;
-                            safe_content_len = 0;
-                            safe_owned = false;
+                            static const char fallback[] = "let me think on that, sorry";
+                            size_t fallback_len = sizeof(fallback) - 1;
+                            safe_content = hu_strndup(agent->alloc, fallback, fallback_len);
+                            if (safe_content) {
+                                safe_content_len = fallback_len;
+                                safe_owned = true;
+                            } else {
+                                /* OOM — last resort: NULL, downstream skip. */
+                                safe_content_len = 0;
+                                safe_owned = false;
+                            }
                         } else {
                             /* Spec 2026-05-19 self-model-scaffold Phase B:
                              * stash post-retry length + latency. Other metric
@@ -1592,9 +1620,26 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                         safe_content_len, retry_report.bytes_stripped);
                         }
                     } else {
+                        /* 2026-05-24 companion fix: retry call itself failed (transport,
+                         * OOM, etc.) — install the same canonical fallback as the
+                         * persona_voice REJECT branch above so safe_content is non-NULL
+                         * and downstream history/final_content gets recorded. The
+                         * client already saw the streamed-then-rejected response;
+                         * this just keeps the agent's record honest. */
                         hu_log_error("agent_stream", agent->observer,
-                                     "response_guard stream retry failed (err=%s)",
+                                     "response_guard stream retry failed (err=%s) — installing "
+                                     "safe fallback",
                                      hu_error_string(retry_err));
+                        static const char fallback[] = "let me think on that, sorry";
+                        size_t fallback_len = sizeof(fallback) - 1;
+                        safe_content = hu_strndup(agent->alloc, fallback, fallback_len);
+                        if (safe_content) {
+                            safe_content_len = fallback_len;
+                            safe_owned = true;
+                        } else {
+                            safe_content_len = 0;
+                            safe_owned = false;
+                        }
                     }
                 } else if (guard_err == HU_OK && guard_outcome == HU_GUARD_REWROTE) {
                     safe_content = guard_out;
@@ -1721,9 +1766,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             .tool_call_id = call->id,
                             .tool_call_id_len = call->id_len,
                         };
+                        hu_agent_turn_state_track_tool(agent, call->name, call->name_len);
                         tool->vtable->execute_streaming(tool->ctx, agent->alloc, args,
                                                         tool_chunk_to_event, &bridge, &result);
                     } else if (tool->vtable->execute) {
+                        hu_agent_turn_state_track_tool(agent, call->name, call->name_len);
                         tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
                     }
                     hu_json_free(agent->alloc, args);

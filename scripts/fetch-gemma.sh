@@ -17,12 +17,26 @@
 #   scripts/fetch-gemma.sh --skip-verify            # download w/o SHA check (CI debug only)
 #   scripts/fetch-gemma.sh --check-only             # verify existing file, never download
 #
+# Phase 4d (Gemma throughput program) — speculative-decode draft model:
+#   scripts/fetch-gemma.sh --draft URL --draft-sha SHA
+#                                                   # fetch main + a small draft
+#                                                   # alongside (lands at
+#                                                   # ~/.human/models/$(basename URL))
+#   scripts/fetch-gemma.sh --draft URL --draft-skip-verify
+#                                                   # CI / operator-knows-best mode
+#
+# Pick the draft per the Phase 3b plan: small enough to run on CPU at high
+# tok/s (e.g. Gemma-3-270M-it Q4_K_M GGUF) AND same tokenizer family as
+# your target. Acceptance rate climbs once Phase 6 trains a persona-
+# aligned draft via the same LoRA pipeline used for personalization.
+#
 # Exit codes:
 #   0  success (file present + SHA matches, or --check-only verified)
 #   1  download failed (network, HF unreachable, partial transfer)
 #   2  SHA mismatch (file present but corrupted — script will NOT delete it)
 #   3  --check-only and file missing
 #   4  required tool missing (curl + sha256sum/shasum)
+#   5  --draft without --draft-sha or --draft-skip-verify
 
 set -euo pipefail
 
@@ -37,14 +51,21 @@ DEFAULT_DEST="${HOME}/.human/models/${MODEL_FILENAME}"
 DEST="${DEFAULT_DEST}"
 SKIP_VERIFY=0
 CHECK_ONLY=0
+# Phase 4d — optional draft for speculative decoding.
+DRAFT_URL=""
+DRAFT_SHA=""
+DRAFT_SKIP_VERIFY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dest)        DEST="${2:?--dest needs a path}"; shift 2 ;;
-    --skip-verify) SKIP_VERIFY=1; shift ;;
-    --check-only)  CHECK_ONLY=1; shift ;;
+    --dest)              DEST="${2:?--dest needs a path}"; shift 2 ;;
+    --skip-verify)       SKIP_VERIFY=1; shift ;;
+    --check-only)        CHECK_ONLY=1; shift ;;
+    --draft)             DRAFT_URL="${2:?--draft needs a URL}"; shift 2 ;;
+    --draft-sha)         DRAFT_SHA="${2:?--draft-sha needs a hex digest}"; shift 2 ;;
+    --draft-skip-verify) DRAFT_SKIP_VERIFY=1; shift ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \?//'
+      sed -n '2,46p' "$0" | sed 's/^# \?//'
       exit 0
       ;;
     *)
@@ -53,6 +74,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Phase 4d — if --draft set, require --draft-sha or --draft-skip-verify.
+# This is the same SHA-pinning discipline the main model uses; a draft
+# without verification is just as silently-corruptible (worse, actually,
+# because spec-decode garbage looks like low acceptance rate, not
+# garbage tokens).
+if [[ -n "${DRAFT_URL}" && -z "${DRAFT_SHA}" && "${DRAFT_SKIP_VERIFY}" -eq 0 ]]; then
+  echo "fetch-gemma: --draft requires --draft-sha SHA256 (or --draft-skip-verify for CI)" >&2
+  exit 5
+fi
 
 # ── tool detection ────────────────────────────────────────────────────
 if ! command -v curl >/dev/null 2>&1; then
@@ -74,59 +105,98 @@ sha256_of() {
 }
 
 # ── verification helper ───────────────────────────────────────────────
+# Phase 4d — generalized to take expected SHA as arg so it works for
+# both main + draft. The pre-Phase-4d single-purpose verify_or_die
+# captured MODEL_SHA from the surrounding scope; the new signature
+# makes the contract explicit at call time.
 verify_or_die() {
   local path="$1"
+  local expected_sha="$2"
+  local label="$3"  # for log line; e.g. "model" or "draft"
   local actual
   actual="$(sha256_of "${path}")"
-  if [[ "${actual}" != "${MODEL_SHA}" ]]; then
-    echo "fetch-gemma: SHA MISMATCH" >&2
-    echo "  expected: ${MODEL_SHA}" >&2
+  if [[ "${actual}" != "${expected_sha}" ]]; then
+    echo "fetch-gemma: ${label} SHA MISMATCH" >&2
+    echo "  expected: ${expected_sha}" >&2
     echo "  actual:   ${actual}" >&2
     echo "  file kept at ${path} for forensic inspection (delete manually before retry)" >&2
     exit 2
   fi
-  echo "fetch-gemma: SHA verified ✓ (${actual:0:16}…${actual: -8})"
+  echo "fetch-gemma: ${label} SHA verified ✓ (${actual:0:16}…${actual: -8})"
+}
+
+# Phase 4d — generic download+verify, factored out so main + draft share
+# one implementation. Returns 0 on success; exits on failure.
+fetch_one() {
+  local url="$1"
+  local dest="$2"
+  local expected_sha="$3"     # empty string OR "skip" → no verify
+  local label="$4"            # e.g. "model" or "draft"
+
+  mkdir -p "$(dirname "${dest}")"
+
+  if [[ -f "${dest}" ]]; then
+    if [[ -z "${expected_sha}" || "${expected_sha}" == "skip" ]]; then
+      echo "fetch-gemma: ${label} ${dest} present, no SHA → assuming good"
+      return 0
+    fi
+    echo "fetch-gemma: ${label} ${dest} already present, verifying…"
+    verify_or_die "${dest}" "${expected_sha}" "${label}"
+    return 0
+  fi
+
+  echo "fetch-gemma: downloading ${label}: ${url}"
+  echo "fetch-gemma:   ↓ ${dest}"
+  if ! curl -L --fail --retry 3 --retry-delay 5 -C - \
+          --output "${dest}.partial" "${url}"; then
+    echo "fetch-gemma: ${label} download failed; partial file at ${dest}.partial" >&2
+    exit 1
+  fi
+  mv "${dest}.partial" "${dest}"
+
+  if [[ -z "${expected_sha}" || "${expected_sha}" == "skip" ]]; then
+    echo "fetch-gemma: ${label} SHA verify skipped — file written to ${dest}"
+    return 0
+  fi
+  verify_or_die "${dest}" "${expected_sha}" "${label}"
+  echo "fetch-gemma: ${label} installed at ${dest}"
 }
 
 # ── main flow ─────────────────────────────────────────────────────────
-mkdir -p "$(dirname "${DEST}")"
-
-if [[ -f "${DEST}" ]]; then
-  if [[ "${SKIP_VERIFY}" -eq 1 ]]; then
-    echo "fetch-gemma: ${DEST} present, --skip-verify → assuming good"
-    exit 0
-  fi
-  echo "fetch-gemma: ${DEST} already present, verifying…"
-  verify_or_die "${DEST}"
-  exit 0
-fi
-
+# Phase 4d — main model uses the shared fetch_one. The --check-only
+# path still short-circuits before download since that's main-only.
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  echo "fetch-gemma: --check-only and ${DEST} is missing" >&2
-  exit 3
-fi
-
-# Download with resume support (-C -). HF redirects to CloudFront so -L
-# is mandatory. --fail turns 4xx/5xx into a non-zero exit so we don't
-# silently accept an HTML error page as a GGUF.
-echo "fetch-gemma: downloading ${MODEL_URL}"
-echo "fetch-gemma:   ↓ ${DEST} (~$(( MODEL_SIZE_BYTES / 1024 / 1024 )) MiB)"
-if ! curl -L --fail --retry 3 --retry-delay 5 -C - \
-        --output "${DEST}.partial" "${MODEL_URL}"; then
-  echo "fetch-gemma: download failed; partial file at ${DEST}.partial" >&2
-  exit 1
-fi
-
-# Atomic install: only rename to the final path once the byte stream
-# completed. A crashed curl leaves .partial behind for resume; it never
-# pollutes the install path.
-mv "${DEST}.partial" "${DEST}"
-
-if [[ "${SKIP_VERIFY}" -eq 1 ]]; then
-  echo "fetch-gemma: --skip-verify (CI debug mode) — NOT verifying SHA"
-  echo "fetch-gemma: model written to ${DEST}"
+  if [[ ! -f "${DEST}" ]]; then
+    echo "fetch-gemma: --check-only and ${DEST} is missing" >&2
+    exit 3
+  fi
+  verify_or_die "${DEST}" "${MODEL_SHA}" "model"
   exit 0
 fi
 
-verify_or_die "${DEST}"
-echo "fetch-gemma: model installed at ${DEST}"
+# Pick the SHA gate ONCE for clarity. "skip" propagates through
+# fetch_one and is logged so the operator sees they're in an
+# unverified-trust mode.
+MAIN_SHA="${MODEL_SHA}"
+if [[ "${SKIP_VERIFY}" -eq 1 ]]; then
+  MAIN_SHA="skip"
+fi
+fetch_one "${MODEL_URL}" "${DEST}" "${MAIN_SHA}" "model"
+
+# Phase 4d — optional draft model alongside the main. Same atomic-
+# install + SHA discipline. Lands at ~/.human/models/$(basename URL) so
+# operators have a predictable path to point HU_LLAMACPP_DRAFT_MODEL at.
+if [[ -n "${DRAFT_URL}" ]]; then
+  DRAFT_DEST="${HOME}/.human/models/$(basename "${DRAFT_URL%%\?*}")"
+  DRAFT_GATE="${DRAFT_SHA}"
+  if [[ "${DRAFT_SKIP_VERIFY}" -eq 1 ]]; then
+    DRAFT_GATE="skip"
+  fi
+  fetch_one "${DRAFT_URL}" "${DRAFT_DEST}" "${DRAFT_GATE}" "draft"
+  echo
+  echo "fetch-gemma: draft ready. To enable spec decode for the llama.cpp"
+  echo "             provider, set in your daemon's env:"
+  echo "                 HU_LLAMACPP_DRAFT_MODEL=${DRAFT_DEST}"
+  echo "             OR add to ~/.human/config.json:"
+  echo "                 \"inference\": { \"draft_model\": \"${DRAFT_DEST}\" }"
+fi

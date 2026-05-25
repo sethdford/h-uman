@@ -75,6 +75,43 @@ def _ok(name: str, cond: bool, detail: str = ""):
         print(f"  FAIL  {name}  {detail}")
 
 
+def _http_sse(server: str, path: str, body, timeout: int = 5):
+    """Phase 3a — read an SSE stream and return (status, content_type,
+    [parsed_chunk_dicts], done_seen).
+
+    Each `data: {...}` line is JSON-parsed; the `data: [DONE]` sentinel
+    is recorded separately. Non-data lines are ignored (per the SSE
+    spec). The function returns once the body closes or DONE is seen.
+    """
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        server + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    chunks = []
+    done = False
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        status = resp.status
+        content_type = resp.headers.get("Content-Type", "")
+        for raw in resp:
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not line.startswith("data: "):
+                continue
+            payload = line[len("data: "):]
+            if payload == "[DONE]":
+                done = True
+                break
+            try:
+                chunks.append(json.loads(payload))
+            except json.JSONDecodeError:
+                # Non-JSON data lines violate our contract; record raw
+                # for the assertion to surface.
+                chunks.append({"_raw": payload})
+    return status, content_type, chunks, done
+
+
 def _wait_for_server(server: str, timeout: int = 10) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -165,6 +202,19 @@ def main() -> int:
             _ok("/health has ok=True",
                 isinstance(payload, dict) and payload.get("ok") is True,
                 f"got {payload}")
+            # Phase 3b — /health surfaces spec-decode state. Stub mode
+            # (no draft env set) reports draft_model_loaded=false. The
+            # field MUST be present so a bench-harness probe can detect
+            # mlx-server versions that don't yet implement Phase 3b.
+            _ok("/health has draft_model_loaded key",
+                isinstance(payload, dict) and "draft_model_loaded" in payload,
+                f"got {payload}")
+            _ok("/health draft_model_loaded is false in stub mode",
+                payload.get("draft_model_loaded") is False,
+                f"got {payload}")
+            _ok("/health has draft_model key (path or empty)",
+                isinstance(payload, dict) and isinstance(payload.get("draft_model"), str),
+                f"got {payload}")
 
             # 2. /v1/adapters/current returns 200 with the right keys.
             code, payload = _http(server_url, "GET", "/v1/adapters/current")
@@ -228,6 +278,64 @@ def main() -> int:
                 isinstance(payload, dict)
                 and payload.get("adapter_path") == resolved,
                 f"got {payload}, expected {resolved}")
+
+            # Phase 3a — SSE streaming contract on /v1/chat/completions
+            # with stream=true. Stub-mode server emits one delta chunk
+            # + a finish-reason chunk + [DONE]. The protocol must be
+            # solid in stub mode so the CI test catches a regression
+            # without needing a real model.
+            stream_body = {
+                "model": "stub",
+                "messages": [{"role": "user", "content": "hello world"}],
+                "stream": True,
+                "max_tokens": 16,
+            }
+            status, ctype, chunks, done = _http_sse(
+                server_url, "/v1/chat/completions", stream_body)
+            _ok("stream POST -> 200", status == 200, f"got {status}")
+            _ok("stream Content-Type is text/event-stream",
+                ctype.startswith("text/event-stream"),
+                f"got {ctype!r}")
+            _ok("stream emits at least one chunk", len(chunks) >= 1,
+                f"got {len(chunks)} chunks")
+            _ok("stream terminates with [DONE]", done, "no [DONE] sentinel")
+            # Find the finish-reason chunk and the content delta chunk.
+            content_deltas = [
+                c for c in chunks
+                if isinstance(c, dict) and c.get("choices")
+                and c["choices"][0].get("delta", {}).get("content")
+            ]
+            finish_chunks = [
+                c for c in chunks
+                if isinstance(c, dict) and c.get("choices")
+                and c["choices"][0].get("finish_reason") == "stop"
+            ]
+            _ok("stream has at least one content delta",
+                len(content_deltas) >= 1,
+                f"chunks: {chunks}")
+            _ok("stream ends with finish_reason=stop",
+                len(finish_chunks) >= 1,
+                f"chunks: {chunks}")
+            # The terminal chunk MUST carry the usage breakdown so the
+            # bench harness's tps math doesn't divide by zero.
+            terminal_with_usage = [
+                c for c in finish_chunks
+                if isinstance(c.get("usage"), dict)
+                and "completion_tokens" in c["usage"]
+            ]
+            _ok("stream terminal chunk includes usage block",
+                len(terminal_with_usage) >= 1,
+                f"finish chunks: {finish_chunks}")
+
+            # stream=false (default) still works — backwards compatible.
+            code, payload = _http(
+                server_url, "POST", "/v1/chat/completions",
+                body={"model": "stub",
+                      "messages": [{"role": "user", "content": "hi"}]})
+            _ok("non-stream POST -> 200", code == 200, f"got {code}: {payload}")
+            _ok("non-stream returns chat.completion object",
+                isinstance(payload, dict) and payload.get("object") == "chat.completion",
+                f"got {payload}")
 
         finally:
             try:

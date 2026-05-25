@@ -9,11 +9,14 @@
  * ~/.claude/rules/tests-that-pin-bugs.md: the test name describes the
  * intent, and the body asserts that intent is honored. */
 
+#include "test_framework.h"
+
+#ifdef HU_ENABLE_IMESSAGE
+
 #include "human/channels/imessage_ingest.h"
 #include "human/channels/reaction_event.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
-#include "test_framework.h"
 
 #include <string.h>
 
@@ -739,3 +742,11 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_ingest_audio_tone_classifies_energetic_speech);
     HU_RUN_TEST(test_ingest_audio_tone_classifies_deliberate_speech);
 }
+
+#else /* !HU_ENABLE_IMESSAGE — stub runner so the symbol resolves */
+
+void run_imessage_ingest_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_IMESSAGE */

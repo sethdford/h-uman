@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Log paths use absolute paths because launchd does NOT expand tildes in plist strings.
+	     Post-install script ensures /var/log/human/ exists with proper permissions. -->
+	<key>Label</key>
+	<string>com.h-uman.human</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/Human.app/Contents/MacOS/human</string>
+		<string>service-loop</string>
+		<string>--with-gateway</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/var/log/human/human.log</string>
+	<key>StandardErrorPath</key>
+	<string>/var/log/human/human.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+</dict>
+</plist>

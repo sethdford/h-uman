@@ -61,6 +61,66 @@
 #define HU_LLAMACPP_LINKED 0
 #endif
 
+/* Phase 1 (Gemma throughput program) — KV-quant string parsing.
+ *
+ * Lives outside the HU_LLAMACPP_LINKED gate so config parsers and
+ * tests can call it without depending on libllama. The actual GGML
+ * type assignment happens at llama_context init below (gated). */
+
+static int hu_ascii_tolower(int c) {
+    return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+}
+
+static bool hu_str_eq_ci(const char *a, const char *b) {
+    if (!a || !b)
+        return false;
+    while (*a && *b) {
+        if (hu_ascii_tolower((unsigned char)*a) != hu_ascii_tolower((unsigned char)*b))
+            return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+hu_kv_quant_t hu_kv_quant_from_string(const char *s, bool *out_recognized) {
+    if (out_recognized)
+        *out_recognized = false;
+    if (!s || !*s)
+        return HU_KV_QUANT_FP16;
+    /* Accept both the wire form ("q8_0") and a more operator-friendly
+     * shorthand ("q8") because mlx-lm and llama.cpp use slightly
+     * different conventions and operators conflate them. */
+    if (hu_str_eq_ci(s, "fp16") || hu_str_eq_ci(s, "f16") || hu_str_eq_ci(s, "16")) {
+        if (out_recognized)
+            *out_recognized = true;
+        return HU_KV_QUANT_FP16;
+    }
+    if (hu_str_eq_ci(s, "q8_0") || hu_str_eq_ci(s, "q8") || hu_str_eq_ci(s, "8")) {
+        if (out_recognized)
+            *out_recognized = true;
+        return HU_KV_QUANT_Q8_0;
+    }
+    if (hu_str_eq_ci(s, "q4_0") || hu_str_eq_ci(s, "q4") || hu_str_eq_ci(s, "4")) {
+        if (out_recognized)
+            *out_recognized = true;
+        return HU_KV_QUANT_Q4_0;
+    }
+    return HU_KV_QUANT_FP16;
+}
+
+const char *hu_kv_quant_to_string(hu_kv_quant_t q) {
+    switch (q) {
+    case HU_KV_QUANT_Q8_0:
+        return "q8_0";
+    case HU_KV_QUANT_Q4_0:
+        return "q4_0";
+    case HU_KV_QUANT_FP16:
+    default:
+        return "fp16";
+    }
+}
+
 typedef struct llamacpp_ctx {
     hu_llamacpp_config_t config;
     /* Owned copy of `config.model_path` so the caller can free its
@@ -94,13 +154,11 @@ static void clear_active_adapter(llamacpp_ctx_t *c, hu_allocator_t *alloc) {
     if (!c)
         return;
     if (c->active_adapter_id) {
-        alloc->free(alloc->ctx, c->active_adapter_id,
-                    strlen(c->active_adapter_id) + 1);
+        alloc->free(alloc->ctx, c->active_adapter_id, strlen(c->active_adapter_id) + 1);
         c->active_adapter_id = NULL;
     }
     if (c->active_adapter_path) {
-        alloc->free(alloc->ctx, c->active_adapter_path,
-                    strlen(c->active_adapter_path) + 1);
+        alloc->free(alloc->ctx, c->active_adapter_path, strlen(c->active_adapter_path) + 1);
         c->active_adapter_path = NULL;
     }
 #if HU_LLAMACPP_LINKED
@@ -128,27 +186,20 @@ static void clear_active_adapter(llamacpp_ctx_t *c, hu_allocator_t *alloc) {
  * Buffer is malloc'd because the prompt can grow arbitrarily large
  * with system + message; the caller frees on every exit path.
  */
-static char *llamacpp_render_template(const char *system_prompt,
-                                      size_t system_prompt_len,
-                                      const char *message,
-                                      size_t message_len,
-                                      size_t *out_len) {
-    static const char OPEN_SYS[]   = "<start_of_turn>system\n";
+static char *llamacpp_render_template(const char *system_prompt, size_t system_prompt_len,
+                                      const char *message, size_t message_len, size_t *out_len) {
+    static const char OPEN_SYS[] = "<start_of_turn>system\n";
     static const char CLOSE_TURN[] = "<end_of_turn>\n";
-    static const char OPEN_USER[]  = "<start_of_turn>user\n";
+    static const char OPEN_USER[] = "<start_of_turn>user\n";
     static const char OPEN_MODEL[] = "<start_of_turn>model\n";
     /* 192-byte template-literal margin; +1 for NUL. */
     size_t combined_cap = system_prompt_len + message_len + 192 + 1;
     char *buf = (char *)malloc(combined_cap);
-    if (!buf) return NULL;
-    int n = snprintf(buf, combined_cap, "%s%.*s%s%s%.*s%s%s",
-                     OPEN_SYS,
-                     (int)system_prompt_len, system_prompt ? system_prompt : "",
-                     CLOSE_TURN,
-                     OPEN_USER,
-                     (int)message_len, message ? message : "",
-                     CLOSE_TURN,
-                     OPEN_MODEL);
+    if (!buf)
+        return NULL;
+    int n = snprintf(buf, combined_cap, "%s%.*s%s%s%.*s%s%s", OPEN_SYS, (int)system_prompt_len,
+                     system_prompt ? system_prompt : "", CLOSE_TURN, OPEN_USER, (int)message_len,
+                     message ? message : "", CLOSE_TURN, OPEN_MODEL);
     if (n < 0 || (size_t)n >= combined_cap) {
         free(buf);
         return NULL;
@@ -158,12 +209,13 @@ static char *llamacpp_render_template(const char *system_prompt,
 }
 
 /* Bridge our hu_llamacpp_logits_fn into llama_get_logits_ith. */
-static hu_error_t llamacpp_real_logits(void *ctx_ptr, size_t batch_pos,
-                                       float *out_logits, size_t vocab_size) {
+static hu_error_t llamacpp_real_logits(void *ctx_ptr, size_t batch_pos, float *out_logits,
+                                       size_t vocab_size) {
     (void)batch_pos;
     struct llama_context *ctx = (struct llama_context *)ctx_ptr;
     const float *src = llama_get_logits_ith(ctx, -1);
-    if (!src) return HU_ERR_PROVIDER_RESPONSE;
+    if (!src)
+        return HU_ERR_PROVIDER_RESPONSE;
     memcpy(out_logits, src, sizeof(float) * vocab_size);
     return HU_OK;
 }
@@ -183,12 +235,10 @@ static hu_error_t llamacpp_real_advance(void *ctx_ptr, int32_t token) {
 #endif /* HU_LLAMACPP_LINKED */
 
 static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
-                                            const char *system_prompt,
-                                            size_t system_prompt_len,
+                                            const char *system_prompt, size_t system_prompt_len,
                                             const char *message, size_t message_len,
-                                            const char *model, size_t model_len,
-                                            double temperature, char **out,
-                                            size_t *out_len) {
+                                            const char *model, size_t model_len, double temperature,
+                                            char **out, size_t *out_len) {
     if (!ctx || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -197,27 +247,31 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
     (void)model_len;
 #if HU_LLAMACPP_LINKED
     llamacpp_ctx_t *c = (llamacpp_ctx_t *)ctx;
-    if (!c->ctx || !c->model) return HU_ERR_NOT_SUPPORTED;
+    if (!c->ctx || !c->model)
+        return HU_ERR_NOT_SUPPORTED;
 
     const struct llama_vocab *vocab = llama_model_get_vocab(c->model);
-    if (!vocab) return HU_ERR_PROVIDER_RESPONSE;
+    if (!vocab)
+        return HU_ERR_PROVIDER_RESPONSE;
     int32_t vocab_n = llama_vocab_n_tokens(vocab);
-    if (vocab_n <= 0) return HU_ERR_PROVIDER_RESPONSE;
+    if (vocab_n <= 0)
+        return HU_ERR_PROVIDER_RESPONSE;
     llama_token eos = llama_vocab_eos(vocab);
     llama_token eot = llama_vocab_eot(vocab);
 
     /* ── 1. Render the chat template ──────────────────────────────── */
     size_t prompt_len = 0;
-    char *prompt = llamacpp_render_template(system_prompt, system_prompt_len,
-                                            message, message_len, &prompt_len);
-    if (!prompt) return HU_ERR_OUT_OF_MEMORY;
+    char *prompt = llamacpp_render_template(system_prompt, system_prompt_len, message, message_len,
+                                            &prompt_len);
+    if (!prompt)
+        return HU_ERR_OUT_OF_MEMORY;
 
     /* ── 2. Tokenize the rendered prompt ─────────────────────────── */
     /* First call returns negative whose absolute value is the number
      * of tokens needed; allocate that, then call again. */
-    int32_t n_probe = llama_tokenize(vocab, prompt, (int32_t)prompt_len,
-                                     NULL, 0, /*add_special=*/true,
-                                     /*parse_special=*/true);
+    int32_t n_probe =
+        llama_tokenize(vocab, prompt, (int32_t)prompt_len, NULL, 0, /*add_special=*/true,
+                       /*parse_special=*/true);
     int32_t n_tokens_needed = n_probe < 0 ? -n_probe : n_probe;
     if (n_tokens_needed <= 0) {
         free(prompt);
@@ -228,37 +282,85 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
         free(prompt);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    int32_t n_tokens = llama_tokenize(vocab, prompt, (int32_t)prompt_len,
-                                      tokens, n_tokens_needed,
+    int32_t n_tokens = llama_tokenize(vocab, prompt, (int32_t)prompt_len, tokens, n_tokens_needed,
                                       /*add_special=*/true, /*parse_special=*/true);
     free(prompt);
-    if (n_tokens <= 0) { free(tokens); return HU_ERR_PROVIDER_RESPONSE; }
-
-    /* ── 3. KV cache: lookup, decode prefix, record ─────────────── */
-    /* Phase 1 keeps this simple: clear the KV cache for any miss
-     * (full re-decode of the new prompt). The hit path is a no-op
-     * fast-path for the common "same system prompt, new user msg"
-     * pattern in agent loops; on a hit we still re-decode the user
-     * portion because we don't track its position separately yet. */
-    int32_t cached_n_past = 0;
-    bool sys_hit =
-        (hu_llamacpp_kvcache_lookup_system(&c->kv_cache, system_prompt,
-                                           system_prompt_len, &cached_n_past) == HU_OK);
-    if (!sys_hit) {
-        llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
-    }
-    /* Decode the full prompt as one batch (Phase 1 simplification —
-     * the prefix-skip optimization is Phase 3+). */
-    if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
+    if (n_tokens <= 0) {
         free(tokens);
         return HU_ERR_PROVIDER_RESPONSE;
     }
+
+    /* ── 3. KV cache: lookup, decode prefix, record ─────────────── */
+    /* Phase 2b + 2b.2 — two paths off the lookup:
+     *
+     *   SAFE  (default): clear KV and re-decode the full prompt every
+     *     turn. Eliminates the pre-Phase-2b corruption bug where a
+     *     cache hit skipped llama_memory_clear but still submitted the
+     *     full prompt, re-decoding the system prefix on top of resident
+     *     KV. The test preset doesn't link libllama so no unit test
+     *     would catch that — the safe path is the only correct default.
+     *
+     *   SKIP-DECODE (opt-in, Phase 2b.2): when
+     *     HU_LLAMACPP_KVCACHE_SKIP_DECODE=1 AND a system-prefix hit
+     *     fires AND the new prompt has a non-empty user portion, keep
+     *     the KV resident and submit only the user-portion tokens at
+     *     offset cached_n_past. Fallback to safe-path on llama_decode
+     *     failure preserves operator-visible behavior on regression.
+     *
+     * The Phase 2b counter (tokens_would_skip) records hit savings on
+     * BOTH paths so operators can size the TTFT opportunity from
+     * /health before opting in. */
+    int32_t cached_n_past = 0;
+    bool sys_hit = (hu_llamacpp_kvcache_lookup_system(&c->kv_cache, system_prompt,
+                                                      system_prompt_len, &cached_n_past) == HU_OK);
+
+    /* Phase 2b.2 — opt-in actual decode-skip on hit. Default OFF
+     * (config->kvcache_skip_decode=false) preserves Phase 2b SAFE
+     * behavior. When the operator opts in (HU_LLAMACPP_KVCACHE_SKIP_DECODE=1)
+     * AND the cache hit fires AND the new prompt's prefix is long
+     * enough to leave a non-empty user portion, we skip the prefix
+     * decode entirely.
+     *
+     * Safety: if the post-skip user_tokens count is <= 0, fall back to
+     * the full-decode path. This guards against the pathological case
+     * of an N-token cache record where the new prompt is also exactly
+     * N tokens (no user portion to decode) — the chat path always
+     * needs at least one token to sample from. */
+    bool skip_decode =
+        (sys_hit && config->kvcache_skip_decode && cached_n_past > 0 && n_tokens > cached_n_past);
+    if (sys_hit) {
+        hu_llamacpp_kvcache_record_hit_savings(&c->kv_cache, cached_n_past);
+    }
+    if (skip_decode) {
+        /* Keep the KV resident — it already contains the prefix tokens
+         * verified by the hash match. Submit only the user portion. */
+        int32_t user_tokens = n_tokens - cached_n_past;
+        if (llama_decode(c->ctx, llama_batch_get_one(tokens + cached_n_past, user_tokens)) != 0) {
+            /* Decode failure on the skip path — fall back to a full
+             * re-decode with clear so the operator-visible behavior
+             * matches the safe Phase 2b path. */
+            llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+            if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
+                free(tokens);
+                return HU_ERR_PROVIDER_RESPONSE;
+            }
+        }
+    } else {
+        /* Phase 2b SAFE path — clear and re-decode the full prompt.
+         * Fires for: miss, hit-but-opt-in-disabled, or hit-but-no-user-
+         * portion-to-decode. */
+        llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+        if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
+            free(tokens);
+            return HU_ERR_PROVIDER_RESPONSE;
+        }
+    }
     /* Record how far we got so the next call sees the same system
-     * hash and can short-circuit (today: still re-decodes; the
-     * hash-hit signal is the foundation for Phase 3+). */
+     * hash and can short-circuit via the Phase 2b.2 skip path (when
+     * opted in) or at minimum record telemetry on the safe path. */
     if (system_prompt && system_prompt_len > 0) {
-        (void)hu_llamacpp_kvcache_record_system(&c->kv_cache, system_prompt,
-                                                system_prompt_len, n_tokens);
+        (void)hu_llamacpp_kvcache_record_system(&c->kv_cache, system_prompt, system_prompt_len,
+                                                n_tokens);
     }
 
     /* ── 4. Sampler + decode loop ───────────────────────────────── */
@@ -315,11 +417,12 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
 
     /* ── 5. Detokenize into a heap string for the caller ────────── */
     /* Probe required size (negative == "needs this many bytes"). */
-    int32_t need = llama_detokenize(vocab, sampled, (int32_t)sampled_len,
-                                    NULL, 0, /*remove_special=*/false,
-                                    /*unparse_special=*/false);
+    int32_t need =
+        llama_detokenize(vocab, sampled, (int32_t)sampled_len, NULL, 0, /*remove_special=*/false,
+                         /*unparse_special=*/false);
     int32_t need_abs = need < 0 ? -need : need;
-    if (need_abs <= 0) need_abs = 1;
+    if (need_abs <= 0)
+        need_abs = 1;
     char *result = (char *)alloc->alloc(alloc->ctx, (size_t)need_abs + 1);
     if (!result) {
         free(sampled);
@@ -327,12 +430,13 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
         hu_llamacpp_sampler_free(&sampler);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    int32_t wrote = llama_detokenize(vocab, sampled, (int32_t)sampled_len,
-                                     result, need_abs,
+    int32_t wrote = llama_detokenize(vocab, sampled, (int32_t)sampled_len, result, need_abs,
                                      /*remove_special=*/false,
                                      /*unparse_special=*/false);
-    if (wrote < 0) wrote = need_abs;
-    if (wrote > need_abs) wrote = need_abs;
+    if (wrote < 0)
+        wrote = need_abs;
+    if (wrote > need_abs)
+        wrote = need_abs;
     result[wrote] = '\0';
 
     free(sampled);
@@ -405,13 +509,11 @@ static bool llamacpp_supports_native_tools(void *ctx) {
 
 /* ── vtable: LoRA adapter management ──────────────────────────────────── */
 
-static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
-                                        const char *adapter_path,
-                                        size_t adapter_path_len,
-                                        const char *adapter_id,
+static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc, const char *adapter_path,
+                                        size_t adapter_path_len, const char *adapter_id,
                                         size_t adapter_id_len) {
-    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0 ||
-        !adapter_id || adapter_id_len == 0)
+    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0 || !adapter_id ||
+        adapter_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
     llamacpp_ctx_t *c = (llamacpp_ctx_t *)ctx;
 #if HU_LLAMACPP_LINKED
@@ -425,8 +527,7 @@ static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
         return HU_ERR_OUT_OF_MEMORY;
     memcpy(path_buf, adapter_path, adapter_path_len);
     path_buf[adapter_path_len] = '\0';
-    struct llama_adapter_lora *adapter =
-        llama_adapter_lora_init(c->model, path_buf);
+    struct llama_adapter_lora *adapter = llama_adapter_lora_init(c->model, path_buf);
     if (!adapter) {
         alloc->free(alloc->ctx, path_buf, adapter_path_len + 1);
         return HU_ERR_PROVIDER_RESPONSE;
@@ -536,11 +637,14 @@ static void llamacpp_deinit(void *ctx, hu_allocator_t *alloc) {
 static void llamacpp_warmup(void *vctx) {
 #if HU_LLAMACPP_LINKED
     llamacpp_ctx_t *c = (llamacpp_ctx_t *)vctx;
-    if (!c || !c->ctx || !c->model) return;
+    if (!c || !c->ctx || !c->model)
+        return;
     const struct llama_vocab *vocab = llama_model_get_vocab(c->model);
-    if (!vocab) return;
+    if (!vocab)
+        return;
     llama_token bos = llama_vocab_bos(vocab);
-    if (bos < 0) return;
+    if (bos < 0)
+        return;
     /* Decode a single BOS token — this triggers Metal kernel
      * compilation without committing any conversational state. */
     struct llama_batch batch = llama_batch_get_one(&bos, 1);
@@ -569,8 +673,7 @@ static const hu_provider_vtable_t llamacpp_vtable = {
 
 /* ── factory ──────────────────────────────────────────────────────────── */
 
-hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
-                                       const hu_llamacpp_config_t *config,
+hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_config_t *config,
                                        hu_provider_t *out) {
     if (!alloc || !config || !out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -611,6 +714,31 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
                 cp.n_ctx = (uint32_t)config->context_size;
             if (config->threads > 0)
                 cp.n_threads = (uint32_t)config->threads;
+            /* Phase 1 — KV quantization. Mapping is direct: HU_KV_QUANT_*
+             * ↦ GGML_TYPE_*. We intentionally set BOTH type_k and type_v
+             * to the same quant level — asymmetric K/V quant exists in
+             * upstream but adds an axis of tuning we don't yet need.
+             * Default (FP16) leaves cp.type_k/v at upstream defaults. */
+            switch (config->kv_quant) {
+            case HU_KV_QUANT_Q8_0:
+                cp.type_k = GGML_TYPE_Q8_0;
+                cp.type_v = GGML_TYPE_Q8_0;
+                break;
+            case HU_KV_QUANT_Q4_0:
+                cp.type_k = GGML_TYPE_Q4_0;
+                cp.type_v = GGML_TYPE_Q4_0;
+                break;
+            case HU_KV_QUANT_FP16:
+            default:
+                /* Leave at llama_context_default_params() — GGML_TYPE_F16. */
+                break;
+            }
+            /* Phase 4 — Flash Attention on Metal. Free 15-30% TPS when
+             * the linked libllama version exposes the field (b3500+).
+             * Older builds where llama_context_params lacks flash_attn
+             * will fail to compile — that's the desired signal: bump
+             * vendored llama.cpp or build the FA support in. */
+            cp.flash_attn = config->flash_attn;
             c->ctx = llama_init_from_model(c->model, cp);
         }
     }
@@ -634,9 +762,7 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
 #if HU_LLAMACPP_LINKED
 int hu_llamacpp_sanity_gate_main(int argc, char **argv) {
     if (argc < 5) {
-        fprintf(stderr,
-                "usage: %s --sanity-gate <gguf-path> <system> <user>\n",
-                argv[0]);
+        fprintf(stderr, "usage: %s --sanity-gate <gguf-path> <system> <user>\n", argv[0]);
         return 2;
     }
     hu_allocator_t alloc = hu_system_allocator();
@@ -655,8 +781,8 @@ int hu_llamacpp_sanity_gate_main(int argc, char **argv) {
     char *out = NULL;
     size_t out_len = 0;
     hu_error_t err = provider.vtable->chat_with_system(
-        provider.ctx, &alloc, argv[3], strlen(argv[3]), argv[4], strlen(argv[4]),
-        "gemma-3-4b-it", strlen("gemma-3-4b-it"), 0.0, &out, &out_len);
+        provider.ctx, &alloc, argv[3], strlen(argv[3]), argv[4], strlen(argv[4]), "gemma-3-4b-it",
+        strlen("gemma-3-4b-it"), 0.0, &out, &out_len);
     if (err == HU_OK && out) {
         fwrite(out, 1, out_len, stdout);
         fputc('\n', stdout);
@@ -664,7 +790,8 @@ int hu_llamacpp_sanity_gate_main(int argc, char **argv) {
     } else {
         fprintf(stderr, "[sanity-gate] chat_with_system returned %d\n", (int)err);
     }
-    if (provider.vtable->deinit) provider.vtable->deinit(provider.ctx, &alloc);
+    if (provider.vtable->deinit)
+        provider.vtable->deinit(provider.ctx, &alloc);
     return (err == HU_OK) ? 0 : 4;
 }
 #else

@@ -1,0 +1,9 @@
+PLACEHOLDER: Full Disk Access permission screenshot
+
+Captured in US-C5. Documents:
+- System Settings > Privacy & Security > Full Disk Access
+- Human.app listed in the allowlist
+- Plus button to add new apps
+- Labels identifying the setting and location
+
+Status: Deferred to Sprint C5 (screenshot capture phase)
