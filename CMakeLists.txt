@@ -1273,6 +1273,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/cli.c
     src/persona/feedback.c
     src/persona/eval.c
+    src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
     src/follow_up.c
@@ -2939,6 +2940,7 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_per_contact.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
+    tests/test_autoresponder_eval.c
     tests/test_contact_narrative.c
     tests/test_causal_attribution.c
     tests/test_identity_continuity.c

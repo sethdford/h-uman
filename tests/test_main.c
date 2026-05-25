@@ -701,6 +701,7 @@ void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 void run_emotional_context_tests(void);
 void run_autoresponder_tests(void);
+void run_autoresponder_eval_tests(void);
 void run_contact_narrative_tests(void);
 void run_causal_attribution_tests(void);
 void run_identity_continuity_tests(void);
@@ -1473,6 +1474,7 @@ int main(int argc, char **argv) {
     run_personal_model_per_contact_tests();
     run_emotional_context_tests();
     run_autoresponder_tests();
+    run_autoresponder_eval_tests();
     run_contact_narrative_tests();
     run_causal_attribution_tests();
     run_identity_continuity_tests();
