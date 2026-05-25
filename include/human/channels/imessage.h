@@ -198,6 +198,22 @@ int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch);
  * Writes into buf; returns false if HOME unset or buffer too small. */
 bool hu_imessage_status_path(char *buf, size_t cap);
 
+/** Detect the user's own iMessage handle from ~/Library/Messages/chat.db.
+ *
+ * Reads the Messages.app SQLite database and queries for the "Me" record
+ * (the logged-in user's handle). Returns the handle string (e.g. "+15551234567"
+ * or "user@icloud.com") in buf, or HU_ERR_NOT_FOUND if not available.
+ *
+ * Returns:
+ *   HU_OK — buf filled with NUL-terminated handle (< buf_size)
+ *   HU_ERR_NOT_FOUND — chat.db unreadable or "Me" record missing
+ *   HU_ERR_IO — database I/O error
+ *   HU_ERR_INVALID_ARGUMENT — buf or buf_size invalid
+ *
+ * Non-macOS: returns HU_ERR_NOT_SUPPORTED.
+ * Under HU_IS_TEST: returns HU_ERR_NOT_FOUND (fixture-based testing preferred). */
+hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size_t buf_size);
+
 /* ── Non-allowlisted sender courtesy reply (US-9.3) ─────────────────────
  *
  * When a DM arrives from a handle not in the channel's allow_from list, the

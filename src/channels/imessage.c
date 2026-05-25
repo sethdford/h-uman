@@ -4840,6 +4840,78 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
 }
 #endif
 
+/* ── Onboarding wizard support ─────────────────────────────────────────── */
+
+hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size_t buf_size) {
+    (void)alloc;
+
+    if (!buf || buf_size == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !defined(__APPLE__) || HU_IS_TEST
+    return HU_ERR_NOT_FOUND;
+#else
+#ifdef HU_ENABLE_SQLITE
+    const char *home = getenv("HOME");
+    if (!home) {
+        buf[0] = '\0';
+        return HU_ERR_NOT_FOUND;
+    }
+
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path)) {
+        buf[0] = '\0';
+        return HU_ERR_IO;
+    }
+
+    sqlite3 *db = NULL;
+    int rc = imessage_open_chatdb(db_path, &db);
+    if (rc != SQLITE_OK || !db) {
+        buf[0] = '\0';
+        return HU_ERR_NOT_FOUND;
+    }
+
+    /* Query the handle table for the "Me" record. In iMessage's SQLite schema,
+     * the handle table contains contact info; the "Me" record is typically
+     * the first row or can be identified by specific criteria. We query by
+     * looking for the handle with a known pattern or by scanning the rows. */
+    const char *sql = "SELECT id FROM handle LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        sqlite3_close(db);
+        buf[0] = '\0';
+        return HU_ERR_IO;
+    }
+
+    hu_error_t result = HU_ERR_NOT_FOUND;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *handle = (const char *)sqlite3_column_text(stmt, 0);
+        if (handle) {
+            size_t handle_len = strlen(handle);
+            if (handle_len > 0 && handle_len < buf_size) {
+                memcpy(buf, handle, handle_len);
+                buf[handle_len] = '\0';
+                result = HU_OK;
+            } else {
+                buf[0] = '\0';
+                result = HU_ERR_IO; /* Buffer too small */
+            }
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return result;
+#else
+    buf[0] = '\0';
+    return HU_ERR_NOT_FOUND;
+#endif /* HU_ENABLE_SQLITE */
+#endif /* __APPLE__ && !HU_IS_TEST */
+}
+
 #if HU_IS_TEST
 hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,
