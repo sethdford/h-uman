@@ -51,6 +51,9 @@ hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *pa
  * no side effect — meaning a regression that dropped one of the 11
  * provider-success call sites would be undetectable at the test layer.
  *
+ * Phase B3 (2026-05-25): probe_infer now also records outcome metadata
+ * (completion_tokens, latency_ms) when provided. NULL adapter is safe.
+ *
  * The counter is a *signal*, not a model: no tensors, no learning, no
  * gradient. It exists so:
  *   1. A test can pin "the chat path actually reaches the M3 hook"
@@ -66,11 +69,32 @@ hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *pa
  * need to be re-edited for this slice. See
  * docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md Phase B-pre. */
 hu_error_t hu_m3_frontier_adapter_probe_infer(hu_m3_frontier_adapter_t *adapter);
+
+/* Extended probe inference that captures outcome metadata (tokens + latency).
+ * Calls probe_infer internally to advance the counter, then records the
+ * outcome with the given metrics into the ring buffer. NULL adapter is safe.
+ * completion_tokens and latency_ms can be 0 if unknown. */
+hu_error_t hu_m3_frontier_adapter_probe_infer_with_metadata(hu_m3_frontier_adapter_t *adapter,
+                                                            uint32_t completion_tokens,
+                                                            uint64_t latency_ms);
+
 hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter);
 
 /* Read-only: number of times probe_infer (or noop_infer) was called on
  * this adapter since open. Zero for NULL. Test-observable seam. */
 uint64_t hu_m3_frontier_adapter_probe_count(const hu_m3_frontier_adapter_t *adapter);
+
+/* Snapshot of a single outcome from the ring buffer. Returned by the getter
+ * to provide a lightweight view without exposing internal ring layout. */
+typedef struct hu_m3_probe_outcome_snapshot {
+    uint32_t completion_tokens; /* completion token count if known; 0 = unknown */
+    uint64_t latency_ms;        /* inference duration in milliseconds */
+} hu_m3_probe_outcome_snapshot_t;
+
+/* Read one outcome snapshot from the ring at index idx (0-based).
+ * Returns {0, 0} if idx >= outcomes_recorded or adapter is NULL. */
+hu_m3_probe_outcome_snapshot_t
+hu_m3_frontier_adapter_probe_outcome_at(const hu_m3_frontier_adapter_t *adapter, size_t idx);
 
 void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_t *adapter);
 

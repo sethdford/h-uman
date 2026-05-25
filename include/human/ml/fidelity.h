@@ -53,6 +53,28 @@ hu_error_t hu_ml_fidelity_score_baseline(const hu_persona_t *persona,
                                          const hu_communication_style_t *target,
                                          hu_communication_style_set_summary_t *out_summary);
 
+/* ── US-7 — fidelity delta scorer ──────────────────────────────────
+ *
+ * Compute the fidelity delta for a single pair of responses.
+ * Scores both `baseline` and `adapted` against `target`, returning
+ * the difference (adapted - baseline).
+ *
+ * Inputs:
+ *   - `baseline_score`: fidelity of baseline response, ∈ [0, 1]
+ *   - `adapted_score`:  fidelity of adapted response, ∈ [0, 1]
+ *   - `target`:         reserved for future per-target weighting;
+ *                       ignored in v1
+ *
+ * Returns:
+ *   - Float ∈ [-1, 1] representing the delta
+ *   - Positive delta indicates adapted is closer to target
+ *   - Returns 0.0 if inputs are out of range or NULL (with warn log)
+ *
+ * Note: This function is intended for single-pair scoring; for
+ * set-level aggregation use `hu_communication_style_compare_response_sets`. */
+double hu_communication_style_fidelity_score_delta(double baseline_score, double adapted_score,
+                                                   const hu_communication_style_t *target);
+
 /* ── US-7.6 — judgment-fidelity (INS-A) ───────────────────────────────
  *
  * The judgment-fidelity scorer measures mean negative log-likelihood

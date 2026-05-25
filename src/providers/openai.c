@@ -970,6 +970,7 @@ static hu_error_t openai_stream_chat(void *ctx, hu_allocator_t *alloc,
             out->tool_calls_count = 1;
         }
         out->usage.completion_tokens = 5;
+        out->latency_ms = 18;
         return HU_OK;
     }
     const char *chunks[] = {"Hello ", "from ", "mock"};
@@ -993,6 +994,7 @@ static hu_error_t openai_stream_chat(void *ctx, hu_allocator_t *alloc,
     out->content = hu_strndup(alloc, "Hello from mock", 15);
     out->content_len = 15;
     out->usage.completion_tokens = 3;
+    out->latency_ms = 14;
     return HU_OK;
 #else
     hu_json_value_t *root = hu_json_object_new(alloc);

@@ -5090,6 +5090,75 @@ static void test_m3_probe_count_advances_once_per_chat_multiple_calls(void) {
 #endif
 }
 
+/* US-4: B3 adapter wire — probe counter outcome metadata.
+ * Verify that probe_infer_with_metadata captures both completion_tokens and
+ * latency_ms into the outcomes ring, and the getter returns them correctly. */
+static void test_m3_probe_outcome_metadata_captured(void) {
+#ifdef HU_ENABLE_ML
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *adapter = NULL;
+    const char *path = "/tmp/hu_m3_outcome_metadata.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &adapter), HU_OK);
+    HU_ASSERT_NOT_NULL(adapter);
+
+    /* Call probe_infer_with_metadata with known token and latency values. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer_with_metadata(adapter, /*completion_tokens=*/42,
+                                                                  /*latency_ms=*/123),
+                 HU_OK);
+
+    /* Verify the outcome was recorded (probe_count incremented). */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(adapter), 1);
+
+    /* Snapshot the outcome via the getter and verify both fields. */
+    hu_m3_probe_outcome_snapshot_t snap = hu_m3_frontier_adapter_probe_outcome_at(adapter, 0);
+    HU_ASSERT_EQ((int)snap.completion_tokens, 42);
+    HU_ASSERT_EQ((int)snap.latency_ms, 123);
+
+    /* Make a second call with different values. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer_with_metadata(adapter, /*completion_tokens=*/17,
+                                                                  /*latency_ms=*/456),
+                 HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(adapter), 2);
+
+    /* Verify the second outcome has the new values. */
+    snap = hu_m3_frontier_adapter_probe_outcome_at(adapter, 1);
+    HU_ASSERT_EQ((int)snap.completion_tokens, 17);
+    HU_ASSERT_EQ((int)snap.latency_ms, 456);
+
+    /* Verify min and max latency (AC-4.5). */
+    hu_m3_probe_outcome_snapshot_t snap0 = hu_m3_frontier_adapter_probe_outcome_at(adapter, 0);
+    hu_m3_probe_outcome_snapshot_t snap1 = hu_m3_frontier_adapter_probe_outcome_at(adapter, 1);
+    uint64_t min_latency =
+        snap0.latency_ms < snap1.latency_ms ? snap0.latency_ms : snap1.latency_ms;
+    uint64_t max_latency =
+        snap0.latency_ms > snap1.latency_ms ? snap0.latency_ms : snap1.latency_ms;
+    HU_ASSERT_TRUE(min_latency >= 0);
+    HU_ASSERT_TRUE(max_latency > 0);
+
+    /* Out-of-bounds index returns {0, 0}. */
+    hu_m3_probe_outcome_snapshot_t snap_oob = hu_m3_frontier_adapter_probe_outcome_at(adapter, 999);
+    HU_ASSERT_EQ((int)snap_oob.completion_tokens, 0);
+    HU_ASSERT_EQ((int)snap_oob.latency_ms, 0);
+
+    hu_m3_frontier_adapter_close(&alloc, adapter);
+#else
+    /* ML disabled: getter returns {0, 0}. */
+    hu_m3_probe_outcome_snapshot_t snap = hu_m3_frontier_adapter_probe_outcome_at(NULL, 0);
+    HU_ASSERT_EQ((int)snap.completion_tokens, 0);
+    HU_ASSERT_EQ((int)snap.latency_ms, 0);
+#endif
+}
+
 /* Pin the producer-side token-count estimate. The B3 v1 outcome driver's
  * selection policy requires pt > 0 && ct > 0 to drop degenerate turns; if
  * the agent path silently stops setting these (regressing to "0 =
@@ -6526,6 +6595,8 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
     HU_RUN_TEST(test_m3_probe_count_advances_once_per_chat_single_call);
     HU_RUN_TEST(test_m3_probe_count_advances_once_per_chat_multiple_calls);
+    /* US-4 (2026-05-25): Probe outcome metadata (completion_tokens + latency_ms). */
+    HU_RUN_TEST(test_m3_probe_outcome_metadata_captured);
     HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
     HU_RUN_TEST(test_m3_record_chat_outcome_prefers_usage_block_when_present);
     HU_RUN_TEST(test_m3_id_map_lookup_is_idempotent_for_same_name);

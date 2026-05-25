@@ -36,6 +36,9 @@ static hu_error_t test_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_requ
     copy[len] = '\0';
     out->content = copy;
     out->content_len = len;
+    /* Test fixture: populate latency_ms with a nominal value so
+     * outcome capture can observe both fields. */
+    out->latency_ms = 10; /* 10ms nominal for test fixture */
     return HU_OK;
 }
 
@@ -74,11 +77,10 @@ static void test_deinit(void *ctx, hu_allocator_t *alloc) {
 }
 
 static hu_error_t test_chat_with_system_full(void *ctx, hu_allocator_t *alloc,
-                                              const char *system_prompt,
-                                              size_t system_prompt_len, const char *message,
-                                              size_t message_len, const char *model,
-                                              size_t model_len, double temperature, char **out,
-                                              size_t *out_len) {
+                                             const char *system_prompt, size_t system_prompt_len,
+                                             const char *message, size_t message_len,
+                                             const char *model, size_t model_len,
+                                             double temperature, char **out, size_t *out_len) {
     (void)system_prompt;
     (void)system_prompt_len;
     (void)message;
@@ -120,16 +122,14 @@ hu_error_t hu_provider_create_for_test_with_canned_response(hu_allocator_t *allo
                                                             hu_provider_t **out) {
     if (!alloc || !canned || !out)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_provider_test_ctx_t *ctx =
-        (hu_provider_test_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*ctx));
+    hu_provider_test_ctx_t *ctx = (hu_provider_test_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*ctx));
     if (!ctx)
         return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(*ctx));
     ctx->alloc = alloc;
     snprintf(ctx->canned, sizeof(ctx->canned), "%s", canned);
 
-    hu_provider_t *p =
-        (hu_provider_t *)alloc->alloc(alloc->ctx, sizeof(hu_provider_t));
+    hu_provider_t *p = (hu_provider_t *)alloc->alloc(alloc->ctx, sizeof(hu_provider_t));
     if (!p) {
         alloc->free(alloc->ctx, ctx, sizeof(*ctx));
         return HU_ERR_OUT_OF_MEMORY;

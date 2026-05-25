@@ -3077,6 +3077,7 @@ set(HU_TEST_SOURCES
     tests/test_m3_swap_failure_observability.c
     tests/test_m3_outcome_ring_population.c
     tests/test_m3_ab_fidelity_gate.c
+    tests/test_fidelity_delta.c
     tests/test_m3_frontier_auto_invocation.c
     tests/test_sql_transaction.c
     tests/test_normalize.c

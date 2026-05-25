@@ -294,26 +294,24 @@ static void load_adapter_malformed_safetensors_accepted(void) {
     char *dir = make_tempdir();
     HU_ASSERT_NOT_NULL(dir);
 
-    /* Write random bytes to adapters.safetensors — not a valid safetensors
-     * file. The load_adapter contract at THIS layer (B5) is that it only
-     * checks FILE EXISTENCE, not validity. The mlx-lm subprocess will
-     * fail at subprocess-runtime if the file is corrupt. This test pins
-     * that the load path accepts any file and defers validation to the
-     * actual inference subprocess. */
+    /* Write valid (but minimal) safetensors file with proper 8-byte header.
+     * Sprint 55 US-6 added magic-byte validation to reject truncated/corrupted
+     * files early. This test was updated to write a valid header (0-byte JSON)
+     * instead of garbage bytes. The mlx-lm subprocess will still validate the
+     * full format at runtime. */
     char path[1024];
     snprintf(path, sizeof(path), "%s/adapters.safetensors", dir);
     FILE *f = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(f);
-    unsigned char garbage[256];
-    memset(garbage, 0xAB, sizeof(garbage));
-    size_t wrote = fwrite(garbage, 1, sizeof(garbage), f);
+    unsigned char hdr[8] = {0}; /* Valid safetensors: 0-byte header */
+    size_t wrote = fwrite(hdr, 1, sizeof(hdr), f);
     fclose(f);
-    HU_ASSERT_EQ(wrote, sizeof(garbage));
+    HU_ASSERT_EQ(wrote, sizeof(hdr));
 
-    /* Call load_adapter on the malformed file. The contract is existence
-     * check only — file exists, so HU_OK. Validation is deferred to mlx-lm
-     * subprocess invocation. */
-    hu_error_t err = p.vtable->load_adapter(p.ctx, &alloc, dir, strlen(dir), "corrupt", 7);
+    /* Call load_adapter on the file. After US-6, validation includes
+     * magic-byte check: files must have 8+ bytes and header size <= 1MB.
+     * This file meets those criteria, so HU_OK. */
+    hu_error_t err = p.vtable->load_adapter(p.ctx, &alloc, dir, strlen(dir), "valid", 5);
     HU_ASSERT_EQ(err, HU_OK);
 
     /* After successful load, active_adapter should be set. */

@@ -1,5 +1,6 @@
 #include "human/ml/fidelity.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/persona.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,6 +100,24 @@ hu_error_t hu_ml_fidelity_score_baseline(const hu_persona_t *persona,
         out_summary->max_score = mx;
     }
     return HU_OK;
+}
+
+double hu_communication_style_fidelity_score_delta(double baseline_score, double adapted_score,
+                                                   const hu_communication_style_t *target) {
+    (void)target; /* reserved for future per-target weighting */
+
+    /* Validate input range: both scores should be in [0, 1] */
+    if (baseline_score < 0.0 || baseline_score > 1.0 || adapted_score < 0.0 ||
+        adapted_score > 1.0) {
+        hu_log_warn("fidelity", NULL,
+                    "fidelity_score_delta: invalid input range (baseline=%.3f, adapted=%.3f); "
+                    "returning 0.0",
+                    baseline_score, adapted_score);
+        return 0.0;
+    }
+
+    /* Return simple difference: positive = improvement toward target */
+    return adapted_score - baseline_score;
 }
 
 /* ── US-7.6 — judgment-fidelity (INS-A) ─────────────────────────────────
