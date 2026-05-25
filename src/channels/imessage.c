@@ -4177,6 +4177,22 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     if (!channel_ctx || !msgs || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
+    /* DIAG (2026-05-25): confirm whether the poll loop is actually invoking
+     * this function. Reactive iMessage was failing because no `incoming
+     * handle=` log ever fired despite new chat.db rows being present. This
+     * single line definitively answers "is the poll being called?" without
+     * the noise of per-message logging. Remove once the init issue is fixed. */
+    if (getenv("HU_DEBUG")) {
+        hu_imessage_ctx_t *_diag_c = (hu_imessage_ctx_t *)channel_ctx;
+        static int _diag_counter = 0;
+        if ((_diag_counter++ % 30) == 0) { /* log once per ~30s at 1s poll */
+            hu_log_info("imessage", NULL,
+                        "POLL-DIAG entry last_rowid=%lld imsg_watch_running=%d "
+                        "use_imsg_cli=%d circuit_breaker=%d",
+                        (long long)_diag_c->last_rowid, _diag_c->imsg_watch_running,
+                        _diag_c->use_imsg_cli, _diag_c->circuit_breaker_tripped);
+        }
+    }
 
 #if HU_IS_TEST
     {
