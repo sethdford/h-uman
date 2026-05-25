@@ -291,19 +291,35 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
     }
 
     /* ── 3. KV cache: lookup, decode prefix, record ─────────────── */
-    /* Phase 1 keeps this simple: clear the KV cache for any miss
-     * (full re-decode of the new prompt). The hit path is a no-op
-     * fast-path for the common "same system prompt, new user msg"
-     * pattern in agent loops; on a hit we still re-decode the user
-     * portion because we don't track its position separately yet. */
+    /* Phase 2b — make the hit path SAFE.
+     *
+     * Pre-Phase-2b, this branch conditionally skipped llama_memory_clear
+     * on a cache hit but still submitted the FULL prompt to llama_decode.
+     * That would re-decode the system prefix on top of the already-
+     * resident KV, corrupting the cache and producing wrong output on
+     * any real HU_LLAMACPP_LINKED build. The test preset doesn't link
+     * libllama so no test caught it.
+     *
+     * Until Phase 2b.2 wires the actual decode-skip (submit only the
+     * user-portion tokens at offset cached_n_past), we ALWAYS clear KV
+     * — hit and miss take the same correct path. The hit case still
+     * yields telemetry value: we record the would-have-been skipped
+     * tokens via the Phase 2b counter so operators can size the
+     * deferred TTFT opportunity from /health. */
     int32_t cached_n_past = 0;
     bool sys_hit = (hu_llamacpp_kvcache_lookup_system(&c->kv_cache, system_prompt,
                                                       system_prompt_len, &cached_n_past) == HU_OK);
-    if (!sys_hit) {
-        llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+    /* Always clear — Phase 2b safety. Phase 2b.2 will lift this on
+     * the hit branch and instead build a batch starting at
+     * cached_n_past, but that needs a real libllama-linked test bed
+     * to verify (the batch position semantics differ across llama.cpp
+     * versions). */
+    llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+    if (sys_hit) {
+        hu_llamacpp_kvcache_record_hit_savings(&c->kv_cache, cached_n_past);
     }
-    /* Decode the full prompt as one batch (Phase 1 simplification —
-     * the prefix-skip optimization is Phase 3+). */
+    /* Decode the full prompt as one batch (Phase 2b safe path —
+     * decode-skip is Phase 2b.2). */
     if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
         free(tokens);
         return HU_ERR_PROVIDER_RESPONSE;

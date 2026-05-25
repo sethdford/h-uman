@@ -139,3 +139,19 @@ uint64_t hu_llamacpp_kvcache_misses(const hu_llamacpp_kvcache_t *cache) {
         return 0;
     return atomic_load_explicit((_Atomic uint64_t *)&cache->misses, memory_order_relaxed);
 }
+
+void hu_llamacpp_kvcache_record_hit_savings(hu_llamacpp_kvcache_t *cache, int32_t n_tokens) {
+    /* Silent no-op for NULL / non-positive n so the chat-path call site
+     * stays simple: it just passes the raw lookup result without an
+     * intermediate filter. */
+    if (!cache || n_tokens <= 0)
+        return;
+    atomic_fetch_add_explicit(&cache->tokens_would_skip, (uint64_t)n_tokens, memory_order_relaxed);
+}
+
+uint64_t hu_llamacpp_kvcache_tokens_would_skip(const hu_llamacpp_kvcache_t *cache) {
+    if (!cache)
+        return 0;
+    return atomic_load_explicit((_Atomic uint64_t *)&cache->tokens_would_skip,
+                                memory_order_relaxed);
+}

@@ -69,6 +69,14 @@ typedef struct hu_llamacpp_kvcache {
      * are write-mostly from one thread + read-rarely from another. */
     _Atomic uint64_t hits;
     _Atomic uint64_t misses;
+    /* Phase 2b — would-skip telemetry. The chat path calls
+     * hu_llamacpp_kvcache_record_hit_savings(cache, cached_n_past) on
+     * every hit, before its (currently SAFE but wasteful) re-decode.
+     * Accumulated total = the TTFT opportunity Phase 2b.2 will unlock
+     * when it wires the actual decode-skip. Operators read via the
+     * getter to size the perf opportunity before paying the
+     * engineering cost. */
+    _Atomic uint64_t tokens_would_skip;
 } hu_llamacpp_kvcache_t;
 
 hu_error_t hu_llamacpp_kvcache_init(hu_llamacpp_kvcache_t *cache);
@@ -97,5 +105,18 @@ uint64_t hu_llamacpp_kvcache_fnv1a(const char *data, size_t len);
  * value — never a value larger than the true count. */
 uint64_t hu_llamacpp_kvcache_hits(const hu_llamacpp_kvcache_t *cache);
 uint64_t hu_llamacpp_kvcache_misses(const hu_llamacpp_kvcache_t *cache);
+
+/* Phase 2b — record that a hit COULD have skipped `n_tokens` of prefix
+ * decode. The chat path calls this on every hit before its (currently
+ * safe but wasteful) re-decode. The accumulated total is the TTFT
+ * opportunity Phase 2b.2 will unlock when it wires the actual skip
+ * inside the chat path's llama_decode call.
+ *
+ * NULL cache or n_tokens <= 0 is a silent no-op (caller can pass
+ * the lookup result directly without filtering). */
+void hu_llamacpp_kvcache_record_hit_savings(hu_llamacpp_kvcache_t *cache, int32_t n_tokens);
+
+/* Phase 2b — read the accumulated would-skip token count. 0 if NULL. */
+uint64_t hu_llamacpp_kvcache_tokens_would_skip(const hu_llamacpp_kvcache_t *cache);
 
 #endif /* HU_LLAMACPP_KVCACHE_H */

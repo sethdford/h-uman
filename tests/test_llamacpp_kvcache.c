@@ -293,6 +293,60 @@ static void test_kvcache_reset_clears_all_slots_but_keeps_counters(void) {
     hu_llamacpp_kvcache_free(&cache);
 }
 
+/* Phase 2b — would-skip counter contracts. Operators read the
+ * accumulated count via the getter to size the deferred TTFT
+ * opportunity Phase 2b.2 will unlock. The chat-path call site is at
+ * src/providers/llamacpp.c — it calls record_hit_savings on every hit
+ * before the (currently safe but wasteful) re-decode. */
+
+static void test_kvcache_tokens_would_skip_starts_at_zero(void) {
+    hu_llamacpp_kvcache_t cache;
+    hu_llamacpp_kvcache_init(&cache);
+    HU_ASSERT_EQ(hu_llamacpp_kvcache_tokens_would_skip(&cache), 0u);
+    hu_llamacpp_kvcache_free(&cache);
+}
+
+static void test_kvcache_record_hit_savings_accumulates(void) {
+    hu_llamacpp_kvcache_t cache;
+    hu_llamacpp_kvcache_init(&cache);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, 100);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, 50);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, 25);
+    HU_ASSERT_EQ(hu_llamacpp_kvcache_tokens_would_skip(&cache), 175u);
+    hu_llamacpp_kvcache_free(&cache);
+}
+
+static void test_kvcache_record_hit_savings_ignores_non_positive(void) {
+    /* The chat path may pass cached_n_past directly without filtering.
+     * Negative / zero must be a silent no-op, not a counter corruption
+     * (signed -> unsigned promotion of -1 would explode the counter). */
+    hu_llamacpp_kvcache_t cache;
+    hu_llamacpp_kvcache_init(&cache);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, 0);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, -5);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, -1);
+    HU_ASSERT_EQ(hu_llamacpp_kvcache_tokens_would_skip(&cache), 0u);
+    hu_llamacpp_kvcache_free(&cache);
+}
+
+static void test_kvcache_record_hit_savings_null_cache_safe(void) {
+    /* NULL must not crash — call site simplification depends on it. */
+    hu_llamacpp_kvcache_record_hit_savings(NULL, 100);
+    HU_ASSERT_EQ(hu_llamacpp_kvcache_tokens_would_skip(NULL), 0u);
+}
+
+static void test_kvcache_tokens_would_skip_survives_reset(void) {
+    /* Lifetime telemetry — reset (LoRA hot-swap) must NOT zero the
+     * would-skip count. Operators want the lifetime opportunity
+     * total, not a per-adapter window. Same contract as hits/misses. */
+    hu_llamacpp_kvcache_t cache;
+    hu_llamacpp_kvcache_init(&cache);
+    hu_llamacpp_kvcache_record_hit_savings(&cache, 200);
+    hu_llamacpp_kvcache_reset(&cache);
+    HU_ASSERT_EQ(hu_llamacpp_kvcache_tokens_would_skip(&cache), 200u);
+    hu_llamacpp_kvcache_free(&cache);
+}
+
 void run_llamacpp_kvcache_tests(void) {
     HU_RUN_TEST(test_kvcache_init_starts_empty);
     HU_RUN_TEST(test_kvcache_record_then_lookup_hits);
@@ -312,4 +366,9 @@ void run_llamacpp_kvcache_tests(void) {
     HU_RUN_TEST(test_kvcache_at_capacity_new_record_evicts_lru);
     HU_RUN_TEST(test_kvcache_lookup_hit_refreshes_lru);
     HU_RUN_TEST(test_kvcache_reset_clears_all_slots_but_keeps_counters);
+    HU_RUN_TEST(test_kvcache_tokens_would_skip_starts_at_zero);
+    HU_RUN_TEST(test_kvcache_record_hit_savings_accumulates);
+    HU_RUN_TEST(test_kvcache_record_hit_savings_ignores_non_positive);
+    HU_RUN_TEST(test_kvcache_record_hit_savings_null_cache_safe);
+    HU_RUN_TEST(test_kvcache_tokens_would_skip_survives_reset);
 }
