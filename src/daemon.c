@@ -13769,20 +13769,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
 
         /* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/.
-         * T1 skeleton: governor-only tick that always returns SKIP. The
-         * tick function itself handles the disabled / enabled one-shot log
-         * lines, so we always call it (no outer enabled-gate needed). */
+         * T1/T2/T3: governor + context-bundle + LLM call. The tick fn
+         * handles the disabled / enabled one-shot log lines, so we always
+         * call it (no outer enabled-gate needed). When provider+alloc are
+         * passed, the LLM "should I propose?" call fires on all-clear
+         * ticks; otherwise behaves like the T1 governor-only path. */
         if (config) {
             static int64_t initiative_last_tick_unix = 0;
             static uint64_t initiative_tick_id = 0;
             int64_t now_unix_init = (int64_t)time(NULL);
             const hu_autoresponder_config_t *ar_cfg_init = daemon_autoresponder_config();
             hu_init_proposer_result_t init_result = HU_INIT_RESULT_SKIP;
-            (void)hu_init_proposer_tick(&config->initiative, ar_cfg_init,
-                                        /*tz_offset_seconds=*/0, &gov_budget,
-                                        /*last_inbound_unix=*/0, now_unix_init,
-                                        &initiative_last_tick_unix, &initiative_tick_id,
-                                        &init_result);
+            hu_init_decision_t init_decision;
+            memset(&init_decision, 0, sizeof(init_decision));
+            (void)hu_init_proposer_tick_with_provider(
+                &config->initiative, ar_cfg_init, /*tz_offset_seconds=*/0, &gov_budget, agent,
+                agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
+                &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
+            /* T4 delivery wire (next slice): when init_result == FIRED,
+             * route init_decision.draft through the iMessage channel via
+             * the existing daemon_proactive path. For now, decisions are
+             * logged inside the tick function and dropped — safe by
+             * design (no message is sent without the kill switch on AND
+             * a future T4 patch enabling delivery). */
+            (void)init_decision;
         }
 #endif
 

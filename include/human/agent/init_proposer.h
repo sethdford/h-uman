@@ -22,10 +22,12 @@
  */
 
 /* Forward declarations to avoid pulling the entire daemon graph into the
- * public header. Definitions live in config.h / agent.h / governor.h. */
+ * public header. Definitions live in config.h / agent.h / governor.h /
+ * provider.h. */
 struct hu_initiative_config;
 struct hu_autoresponder_config;
 struct hu_proactive_budget;
+struct hu_provider;
 
 /* Single per-tick outcome the daemon logs at INFO level. */
 typedef enum hu_init_proposer_result {
@@ -35,6 +37,10 @@ typedef enum hu_init_proposer_result {
     HU_INIT_RESULT_GATED_RECENCY = 3,  /* Seth texted h-uman recently (<per_contact_min_seconds) */
     HU_INIT_RESULT_GATED_INTERVAL = 4, /* not enough time since last tick */
     HU_INIT_RESULT_FIRED = 5,          /* T3+: actually fired a proposal */
+    HU_INIT_RESULT_LLM_ERROR = 6,      /* T3: provider call failed; skipped silently */
+    HU_INIT_RESULT_PARSE_ERROR = 7,    /* T3: LLM response wasn't valid JSON */
+    HU_INIT_RESULT_LOW_CONFIDENCE = 8, /* T3: LLM proposed but confidence < threshold */
+    HU_INIT_RESULT_NEGATIVE = 9,       /* T3: LLM returned should_propose=false */
 } hu_init_proposer_result_t;
 
 /* Tick entry point.
@@ -136,5 +142,100 @@ hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64
  * number of bytes written (excluding NUL). On out_cap=0, returns 0. */
 size_t hu_init_proposer_format_context_summary(const hu_init_context_bundle_t *bundle, char *out,
                                                size_t out_cap);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * T3 — LLM call + decision gate (AC-3 partial)
+ *
+ * Three pure predicates + one integration tick that wires them together
+ * with a provider call. The predicates exist so the decision logic can be
+ * tested without spinning a real HTTP path.
+ *
+ * Flow inside hu_init_proposer_tick_with_provider:
+ *   1. Build the system + user prompt from the bundle (pure)
+ *   2. Call provider->chat_with_system(...) → response text
+ *   3. Parse the response as JSON (pure) → hu_init_decision_t
+ *   4. Evaluate the decision against cfg->confidence_threshold (pure)
+ *   5. Log + return result enum
+ */
+
+#define HU_INIT_DRAFT_MAX       512
+#define HU_INIT_SKIP_REASON_MAX 256
+
+/* Structured decision parsed from the LLM's JSON response.
+ *
+ *   {
+ *     "should_propose": bool,    // true = propose, false = skip this tick
+ *     "confidence": 0.0..1.0,    // model's self-reported confidence
+ *     "draft": "the message...", // candidate text if should_propose=true
+ *     "reason": "why skipping"   // present when should_propose=false
+ *   }
+ *
+ * The draft/reason strings are copied into fixed-size buffers so callers
+ * don't need to track ownership. */
+typedef struct hu_init_decision {
+    bool should_propose;
+    double confidence;
+    char draft[HU_INIT_DRAFT_MAX];
+    size_t draft_len;
+    char skip_reason[HU_INIT_SKIP_REASON_MAX];
+    size_t skip_reason_len;
+} hu_init_decision_t;
+
+/* Build the "propose-or-skip" prompt pair for the LLM. Returns the bytes
+ * written to each output buffer (excluding NUL). The system prompt sets up
+ * the role + JSON-only output contract; the user message embeds the bundle
+ * fields verbatim.
+ *
+ * If a buffer would overflow, the function truncates (NUL-terminates) and
+ * still returns. Caller is responsible for sizing — recommended:
+ *   system_prompt: 1024 bytes
+ *   user_message: 16384 bytes (matches the daemon's typical context size)
+ *
+ * Pure predicate — no I/O, no allocation. */
+size_t hu_init_proposer_build_propose_prompt(const hu_init_context_bundle_t *bundle,
+                                             char *out_system_prompt, size_t system_prompt_cap,
+                                             char *out_user_message, size_t user_message_cap);
+
+/* Parse the LLM's response (raw JSON or text-with-JSON-substring) into a
+ * structured decision. Returns HU_OK and populates *out on success;
+ * HU_ERR_JSON_PARSE if no valid JSON object can be extracted; or
+ * HU_ERR_INVALID_ARGUMENT on NULL args.
+ *
+ * Defensive parsing: the function locates the FIRST top-level '{...}' run
+ * and parses that, so the LLM can prefix or suffix prose without breaking
+ * the decision. Required fields default to safe values (should_propose=false,
+ * confidence=0.0) if absent, so a missing field always means SKIP.
+ *
+ * Pure predicate — no I/O, no allocation outside the out struct. */
+hu_error_t hu_init_proposer_parse_response(const char *response, size_t response_len,
+                                           hu_init_decision_t *out);
+
+/* Evaluate a parsed decision against the confidence threshold. Returns the
+ * tick result enum (FIRED / LOW_CONFIDENCE / NEGATIVE). Pure. */
+hu_init_proposer_result_t hu_init_proposer_evaluate_decision(const hu_init_decision_t *decision,
+                                                             double confidence_threshold);
+
+/* Tick variant that wires the provider call. Same semantics as
+ * hu_init_proposer_tick when provider is NULL — the LLM step is skipped
+ * and the tick returns SKIP after the governor checks (preserves T1/T2
+ * behavior for tests + the disabled-default-launch state).
+ *
+ * When provider is non-NULL AND all governor gates pass:
+ *   - assembles context bundle (T2)
+ *   - builds prompt (T3 pure)
+ *   - calls provider->vtable->chat_with_system with cfg->propose_model
+ *   - parses JSON (T3 pure)
+ *   - evaluates against cfg->confidence_threshold
+ *   - returns FIRED / LOW_CONFIDENCE / NEGATIVE / LLM_ERROR / PARSE_ERROR
+ *   - on FIRED, populates *out_decision so the caller can send the draft
+ *
+ * out_decision: caller-owned; populated only when result == FIRED. Pass
+ *               NULL if you don't need the draft (e.g. dry-run mode). */
+hu_error_t hu_init_proposer_tick_with_provider(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
+    int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+    hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision);
 
 #endif /* HU_AGENT_INIT_PROPOSER_H */

@@ -14,11 +14,14 @@
 #include "human/agent/governor.h"
 #include "human/autoresponder.h"
 #include "human/config.h"
+#include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/provider.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Per ~/.claude/rules/silent-config-gated-subsystems.md: emit ONE
@@ -203,4 +206,319 @@ size_t hu_init_proposer_format_context_summary(const hu_init_context_bundle_t *b
     }
     out[pos] = '\0';
     return pos;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * T3 — Prompt building, response parsing, decision evaluation.
+ *
+ * Three pure predicates. The integration glue (tick_with_provider) calls
+ * provider->vtable->chat_with_system between predicates 1 and 2. Tests
+ * exercise each predicate directly. */
+
+/* The system prompt is small and static. We embed it as a literal so we
+ * don't have to manage a config string slot for it. T6 (post-tuning) can
+ * move it to config if Seth wants to A/B test alternate prompts. */
+static const char *const s_system_prompt =
+    "You are the Initiative Layer of h-uman, a private AI assistant that runs "
+    "on Seth's hardware. Your job is to decide whether h-uman should proactively "
+    "send Seth a message right now — even though he didn't ask. You bias HEAVILY "
+    "toward silence: a wrong proposal during a meeting is far worse than a right "
+    "proposal that never fires.\n"
+    "\n"
+    "Consider only the context provided in the user message below. Do NOT invent "
+    "facts. If the context is empty or thin, propose nothing.\n"
+    "\n"
+    "Return ONLY a single JSON object — no prose before or after — in this exact "
+    "shape:\n"
+    "{\n"
+    "  \"should_propose\": <true|false>,\n"
+    "  \"confidence\": <0.0..1.0>,\n"
+    "  \"draft\": \"<text to send to Seth — only when should_propose=true>\",\n"
+    "  \"reason\": \"<one short sentence why — when should_propose=false>\"\n"
+    "}\n"
+    "\n"
+    "Set confidence >= 0.85 ONLY when you have a clear, specific, "
+    "time-sensitive reason. Otherwise, set should_propose=false.";
+
+size_t hu_init_proposer_build_propose_prompt(const hu_init_context_bundle_t *bundle,
+                                             char *out_system_prompt, size_t system_prompt_cap,
+                                             char *out_user_message, size_t user_message_cap) {
+    if (!out_system_prompt || !out_user_message || system_prompt_cap == 0 || user_message_cap == 0)
+        return 0;
+    out_system_prompt[0] = '\0';
+    out_user_message[0] = '\0';
+    if (!bundle)
+        return 0;
+
+    /* Copy the static system prompt (truncating if cap is tiny). */
+    size_t sys_len = strlen(s_system_prompt);
+    size_t sys_copy = sys_len < system_prompt_cap - 1 ? sys_len : system_prompt_cap - 1;
+    memcpy(out_system_prompt, s_system_prompt, sys_copy);
+    out_system_prompt[sys_copy] = '\0';
+
+    /* Build the user message — bundle fields in a stable order, then a
+     * one-line tail asking the question. Each field gets a labeled header
+     * so the LLM can see WHICH source contributed what. */
+    int written =
+        snprintf(out_user_message, user_message_cap, "Context as of unix=%lld; last_inbound=%lld\n",
+                 (long long)bundle->now_unix, (long long)bundle->last_inbound_unix);
+    if (written < 0)
+        return 0;
+    size_t pos = (size_t)written < user_message_cap ? (size_t)written : user_message_cap - 1;
+
+    for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT && pos + 1 < user_message_cap; i++) {
+        const char *body = bundle->content[i];
+        size_t body_len = bundle->bytes[i];
+        if (!body || body_len == 0)
+            continue; /* skip empty fields — saves tokens, signals "unwired" */
+
+        int n = snprintf(out_user_message + pos, user_message_cap - pos, "\n--- %s ---\n",
+                         s_field_names[i]);
+        if (n < 0)
+            break;
+        if ((size_t)n >= user_message_cap - pos) {
+            pos = user_message_cap - 1;
+            break;
+        }
+        pos += (size_t)n;
+
+        size_t avail = user_message_cap - pos - 1; /* leave space for NUL */
+        size_t copy = body_len < avail ? body_len : avail;
+        memcpy(out_user_message + pos, body, copy);
+        pos += copy;
+    }
+
+    /* Final question line. Append only if there's room — otherwise the
+     * model still gets the system-prompt instructions, which include the
+     * decision contract. */
+    if (pos + 1 < user_message_cap) {
+        int n = snprintf(out_user_message + pos, user_message_cap - pos,
+                         "\n\nShould h-uman send Seth a message right now?");
+        if (n > 0 && (size_t)n < user_message_cap - pos)
+            pos += (size_t)n;
+    }
+    out_user_message[pos] = '\0';
+    return pos;
+}
+
+/* Locate the first balanced top-level {...} substring in `text`. Returns
+ * 0/0 if none is found. Bracket-counting is naive (does not understand
+ * JSON string-escaped braces) but adequate for well-formed model outputs. */
+static void find_first_json_object(const char *text, size_t len, size_t *out_start,
+                                   size_t *out_end) {
+    *out_start = 0;
+    *out_end = 0;
+    if (!text || len == 0)
+        return;
+    size_t start = 0;
+    bool found_start = false;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == '{') {
+            start = i;
+            found_start = true;
+            break;
+        }
+    }
+    if (!found_start)
+        return;
+    int depth = 0;
+    bool in_str = false;
+    bool esc = false;
+    for (size_t i = start; i < len; i++) {
+        char c = text[i];
+        if (in_str) {
+            if (esc) {
+                esc = false;
+            } else if (c == '\\') {
+                esc = true;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+            continue;
+        }
+        if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0) {
+                *out_start = start;
+                *out_end = i + 1;
+                return;
+            }
+        }
+    }
+}
+
+hu_error_t hu_init_proposer_parse_response(const char *response, size_t response_len,
+                                           hu_init_decision_t *out) {
+    if (!response || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    size_t js_start = 0, js_end = 0;
+    find_first_json_object(response, response_len, &js_start, &js_end);
+    if (js_end == 0 || js_end <= js_start)
+        return HU_ERR_JSON_PARSE;
+
+    /* Use a temporary system allocator for the parse — the JSON tree is
+     * freed before return; only the decision struct survives. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(&alloc, response + js_start, js_end - js_start, &root);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
+        if (root)
+            hu_json_free(&alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+
+    out->should_propose = hu_json_get_bool(root, "should_propose", false);
+    double conf = hu_json_get_number(root, "confidence", 0.0);
+    if (conf < 0.0)
+        conf = 0.0;
+    if (conf > 1.0)
+        conf = 1.0;
+    out->confidence = conf;
+
+    const char *draft = hu_json_get_string(root, "draft");
+    if (draft && draft[0]) {
+        size_t dlen = strlen(draft);
+        size_t cap = sizeof(out->draft) - 1;
+        size_t copy = dlen < cap ? dlen : cap;
+        memcpy(out->draft, draft, copy);
+        out->draft[copy] = '\0';
+        out->draft_len = copy;
+    }
+
+    const char *reason = hu_json_get_string(root, "reason");
+    if (reason && reason[0]) {
+        size_t rlen = strlen(reason);
+        size_t cap = sizeof(out->skip_reason) - 1;
+        size_t copy = rlen < cap ? rlen : cap;
+        memcpy(out->skip_reason, reason, copy);
+        out->skip_reason[copy] = '\0';
+        out->skip_reason_len = copy;
+    }
+
+    hu_json_free(&alloc, root);
+    return HU_OK;
+}
+
+hu_init_proposer_result_t hu_init_proposer_evaluate_decision(const hu_init_decision_t *decision,
+                                                             double confidence_threshold) {
+    if (!decision)
+        return HU_INIT_RESULT_LLM_ERROR;
+    if (!decision->should_propose)
+        return HU_INIT_RESULT_NEGATIVE;
+    /* When should_propose=true, gate on confidence AND non-empty draft.
+     * A "propose" decision with no draft is malformed → low confidence. */
+    if (decision->confidence < confidence_threshold || decision->draft_len == 0)
+        return HU_INIT_RESULT_LOW_CONFIDENCE;
+    return HU_INIT_RESULT_FIRED;
+}
+
+hu_error_t hu_init_proposer_tick_with_provider(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
+    int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+    hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
+    /* Run the T1/T2 governor first. If gated, return early — never spends
+     * an LLM token unless the cheap gates passed. */
+    hu_init_proposer_result_t gov_result = HU_INIT_RESULT_SKIP;
+    hu_error_t gov_err =
+        hu_init_proposer_tick(cfg, ar_cfg, tz_offset_seconds, budget, last_inbound_unix, now_unix,
+                              last_tick_unix_inout, tick_id_inout, &gov_result);
+    if (gov_err != HU_OK)
+        return gov_err;
+    if (gov_result != HU_INIT_RESULT_SKIP) {
+        /* Either a governor GATE_ or the T1-stub SKIP-after-gov returned;
+         * either way, no LLM call is warranted this tick. */
+        if (out_result)
+            *out_result = gov_result;
+        return HU_OK;
+    }
+
+    /* T1 returned SKIP after passing all governor gates. Promote to a
+     * full T3 LLM call when provider + alloc are both present. */
+    if (!provider || !provider->vtable || !provider->vtable->chat_with_system || !alloc) {
+        if (out_result)
+            *out_result = HU_INIT_RESULT_SKIP;
+        return HU_OK;
+    }
+
+    /* Assemble context bundle (T2). */
+    hu_init_context_bundle_t bundle;
+    hu_error_t ace = hu_init_proposer_assemble_context(agent, now_unix, last_inbound_unix, &bundle);
+    if (ace != HU_OK) {
+        if (out_result)
+            *out_result = HU_INIT_RESULT_SKIP;
+        return HU_OK;
+    }
+
+    /* Build prompt (T3 pure). */
+    static char sys_prompt[1536];
+    static char user_msg[16384];
+    hu_init_proposer_build_propose_prompt(&bundle, sys_prompt, sizeof(sys_prompt), user_msg,
+                                          sizeof(user_msg));
+
+#if HU_IS_TEST
+    /* Test builds: never make a real network call. Return SKIP so unit
+     * tests of the integration path can exercise the wiring without
+     * needing a mock provider. The pure predicates are tested directly. */
+    (void)tz_offset_seconds;
+    if (out_result)
+        *out_result = HU_INIT_RESULT_SKIP;
+    if (out_decision)
+        memset(out_decision, 0, sizeof(*out_decision));
+    return HU_OK;
+#else
+    /* Production: call provider->chat_with_system, parse response,
+     * evaluate against confidence threshold. */
+    const char *model =
+        (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
+    char *response = NULL;
+    size_t response_len = 0;
+    /* Temperature 0.2 — the decision is largely deterministic; a bit of
+     * sampling jitter helps when the bundle is borderline. */
+    hu_error_t lerr = provider->vtable->chat_with_system(
+        provider->ctx, alloc, sys_prompt, strlen(sys_prompt), user_msg, strlen(user_msg), model,
+        strlen(model), 0.2, &response, &response_len);
+    if (lerr != HU_OK || !response || response_len == 0) {
+        hu_log_warn("init_proposer", NULL, "LLM call failed: err=%d (response_len=%zu)", (int)lerr,
+                    response_len);
+        if (response)
+            alloc->free(alloc->ctx, response, response_len + 1);
+        if (out_result)
+            *out_result = HU_INIT_RESULT_LLM_ERROR;
+        return HU_OK;
+    }
+
+    hu_init_decision_t decision;
+    hu_error_t perr = hu_init_proposer_parse_response(response, response_len, &decision);
+    alloc->free(alloc->ctx, response, response_len + 1);
+    if (perr != HU_OK) {
+        hu_log_warn("init_proposer", NULL, "response parse failed: err=%d", (int)perr);
+        if (out_result)
+            *out_result = HU_INIT_RESULT_PARSE_ERROR;
+        return HU_OK;
+    }
+
+    double threshold = cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85;
+    hu_init_proposer_result_t verdict = hu_init_proposer_evaluate_decision(&decision, threshold);
+
+    hu_log_info("init_proposer", NULL,
+                "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d",
+                decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
+                (int)verdict);
+
+    if (out_result)
+        *out_result = verdict;
+    if (out_decision && verdict == HU_INIT_RESULT_FIRED)
+        memcpy(out_decision, &decision, sizeof(decision));
+    return HU_OK;
+#endif
 }

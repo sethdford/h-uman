@@ -200,6 +200,208 @@ static void test_assemble_context_null_agent_returns_empty_bundle(void) {
     }
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * T3 — Prompt building, response parsing, decision evaluation.
+ *
+ * All three predicates are pure — testable without HTTP, providers, or
+ * agents. Integration test for hu_init_proposer_tick_with_provider is
+ * limited to the NULL-provider passthrough case (HU_IS_TEST forbids
+ * real network calls per .claude/rules/testing.md). */
+
+static void test_build_prompt_includes_role_and_json_contract(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    char sys[1536] = {0};
+    char usr[4096] = {0};
+    size_t n = hu_init_proposer_build_propose_prompt(&bundle, sys, sizeof(sys), usr, sizeof(usr));
+    HU_ASSERT(n > 0);
+    /* System prompt must establish role + JSON contract. */
+    HU_ASSERT(strstr(sys, "Initiative Layer") != NULL);
+    HU_ASSERT(strstr(sys, "should_propose") != NULL);
+    HU_ASSERT(strstr(sys, "confidence") != NULL);
+    HU_ASSERT(strstr(sys, "JSON") != NULL);
+    /* User message must end with the question line so the LLM knows to decide. */
+    HU_ASSERT(strstr(usr, "Should h-uman send Seth a message right now?") != NULL);
+}
+
+static void test_build_prompt_skips_empty_fields_includes_populated_ones(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.now_unix = 1779700000;
+    bundle.last_inbound_unix = 1779699000;
+    bundle.content[HU_INIT_FIELD_CONTACT] = "alice@example.com";
+    bundle.bytes[HU_INIT_FIELD_CONTACT] = 17;
+    bundle.content[HU_INIT_FIELD_CONVERSATION] = "hello world from Alice";
+    bundle.bytes[HU_INIT_FIELD_CONVERSATION] = 22;
+    char sys[1536] = {0};
+    char usr[4096] = {0};
+    hu_init_proposer_build_propose_prompt(&bundle, sys, sizeof(sys), usr, sizeof(usr));
+    /* Populated fields appear with their label headers + content. */
+    HU_ASSERT(strstr(usr, "--- contact ---") != NULL);
+    HU_ASSERT(strstr(usr, "alice@example.com") != NULL);
+    HU_ASSERT(strstr(usr, "--- conversation ---") != NULL);
+    HU_ASSERT(strstr(usr, "hello world from Alice") != NULL);
+    /* Empty fields are silently skipped (no header for them). */
+    HU_ASSERT(strstr(usr, "--- memory ---") == NULL);
+    HU_ASSERT(strstr(usr, "--- persona ---") == NULL);
+    /* Metadata line carries the timestamps. */
+    HU_ASSERT(strstr(usr, "1779700000") != NULL);
+}
+
+static void test_build_prompt_tiny_user_cap_truncates_safely(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.content[HU_INIT_FIELD_CONVERSATION] = "this is a long conversation that won't fit";
+    bundle.bytes[HU_INIT_FIELD_CONVERSATION] = 42;
+    char sys[256] = {0};
+    char tiny_usr[32] = {0};
+    size_t n = hu_init_proposer_build_propose_prompt(&bundle, sys, sizeof(sys), tiny_usr,
+                                                     sizeof(tiny_usr));
+    HU_ASSERT(n < sizeof(tiny_usr));
+    HU_ASSERT_EQ(tiny_usr[sizeof(tiny_usr) - 1], '\0');
+}
+
+static void test_parse_response_valid_propose_with_high_confidence(void) {
+    const char *json =
+        "{\"should_propose\": true, \"confidence\": 0.92, \"draft\": \"Hey, got a sec?\"}";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(json, strlen(json), &d), HU_OK);
+    HU_ASSERT(d.should_propose);
+    HU_ASSERT(d.confidence > 0.91 && d.confidence < 0.93);
+    HU_ASSERT_STR_EQ(d.draft, "Hey, got a sec?");
+    HU_ASSERT(d.draft_len == 15);
+    HU_ASSERT_EQ(d.skip_reason_len, (size_t)0);
+}
+
+static void test_parse_response_extracts_json_from_surrounding_prose(void) {
+    /* LLMs frequently violate "return ONLY JSON" — defensive parser must cope. */
+    const char *response =
+        "Here is my decision:\n"
+        "{\"should_propose\": false, \"confidence\": 0.3, \"reason\": \"thin context\"}\n"
+        "Hope this helps!";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(response, strlen(response), &d), HU_OK);
+    HU_ASSERT(!d.should_propose);
+    HU_ASSERT_STR_EQ(d.skip_reason, "thin context");
+}
+
+static void test_parse_response_clamps_out_of_range_confidence(void) {
+    const char *json = "{\"should_propose\": true, \"confidence\": 1.5, \"draft\": \"hi\"}";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(json, strlen(json), &d), HU_OK);
+    HU_ASSERT(d.confidence <= 1.0);
+
+    const char *neg = "{\"should_propose\": true, \"confidence\": -0.5, \"draft\": \"hi\"}";
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(neg, strlen(neg), &d), HU_OK);
+    HU_ASSERT(d.confidence >= 0.0);
+}
+
+static void test_parse_response_missing_fields_default_to_skip(void) {
+    /* Empty object — both fields default to safe values. */
+    const char *json = "{}";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(json, strlen(json), &d), HU_OK);
+    HU_ASSERT(!d.should_propose);
+    HU_ASSERT_EQ(d.confidence, 0.0);
+}
+
+static void test_parse_response_malformed_returns_parse_error(void) {
+    hu_init_decision_t d;
+    /* No JSON object at all. */
+    HU_ASSERT_EQ(hu_init_proposer_parse_response("not json at all", 15, &d), HU_ERR_JSON_PARSE);
+    /* Empty input. */
+    HU_ASSERT_EQ(hu_init_proposer_parse_response("", 0, &d), HU_ERR_JSON_PARSE);
+}
+
+static void test_parse_response_null_args_return_invalid(void) {
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(NULL, 0, &d), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_init_proposer_parse_response("{}", 2, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_parse_response_truncates_oversize_draft_to_buffer(void) {
+    /* Draft longer than HU_INIT_DRAFT_MAX must be truncated, not overflow. */
+    char json[HU_INIT_DRAFT_MAX + 128];
+    memcpy(json, "{\"should_propose\":true,\"confidence\":0.9,\"draft\":\"", 49);
+    size_t pos = 49;
+    for (size_t i = 0; i < HU_INIT_DRAFT_MAX + 20; i++)
+        json[pos++] = 'x';
+    memcpy(json + pos, "\"}", 2);
+    pos += 2;
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(json, pos, &d), HU_OK);
+    /* draft_len capped at buffer cap (excluding NUL). */
+    HU_ASSERT(d.draft_len < HU_INIT_DRAFT_MAX);
+    HU_ASSERT_EQ(d.draft[d.draft_len], '\0');
+}
+
+static void test_evaluate_high_confidence_propose_returns_fired(void) {
+    hu_init_decision_t d = {0};
+    d.should_propose = true;
+    d.confidence = 0.9;
+    strcpy(d.draft, "hello");
+    d.draft_len = 5;
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_decision(&d, 0.85), (int)HU_INIT_RESULT_FIRED);
+}
+
+static void test_evaluate_low_confidence_propose_returns_low_confidence(void) {
+    hu_init_decision_t d = {0};
+    d.should_propose = true;
+    d.confidence = 0.7;
+    strcpy(d.draft, "hello");
+    d.draft_len = 5;
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_decision(&d, 0.85),
+                 (int)HU_INIT_RESULT_LOW_CONFIDENCE);
+}
+
+static void test_evaluate_should_not_propose_returns_negative(void) {
+    hu_init_decision_t d = {0};
+    d.should_propose = false;
+    d.confidence = 0.99;
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_decision(&d, 0.85), (int)HU_INIT_RESULT_NEGATIVE);
+}
+
+static void test_evaluate_propose_with_empty_draft_treated_as_low_confidence(void) {
+    /* Malformed "propose but no draft" — safer to SKIP than send empty text. */
+    hu_init_decision_t d = {0};
+    d.should_propose = true;
+    d.confidence = 0.95;
+    d.draft_len = 0;
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_decision(&d, 0.85),
+                 (int)HU_INIT_RESULT_LOW_CONFIDENCE);
+}
+
+static void test_evaluate_null_decision_returns_llm_error(void) {
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_decision(NULL, 0.85),
+                 (int)HU_INIT_RESULT_LLM_ERROR);
+}
+
+static void test_tick_with_provider_null_provider_behaves_like_t1_tick(void) {
+    hu_init_proposer_reset_warn_guards_for_test();
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = true;
+    cfg.tick_interval_sec = 1800;
+    cfg.confidence_threshold = 0.85;
+    cfg.per_contact_min_seconds = 600;
+
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED;
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+
+    /* NULL provider + alloc → T3 falls through to T1 governor path; SKIP. */
+    hu_error_t err = hu_init_proposer_tick_with_provider(
+        &cfg, /*ar_cfg=*/NULL, /*tz=*/0, /*budget=*/NULL, /*agent=*/NULL, /*provider=*/NULL,
+        /*alloc=*/NULL, /*last_inbound=*/0, /*now=*/1779700000, &last_tick, &tick_id, &result,
+        &decision);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_SKIP);
+    HU_ASSERT_EQ(tick_id, (uint64_t)1);
+    HU_ASSERT_EQ(last_tick, (int64_t)1779700000);
+}
+
 void run_init_proposer_tests(void);
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
@@ -214,4 +416,21 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_format_summary_tiny_buffer_truncates_safely);
     HU_RUN_TEST(test_assemble_context_null_out_returns_invalid);
     HU_RUN_TEST(test_assemble_context_null_agent_returns_empty_bundle);
+    /* T3 — prompt build / parse / evaluate */
+    HU_RUN_TEST(test_build_prompt_includes_role_and_json_contract);
+    HU_RUN_TEST(test_build_prompt_skips_empty_fields_includes_populated_ones);
+    HU_RUN_TEST(test_build_prompt_tiny_user_cap_truncates_safely);
+    HU_RUN_TEST(test_parse_response_valid_propose_with_high_confidence);
+    HU_RUN_TEST(test_parse_response_extracts_json_from_surrounding_prose);
+    HU_RUN_TEST(test_parse_response_clamps_out_of_range_confidence);
+    HU_RUN_TEST(test_parse_response_missing_fields_default_to_skip);
+    HU_RUN_TEST(test_parse_response_malformed_returns_parse_error);
+    HU_RUN_TEST(test_parse_response_null_args_return_invalid);
+    HU_RUN_TEST(test_parse_response_truncates_oversize_draft_to_buffer);
+    HU_RUN_TEST(test_evaluate_high_confidence_propose_returns_fired);
+    HU_RUN_TEST(test_evaluate_low_confidence_propose_returns_low_confidence);
+    HU_RUN_TEST(test_evaluate_should_not_propose_returns_negative);
+    HU_RUN_TEST(test_evaluate_propose_with_empty_draft_treated_as_low_confidence);
+    HU_RUN_TEST(test_evaluate_null_decision_returns_llm_error);
+    HU_RUN_TEST(test_tick_with_provider_null_provider_behaves_like_t1_tick);
 }
