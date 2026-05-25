@@ -279,17 +279,20 @@ def run_training(samples: int, simulate: bool) -> Path:
     """
     ADAPTER_OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = int(time.time())
-    out_path = ADAPTER_OUT_DIR / f"m3-driver-{stamp}.safetensors"
+    out_path = ADAPTER_OUT_DIR / f"m3-driver-{stamp}"
 
     if simulate:
         # Placeholder. The real artifact is an MLX-compatible safetensors
-        # checkpoint; this fake file lets the swap call exercise its
+        # checkpoint stored in {out_path}/adapters.safetensors (per training_loop.py US-8
+        # Phase C3 contract). This fake file lets the swap call exercise its
         # path-validation code without spending wall-clock on training.
-        out_path.write_bytes(b"FAKE_MLX_LORA_ADAPTER_FROM_M3_DRIVER_v0\n"
-                             + f"trained_on_samples={samples}\n".encode()
-                             + f"timestamp={stamp}\n".encode())
+        out_path.mkdir(parents=True, exist_ok=True)
+        fake_adapter = out_path / "adapters.safetensors"
+        fake_adapter.write_bytes(b"FAKE_MLX_LORA_ADAPTER_FROM_M3_DRIVER_v0\n"
+                                + f"trained_on_samples={samples}\n".encode()
+                                + f"timestamp={stamp}\n".encode())
         print(f"[m3-driver] (simulate-train) wrote placeholder adapter "
-              f"({out_path.stat().st_size} bytes) → {out_path}")
+              f"({fake_adapter.stat().st_size} bytes) → {out_path}")
         return out_path
 
     # Real training. Delegates to training_loop.py — that script knows how
