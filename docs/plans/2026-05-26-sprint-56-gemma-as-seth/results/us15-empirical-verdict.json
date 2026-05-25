@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-05-25T18:27:47.395305",
+  "verdict": "PASS",
+  "exit_code": 0,
+  "n_prompts": 25,
+  "model_id": "mlx-community/gemma-4-31b-it-4bit",
+  "adapter_path": "/Users/sethford/.human/training-data/adapters/seth-lora-v4-repair-20260525-071921",
+  "pre": {
+    "mean_score": 0.586,
+    "elapsed_sec": 239.43887901306152
+  },
+  "post": {
+    "mean_score": 0.856,
+    "elapsed_sec": 331.96536087989807
+  },
+  "delta": {
+    "mean": 0.27,
+    "ci_lower": 0.156,
+    "ci_upper": 0.372,
+    "stderr_est": 0.0551
+  },
+  "gate": {
+    "statistical_pass": true,
+    "statistical_threshold": 0.694,
+    "statistical_alpha": 0.025,
+    "practical_pass": true,
+    "practical_floor": 0.05
+  }
+}
