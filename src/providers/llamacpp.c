@@ -291,21 +291,25 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
     }
 
     /* ── 3. KV cache: lookup, decode prefix, record ─────────────── */
-    /* Phase 2b — make the hit path SAFE.
+    /* Phase 2b + 2b.2 — two paths off the lookup:
      *
-     * Pre-Phase-2b, this branch conditionally skipped llama_memory_clear
-     * on a cache hit but still submitted the FULL prompt to llama_decode.
-     * That would re-decode the system prefix on top of the already-
-     * resident KV, corrupting the cache and producing wrong output on
-     * any real HU_LLAMACPP_LINKED build. The test preset doesn't link
-     * libllama so no test caught it.
+     *   SAFE  (default): clear KV and re-decode the full prompt every
+     *     turn. Eliminates the pre-Phase-2b corruption bug where a
+     *     cache hit skipped llama_memory_clear but still submitted the
+     *     full prompt, re-decoding the system prefix on top of resident
+     *     KV. The test preset doesn't link libllama so no unit test
+     *     would catch that — the safe path is the only correct default.
      *
-     * Until Phase 2b.2 wires the actual decode-skip (submit only the
-     * user-portion tokens at offset cached_n_past), we ALWAYS clear KV
-     * — hit and miss take the same correct path. The hit case still
-     * yields telemetry value: we record the would-have-been skipped
-     * tokens via the Phase 2b counter so operators can size the
-     * deferred TTFT opportunity from /health. */
+     *   SKIP-DECODE (opt-in, Phase 2b.2): when
+     *     HU_LLAMACPP_KVCACHE_SKIP_DECODE=1 AND a system-prefix hit
+     *     fires AND the new prompt has a non-empty user portion, keep
+     *     the KV resident and submit only the user-portion tokens at
+     *     offset cached_n_past. Fallback to safe-path on llama_decode
+     *     failure preserves operator-visible behavior on regression.
+     *
+     * The Phase 2b counter (tokens_would_skip) records hit savings on
+     * BOTH paths so operators can size the TTFT opportunity from
+     * /health before opting in. */
     int32_t cached_n_past = 0;
     bool sys_hit = (hu_llamacpp_kvcache_lookup_system(&c->kv_cache, system_prompt,
                                                       system_prompt_len, &cached_n_past) == HU_OK);
@@ -352,8 +356,8 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
         }
     }
     /* Record how far we got so the next call sees the same system
-     * hash and can short-circuit (today: still re-decodes; the
-     * hash-hit signal is the foundation for Phase 3+). */
+     * hash and can short-circuit via the Phase 2b.2 skip path (when
+     * opted in) or at minimum record telemetry on the safe path. */
     if (system_prompt && system_prompt_len > 0) {
         (void)hu_llamacpp_kvcache_record_system(&c->kv_cache, system_prompt, system_prompt_len,
                                                 n_tokens);
