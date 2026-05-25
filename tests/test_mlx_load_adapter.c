@@ -283,6 +283,46 @@ static void active_adapter_path_handles_null_provider(void) {
     HU_ASSERT_TRUE(plen == 42 || plen == 0);
 }
 
+/* ── 8. Malformed safetensors rejected (B5 negative path) ──────────────── */
+
+static void load_adapter_malformed_safetensors_rejected(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_config_t cfg = {0};
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+
+    char *dir = make_tempdir();
+    HU_ASSERT_NOT_NULL(dir);
+
+    /* Write random bytes to adapters.safetensors — not a valid safetensors
+     * file. The load_adapter contract is that malformed files are rejected
+     * gracefully (either NOT_FOUND or INVALID_ARGUMENT). */
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/adapters.safetensors", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    unsigned char garbage[256];
+    memset(garbage, 0xAB, sizeof(garbage));
+    size_t wrote = fwrite(garbage, 1, sizeof(garbage), f);
+    fclose(f);
+    HU_ASSERT_EQ(wrote, sizeof(garbage));
+
+    /* Call load_adapter on the malformed file. The contract is that it
+     * rejects gracefully (NOT_FOUND if validation fails, INVALID_ARGUMENT
+     * if file exists but is corrupt). For now, we verify it doesn't crash
+     * and returns an error. */
+    hu_error_t err = p.vtable->load_adapter(p.ctx, &alloc, dir, strlen(dir), "corrupt", 7);
+    HU_ASSERT_TRUE(err == HU_ERR_NOT_FOUND || err == HU_ERR_INVALID_ARGUMENT);
+
+    /* After a failed load, active_adapter must be NULL (no partial state). */
+    size_t plen = 0;
+    HU_ASSERT_NULL((void *)hu_mlx_provider_active_adapter_path(&p, &plen));
+
+    rm_rf(dir);
+    free(dir);
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
 void run_mlx_load_adapter_tests(void);
 void run_mlx_load_adapter_tests(void) {
     HU_TEST_SUITE("mlx_load_adapter");
@@ -296,4 +336,5 @@ void run_mlx_load_adapter_tests(void) {
     HU_RUN_TEST(load_adapter_replaces_prior_path_on_success);
     HU_RUN_TEST(load_adapter_reports_initial_config_adapter);
     HU_RUN_TEST(active_adapter_path_handles_null_provider);
+    HU_RUN_TEST(load_adapter_malformed_safetensors_rejected);
 }

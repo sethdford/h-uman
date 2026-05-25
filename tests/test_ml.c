@@ -5017,6 +5017,79 @@ static void test_m3_agent_on_provider_success_advances_probe_count(void) {
 #endif
 }
 
+/* B3 verifier contract — probe count advances once per chat.
+ * Extended test: verify that probe_count advances by exactly 1 per call,
+ * and that multiple calls accumulate correctly. This is the tail-end of
+ * the M3 first-slice seam, and the test ensures the counter is monotonic
+ * and exact — not double-counted, not missed. */
+static void test_m3_probe_count_advances_once_per_chat_single_call(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_probe_single.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 0);
+
+    /* Single call → exactly +1 */
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 1);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+#endif
+}
+
+static void test_m3_probe_count_advances_once_per_chat_multiple_calls(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_probe_multi.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 0);
+
+    /* Five calls → exactly +5 */
+    for (int i = 0; i < 5; i++) {
+        hu_agent_m3_on_provider_success(&agent);
+    }
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 5);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+#endif
+}
+
 /* Pin the producer-side token-count estimate. The B3 v1 outcome driver's
  * selection policy requires pt > 0 && ct > 0 to drop degenerate turns; if
  * the agent path silently stops setting these (regressing to "0 =
@@ -6451,6 +6524,8 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_probe_infer_increments_counter);
     HU_RUN_TEST(test_m3_probe_count_null_safe);
     HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
+    HU_RUN_TEST(test_m3_probe_count_advances_once_per_chat_single_call);
+    HU_RUN_TEST(test_m3_probe_count_advances_once_per_chat_multiple_calls);
     HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
     HU_RUN_TEST(test_m3_record_chat_outcome_prefers_usage_block_when_present);
     HU_RUN_TEST(test_m3_id_map_lookup_is_idempotent_for_same_name);
