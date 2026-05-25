@@ -490,9 +490,26 @@ const hu_channel_daemon_config_t *hu_daemon_test_get_active_daemon_config(const 
 #endif
 
 #ifndef HU_IS_TEST
-/* F119: Proactive volume governor — shared between check-in cycle and inbound handler */
-static hu_proactive_budget_t gov_budget;
-static bool gov_budget_inited;
+/* F119: Proactive volume governor — shared between check-in cycle and inbound handler.
+ *
+ * 2026-05-25 fix: pre-initialize with safe defaults so init_proposer
+ * sees a valid budget BEFORE the proactive check-in function runs its
+ * own init. Previously a fresh daemon (or a persona without
+ * proactive.master_enabled) left gov_budget all-zero → daily_max=0
+ * → has_budget(0 < 0) → permanent GATED_BUDGET → init_proposer
+ * starved before reaching the LLM call. Matches the gcfg in the
+ * proactive function below; setting gov_budget_inited=true means
+ * that function's init branch becomes a no-op. The
+ * relationship_multiplier mutation that follows the init guard
+ * still fires (it's outside the guard). */
+static hu_proactive_budget_t gov_budget = {
+    .daily_max = 6,
+    .weekly_max = 15,
+    .relationship_multiplier = 1.0,
+    .cool_off_after_unanswered = 2,
+    .cool_off_hours = 72,
+};
+static bool gov_budget_inited = true;
 
 /* Proactive-style budget for outbound visual attachments (separate from check-in governor). */
 static hu_proactive_budget_t hu_daemon_visual_attach_gov;

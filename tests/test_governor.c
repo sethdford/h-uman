@@ -136,9 +136,9 @@ static void governor_filter_allows_all_under_budget(void) {
     bool allowed[2];
     size_t allowed_count = 0;
 
-    HU_ASSERT_EQ(hu_governor_filter_by_priority(&budget, priorities, 2, allowed, &allowed_count,
-                                                now),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_governor_filter_by_priority(&budget, priorities, 2, allowed, &allowed_count, now),
+        HU_OK);
     HU_ASSERT_EQ(allowed_count, 2u);
     HU_ASSERT_TRUE(allowed[0]);
     HU_ASSERT_TRUE(allowed[1]);
@@ -155,9 +155,9 @@ static void governor_filter_trims_to_budget(void) {
     bool allowed[5];
     size_t allowed_count = 0;
 
-    HU_ASSERT_EQ(hu_governor_filter_by_priority(&budget, priorities, 5, allowed, &allowed_count,
-                                                now),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_governor_filter_by_priority(&budget, priorities, 5, allowed, &allowed_count, now),
+        HU_OK);
     HU_ASSERT_EQ(allowed_count, 2u);
     HU_ASSERT_TRUE(allowed[1]);
     HU_ASSERT_TRUE(allowed[4]);
@@ -176,9 +176,9 @@ static void governor_filter_blocks_all_in_cool_off(void) {
     bool allowed[2];
     size_t allowed_count = 99;
 
-    HU_ASSERT_EQ(hu_governor_filter_by_priority(&budget, priorities, 2, allowed, &allowed_count,
-                                                now),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_governor_filter_by_priority(&budget, priorities, 2, allowed, &allowed_count, now),
+        HU_OK);
     HU_ASSERT_EQ(allowed_count, 0u);
     HU_ASSERT_FALSE(allowed[0]);
     HU_ASSERT_FALSE(allowed[1]);
@@ -197,9 +197,9 @@ static void governor_daily_reset_on_new_day(void) {
     bool allowed[1];
     size_t allowed_count = 0;
 
-    HU_ASSERT_EQ(hu_governor_filter_by_priority(&budget, priorities, 1, allowed, &allowed_count,
-                                                now),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_governor_filter_by_priority(&budget, priorities, 1, allowed, &allowed_count, now),
+        HU_OK);
     HU_ASSERT_EQ(budget.daily_used, 0u);
     HU_ASSERT_EQ(allowed_count, 1u);
     HU_ASSERT_TRUE(allowed[0]);
@@ -218,9 +218,9 @@ static void governor_weekly_reset_on_new_week(void) {
     bool allowed[1];
     size_t allowed_count = 0;
 
-    HU_ASSERT_EQ(hu_governor_filter_by_priority(&budget, priorities, 1, allowed, &allowed_count,
-                                                now),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_governor_filter_by_priority(&budget, priorities, 1, allowed, &allowed_count, now),
+        HU_OK);
     HU_ASSERT_EQ(budget.weekly_used, 0u);
     HU_ASSERT_EQ(allowed_count, 1u);
 }
@@ -278,6 +278,52 @@ static void governor_compute_priority_max_inputs(void) {
     HU_ASSERT_FLOAT_EQ(r, 1.0, 0.001);
 }
 
+/* 2026-05-25 regression — pins the has_budget reset-on-rollover contract.
+ *
+ * The pre-fix bug: hu_governor_has_budget was const and never called
+ * apply_resets. A budget at daily_used == daily_max yesterday stayed
+ * GATED forever (until a mutating filter_by_priority / record_sent
+ * happened to be called). For the init_proposer, the gate IS
+ * has_budget — there's no other path — so once it hit the cap once,
+ * it never proposed again on later days.
+ *
+ * This test simulates "yesterday's max usage" by initializing the
+ * budget with daily_used = daily_max and last_reset_day = today-1.
+ * Under the OLD impl: has_budget(now_today) returns false (stale).
+ * Under the FIXED impl: has_budget applies the daily reset, sees
+ * daily_used reset to 0, returns true. */
+static void governor_has_budget_resets_daily_counter_on_day_rollover(void) {
+    hu_proactive_budget_t budget;
+    HU_ASSERT_EQ(hu_governor_init(NULL, &budget), HU_OK);
+
+    /* Simulate: yesterday we hit the cap. */
+    const uint64_t ms_per_day = 86400000ULL;
+    uint64_t today_ms = 1779800000000ULL; /* arbitrary today in ms */
+    uint64_t yesterday_day = (today_ms - ms_per_day) / ms_per_day;
+    budget.daily_used = budget.daily_max;       /* exhausted */
+    budget.last_reset_day = yesterday_day;      /* counter was set yesterday */
+    budget.last_reset_week = yesterday_day / 7; /* same week is fine */
+
+    /* Today's check MUST see the rollover and return true. Under the
+     * old const impl this asserted FALSE — same input, broken contract. */
+    HU_ASSERT_TRUE(hu_governor_has_budget(&budget, today_ms));
+    HU_ASSERT_EQ(budget.daily_used, 0u); /* the reset actually fired */
+}
+
+/* Sister regression — cool-off still wins even after a day rollover.
+ * The reset shouldn't accidentally clear cool_off_until. */
+static void governor_has_budget_respects_cool_off_after_rollover(void) {
+    hu_proactive_budget_t budget;
+    HU_ASSERT_EQ(hu_governor_init(NULL, &budget), HU_OK);
+
+    const uint64_t ms_per_day = 86400000ULL;
+    uint64_t today_ms = 1779800000000ULL;
+    budget.last_reset_day = (today_ms - ms_per_day) / ms_per_day;
+    budget.cool_off_until = today_ms + 3600000ULL; /* cool-off active for 1h */
+
+    HU_ASSERT_FALSE(hu_governor_has_budget(&budget, today_ms));
+}
+
 void run_governor_tests(void) {
     HU_TEST_SUITE("governor");
     HU_RUN_TEST(governor_init_defaults_produces_valid_budget);
@@ -298,4 +344,7 @@ void run_governor_tests(void) {
     HU_RUN_TEST(governor_effective_daily_max_minimum_one);
     HU_RUN_TEST(governor_compute_priority_weights);
     HU_RUN_TEST(governor_compute_priority_max_inputs);
+    /* 2026-05-25 regression — has_budget must apply daily/weekly resets. */
+    HU_RUN_TEST(governor_has_budget_resets_daily_counter_on_day_rollover);
+    HU_RUN_TEST(governor_has_budget_respects_cool_off_after_rollover);
 }

@@ -499,13 +499,28 @@ hu_error_t hu_init_proposer_tick_with_provider(
 
     hu_init_decision_t decision;
     hu_error_t perr = hu_init_proposer_parse_response(response, response_len, &decision);
-    alloc->free(alloc->ctx, response, response_len + 1);
     if (perr != HU_OK) {
-        hu_log_warn("init_proposer", NULL, "response parse failed: err=%d", (int)perr);
+        /* T3 diagnostic: preview the first 200 chars of the failed
+         * response so we can tell whether the model returned plain text
+         * (no '{' at all) vs malformed JSON vs JSON-with-wrong-schema.
+         * The preview is sanitized — newlines → spaces, NULs → '.' —
+         * so a single log line is grep-friendly. */
+        char preview[201];
+        size_t copy = response_len < sizeof(preview) - 1 ? response_len : sizeof(preview) - 1;
+        for (size_t i = 0; i < copy; i++) {
+            unsigned char c = (unsigned char)response[i];
+            preview[i] = (c == '\n' || c == '\r' || c == '\t') ? ' ' : (c == 0 ? '.' : (char)c);
+        }
+        preview[copy] = '\0';
+        hu_log_warn("init_proposer", NULL,
+                    "response parse failed: err=%d response_len=%zu preview=%.*s%s", (int)perr,
+                    response_len, (int)copy, preview, response_len > copy ? "..." : "");
+        alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
         return HU_OK;
     }
+    alloc->free(alloc->ctx, response, response_len + 1);
 
     double threshold = cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85;
     hu_init_proposer_result_t verdict = hu_init_proposer_evaluate_decision(&decision, threshold);

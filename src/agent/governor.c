@@ -13,8 +13,7 @@ static const hu_proactive_budget_config_t HU_GOVERNOR_DEFAULTS = {
 };
 
 hu_error_t hu_governor_init(const hu_proactive_budget_config_t *config,
-                            hu_proactive_budget_t *out)
-{
+                            hu_proactive_budget_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -37,8 +36,7 @@ hu_error_t hu_governor_init(const hu_proactive_budget_config_t *config,
     return HU_OK;
 }
 
-static void apply_resets(hu_proactive_budget_t *budget, uint64_t now_ms)
-{
+static void apply_resets(hu_proactive_budget_t *budget, uint64_t now_ms) {
     uint64_t day_number = now_ms / HU_GOVERNOR_MS_PER_DAY;
     uint64_t week_number = day_number / 7;
 
@@ -57,8 +55,7 @@ typedef struct {
     double priority;
 } hu_governor_priority_entry_t;
 
-static int compare_priority_desc(const void *a, const void *b)
-{
+static int compare_priority_desc(const void *a, const void *b) {
     const hu_governor_priority_entry_t *pa = (const hu_governor_priority_entry_t *)a;
     const hu_governor_priority_entry_t *pb = (const hu_governor_priority_entry_t *)b;
     if (pa->priority > pb->priority)
@@ -70,11 +67,9 @@ static int compare_priority_desc(const void *a, const void *b)
 
 #define HU_GOVERNOR_MAX_FILTER 64
 
-hu_error_t hu_governor_filter_by_priority(hu_proactive_budget_t *budget,
-                                          const double *priorities, size_t count,
-                                          bool *allowed, size_t *out_allowed_count,
-                                          uint64_t now_ms)
-{
+hu_error_t hu_governor_filter_by_priority(hu_proactive_budget_t *budget, const double *priorities,
+                                          size_t count, bool *allowed, size_t *out_allowed_count,
+                                          uint64_t now_ms) {
     if (!budget || !out_allowed_count)
         return HU_ERR_INVALID_ARGUMENT;
     if (count > 0 && (!priorities || !allowed))
@@ -94,12 +89,11 @@ hu_error_t hu_governor_filter_by_priority(hu_proactive_budget_t *budget,
     apply_resets(budget, now_ms);
 
     uint8_t effective_daily = hu_governor_effective_daily_max(budget);
-    uint8_t daily_remaining = budget->daily_used >= effective_daily
-                                  ? 0
-                                  : (uint8_t)(effective_daily - budget->daily_used);
+    uint8_t daily_remaining =
+        budget->daily_used >= effective_daily ? 0 : (uint8_t)(effective_daily - budget->daily_used);
     uint8_t weekly_remaining = budget->weekly_used >= budget->weekly_max
-                                  ? 0
-                                  : (uint8_t)(budget->weekly_max - budget->weekly_used);
+                                   ? 0
+                                   : (uint8_t)(budget->weekly_max - budget->weekly_used);
     uint8_t remaining = daily_remaining < weekly_remaining ? daily_remaining : weekly_remaining;
 
     if (remaining >= count) {
@@ -124,8 +118,7 @@ hu_error_t hu_governor_filter_by_priority(hu_proactive_budget_t *budget,
     return HU_OK;
 }
 
-hu_error_t hu_governor_record_sent(hu_proactive_budget_t *budget, uint64_t now_ms)
-{
+hu_error_t hu_governor_record_sent(hu_proactive_budget_t *budget, uint64_t now_ms) {
     if (!budget)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -141,8 +134,7 @@ hu_error_t hu_governor_record_sent(hu_proactive_budget_t *budget, uint64_t now_m
     return HU_OK;
 }
 
-hu_error_t hu_governor_record_response(hu_proactive_budget_t *budget)
-{
+hu_error_t hu_governor_record_response(hu_proactive_budget_t *budget) {
     if (!budget)
         return HU_ERR_INVALID_ARGUMENT;
     budget->unanswered_count = 0;
@@ -150,18 +142,24 @@ hu_error_t hu_governor_record_response(hu_proactive_budget_t *budget)
     return HU_OK;
 }
 
-bool hu_governor_has_budget(const hu_proactive_budget_t *budget, uint64_t now_ms)
-{
+bool hu_governor_has_budget(hu_proactive_budget_t *budget, uint64_t now_ms) {
     if (!budget)
         return false;
+    /* 2026-05-25 fix: apply daily/weekly resets BEFORE the budget check.
+     * Previously this function was const and never reset, so callers
+     * that ONLY ever call has_budget (init_proposer's gate, daemon's
+     * visual_attach gate) stayed permanently GATED whenever yesterday's
+     * counter sat at max — only mutating filter_by_priority /
+     * record_sent applied resets, and the init_proposer's tick path
+     * never reaches those if has_budget short-circuits → starvation. */
+    apply_resets(budget, now_ms);
     if (budget->cool_off_until > now_ms)
         return false;
     uint8_t effective = hu_governor_effective_daily_max(budget);
     return budget->daily_used < effective && budget->weekly_used < budget->weekly_max;
 }
 
-uint8_t hu_governor_effective_daily_max(const hu_proactive_budget_t *budget)
-{
+uint8_t hu_governor_effective_daily_max(const hu_proactive_budget_t *budget) {
     if (!budget)
         return 1;
     double v = (double)budget->daily_max * budget->relationship_multiplier;
@@ -169,12 +167,9 @@ uint8_t hu_governor_effective_daily_max(const hu_proactive_budget_t *budget)
     return r == 0 ? 1 : r;
 }
 
-double hu_governor_compute_priority(uint8_t urgency_0_to_10,
-                                    uint8_t relevance_0_to_10,
-                                    uint8_t freshness_0_to_10,
-                                    uint8_t social_debt_0_to_10,
-                                    uint8_t emotional_weight_0_to_10)
-{
+double hu_governor_compute_priority(uint8_t urgency_0_to_10, uint8_t relevance_0_to_10,
+                                    uint8_t freshness_0_to_10, uint8_t social_debt_0_to_10,
+                                    uint8_t emotional_weight_0_to_10) {
     double u = (double)urgency_0_to_10 / 10.0;
     double r = (double)relevance_0_to_10 / 10.0;
     double f = (double)freshness_0_to_10 / 10.0;
