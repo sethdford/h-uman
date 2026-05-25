@@ -17,14 +17,17 @@
 # Usage:
 #   scripts/train-persona-draft.sh \
 #     --persona seth \
-#     --base mlx-community/gemma-3-270m-it \
+#     --base google/gemma-3-270m-it \
 #     --output ~/.human/models/seth-draft.safetensors \
 #     --iters 200
 #
 # Required args:
 #   --persona NAME           Persona to source examples from
 #                            (must exist in ~/.human/personas/)
-#   --base ID-OR-PATH        Base draft model (HF id or local path)
+#   --base ID-OR-PATH        Base draft model (HF id or local path).
+#                            Gemma repos under `google/*` are GATED on
+#                            HuggingFace — visit the model page once and
+#                            click "Acknowledge license" before first run.
 #   --output PATH            Where to save the trained adapter
 #
 # Optional args:
@@ -36,6 +39,9 @@
 #   --export-only            Skip training; just write the JSONL.
 #                            Useful for operator review before paying
 #                            the multi-hour training cost.
+#   --skip-model-check       Skip the up-front HF reachability probe.
+#                            Use when --base is a local path that doesn't
+#                            need network resolution.
 #   --dry-run                Print every command that WOULD run; don't
 #                            execute. Useful for CI / first-time setup
 #                            without paying for actual compute.
@@ -46,6 +52,7 @@
 #   2  persona export failed (human binary / persona missing?)
 #   3  mlx_lm.lora training failed (or mlx_lm not installed)
 #   4  output adapter not produced by training (subprocess silently failed)
+#   5  base model not reachable on HuggingFace (gated/typo/network)
 
 set -euo pipefail
 
@@ -60,6 +67,7 @@ BS=4
 MAX_SEQ=2048
 EXPORT_ONLY=0
 DRY_RUN=0
+SKIP_MODEL_CHECK=0
 
 usage() {
     sed -n '2,42p' "$0" | sed 's/^# \?//'
@@ -76,6 +84,7 @@ while [[ $# -gt 0 ]]; do
         --batch-size)      BS="${2:?--batch-size needs N}"; shift 2 ;;
         --max-seq-length)  MAX_SEQ="${2:?--max-seq-length needs N}"; shift 2 ;;
         --export-only)     EXPORT_ONLY=1; shift ;;
+        --skip-model-check) SKIP_MODEL_CHECK=1; shift ;;
         --dry-run)         DRY_RUN=1; shift ;;
         -h|--help)         usage; exit 0 ;;
         *)
@@ -151,6 +160,37 @@ if [[ "${EXPORT_ONLY}" -eq 1 ]]; then
     echo "train-persona-draft: --export-only — JSONL at ${out_jsonl}"
     echo "  Review it, then re-run WITHOUT --export-only to train."
     exit 0
+fi
+
+# ── step 1.5: probe HF model reachability ────────────────────────────
+# mlx_lm.lora loads weights immediately on start. If --base names a
+# gated, mistyped, or unauthenticated HF repo, it fails after spending
+# 30+ seconds resolving the tokenizer and model config. Probe first so
+# the operator learns about the gate or typo in under 2 seconds.
+#
+# Skip for local paths and when --skip-model-check is set.
+if [[ "${SKIP_MODEL_CHECK}" -eq 0 && "${DRY_RUN}" -eq 0 && ! -e "${BASE}" ]]; then
+    # Downloading config.json (small, always present in HF model repos)
+    # exercises BOTH the repo-exists check AND the gate-acceptance check.
+    # Model-metadata calls succeed for gated-not-accepted repos; file
+    # downloads do not. We want the strong check.
+    if ! python3 - "${BASE}" <<'PYEOF' >/dev/null 2>&1
+import sys
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id=sys.argv[1], filename="config.json")
+PYEOF
+    then
+        echo "train-persona-draft: base model '${BASE}' not reachable on HuggingFace" >&2
+        echo "  Common causes:" >&2
+        echo "    1. Typo — verify the repo id at https://huggingface.co/${BASE}" >&2
+        echo "    2. Gated repo — visit the model page and click 'Acknowledge license'" >&2
+        echo "       (most google/gemma-* repos require this once per HF account)" >&2
+        echo "    3. Not authenticated — run 'huggingface-cli login' if --base is private" >&2
+        echo "    4. No network / DNS — retry when online" >&2
+        echo "  Bypass: --skip-model-check (use only when --base is a local path or" >&2
+        echo "  you've separately verified the model is reachable)" >&2
+        exit 5
+    fi
 fi
 
 # ── step 2: train via mlx_lm.lora ────────────────────────────────────
