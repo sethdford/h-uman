@@ -1081,6 +1081,7 @@ set(HU_CORE_SOURCES
     src/daemon_cron.c
     src/daemon_routing.c
     src/daemon_proactive.c
+    src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
     src/webhook.c
@@ -3101,6 +3102,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
     tests/test_follow_up.c
+    tests/test_follow_up_daemon_integration.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c

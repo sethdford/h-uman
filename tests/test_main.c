@@ -272,6 +272,7 @@ void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
 void run_imessage_react_contract_tests(void);
 void run_follow_up_tests(void);
+void run_follow_up_daemon_integration_tests(void);
 void run_intelligence_tests(void);
 void run_protective_tests(void);
 void run_humor_tests(void);
@@ -1057,6 +1058,7 @@ int main(int argc, char **argv) {
     run_imessage_rich_link_tests();
     run_imessage_react_contract_tests();
     run_follow_up_tests();
+    run_follow_up_daemon_integration_tests();
     run_intelligence_tests();
     run_protective_tests();
     run_humor_tests();

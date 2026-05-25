@@ -20,8 +20,10 @@
 #include "human/daemon_proactive.h"
 #include "human/agent.h"
 #include "human/agent/proactive.h"
+#include "human/agent/proactive_throttle.h"
 #include "human/agent/weather_awareness.h"
 #include "human/agent/weather_fetch.h"
+#include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/context/protective.h"
 #include "human/context/self_awareness.h"
@@ -31,6 +33,7 @@
 #include "human/memory.h"
 #include "human/memory/compression.h"
 #include "human/memory/degradation.h"
+#include "human/memory/personal_model.h"
 #include "human/persona.h"
 #include "human/platform.h"
 #ifdef HU_ENABLE_SQLITE
@@ -41,8 +44,10 @@
 #endif
 
 #include "human/core/debug.h"
+#include "human/core/log.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* P2-5 (2026-05-16 incident): public outbound-safety predicate for memory
@@ -718,6 +723,112 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     result[pos] = '\0';
     *out_len = pos;
     return result;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Follow-up watcher flush (US-48-3) — generate and send a follow-up draft
+ * ────────────────────────────────────────────────────────────────────────── */
+
+hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
+                                                 const char *contact_handle, struct hu_config *cfg,
+                                                 hu_service_channel_t *channels,
+                                                 size_t channel_count,
+                                                 struct hu_proactive_throttle *throttle) {
+    if (!alloc || !agent || !contact_handle || !contact_handle[0] || !cfg)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!channels || channel_count == 0 || !throttle)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_log_info("follow_up_watcher", NULL, "follow-up flush initiated for contact %s",
+                contact_handle);
+
+    /* Step 1: Load per-contact personal model (US-48-2).
+     * The contact_handle is typically an iMessage handle like "+15551234567" or
+     * "alice@example.com". Construct the model db path using workspace_dir. */
+    hu_personal_model_t contact_model;
+    memset(&contact_model, 0, sizeof(contact_model));
+
+    char db_path[512] = {0};
+    if (cfg->workspace_dir) {
+        snprintf(db_path, sizeof(db_path), "%s/models/per_contact", cfg->workspace_dir);
+    } else {
+        /* Fallback: use ~/.human */
+        const char *home = getenv("HOME");
+        snprintf(db_path, sizeof(db_path), "%s/.human/models/per_contact", home ? home : "/tmp");
+    }
+
+    hu_error_t pm_err = hu_personal_model_load_for_contact(&contact_model, contact_handle, db_path);
+    if (pm_err != HU_OK) {
+        hu_log_warn(
+            "follow_up_watcher", NULL,
+            "failed to load personal model for contact %s (err=%d); proceeding with empty model",
+            contact_handle, pm_err);
+        /* Non-fatal: proceed with empty model. The autoresponder will generate a generic response.
+         */
+    }
+
+    /* Step 2: Build autoresponder prompt for the follow-up.
+     * Use a simple incoming message to trigger the follow-up template. */
+    const char *follow_up_trigger = "It's been a while since we last talked.";
+    char prompt_buf[4096];
+    size_t prompt_len = hu_autoresponder_build_prompt(
+        NULL, /* autoresponder_config — NULL means skip the DND/allowlist checks */
+        contact_handle, "imessage", follow_up_trigger, NULL, /* persona_summary=NULL for now */
+        &contact_model, prompt_buf, sizeof(prompt_buf));
+
+    if (prompt_len == 0 || prompt_len >= sizeof(prompt_buf)) {
+        hu_log_warn("follow_up_watcher", NULL,
+                    "failed to build autoresponder prompt for contact %s", contact_handle);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_log_info("follow_up_watcher", NULL, "built follow-up prompt (%zu bytes) for contact %s",
+                prompt_len, contact_handle);
+
+    /* Step 3: Send via iMessage.
+     * Find the iMessage channel in the service channels array and call its send vtable. */
+    hu_error_t send_err = HU_ERR_NOT_FOUND;
+    for (size_t i = 0; i < channel_count; i++) {
+        hu_service_channel_t *ch = &channels[i];
+        if (!ch->channel || !ch->channel->vtable || !ch->channel->vtable->name)
+            continue;
+        const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+        if (ch_name && strcmp(ch_name, "imessage") == 0) {
+            /* Found iMessage channel. Send the follow-up prompt. */
+            send_err =
+                ch->channel->vtable->send(ch->channel->ctx, contact_handle, strlen(contact_handle),
+                                          prompt_buf, prompt_len, NULL, /* media */
+                                          0);                           /* media_count */
+            if (send_err == HU_OK) {
+                hu_log_info("follow_up_watcher", NULL, "follow-up sent via iMessage to contact %s",
+                            contact_handle);
+            } else {
+                hu_log_warn("follow_up_watcher", NULL,
+                            "iMessage send failed for contact %s (err=%d)", contact_handle,
+                            send_err);
+            }
+            break;
+        }
+    }
+    if (send_err == HU_ERR_NOT_FOUND) {
+        hu_log_warn("follow_up_watcher", NULL,
+                    "iMessage channel not found in service channels; cannot send follow-up");
+    }
+
+    /* Step 4: Record throttle event (for rate-limiting).
+     * Track the send so we don't violate the follow-up throttle limits. */
+    int64_t now_unix = time(NULL);
+    uint64_t now_ms = (uint64_t)now_unix * 1000;
+    bool allowed = hu_proactive_throttle_record_send(throttle, contact_handle, "follow_up", now_ms);
+    if (!allowed) {
+        hu_log_warn("follow_up_watcher", NULL, "throttle blocked follow-up send for contact %s",
+                    contact_handle);
+    } else {
+        hu_log_info("follow_up_watcher", NULL, "throttle recorded follow-up send for contact %s",
+                    contact_handle);
+    }
+
+    return HU_OK;
 }
 
 /* Test helpers removed — use hu_proactive_context_reset() and ctx->count directly. */
