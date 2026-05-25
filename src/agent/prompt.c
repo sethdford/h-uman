@@ -4,9 +4,11 @@
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona.h"
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,6 +150,30 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                                   size_t *out_len) {
     if (!alloc || !config || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* Sprint 55 B3 Task 6 — silent-failure diagnostic.
+     *
+     * Two complementary fail modes log distinct one-shot messages so
+     * operators can tell "haven't enabled" apart from "enabled but
+     * caller forgot to thread the singleton" — the latter is the
+     * exact "wired but starved" pattern that hit gov_budget earlier
+     * this session. Patterns match commit 48372778 (LoRA diagnostic)
+     * + ~/.claude/rules/silent-config-gated-subsystems.md. */
+    if (!config->prompt_budget_trim_enabled) {
+        static atomic_bool s_prompt_budget_disabled_warn = false;
+        hu_log_info_once(&s_prompt_budget_disabled_warn, "prompt_budget", NULL,
+                         "prompt_budget: trim gate disabled by config "
+                         "(prompt_budget_trim_enabled=false). Set prompt_budget.enabled=true "
+                         "in config.json to enable per-field DEAD-field trimming. "
+                         "Cost is ~5us/turn for the bookkeeping.");
+    } else if (budget == NULL) {
+        static atomic_bool s_prompt_budget_starved_warn = false;
+        hu_log_info_once(&s_prompt_budget_starved_warn, "prompt_budget", NULL,
+                         "prompt_budget: trim gate enabled in config but caller didn't "
+                         "thread the budget singleton (budget arg is NULL). The trim is "
+                         "a no-op. Caller MUST pass the global hu_prompt_budget_t* to "
+                         "hu_prompt_build_system for trimming to actually fire.");
+    }
 
     /* Initialize prompt data (tone hints, etc.) */
     hu_prompt_data_init(alloc);
