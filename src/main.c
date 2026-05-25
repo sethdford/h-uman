@@ -52,6 +52,7 @@
 #include "human/plugin_discovery.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
+#include "human/providers/llamacpp.h" /* Phase 4c — hu_kv_quant_from_string for inference-status */
 #include "human/runtime.h"
 #include "human/security.h"
 #include "human/security/audit.h"
@@ -181,6 +182,12 @@ static hu_error_t cmd_version(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_help(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_status(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv);
+/* Phase 4c (Gemma throughput program) — print the effective inference
+ * config the daemon would use right now. Reads the same getenv slots
+ * the factory consumes, so the reported values match what the chat
+ * path actually applies — single source of truth, no risk of the CLI
+ * lying about what the daemon thinks it has. */
+static hu_error_t cmd_inference_status(hu_allocator_t *alloc, int argc, char **argv);
 #ifdef HU_HAS_CRON
 static hu_error_t cmd_cron(hu_allocator_t *alloc, int argc, char **argv);
 #endif
@@ -522,6 +529,8 @@ static const hu_command_t commands[] = {
     {"status", "Show runtime status", cmd_status},
     {"onboard", "Interactive setup wizard", cmd_onboard},
     {"doctor", "Run system diagnostics", cmd_doctor},
+    {"inference-status", "Show effective inference throughput config (KV quant, FA, draft model)",
+     cmd_inference_status},
 #ifdef HU_HAS_CRON
     {"cron", "Manage scheduled tasks", cmd_cron},
 #endif
@@ -625,6 +634,77 @@ static hu_error_t cmd_status(hu_allocator_t *alloc, int argc, char **argv) {
     } else if (r.check_count == 0) {
         printf("  (no components registered)\n");
     }
+    return HU_OK;
+}
+
+static hu_error_t cmd_inference_status(hu_allocator_t *alloc, int argc, char **argv) {
+    (void)alloc;
+    (void)argc;
+    (void)argv;
+    /* Read the same env slots the factory consumes (src/providers/
+     * factory.c). Reporting from getenv (not from a struct field)
+     * guarantees the displayed value matches what hu_provider_create
+     * would actually pass to the provider — no drift risk. */
+    const char *kv = getenv("HU_LLAMACPP_KV_QUANT");
+    const char *fa = getenv("HU_LLAMACPP_FLASH_ATTN");
+    const char *draft = getenv("HU_LLAMACPP_DRAFT_MODEL");
+    const char *draft_min_p = getenv("HU_LLAMACPP_DRAFT_MIN_P");
+    const char *draft_max_t = getenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    const char *mlx_draft = getenv("HU_MLX_DRAFT_MODEL");
+
+    printf("inference-status:\n");
+    printf("  llamacpp provider:\n");
+
+    /* KV quant — resolve via the same parser the factory uses so the
+     * operator sees both the env value AND whether the parser
+     * recognizes it (catches typos like q3_0 → silent fp16 fallback). */
+    bool kv_recognized = false;
+    hu_kv_quant_t kv_eff = hu_kv_quant_from_string(kv, &kv_recognized);
+    if (!kv || !*kv) {
+        printf("    kv_quant:          fp16 (default — env HU_LLAMACPP_KV_QUANT unset)\n");
+    } else if (kv_recognized) {
+        printf("    kv_quant:          %s (env=%s)\n", hu_kv_quant_to_string(kv_eff), kv);
+    } else {
+        printf("    kv_quant:          fp16 (default — env HU_LLAMACPP_KV_QUANT=%s UNRECOGNIZED, "
+               "falling back)\n",
+               kv);
+    }
+
+    /* Flash Attention — factory defaults to true; env can disable via
+     * "off" / "0" / "false". Anything else keeps it on. */
+    bool fa_on = true;
+    if (fa && (strcmp(fa, "off") == 0 || strcmp(fa, "0") == 0 || strcmp(fa, "false") == 0))
+        fa_on = false;
+    if (!fa || !*fa)
+        printf("    flash_attn:        on  (default — env HU_LLAMACPP_FLASH_ATTN unset)\n");
+    else
+        printf("    flash_attn:        %s (env=%s)\n", fa_on ? "on " : "off", fa);
+
+    /* Draft model — Phase 3b spec decode. Resolve presence + parse the
+     * numeric overrides if set. */
+    if (!draft || !*draft) {
+        printf("    draft_model:       (unset — spec decode disabled)\n");
+    } else {
+        printf("    draft_model:       %s\n", draft);
+        if (draft_min_p && *draft_min_p)
+            printf("      draft_min_p:     %s (env)\n", draft_min_p);
+        else
+            printf("      draft_min_p:     (unset — upstream default)\n");
+        if (draft_max_t && *draft_max_t)
+            printf("      draft_max_tokens: %s (env)\n", draft_max_t);
+        else
+            printf("      draft_max_tokens: (unset — upstream default)\n");
+    }
+
+    printf("  mlx-server (HTTP):\n");
+    if (mlx_draft && *mlx_draft)
+        printf("    draft_model:       %s\n", mlx_draft);
+    else
+        printf("    draft_model:       (unset — spec decode disabled)\n");
+
+    printf("\n  Source: getenv() — same slots src/providers/factory.c reads.\n");
+    printf("  Set via env, or via 'inference.{kv_quant,flash_attn,draft_model}' in config.json\n");
+    printf("  (Phase 1c bridge populates env from config if env is unset).\n");
     return HU_OK;
 }
 
