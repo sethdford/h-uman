@@ -2666,6 +2666,100 @@ hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contac
 #endif
 }
 
+/* NEW FUNCTION FOR US-48-3: Find inbound unreplied message.
+ *
+ * Detects when the user (seth) has been unresponsive to an inbound message
+ * from a contact. Queries for:
+ * 1. Most recent inbound (is_from_me=0) from contact_id
+ * 2. Verifies no outbound (is_from_me=1) exists after it
+ * If both conditions hold, returns the message ID and timestamp. Otherwise
+ * returns HU_OK with out_msg_id=0 (no unreplied inbound found). */
+hu_error_t hu_imessage_find_inbound_unreplied(const char *contact_id, size_t contact_id_len,
+                                              int64_t *out_msg_id, uint64_t *out_read_at_ms) {
+    if (out_msg_id)
+        *out_msg_id = 0;
+    if (out_read_at_ms)
+        *out_read_at_ms = 0;
+    if (!contact_id || contact_id_len == 0 || !out_msg_id || !out_read_at_ms)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+    /* Open chat.db and find most recent inbound from contact. */
+    char db_path[512];
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_IO;
+    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    /* Query most recent INBOUND (is_from_me=0) from this contact. */
+    const char *sql = "SELECT m.ROWID, m.date "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE h.id = ?1 AND m.is_from_me = 0 "
+                      "ORDER BY m.date DESC LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    char contact_buf[128];
+    size_t clen =
+        contact_id_len < sizeof(contact_buf) - 1 ? contact_id_len : sizeof(contact_buf) - 1;
+    memcpy(contact_buf, contact_id, clen);
+    contact_buf[clen] = '\0';
+    sqlite3_bind_text(stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+
+    int64_t msg_id = 0;
+    int64_t inbound_date = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        msg_id = sqlite3_column_int64(stmt, 0);
+        inbound_date = sqlite3_column_int64(stmt, 1);
+    }
+    sqlite3_finalize(stmt);
+
+    if (msg_id == 0) {
+        /* No inbound from this contact. */
+        sqlite3_close(db);
+        return HU_OK;
+    }
+
+    /* Check for any OUTBOUND (is_from_me=1) AFTER the inbound message.
+     * If an outbound exists, the user has already replied. */
+    bool has_reply = false;
+    sqlite3_stmt *reply_stmt = NULL;
+    const char *reply_sql = "SELECT COUNT(*) FROM message m "
+                            "JOIN handle h ON m.handle_id = h.ROWID "
+                            "WHERE h.id = ?1 AND m.is_from_me = 1 AND m.date > ?2";
+    if (sqlite3_prepare_v2(db, reply_sql, -1, &reply_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(reply_stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+        sqlite3_bind_int64(reply_stmt, 2, inbound_date);
+        if (sqlite3_step(reply_stmt) == SQLITE_ROW)
+            has_reply = sqlite3_column_int(reply_stmt, 0) > 0;
+        sqlite3_finalize(reply_stmt);
+    }
+    sqlite3_close(db);
+
+    if (has_reply)
+        return HU_OK; /* User has already replied; no follow-up needed. */
+
+    /* Convert Apple's date (nanoseconds since 2001-01-01) to wall-clock ms. */
+    int64_t apple_epoch = 978307200LL;
+    int64_t inbound_unix_sec = apple_epoch + inbound_date / 1000000000LL;
+    *out_msg_id = msg_id;
+    *out_read_at_ms = (uint64_t)inbound_unix_sec * 1000ULL;
+    return HU_OK;
+#else
+    (void)contact_id_len;
+    return HU_OK; /* test / non-Apple / no-SQLite: no result */
+#endif
+}
+
 static hu_error_t imessage_get_response_constraints(void *ctx,
                                                     hu_channel_response_constraints_t *out) {
     (void)ctx;

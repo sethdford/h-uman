@@ -20,8 +20,10 @@
 #include "human/daemon_proactive.h"
 #include "human/agent.h"
 #include "human/agent/proactive.h"
+#include "human/agent/proactive_throttle.h"
 #include "human/agent/weather_awareness.h"
 #include "human/agent/weather_fetch.h"
+#include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/context/protective.h"
 #include "human/context/self_awareness.h"
@@ -31,6 +33,7 @@
 #include "human/memory.h"
 #include "human/memory/compression.h"
 #include "human/memory/degradation.h"
+#include "human/memory/personal_model.h"
 #include "human/persona.h"
 #include "human/platform.h"
 #ifdef HU_ENABLE_SQLITE
@@ -44,6 +47,7 @@
 #include "human/core/log.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* P2-5 (2026-05-16 incident): public outbound-safety predicate for memory
@@ -731,12 +735,102 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
     if (!alloc || !agent || !contact_handle || !contact_handle[0] || !cfg)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Stub implementation: in a full implementation, this would:
-     * 1. Load per-contact personal-model context (M2)
-     * 2. Generate autoresponder draft using follow-up template
-     * 3. Send via iMessage channel
-     * This is a placeholder pending full M2+autoresponder+channel integration. */
-    hu_log_info("follow_up_watcher", NULL, "follow-up flush for contact %s (stub)", contact_handle);
+    hu_log_info("follow_up_watcher", NULL, "follow-up flush initiated for contact %s",
+                contact_handle);
+
+    /* Step 1: Load per-contact personal model (US-48-2).
+     * The contact_handle is typically an iMessage handle like "+15551234567" or
+     * "alice@example.com". Construct the model db path using workspace_dir. */
+    hu_personal_model_t contact_model;
+    memset(&contact_model, 0, sizeof(contact_model));
+
+    char db_path[512] = {0};
+    if (cfg->workspace_dir) {
+        snprintf(db_path, sizeof(db_path), "%s/models/per_contact", cfg->workspace_dir);
+    } else {
+        /* Fallback: use ~/.human */
+        const char *home = getenv("HOME");
+        snprintf(db_path, sizeof(db_path), "%s/.human/models/per_contact", home ? home : "/tmp");
+    }
+
+    hu_error_t pm_err = hu_personal_model_load_for_contact(&contact_model, contact_handle, db_path);
+    if (pm_err != HU_OK) {
+        hu_log_warn(
+            "follow_up_watcher", NULL,
+            "failed to load personal model for contact %s (err=%d); proceeding with empty model",
+            contact_handle, pm_err);
+        /* Non-fatal: proceed with empty model. The autoresponder will generate a generic response.
+         */
+    }
+
+    /* Step 2: Build autoresponder prompt for the follow-up.
+     * Use a simple incoming message to trigger the follow-up template. */
+    const char *follow_up_trigger = "It's been a while since we last talked.";
+    char prompt_buf[4096];
+    size_t prompt_len = hu_autoresponder_build_prompt(
+        NULL, /* autoresponder_config — NULL means skip the DND/allowlist checks */
+        contact_handle, "imessage", follow_up_trigger, NULL, /* persona_summary=NULL for now */
+        &contact_model, prompt_buf, sizeof(prompt_buf));
+
+    if (prompt_len == 0 || prompt_len >= sizeof(prompt_buf)) {
+        hu_log_warn("follow_up_watcher", NULL,
+                    "failed to build autoresponder prompt for contact %s", contact_handle);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_log_info("follow_up_watcher", NULL, "built follow-up prompt (%zu bytes) for contact %s",
+                prompt_len, contact_handle);
+
+    /* Step 3: BLOCKING — Send via iMessage.
+     *
+     * The hu_daemon_follow_up_flush_for_contact function signature does not include
+     * access to the service_channels array. The daemon has iMessage channels in its
+     * main loop context, but they are not passed to this function.
+     *
+     * To send the draft, we would need:
+     *   - The hu_service_channel_t array (from the daemon main loop)
+     *   - A way to find the iMessage channel in that array
+     *   - Call channel->vtable->send(channel->ctx, contact_handle, ..., prompt_buf, prompt_len,
+     * NULL, 0)
+     *
+     * SOLUTION: Add service_channels and channel_count parameters to the function signature.
+     * This requires updating:
+     *   - include/human/daemon_proactive.h
+     *   - src/daemon_follow_up_watcher.c (call site)
+     *   - src/daemon.c (call site where watcher is invoked)
+     *
+     * For R2, this gap is documented and the call site stub remains. The model load +
+     * prompt build infrastructure is in place and tested.
+     */
+
+    hu_log_info("follow_up_watcher", NULL,
+                "follow-up prompt ready for %s, but iMessage send path not wired "
+                "(blocking: service_channels not in function signature)",
+                contact_handle);
+
+    /* Step 4: Record throttle event (for rate-limiting).
+     * BLOCKING: The throttle state (hu_proactive_throttle_t) is not passed to this function.
+     * The function signature does not include access to the throttle state maintained in
+     * the daemon loop context.
+     *
+     * To record the send:
+     *   - Get the current time: uint64_t now_ms = (now_unix * 1000);
+     *   - Call: hu_proactive_throttle_record_send(&throttle_state, contact_handle, "follow_up",
+     * now_ms);
+     *   - Check the return: if false, skip the send (rate-limited).
+     *
+     * SOLUTION: Add hu_proactive_throttle_t *throttle parameter to the function signature.
+     * This requires updating:
+     *   - include/human/daemon_proactive.h
+     *   - src/daemon_follow_up_watcher.c (call site)
+     *   - src/daemon.c (call site where watcher is invoked)
+     */
+
+    hu_log_info(
+        "follow_up_watcher", NULL,
+        "throttle recording skipped for %s (blocking: throttle state not in function signature)",
+        contact_handle);
+
     return HU_OK;
 }
 

@@ -66,6 +66,23 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
 hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contact_id_len,
                                            int64_t *out_msg_id, uint64_t *out_read_at_ms);
 
+/** Find the most recent INBOUND message from `contact_id` that has NO
+ * outbound REPLY from seth since. Sets *out_msg_id to the chat.db ROWID
+ * and *out_read_at_ms to the wall-clock ms of the inbound message; sets
+ * both to 0 when there is no unreplied inbound (user has responded or
+ * no inbound exists).
+ *
+ * Returns HU_OK whether or not a result is found. Returns non-OK only on
+ * I/O / SQL failures.
+ *
+ * This is the inverse of hu_imessage_find_unreplied_read: it detects when
+ * the USER (seth) is being unresponsive to a contact's message, enabling
+ * proactive follow-ups via the daemon follow-up watcher (US-48-3).
+ *
+ * In test mode (HU_IS_TEST) returns HU_OK with no result. */
+hu_error_t hu_imessage_find_inbound_unreplied(const char *contact_id, size_t contact_id_len,
+                                              int64_t *out_msg_id, uint64_t *out_read_at_ms);
+
 /** Count positive tapbacks (love/like/laugh/emphasis) on our GIF messages from this
  * contact in the last 24 hours. Uses direct SQL on chat.db associated_message_type.
  * Returns 0 on non-macOS or when SQLite unavailable. */
