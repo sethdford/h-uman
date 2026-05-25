@@ -942,6 +942,35 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             goto fail;
         hu_metacognition_apply_config(&bi->agent.infra.metacognition, &bi->cfg.agent.metacognition);
 
+        /* US-13: wire provider-degradation fallback_model from parsed config.
+         *
+         * hu_agent_from_config initializes degradation_config.enabled=true +
+         * max_retries=1 (agent.c:997-998) but never reads the fallback_model
+         * field — leaving it NULL. When the primary model fails, the
+         * degradation path skips its Stage 2 (fallback retry) and goes
+         * straight to honest-failure ("I'm having trouble connecting...").
+         *
+         * Wiring it here (post hu_agent_from_config, where both `bi->agent`
+         * and `bi->cfg` are in scope) is less invasive than threading a new
+         * parameter through the 18-argument constructor. The lifetime
+         * matches the agent — the config arena outlives the agent struct.
+         *
+         * NOTE: this is a SAME-PROVIDER fallback (the existing
+         * hu_provider_degrade_chat re-uses the same provider instance with a
+         * different model name). For TRUE cross-provider fallback (e.g.
+         * route to cloud Gemini when local mlx_local is down), a separate
+         * provider-router change is required — scoped as US-13 follow-up in
+         * docs/plans/2026-05-26-sprint-56-gemma-as-seth/us13-followup.md. */
+        if (bi->cfg.agent.fallback_model && *bi->cfg.agent.fallback_model) {
+            bi->agent.sota.degradation_config.fallback_model = bi->cfg.agent.fallback_model;
+            bi->agent.sota.degradation_config.fallback_model_len =
+                strlen(bi->cfg.agent.fallback_model);
+            hu_log_info("agent", obs,
+                        "degradation: same-provider fallback model wired (%s) — "
+                        "fires after primary model fails before honest-failure",
+                        bi->cfg.agent.fallback_model);
+        }
+
         /* W13 on-device learner: open the best-available backend and attach
          * to the agent so signal-source modules (delta_observer,
          * outcome_tracker bridge) can deposit pending signals between
