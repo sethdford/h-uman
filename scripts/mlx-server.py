@@ -433,8 +433,151 @@ class SwapHandler(BaseHTTPRequestHandler):
             # completions through the swapped adapter, otherwise the
             # M3 personalization loop has no served-turn proof.
             # OpenAI-compatible request shape: messages=[{role, content}].
+            #
+            # Phase 3a (Gemma throughput program): when the client
+            # passes stream=true, switch to SSE so perceived TTFT
+            # collapses to first-token latency instead of full-response
+            # latency. The existing buffered path stays for stream=false
+            # consumers and for backwards compatibility with anything
+            # that POSTed without the field.
+            if body.get("stream") is True:
+                return self._stream_chat_completion(body)
             status, resp = _chat_completion_inline(body)
             return self._send_json(status, resp)
+
+    def _stream_chat_completion(self, body):
+        """SSE response path. Emits OpenAI-compatible chunks until the
+        model halts (max_tokens or eos), then a final chunk with
+        finish_reason='stop' plus a `data: [DONE]\\n\\n` sentinel.
+
+        Falls back gracefully when mlx_lm isn't importable: emits ONE
+        delta chunk with the stub text + DONE. This keeps the SSE
+        contract testable in stub mode without a real model.
+        """
+        messages = body.get("messages", [])
+        if not isinstance(messages, list) or not messages:
+            return self._send_json(400, {"error": "missing or empty messages"})
+        max_tokens = int(body.get("max_tokens", 256))
+        model_name = body.get("model", "mlx-inline")
+
+        # Begin chunked SSE response. No Content-Length (chunked encoding
+        # via close-on-EOF; HTTPServer's chunk handling is good enough
+        # here because each `self.wfile.write` flushes a TCP packet).
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        # No Content-Length intentionally — keep the connection
+        # streaming until the closing [DONE] sentinel.
+        self.end_headers()
+
+        def emit(delta_text: str, finish_reason=None, usage=None):
+            chunk = {
+                "id": "chatcmpl-mlx-inline",
+                "object": "chat.completion.chunk",
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": delta_text} if delta_text else {},
+                        "finish_reason": finish_reason,
+                    }
+                ],
+            }
+            if usage is not None:
+                chunk["usage"] = usage
+            payload = "data: " + json.dumps(chunk) + "\n\n"
+            try:
+                self.wfile.write(payload.encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # Client disconnected mid-stream. Re-raise as a sentinel
+                # the outer loop catches to stop generation cleanly.
+                raise
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        try:
+            if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
+                try:
+                    from mlx_lm import stream_generate
+                except ImportError:
+                    # mlx_lm < 0.20 didn't expose stream_generate at the
+                    # top level. Fall back to one-shot generate +
+                    # emit-as-one-chunk so the SSE contract still holds.
+                    stream_generate = None
+
+                tok = _MLX_TOKENIZER
+                if hasattr(tok, "apply_chat_template"):
+                    prompt = tok.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    prompt = "\n".join(
+                        f"{m.get('role', 'user')}: {m.get('content', '')}"
+                        for m in messages
+                    )
+                try:
+                    prompt_tokens = len(tok.encode(prompt))
+                except Exception:
+                    prompt_tokens = 0
+
+                if stream_generate is not None:
+                    for item in stream_generate(
+                        _MLX_MODEL, _MLX_TOKENIZER,
+                        prompt=prompt, max_tokens=max_tokens,
+                    ):
+                        # mlx_lm yields different shapes across versions:
+                        # newer GenerationResponse objects have `.text`;
+                        # older paths yield bare strings.
+                        delta = getattr(item, "text", None)
+                        if delta is None and isinstance(item, str):
+                            delta = item
+                        if delta is None:
+                            delta = str(item)
+                        if delta:
+                            emit(delta)
+                            completion_tokens += 1
+                else:
+                    # Fallback: one-shot then emit as a single chunk.
+                    from mlx_lm import generate as _generate
+                    text = _generate(
+                        _MLX_MODEL, _MLX_TOKENIZER,
+                        prompt=prompt, max_tokens=max_tokens,
+                    )
+                    try:
+                        completion_tokens = len(tok.encode(text))
+                    except Exception:
+                        completion_tokens = 0
+                    if text:
+                        emit(text)
+            else:
+                # Stub mode: emit one delta chunk + DONE so the SSE
+                # contract is exercisable in CI without mlx_lm installed.
+                last = messages[-1].get("content", "") if messages else ""
+                stub = f"[stub] echoing {len(last)} chars from last user message"
+                emit(stub)
+                completion_tokens = 0
+        except (BrokenPipeError, ConnectionResetError):
+            return  # client gone, no point sending finish chunk
+        except Exception as exc:  # noqa: BLE001 — mlx_lm raises a variety
+            print(f"[mlx-server] stream generate failed: {exc}", flush=True)
+            # Best-effort finish chunk + DONE so the client doesn't hang.
+            try:
+                emit("", finish_reason="error")
+            except Exception:
+                pass
+
+        # Final chunk + DONE sentinel.
+        try:
+            emit("", finish_reason="stop", usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            })
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
         return self._send_json(404, {"error": f"no route: {self.path}"})
 
