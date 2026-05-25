@@ -142,4 +142,13 @@ void hu_daemon_personalization_warn_adapter_ignored(struct hu_observer *observer
 void hu_daemon_personalization_warn_reset_for_test(void);
 #endif
 
+/* Follow-up watcher daemon tick (US-48-3). Polls iMessage chat.db for
+ * unresponded reads and schedules follow-ups via daemon_proactive. */
+struct hu_follow_up_watcher_config;
+struct hu_config;
+hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_config *cfg,
+                                            int64_t now_unix, int64_t *last_poll_unix_inout,
+                                            int64_t *watermark_inout, struct hu_agent *agent,
+                                            const struct hu_config *config);
+
 #endif /* HU_DAEMON_H */

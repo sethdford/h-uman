@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <string.h>
+#include <time.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Follow-up delay computation + warmth-tier + template selection.
@@ -204,4 +205,23 @@ void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id) {
         return;
     d->recent_msg_ids[d->next_slot] = msg_id;
     d->next_slot = (d->next_slot + 1) % HU_FOLLOWUP_DEDUP_SIZE;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Send-now predicate — daemon gate for follow-up throttle
+ * ────────────────────────────────────────────────────────────────────────── */
+
+#include "human/agent/proactive_throttle.h"
+
+bool hu_follow_up_should_send_now(const char *contact_handle, uint64_t now_ms,
+                                  struct hu_proactive_throttle *throttle) {
+    if (!contact_handle || !contact_handle[0] || !throttle)
+        return false;
+
+    /* Check per-contact daily cap via throttle subsystem. The throttle module
+     * handles YMD computation and per-contact daily max enforcement. */
+    if (!hu_proactive_throttle_record_send(throttle, contact_handle, "follow_up", now_ms))
+        return false; /* throttle rejected the send */
+
+    return true;
 }

@@ -41,6 +41,7 @@
 #endif
 
 #include "human/core/debug.h"
+#include "human/core/log.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -718,6 +719,25 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     result[pos] = '\0';
     *out_len = pos;
     return result;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Follow-up watcher flush (US-48-3) — generate and send a follow-up draft
+ * ────────────────────────────────────────────────────────────────────────── */
+
+hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
+                                                 const char *contact_handle,
+                                                 struct hu_config *cfg) {
+    if (!alloc || !agent || !contact_handle || !contact_handle[0] || !cfg)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Stub implementation: in a full implementation, this would:
+     * 1. Load per-contact personal-model context (M2)
+     * 2. Generate autoresponder draft using follow-up template
+     * 3. Send via iMessage channel
+     * This is a placeholder pending full M2+autoresponder+channel integration. */
+    hu_log_info("follow_up_watcher", NULL, "follow-up flush for contact %s (stub)", contact_handle);
+    return HU_OK;
 }
 
 /* Test helpers removed — use hu_proactive_context_reset() and ctx->count directly. */

@@ -91,4 +91,10 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, struct hu_ag
  * injection, newlines). See src/daemon_proactive.c for the contract. */
 bool hu_daemon_callback_content_is_safe(const char *content, size_t content_len);
 
+/* Follow-up watcher flush function (US-48-3). Generates a follow-up draft
+ * for a contact and sends it via iMessage if throttle allows. Called by
+ * hu_daemon_tick_follow_up_watcher() when a scheduled follow-up is ready. */
+hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
+                                                 const char *contact_handle, struct hu_config *cfg);
+
 #endif /* HU_DAEMON_PROACTIVE_H */
