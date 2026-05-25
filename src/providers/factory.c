@@ -209,6 +209,15 @@ static const struct {
     {"litellm", "http://localhost:4000"},
     {"mlx_local", "http://127.0.0.1:8741/v1"},
     {"mlx-local", "http://127.0.0.1:8741/v1"},
+    /* Phase 3a.2 — "mlx-http" alias matches the Gemma throughput
+     * program spec. Same target as mlx-local, but the name documents
+     * intent (HTTP-talks-to-mlx-server, vs the "mlx" key which routes
+     * to CoreML via a separate factory branch). Operators picking
+     * between providers see "mlx" (subprocess one-shot, no streaming),
+     * "mlx-http" (HTTP to mlx-server.py, streaming, warm model), and
+     * "coreml" (native CoreML — different code path entirely). */
+    {"mlx-http", "http://127.0.0.1:8741/v1"},
+    {"mlx_http", "http://127.0.0.1:8741/v1"},
 };
 
 static const size_t hu_compat_providers_count =

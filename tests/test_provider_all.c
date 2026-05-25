@@ -1212,6 +1212,49 @@ static void test_compatible_perplexity_base_url(void) {
     HU_ASSERT_TRUE(strstr(url, "perplexity") != NULL);
 }
 
+/* Phase 3a.2 — mlx-server HTTP aliases. All four names route to the
+ * same local mlx-server.py port. Pinned because the factory's "mlx"
+ * keyword (no dash, no -http) routes to CoreML via a separate factory
+ * branch — operators have to opt into the HTTP path explicitly. */
+
+static void test_compatible_mlx_http_base_url(void) {
+    const char *url = hu_compatible_provider_url("mlx-http");
+    HU_ASSERT_NOT_NULL(url);
+    HU_ASSERT_STR_EQ(url, "http://127.0.0.1:8741/v1");
+}
+
+static void test_compatible_mlx_http_underscore_alias(void) {
+    const char *url = hu_compatible_provider_url("mlx_http");
+    HU_ASSERT_NOT_NULL(url);
+    HU_ASSERT_STR_EQ(url, "http://127.0.0.1:8741/v1");
+}
+
+static void test_compatible_mlx_local_dash_and_underscore_agree(void) {
+    /* All four mlx-server aliases must resolve to the same URL —
+     * regression guard against a typo that points one alias at a
+     * different port. */
+    const char *u_dash = hu_compatible_provider_url("mlx-local");
+    const char *u_us = hu_compatible_provider_url("mlx_local");
+    const char *u_http_dash = hu_compatible_provider_url("mlx-http");
+    const char *u_http_us = hu_compatible_provider_url("mlx_http");
+    HU_ASSERT_NOT_NULL(u_dash);
+    HU_ASSERT_NOT_NULL(u_us);
+    HU_ASSERT_NOT_NULL(u_http_dash);
+    HU_ASSERT_NOT_NULL(u_http_us);
+    HU_ASSERT_STR_EQ(u_dash, u_us);
+    HU_ASSERT_STR_EQ(u_dash, u_http_dash);
+    HU_ASSERT_STR_EQ(u_dash, u_http_us);
+}
+
+static void test_compatible_mlx_keyword_does_NOT_route_to_http(void) {
+    /* The bare "mlx" keyword routes via a different factory branch
+     * (to CoreML when HU_ENABLE_COREML, or to nothing). It MUST NOT
+     * appear in the compat table — otherwise the routing would
+     * conflict with whichever branch the factory checked first. */
+    const char *url = hu_compatible_provider_url("mlx");
+    HU_ASSERT_TRUE(url == NULL);
+}
+
 static void test_compatible_cerebras_base_url(void) {
     const char *url = hu_compatible_provider_url("cerebras");
     HU_ASSERT_NOT_NULL(url);
@@ -3378,6 +3421,10 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_compatible_url_lookup_perplexity);
     HU_RUN_TEST(test_compatible_url_lookup_cerebras);
     HU_RUN_TEST(test_compatible_url_lookup_unknown);
+    HU_RUN_TEST(test_compatible_mlx_http_base_url);
+    HU_RUN_TEST(test_compatible_mlx_http_underscore_alias);
+    HU_RUN_TEST(test_compatible_mlx_local_dash_and_underscore_agree);
+    HU_RUN_TEST(test_compatible_mlx_keyword_does_NOT_route_to_http);
     HU_RUN_TEST(test_factory_creates_compatible_for_groq);
 
     HU_RUN_TEST(test_factory_google_creates_gemini);
