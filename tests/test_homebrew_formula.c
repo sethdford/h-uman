@@ -49,7 +49,7 @@ static void test_formula_has_required_sections(void) {
             has_install = true;
         if (strstr(line, "def post_install"))
             has_post_install = true;
-        if (strstr(line, "def test"))
+        if (strstr(line, "test do"))
             has_test = true;
         if (strstr(line, "def caveats"))
             has_caveats = true;
