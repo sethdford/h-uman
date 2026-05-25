@@ -202,6 +202,19 @@ def main() -> int:
             _ok("/health has ok=True",
                 isinstance(payload, dict) and payload.get("ok") is True,
                 f"got {payload}")
+            # Phase 3b — /health surfaces spec-decode state. Stub mode
+            # (no draft env set) reports draft_model_loaded=false. The
+            # field MUST be present so a bench-harness probe can detect
+            # mlx-server versions that don't yet implement Phase 3b.
+            _ok("/health has draft_model_loaded key",
+                isinstance(payload, dict) and "draft_model_loaded" in payload,
+                f"got {payload}")
+            _ok("/health draft_model_loaded is false in stub mode",
+                payload.get("draft_model_loaded") is False,
+                f"got {payload}")
+            _ok("/health has draft_model key (path or empty)",
+                isinstance(payload, dict) and isinstance(payload.get("draft_model"), str),
+                f"got {payload}")
 
             # 2. /v1/adapters/current returns 200 with the right keys.
             code, payload = _http(server_url, "GET", "/v1/adapters/current")

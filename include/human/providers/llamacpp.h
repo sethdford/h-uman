@@ -63,6 +63,26 @@ typedef struct hu_llamacpp_config {
      * pre-quant behavior; the operator opts in to Q8_0 / Q4_0 either
      * via config or a follow-up env-var bridge in the factory. */
     hu_kv_quant_t kv_quant;
+    /* Phase 3b (Gemma throughput program) — speculative decoding draft
+     * model. When non-NULL, the chat path runs cross-model spec decode:
+     * a small draft model (e.g. Gemma-3-270M) proposes draft_max_tokens
+     * tokens; the target model verifies in parallel; verified prefix is
+     * emitted. Hits ~1.5-2× decode TPS at batch=1 on M-series when the
+     * draft is well-aligned with the target distribution.
+     *
+     * The Phase 6 milestone (A3 from the SOTA roadmap) trains a persona-
+     * aligned draft via the same LoRA pipeline used for personalization;
+     * acceptance rate climbs from ~0% (unaligned) to ≥50% (aligned).
+     *
+     * draft_model_path: borrowed pointer at config time, deep-copied by
+     * hu_llamacpp_provider_create. NULL disables spec decode (the
+     * default — pre-Phase-3b behavior is byte-identical).
+     * draft_min_p: confidence threshold for accepting a draft token.
+     * draft_max_tokens: how many tokens the draft proposes per round
+     * before the target verifies. 0 → upstream default (typically 5). */
+    char *draft_model_path;
+    float draft_min_p;
+    int draft_max_tokens;
 } hu_llamacpp_config_t;
 
 hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_config_t *config,

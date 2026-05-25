@@ -116,6 +116,16 @@ _MLX_TOKENIZER = None  # mlx_lm tokenizer (or None)
 _CURRENT_ADAPTER = ""
 _TENSORS_LOADED = 0
 
+# Phase 3b — cross-model speculative decoding state. When the operator
+# sets HU_MLX_DRAFT_MODEL (or --draft-model), we load a small draft
+# model alongside the target and pass it through to mlx_lm.stream_generate
+# via the `draft_model=` kwarg (mlx_lm >= 0.21). Newer mlx_lm exposes
+# the kwarg; older versions silently ignore extras, so the fallback is
+# graceful — spec decode is off but inference still works.
+_MLX_DRAFT_MODEL = None
+_MLX_DRAFT_TOKENIZER = None
+_MLX_DRAFT_PATH = ""
+
 
 def _try_load_mlx_model(model_id: str) -> bool:
     """Best-effort. Returns True if the model loaded successfully."""
@@ -128,6 +138,34 @@ def _try_load_mlx_model(model_id: str) -> bool:
         return True
     except Exception as exc:  # noqa: BLE001 — mlx_lm raises a variety
         print(f"[mlx-server] load({model_id!r}) failed: {exc}", flush=True)
+        return False
+
+
+def _try_load_draft_model(draft_path: str) -> bool:
+    """Phase 3b — load a draft model for speculative decoding. Returns
+    True on success. Failure is non-fatal: spec decode silently turns
+    off and inference proceeds against the target only. The draft must
+    use the SAME tokenizer family as the target — caller's responsibility
+    (a future doctor check could detect mismatched tokenizers, but the
+    fallback is correct regardless: divergent drafts just lower the
+    acceptance rate, they don't break output)."""
+    global _MLX_DRAFT_MODEL, _MLX_DRAFT_TOKENIZER, _MLX_DRAFT_PATH
+    if not draft_path:
+        return False
+    if not have_mlx_lm():
+        return False
+    try:
+        from mlx_lm import load
+        _MLX_DRAFT_MODEL, _MLX_DRAFT_TOKENIZER = load(draft_path)
+        _MLX_DRAFT_PATH = draft_path
+        print(f"[mlx-server] draft model loaded: {draft_path!r}", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlx-server] draft load({draft_path!r}) failed (spec decode "
+              f"disabled): {exc}", flush=True)
+        _MLX_DRAFT_MODEL = None
+        _MLX_DRAFT_TOKENIZER = None
+        _MLX_DRAFT_PATH = ""
         return False
 
 
@@ -390,6 +428,11 @@ class SwapHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "active_adapter": _CURRENT_ADAPTER,
                 "model_loaded": _MLX_MODEL is not None,
+                # Phase 3b — expose draft-model state so the bench
+                # harness can verify spec decode is actually configured
+                # (vs the operator forgetting to set HU_MLX_DRAFT_MODEL).
+                "draft_model_loaded": _MLX_DRAFT_MODEL is not None,
+                "draft_model": _MLX_DRAFT_PATH,
             })
         if self.path == "/v1/adapters/current":
             return self._send_json(200, {
@@ -522,10 +565,26 @@ class SwapHandler(BaseHTTPRequestHandler):
                     prompt_tokens = 0
 
                 if stream_generate is not None:
-                    for item in stream_generate(
-                        _MLX_MODEL, _MLX_TOKENIZER,
-                        prompt=prompt, max_tokens=max_tokens,
-                    ):
+                    # Phase 3b — pass the draft model when loaded. Older
+                    # mlx_lm ignores unknown kwargs in **kwargs, newer
+                    # ones consume draft_model. We use a try/except
+                    # around the iterator construction itself in case a
+                    # specific version raises on unknown kwargs.
+                    sg_kwargs = {
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                    }
+                    if _MLX_DRAFT_MODEL is not None:
+                        sg_kwargs["draft_model"] = _MLX_DRAFT_MODEL
+                    try:
+                        iterator = stream_generate(
+                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
+                    except TypeError:
+                        # mlx_lm rejected draft_model — retry without it.
+                        sg_kwargs.pop("draft_model", None)
+                        iterator = stream_generate(
+                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
+                    for item in iterator:
                         # mlx_lm yields different shapes across versions:
                         # newer GenerationResponse objects have `.text`;
                         # older paths yield bare strings.
@@ -650,6 +709,11 @@ def main():
     ap.add_argument("--model", default=os.environ.get(
                         "HUMAN_MLX_MODEL", "mlx-community/gemma-4-26b-a4b-it-4bit"),
                     help="Model id to load (only used when mlx_lm is installed)")
+    ap.add_argument("--draft-model", default=os.environ.get("HU_MLX_DRAFT_MODEL", ""),
+                    help="Phase 3b — speculative decoding draft model id or local "
+                         "path. When set AND mlx_lm is installed, loaded alongside "
+                         "the target and passed to stream_generate via draft_model=. "
+                         "Empty disables spec decode (default).")
     ap.add_argument("--prefer-upstream", action="store_true",
                     help="If gemma-realtime is installed AND exposes "
                          "/v1/adapters/swap, delegate to it. Default is to "
@@ -693,6 +757,12 @@ def main():
             sys.modules["__main__"] = mod
             spec.loader.exec_module(mod)
             return 0
+
+    # Phase 3b — attempt draft-model load before booting the server so
+    # the first request can already use spec decode. Failure is non-
+    # fatal; the server runs without spec decode.
+    if args.draft_model:
+        _try_load_draft_model(args.draft_model)
 
     # Default path (and AC-M3-1 (a)): inline swap server.
     _run_inline_server(args.port, args.adapter, args.model)

@@ -51,6 +51,48 @@ static void factory_apply_kv_quant_env(hu_llamacpp_config_t *lc) {
     lc->kv_quant = hu_kv_quant_from_string(env, NULL);
 }
 
+/* Phase 3b — env-var bridge for cross-model speculative decoding.
+ *
+ * Operators wire a draft model alongside the target without a rebuild
+ * via three optional env vars (all silently ignored if unset):
+ *
+ *   HU_LLAMACPP_DRAFT_MODEL=/path/to/gemma-3-270m.gguf
+ *   HU_LLAMACPP_DRAFT_MIN_P=0.05    (default unset → 0; provider uses
+ *                                    upstream default)
+ *   HU_LLAMACPP_DRAFT_MAX_TOKENS=5  (default unset → 0; provider uses
+ *                                    upstream default)
+ *
+ * The draft_model_path is heap-allocated here (strdup); the factory
+ * frees it after hu_llamacpp_provider_create returns, matching the
+ * existing model_path ownership pattern.
+ *
+ * Unparseable numeric values default to 0 (use upstream default)
+ * rather than failing — same friendly-to-typos posture as KV quant. */
+static void factory_apply_spec_decode_env(hu_allocator_t *alloc, hu_llamacpp_config_t *lc) {
+    if (!alloc || !lc)
+        return;
+    const char *path = getenv("HU_LLAMACPP_DRAFT_MODEL");
+    if (path && *path) {
+        char *owned = hu_strdup(alloc, path);
+        if (owned)
+            lc->draft_model_path = owned;
+    }
+    const char *min_p = getenv("HU_LLAMACPP_DRAFT_MIN_P");
+    if (min_p && *min_p) {
+        char *end = NULL;
+        float v = (float)strtod(min_p, &end);
+        if (end && end != min_p && v >= 0.0f && v <= 1.0f)
+            lc->draft_min_p = v;
+    }
+    const char *max_t = getenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    if (max_t && *max_t) {
+        char *end = NULL;
+        long v = strtol(max_t, &end, 10);
+        if (end && end != max_t && v > 0 && v < 64)
+            lc->draft_max_tokens = (int)v;
+    }
+}
+
 static const struct {
     const char *name;
     const char *url;
@@ -263,9 +305,12 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
             lc.model_path = path;
         }
         factory_apply_kv_quant_env(&lc);
+        factory_apply_spec_decode_env(alloc, &lc);
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        if (lc.draft_model_path)
+            alloc->free(alloc->ctx, lc.draft_model_path, strlen(lc.draft_model_path) + 1);
         return r;
     }
 
@@ -334,24 +379,33 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
 #include <stdlib.h>
 static hu_llamacpp_config_t s_last_llamacpp_config;
 static char *s_last_llamacpp_model_path_copy;
+static char *s_last_llamacpp_draft_model_path_copy;
 static bool s_last_llamacpp_config_set = false;
+
+static char *capture_dup(const char *s) {
+    if (!s)
+        return NULL;
+    size_t n = strlen(s);
+    char *copy = (char *)malloc(n + 1);
+    if (copy)
+        memcpy(copy, s, n + 1);
+    return copy;
+}
 
 static void hu_llamacpp_factory_capture_for_test(const hu_llamacpp_config_t *cfg) {
     if (s_last_llamacpp_model_path_copy) {
         free(s_last_llamacpp_model_path_copy);
         s_last_llamacpp_model_path_copy = NULL;
     }
-    s_last_llamacpp_config = *cfg;
-    if (cfg->model_path) {
-        size_t n = strlen(cfg->model_path);
-        s_last_llamacpp_model_path_copy = (char *)malloc(n + 1);
-        if (s_last_llamacpp_model_path_copy) {
-            memcpy(s_last_llamacpp_model_path_copy, cfg->model_path, n + 1);
-            s_last_llamacpp_config.model_path = s_last_llamacpp_model_path_copy;
-        } else {
-            s_last_llamacpp_config.model_path = NULL;
-        }
+    if (s_last_llamacpp_draft_model_path_copy) {
+        free(s_last_llamacpp_draft_model_path_copy);
+        s_last_llamacpp_draft_model_path_copy = NULL;
     }
+    s_last_llamacpp_config = *cfg;
+    s_last_llamacpp_model_path_copy = capture_dup(cfg->model_path);
+    s_last_llamacpp_config.model_path = s_last_llamacpp_model_path_copy;
+    s_last_llamacpp_draft_model_path_copy = capture_dup(cfg->draft_model_path);
+    s_last_llamacpp_config.draft_model_path = s_last_llamacpp_draft_model_path_copy;
     s_last_llamacpp_config_set = true;
 }
 
@@ -363,6 +417,10 @@ void hu_llamacpp_factory_reset_for_test(void) {
     if (s_last_llamacpp_model_path_copy) {
         free(s_last_llamacpp_model_path_copy);
         s_last_llamacpp_model_path_copy = NULL;
+    }
+    if (s_last_llamacpp_draft_model_path_copy) {
+        free(s_last_llamacpp_draft_model_path_copy);
+        s_last_llamacpp_draft_model_path_copy = NULL;
     }
     s_last_llamacpp_config_set = false;
     memset(&s_last_llamacpp_config, 0, sizeof(s_last_llamacpp_config));
@@ -389,12 +447,15 @@ hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc, const hu_provide
         lc.use_gpu = entry->use_gpu;
         lc.n_gpu_layers = entry->n_gpu_layers;
         factory_apply_kv_quant_env(&lc);
+        factory_apply_spec_decode_env(alloc, &lc);
 #ifdef HU_IS_TEST
         hu_llamacpp_factory_capture_for_test(&lc);
 #endif
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        if (lc.draft_model_path)
+            alloc->free(alloc->ctx, lc.draft_model_path, strlen(lc.draft_model_path) + 1);
         return r;
     }
     /* Non-llamacpp: defer to the legacy by-name path. */

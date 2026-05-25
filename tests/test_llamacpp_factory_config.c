@@ -269,6 +269,135 @@ static void test_factory_kv_quant_env_empty_string_treated_as_unset(void) {
     hu_llamacpp_factory_reset_for_test();
 }
 
+/* Phase 3b — HU_LLAMACPP_DRAFT_MODEL env-var bridge.
+ *
+ * Three optional env vars: HU_LLAMACPP_DRAFT_MODEL (path),
+ * HU_LLAMACPP_DRAFT_MIN_P (float), HU_LLAMACPP_DRAFT_MAX_TOKENS (int).
+ * All silently ignored if unset; unparseable numerics fall back to 0
+ * so a typo doesn't break the factory. */
+
+static void test_factory_draft_model_env_unset_leaves_null(void) {
+    hu_llamacpp_factory_reset_for_test();
+    unsetenv("HU_LLAMACPP_DRAFT_MODEL");
+    unsetenv("HU_LLAMACPP_DRAFT_MIN_P");
+    unsetenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/no-draft.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_TRUE(captured->draft_model_path == NULL);
+    HU_ASSERT_EQ((int)(captured->draft_min_p * 1000), 0);
+    HU_ASSERT_EQ(captured->draft_max_tokens, 0);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_draft_model_env_sets_path(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_DRAFT_MODEL", "/tmp/draft-270m.gguf", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/target-31b.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_NOT_NULL(captured->draft_model_path);
+    HU_ASSERT_STR_EQ(captured->draft_model_path, "/tmp/draft-270m.gguf");
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_DRAFT_MODEL");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_draft_min_p_env_sets_threshold(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_DRAFT_MIN_P", "0.05", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/min-p.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    /* 0.05 -> 50 via *1000 (avoids float equality fragility). */
+    HU_ASSERT_EQ((int)(captured->draft_min_p * 1000.0f + 0.5f), 50);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_DRAFT_MIN_P");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_draft_max_tokens_env_sets_value(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_DRAFT_MAX_TOKENS", "7", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/max-tokens.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ(captured->draft_max_tokens, 7);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_draft_env_invalid_numerics_ignored(void) {
+    /* Adversarial: garbage env values must not break the factory.
+     * Min-p out of [0,1] and max-tokens out of (0,64) silently fall
+     * back to 0 (upstream default) — same friendly-to-typos posture
+     * as KV quant. */
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_DRAFT_MIN_P", "not-a-number", 1);
+    setenv("HU_LLAMACPP_DRAFT_MAX_TOKENS", "9999", 1); /* out of range */
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/garbage-env.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)(captured->draft_min_p * 1000), 0);
+    HU_ASSERT_EQ(captured->draft_max_tokens, 0);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_DRAFT_MIN_P");
+    unsetenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    hu_llamacpp_factory_reset_for_test();
+}
+
 void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_forwards_full_llamacpp_config);
     HU_RUN_TEST(test_factory_llamacpp_dotted_alias);
@@ -280,4 +409,9 @@ void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_kv_quant_env_q4_0_sets_quant);
     HU_RUN_TEST(test_factory_kv_quant_env_unrecognized_falls_back_to_fp16);
     HU_RUN_TEST(test_factory_kv_quant_env_empty_string_treated_as_unset);
+    HU_RUN_TEST(test_factory_draft_model_env_unset_leaves_null);
+    HU_RUN_TEST(test_factory_draft_model_env_sets_path);
+    HU_RUN_TEST(test_factory_draft_min_p_env_sets_threshold);
+    HU_RUN_TEST(test_factory_draft_max_tokens_env_sets_value);
+    HU_RUN_TEST(test_factory_draft_env_invalid_numerics_ignored);
 }
