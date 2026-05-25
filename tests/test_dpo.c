@@ -155,8 +155,11 @@ static void dpo_get_best_examples_sqlite_orders_by_margin(void) {
     high.prompt_len = 11;
     memcpy(high.chosen, "good", 4);
     high.chosen_len = 4;
-    memcpy(high.rejected, "bad", 3);
-    high.rejected_len = 3;
+    /* Both sides must be >= 4 bytes — symmetric with the corpus-inversion
+     * filter in hu_dpo_get_best_examples (see dpo.c:696). 3-byte "bad"
+     * was the degenerate case the filter is designed to exclude. */
+    memcpy(high.rejected, "lousy", 5);
+    high.rejected_len = 5;
     high.margin = 0.9;
     HU_ASSERT_EQ(hu_dpo_record_pair(&col, &high), HU_OK);
 
@@ -169,6 +172,7 @@ static void dpo_get_best_examples_sqlite_orders_by_margin(void) {
     HU_ASSERT_TRUE(strstr(frag, "high prompt") != NULL);
     HU_ASSERT_TRUE(strstr(frag, "GOOD") != NULL);
     HU_ASSERT_TRUE(strstr(frag, "BAD") != NULL);
+    HU_ASSERT_TRUE(strstr(frag, "lousy") != NULL);
     HU_ASSERT_TRUE(strstr(frag, "low") == NULL);
 
     alloc.free(alloc.ctx, frag, frag_len + 1);
