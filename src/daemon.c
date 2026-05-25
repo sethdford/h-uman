@@ -3167,6 +3167,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * returns HU_ERR_NOT_SUPPORTED for backends that haven't implemented
      * adapter merging (e.g. cloud providers); we treat that the same as
      * a configured-but-no-op state. */
+    /* Sprint 55 — silent-failure defense. Per
+     * ~/.claude/rules/silent-config-gated-subsystems.md the disabled
+     * path of a config-gated subsystem MUST emit one operator-visible
+     * line naming the key needed to enable it. The documented failure
+     * mode here is operators who set `mlx_local.adapter_path`
+     * (the wrong key) instead of `personalization.lora_adapter_path`
+     * and end up with months of silent no-op LoRA loading. */
+    if (agent && (!config || !config->personalization.enabled ||
+                  !config->personalization.lora_adapter_path)) {
+        static atomic_bool warned_personalization_off = false;
+        const char *why = !config ? "no config object"
+                          : !config->personalization.enabled
+                              ? "personalization.enabled=false"
+                              : "personalization.lora_adapter_path unset";
+        hu_log_info_once(&warned_personalization_off, "human", agent->observer,
+                         "personalization: LoRA adapter NOT loaded (%s). "
+                         "To enable: set personalization.enabled=true AND "
+                         "personalization.lora_adapter_path=\"~/.human/...\" in config.json. "
+                         "Common mistake: mlx_local.adapter_path is NOT the right key.",
+                         why);
+    }
     if (config && config->personalization.enabled && config->personalization.lora_adapter_path &&
         agent && agent->provider.vtable) {
         const char *adapter_path = config->personalization.lora_adapter_path;
