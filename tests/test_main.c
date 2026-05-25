@@ -379,6 +379,8 @@ void run_w14_scheduler_tests(void);
 /* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
 void run_dpo_pair_count_trigger_tests(void);
 void run_training_runner_shared_entry_tests(void);
+/* US-8 / M3 frontier-MLX dispatch via training_loop.py subprocess. */
+void run_m3_frontier_mlx_dispatch_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phase A. Test file uses the
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
@@ -1215,6 +1217,8 @@ int main(int argc, char **argv) {
     /* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
     run_dpo_pair_count_trigger_tests();
     run_training_runner_shared_entry_tests();
+    /* US-8 / M3 frontier-MLX dispatch via training_loop.py subprocess. */
+    run_m3_frontier_mlx_dispatch_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
     run_action_directives_tests();

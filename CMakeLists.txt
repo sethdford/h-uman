@@ -3341,6 +3341,7 @@ set(HU_TEST_SOURCES
     # unconditional list per ~/.claude/rules/test-source-gate-symmetry.md.
     tests/test_dpo_pair_count_trigger.c
     tests/test_training_runner_shared_entry.c
+    tests/test_m3_frontier_mlx_dispatch.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
     tests/test_b11_pressure_history_e2e.c

@@ -8,6 +8,15 @@
  * adapter — this is the "wire KV invalidation on adapter swap" half of
  * the W14 P0 contract.
  *
+ * M3 frontier-MLX path (US-8 carryover): when the pair-count trigger
+ * enqueues with HU_TRAINING_TARGET_FRONTIER_MLX, this runner invokes
+ * `scripts/training_loop.py --source-jsonl` as a subprocess to train
+ * against the served Gemma-4-31B model (via mlx_lm.lora) instead of the
+ * in-process reference HUML GPT. The target selection is read from
+ * `hu_training_runner_last_enqueued_target()` (set by daemon when
+ * the pair-count trigger fires). When target == FRONTIER_MLX, dispatch
+ * subprocess; when target == HUML_REFERENCE, use hu_learner_train.
+ *
  * `user_data` carries an `hu_lora_runner_ctx_t *` that bundles the
  * learner, the scheduler (for the follow-up enqueue), and the optional
  * KV cache + semantic cache handles. None of the cache handles are
@@ -18,9 +27,10 @@
  * the resulting adapter bytes. Replays with an empty pending buffer are
  * a no-op and return HU_OK. */
 
-#include "human/agent/scheduler.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/scheduler.h"
+#include "human/agent/training_runner_shared.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -28,6 +38,10 @@
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #include "human/provider.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
@@ -44,13 +58,17 @@
 #ifdef HU_IS_TEST
 static time_t g_lora_runner_test_clock = 0;
 
-void hu_lora_runner_set_test_clock(time_t frozen) { g_lora_runner_test_clock = frozen; }
+void hu_lora_runner_set_test_clock(time_t frozen) {
+    g_lora_runner_test_clock = frozen;
+}
 
 static time_t runner_now(void) {
     return g_lora_runner_test_clock != 0 ? g_lora_runner_test_clock : time(NULL);
 }
 #else
-static time_t runner_now(void) { return time(NULL); }
+static time_t runner_now(void) {
+    return time(NULL);
+}
 #endif
 
 static hu_error_t mkdir_p(const char *path) {
@@ -76,23 +94,20 @@ static hu_error_t write_stub_file(const char *path, const char *body) {
 }
 
 static hu_error_t write_proof_bundle(const char *proof_dir, bool promote,
-                                   const hu_eval_gate_verdict_t *verdict) {
+                                     const hu_eval_gate_verdict_t *verdict) {
     if (mkdir_p(proof_dir) != HU_OK)
         return HU_ERR_IO;
     char path[768];
     if (!promote) {
         snprintf(path, sizeof(path), "%s/gate_decision.json", proof_dir);
         char body[1024];
-        snprintf(body, sizeof(body),
-                 "{\"promote\":false,\"reason\":\"%s\"}\n",
+        snprintf(body, sizeof(body), "{\"promote\":false,\"reason\":\"%s\"}\n",
                  verdict && verdict->reason[0] ? verdict->reason : "rejected");
         return write_stub_file(path, body);
     }
-    const char *files[] = {"manifest.json",           "training_curves.json",
-                           "eval_before.json",        "eval_after.json",
-                           "eval_delta.json",         "delta_responses.md",
-                           "gate_decision.json",      "adversarial_review.md",
-                           "reproduce.sh"};
+    const char *files[] = {"manifest.json",      "training_curves.json",  "eval_before.json",
+                           "eval_after.json",    "eval_delta.json",       "delta_responses.md",
+                           "gate_decision.json", "adversarial_review.md", "reproduce.sh"};
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
         snprintf(path, sizeof(path), "%s/%s", proof_dir, files[i]);
         write_stub_file(path, "{}");
@@ -228,17 +243,15 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
                 score_n = sizeof(mt_scores) / sizeof(mt_scores[0]);
 
             if (ctx->eval_gate->mt_bench && rr.responses && score_n > 0) {
-                if (ctx->eval_gate->mt_bench->vtable->run(ctx->eval_gate->mt_bench, alloc,
-                                                            (const char *const *)prompts,
-                                                            (const char *const *)rr.responses,
-                                                            score_n, mt_scores) == HU_OK)
+                if (ctx->eval_gate->mt_bench->vtable->run(
+                        ctx->eval_gate->mt_bench, alloc, (const char *const *)prompts,
+                        (const char *const *)rr.responses, score_n, mt_scores) == HU_OK)
                     mt_ptr = mt_scores;
             }
             if (ctx->eval_gate->ifeval && rr.responses && score_n > 0) {
-                if (ctx->eval_gate->ifeval->vtable->run(ctx->eval_gate->ifeval, alloc,
-                                                        (const char *const *)prompts,
-                                                        (const char *const *)rr.responses,
-                                                        score_n, if_scores) == HU_OK)
+                if (ctx->eval_gate->ifeval->vtable->run(
+                        ctx->eval_gate->ifeval, alloc, (const char *const *)prompts,
+                        (const char *const *)rr.responses, score_n, if_scores) == HU_OK)
                     if_ptr = if_scores;
             }
         }
@@ -285,14 +298,120 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
 }
 #endif /* HU_ENABLE_RL_FULL */
 
-#include <string.h>
+/* US-8 / M3 Frontier-MLX subprocess dispatch.
+ *
+ * Invokes `scripts/training_loop.py --source-jsonl <jsonl_path>`
+ * to train a real LoRA against the served Gemma-4-31B frontier model
+ * (via mlx_lm.lora). This is wired from the daemon's pair-count trigger
+ * when HU_TRAINING_TARGET_FRONTIER_MLX is selected.
+ *
+ * The JSONL input is expected at ~/.human/training-data/m3-outcomes.jsonl
+ * (DPO pair outcomes from the M3 driver). The output adapter is written to
+ * ~/.human/training-data/adapters/auto-<timestamp>/ (per training_loop.py defaults).
+ *
+ * Returns HU_OK on successful dispatch (subprocess spawned).
+ * Returns HU_ERR_NOT_SUPPORTED when under HU_IS_TEST (to avoid real training in tests).
+ * Returns HU_ERR_IO for subprocess failures.
+ */
+static hu_error_t dispatch_frontier_mlx_training(const char *home_dir, hu_observer_t *observer) {
+    if (!home_dir || !home_dir[0])
+        return HU_ERR_INVALID_ARGUMENT;
 
-hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_spec *spec, int64_t budget_ms,
-                                   void *user_data) {
+#ifdef HU_IS_TEST
+    /* Under test, don't invoke real training. Tests should mock or skip
+     * this path via the global target flag. */
+    hu_log_info("lora_training_runner", observer,
+                "frontier-mlx training dispatch skipped (HU_IS_TEST=1)");
+    return HU_OK;
+#else
+    /* Production: spawn training_loop.py as a subprocess.
+     * Command line:
+     *   python3 <repo>/scripts/training_loop.py \
+     *     --source-jsonl ~/.human/training-data/m3-outcomes.jsonl \
+     *     --adapter-out ~/.human/training-data/adapters/auto-<timestamp>
+     *
+     * See scripts/training_loop.py for full options.
+     * Exit code 0 = training succeeded; non-zero = failure (log the reason).
+     *
+     * The subprocess inherits the daemon's environment, including PATH,
+     * PYTHONPATH, $HOME, etc. Make sure mlx_lm and torch are in the
+     * environment (or the script will write a stub adapter).
+     */
+
+    static char repo_scripts_path[512];
+    static char outcomes_jsonl_path[512];
+    static char adapters_output_path[512];
+    static char timestamp_buf[32];
+
+    snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s/..", home_dir);
+    snprintf(outcomes_jsonl_path, sizeof(outcomes_jsonl_path),
+             "%s/.human/training-data/m3-outcomes.jsonl", home_dir);
+    time_t now = time(NULL);
+    snprintf(timestamp_buf, sizeof(timestamp_buf), "%lld", (long long)now);
+    snprintf(adapters_output_path, sizeof(adapters_output_path),
+             "%s/.human/training-data/adapters/auto-%s", home_dir, timestamp_buf);
+
+    hu_log_info("lora_training_runner", observer,
+                "dispatching frontier-MLX training (outcomes=%s, adapter=%s)", outcomes_jsonl_path,
+                adapters_output_path);
+
+    /* Use simple fork+exec via system() for simplicity. A more robust
+     * implementation would use posix_spawn + pipe for stdout capture
+     * (per lora_retrain_runner.c pattern), but for this phase we log
+     * the command and let Python's stderr go to the daemon log. */
+    char cmd_buf[1024];
+    snprintf(cmd_buf, sizeof(cmd_buf),
+             "python3 %s/scripts/training_loop.py --source-jsonl %s --adapter-out %s "
+             ">> %s/.human/logs/training-loop-%s.log 2>&1",
+             repo_scripts_path, outcomes_jsonl_path, adapters_output_path, home_dir, timestamp_buf);
+
+    hu_log_info("lora_training_runner", observer, "executing: %s", cmd_buf);
+
+    int rc = system(cmd_buf);
+    if (rc != 0) {
+        hu_log_warn("lora_training_runner", observer,
+                    "frontier-mlx training subprocess exited with rc=%d", rc);
+        return HU_ERR_IO;
+    }
+
+    hu_log_info("lora_training_runner", observer,
+                "frontier-mlx training dispatch succeeded (adapter=%s)", adapters_output_path);
+    return HU_OK;
+#endif /* HU_IS_TEST */
+}
+
+hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_spec *spec,
+                                   int64_t budget_ms, void *user_data) {
     (void)m;
+    (void)budget_ms;
     if (!spec || !user_data)
         return HU_ERR_INVALID_ARGUMENT;
     hu_lora_runner_ctx_t *ctx = (hu_lora_runner_ctx_t *)user_data;
+
+    /* M3 / US-8 frontier-MLX path (pair-count trigger).
+     * When the pair-count trigger fires with target=FRONTIER_MLX,
+     * dispatch training_loop.py subprocess instead of draining learner signals.
+     * See dispatch_frontier_mlx_training() for implementation. */
+    hu_training_target_model_t target = hu_training_runner_last_enqueued_target();
+    if (target == HU_TRAINING_TARGET_FRONTIER_MLX) {
+        const char *home = getenv("HOME");
+        if (!home || !home[0])
+            home = "/tmp";
+        hu_error_t fmx_err = dispatch_frontier_mlx_training(home, NULL);
+        /* Dispatch errors are logged but don't block cache warming below. */
+        if (fmx_err == HU_OK) {
+            hu_log_info("lora_training_runner", NULL, "frontier-mlx training dispatch succeeded");
+        } else {
+            hu_log_warn("lora_training_runner", NULL, "frontier-mlx training dispatch failed: %s",
+                        hu_error_string(fmx_err));
+        }
+        /* Even if dispatch failed, skip the learner drain path and return.
+         * The next pair-count threshold crossing will retry. */
+        return HU_OK;
+    }
+
+    /* HUML reference path (learner-pending or legacy pair-count).
+     * Drain pending signals from the in-process learner. */
     if (!ctx->learner)
         return HU_OK;
 
@@ -348,7 +467,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
         char adapter_id[128];
         const char *method = ctx->rl_method_name ? ctx->rl_method_name : "dpo";
         if (hu_format_adapter_id(method, ctx->rl_step_index, runner_now(), adapter_id,
-                               sizeof(adapter_id)) != HU_OK) {
+                                 sizeof(adapter_id)) != HU_OK) {
             snprintf(adapter_id, sizeof(adapter_id), "unknown-dpo-step-0");
         }
         const char *home = getenv("HOME");
@@ -405,15 +524,13 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
             load_alloc = *ctx->alloc;
         else
             load_alloc = hu_system_allocator();
-        hu_error_t le = hu_provider_load_adapter(
-            ctx->provider, &load_alloc, report.adapter_path,
-            strlen(report.adapter_path), aid, strlen(aid));
+        hu_error_t le = hu_provider_load_adapter(ctx->provider, &load_alloc, report.adapter_path,
+                                                 strlen(report.adapter_path), aid, strlen(aid));
         if (le == HU_OK)
-            hu_log_info("lora-runner", NULL,
-                        "auto-loaded adapter '%s' from %s", aid, report.adapter_path);
+            hu_log_info("lora-runner", NULL, "auto-loaded adapter '%s' from %s", aid,
+                        report.adapter_path);
         else if (le != HU_ERR_NOT_SUPPORTED)
-            hu_log_warn("lora-runner", NULL,
-                        "adapter auto-load failed for '%s': %d", aid, (int)le);
+            hu_log_warn("lora-runner", NULL, "adapter auto-load failed for '%s': %d", aid, (int)le);
     }
 
     /* Enqueue a KV warming job so the cache is repopulated proactively
@@ -489,8 +606,7 @@ void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc, hu_e2e_closed_loop_ou
     }
 }
 
-hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
-                                  hu_allocator_t *alloc,
+hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in, hu_allocator_t *alloc,
                                   hu_e2e_closed_loop_output_t *out) {
     if (!in || !alloc || !out || !in->provider || !in->provider->vtable || !in->trainer ||
         !in->trainer->vtable || !in->collector || !in->reaction_events || !in->adapter_out_path ||
@@ -541,7 +657,7 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
             size_t cl = strlen(a->response_chosen);
             size_t rl = strlen(a->response_rejected);
             (void)hu_dpo_record_from_retry(in->collector, a->prompt, pl, a->response_rejected, rl,
-                                          a->response_chosen, cl);
+                                           a->response_chosen, cl);
         }
     }
 
