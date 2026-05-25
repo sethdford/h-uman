@@ -116,6 +116,14 @@ typedef struct hu_personalization_config {
     char *m3_adapter_probe_path;
     bool m3_adapter_disabled;
     hu_molora_config_t molora;
+    /* When true, the model router prefers the on-device model at ALL
+     * cognitive tiers (not just REFLEXIVE). Combined with a configured
+     * mlx_local on-device provider, this routes EVERY contact's reply
+     * through the local LoRA-adapted model so the personalized voice
+     * is applied on every turn — instead of the cloud-cold tone that
+     * happens when cloud Gemini handles conversational+ tiers without
+     * the adapter. Default false preserves the tier-graduated default. */
+    bool force_local_mlx;
 } hu_personalization_config_t;
 
 /* Spec 2026-05-19 — reaction-loop pair-count auto-training trigger.

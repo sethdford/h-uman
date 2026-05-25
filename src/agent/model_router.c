@@ -44,19 +44,38 @@ static size_t word_count(const char *msg, size_t len) {
 /* Detect emotional weight — messages that need empathy, not speed */
 static int emotional_weight(const char *msg, size_t len) {
     int score = 0;
-    static const char *heavy[] = {
-        "died", "dying", "cancer", "funeral", "divorce", "breakup", "depressed",
-        "suicidal", "hospital", "emergency", "scared", "terrified", "heartbroken",
-        "lost my", "passed away", "miss you", "love you", "worried about",
-        "don't know what to do", "need help", "struggling", "overwhelmed",
-        "can't sleep", "crying", "panic", "anxiety", "therapy"
-    };
+    static const char *heavy[] = {"died",
+                                  "dying",
+                                  "cancer",
+                                  "funeral",
+                                  "divorce",
+                                  "breakup",
+                                  "depressed",
+                                  "suicidal",
+                                  "hospital",
+                                  "emergency",
+                                  "scared",
+                                  "terrified",
+                                  "heartbroken",
+                                  "lost my",
+                                  "passed away",
+                                  "miss you",
+                                  "love you",
+                                  "worried about",
+                                  "don't know what to do",
+                                  "need help",
+                                  "struggling",
+                                  "overwhelmed",
+                                  "can't sleep",
+                                  "crying",
+                                  "panic",
+                                  "anxiety",
+                                  "therapy"};
     static const char *moderate[] = {
-        "frustrated", "stressed", "upset", "annoyed", "confused", "angry",
-        "disappointed", "tired", "exhausted", "sick", "hurt", "lonely",
-        "nervous", "worried", "sorry", "ugh", "hate", "awful", "terrible",
-        "not working", "broken", "failing"
-    };
+        "frustrated",   "stressed",    "upset",     "annoyed", "confused", "angry",
+        "disappointed", "tired",       "exhausted", "sick",    "hurt",     "lonely",
+        "nervous",      "worried",     "sorry",     "ugh",     "hate",     "awful",
+        "terrible",     "not working", "broken",    "failing"};
     for (size_t i = 0; i < sizeof(heavy) / sizeof(heavy[0]); i++)
         if (ci_contains(msg, len, heavy[i]))
             score += 3;
@@ -69,11 +88,10 @@ static int emotional_weight(const char *msg, size_t len) {
 /* Detect advice-seeking or complex reasoning needs */
 static bool needs_reasoning(const char *msg, size_t len) {
     static const char *markers[] = {
-        "should i", "what do you think", "what would you", "how do i",
-        "help me decide", "pros and cons", "advice", "opinion",
-        "compared to", "better option", "worth it", "trade-off",
-        "explain", "why does", "how does", "what if"
-    };
+        "should i",       "what do you think", "what would you", "how do i",
+        "help me decide", "pros and cons",     "advice",         "opinion",
+        "compared to",    "better option",     "worth it",       "trade-off",
+        "explain",        "why does",          "how does",       "what if"};
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++)
         if (ci_contains(msg, len, markers[i]))
             return true;
@@ -133,9 +151,8 @@ bool hu_model_router_on_device_suitable(hu_cognitive_tier_t tier) {
 
 /* Internal heuristic scoring — returns the raw score for use by both
  * hu_model_route and hu_model_route_with_judge. */
-static int compute_heuristic_score(const char *msg, size_t msg_len,
-                                   const char *relationship, size_t relationship_len,
-                                   int hour, size_t history_count) {
+static int compute_heuristic_score(const char *msg, size_t msg_len, const char *relationship,
+                                   size_t relationship_len, int hour, size_t history_count) {
     size_t words = word_count(msg, msg_len);
     int emotion = emotional_weight(msg, msg_len);
     bool question = has_question(msg, msg_len);
@@ -174,6 +191,27 @@ static int compute_heuristic_score(const char *msg, size_t msg_len,
     return score;
 }
 
+/* Override sel->model to the on-device model when the operator has set
+ * force_on_device=true AND on_device_available=true AND the on-device
+ * model identifier is set. Tier + thinking_budget + temperature are
+ * preserved — only the model identifier changes. Used by both
+ * apply_tier_to_selection and apply_tier_override to keep the policy
+ * in one place.
+ *
+ * Rationale: when the operator wants all contacts routed through the
+ * local LoRA-adapted model (so every reply carries the personalized
+ * voice instead of cloud-cold tone), the tier-graduated default
+ * (REFLEXIVE-only on-device) is wrong. This helper applies the
+ * "all tiers prefer on-device" policy when the flag is set. */
+static void maybe_override_to_on_device(hu_model_selection_t *sel,
+                                        const hu_model_router_config_t *cfg) {
+    if (cfg->force_on_device && cfg->on_device_available && cfg->on_device_model &&
+        cfg->on_device_model_len > 0) {
+        sel->model = cfg->on_device_model;
+        sel->model_len = cfg->on_device_model_len;
+    }
+}
+
 static void apply_tier_to_selection(hu_model_selection_t *sel, const hu_model_router_config_t *cfg,
                                     int score) {
     if (score <= 0) {
@@ -206,6 +244,10 @@ static void apply_tier_to_selection(hu_model_selection_t *sel, const hu_model_ro
         sel->thinking_budget = 8192;
         sel->temperature = 0.6;
     }
+    /* "All contacts through on-device" policy: when set, override the
+     * cloud model selection for CONVERSATIONAL/ANALYTICAL/DEEP tiers
+     * too. REFLEXIVE already picks on-device above when available. */
+    maybe_override_to_on_device(sel, cfg);
 }
 
 static void apply_tier_override(hu_model_selection_t *sel, const hu_model_router_config_t *cfg,
@@ -245,12 +287,13 @@ static void apply_tier_override(hu_model_selection_t *sel, const hu_model_router
         sel->temperature = 0.6;
         break;
     }
+    /* "All contacts through on-device" policy override (see helper). */
+    maybe_override_to_on_device(sel, cfg);
 }
 
-hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg,
-                                    const char *msg, size_t msg_len,
-                                    const char *relationship, size_t relationship_len,
-                                    int hour, size_t history_count) {
+hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const char *msg,
+                                    size_t msg_len, const char *relationship,
+                                    size_t relationship_len, int hour, size_t history_count) {
     hu_model_selection_t sel;
     memset(&sel, 0, sizeof(sel));
     sel.source = HU_ROUTE_HEURISTIC;
@@ -262,8 +305,8 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg,
         return sel;
     }
 
-    int score = compute_heuristic_score(msg, msg_len, relationship, relationship_len, hour,
-                                        history_count);
+    int score =
+        compute_heuristic_score(msg, msg_len, relationship, relationship_len, hour, history_count);
     apply_tier_to_selection(&sel, cfg, score);
 
     if (cfg->conversation_floor > sel.tier)
@@ -275,14 +318,12 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg,
     return sel;
 }
 
-hu_model_selection_t hu_model_route_with_judge(const hu_model_router_config_t *cfg,
-                                               const char *msg, size_t msg_len,
-                                               const char *relationship, size_t relationship_len,
-                                               int hour, size_t history_count,
-                                               hu_provider_t *judge_provider,
+hu_model_selection_t hu_model_route_with_judge(const hu_model_router_config_t *cfg, const char *msg,
+                                               size_t msg_len, const char *relationship,
+                                               size_t relationship_len, int hour,
+                                               size_t history_count, hu_provider_t *judge_provider,
                                                const char *judge_model, size_t judge_model_len,
-                                               hu_allocator_t *alloc,
-                                               hu_route_cache_t *cache) {
+                                               hu_allocator_t *alloc, hu_route_cache_t *cache) {
     hu_model_selection_t sel;
     memset(&sel, 0, sizeof(sel));
 
@@ -291,8 +332,8 @@ hu_model_selection_t hu_model_route_with_judge(const hu_model_router_config_t *c
                               history_count);
     }
 
-    int score = compute_heuristic_score(msg, msg_len, relationship, relationship_len, hour,
-                                        history_count);
+    int score =
+        compute_heuristic_score(msg, msg_len, relationship, relationship_len, hour, history_count);
 
     int64_t now = (int64_t)time(NULL);
 
@@ -332,8 +373,8 @@ hu_model_selection_t hu_model_route_with_judge(const hu_model_router_config_t *c
     char *response = NULL;
     size_t response_len = 0;
     hu_error_t err = judge_provider->vtable->chat_with_system(
-        judge_provider->ctx, alloc, system_prompt, strlen(system_prompt),
-        msg, msg_len, judge_model, judge_model_len, 0.0, &response, &response_len);
+        judge_provider->ctx, alloc, system_prompt, strlen(system_prompt), msg, msg_len, judge_model,
+        judge_model_len, 0.0, &response, &response_len);
 
     if (err != HU_OK || !response || response_len == 0) {
         if (response)
@@ -385,8 +426,8 @@ void hu_route_cache_init(hu_route_cache_t *cache) {
     memset(cache, 0, sizeof(*cache));
 }
 
-bool hu_route_cache_get(hu_route_cache_t *cache, const char *msg, size_t msg_len,
-                        int64_t now_secs, hu_cognitive_tier_t *tier) {
+bool hu_route_cache_get(hu_route_cache_t *cache, const char *msg, size_t msg_len, int64_t now_secs,
+                        hu_cognitive_tier_t *tier) {
     if (!cache || !msg || msg_len == 0 || !tier)
         return false;
     uint64_t hash = hu_route_hash_prompt(msg, msg_len);
@@ -405,8 +446,8 @@ bool hu_route_cache_get(hu_route_cache_t *cache, const char *msg, size_t msg_len
     return false;
 }
 
-void hu_route_cache_put(hu_route_cache_t *cache, const char *msg, size_t msg_len,
-                        int64_t now_secs, hu_cognitive_tier_t tier) {
+void hu_route_cache_put(hu_route_cache_t *cache, const char *msg, size_t msg_len, int64_t now_secs,
+                        hu_cognitive_tier_t tier) {
     if (!cache || !msg || msg_len == 0)
         return;
     uint64_t hash = hu_route_hash_prompt(msg, msg_len);
@@ -475,15 +516,15 @@ bool hu_route_parse_judge_response(const char *response, size_t response_len,
 
     /* Scan for "tier" key in JSON (tolerant of whitespace, newlines, single quotes) */
     for (const char *p = response; p < end - 4; p++) {
-        if (p > response && (p[-1] == '"' || p[-1] == '\'') &&
-            (p[0] == 't' || p[0] == 'T') && (p[1] == 'i' || p[1] == 'I') &&
-            (p[2] == 'e' || p[2] == 'E') && (p[3] == 'r' || p[3] == 'R')) {
+        if (p > response && (p[-1] == '"' || p[-1] == '\'') && (p[0] == 't' || p[0] == 'T') &&
+            (p[1] == 'i' || p[1] == 'I') && (p[2] == 'e' || p[2] == 'E') &&
+            (p[3] == 'r' || p[3] == 'R')) {
             const char *after_key = p + 4;
             if (after_key < end && (*after_key == '"' || *after_key == '\''))
                 after_key++;
-            while (after_key < end && (*after_key == ' ' || *after_key == '\t' ||
-                                       *after_key == '\n' || *after_key == '\r' ||
-                                       *after_key == ':'))
+            while (after_key < end &&
+                   (*after_key == ' ' || *after_key == '\t' || *after_key == '\n' ||
+                    *after_key == '\r' || *after_key == ':'))
                 after_key++;
             if (after_key < end && (*after_key == '"' || *after_key == '\'')) {
                 char quote = *after_key;
@@ -500,8 +541,8 @@ bool hu_route_parse_judge_response(const char *response, size_t response_len,
 
     /* Fallback: scan for bare tier names (handles malformed responses) */
     static const char *bare_names[] = {
-        "REFLEXIVE", "CONVERSATIONAL", "ANALYTICAL", "DEEP",
-        "SIMPLE",    "MEDIUM",         "COMPLEX",    "RESEARCH", "REASONING",
+        "REFLEXIVE", "CONVERSATIONAL", "ANALYTICAL", "DEEP",      "SIMPLE",
+        "MEDIUM",    "COMPLEX",        "RESEARCH",   "REASONING",
     };
     for (size_t i = 0; i < sizeof(bare_names) / sizeof(bare_names[0]); i++) {
         size_t nlen = strlen(bare_names[i]);
@@ -534,7 +575,8 @@ static const char JUDGE_SYSTEM_PROMPT[] =
     "ANALYTICAL - Multi-step reasoning or emotional depth. Advice-seeking, pros/cons analysis, "
     "code review, debugging, emotional support, relationship discussions, financial planning.\n"
     "\n"
-    "DEEP - Complex synthesis or crisis. Multi-source research, system design, mathematical proofs, "
+    "DEEP - Complex synthesis or crisis. Multi-source research, system design, mathematical "
+    "proofs, "
     "life decisions, mental health crisis, grief support, legal/medical analysis.\n"
     "\n"
     "## Disambiguation\n"

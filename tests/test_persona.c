@@ -364,7 +364,7 @@ static void test_persona_prompt_overrides_default(void) {
     cfg.persona_prompt_len = strlen(cfg.persona_prompt);
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "TestUser") != NULL);
@@ -723,7 +723,7 @@ static void test_persona_full_round_trip(void) {
     cfg.persona_prompt_len = prompt_len;
     char *sys = NULL;
     size_t sys_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, &sys, &sys_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(strstr(sys, "roundtrip") != NULL);
     HU_ASSERT_TRUE(strstr(sys, "Human") == NULL);
@@ -869,7 +869,7 @@ static void test_agent_persona_prompt_injected(void) {
     };
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(strstr(out, "TestUser"));
     alloc.free(alloc.ctx, out, out_len + 1);
@@ -3715,7 +3715,7 @@ static void test_persona_immersive_in_prompt(void) {
 
     char *sys = NULL;
     size_t sys_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, &sys, &sys_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(sys);
     HU_ASSERT_TRUE(strstr(sys, "You are Seth, not an AI") != NULL);
@@ -3749,7 +3749,7 @@ static void test_persona_immersive_fallback_when_no_reinforcement(void) {
 
     char *sys = NULL;
     size_t sys_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, &sys, &sys_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(sys);
     HU_ASSERT_TRUE(strstr(sys, "real person") != NULL);
@@ -4212,7 +4212,7 @@ static void test_lean_prompt_size_under_5kb(void) {
 
     char *sp = NULL;
     size_t sp_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, &sp, &sp_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, &sp, &sp_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(sp);
     HU_ASSERT_TRUE(sp_len < 5120); /* total system prompt under 5KB */
@@ -4343,7 +4343,7 @@ static void test_lean_prompt_excludes_heavy_contexts(void) {
 
     char *sp = NULL;
     size_t sp_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, &sp, &sp_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, &sp, &sp_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(sp);
 
@@ -4405,12 +4405,12 @@ static void test_lean_prompt_full_pipeline_sp_len(void) {
 
     char *lean_sp = NULL;
     size_t lean_sp_len = 0;
-    err = hu_prompt_build_system(&alloc, &lean_cfg, &lean_sp, &lean_sp_len);
+    err = hu_prompt_build_system(&alloc, &lean_cfg, NULL, &lean_sp, &lean_sp_len);
     HU_ASSERT_EQ(err, HU_OK);
 
     char *full_sp = NULL;
     size_t full_sp_len = 0;
-    err = hu_prompt_build_system(&alloc, &full_cfg, &full_sp, &full_sp_len);
+    err = hu_prompt_build_system(&alloc, &full_cfg, NULL, &full_sp, &full_sp_len);
     HU_ASSERT_EQ(err, HU_OK);
 
     /* Lean system prompt must be dramatically smaller */

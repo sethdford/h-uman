@@ -135,7 +135,7 @@ static void personal_model_reaches_system_prompt_via_config(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "[Personal Context]") != NULL);
@@ -157,7 +157,7 @@ static void personal_model_absent_does_not_leak_into_prompt(void) {
     };
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "[Personal Context]") == NULL);

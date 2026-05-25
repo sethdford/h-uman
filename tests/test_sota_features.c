@@ -142,7 +142,7 @@ static void prompt_includes_constitutional_principles(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "Core Principles") != NULL);
@@ -157,7 +157,7 @@ static void prompt_without_principles_has_no_section(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "Core Principles") == NULL);
@@ -482,7 +482,7 @@ static void prompt_includes_conv_goals_section(void) {
     cfg.conv_goals_context_len = 27;
     char *prompt = NULL;
     size_t prompt_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &prompt, &prompt_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &prompt, &prompt_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(prompt);
     HU_ASSERT_NOT_NULL(strstr(prompt, "Conversation Goals"));

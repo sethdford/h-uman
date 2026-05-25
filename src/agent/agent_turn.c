@@ -3844,7 +3844,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
         };
-        err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        /* NULL stats: prompt_budget instrumentation TODO — wire when the
+         * spec at docs/plans/2026-05-25-director-compression/ ships its
+         * accumulator. For now opt out (zero overhead). */
+        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, &system_prompt, &system_prompt_len);
         /* Prompt-size budget guard. MLX backends return empty responses
          * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:
          * body_len=28291 → "Server returned nothing"). Cap at 16 KB so
@@ -4893,6 +4896,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             /* Inline routing: emotional/vulnerable messages get better models */
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
             mr_cfg.on_device_available = agent->on_device_available;
+            /* "Gemma = Seth" policy: when personalization.force_local_mlx is
+             * set in config, route ALL tiers through the on-device model
+             * (mlx_local) so every reply carries Seth's LoRA-adapted voice
+             * instead of cloud-cold tone on conversational+. The router
+             * keeps the tier/thinking-budget/temperature it picked; only
+             * the model identifier is overridden. */
+            if (agent->config && agent->config->personalization.force_local_mlx) {
+                mr_cfg.force_on_device = true;
+            }
             const char *rel = NULL;
             size_t rel_len = 0;
             if (agent->relationship.stage >= HU_REL_TRUSTED) {

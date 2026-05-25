@@ -205,6 +205,18 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
     cfg->personalization.m3_adapter_disabled =
         hu_json_get_bool(obj, "m3_adapter_disabled", cfg->personalization.m3_adapter_disabled);
 
+    /* "Gemma = Seth" policy: route ALL contacts through the local
+     * MLX-served LoRA-adapted model, not just REFLEXIVE-tier acks.
+     * When true, the model router prefers on_device_model at every
+     * tier (conversational, analytical, deep). Combined with
+     * agent.mr_on_device_model = "mlx_local" (the OpenAI-compatible
+     * HTTP provider pointing at the running mlx-server.py on port
+     * 8741 with v4-repair loaded), this fixes the cold-tone bug
+     * where cloud-Gemini answers warm-contact turns without the
+     * adapter. Default false preserves the cloud-default behavior. */
+    cfg->personalization.force_local_mlx =
+        hu_json_get_bool(obj, "force_local_mlx", cfg->personalization.force_local_mlx);
+
     /* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
      * Schema:
      *   "molora": {

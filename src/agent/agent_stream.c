@@ -1152,7 +1152,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
         };
-        err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        /* NULL stats: agent_stream doesn't currently feed the prompt_budget
+         * accumulator. agent_turn is the canonical instrumented call site;
+         * the streaming path opts out of bookkeeping. */
+        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, &system_prompt, &system_prompt_len);
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
