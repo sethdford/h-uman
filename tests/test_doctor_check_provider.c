@@ -187,6 +187,85 @@ static void test_run_with_cfg_under_test_mode_returns_na(void) {
     HU_ASSERT_TRUE(strstr(result.reason, "HU_IS_TEST") != NULL);
 }
 
+/* ── Sprint 55 Phase 3 — fault-injection e2e mappings ─────────────── */
+
+/* Run the check with injected error and return its result. Common
+ * setup so each Phase 3 test stays focused on its one assertion. */
+static hu_doctor_check_result_t run_with_injected(hu_error_t injected) {
+    int dummy = 1;
+    hu_doctor_check_provider_ctx_t pctx = {.alloc = (hu_allocator_t *)&dummy,
+                                           .cfg = (const struct hu_config *)&dummy};
+    hu_doctor_check_provider_inject_error_for_test(injected);
+    hu_doctor_check_result_t r = hu_doctor_check_provider.run(&hu_doctor_check_provider, &pctx);
+    hu_doctor_check_provider_inject_error_for_test_reset();
+    return r;
+}
+
+static void test_inject_ok_returns_pass_with_empty_reason(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_OK);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_PASS);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_STR_EQ(r.reason, "");
+}
+
+static void test_inject_invalid_argument_returns_fail_not_configured(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "no provider configured") != NULL);
+}
+
+static void test_inject_provider_auth_returns_fail_credentials_invalid(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_PROVIDER_AUTH);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "credentials invalid") != NULL);
+}
+
+static void test_inject_rate_limited_returns_fail_with_backoff_hint(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_PROVIDER_RATE_LIMITED);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "rate-limited") != NULL);
+}
+
+static void test_inject_provider_unavailable_returns_fail_unreachable(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_PROVIDER_UNAVAILABLE);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "unreachable") != NULL);
+}
+
+static void test_inject_config_not_found_returns_fail_credentials_missing(void) {
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_CONFIG_NOT_FOUND);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "credentials missing") != NULL);
+}
+
+static void test_inject_unmapped_error_returns_fail_other(void) {
+    /* HU_ERR_IO isn't in the classifier's mapping table → OTHER bucket. */
+    hu_doctor_check_result_t r = run_with_injected(HU_ERR_IO);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    HU_ASSERT_TRUE(strstr(r.reason, "unmapped error class") != NULL);
+}
+
+static void test_inject_reset_returns_to_na_skipped(void) {
+    /* After reset, the next call should fall back to the standard
+     * HU_IS_TEST NA path. Pins the reset contract — without it tests
+     * would leak injected state to each other. */
+    hu_doctor_check_provider_inject_error_for_test(HU_ERR_PROVIDER_AUTH);
+    hu_doctor_check_provider_inject_error_for_test_reset();
+
+    int dummy = 1;
+    hu_doctor_check_provider_ctx_t pctx = {.alloc = (hu_allocator_t *)&dummy,
+                                           .cfg = (const struct hu_config *)&dummy};
+    hu_doctor_check_result_t r = hu_doctor_check_provider.run(&hu_doctor_check_provider, &pctx);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_NA);
+    HU_ASSERT_TRUE(strstr(r.reason, "HU_IS_TEST") != NULL);
+}
+
 /* ── runner ───────────────────────────────────────────────────────── */
 
 void run_doctor_check_provider_tests(void) {
@@ -216,4 +295,14 @@ void run_doctor_check_provider_tests(void) {
     HU_RUN_TEST(test_run_with_null_ctx_returns_na);
     HU_RUN_TEST(test_run_with_ctx_but_null_cfg_returns_na);
     HU_RUN_TEST(test_run_with_cfg_under_test_mode_returns_na);
+
+    /* Phase 3 — fault injection e2e */
+    HU_RUN_TEST(test_inject_ok_returns_pass_with_empty_reason);
+    HU_RUN_TEST(test_inject_invalid_argument_returns_fail_not_configured);
+    HU_RUN_TEST(test_inject_provider_auth_returns_fail_credentials_invalid);
+    HU_RUN_TEST(test_inject_rate_limited_returns_fail_with_backoff_hint);
+    HU_RUN_TEST(test_inject_provider_unavailable_returns_fail_unreachable);
+    HU_RUN_TEST(test_inject_config_not_found_returns_fail_credentials_missing);
+    HU_RUN_TEST(test_inject_unmapped_error_returns_fail_other);
+    HU_RUN_TEST(test_inject_reset_returns_to_na_skipped);
 }

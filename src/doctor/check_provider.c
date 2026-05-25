@@ -26,6 +26,22 @@
 /* Static reason buffers — borrowed pointers per the check.h contract. */
 static char s_reason_buf[256];
 
+#ifdef HU_IS_TEST
+/* Sprint 55 Phase 3 — fault-injection state. See header for usage. */
+static bool s_inject_err_active = false;
+static hu_error_t s_inject_err_value = HU_OK;
+
+void hu_doctor_check_provider_inject_error_for_test(hu_error_t err) {
+    s_inject_err_active = true;
+    s_inject_err_value = err;
+}
+
+void hu_doctor_check_provider_inject_error_for_test_reset(void) {
+    s_inject_err_active = false;
+    s_inject_err_value = HU_OK;
+}
+#endif
+
 /* ── Pure helpers (testable in isolation) ─────────────────────────── */
 
 hu_doctor_provider_reason_t hu_doctor_check_provider_classify(hu_error_t err) {
@@ -127,11 +143,23 @@ static hu_doctor_check_result_t check_provider_run(hu_doctor_check_t *self, void
     }
 
 #if HU_IS_TEST
-    /* Tests don't exercise real provider creation. The classifier and
-     * reason-message paths are covered by their own pure-function
-     * tests (test_doctor_check_provider.c). Return NA so the doctor
-     * run-all flow can be exercised end-to-end without spinning up
-     * provider state. */
+    /* Sprint 55 Phase 3 — fault injection. If a test has called
+     * hu_doctor_check_provider_inject_error_for_test, flow that error
+     * through the same classify → message → verdict pipeline that the
+     * production path uses. This lets tests pin every fault-mode
+     * mapping end-to-end without spinning up a mock provider. */
+    if (s_inject_err_active) {
+        hu_error_t err = s_inject_err_value;
+        hu_doctor_provider_reason_t reason = hu_doctor_check_provider_classify(err);
+        if (err == HU_OK) {
+            return (hu_doctor_check_result_t){HU_DOCTOR_PASS, "", NULL};
+        }
+        const char *msg = hu_doctor_check_provider_reason_message(reason);
+        return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, msg, NULL};
+    }
+    /* No injection — tests don't exercise real provider creation.
+     * Return NA so the doctor run-all flow can be exercised end-to-
+     * end without spinning up provider state. */
     return (hu_doctor_check_result_t){HU_DOCTOR_NA, "smoke check skipped under HU_IS_TEST", NULL};
 #else
     /* Production path — call the configured provider's factory. We

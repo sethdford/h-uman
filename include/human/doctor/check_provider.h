@@ -89,4 +89,27 @@ const char *hu_doctor_check_provider_reason_str(hu_doctor_provider_reason_t r);
  * use this from the production path; Phase 1 exposes it for tests. */
 const char *hu_doctor_check_provider_reason_message(hu_doctor_provider_reason_t r);
 
+#ifdef HU_IS_TEST
+/* Sprint 55 Phase 3 — test-only fault-injection seam.
+ *
+ * The Phase 2 production path calls hu_provider_create_from_config()
+ * inside the !HU_IS_TEST branch; tests can't reach it without a
+ * mock-provider factory. This seam lets a test force a specific
+ * hu_error_t to flow through the classifier + message renderer +
+ * vtable return path, pinning all 5 fault-mode end-to-end mappings
+ * without spinning up real provider state.
+ *
+ * Usage:
+ *   hu_doctor_check_provider_inject_error_for_test(HU_ERR_PROVIDER_AUTH);
+ *   result = hu_doctor_check_provider.run(...);   // verdict = FAIL,
+ *                                                 // reason = credentials-invalid message
+ *   hu_doctor_check_provider_inject_error_for_test_reset();
+ *
+ * The injection is process-scoped and additive — if injected, the
+ * check uses it instead of returning the "skipped under HU_IS_TEST"
+ * NA. Always call _reset between tests to avoid cross-test bleed. */
+void hu_doctor_check_provider_inject_error_for_test(hu_error_t err);
+void hu_doctor_check_provider_inject_error_for_test_reset(void);
+#endif /* HU_IS_TEST */
+
 #endif /* HU_DOCTOR_CHECK_PROVIDER_H */
