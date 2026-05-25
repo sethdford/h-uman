@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Forward declaration of external check */
+extern hu_doctor_check_t hu_doctor_check_chatdb;
+
 #define HU_DOCTOR_REGISTRY_INITIAL_CAP 16
 
 typedef struct hu_doctor_registry {
@@ -206,6 +209,13 @@ static hu_doctor_check_result_t run_inference_check(hu_doctor_check_t *self, voi
     return (hu_doctor_check_result_t){verdict, "", NULL};
 }
 
+/* Wrapper: chatdb_readable check (external vtable) */
+static hu_doctor_check_result_t run_chatdb_readable_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    /* Delegate directly to the external check vtable */
+    return hu_doctor_check_chatdb.run(self, ctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -218,6 +228,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
         {"security", "Validates security posture", run_security_check, NULL, NULL},
         {"memory_health", "Checks memory backend health", run_memory_health_check, NULL, NULL},
         {"skills", "Verifies skill registry", run_skills_check, NULL, NULL},
+        {"chatdb_readable", "Verifies ~/Library/Messages/chat.db is readable (FDA check)",
+         run_chatdb_readable_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},
