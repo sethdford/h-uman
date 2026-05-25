@@ -95,6 +95,17 @@ void hu_doctor_registry_free(hu_doctor_registry_t *r) {
     r->alloc->free(r->alloc->ctx, r, sizeof(hu_doctor_registry_t));
 }
 
+/* Sprint 55 Phase 2 accessors. */
+size_t hu_doctor_registry_count(const hu_doctor_registry_t *r) {
+    return r ? r->count : 0;
+}
+
+const char *hu_doctor_registry_check_name(const hu_doctor_registry_t *r, size_t index) {
+    if (!r || index >= r->count)
+        return NULL;
+    return r->checks[index].name;
+}
+
 /* ────────────────────────────────────────────────────────────────────
  * Default check registration
  * ──────────────────────────────────────────────────────────────────── */

@@ -51,4 +51,12 @@ void hu_doctor_registry_free(hu_doctor_registry_t *r);
 /* Helper: register all default checks into the registry */
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r);
 
+/* Sprint 55 Phase 2 accessors — needed by cmd_doctor() to zip
+ * run_all results with their owning check's name (for JSON output and
+ * the human-readable summary). The names are borrowed pointers into
+ * the registered check vtable entries; valid until the registry is
+ * freed. Returns NULL on out-of-range or NULL registry. */
+size_t hu_doctor_registry_count(const hu_doctor_registry_t *r);
+const char *hu_doctor_registry_check_name(const hu_doctor_registry_t *r, size_t index);
+
 #endif /* HU_DOCTOR_CHECK_H */

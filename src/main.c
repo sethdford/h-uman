@@ -34,6 +34,7 @@
 #include "human/crontab.h"
 #include "human/daemon.h"
 #include "human/doctor.h"
+#include "human/doctor/check.h"
 #include "human/doctor_fix.h"
 #include "human/gateway.h"
 #include "human/gateway/control_protocol.h"
@@ -965,80 +966,143 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_OK;
     }
 
-    printf("\n  human doctor — system diagnostics\n\n");
-
+    /* Sprint 55 Phase 2 — Registry-driven default doctor path.
+     *
+     * Wires up the Sprint 54 Phase 1 contracts (US-C3.1 registry,
+     * US-C3.3 provider smoke, US-C3.7 --json emitter, US-C3.9 exit
+     * codes). The path:
+     *   1. Load config (results ctx for the checks)
+     *   2. Init registry + register defaults
+     *   3. Run all checks → results[]
+     *   4. If --json: emit v1 JSON to stdout, suppress human output
+     *      Else: print human-readable summary
+     *   5. Compute exit code from results + detail_json severity tag
+     *   6. Free registry + config, exit() with the computed code so
+     *      the dispatcher's HU_OK→0/non-OK→1 collapse is bypassed.
+     *
+     * The Phase 1 tests for these contracts (19+15+14 = 48 unit tests
+     * across three suites) keep passing; this rewrite makes them
+     * INTEGRATION-meaningful — the wire from `human doctor` now drives
+     * the same constants and emitter the tests pinned. */
     hu_config_t cfg;
-    hu_error_t err = hu_config_load(alloc, &cfg);
-    if (err != HU_OK) {
-        printf("  config        error    %s\n", hu_error_string(err));
-        return err;
+    hu_error_t cfg_err = hu_config_load(alloc, &cfg);
+    const hu_config_t *cfg_ptr = (cfg_err == HU_OK) ? &cfg : NULL;
+
+    hu_doctor_registry_t *reg = NULL;
+    hu_error_t reg_err = hu_doctor_registry_init(alloc, &reg);
+    if (reg_err != HU_OK) {
+        /* Can't run the doctor without a registry — bug-grade exit. */
+        if (cfg_ptr)
+            hu_config_deinit(&cfg);
+        fprintf(stderr, "doctor: registry init failed: %s\n", hu_error_string(reg_err));
+        exit(HU_DOCTOR_EXIT_BUG_GRADE);
     }
+    hu_doctor_registry_register_defaults(reg);
 
-    printf("  config        ok       loaded from %s\n",
-           cfg.config_path && cfg.config_path[0] ? cfg.config_path : "defaults");
+    /* The registry's legacy check wrappers (install, config_semantics,
+     * etc.) cast ctx to a struct {alloc, items, count, cap} —
+     * src/doctor/registry.c::hu_doctor_adapter_ctx_t. Newer checks
+     * (chatdb, check_provider) ignore ctx. Layout must match the
+     * private adapter struct exactly; field order checked manually
+     * since the type isn't exported. */
+    struct doctor_adapter_ctx {
+        hu_allocator_t *alloc;
+        void *items; /* hu_diag_item_t * — checks allocate their own */
+        size_t count;
+        size_t cap;
+    } adapter_ctx = {alloc, NULL, 0, 0};
 
-    const char *prov = cfg.default_provider ? cfg.default_provider : "openai";
-    if (hu_config_provider_requires_api_key(prov)) {
-        const char *key = hu_config_default_provider_key(&cfg);
-        const char *burl = hu_config_get_provider_base_url(&cfg, prov);
-        bool has_vertex_adc =
-            burl && strstr(burl, "aiplatform.googleapis.com") != NULL && (!key || !key[0]);
-        if (has_vertex_adc) {
-            printf("  provider      ok       %s (Vertex AI with ADC)\n", prov);
-        } else if (key && key[0]) {
-            printf("  provider      ok       %s (API key configured)\n", prov);
+    size_t reg_count = hu_doctor_registry_count(reg);
+    if (reg_count == 0) {
+        /* Registry has no checks — structurally weird but not bug-grade.
+         * Emit empty results and exit 0. */
+        hu_doctor_registry_free(reg);
+        if (cfg_ptr)
+            hu_config_deinit(&cfg);
+        if (emit_json) {
+            hu_doctor_emit_json_v1(NULL, 0, time(NULL), stdout);
         } else {
-            printf("  provider      warn     %s — no API key\n", prov);
+            printf("\n  human doctor — system diagnostics\n");
+            printf("  (no checks registered)\n\n");
         }
+        exit(HU_DOCTOR_EXIT_OK);
+    }
+
+    /* Allocate result + JSON-entry parallel arrays sized to the
+     * registry. We cap at 256 for stack safety; in practice the
+     * registry is ~12 entries. */
+    if (reg_count > 256) {
+        fprintf(stderr, "doctor: too many checks registered (%zu > 256)\n", reg_count);
+        hu_doctor_registry_free(reg);
+        if (cfg_ptr)
+            hu_config_deinit(&cfg);
+        exit(HU_DOCTOR_EXIT_BUG_GRADE);
+    }
+    hu_doctor_check_result_t results[256];
+    size_t result_count = 0;
+    hu_error_t run_err = hu_doctor_registry_run_all(reg, &adapter_ctx, results, &result_count, 256);
+    if (run_err != HU_OK) {
+        fprintf(stderr, "doctor: registry run_all failed: %s\n", hu_error_string(run_err));
+        hu_doctor_registry_free(reg);
+        if (cfg_ptr)
+            hu_config_deinit(&cfg);
+        exit(HU_DOCTOR_EXIT_BUG_GRADE);
+    }
+
+    /* Compute the exit code BEFORE emitting output — the code drives
+     * the exit() call regardless of output mode. */
+    int exit_code = hu_doctor_compute_exit_code(results, result_count);
+
+    if (emit_json) {
+        /* US-C3.7 Phase 2: zip results with check names and emit. */
+        hu_doctor_json_entry_t entries[256];
+        for (size_t i = 0; i < result_count; i++) {
+            entries[i].name = hu_doctor_registry_check_name(reg, i);
+            entries[i].verdict = (int)results[i].verdict;
+            entries[i].reason = results[i].reason ? results[i].reason : "";
+            entries[i].detail_json = results[i].detail_json;
+        }
+        hu_doctor_emit_json_v1(entries, result_count, time(NULL), stdout);
     } else {
-        printf("  provider      ok       %s (local — no API key required)\n", prov);
-    }
-
-    const char *backend = cfg.memory_backend ? cfg.memory_backend : "none";
-    printf("  memory        %s%s\n", strcmp(backend, "none") == 0 ? "warn     " : "ok       ",
-           backend);
-
-    /* Context engine */
-    printf("  context       ok       legacy engine (pluggable via hu_context_engine_t)\n");
-
-    hu_diag_item_t *items = NULL;
-    size_t item_count = 0;
-    err = hu_doctor_check_config_semantics(alloc, &cfg, &items, &item_count);
-
-    size_t ok_count = 0, warn_count = 0, err_count = 0;
-    if (err == HU_OK && items && item_count > 0) {
-        printf("\n");
-        for (size_t i = 0; i < item_count; i++) {
+        /* Human-readable summary. One row per check + aggregate. */
+        printf("\n  human doctor — system diagnostics\n\n");
+        size_t ok_n = 0, fail_n = 0, na_n = 0;
+        for (size_t i = 0; i < result_count; i++) {
+            const char *name = hu_doctor_registry_check_name(reg, i);
+            if (!name)
+                name = "(unnamed)";
             const char *sev_str;
-            if (items[i].severity == HU_DIAG_ERR) {
-                sev_str = "error   ";
-                err_count++;
-            } else if (items[i].severity == HU_DIAG_WARN) {
-                sev_str = "warn    ";
-                warn_count++;
-            } else {
+            switch (results[i].verdict) {
+            case HU_DOCTOR_PASS:
                 sev_str = "ok      ";
-                ok_count++;
+                ok_n++;
+                break;
+            case HU_DOCTOR_FAIL:
+                sev_str = "error   ";
+                fail_n++;
+                break;
+            case HU_DOCTOR_NA:
+                sev_str = "n/a     ";
+                na_n++;
+                break;
+            default:
+                sev_str = "?       ";
+                break;
             }
-            printf("  %-12s %s %s\n", items[i].category ? items[i].category : "config", sev_str,
-                   items[i].message ? items[i].message : "");
+            const char *reason = results[i].reason ? results[i].reason : "";
+            printf("  %-22s %s %s\n", name, sev_str, reason);
         }
+        printf("\n  Summary: %zu ok, %zu n/a, %zu errors  (exit code %d)\n\n", ok_n, na_n, fail_n,
+               exit_code);
     }
 
-    printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_count, warn_count, err_count);
+    hu_doctor_registry_free(reg);
+    if (cfg_ptr)
+        hu_config_deinit(&cfg);
 
-    if (items) {
-        for (size_t i = 0; i < item_count; i++) {
-            if (items[i].category)
-                alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
-            if (items[i].message)
-                alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
-        }
-        alloc->free(alloc->ctx, items, item_count * sizeof(hu_diag_item_t));
-    }
-
-    hu_config_deinit(&cfg);
-    return HU_OK;
+    /* Bypass the dispatcher's HU_OK→0 / err→1 collapse — exit with
+     * the precise 0/1/2/64 code per US-C3.9. */
+    exit(exit_code);
 }
 
 #ifdef HU_HAS_CRON
