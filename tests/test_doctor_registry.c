@@ -146,6 +146,44 @@ static void test_registry_invalid_arguments(void) {
 }
 
 /* ────────────────────────────────────────────────────────────────────
+ * Growth: register past the initial capacity so the dynamic array's
+ * realloc path actually executes. Confirms ordering is preserved across
+ * growth, that count matches the number registered, and that every check
+ * runs exactly once. Pinned by audit 2026-05-25 finding L2: prior tests
+ * only registered 3 checks, never tripping growth.
+ * ──────────────────────────────────────────────────────────────────── */
+
+static void test_registry_grows_past_initial_capacity(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_doctor_registry_t *r = NULL;
+
+    HU_ASSERT_EQ((int)hu_doctor_registry_init(&alloc, &r), (int)HU_OK);
+
+    /* Register 25 checks with distinct names so we can verify ordering
+     * after realloc. 25 comfortably exceeds typical initial capacity (8/16)
+     * and forces at least one growth, often two. */
+    enum { N = 25 };
+    char names[N][32];
+    hu_doctor_check_t checks[N];
+    for (int i = 0; i < N; i++) {
+        snprintf(names[i], sizeof(names[i]), "grow_%02d", i);
+        checks[i] = (hu_doctor_check_t){names[i], "growth check", run_fake_pass, NULL, NULL};
+        HU_ASSERT_EQ((int)hu_doctor_registry_register(r, &checks[i]), (int)HU_OK);
+    }
+
+    hu_doctor_check_result_t results[N + 5] = {0};
+    size_t count = 0;
+    HU_ASSERT_EQ((int)hu_doctor_registry_run_all(r, NULL, results, &count, N + 5), (int)HU_OK);
+    HU_ASSERT_EQ((int)count, N);
+
+    /* Every check ran exactly once and returned PASS. */
+    for (int i = 0; i < N; i++)
+        HU_ASSERT_EQ((int)results[i].verdict, (int)HU_DOCTOR_PASS);
+
+    hu_doctor_registry_free(r);
+}
+
+/* ────────────────────────────────────────────────────────────────────
  * Test runner
  * ──────────────────────────────────────────────────────────────────── */
 
@@ -155,4 +193,5 @@ void run_doctor_registry_tests(void) {
     HU_RUN_TEST(test_registry_register_and_iter_in_order);
     HU_RUN_TEST(test_registry_run_all_calls_each_check_once);
     HU_RUN_TEST(test_registry_invalid_arguments);
+    HU_RUN_TEST(test_registry_grows_past_initial_capacity);
 }

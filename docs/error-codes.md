@@ -125,10 +125,28 @@ All error codes are defined in `include/human/core/error.h` as `hu_error_t`. Use
 
 | Code                            | Value | When to Use                                                    |
 | ------------------------------- | ----- | -------------------------------------------------------------- |
-| `HU_ERR_FLEET_DEPTH_EXCEEDED`   | 48    | Nested spawn would exceed `agent.fleet_max_spawn_depth`        |
-| `HU_ERR_FLEET_SPAWN_CAP`        | 49    | Lifetime spawn count hit `agent.fleet_max_total_spawns`        |
-| `HU_ERR_FLEET_BUDGET_EXCEEDED`  | 50    | Shared session cost is at/above `agent.fleet_budget_usd`       |
-| `HU_ERR_LIMIT_REACHED`          | 51    | A fixed cap (tags, queue depth, etc.) was exceeded            |
+| `HU_ERR_FLEET_DEPTH_EXCEEDED`   | 49    | Nested spawn would exceed `agent.fleet_max_spawn_depth`        |
+| `HU_ERR_FLEET_SPAWN_CAP`        | 50    | Lifetime spawn count hit `agent.fleet_max_total_spawns`        |
+| `HU_ERR_FLEET_BUDGET_EXCEEDED`  | 51    | Shared session cost is at/above `agent.fleet_budget_usd`       |
+
+`HU_ERR_LIMIT_REACHED` (value 48) sits outside the Fleet group — see "General-purpose limits" below.
+
+## General-purpose limits
+
+| Code                   | Value | When to Use                                            |
+| ---------------------- | ----- | ------------------------------------------------------ |
+| `HU_ERR_LIMIT_REACHED` | 48    | A fixed cap (tags, queue depth, etc.) was exceeded     |
+
+## Persona (encryption-at-rest, US-8.2)
+
+These errors surface from the persona load/save and migration paths in `src/persona/persona_crypt.c` and `src/persona/persona_io.c`. Operators see them when the on-disk persona file is in an unexpected state during migration to encrypted-at-rest format.
+
+| Code                   | Value | When to Use                                                                          |
+| ---------------------- | ----- | ------------------------------------------------------------------------------------ |
+| `HU_ERR_LEGACY_REFUSED` | 52    | The refuse-path loader saw an encrypted file after the migration cutoff             |
+| `HU_ERR_INVALID_FORMAT` | 53    | On-disk bytes do not match any recognized persona format (magic header mismatch)    |
+| `HU_ERR_IO_BUSY`        | 54    | Atomic write target slot already exists — likely a concurrent migration in flight   |
+| `HU_ERR_DECRYPT_FAILED` | 55    | libsodium MAC verification failed (wrong key, tampered ciphertext, or truncated)    |
 
 ## Usage Guidelines
 
