@@ -429,6 +429,17 @@ static hu_error_t parse_initiative(hu_allocator_t *a, hu_config_t *cfg,
                     strlen(cfg->initiative.propose_model) + 1);
         cfg->initiative.propose_model = hu_strdup(a, model);
     }
+
+    /* T4 delivery wire (2026-05-25). target_handle = where to send a
+     * FIRED proposal; dry_run = log-but-don't-send safety gate. */
+    const char *target = hu_json_get_string(obj, "target_handle");
+    if (target && target[0]) {
+        if (cfg->initiative.target_handle)
+            a->free(a->ctx, cfg->initiative.target_handle,
+                    strlen(cfg->initiative.target_handle) + 1);
+        cfg->initiative.target_handle = hu_strdup(a, target);
+    }
+    cfg->initiative.dry_run = hu_json_get_bool(obj, "dry_run", cfg->initiative.dry_run);
     return HU_OK;
 }
 

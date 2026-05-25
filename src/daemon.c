@@ -13786,12 +13786,80 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 &config->initiative, ar_cfg_init, /*tz_offset_seconds=*/0, &gov_budget, agent,
                 agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
                 &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
-            /* T4 delivery wire (next slice): when init_result == FIRED,
-             * route init_decision.draft through the iMessage channel via
-             * the existing daemon_proactive path. For now, decisions are
-             * logged inside the tick function and dropped — safe by
-             * design (no message is sent without the kill switch on AND
-             * a future T4 patch enabling delivery). */
+            /* T4 delivery wire (2026-05-25). When the proposer FIREs,
+             * route init_decision.draft through the iMessage channel.
+             *
+             * Triple-locked safety gate (all three required for LIVE):
+             *   1. config->initiative.enabled true (already gated by
+             *      the tick fn; FIRED can't happen if disabled).
+             *   2. config->initiative.target_handle non-empty.
+             *      NULL/"" → drop with one-shot WARN naming the gap.
+             *   3. config->initiative.dry_run false. Default false from
+             *      zero-init — but the three-of-three gate means a user
+             *      who forgets target_handle still hits DRY-RUN, so
+             *      they can't accidentally fire live.
+             *
+             * Per ~/.claude/rules/silent-config-gated-subsystems.md
+             * dropped FIREDs emit a discoverable WARN. */
+            if (init_result == HU_INIT_RESULT_FIRED && init_decision.draft_len > 0) {
+                const char *target = config->initiative.target_handle;
+                bool have_target = (target && target[0]);
+                bool live_send = have_target && !config->initiative.dry_run;
+
+                if (!have_target) {
+                    static atomic_bool warned_no_target = false;
+                    hu_log_warn_once(
+                        &warned_no_target, "init_proposer", agent ? agent->observer : NULL,
+                        "init_proposer: FIRED decision DROPPED — "
+                        "initiative.target_handle unset in config.json. "
+                        "Set initiative.target_handle=\"+1xxxxxxxxxx\" + dry_run=false to "
+                        "enable LIVE delivery.");
+                    hu_log_info("init_proposer", agent ? agent->observer : NULL,
+                                "init_proposer: would-have-sent (no target): %.*s",
+                                (int)init_decision.draft_len, init_decision.draft);
+                } else if (!live_send) {
+                    /* dry_run path — log the would-have-been-sent message
+                     * at INFO so the operator can grep + tune before
+                     * flipping dry_run=false. */
+                    hu_log_info("init_proposer", agent ? agent->observer : NULL,
+                                "init_proposer: DRY-RUN would send to %s (confidence=%.2f): %.*s",
+                                target, init_decision.confidence, (int)init_decision.draft_len,
+                                init_decision.draft);
+                } else {
+                    /* LIVE — find the iMessage channel and send. */
+                    hu_error_t send_err = HU_ERR_NOT_FOUND;
+                    for (size_t i = 0; i < channel_count; i++) {
+                        hu_service_channel_t *ch = &channels[i];
+                        if (!ch->channel || !ch->channel->vtable || !ch->channel->vtable->name ||
+                            !ch->channel->vtable->send)
+                            continue;
+                        const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+                        if (ch_name && strcmp(ch_name, "imessage") == 0) {
+                            send_err = ch->channel->vtable->send(
+                                ch->channel->ctx, target, strlen(target), init_decision.draft,
+                                init_decision.draft_len, NULL, 0);
+                            break;
+                        }
+                    }
+                    if (send_err == HU_OK) {
+                        hu_log_info("init_proposer", agent ? agent->observer : NULL,
+                                    "init_proposer: LIVE sent to %s "
+                                    "(confidence=%.2f, %zu bytes): %.*s",
+                                    target, init_decision.confidence, init_decision.draft_len,
+                                    (int)init_decision.draft_len, init_decision.draft);
+                    } else if (send_err == HU_ERR_NOT_FOUND) {
+                        hu_log_warn("init_proposer", agent ? agent->observer : NULL,
+                                    "init_proposer: iMessage channel not registered — "
+                                    "FIRED dropped (would have sent to %s)",
+                                    target);
+                    } else {
+                        hu_log_warn("init_proposer", agent ? agent->observer : NULL,
+                                    "init_proposer: iMessage send failed for %s (err=%d) — "
+                                    "draft dropped",
+                                    target, (int)send_err);
+                    }
+                }
+            }
             (void)init_decision;
         }
 #endif

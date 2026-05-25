@@ -266,6 +266,16 @@ typedef struct hu_initiative_config {
     double confidence_threshold; /* default 0.85 (DECISION-2) */
     char *propose_model;         /* default "gemini-3.5-flash" (DECISION-3) */
     int per_contact_min_seconds; /* default 600 = 10 min; recency floor */
+
+    /* Sprint 55 T4 delivery wire — added to land FIRED → iMessage send.
+     * Per the spec's T5 the safe default is dry-run mode; flip after a week
+     * of observation. */
+    char *target_handle; /* iMessage handle to deliver to (e.g. "+14845661687").
+                            NULL = no delivery — FIRED decisions logged + dropped
+                            with a WARN so operator sees the gap. */
+    bool dry_run;        /* default true — log would-have-been-sent messages
+                            instead of delivering. Flip false ONLY after dry-run
+                            observation proves thresholds are tuned correctly. */
 } hu_initiative_config_t;
 
 /* Prompt-Budget Compression — see docs/plans/2026-05-25-director-compression/.
