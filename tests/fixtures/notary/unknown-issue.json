@@ -1,0 +1,13 @@
+{
+  "issues": [
+    {
+      "severity": "error",
+      "architecture": "arm64",
+      "message": "The binary contains an unknown issue that is not recognized by this version of the diagnostic tool",
+      "docUrl": "https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution",
+      "path": "Payload/Applications/Human.app/Contents/MacOS/human"
+    }
+  ],
+  "id": "test-unknown",
+  "statusCode": 4000
+}

@@ -1,0 +1,9 @@
+PLACEHOLDER: Successful installation screenshot
+
+Captured in US-C5. Documents:
+- Terminal output of: /Applications/Human.app/Contents/MacOS/human --version
+- Shows version, architecture, build date (e.g., human 0.1.0 macos-arm64 2026-05-24)
+- Terminal output of: human doctor (once available in Sprint C3)
+- Shows daemon running, permissions granted, config valid
+
+Status: Deferred to Sprint C5 (screenshot capture phase)

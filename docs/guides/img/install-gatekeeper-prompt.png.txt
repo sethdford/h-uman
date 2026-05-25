@@ -1,0 +1,9 @@
+PLACEHOLDER: Gatekeeper prompt screenshot
+
+Captured in US-C5. Documents:
+- macOS Gatekeeper security warning dialog
+- "human cannot be opened because it is from an unidentified developer"
+- Path: System Settings > General > Security & Privacy > Human > Open button
+- Labels showing how to approve the notarized installer
+
+Status: Deferred to Sprint C5 (screenshot capture phase)

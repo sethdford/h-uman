@@ -235,11 +235,8 @@ void run_m3_ab_fidelity_gate_tests(void) {
     HU_RUN_TEST(gate_fail_when_empty_jsonl);
 }
 
-#else /* !HU_ENABLE_ML */
+#else /* !HU_ENABLE_ML — stub runner so the symbol resolves */
 
-/* Stub runner so the symbol resolves at link time in no-ML variants
- * (test-source-gate-symmetry.md rule). */
-void run_m3_ab_fidelity_gate_tests(void);
 void run_m3_ab_fidelity_gate_tests(void) {
     (void)0;
 }

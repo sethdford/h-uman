@@ -48,6 +48,10 @@ void run_normalize_tests(void);
 void run_sensitivity_tests(void);
 void run_vault_tests(void);
 void run_vault_aead_tests(void);
+void run_app_bundle_structure_tests(void);
+void run_pkg_builder_tests(void);
+void run_install_docs_tests(void);
+void run_sign_notarize_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
 void run_ensemble_tests(void);
@@ -254,6 +258,7 @@ void run_otel_trace_tests(void);
 void run_mcp_audit_tests(void);
 void run_voice_tests(void);
 void run_cli_tests(void);
+void run_diagnose_notary_tests(void);
 void run_update_tests(void);
 void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
@@ -334,6 +339,7 @@ void run_response_guard_retry_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
+void run_agent_turn_state_tests(void);     /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void); /* M4 follow-up: transport-error fast-fail */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
@@ -687,6 +693,7 @@ void run_plugin_hooks_tests(void);
 void run_approval_gate_tests(void);
 void run_workflow_commands_tests(void);
 void run_repair_tests(void);
+void run_release_workflow_tests(void);
 void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
@@ -700,6 +707,7 @@ void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
 void run_canvas_persist_tests(void);
 void run_canvas_render_tests(void);
+void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
 void run_mlx_provider_tests(void);
@@ -879,6 +887,10 @@ int main(int argc, char **argv) {
     run_sensitivity_tests();
     run_vault_tests();
     run_vault_aead_tests();
+    run_app_bundle_structure_tests();
+    run_pkg_builder_tests();
+    run_install_docs_tests();
+    run_sign_notarize_tests();
     run_provider_tests();
     run_provider_http_tests();
     run_ensemble_tests();
@@ -941,6 +953,7 @@ int main(int argc, char **argv) {
     run_gateway_http_tests();
     run_memory_full_tests();
     run_tools_all_tests();
+    run_diagnose_notary_tests();
     run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();
@@ -1137,6 +1150,8 @@ int main(int argc, char **argv) {
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
     run_agent_tests();
+    /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
+    run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
     run_w6_e2e_adversarial_tests();
@@ -1479,6 +1494,7 @@ int main(int argc, char **argv) {
     run_approval_gate_tests();
     run_workflow_commands_tests();
     run_repair_tests();
+    run_release_workflow_tests();
     run_daemon_cron_tests();
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
@@ -1555,6 +1571,7 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+    run_homebrew_formula_tests();
 #ifdef HU_ENABLE_RL_FULL
     /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when
      * the RL-full gate is ON, so default release/dev builds are byte-

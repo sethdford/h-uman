@@ -203,11 +203,23 @@ void hu_agent_internal_emit_behavior_record(hu_agent_t *agent) {
 
     rec.response_length_chars = agent->behavior_log_pending.response_length_chars;
     rec.response_length_tokens_est = agent->behavior_log_pending.response_length_tokens_est;
-    rec.tool_sequence_hash = agent->behavior_log_pending.tool_sequence_hash;
-    rec.tool_count = agent->behavior_log_pending.tool_count;
-    rec.emotional_register = agent->behavior_log_pending.emotional_register;
-    rec.persona_delta_kind = agent->behavior_log_pending.persona_delta_kind;
     rec.response_latency_ms = agent->behavior_log_pending.response_latency_ms;
+    /* Override-pattern: explicit stash wins; for fields the stash left
+     * zero, fall back to per-turn state populated by track_tool /
+     * set_emotional_register / set_persona_delta (Spec 2026-05-19
+     * AC-SM-1 follow-up). This is how the 4 fields that the stash
+     * call sites can't easily compute get into the behavior log. */
+    rec.tool_sequence_hash = agent->behavior_log_pending.tool_sequence_hash
+                                 ? agent->behavior_log_pending.tool_sequence_hash
+                                 : agent->current_turn_state.tool_sequence_hash;
+    rec.tool_count = agent->behavior_log_pending.tool_count ? agent->behavior_log_pending.tool_count
+                                                            : agent->current_turn_state.tool_count;
+    rec.emotional_register = agent->behavior_log_pending.emotional_register
+                                 ? agent->behavior_log_pending.emotional_register
+                                 : agent->current_turn_state.emotional_register;
+    rec.persona_delta_kind = agent->behavior_log_pending.persona_delta_kind
+                                 ? agent->behavior_log_pending.persona_delta_kind
+                                 : agent->current_turn_state.persona_delta_kind;
 
     if (agent->memory_session_id && agent->memory_session_id_len > 0) {
         rec.contact_hash =
@@ -245,6 +257,50 @@ void hu_agent_m3_stash_behavior_metrics(hu_agent_t *agent, const hu_agent_behavi
     agent->behavior_log_pending.persona_delta_kind = stash->persona_delta_kind;
     agent->behavior_log_pending.response_latency_ms = stash->response_latency_ms;
     agent->behavior_log_pending.has_data = true;
+}
+
+/* Per-turn state helpers — Spec 2026-05-19 AC-SM-1 follow-up.
+ * See agent.h for the contract. Implementations are deliberately tiny
+ * and NULL-safe so call sites don't need to wrap with `if (agent)`. */
+
+void hu_agent_turn_state_reset(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    memset(&agent->current_turn_state, 0, sizeof(agent->current_turn_state));
+}
+
+void hu_agent_turn_state_track_tool(hu_agent_t *agent, const char *tool_name,
+                                    size_t tool_name_len) {
+    if (!agent || !tool_name || tool_name_len == 0)
+        return;
+    agent->current_turn_state.tool_count++;
+    /* Running FNV-1a fold: 'name1|name2|name3'. The pipe is a single
+     * byte mixed in between names so reordered sequences produce
+     * different hashes (per AC-SM-1 design — "ordered tool names"). */
+    uint32_t h = agent->current_turn_state.tool_sequence_hash;
+    if (h == 0) {
+        h = 2166136261u; /* FNV-1a 32-bit basis */
+    } else {
+        h ^= (uint32_t)'|';
+        h *= 16777619u;
+    }
+    for (size_t i = 0; i < tool_name_len; i++) {
+        h ^= (uint8_t)tool_name[i];
+        h *= 16777619u;
+    }
+    agent->current_turn_state.tool_sequence_hash = h;
+}
+
+void hu_agent_turn_state_set_emotional_register(hu_agent_t *agent, uint8_t reg) {
+    if (!agent)
+        return;
+    agent->current_turn_state.emotional_register = reg;
+}
+
+void hu_agent_turn_state_set_persona_delta(hu_agent_t *agent, uint8_t kind) {
+    if (!agent)
+        return;
+    agent->current_turn_state.persona_delta_kind = kind;
 }
 
 static _Thread_local hu_agent_t *hu__current_agent_for_tools;
@@ -2215,6 +2271,7 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
      * pre-hook denied — that's the security gate the helper exists for. */
     if (proceed) {
         if (tool->vtable && tool->vtable->execute) {
+            hu_agent_turn_state_track_tool(agent, tool_name, tool_name_len);
             tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
         } else {
             *out = hu_tool_result_fail("tool has no execute method", 26);

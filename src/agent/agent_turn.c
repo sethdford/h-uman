@@ -24,6 +24,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
+#include "human/persona/persona_deltas.h"
 #include "human/persona/somatic.h"
 #include "human/persona/style_critique.h"
 #include "human/persona/style_mirror.h"
@@ -697,8 +698,11 @@ static void *dag_parallel_worker(void *arg) {
         if (jerr != HU_OK)
             hu_log_error("agent_turn", NULL, "DAG tool args parse failed");
     }
-    if (dag_args && dag_tool->vtable->execute)
+    if (dag_args && dag_tool->vtable->execute) {
+        if (node->tool_name)
+            hu_agent_turn_state_track_tool(w->agent, node->tool_name, strlen(node->tool_name));
         dag_tool->vtable->execute(dag_tool->ctx, w->agent->alloc, dag_args, &dag_result);
+    }
     if (dag_args)
         hu_json_free(w->agent->alloc, dag_args);
     if (resolved_args)
@@ -796,6 +800,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
 
     hu_agent_set_current_for_tools(agent);
+
+    /* Reset per-turn state tracking so this turn's behavior-log stash sees a
+     * clean slate (tool_count, tool_sequence_hash, emotional_register,
+     * persona_delta_kind). Populated as the turn progresses; consumed by
+     * hu_agent_internal_emit_behavior_record at stash time. */
+    hu_agent_turn_state_reset(agent);
 
     /* Free any previously-built humanness context, then build fresh for this turn */
     hu_agent_free_turn_context(agent);
@@ -3628,6 +3638,59 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                      tom_c, tom_c_len, &agent->personal_model, pctx_p);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
+
+            /* Per-turn state #26: classify the merged emotional register
+             * for the behavior-log stash. The bridge cached the WM, so
+             * this load is a hash hit on the cached snapshot — no extra
+             * SQL fetch on the hot path. Map the dominant-emotion string
+             * to the compact enum the log expects. */
+            hu_memory_facade_t *_wm_mf = hu_w7_facade_memory_handle(agent->w7_facade);
+            if (_wm_mf) {
+                hu_world_model_t *_wm_snap = NULL;
+                const char *_wm_ch = (agent->active_channel && agent->active_channel_len > 0 &&
+                                      agent->active_channel_len < 32)
+                                         ? agent->active_channel
+                                         : NULL;
+                size_t _wm_ch_len = _wm_ch ? agent->active_channel_len : 0;
+                if (hu_world_model_load_with_channel(_wm_mf, agent->alloc, agent->memory_session_id,
+                                                     agent->memory_session_id_len, _wm_ch,
+                                                     _wm_ch_len, 0, &_wm_snap) == HU_OK &&
+                    _wm_snap) {
+                    const char *_er = _wm_snap->self_model.recent_emotional_register;
+                    uint8_t _reg = (uint8_t)HU_AGENT_EMOTION_NEUTRAL;
+                    if (_er && _er[0]) {
+                        if (strcmp(_er, "joy") == 0 || strcmp(_er, "calm") == 0 ||
+                            strcmp(_er, "playful") == 0)
+                            _reg = (uint8_t)HU_AGENT_EMOTION_POSITIVE;
+                        else if (strcmp(_er, "distressed") == 0)
+                            _reg = (uint8_t)HU_AGENT_EMOTION_NEGATIVE;
+                        else if (strcmp(_er, "concerned") == 0)
+                            _reg = (uint8_t)HU_AGENT_EMOTION_CAUTIOUS;
+                        else if (strcmp(_er, "neutral") == 0)
+                            _reg = (uint8_t)HU_AGENT_EMOTION_NEUTRAL;
+                        else
+                            _reg = (uint8_t)HU_AGENT_EMOTION_OTHER;
+                    }
+                    hu_agent_turn_state_set_emotional_register(agent, _reg);
+                }
+
+                /* Per-turn state #26: capture the most-recently-applied
+                 * persona-delta kind that's shaping this turn's prompt.
+                 * The bridge already merged applied deltas into the wm;
+                 * we re-query with limit=1 here to grab JUST the kind for
+                 * the behavior-log stash. Indexed lookup, cheap. */
+                hu_persona_delta_t *_pd = NULL;
+                size_t _pd_n = 0;
+                if (hu_persona_delta_list_facade(_wm_mf, agent->alloc, agent->memory_session_id,
+                                                 agent->memory_session_id_len,
+                                                 HU_DELTA_STATUS_APPLIED, 1, &_pd,
+                                                 &_pd_n) == HU_OK &&
+                    _pd && _pd_n > 0) {
+                    hu_agent_turn_state_set_persona_delta(agent, (uint8_t)_pd[0].kind);
+                }
+                if (_pd)
+                    hu_persona_delta_free(agent->alloc, _pd, _pd_n);
+            }
         }
 
         /* Contact style overlay + emotional context from memory */
@@ -7914,6 +7977,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                     "[agent_turn] DAG tool args parse failed\n");
                                         }
                                         if (dag_args && dag_tool->vtable->execute) {
+                                            if (node->tool_name)
+                                                hu_agent_turn_state_track_tool(
+                                                    agent, node->tool_name,
+                                                    strlen(node->tool_name));
                                             dag_tool->vtable->execute(dag_tool->ctx, agent->alloc,
                                                                       dag_args, &dag_result);
                                         }
@@ -8140,6 +8207,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                     stderr,
                                                     "[agent_turn] tool args JSON parse failed\n");
                                             if (orch_args && orch_tool->vtable->execute) {
+                                                if (task->description_len > 0)
+                                                    hu_agent_turn_state_track_tool(
+                                                        agent, task->description,
+                                                        task->description_len);
                                                 orch_tool->vtable->execute(orch_tool->ctx,
                                                                            agent->alloc, orch_args,
                                                                            &orch_result);
@@ -8756,9 +8827,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         }
                                         *result = hu_tool_result_fail("invalid arguments", 16);
                                         if (retry_args) {
-                                            if (tool->vtable->execute)
+                                            if (tool->vtable->execute) {
+                                                if (call->name && call->name_len > 0)
+                                                    hu_agent_turn_state_track_tool(
+                                                        agent, call->name, call->name_len);
                                                 tool->vtable->execute(tool->ctx, agent->alloc,
                                                                       retry_args, result);
+                                            }
                                             hu_json_free(agent->alloc, retry_args);
                                         }
                                     }
@@ -9106,6 +9181,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     hu_error_t pe = hu_json_parse(agent->alloc, call->arguments,
                                                                   call->arguments_len, &args);
                                     if (pe == HU_OK && args) {
+                                        if (call->name && call->name_len > 0)
+                                            hu_agent_turn_state_track_tool(agent, call->name,
+                                                                           call->name_len);
                                         tool->vtable->execute(tool->ctx, agent->alloc, args,
                                                               &result);
                                         hu_json_free(agent->alloc, args);
@@ -9212,6 +9290,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     }
                                     result = hu_tool_result_fail("invalid arguments", 16);
                                     if (retry_args) {
+                                        if (call->name && call->name_len > 0)
+                                            hu_agent_turn_state_track_tool(agent, call->name,
+                                                                           call->name_len);
                                         tool->vtable->execute(tool->ctx, agent->alloc, retry_args,
                                                               &result);
                                         hu_json_free(agent->alloc, retry_args);

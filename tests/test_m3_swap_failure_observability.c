@@ -195,7 +195,6 @@ void run_m3_swap_failure_observability_tests(void) {
 
 #else /* !HU_ENABLE_ML — stub runner so the symbol resolves */
 
-void run_m3_swap_failure_observability_tests(void);
 void run_m3_swap_failure_observability_tests(void) {
     (void)0;
 }

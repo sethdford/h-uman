@@ -13,12 +13,32 @@
 #include "human/provider.h"
 #include "human/providers/factory.h"
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Agent-state serialization (2026-05-25 hotfix for ASan heap-use-after-free
+ * triggered when two HTTP worker threads called hu_agent_clear_history /
+ * hu_agent_internal_append_history / hu_agent_turn concurrently on the SAME
+ * shared app_ctx->agent — see stack in ~/.human/logs/daemon-merged.log).
+ *
+ * The agent's history array is heap-allocated and freed wholesale by
+ * clear_history; readers (gvr_check, prompt builder, output validators)
+ * keep raw pointers into those entries across the request. A concurrent
+ * clear_history from another worker frees the memory mid-read.
+ *
+ * Provider-level lock (PR #18 / g_compatible_chat_lock in compatible.c)
+ * sits BELOW this race — both threads have already entered the agent
+ * critical section by the time they call the provider.
+ *
+ * Coarse global lock is acceptable because the agent is fundamentally a
+ * single-tenant per-process object today. Multi-agent multi-tenant work
+ * is tracked separately. */
+static pthread_mutex_t g_openai_compat_agent_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Resolve provider name and model from OpenAI model string.
  * "anthropic/claude-sonnet" -> provider=anthropic, model=claude-sonnet
@@ -188,11 +208,11 @@ static void openai_compat_agent_stream_cb(const hu_agent_stream_event_t *event, 
 }
 #endif /* !HU_IS_TEST */
 
-void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
-                                              hu_allocator_t *alloc,
-                                              const hu_app_context_t *app_ctx, int *out_status,
-                                              char **out_body, size_t *out_body_len,
-                                              const char **out_content_type) {
+/* Inner handler — must be called with g_openai_compat_agent_lock held.
+ * Trampoline wrapper below acquires/releases the lock. */
+static void hu_openai_compat_handle_chat_completions_inner(
+    const char *body, size_t body_len, hu_allocator_t *alloc, const hu_app_context_t *app_ctx,
+    int *out_status, char **out_body, size_t *out_body_len, const char **out_content_type) {
     *out_status = 500;
     *out_body = NULL;
     *out_body_len = 0;
@@ -987,6 +1007,20 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
     *out_body_len = buf.len;
     hu_json_buf_free(&buf);
 #endif
+}
+
+/* Public entry point — serializes concurrent requests on the shared
+ * app_ctx->agent via g_openai_compat_agent_lock. See the lock's
+ * declaration comment for the heap-use-after-free this prevents. */
+void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
+                                              hu_allocator_t *alloc,
+                                              const hu_app_context_t *app_ctx, int *out_status,
+                                              char **out_body, size_t *out_body_len,
+                                              const char **out_content_type) {
+    pthread_mutex_lock(&g_openai_compat_agent_lock);
+    hu_openai_compat_handle_chat_completions_inner(body, body_len, alloc, app_ctx, out_status,
+                                                   out_body, out_body_len, out_content_type);
+    pthread_mutex_unlock(&g_openai_compat_agent_lock);
 }
 
 void hu_openai_compat_handle_models(hu_allocator_t *alloc, const hu_app_context_t *app_ctx,

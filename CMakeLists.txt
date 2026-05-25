@@ -1232,8 +1232,13 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/lora_export.c
-    src/ml/lora_nightly.c
     src/ml/lora_subprocess.c
+    # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
+    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
+    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
+    # minimal-build, design-tokens, completions, docs, static-analysis and
+    # ~30 other CI jobs across every open PR with an undefined-reference
+    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1518,6 +1523,7 @@ if(HU_ENABLE_ML)
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c
+        src/ml/lora_nightly.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
@@ -3011,6 +3017,7 @@ set(HU_TEST_SOURCES
     # test_persona_encryption.c — moved to gated block below; references
     # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
+    tests/test_homebrew_formula.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c
     tests/test_filler_pctt.c
@@ -3061,6 +3068,10 @@ set(HU_TEST_SOURCES
     tests/test_sensitivity.c
     tests/test_vault.c
     tests/test_vault_aead.c
+    tests/test_app_bundle_structure.c
+    tests/test_pkg_builder.c
+    tests/test_install_docs.c
+    tests/test_sign_and_notarize.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
@@ -3101,6 +3112,7 @@ set(HU_TEST_SOURCES
     tests/test_gateway_http.c
     tests/test_memory_full.c
     tests/test_tools_all.c
+    tests/test_diagnose_notary.c
     tests/test_infrastructure.c
     tests/test_memory_subsystems.c
     tests/test_memory_new.c
@@ -3268,6 +3280,7 @@ set(HU_TEST_SOURCES
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
+    tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
@@ -3412,6 +3425,7 @@ set(HU_TEST_SOURCES
     tests/test_skill_routing.c
     tests/test_dual_process.c
     tests/test_repair.c
+    tests/test_release_workflow.c
 )
 if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
@@ -4555,6 +4569,37 @@ add_custom_target(benchmark
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running benchmarks..."
 )
+
+# macOS App Bundle target (US-C1.1)
+if(APPLE)
+    set(APP_BUNDLE_PATH ${CMAKE_BINARY_DIR}/Human.app)
+    set(APP_BUNDLE_CONTENTS ${APP_BUNDLE_PATH}/Contents)
+    set(APP_BUNDLE_MACOS ${APP_BUNDLE_CONTENTS}/MacOS)
+    set(APP_BUNDLE_RESOURCES ${APP_BUNDLE_CONTENTS}/Resources)
+    set(APP_PLIST_SOURCE ${CMAKE_SOURCE_DIR}/apps/macOS/Human.app/Contents/Info.plist)
+
+    add_custom_target(build_app_bundle ALL
+        DEPENDS human
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${APP_BUNDLE_CONTENTS} ${APP_BUNDLE_MACOS} ${APP_BUNDLE_RESOURCES}
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/human ${APP_BUNDLE_MACOS}/human
+        COMMAND ${CMAKE_COMMAND} -E copy ${APP_PLIST_SOURCE} ${APP_BUNDLE_CONTENTS}/Info.plist
+        COMMAND chmod 755 ${APP_BUNDLE_MACOS}/human
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Building macOS app bundle: ${APP_BUNDLE_PATH}"
+        VERBATIM
+    )
+
+    # Verify bundle dependencies (no rpath leakage)
+    # Uses scripts/release/verify-bundle.sh as single source of truth
+    add_custom_target(verify_bundle_dependencies
+        DEPENDS build_app_bundle
+        COMMAND ${CMAKE_COMMAND} -E echo "Verifying bundle dependencies..."
+        COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/release/verify-bundle.sh ${APP_BUNDLE_PATH}
+        COMMENT "Verifying macOS app bundle has system-only dependencies..."
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        VERBATIM
+    )
+endif()
 
 # Print build info
 message(STATUS "Human v0.5.0")
