@@ -63,6 +63,28 @@ typedef struct hu_llamacpp_config {
      * pre-quant behavior; the operator opts in to Q8_0 / Q4_0 either
      * via config or a follow-up env-var bridge in the factory. */
     hu_kv_quant_t kv_quant;
+    /* Phase 2b.2 (Gemma throughput program) — opt-in actual decode-skip
+     * on cache hit. Phase 2b made the hit path SAFE by always clearing
+     * KV (hit == miss) while recording the would-have-been savings in
+     * the tokens_would_skip counter. This field unlocks the real win:
+     *
+     *   - true (operator opts in): on cache hit, skip llama_memory_clear
+     *     and submit only the user-portion tokens (tokens + cached_n_past,
+     *     n_tokens - cached_n_past). llama.cpp KV cache resumes at
+     *     position cached_n_past — saves prefix decode time.
+     *
+     *   - false (default): pre-Phase-2b.2 SAFE behavior preserved. Always
+     *     clear, always decode full prompt. tokens_would_skip still
+     *     accumulates so the operator can measure the opportunity before
+     *     flipping the switch.
+     *
+     * Operator opts in via HU_LLAMACPP_KVCACHE_SKIP_DECODE=1 once they
+     * have an HU_LLAMACPP_LINKED build to verify against — the test
+     * preset stubs libllama so the skip-decode path is fundamentally
+     * un-runtime-tested without operator participation. Defaulting OFF
+     * means an upgrade can't silently regress correctness if a libllama
+     * version difference breaks the batch-position assumption. */
+    bool kvcache_skip_decode;
     /* Phase 4 (Gemma throughput program) — Flash Attention on Metal.
      *
      * llama.cpp's llama_context_params.flash_attn enables FA-style

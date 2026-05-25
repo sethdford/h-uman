@@ -309,20 +309,47 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
     int32_t cached_n_past = 0;
     bool sys_hit = (hu_llamacpp_kvcache_lookup_system(&c->kv_cache, system_prompt,
                                                       system_prompt_len, &cached_n_past) == HU_OK);
-    /* Always clear — Phase 2b safety. Phase 2b.2 will lift this on
-     * the hit branch and instead build a batch starting at
-     * cached_n_past, but that needs a real libllama-linked test bed
-     * to verify (the batch position semantics differ across llama.cpp
-     * versions). */
-    llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+
+    /* Phase 2b.2 — opt-in actual decode-skip on hit. Default OFF
+     * (config->kvcache_skip_decode=false) preserves Phase 2b SAFE
+     * behavior. When the operator opts in (HU_LLAMACPP_KVCACHE_SKIP_DECODE=1)
+     * AND the cache hit fires AND the new prompt's prefix is long
+     * enough to leave a non-empty user portion, we skip the prefix
+     * decode entirely.
+     *
+     * Safety: if the post-skip user_tokens count is <= 0, fall back to
+     * the full-decode path. This guards against the pathological case
+     * of an N-token cache record where the new prompt is also exactly
+     * N tokens (no user portion to decode) — the chat path always
+     * needs at least one token to sample from. */
+    bool skip_decode =
+        (sys_hit && config->kvcache_skip_decode && cached_n_past > 0 && n_tokens > cached_n_past);
     if (sys_hit) {
         hu_llamacpp_kvcache_record_hit_savings(&c->kv_cache, cached_n_past);
     }
-    /* Decode the full prompt as one batch (Phase 2b safe path —
-     * decode-skip is Phase 2b.2). */
-    if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
-        free(tokens);
-        return HU_ERR_PROVIDER_RESPONSE;
+    if (skip_decode) {
+        /* Keep the KV resident — it already contains the prefix tokens
+         * verified by the hash match. Submit only the user portion. */
+        int32_t user_tokens = n_tokens - cached_n_past;
+        if (llama_decode(c->ctx, llama_batch_get_one(tokens + cached_n_past, user_tokens)) != 0) {
+            /* Decode failure on the skip path — fall back to a full
+             * re-decode with clear so the operator-visible behavior
+             * matches the safe Phase 2b path. */
+            llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+            if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
+                free(tokens);
+                return HU_ERR_PROVIDER_RESPONSE;
+            }
+        }
+    } else {
+        /* Phase 2b SAFE path — clear and re-decode the full prompt.
+         * Fires for: miss, hit-but-opt-in-disabled, or hit-but-no-user-
+         * portion-to-decode. */
+        llama_memory_clear(llama_get_memory(c->ctx), /*data=*/true);
+        if (llama_decode(c->ctx, llama_batch_get_one(tokens, n_tokens)) != 0) {
+            free(tokens);
+            return HU_ERR_PROVIDER_RESPONSE;
+        }
     }
     /* Record how far we got so the next call sees the same system
      * hash and can short-circuit (today: still re-decodes; the

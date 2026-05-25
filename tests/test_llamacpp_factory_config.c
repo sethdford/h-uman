@@ -502,6 +502,91 @@ static void test_factory_flash_attn_env_unrecognized_keeps_default(void) {
     }
 }
 
+/* Phase 2b.2 — HU_LLAMACPP_KVCACHE_SKIP_DECODE env-var bridge.
+ *
+ * STRICTER opt-in than the other env bridges: only "1" / "on" / "true"
+ * enables. Typos and "yes"/"enable"/etc. keep the SAFE default OFF
+ * because mis-enabling this can silently corrupt KV in real linked-
+ * libllama builds. The defensive posture is intentional, not paranoid:
+ * Phase 2b only landed in main because the silent-corruption bug it
+ * fixed was undetectable under the test preset. */
+
+static void test_factory_kvcache_skip_decode_env_unset_defaults_to_off(void) {
+    hu_llamacpp_factory_reset_for_test();
+    unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/safe-default.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_FALSE(captured->kvcache_skip_decode);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_kvcache_skip_decode_env_on_tokens_enable(void) {
+    /* The three accepted on-tokens. Each enables the opt-in. */
+    const char *on_tokens[] = {"1", "on", "true"};
+    for (size_t i = 0; i < sizeof(on_tokens) / sizeof(on_tokens[0]); i++) {
+        hu_llamacpp_factory_reset_for_test();
+        setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", on_tokens[i], 1);
+
+        hu_allocator_t a = alloc();
+        hu_provider_entry_t entry = {
+            .name = (char *)"llamacpp",
+            .base_url = (char *)"/tmp/skip-on.gguf",
+        };
+        hu_provider_t prov = {0};
+        HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+        const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+        HU_ASSERT_NOT_NULL(captured);
+        HU_ASSERT_TRUE(captured->kvcache_skip_decode);
+
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, &a);
+        unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+        hu_llamacpp_factory_reset_for_test();
+    }
+}
+
+static void test_factory_kvcache_skip_decode_env_typo_keeps_safe_default(void) {
+    /* Adversarial: typo or "yes"/"enable" must NOT silently enable.
+     * The strict-token posture is what separates this bridge from the
+     * friendly-to-typos posture of kv_quant / flash_attn — mis-enabling
+     * silently corrupts KV; mis-disabling just leaves perf on the table. */
+    const char *off_tokens[] = {"yes", "enable", "TRUE", "ON", "y", "off", "0", "garbage"};
+    for (size_t i = 0; i < sizeof(off_tokens) / sizeof(off_tokens[0]); i++) {
+        hu_llamacpp_factory_reset_for_test();
+        setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", off_tokens[i], 1);
+
+        hu_allocator_t a = alloc();
+        hu_provider_entry_t entry = {
+            .name = (char *)"llamacpp",
+            .base_url = (char *)"/tmp/skip-strict.gguf",
+        };
+        hu_provider_t prov = {0};
+        HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+        const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+        HU_ASSERT_NOT_NULL(captured);
+        HU_ASSERT_FALSE(captured->kvcache_skip_decode);
+
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, &a);
+        unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+        hu_llamacpp_factory_reset_for_test();
+    }
+}
+
 void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_forwards_full_llamacpp_config);
     HU_RUN_TEST(test_factory_llamacpp_dotted_alias);
@@ -522,4 +607,7 @@ void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_flash_attn_env_off_disables);
     HU_RUN_TEST(test_factory_flash_attn_env_zero_and_false_also_disable);
     HU_RUN_TEST(test_factory_flash_attn_env_unrecognized_keeps_default);
+    HU_RUN_TEST(test_factory_kvcache_skip_decode_env_unset_defaults_to_off);
+    HU_RUN_TEST(test_factory_kvcache_skip_decode_env_on_tokens_enable);
+    HU_RUN_TEST(test_factory_kvcache_skip_decode_env_typo_keeps_safe_default);
 }

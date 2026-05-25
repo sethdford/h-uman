@@ -73,6 +73,25 @@ static void factory_apply_flash_attn_env(hu_llamacpp_config_t *lc) {
         lc->flash_attn = false;
 }
 
+/* Phase 2b.2 — opt-in KV cache skip-decode env bridge.
+ *
+ * Default OFF (preserves Phase 2b SAFE behavior). Operator opts in via
+ * HU_LLAMACPP_KVCACHE_SKIP_DECODE set to "1" / "on" / "true". This is
+ * the ONE env bridge in this file with STRICT on-token matching rather
+ * than the friendly-to-typos posture used elsewhere: mis-enabling this
+ * can silently corrupt KV in real linked-libllama builds, so operators
+ * must opt in unambiguously. Anything else (typo, "yes", "enable") keeps
+ * the safe default rather than risking a silent enable. */
+static void factory_apply_kvcache_skip_decode_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    const char *env = getenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    if (!env || !*env)
+        return; /* unset → default OFF */
+    if (strcmp(env, "1") == 0 || strcmp(env, "on") == 0 || strcmp(env, "true") == 0)
+        lc->kvcache_skip_decode = true;
+}
+
 /* Phase 3b — env-var bridge for cross-model speculative decoding.
  *
  * Operators wire a draft model alongside the target without a rebuild
@@ -338,6 +357,7 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
         factory_apply_kv_quant_env(&lc);
         factory_apply_spec_decode_env(alloc, &lc);
         factory_apply_flash_attn_env(&lc);
+        factory_apply_kvcache_skip_decode_env(&lc);
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
@@ -481,6 +501,7 @@ hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc, const hu_provide
         factory_apply_kv_quant_env(&lc);
         factory_apply_spec_decode_env(alloc, &lc);
         factory_apply_flash_attn_env(&lc);
+        factory_apply_kvcache_skip_decode_env(&lc);
 #ifdef HU_IS_TEST
         hu_llamacpp_factory_capture_for_test(&lc);
 #endif
