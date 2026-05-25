@@ -2,6 +2,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/sse.h"
@@ -768,7 +769,17 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
                                    hu_json_string_new(alloc, "application/json", 16));
             }
         }
-        if (request->thinking_budget > 0) {
+        /* Gemini 3.x is thinking-by-default with an invisible reasoning budget
+         * that SHARES the maxOutputTokens pool. Short replies (e.g. iMessage)
+         * with small max_tokens get starved: thinkingBudget eats the entire
+         * budget → empty visible text + finishReason=MAX_TOKENS. The
+         * `thinking_budget` field's documented contract (see hu_chat_request_t)
+         * is "0 = no thinking, >0 = bounded budget" — so we MUST emit
+         * thinkingConfig whenever the value is set explicitly (>= 0), not
+         * just when positive. Discovered 2026-05-24: gemini-3.5-flash returned
+         * empty text on a "hi" probe with max_tokens=80 because thoughtsToken-
+         * Count was 72; same probe with thinkingBudget=0 returned proper text. */
+        if (request->thinking_budget >= 0) {
             hu_json_value_t *think_cfg = hu_json_object_new(alloc);
             if (think_cfg) {
                 hu_json_object_set(alloc, think_cfg, "thinkingBudget",
@@ -852,6 +863,29 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         if (n <= 0 || (size_t)n >= sizeof(url_buf)) {
             alloc->free(alloc->ctx, body, body_len);
             return HU_ERR_INVALID_ARGUMENT;
+        }
+    }
+
+    /* DEBUG (2026-05-25): when HU_GEMINI_DUMP_BODY env var is set, write the
+     * outgoing request body to /tmp/gemini_request_body.json. Lets us diff
+     * h-uman's full-context request against a known-working direct probe to
+     * find the field Vertex rejects with "provider response error". Remove
+     * this block once the layer-3 bug in docs/plans/2026-05-24-reactive-
+     * imessage-recovery/ is closed. */
+    if (getenv("HU_GEMINI_DUMP_BODY")) {
+        FILE *dbg_f = fopen("/tmp/gemini_request_body.json", "w");
+        if (dbg_f) {
+            size_t written = fwrite(body, 1, body_len, dbg_f);
+            fclose(dbg_f);
+            if (written != body_len) {
+                hu_log_info("gemini", NULL,
+                            "DEBUG: gemini_request_body.json incomplete: wrote %zu of %zu bytes",
+                            written, body_len);
+            } else {
+                hu_log_info("gemini", NULL,
+                            "DEBUG: dumped %zu-byte request body to /tmp/gemini_request_body.json",
+                            body_len);
+            }
         }
     }
 
@@ -1307,7 +1341,17 @@ static hu_error_t gemini_stream_chat(void *ctx, hu_allocator_t *alloc,
         uint32_t max_tok = request->max_tokens ? request->max_tokens : HU_GEMINI_DEFAULT_MAX_TOKENS;
         hu_json_object_set(alloc, gen_cfg, "maxOutputTokens",
                            hu_json_number_new(alloc, (double)max_tok));
-        if (request->thinking_budget > 0) {
+        /* Gemini 3.x is thinking-by-default with an invisible reasoning budget
+         * that SHARES the maxOutputTokens pool. Short replies (e.g. iMessage)
+         * with small max_tokens get starved: thinkingBudget eats the entire
+         * budget → empty visible text + finishReason=MAX_TOKENS. The
+         * `thinking_budget` field's documented contract (see hu_chat_request_t)
+         * is "0 = no thinking, >0 = bounded budget" — so we MUST emit
+         * thinkingConfig whenever the value is set explicitly (>= 0), not
+         * just when positive. Discovered 2026-05-24: gemini-3.5-flash returned
+         * empty text on a "hi" probe with max_tokens=80 because thoughtsToken-
+         * Count was 72; same probe with thinkingBudget=0 returned proper text. */
+        if (request->thinking_budget >= 0) {
             hu_json_value_t *think_cfg = hu_json_object_new(alloc);
             if (think_cfg) {
                 hu_json_object_set(alloc, think_cfg, "thinkingBudget",
