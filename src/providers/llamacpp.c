@@ -150,6 +150,18 @@ typedef struct llamacpp_ctx {
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 
+/* Phase 2b.2 — pure predicate for the cache-hit skip-decode decision.
+ *
+ * Lives outside HU_LLAMACPP_LINKED so tests in the stubbed preset can
+ * pin every branch of the truth table. The chat path below calls this
+ * via the same prototype; one source of truth.
+ *
+ * See include/human/providers/llamacpp.h for the contract docs. */
+bool hu_llamacpp_should_skip_decode(bool sys_hit, bool operator_opt_in, int32_t cached_n_past,
+                                    int32_t n_tokens) {
+    return sys_hit && operator_opt_in && cached_n_past > 0 && n_tokens > cached_n_past;
+}
+
 static void clear_active_adapter(llamacpp_ctx_t *c, hu_allocator_t *alloc) {
     if (!c)
         return;
@@ -326,8 +338,8 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
      * of an N-token cache record where the new prompt is also exactly
      * N tokens (no user portion to decode) — the chat path always
      * needs at least one token to sample from. */
-    bool skip_decode =
-        (sys_hit && config->kvcache_skip_decode && cached_n_past > 0 && n_tokens > cached_n_past);
+    bool skip_decode = hu_llamacpp_should_skip_decode(sys_hit, config->kvcache_skip_decode,
+                                                      cached_n_past, n_tokens);
     if (sys_hit) {
         hu_llamacpp_kvcache_record_hit_savings(&c->kv_cache, cached_n_past);
     }
