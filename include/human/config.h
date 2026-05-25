@@ -294,10 +294,15 @@ typedef struct hu_initiative_config {
  * byte counts across turns; `enabled` defaults to false so the trim
  * behavior stays off until operators have a week of data and decide to
  * flip it on. Phase 2 (Task 4) wires the actual trim of DEAD fields. */
+#define HU_PROMPT_BUDGET_ALLOWLIST_MAX 10
+
 typedef struct hu_prompt_budget_config {
-    bool enabled;               /* default false (Phase 1 ships gated OFF) */
-    int dead_field_min_bytes;   /* default 16 — fields below this mean are DEAD */
-    int min_samples_before_tag; /* default 100 — turns needed before tagging */
+    bool enabled;                 /* default false (Phase 1 ships gated OFF) */
+    int dead_field_min_bytes;     /* default 16 — fields below this mean are DEAD */
+    int min_samples_before_tag;   /* default 100 — turns needed before tagging */
+    const char **field_allowlist; /* fields to keep even if DEAD (names like "memory_context") */
+    size_t field_allowlist_count; /* number of allowlisted fields (max
+                                     HU_PROMPT_BUDGET_ALLOWLIST_MAX) */
 } hu_prompt_budget_config_t;
 
 typedef struct hu_imessage_channel_config {

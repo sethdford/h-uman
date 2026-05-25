@@ -711,12 +711,15 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
                 else:
                     f.write(f"{key}: {value}\n")
 
+    # Ensure adapter output directory exists
+    adapter_out.mkdir(parents=True, exist_ok=True)
+
     # Build mlx_lm.lora command
     cmd = [
         sys.executable, "-m", "mlx_lm", "lora",
         "--model", model,
         "--data", str(train_data_dir),  # Directory with train.jsonl
-        "--adapter-path", str(adapter_out.parent),  # Output directory
+        "--adapter-path", str(adapter_out),  # Output directory (mlx_lm writes adapters.safetensors + adapter_config.json here)
         "--iters", str(iters),
         "--batch-size", str(batch_size),
         "--learning-rate", f"{learning_rate:g}",
@@ -742,10 +745,10 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             return rc
 
         # Check if output exists — mlx_lm writes adapters.safetensors + adapter_config.json
-        adapters_file = adapter_out.parent / "adapters.safetensors"
+        adapters_file = adapter_out / "adapters.safetensors"
         if not adapters_file.exists():
-            print(f"  ERROR: mlx_lm did not produce adapters.safetensors in {adapter_out.parent}")
-            print(f"  Directory contents: {list(adapter_out.parent.iterdir())}")
+            print(f"  ERROR: mlx_lm did not produce adapters.safetensors in {adapter_out}")
+            print(f"  Directory contents: {list(adapter_out.iterdir())}")
             return 1
 
         print(f"  mlx_lm lora training succeeded")
@@ -896,13 +899,16 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
 
     rc = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
 
-    if rc != 0 or not adapter_out.exists():
+    # Check if training succeeded by looking for the safetensors file
+    adapters_file = adapter_out / "adapters.safetensors"
+    if rc != 0 or not adapters_file.exists():
         print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
         print(f"  Falling back to empty-tensors safetensors.")
-        write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
+        write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
         return 0
 
-    size = adapter_out.stat().st_size
+    # Get the size of the safetensors file
+    size = adapters_file.stat().st_size
     print(f"  Real LoRA adapter written: {adapter_out} ({size} bytes)")
 
     # D2 lineage entry for the real-training success path.
@@ -959,8 +965,9 @@ def main():
                              "When set, skips cycle pipeline and runs the "
                              "outcomes-driven training path.")
     parser.add_argument("--adapter-out", type=Path, default=None,
-                        help="C3: where to write the produced LoRA adapter "
-                             "safetensors. Required when --source-jsonl is set.")
+                        help="C3: directory where to write the produced LoRA adapter "
+                             "(will contain adapters.safetensors + adapter_config.json). "
+                             "Required when --source-jsonl is set.")
     parser.add_argument("--memory-db", type=Path,
                         default=Path.home() / ".human" / "memory.db",
                         help="C3: path to the conversations DB for hash "
