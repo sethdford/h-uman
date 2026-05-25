@@ -544,6 +544,7 @@ set(HU_CORE_SOURCES
     src/channel_adapters.c
     src/doctor.c
     src/doctor/registry.c
+    src/doctor/check_chatdb.c
     src/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
@@ -3192,6 +3193,7 @@ set(HU_TEST_SOURCES
     tests/test_ported_modules.c
     tests/test_doctor_imessage_diagnose.c
     tests/test_doctor_registry.c
+    tests/test_doctor_chatdb.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
