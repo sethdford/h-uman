@@ -1,4 +1,6 @@
 #include "human/agent/degradation.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <string.h>
 
 #ifndef HU_IS_TEST
@@ -42,6 +44,13 @@ hu_error_t hu_provider_degrade_chat(hu_provider_degradation_config_t *config,
 
     /* Passthrough when disabled or no config */
     if (!config || !config->enabled) {
+        if (config && !config->enabled) {
+            static atomic_bool warned_degradation_disabled = false;
+            hu_log_info_once(&warned_degradation_disabled, "degradation", NULL,
+                             "graceful degradation disabled — set "
+                             "degradation.enabled=true in config.json to enable "
+                             "circuit-breaker + retry on provider failures");
+        }
         hu_error_t err =
             try_chat(provider, alloc, request, model, model_len, temperature, &out->response);
         out->strategy_used = HU_DEGRADE_PRIMARY;

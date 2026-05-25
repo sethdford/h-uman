@@ -3,6 +3,8 @@
  * Classifies based on response content, incoming message, config, and context.
  */
 #include "human/context/voice_decision.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -16,9 +18,8 @@ static bool contains_substring_ci(const char *haystack, size_t hay_len, const ch
     for (size_t i = 0; i + nlen <= hay_len; i++) {
         bool match = true;
         for (size_t j = 0; j < nlen; j++) {
-            char h = (char)(haystack[i + j] >= 'A' && haystack[i + j] <= 'Z'
-                            ? haystack[i + j] + 32
-                            : haystack[i + j]);
+            char h = (char)(haystack[i + j] >= 'A' && haystack[i + j] <= 'Z' ? haystack[i + j] + 32
+                                                                             : haystack[i + j]);
             char nd = (char)(needle[j] >= 'A' && needle[j] <= 'Z' ? needle[j] + 32 : needle[j]);
             if (h != nd) {
                 match = false;
@@ -74,8 +75,8 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
             }
         } else if (strcmp(p, "comfort") == 0) {
             /* Incoming must have sad keywords AND response must be comforting */
-            static const char *sad[] = {"sad", "upset", "crying", "devastated", "heartbroken",
-                                       "depressed", "miserable", "lonely"};
+            static const char *sad[] = {"sad",         "upset",     "crying",    "devastated",
+                                        "heartbroken", "depressed", "miserable", "lonely"};
             static const char *comfort[] = {"it'll be ok", "I'm here", "you've got this"};
             bool incoming_sad = false;
             if (incoming_msg && incoming_len > 0) {
@@ -97,20 +98,23 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
     return false;
 }
 
-hu_voice_decision_t hu_voice_decision_classify(
-    const char *response_text, size_t response_len,
-    const char *incoming_msg, size_t incoming_len,
-    const hu_voice_messages_config_t *voice_msg_config,
-    bool has_voice_id,
-    int hour_local,
-    uint32_t seed) {
+hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t response_len,
+                                               const char *incoming_msg, size_t incoming_len,
+                                               const hu_voice_messages_config_t *voice_msg_config,
+                                               bool has_voice_id, int hour_local, uint32_t seed) {
 
     (void)seed;
 
     if (!has_voice_id)
         return HU_VOICE_SEND_TEXT;
-    if (!voice_msg_config || !voice_msg_config->enabled)
+    if (!voice_msg_config || !voice_msg_config->enabled) {
+        static atomic_bool warned_voice_decision_disabled = false;
+        hu_log_info_once(&warned_voice_decision_disabled, "voice_decision", NULL,
+                         "voice messaging disabled — set "
+                         "voice_messaging.enabled=true in config.json "
+                         "to enable TTS reply routing (currently always text)");
         return HU_VOICE_SEND_TEXT;
+    }
 
     /* Never: incoming is question ('?') */
     if (incoming_msg && incoming_len > 0 && ends_with_question(incoming_msg, incoming_len))
@@ -154,13 +158,10 @@ hu_voice_decision_t hu_voice_decision_classify(
 
 #else
 
-hu_voice_decision_t hu_voice_decision_classify(
-    const char *response_text, size_t response_len,
-    const char *incoming_msg, size_t incoming_len,
-    const hu_voice_messages_config_t *voice_msg_config,
-    bool has_voice_id,
-    int hour_local,
-    uint32_t seed) {
+hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t response_len,
+                                               const char *incoming_msg, size_t incoming_len,
+                                               const hu_voice_messages_config_t *voice_msg_config,
+                                               bool has_voice_id, int hour_local, uint32_t seed) {
     (void)response_text;
     (void)response_len;
     (void)incoming_msg;

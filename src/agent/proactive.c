@@ -2,9 +2,11 @@
  * Proactive action system — milestones, morning briefing, check-in.
  */
 #include "human/agent/proactive.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -82,8 +84,16 @@ hu_error_t hu_proactive_check_silence(hu_allocator_t *alloc, uint64_t last_conta
                                       hu_proactive_result_t *out) {
     if (!alloc || !out || !config)
         return HU_ERR_INVALID_ARGUMENT;
-    if (!config->enabled || last_contact_ms == 0)
+    if (!config->enabled || last_contact_ms == 0) {
+        if (!config->enabled) {
+            static atomic_bool warned_proactive_silence_disabled = false;
+            hu_log_info_once(&warned_proactive_silence_disabled, "proactive", NULL,
+                             "proactive silence check disabled — "
+                             "set proactive.silence.enabled=true in config.json "
+                             "to enable check-in after long silence");
+        }
         return HU_OK;
+    }
     if (now_ms <= last_contact_ms)
         return HU_OK; /* clock skew or equal timestamps — avoid uint64_t underflow */
 

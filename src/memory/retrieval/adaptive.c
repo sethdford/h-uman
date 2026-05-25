@@ -1,5 +1,7 @@
 #include "human/memory/retrieval/adaptive.h"
+#include "human/core/log.h"
 #include <ctype.h>
+#include <stdatomic.h>
 #include <string.h>
 
 static int is_question_query(const char *query, size_t len) {
@@ -34,8 +36,14 @@ hu_query_analysis_t hu_adaptive_analyze_query(const char *query, size_t query_le
         .recommended_strategy = HU_ADAPTIVE_HYBRID,
     };
 
-    if (!config || !config->enabled)
+    if (!config || !config->enabled) {
+        static atomic_bool warned_adaptive_retrieval_disabled = false;
+        hu_log_info_once(&warned_adaptive_retrieval_disabled, "adaptive_retrieval", NULL,
+                         "adaptive retrieval disabled — set "
+                         "memory.retrieval.adaptive.enabled=true in config.json "
+                         "to enable query-driven retrieval strategy selection");
         return out;
+    }
 
     unsigned token_count = 0;
     unsigned total_len = 0;

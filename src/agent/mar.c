@@ -1,4 +1,6 @@
 #include "human/agent/mar.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -78,6 +80,13 @@ hu_error_t hu_mar_execute(hu_allocator_t *alloc, hu_provider_t *provider,
     memset(out, 0, sizeof(*out));
 
     if (!config || !config->enabled || !task || task_len == 0) {
+        if (config && !config->enabled) {
+            static atomic_bool warned_mar_disabled = false;
+            hu_log_info_once(&warned_mar_disabled, "mar", NULL,
+                             "MAR (multi-agent reasoning) disabled — set "
+                             "mar.enabled=true in config.json to enable "
+                             "multi-round agent reasoning on complex tasks");
+        }
         return HU_OK;
     }
 
