@@ -1,0 +1,238 @@
+name: macOS Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      run_signing:
+        description: 'Force signing step (for testing)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build macOS release binary
+    runs-on: macos-14-arm64
+    timeout-minutes: 30
+    env:
+      MACOS_DEPLOYMENT_TARGET: '10.15'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cache CMake build
+        uses: actions/cache@v5
+        with:
+          path: build
+          key: ${{ runner.os }}-release-cmake-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**') }}
+          restore-keys: |
+            ${{ runner.os }}-release-cmake-
+
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: Release
+          enable-lto: 'true'
+          enable-curl: 'true'
+          enable-all-channels: 'true'
+          target: human
+
+      - name: Run preflight checks
+        run: |
+          set -euo pipefail
+          bash scripts/agent-preflight.sh
+          if [ $? -ne 0 ]; then
+            echo "::error::Preflight checks failed; aborting release"
+            exit 1
+          fi
+
+      - name: Create app bundle directory structure
+        run: |
+          mkdir -p "build/Release/Human.app/Contents/MacOS"
+          mkdir -p "build/Release/Human.app/Contents/Resources"
+          mkdir -p "build/Release/Human.app/Contents/_CodeSignature"
+          cp build/human "build/Release/Human.app/Contents/MacOS/human"
+          chmod 755 "build/Release/Human.app/Contents/MacOS/human"
+          # TODO: Copy Info.plist from US-C1.1 when available
+
+      - name: Build .pkg installer
+        run: |
+          set -euo pipefail
+          if [ ! -f "scripts/release/build-pkg.sh" ]; then
+            echo "::error::build-pkg.sh not found at scripts/release/build-pkg.sh"
+            exit 1
+          fi
+          bash scripts/release/build-pkg.sh \
+            --app-path "build/Release/Human.app" \
+            --output "human-macos-latest.pkg"
+
+      - name: Verify .pkg was created
+        run: |
+          if [ ! -f "human-macos-latest.pkg" ]; then
+            echo "::error::.pkg file not created"
+            exit 1
+          fi
+          file human-macos-latest.pkg
+          ls -lh human-macos-latest.pkg
+
+      - name: Upload .pkg as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: human-macos-pkg
+          path: human-macos-latest.pkg
+          retention-days: 7
+
+  sign-and-release:
+    name: Sign, notarize, and publish release
+    needs: build
+    runs-on: macos-14-arm64
+    timeout-minutes: 45
+    if: |
+      (github.ref_type == 'tag' && startswith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_signing == 'true')
+    permissions:
+      contents: write
+    env:
+      APPLE_DEVELOPER_ID_APPLICATION_CERT: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERT }}
+      APPLE_DEVELOPER_ID_INSTALLER_CERT: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERT }}
+      APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_KEY_ISSUER: ${{ secrets.APPLE_API_KEY_ISSUER }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download .pkg artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: human-macos-pkg
+
+      - name: Check signing script availability
+        id: check-sign-script
+        run: |
+          if [ -f "scripts/release/sign-and-notarize.sh" ]; then
+            echo "script-exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "script-exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bootstrap keychain for code signing (if script exists)
+        if: steps.check-sign-script.outputs.script-exists == 'true'
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$HOME/Library/Keychains/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -s "$KEYCHAIN_PATH"
+
+          if [ -n "$APPLE_DEVELOPER_ID_APPLICATION_CERT" ]; then
+            CERT_PATH="/tmp/app_cert.p12"
+            base64 -d > "$CERT_PATH" <<< "$APPLE_DEVELOPER_ID_APPLICATION_CERT"
+            security import "$CERT_PATH" \
+              -k "$KEYCHAIN_PATH" \
+              -P "$APPLE_DEVELOPER_ID_CERT_PASSWORD" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/productbuild
+            rm -f "$CERT_PATH"
+          else
+            echo "::warning::APPLE_DEVELOPER_ID_APPLICATION_CERT not set"
+          fi
+
+          if [ -n "$APPLE_DEVELOPER_ID_INSTALLER_CERT" ]; then
+            CERT_PATH="/tmp/installer_cert.p12"
+            base64 -d > "$CERT_PATH" <<< "$APPLE_DEVELOPER_ID_INSTALLER_CERT"
+            security import "$CERT_PATH" \
+              -k "$KEYCHAIN_PATH" \
+              -P "$APPLE_DEVELOPER_ID_CERT_PASSWORD" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/productbuild
+            rm -f "$CERT_PATH"
+          else
+            echo "::warning::APPLE_DEVELOPER_ID_INSTALLER_CERT not set"
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" 2>/dev/null || true
+
+      - name: Sign and notarize .pkg (if script exists)
+        if: steps.check-sign-script.outputs.script-exists == 'true'
+        run: |
+          set -euo pipefail
+          bash scripts/release/sign-and-notarize.sh \
+            --pkg "human-macos-latest.pkg" \
+            --cert-id "Developer ID Installer" \
+            2>&1 | tee sign_notarize.log
+
+      - name: Signing script not yet implemented (US-C1.3)
+        if: steps.check-sign-script.outputs.script-exists == 'false'
+        run: |
+          echo "::notice::sign-and-notarize.sh not yet available (US-C1.3 not landed)"
+
+      - name: Upload sign/notarize logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: signing-logs
+          path: |
+            sign_notarize.log
+            notarize_response.json
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: human-macos-latest.pkg
+          prerelease: false
+          draft: false
+          body: |
+            # macOS Release
+
+            Installation: Download `human-macos-latest.pkg`, double-click to run the installer, then run `human --version` to verify.
+
+            For detailed instructions, see the [Installation Guide](https://github.com/anthropics/human/blob/main/docs/guides/installation.md).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-prerelease:
+    name: Publish unsigned pre-release to main
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download .pkg artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: human-macos-pkg
+
+      - name: Create or update pre-release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: human-macos-latest.pkg
+          prerelease: true
+          draft: false
+          tag_name: latest-main
+          name: Latest main (unsigned)
+          body: |
+            # Latest main build (unsigned)
+
+            Automatically-generated pre-release from the latest main branch push.
+
+            **Status:** Unsigned — testing only. For production use, download a signed release from the Releases page.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -688,6 +688,7 @@ void run_plugin_hooks_tests(void);
 void run_approval_gate_tests(void);
 void run_workflow_commands_tests(void);
 void run_repair_tests(void);
+void run_release_workflow_tests(void);
 void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
@@ -1481,6 +1482,7 @@ int main(int argc, char **argv) {
     run_approval_gate_tests();
     run_workflow_commands_tests();
     run_repair_tests();
+    run_release_workflow_tests();
     run_daemon_cron_tests();
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();

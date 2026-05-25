@@ -3403,6 +3403,7 @@ set(HU_TEST_SOURCES
     tests/test_skill_routing.c
     tests/test_dual_process.c
     tests/test_repair.c
+    tests/test_release_workflow.c
 )
 if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
