@@ -2936,6 +2936,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_per_contact.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_contact_narrative.c

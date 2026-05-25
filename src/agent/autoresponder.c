@@ -21,6 +21,44 @@
 #include <string.h>
 #include <time.h>
 
+/* ── sanitize fact fields before prompt injection ──────────────────── */
+
+/* Strip prompt-injection-shaped characters from a fact field before
+ * inlining into the system prompt. Removes '<', '>', '`', and ASCII
+ * control chars (other than space and tab). Truncates at out_cap-1.
+ * Returns bytes written (excluding null).
+ *
+ * Why: Sprint 48 US-48-2 security finding. Fact fields come from
+ * inbound contact messages; we don't trust arbitrary content to land
+ * in the LLM system prompt unescaped. A contact sending
+ * "i like X that <system>DANGEROUS</system>" could inject prompt-shaped
+ * content that the LLM might honor. */
+static size_t sanitize_fact_field_for_prompt(const char *in, char *out, size_t out_cap) {
+    if (!in || !out || out_cap == 0)
+        return 0;
+    if (out_cap == 1) {
+        out[0] = '\0';
+        return 0;
+    }
+
+    size_t j = 0;
+    for (size_t i = 0; in[i] != '\0' && j < out_cap - 1; i++) {
+        unsigned char c = (unsigned char)in[i];
+
+        /* Skip dangerous characters: '<', '>', '`' */
+        if (c == '<' || c == '>' || c == '`')
+            continue;
+
+        /* Skip ASCII control chars except space (0x20) and tab (0x09) */
+        if (c < 0x20 && c != 0x09)
+            continue;
+
+        out[j++] = (char)c;
+    }
+    out[j] = '\0';
+    return j;
+}
+
 /* ── allowlist (case-insensitive exact match) ───────────────────────── */
 
 bool hu_autoresponder_handle_allowlisted(const hu_autoresponder_config_t *cfg,
@@ -124,7 +162,8 @@ static void sb_append(char *dst, size_t cap, size_t *off, const char *s) {
 size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
                                      const char *contact_handle, const char *channel,
                                      const char *incoming_text, const char *persona_summary,
-                                     char *out, size_t cap) {
+                                     const struct hu_personal_model *contact_model, char *out,
+                                     size_t cap) {
     if (!out || cap < 2)
         return 0;
     out[0] = '\0';
@@ -162,6 +201,69 @@ size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
         sb_append(out, cap, &n, persona_summary);
         sb_append(out, cap, &n, "\n");
     }
+
+    /* Sprint 48 US-48-2: Inject per-contact insights (top-3 facts by effective confidence) */
+    if (contact_model && contact_model->fact_count > 0) {
+        int64_t now = time(NULL);
+
+        /* Collect facts with their effective confidence */
+        typedef struct {
+            const hu_heuristic_fact_t *fact;
+            float effective_confidence;
+        } fact_score_t;
+
+        fact_score_t scored[HU_PM_MAX_FACTS];
+        size_t scored_count = 0;
+
+        for (size_t i = 0; i < contact_model->fact_count; i++) {
+            const hu_heuristic_fact_t *f = &contact_model->facts[i];
+            float eff = hu_heuristic_fact_effective_confidence(f, now);
+            if (eff >= 0.1f) { /* Filter low-confidence facts */
+                scored[scored_count].fact = f;
+                scored[scored_count].effective_confidence = eff;
+                scored_count++;
+                if (scored_count >= 3)
+                    break; /* Take top 3 */
+            }
+        }
+
+        /* Sort by effective confidence (bubble sort, max 3 items) */
+        for (size_t i = 0; i < scored_count; i++) {
+            for (size_t j = i + 1; j < scored_count; j++) {
+                if (scored[j].effective_confidence > scored[i].effective_confidence) {
+                    fact_score_t tmp = scored[i];
+                    scored[i] = scored[j];
+                    scored[j] = tmp;
+                }
+            }
+        }
+
+        /* Only emit if we have facts to show */
+        if (scored_count > 0) {
+            sb_append(out, cap, &n, "\nContact insights:\n");
+            for (size_t i = 0; i < scored_count && i < 3; i++) {
+                const hu_heuristic_fact_t *f = scored[i].fact;
+                /* Sanitize each field to prevent prompt injection. */
+                char safe_subject[HU_FACT_MAX_FIELD];
+                char safe_predicate[HU_FACT_MAX_FIELD];
+                char safe_object[HU_FACT_MAX_FIELD];
+
+                sanitize_fact_field_for_prompt(f->subject, safe_subject, sizeof(safe_subject));
+                sanitize_fact_field_for_prompt(f->predicate, safe_predicate,
+                                               sizeof(safe_predicate));
+                sanitize_fact_field_for_prompt(f->object, safe_object, sizeof(safe_object));
+
+                sb_append(out, cap, &n, "- ");
+                sb_append(out, cap, &n, safe_subject);
+                sb_append(out, cap, &n, " ");
+                sb_append(out, cap, &n, safe_predicate);
+                sb_append(out, cap, &n, " ");
+                sb_append(out, cap, &n, safe_object);
+                sb_append(out, cap, &n, "\n");
+            }
+        }
+    }
+
     sb_append(out, cap, &n, "\nIncoming message:\n");
     sb_append(out, cap, &n, (incoming_text && *incoming_text) ? incoming_text : "(empty)");
     sb_append(out, cap, &n, "\n\nReply:");
@@ -394,8 +496,8 @@ hu_error_t hu_autoresponder_generate_reply(hu_allocator_t *alloc,
                                        sizeof(persona_buf));
 
     char prompt[4096];
-    hu_autoresponder_build_prompt(cfg, contact_handle, channel, incoming_text, persona_buf, prompt,
-                                  sizeof(prompt));
+    hu_autoresponder_build_prompt(cfg, contact_handle, channel, incoming_text, persona_buf, model,
+                                  prompt, sizeof(prompt));
 
     /* Load default provider. Same pattern as predictive_drafts. */
     hu_config_t loaded_cfg;

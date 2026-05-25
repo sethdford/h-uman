@@ -2943,3 +2943,76 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
      * keep walking on a schema mismatch beyond N-1. */
     return HU_ERR_PARSE;
 }
+
+/* ── Per-contact M2 slice (Sprint 48 US-48-2) ──────────────────────
+ *
+ * Load per-contact facts into a model struct. For now, this is a
+ * straightforward extension: contact-scoped facts are tagged with
+ * contact_handle during ingest and filtered on load.
+ *
+ * Future: full SQLite backend for efficient per-contact queries.
+ * Current: simplistic tag-and-filter approach on top of binary model. */
+
+hu_error_t hu_personal_model_load_for_contact(hu_personal_model_t *out, const char *contact_handle,
+                                              const char *db_path) {
+    if (!out || !contact_handle || !db_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_personal_model_init(out);
+
+    /* Load the global personal model (may be .bin or .db in future) */
+    hu_error_t err = hu_personal_model_load(out, db_path);
+    if (err != HU_OK)
+        return err;
+
+    /* Filter facts to contact_handle: keep facts with matching
+     * contact_handle OR empty contact_handle (global scope) */
+    size_t filtered_count = 0;
+    for (size_t i = 0; i < out->fact_count; i++) {
+        const hu_heuristic_fact_t *f = &out->facts[i];
+        bool matches = false;
+
+        /* Match if contact_handle is empty (global) or matches exactly */
+        if (f->contact_handle[0] == '\0') {
+            matches = true; /* global fact */
+        } else if (strncmp(f->contact_handle, contact_handle, HU_FACT_MAX_FIELD) == 0) {
+            matches = true;
+        }
+
+        if (matches) {
+            if (filtered_count != i) {
+                out->facts[filtered_count] = out->facts[i];
+            }
+            filtered_count++;
+        }
+    }
+
+    out->fact_count = filtered_count;
+    return HU_OK;
+}
+
+hu_error_t hu_personal_model_ingest_for_contact(hu_personal_model_t *model,
+                                                const char *contact_handle, const char *message,
+                                                size_t message_len, bool from_user,
+                                                int64_t timestamp, const hu_provenance_t *prov,
+                                                const char *db_path) {
+    if (!model || !contact_handle || !message || !prov || !db_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Standard ingest first */
+    hu_error_t err =
+        hu_personal_model_ingest(model, message, message_len, from_user, timestamp, prov);
+    if (err != HU_OK)
+        return err;
+
+    /* Tag newly-added facts with contact_handle */
+    for (size_t i = 0; i < model->fact_count; i++) {
+        if (model->facts[i].contact_handle[0] == '\0') {
+            /* Only tag if not already set */
+            snprintf(model->facts[i].contact_handle, HU_FACT_MAX_FIELD, "%s", contact_handle);
+        }
+    }
+
+    /* Save atomically (existing atomic path) */
+    return hu_personal_model_save(model, db_path);
+}

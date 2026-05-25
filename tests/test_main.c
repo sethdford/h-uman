@@ -698,6 +698,7 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_personal_model_per_contact_tests(void);
 void run_emotional_context_tests(void);
 void run_autoresponder_tests(void);
 void run_contact_narrative_tests(void);
@@ -1469,6 +1470,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_per_contact_tests();
     run_emotional_context_tests();
     run_autoresponder_tests();
     run_contact_narrative_tests();

@@ -122,11 +122,14 @@ bool hu_autoresponder_handle_allowlisted(const hu_autoresponder_config_t *cfg,
  *   - NEVER mention location/calendar/sensitive info
  *   - Keep response under HU_AUTORESPONDER_REPLY_MAX chars
  *
- * persona_summary may be NULL/empty (no persona signal yet). */
+ * persona_summary may be NULL/empty (no persona signal yet).
+ * contact_model may be NULL (no per-contact context yet); if provided,
+ * injects top-3 facts as "Contact insights:" section. */
 size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
                                      const char *contact_handle, const char *channel,
                                      const char *incoming_text, const char *persona_summary,
-                                     char *out, size_t cap);
+                                     const struct hu_personal_model *contact_model, char *out,
+                                     size_t cap);
 
 /* ── post-processing: strip dangerous phrasing ───────────────────────
  *
