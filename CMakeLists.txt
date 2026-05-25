@@ -1097,6 +1097,7 @@ set(HU_CORE_SOURCES
     src/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
+    src/onboard/step_welcome.c
     src/interactions/choices.c
     src/daemon.c
     src/daemon_lifecycle.c
@@ -3110,6 +3111,7 @@ set(HU_TEST_SOURCES
     tests/test_subsystems.c
     tests/test_onboard_state.c
     tests/test_onboard_dispatcher.c
+    tests/test_onboard_step1.c
     tests/test_onboard_nextstep.c
     tests/test_onboard_aloop.c
     tests/test_daemon_cron.c
