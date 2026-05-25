@@ -84,6 +84,28 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
 hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item_t **items,
                                              size_t *count, size_t *cap);
 
+/* Phase 4b (Gemma throughput program) — inspect operator-set inference
+ * env vars for misconfigurations that would silently cost performance
+ * or shape behavior unexpectedly. Catches the failure modes Phase 1+
+ * deliberately silenced with the "friendly-to-typos" parser posture:
+ *
+ *   - HU_LLAMACPP_KV_QUANT set to a value the parser doesn't recognize
+ *     (silently falls back to FP16 — operator wasted a bench-day)
+ *   - HU_LLAMACPP_DRAFT_MODEL points to a path that doesn't exist on
+ *     disk (spec decode silently disabled at provider creation)
+ *   - HU_LLAMACPP_DRAFT_MIN_P or HU_LLAMACPP_DRAFT_MAX_TOKENS out of
+ *     the validated range — factory silently uses 0 (upstream default)
+ *   - HU_LLAMACPP_FLASH_ATTN set to something neither off-token nor a
+ *     recognized "keep default" token — suggests operator confusion
+ *
+ * Reads getenv directly, matching src/providers/factory.c's source of
+ * truth so the doctor reports what the daemon would actually apply
+ * (not what some struct field thinks). Emits HU_DIAG_OK lines when the
+ * config is sane so operators get positive confirmation, not just
+ * silence-on-success. */
+hu_error_t hu_doctor_check_inference(hu_allocator_t *alloc, hu_diag_item_t **items, size_t *count,
+                                     size_t *cap);
+
 /* US-9.4 install-readiness gate. One predicate, four sub-checks, each
  * reading PRIMARY EVIDENCE on the live filesystem (not a cached flag):
  *

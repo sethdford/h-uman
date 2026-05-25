@@ -3614,6 +3614,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_chat_metal.c
     tests/test_llamacpp_best_of_n.c
     tests/test_doctor_best_of_n_warning.c
+    tests/test_doctor_inference.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c

@@ -651,6 +651,7 @@ void run_llamacpp_lora_hotswap_tests(void);
 void run_llamacpp_chat_metal_tests(void);
 void run_llamacpp_best_of_n_tests(void);
 void run_doctor_best_of_n_warning_tests(void);
+void run_doctor_inference_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -1436,6 +1437,7 @@ int main(int argc, char **argv) {
     run_llamacpp_chat_metal_tests();
     run_llamacpp_best_of_n_tests();
     run_doctor_best_of_n_warning_tests();
+    run_doctor_inference_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();
