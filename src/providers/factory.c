@@ -29,7 +29,27 @@
 #include "human/providers/openai.h"
 #include "human/providers/openai_codex.h"
 #include "human/providers/openrouter.h"
+#include <stdlib.h>
 #include <string.h>
+
+/* Phase 1b (Gemma throughput program) — env-var bridge for KV quant.
+ *
+ * Operators flip Q8 KV without a rebuild by setting
+ * HU_LLAMACPP_KV_QUANT=q8_0 (or q4_0 / fp16) in the daemon's env. The
+ * factory reads it once per provider creation and threads the parsed
+ * value into hu_llamacpp_config_t.kv_quant. Unrecognized values fall
+ * back to FP16 with no warning here — the parse function is the
+ * authoritative truth and the operator's typo gets ignored silently
+ * rather than emitting per-creation log spam. A future doctor check
+ * is the right place to elevate the unrecognized-value signal. */
+static void factory_apply_kv_quant_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    const char *env = getenv("HU_LLAMACPP_KV_QUANT");
+    if (!env || !*env)
+        return; /* leave default (FP16 from zero-init) */
+    lc->kv_quant = hu_kv_quant_from_string(env, NULL);
+}
 
 static const struct {
     const char *name;
@@ -242,6 +262,7 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
                 return HU_ERR_OUT_OF_MEMORY;
             lc.model_path = path;
         }
+        factory_apply_kv_quant_env(&lc);
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
@@ -348,26 +369,26 @@ void hu_llamacpp_factory_reset_for_test(void) {
 }
 #endif
 
-hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc,
-                                         const hu_provider_entry_t *entry,
+hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc, const hu_provider_entry_t *entry,
                                          hu_provider_t *out) {
     if (!alloc || !entry || !entry->name || !out)
         return HU_ERR_INVALID_ARGUMENT;
     size_t name_len = strlen(entry->name);
-    bool is_llamacpp =
-        (name_len == 8 && memcmp(entry->name, "llamacpp", 8) == 0) ||
-        (name_len == 9 && memcmp(entry->name, "llama.cpp", 9) == 0);
+    bool is_llamacpp = (name_len == 8 && memcmp(entry->name, "llamacpp", 8) == 0) ||
+                       (name_len == 9 && memcmp(entry->name, "llama.cpp", 9) == 0);
     if (is_llamacpp) {
         hu_llamacpp_config_t lc = {0};
         if (entry->base_url && entry->base_url[0]) {
             char *path = hu_strdup(alloc, entry->base_url);
-            if (!path) return HU_ERR_OUT_OF_MEMORY;
+            if (!path)
+                return HU_ERR_OUT_OF_MEMORY;
             lc.model_path = path;
         }
         lc.context_size = entry->context_size;
-        lc.threads      = entry->threads;
-        lc.use_gpu      = entry->use_gpu;
+        lc.threads = entry->threads;
+        lc.use_gpu = entry->use_gpu;
         lc.n_gpu_layers = entry->n_gpu_layers;
+        factory_apply_kv_quant_env(&lc);
 #ifdef HU_IS_TEST
         hu_llamacpp_factory_capture_for_test(&lc);
 #endif
@@ -377,10 +398,7 @@ hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc,
         return r;
     }
     /* Non-llamacpp: defer to the legacy by-name path. */
-    return hu_provider_create(alloc, entry->name, name_len,
-                              entry->api_key,
-                              entry->api_key ? strlen(entry->api_key) : 0,
-                              entry->base_url,
-                              entry->base_url ? strlen(entry->base_url) : 0,
-                              out);
+    return hu_provider_create(alloc, entry->name, name_len, entry->api_key,
+                              entry->api_key ? strlen(entry->api_key) : 0, entry->base_url,
+                              entry->base_url ? strlen(entry->base_url) : 0, out);
 }

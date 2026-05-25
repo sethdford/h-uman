@@ -30,11 +30,11 @@ static void test_factory_forwards_full_llamacpp_config(void) {
 
     hu_allocator_t a = alloc();
     hu_provider_entry_t entry = {
-        .name         = (char *)"llamacpp",
-        .base_url     = (char *)"/tmp/some-model.gguf",
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/some-model.gguf",
         .context_size = 8192,
-        .threads      = 6,
-        .use_gpu      = true,
+        .threads = 6,
+        .use_gpu = true,
         .n_gpu_layers = 99,
     };
     hu_provider_t prov = {0};
@@ -64,8 +64,8 @@ static void test_factory_llamacpp_dotted_alias(void) {
 
     hu_allocator_t a = alloc();
     hu_provider_entry_t entry = {
-        .name         = (char *)"llama.cpp",
-        .base_url     = (char *)"/tmp/dotted.gguf",
+        .name = (char *)"llama.cpp",
+        .base_url = (char *)"/tmp/dotted.gguf",
         .context_size = 4096,
     };
     hu_provider_t prov = {0};
@@ -91,7 +91,7 @@ static void test_factory_zero_fields_pass_through(void) {
 
     hu_allocator_t a = alloc();
     hu_provider_entry_t entry = {
-        .name     = (char *)"llamacpp",
+        .name = (char *)"llamacpp",
         .base_url = (char *)"/tmp/defaults.gguf",
     };
     hu_provider_t prov = {0};
@@ -117,7 +117,7 @@ static void test_factory_non_llamacpp_skips_capture(void) {
 
     hu_allocator_t a = alloc();
     hu_provider_entry_t entry = {
-        .name     = (char *)"ollama",
+        .name = (char *)"ollama",
         .base_url = (char *)"http://localhost:11434",
     };
     hu_provider_t prov = {0};
@@ -132,7 +132,7 @@ static void test_factory_non_llamacpp_skips_capture(void) {
 
 static void test_factory_rejects_null_args(void) {
     hu_allocator_t a = alloc();
-    hu_provider_entry_t entry = { .name = (char *)"llamacpp" };
+    hu_provider_entry_t entry = {.name = (char *)"llamacpp"};
     hu_provider_t prov = {0};
 
     HU_ASSERT_EQ(hu_provider_create_from_entry(NULL, &entry, &prov), HU_ERR_INVALID_ARGUMENT);
@@ -143,10 +143,141 @@ static void test_factory_rejects_null_args(void) {
     HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &no_name, &prov), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* Phase 1b — HU_LLAMACPP_KV_QUANT env-var bridge contract.
+ *
+ * The factory reads HU_LLAMACPP_KV_QUANT once per provider creation
+ * and threads the parsed value into hu_llamacpp_config_t.kv_quant.
+ * Default (env unset) preserves FP16; valid values set Q8_0 / Q4_0;
+ * unrecognized values silently fall back to FP16 (parse function
+ * absorbs the typo — operator gets recognized=false signal at the
+ * parse layer, not here at the factory). */
+
+static void test_factory_kv_quant_env_unset_defaults_to_fp16(void) {
+    hu_llamacpp_factory_reset_for_test();
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/no-env.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)captured->kv_quant, (int)HU_KV_QUANT_FP16);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_kv_quant_env_q8_0_sets_quant(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_KV_QUANT", "q8_0", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/q8.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)captured->kv_quant, (int)HU_KV_QUANT_Q8_0);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_kv_quant_env_q4_0_sets_quant(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_KV_QUANT", "q4_0", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/q4.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)captured->kv_quant, (int)HU_KV_QUANT_Q4_0);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_kv_quant_env_unrecognized_falls_back_to_fp16(void) {
+    /* Adversarial: typo in env value must not silently quantize. The
+     * parse function returns FP16 + recognized=false for unknown input
+     * (pinned by test_llamacpp_kv_quant); the factory inherits that
+     * behavior. */
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_KV_QUANT", "q3_0", 1); /* not a supported variant */
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/typo.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)captured->kv_quant, (int)HU_KV_QUANT_FP16);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_kv_quant_env_empty_string_treated_as_unset(void) {
+    /* Empty HU_LLAMACPP_KV_QUANT="" must NOT be interpreted as Q8 or
+     * Q4 — it's the same as unset. Pinned because the parse function
+     * returns FP16 + recognized=false for empty input, and the factory
+     * must respect "unset means leave default" semantics. */
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_KV_QUANT", "", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/empty.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_EQ((int)captured->kv_quant, (int)HU_KV_QUANT_FP16);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_llamacpp_factory_reset_for_test();
+}
+
 void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_forwards_full_llamacpp_config);
     HU_RUN_TEST(test_factory_llamacpp_dotted_alias);
     HU_RUN_TEST(test_factory_zero_fields_pass_through);
     HU_RUN_TEST(test_factory_non_llamacpp_skips_capture);
     HU_RUN_TEST(test_factory_rejects_null_args);
+    HU_RUN_TEST(test_factory_kv_quant_env_unset_defaults_to_fp16);
+    HU_RUN_TEST(test_factory_kv_quant_env_q8_0_sets_quant);
+    HU_RUN_TEST(test_factory_kv_quant_env_q4_0_sets_quant);
+    HU_RUN_TEST(test_factory_kv_quant_env_unrecognized_falls_back_to_fp16);
+    HU_RUN_TEST(test_factory_kv_quant_env_empty_string_treated_as_unset);
 }
