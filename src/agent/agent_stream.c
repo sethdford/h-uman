@@ -318,6 +318,42 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                       agent->provider.vtable->supports_streaming(agent->provider.ctx) &&
                       agent->provider.vtable->stream_chat;
 
+    /* WORKAROUND (2026-05-25): The Gemini streaming path silently returns
+     * empty content. Verified empirically: Vertex's :streamGenerateContent
+     * endpoint DOES return proper TEXT chunks ("Hey!", " What's up?") for
+     * the same prompt that h-uman's gemini_stream_chat → SSE parser gives
+     * back response_len=0. The bug is between hu_http_post_json_stream and
+     * gemini_process_sse_json (chunks aren't being piped or aren't being
+     * parsed). The non-streaming path through gemini_chat works fine
+     * (proven via the classifier, director, and judge calls).
+     *
+     * Until that streaming pipeline is debugged, force non-stream for Gemini
+     * so reactive replies actually deliver. iMessage has no token-by-token UX
+     * (AX types the whole reply after agent_turn returns), so no regression.
+     *
+     * Fix tracked at: docs/plans/2026-05-24-reactive-imessage-recovery/
+     * Search for "TODO(gemini-stream-bypass)" to find this site later. */
+    if (can_stream && agent->provider.vtable->get_name) {
+        const char *pname = agent->provider.vtable->get_name(agent->provider.ctx);
+        if (pname && strcmp(pname, "gemini") == 0) {
+            can_stream = false; /* TODO(gemini-stream-bypass): fix SSE pipeline */
+        }
+        /* WORKAROUND (2026-05-25, extension): The "compatible" provider
+         * (used for MLX local serving Gemma 4) streams raw `<|channel>thought`
+         * markers as visible text chunks, which the daemon accumulates and
+         * returns as the response. mlx-server.py's strip_thought_channels
+         * postprocessor only runs in the NON-streaming path. Bypass streaming
+         * for compatible so the postprocessor (now patched to handle the
+         * markdown-bullet thinking pattern) actually fires.
+         *
+         * Risk: any other "compatible" service (OpenRouter, etc.) loses
+         * streaming UX. iMessage doesn't have token-by-token UX anyway, so
+         * for the daemon's primary use-case this is neutral. */
+        if (pname && strcmp(pname, "compatible") == 0) {
+            can_stream = false; /* TODO(compatible-stream-bypass): per-service whitelist */
+        }
+    }
+
     if (getenv("HU_DEBUG"))
         hu_log_info("agent_stream", NULL, "stream_v2: can_stream=%d msg_len=%zu", can_stream,
                     msg_len);
