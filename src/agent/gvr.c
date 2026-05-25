@@ -1,4 +1,6 @@
 #include "human/agent/gvr.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -209,6 +211,11 @@ hu_error_t hu_gvr_pipeline(hu_allocator_t *alloc, hu_provider_t *provider,
     memset(out, 0, sizeof(*out));
 
     if (!config || !config->enabled) {
+        static atomic_bool warned_gvr_disabled = false;
+        hu_log_info_once(&warned_gvr_disabled, "gvr", NULL,
+                         "GVR (generator-verifier-revision) disabled — "
+                         "set gvr.enabled=true in config.json to enable "
+                         "response verification");
         out->final_verdict = HU_GVR_PASS;
         out->revisions_performed = 0;
         out->final_content = gvr_dup(alloc, initial_response, initial_response_len);

@@ -4143,12 +4143,32 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
-                /* Autoresearch ML training — run experiment loop every 12 hours */
+                /* Autoresearch ML training — run experiment loop every 12 hours.
+                 *
+                 * BUGFIX 2026-05-25: First-tick trigger blocked the daemon's
+                 * main service loop for up to 25 minutes (5 iter × 300s budget),
+                 * preventing the iMessage channel dispatcher at line ~4790 from
+                 * ever running. The DISPATCH-DIAG investigation in
+                 * docs/plans/2026-05-24-reactive-imessage-recovery/ confirmed
+                 * the service-loop iteration never reached the channel dispatch
+                 * because this synchronous ML block held it.
+                 *
+                 * Workaround: initialize last_ml_train to current time on first
+                 * visit so the FIRST run is deferred by 12h. The next session
+                 * should move this whole block to a background scheduler job
+                 * (kind=ML, budget=...) so a long synchronous step never blocks
+                 * the channel poll dispatcher again.
+                 *
+                 * Note: HU_ENABLE_ML is opt-in already; this block only compiles
+                 * when both HU_ENABLE_SQLITE and HU_ENABLE_ML are on. */
                 {
                     static int64_t last_ml_train = 0;
                     int64_t ml_interval = 12 * 3600;
-                    if (agent && agent->memory &&
-                        (last_ml_train == 0 || ((int64_t)t - last_ml_train) >= ml_interval)) {
+                    if (last_ml_train == 0) {
+                        last_ml_train = (int64_t)t;
+                        /* Skip first run; resume normal 12h cadence afterward. */
+                    } else if (agent && agent->memory &&
+                               ((int64_t)t - last_ml_train) >= ml_interval) {
                         sqlite3 *ml_db = hu_sqlite_memory_get_db(agent->memory);
                         if (ml_db) {
                             /* Prepare training data from conversations */
@@ -4200,12 +4220,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif /* HU_ENABLE_ML */
 #ifdef HU_ENABLE_SQLITE
-                /* DPO consolidation — train on preference pairs every 24 hours */
+                /* DPO consolidation — train on preference pairs every 24 hours.
+                 *
+                 * BUGFIX 2026-05-25: Same first-tick blocking issue as the ML
+                 * experiment loop above — judge_step makes 64 LLM scoring
+                 * calls (32 pairs × 2 each) for ~5 min synchronous blocking.
+                 * That prevented the iMessage channel dispatcher from running.
+                 * Defer first run by initializing last_dpo_train to current
+                 * time. Subsequent runs follow the 24-hour cadence. */
                 {
                     static int64_t last_dpo_train = 0;
                     int64_t dpo_interval = 24 * 3600;
-                    if (agent && agent->memory && agent->sota.sota_initialized &&
-                        (last_dpo_train == 0 || ((int64_t)t - last_dpo_train) >= dpo_interval)) {
+                    if (last_dpo_train == 0) {
+                        last_dpo_train = (int64_t)t;
+                        /* Skip first run; resume normal 24h cadence afterward. */
+                    } else if (agent && agent->memory && agent->sota.sota_initialized &&
+                               ((int64_t)t - last_dpo_train) >= dpo_interval) {
                         sqlite3 *dpo_db = hu_sqlite_memory_get_db(agent->memory);
                         if (dpo_db) {
                             last_dpo_train = (int64_t)t;
@@ -4756,6 +4786,34 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         struct timespec ts_now;
         clock_gettime(CLOCK_MONOTONIC, &ts_now);
         int64_t tick_now = (int64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+
+        /* DISPATCH-DIAG (HU_DEBUG-gated, once per ~60 ticks): emits the channel
+         * dispatcher's view of channels[]. Originally added 2026-05-25 with an
+         * unconditional probe to discriminate "code not reachable" vs
+         * "env-var gate broken" — confirmed the loop was reachable but blocked
+         * upstream by the synchronous ML/DPO trainers (now deferred). Kept
+         * HU_DEBUG-gated as a permanent diagnostic for future dispatcher
+         * regressions. */
+        if (getenv("HU_DEBUG")) {
+            static int _disp_diag_counter = 0;
+            if ((_disp_diag_counter++ % 60) == 0) {
+                hu_log_info("daemon", NULL, "DISPATCH-DIAG channel_count=%zu tick=%d",
+                            channel_count, _disp_diag_counter);
+                for (size_t _di = 0; _di < channel_count; _di++) {
+                    const char *_cn =
+                        (channels[_di].channel && channels[_di].channel->vtable &&
+                         channels[_di].channel->vtable->name)
+                            ? channels[_di].channel->vtable->name(channels[_di].channel->ctx)
+                            : "?";
+                    hu_log_info("daemon", NULL,
+                                "DISPATCH-DIAG ch[%zu] name=%s poll_fn=%p ctx=%p "
+                                "last_poll_ms=%lld interval_ms=%u",
+                                _di, _cn, (void *)(uintptr_t)channels[_di].poll_fn,
+                                channels[_di].channel_ctx, (long long)channels[_di].last_poll_ms,
+                                channels[_di].interval_ms);
+                }
+            }
+        }
 
         for (size_t i = 0; i < channel_count; i++) {
             hu_service_channel_t *ch = &channels[i];

@@ -1,4 +1,6 @@
 #include "human/agent/data_quality.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -54,6 +56,13 @@ hu_error_t hu_dq_check(const hu_dq_config_t *config, const hu_dq_fragment_t *fra
     memset(out, 0, sizeof(*out));
 
     if (!config || !config->enabled || !fragments || fragment_count == 0) {
+        if (config && !config->enabled) {
+            static atomic_bool warned_data_quality_disabled = false;
+            hu_log_info_once(&warned_data_quality_disabled, "data_quality", NULL,
+                             "data quality checks disabled — set "
+                             "data_quality.enabled=true in config.json to enable "
+                             "fragment validation (currently default-pass)");
+        }
         out->passed = true;
         out->fragments_checked = fragment_count;
         out->fragments_passed = fragment_count;

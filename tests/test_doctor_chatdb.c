@@ -25,7 +25,14 @@ static void test_chatdb_missing_returns_fail_with_missing_reason(void) {
     }
 
     /* Set HOME to the temporary directory */
+    /* NOTE: save a copy of old_home, not the pointer, to avoid UAF when setenv
+     * reallocates environ. On macOS, consecutive setenv calls can trigger
+     * heap-use-after-free in libc's __setenv_locked if the pointer is not copied. */
+    char old_home_copy[256] = {0};
     const char *old_home = getenv("HOME");
+    if (old_home) {
+        snprintf(old_home_copy, sizeof(old_home_copy), "%s", old_home);
+    }
     if (setenv("HOME", temp_home, 1) != 0) {
         HU_ASSERT(0); /* setenv failed */
     }
@@ -50,8 +57,8 @@ static void test_chatdb_missing_returns_fail_with_missing_reason(void) {
     HU_ASSERT(strstr(result.reason, "missing") != NULL);
 
     /* Cleanup: restore HOME and remove temp directory */
-    if (old_home) {
-        setenv("HOME", old_home, 1);
+    if (old_home_copy[0]) {
+        setenv("HOME", old_home_copy, 1);
     } else {
         unsetenv("HOME");
     }
@@ -72,12 +79,27 @@ static void test_chatdb_permission_denied_returns_fail_with_fda_link(void) {
     }
 
     /* Set HOME to the temporary directory */
+    /* NOTE: save a copy of old_home, not the pointer, to avoid UAF when setenv
+     * reallocates environ. On macOS, consecutive setenv calls can trigger
+     * heap-use-after-free in libc's __setenv_locked if the pointer is not copied. */
+    char old_home_copy[256] = {0};
     const char *old_home = getenv("HOME");
+    if (old_home) {
+        snprintf(old_home_copy, sizeof(old_home_copy), "%s", old_home);
+    }
     if (setenv("HOME", temp_home, 1) != 0) {
         HU_ASSERT(0); /* setenv failed */
     }
 
     /* Create the Library/Messages directory */
+    /* mkdir requires parents to exist — create $HOME/Library first, then
+     * $HOME/Library/Messages. Without the intermediate mkdir, the fopen
+     * below silently fails (parent dir missing), the check returns ENOENT
+     * "missing" instead of EACCES, and the FDA-guidance assertion below
+     * fails with a misleading message about "System Settings". */
+    char lib_parent[512];
+    snprintf(lib_parent, sizeof(lib_parent), "%s/Library", temp_home);
+    mkdir(lib_parent, 0755);
     char lib_path[512];
     snprintf(lib_path, sizeof(lib_path), "%s/Library/Messages", temp_home);
     mkdir(lib_path, 0755);
@@ -104,8 +126,8 @@ static void test_chatdb_permission_denied_returns_fail_with_fda_link(void) {
     HU_ASSERT(strstr(result.reason, "x-apple.systempreferences") != NULL);
 
     /* Cleanup: restore HOME and permissions, then remove temp directory */
-    if (old_home) {
-        setenv("HOME", old_home, 1);
+    if (old_home_copy[0]) {
+        setenv("HOME", old_home_copy, 1);
     } else {
         unsetenv("HOME");
     }

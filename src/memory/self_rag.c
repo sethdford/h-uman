@@ -1,4 +1,6 @@
 #include "human/memory/self_rag.h"
+#include "human/core/log.h"
+#include <stdatomic.h>
 #include <string.h>
 
 hu_srag_config_t hu_srag_config_default(void) {
@@ -65,9 +67,8 @@ static bool is_greeting(const char *query, size_t query_len) {
 }
 
 hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t *config,
-                                   const char *query, size_t query_len,
-                                   const char *history, size_t history_len,
-                                   hu_srag_assessment_t *out) {
+                                   const char *query, size_t query_len, const char *history,
+                                   size_t history_len, hu_srag_assessment_t *out) {
     (void)alloc;
     (void)history;
     (void)history_len;
@@ -77,6 +78,11 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
     memset(out, 0, sizeof(*out));
 
     if (!config || !config->enabled) {
+        static atomic_bool warned_self_rag_disabled = false;
+        hu_log_info_once(&warned_self_rag_disabled, "self_rag", NULL,
+                         "self-RAG disabled — set self_rag.enabled=true in "
+                         "config.json to enable adaptive retrieval decisions "
+                         "(defaulting to always-retrieve at confidence 0.5)");
         out->decision = HU_SRAG_RETRIEVE;
         out->confidence = 0.5;
         return HU_OK;
@@ -94,7 +100,8 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
         return HU_OK;
     }
 
-    static const char *creative[] = {"write ", "generate ", "brainstorm ", "imagine ", "create a ", "compose "};
+    static const char *creative[] = {"write ",   "generate ", "brainstorm ",
+                                     "imagine ", "create a ", "compose "};
     for (size_t i = 0; i < sizeof(creative) / sizeof(creative[0]); i++) {
         if (srag_starts_with_ci(query, query_len, creative[i])) {
             out->decision = HU_SRAG_NO_RETRIEVAL;
@@ -104,7 +111,8 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
         }
     }
 
-    static const char *personal[] = {"my ", "I ", "remember when", "you told me", "we discussed", "my name"};
+    static const char *personal[] = {"my ",         "I ",           "remember when",
+                                     "you told me", "we discussed", "my name"};
     for (size_t i = 0; i < sizeof(personal) / sizeof(personal[0]); i++) {
         if (srag_contains_ci(query, query_len, personal[i])) {
             out->decision = HU_SRAG_RETRIEVE;
@@ -124,8 +132,8 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
         }
     }
 
-    static const char *factual[] = {"what ", "who ", "when ", "where ", "how does",
-                                     "how many", "how much", "explain", "define"};
+    static const char *factual[] = {"what ",    "who ",     "when ",   "where ", "how does",
+                                    "how many", "how much", "explain", "define"};
     for (size_t i = 0; i < sizeof(factual) / sizeof(factual[0]); i++) {
         if (srag_starts_with_ci(query, query_len, factual[i])) {
             out->decision = HU_SRAG_RETRIEVE_AND_VERIFY;
@@ -141,9 +149,9 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
 }
 
 hu_error_t hu_srag_verify_relevance(hu_allocator_t *alloc, const hu_srag_config_t *config,
-                                    const char *query, size_t query_len,
-                                    const char *retrieved, size_t retrieved_len,
-                                    double *relevance_score, bool *should_use) {
+                                    const char *query, size_t query_len, const char *retrieved,
+                                    size_t retrieved_len, double *relevance_score,
+                                    bool *should_use) {
     (void)alloc;
     (void)config;
 

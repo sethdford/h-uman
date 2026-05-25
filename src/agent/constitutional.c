@@ -4,9 +4,11 @@
  */
 
 #include "human/agent/constitutional.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,11 +100,15 @@ static CONST_UNUSED int scan_capped_int(const char **pp, const char *end) {
     const char *p = *pp;
     while (p < end && (isspace((unsigned char)*p) || *p == '#' || *p == ':'))
         p++;
-    if (p >= end || *p < '0' || *p > '9') return -1;
+    if (p >= end || *p < '0' || *p > '9')
+        return -1;
     int idx = 0;
     while (p < end && *p >= '0' && *p <= '9') {
         idx = idx * 10 + (int)(*p - '0');
-        if (idx > 999) { idx = 999; break; }
+        if (idx > 999) {
+            idx = 999;
+            break;
+        }
         p++;
     }
     *pp = p;
@@ -125,7 +131,8 @@ static CONST_UNUSED int parse_principle_index(const char *resp, size_t resp_len)
             (p[8] == 'e' || p[8] == 'E')) {
             const char *after = p + 9;
             int idx = scan_capped_int(&after, end);
-            if (idx >= 0) return idx;
+            if (idx >= 0)
+                return idx;
         }
         p++;
     }
@@ -139,7 +146,8 @@ static CONST_UNUSED int parse_principle_index(const char *resp, size_t resp_len)
     {
         const char *fp = p;
         int idx = scan_capped_int(&fp, end);
-        if (idx >= 0) return idx;
+        if (idx >= 0)
+            return idx;
     }
     return -1;
 }
@@ -155,6 +163,13 @@ hu_error_t hu_constitutional_critique(hu_allocator_t *alloc, hu_provider_t *prov
     result->principle_index = -1;
 
     if (!config || !config->enabled || config->principle_count == 0) {
+        if (config && !config->enabled) {
+            static atomic_bool warned_constitutional_disabled = false;
+            hu_log_info_once(&warned_constitutional_disabled, "constitutional", NULL,
+                             "constitutional AI critique disabled — "
+                             "set constitutional.enabled=true in config.json "
+                             "and define principles to enable self-critique");
+        }
         result->verdict = HU_CRITIQUE_PASS;
         return HU_OK;
     }
@@ -330,22 +345,28 @@ hu_constitutional_config_t hu_constitutional_config_persona(void) {
     cfg.enabled = true;
     cfg.rewrite_enabled = true;
     cfg.principle_count = 6;
-    cfg.principles[0].name = "no_ai_tells"; cfg.principles[0].name_len = 11;
+    cfg.principles[0].name = "no_ai_tells";
+    cfg.principles[0].name_len = 11;
     cfg.principles[0].description = "No phrases revealing AI authorship.";
     cfg.principles[0].description_len = 35;
-    cfg.principles[1].name = "style_match"; cfg.principles[1].name_len = 11;
+    cfg.principles[1].name = "style_match";
+    cfg.principles[1].name_len = 11;
     cfg.principles[1].description = "Match persona texting style.";
     cfg.principles[1].description_len = 28;
-    cfg.principles[2].name = "energy_match"; cfg.principles[2].name_len = 12;
+    cfg.principles[2].name = "energy_match";
+    cfg.principles[2].name_len = 12;
     cfg.principles[2].description = "Tone must match context energy.";
     cfg.principles[2].description_len = 31;
-    cfg.principles[3].name = "genuine_warmth"; cfg.principles[3].name_len = 14;
+    cfg.principles[3].name = "genuine_warmth";
+    cfg.principles[3].name_len = 14;
     cfg.principles[3].description = "Show genuine warmth, not performative empathy.";
     cfg.principles[3].description_len = 46;
-    cfg.principles[4].name = "no_formatting"; cfg.principles[4].name_len = 13;
+    cfg.principles[4].name = "no_formatting";
+    cfg.principles[4].name_len = 13;
     cfg.principles[4].description = "Never use markdown in casual texting.";
     cfg.principles[4].description_len = 37;
-    cfg.principles[5].name = "identity_lock"; cfg.principles[5].name_len = 13;
+    cfg.principles[5].name = "identity_lock";
+    cfg.principles[5].name_len = 13;
     cfg.principles[5].description = "Never break character or acknowledge being AI.";
     cfg.principles[5].description_len = 46;
     return cfg;

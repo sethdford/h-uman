@@ -5120,6 +5120,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
              * (US-7.8, when enabled) fires BEFORE this decorator: the router
              * picks the adapter, then best-of-N samples N completions against
              * it. Single chat-dispatch site. */
+            /* US-7.7 cold-start instrumentation (audit 2026-05-25): when
+             * inference.best_of_n is configured (>=2) but the persona has
+             * zero style samples, the gate below silently skips best-of-N
+             * (every candidate would score -1.0). Operators setting
+             * `inference.best_of_n: 4` and never seeing it fire have no
+             * signal that style.sample_count is the cause. Emit one
+             * process-lifetime log so the cold-start gate is discoverable. */
+            if (agent->config && agent->config->inference.best_of_n >= 2 &&
+                agent->personal_model.style.sample_count == 0) {
+                static atomic_bool warned_best_of_n_cold_start = false;
+                hu_log_info_once(&warned_best_of_n_cold_start, "agent", agent->observer,
+                                 "best_of_n configured (inference.best_of_n=%d) but skipped — "
+                                 "persona has 0 style examples; will activate once style "
+                                 "samples accumulate via memory/personal_model ingest",
+                                 agent->config->inference.best_of_n);
+            }
             bool best_of_n_eligible = false;
             if (agent->config && agent->config->inference.best_of_n >= 2 &&
                 agent->provider.vtable && agent->provider.vtable->chat &&
