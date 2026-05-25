@@ -105,6 +105,25 @@ int hu_eval_rubric_formality_match(const char *incoming, const char *reply_basel
 uint64_t hu_eval_rubric_hash_for_blind_order(const char *response_a, const char *response_b,
                                              uint32_t seed);
 
+/* JSON output serializer for per-contact eval results.
+ *
+ * Serializes a list of contact scores into JSON format for AC-1.5 output.
+ * Produces: { "results": [ { "contact": "alice", "score": 7.5 }, ... ] }
+ *
+ * Args:
+ *   contacts    — array of contact handle strings (NULL-terminated)
+ *   scores      — array of corresponding scores (0.0-10.0)
+ *   count       — number of contacts/scores
+ *   buf         — output buffer (caller-allocated)
+ *   buflen      — size of output buffer
+ *
+ * Returns:
+ *   Number of characters written (not including NUL terminator), or negative
+ *   on error (e.g., buffer too small). Check result >= 0 and result < buflen.
+ */
+int hu_eval_rubric_json_per_contact(const char **contacts, const double *scores, int count,
+                                    char *buf, int buflen);
+
 #ifdef __cplusplus
 }
 #endif

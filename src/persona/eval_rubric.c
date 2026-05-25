@@ -294,3 +294,57 @@ uint64_t hu_eval_rubric_hash_for_blind_order(const char *response_a, const char 
     free(buf);
     return hash;
 }
+
+/* ── JSON per-contact output ───────────────────────────────────────── */
+
+int hu_eval_rubric_json_per_contact(const char **contacts, const double *scores, int count,
+                                    char *buf, int buflen) {
+    if (!buf || buflen < 2 || !contacts || !scores || count < 0)
+        return -1;
+
+    if (count == 0) {
+        if (buflen < 13)
+            return -1; /* Not enough space for "{\"results\":[]}" */
+        snprintf(buf, buflen, "{\"results\":[]}");
+        return 13;
+    }
+
+    /* Build incrementally */
+    int written = 0;
+    int remaining = buflen;
+
+    /* Opening */
+    int n = snprintf(buf + written, remaining, "{\"results\":[");
+    if (n < 0 || n >= remaining)
+        return -1;
+    written += n;
+    remaining -= n;
+
+    /* Per-contact entries */
+    for (int i = 0; i < count; i++) {
+        if (i > 0) {
+            n = snprintf(buf + written, remaining, ",");
+            if (n < 0 || n >= remaining)
+                return -1;
+            written += n;
+            remaining -= n;
+        }
+
+        const char *contact = contacts[i];
+        double score = scores[i];
+        n = snprintf(buf + written, remaining, "{\"contact\":\"%s\",\"score\":%.1f}", contact,
+                     score);
+        if (n < 0 || n >= remaining)
+            return -1;
+        written += n;
+        remaining -= n;
+    }
+
+    /* Closing */
+    n = snprintf(buf + written, remaining, "]}");
+    if (n < 0 || n >= remaining)
+        return -1;
+    written += n;
+
+    return written;
+}
