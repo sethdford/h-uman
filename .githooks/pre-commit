@@ -136,3 +136,19 @@ if [ -x "scripts/check-test-silent-pass.sh" ]; then
         exit 1
     fi
 fi
+
+# Sprint 54 US-C3.9 — Doctor exit-code parity guard. Asserts that the
+# HU_DOCTOR_EXIT_* constants in include/human/doctor.h match the
+# exit-code table in docs/guides/doctor.md. Fires whenever either
+# file is staged.
+staged_doctor_inputs=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'include/human/doctor.h' 'docs/guides/doctor.md')
+if [ -n "$staged_doctor_inputs" ] && [ -x "scripts/check-doctor-exit-codes-in-sync.sh" ]; then
+    if ! bash scripts/check-doctor-exit-codes-in-sync.sh; then
+        echo ""
+        echo "Pre-commit blocked: doctor exit-code drift."
+        echo "include/human/doctor.h constants must match docs/guides/doctor.md."
+        echo "See sprints/sprint-54/designs/US-C3.9.md for the contract."
+        exit 1
+    fi
+fi

@@ -6,6 +6,46 @@
 #include "human/core/error.h"
 #include <stddef.h>
 
+/* Sprint 54 US-C3.9 — Doctor exit-code contract.
+ *
+ * `human doctor` exits with one of these codes. The numeric values are
+ * STABLE (consumed by CI, alerting integrations, and shell scripts).
+ *
+ * - HU_DOCTOR_EXIT_OK (0): every registered check returned PASS or NA.
+ * - HU_DOCTOR_EXIT_USER_ACTION (1): at least one FAIL the user can fix
+ *   (FDA denied, credentials missing, server down, etc.).
+ * - HU_DOCTOR_EXIT_BUG_GRADE (2): at least one FAIL with detail_json
+ *   containing "category":"bug" (binary corrupted, config unparseable,
+ *   internal invariant violation). A developer must investigate.
+ * - HU_DOCTOR_EXIT_CRASH (64): the doctor process itself crashed
+ *   (atexit handler emits this to distinguish "doctor found problems"
+ *   from "doctor itself broke").
+ *
+ * The bug-grade vs user-action discrimination uses each check's
+ * detail_json field: detail_json containing `"category":"bug"` is
+ * bug-grade. All other FAILs default to user-action.
+ *
+ * Docs (`docs/guides/doctor.md`) and the parity script
+ * (`scripts/check-doctor-exit-codes-in-sync.sh`) hold these constants
+ * in lockstep — pre-commit fails if they drift. */
+#define HU_DOCTOR_EXIT_OK          0
+#define HU_DOCTOR_EXIT_USER_ACTION 1
+#define HU_DOCTOR_EXIT_BUG_GRADE   2
+#define HU_DOCTOR_EXIT_CRASH       64
+
+/* Compute the exit code from an array of check results.
+ *
+ * Inspects each result's verdict and (for FAIL) the detail_json field
+ * for the `"category":"bug"` tag. Returns one of the HU_DOCTOR_EXIT_*
+ * constants. Pure; NULL or zero-count input returns OK.
+ *
+ * Phase 1 contract: pure function + docs + parity script. The wire-up
+ * from cmd_doctor()'s exit path lands in Phase 2 alongside the
+ * registry-driven main() rewrite. Until then, the function is testable
+ * and callable but not driving the binary's actual exit code. */
+struct hu_doctor_check_result;
+int hu_doctor_compute_exit_code(const struct hu_doctor_check_result *results, size_t count);
+
 typedef enum hu_diag_severity {
     HU_DIAG_OK,
     HU_DIAG_WARN,
