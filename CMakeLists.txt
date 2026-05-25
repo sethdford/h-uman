@@ -500,6 +500,7 @@ set(HU_CORE_SOURCES
     src/core/string.c
     src/core/io_secure.c
     src/core/json.c
+    src/core/time.c
     # Phase 3 of docs/plans/2026-05-18-imessage-sota.md: pure-C bplist00
     # parser. Used by imessage_ingest.c extractors for audio transcripts
     # and edit-chain history. No external deps.
@@ -1100,6 +1101,7 @@ set(HU_CORE_SOURCES
     src/daemon_cron.c
     src/daemon_routing.c
     src/daemon_proactive.c
+    src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
     src/webhook.c
@@ -1299,6 +1301,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/cli.c
     src/persona/feedback.c
     src/persona/eval.c
+    src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
     src/follow_up.c
@@ -2999,8 +3002,10 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_per_contact.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
+    tests/test_autoresponder_eval.c
     tests/test_contact_narrative.c
     tests/test_causal_attribution.c
     tests/test_identity_continuity.c
@@ -3103,6 +3108,7 @@ set(HU_TEST_SOURCES
     tests/test_subsystems.c
     tests/test_onboard_state.c
     tests/test_onboard_nextstep.c
+    tests/test_onboard_aloop.c
     tests/test_daemon_cron.c
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
@@ -3175,6 +3181,8 @@ set(HU_TEST_SOURCES
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
     tests/test_follow_up.c
+    tests/test_follow_up_daemon_integration.c
+    tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
@@ -3474,6 +3482,7 @@ list(APPEND HU_TEST_SOURCES tests/test_integration.c)
 list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_dispatch_hooks.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
+list(APPEND HU_TEST_SOURCES tests/test_config_gated_subsystems.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
 # Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers.
 list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)

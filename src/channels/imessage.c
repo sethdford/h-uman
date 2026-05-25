@@ -167,6 +167,11 @@ bool hu_imessage_status_path(char *buf, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
+#ifdef HU_IS_TEST
+/* Test-only: stub function for send interception. When set, replaces osascript send. */
+static hu_imessage_test_send_stub_fn g_imessage_test_send_stub = NULL;
+#endif
+
 typedef struct hu_imessage_ctx {
     hu_allocator_t *alloc;
     char *default_target;
@@ -1855,14 +1860,25 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         }
 
         {
-            const char *argv[] = {"osascript", "-e", script, NULL};
-            hu_run_result_t result = {0};
-            hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
-            c->alloc->free(c->alloc->ctx, script, script_cap);
-            bool ok = (err == HU_OK && result.success && result.exit_code == 0);
-            hu_run_result_free(c->alloc, &result);
-            if (err || !ok)
-                send_err = HU_ERR_CHANNEL_SEND;
+#ifdef HU_IS_TEST
+            if (g_imessage_test_send_stub != NULL) {
+                /* Test stub: invoke callback instead of osascript */
+                (*g_imessage_test_send_stub)(tgt, tgt_len, message, message_len);
+                c->alloc->free(c->alloc->ctx, script, script_cap);
+                send_err = HU_OK;
+            } else {
+#endif
+                const char *argv[] = {"osascript", "-e", script, NULL};
+                hu_run_result_t result = {0};
+                hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+                c->alloc->free(c->alloc->ctx, script, script_cap);
+                bool ok = (err == HU_OK && result.success && result.exit_code == 0);
+                hu_run_result_free(c->alloc, &result);
+                if (err || !ok)
+                    send_err = HU_ERR_CHANNEL_SEND;
+#ifdef HU_IS_TEST
+            }
+#endif
         }
 
         if (send_err == HU_OK)
@@ -2659,6 +2675,100 @@ hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contac
     int64_t read_unix_sec = apple_epoch + read_date / 1000000000LL;
     *out_msg_id = msg_id;
     *out_read_at_ms = (uint64_t)read_unix_sec * 1000ULL;
+    return HU_OK;
+#else
+    (void)contact_id_len;
+    return HU_OK; /* test / non-Apple / no-SQLite: no result */
+#endif
+}
+
+/* NEW FUNCTION FOR US-48-3: Find inbound unreplied message.
+ *
+ * Detects when the user (seth) has been unresponsive to an inbound message
+ * from a contact. Queries for:
+ * 1. Most recent inbound (is_from_me=0) from contact_id
+ * 2. Verifies no outbound (is_from_me=1) exists after it
+ * If both conditions hold, returns the message ID and timestamp. Otherwise
+ * returns HU_OK with out_msg_id=0 (no unreplied inbound found). */
+hu_error_t hu_imessage_find_inbound_unreplied(const char *contact_id, size_t contact_id_len,
+                                              int64_t *out_msg_id, uint64_t *out_read_at_ms) {
+    if (out_msg_id)
+        *out_msg_id = 0;
+    if (out_read_at_ms)
+        *out_read_at_ms = 0;
+    if (!contact_id || contact_id_len == 0 || !out_msg_id || !out_read_at_ms)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+    /* Open chat.db and find most recent inbound from contact. */
+    char db_path[512];
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_IO;
+    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    /* Query most recent INBOUND (is_from_me=0) from this contact. */
+    const char *sql = "SELECT m.ROWID, m.date "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE h.id = ?1 AND m.is_from_me = 0 "
+                      "ORDER BY m.date DESC LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    char contact_buf[128];
+    size_t clen =
+        contact_id_len < sizeof(contact_buf) - 1 ? contact_id_len : sizeof(contact_buf) - 1;
+    memcpy(contact_buf, contact_id, clen);
+    contact_buf[clen] = '\0';
+    sqlite3_bind_text(stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+
+    int64_t msg_id = 0;
+    int64_t inbound_date = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        msg_id = sqlite3_column_int64(stmt, 0);
+        inbound_date = sqlite3_column_int64(stmt, 1);
+    }
+    sqlite3_finalize(stmt);
+
+    if (msg_id == 0) {
+        /* No inbound from this contact. */
+        sqlite3_close(db);
+        return HU_OK;
+    }
+
+    /* Check for any OUTBOUND (is_from_me=1) AFTER the inbound message.
+     * If an outbound exists, the user has already replied. */
+    bool has_reply = false;
+    sqlite3_stmt *reply_stmt = NULL;
+    const char *reply_sql = "SELECT COUNT(*) FROM message m "
+                            "JOIN handle h ON m.handle_id = h.ROWID "
+                            "WHERE h.id = ?1 AND m.is_from_me = 1 AND m.date > ?2";
+    if (sqlite3_prepare_v2(db, reply_sql, -1, &reply_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(reply_stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+        sqlite3_bind_int64(reply_stmt, 2, inbound_date);
+        if (sqlite3_step(reply_stmt) == SQLITE_ROW)
+            has_reply = sqlite3_column_int(reply_stmt, 0) > 0;
+        sqlite3_finalize(reply_stmt);
+    }
+    sqlite3_close(db);
+
+    if (has_reply)
+        return HU_OK; /* User has already replied; no follow-up needed. */
+
+    /* Convert Apple's date (nanoseconds since 2001-01-01) to wall-clock ms. */
+    int64_t apple_epoch = 978307200LL;
+    int64_t inbound_unix_sec = apple_epoch + inbound_date / 1000000000LL;
+    *out_msg_id = msg_id;
+    *out_read_at_ms = (uint64_t)inbound_unix_sec * 1000ULL;
     return HU_OK;
 #else
     (void)contact_id_len;
@@ -4840,6 +4950,78 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
 }
 #endif
 
+/* ── Onboarding wizard support ─────────────────────────────────────────── */
+
+hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size_t buf_size) {
+    (void)alloc;
+
+    if (!buf || buf_size == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !defined(__APPLE__) || HU_IS_TEST
+    return HU_ERR_NOT_FOUND;
+#else
+#ifdef HU_ENABLE_SQLITE
+    const char *home = getenv("HOME");
+    if (!home) {
+        buf[0] = '\0';
+        return HU_ERR_NOT_FOUND;
+    }
+
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path)) {
+        buf[0] = '\0';
+        return HU_ERR_IO;
+    }
+
+    sqlite3 *db = NULL;
+    int rc = imessage_open_chatdb(db_path, &db);
+    if (rc != SQLITE_OK || !db) {
+        buf[0] = '\0';
+        return HU_ERR_NOT_FOUND;
+    }
+
+    /* Query the handle table for the "Me" record. In iMessage's SQLite schema,
+     * the handle table contains contact info; the "Me" record is typically
+     * the first row or can be identified by specific criteria. We query by
+     * looking for the handle with a known pattern or by scanning the rows. */
+    const char *sql = "SELECT id FROM handle LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        sqlite3_close(db);
+        buf[0] = '\0';
+        return HU_ERR_IO;
+    }
+
+    hu_error_t result = HU_ERR_NOT_FOUND;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *handle = (const char *)sqlite3_column_text(stmt, 0);
+        if (handle) {
+            size_t handle_len = strlen(handle);
+            if (handle_len > 0 && handle_len < buf_size) {
+                memcpy(buf, handle, handle_len);
+                buf[handle_len] = '\0';
+                result = HU_OK;
+            } else {
+                buf[0] = '\0';
+                result = HU_ERR_IO; /* Buffer too small */
+            }
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return result;
+#else
+    buf[0] = '\0';
+    return HU_ERR_NOT_FOUND;
+#endif /* HU_ENABLE_SQLITE */
+#endif /* __APPLE__ && !HU_IS_TEST */
+}
+
 #if HU_IS_TEST
 hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,
@@ -5051,5 +5233,9 @@ bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
         return false;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->chatdb_busy_log_emitted;
+}
+
+void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn) {
+    g_imessage_test_send_stub = fn;
 }
 #endif

@@ -1,4 +1,5 @@
 #include "human/onboard.h"
+#include "human/channels/imessage.h"
 #include "human/config.h"
 #include "human/core/io_secure.h"
 #include "human/core/string.h"
@@ -602,6 +603,79 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
             printf("  Created %s\n", tmpl_path);
     }
 
+    /* US-48-5: A-loop autoresponder + proactive subsystems configuration. */
+    printf("\n");
+    printf("A-Loop Configuration (Autoresponder + Proactive Messaging)\n");
+    printf("=========================================================\n\n");
+
+    bool autoresponder_enabled = true;
+    bool follow_up_watcher_enabled = true;
+    bool proactive_throttle_enabled = true;
+    char allowlist_input[512] = "";
+    char dnd_window[32] = "22:00-08:00";
+
+    /* Prompt: Enable autoresponder? */
+    printf("Enable autoresponder (reply-while-you're-busy)? [Y/n]: ");
+    fflush(stdout);
+    line = read_line(buf, sizeof(buf));
+    if (line && (line[0] == 'n' || line[0] == 'N'))
+        autoresponder_enabled = false;
+
+    if (autoresponder_enabled) {
+        /* Detect user's own iMessage handle for allowlist. */
+        char detected_handle[256] = "";
+        hu_error_t detect_err =
+            hu_imessage_detect_self_handle(alloc, detected_handle, sizeof(detected_handle));
+
+        if (detect_err == HU_OK && detected_handle[0]) {
+            printf("Detected your iMessage handle: %s\n", detected_handle);
+            printf("Add to autoresponder allowlist? [Y/n]: ");
+            fflush(stdout);
+            line = read_line(buf, sizeof(buf));
+            if (!line || (line[0] != 'n' && line[0] != 'N')) {
+                /* Yes, add detected handle to allowlist. */
+                snprintf(allowlist_input, sizeof(allowlist_input), "%s", detected_handle);
+            }
+        } else {
+            printf("Couldn't auto-detect iMessage handle (Full Disk Access may be required).\n");
+            printf("Enter your iMessage handle manually (e.g., +15551234567 or you@icloud.com), or "
+                   "blank to skip: ");
+            fflush(stdout);
+            line = read_line(buf, sizeof(buf));
+            if (line && line[0])
+                snprintf(allowlist_input, sizeof(allowlist_input), "%s", line);
+        }
+
+        /* Prompt: Additional contacts? */
+        printf("Any other contacts for autoresponder allowlist (comma-separated, or blank): ");
+        fflush(stdout);
+        line = read_line(buf, sizeof(buf));
+        if (line && line[0]) {
+            if (allowlist_input[0]) {
+                strncat(allowlist_input, ",",
+                        sizeof(allowlist_input) - strlen(allowlist_input) - 1);
+            }
+            strncat(allowlist_input, line, sizeof(allowlist_input) - strlen(allowlist_input) - 1);
+        }
+    }
+
+    /* Prompt: Enable follow-up watcher (proactive). */
+    printf("Enable proactive follow-ups (auto-detect when you read but don't reply)? [Y/n]: ");
+    fflush(stdout);
+    line = read_line(buf, sizeof(buf));
+    if (line && (line[0] == 'n' || line[0] == 'N'))
+        follow_up_watcher_enabled = false;
+
+    if (follow_up_watcher_enabled)
+        proactive_throttle_enabled = true;
+
+    /* Prompt: DND window. */
+    printf("Quiet hours window (default 22:00-08:00, HH:MM-HH:MM format, or blank): ");
+    fflush(stdout);
+    line = read_line(buf, sizeof(buf));
+    if (line && line[0])
+        snprintf(dnd_window, sizeof(dnd_window), "%s", line);
+
     /* config.json contains an API key when the user types one in
      * interactively (line 410-412 below). Treat it as a secret so
      * the file is created mode 0600 even when the user hasn't pasted
@@ -622,6 +696,68 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
                 api_key);
     else
         fprintf(f, "  \"providers\": [],\n");
+
+    /* Write A-loop autoresponder configuration. */
+    fprintf(f, "  \"autoresponder\": {\n");
+    fprintf(f, "    \"enabled\": %s", autoresponder_enabled ? "true" : "false");
+
+    if (autoresponder_enabled) {
+        fprintf(f, ",\n");
+        fprintf(f, "    \"allowlist\": [");
+        if (allowlist_input[0]) {
+            /* Parse comma-separated handles and quote each. */
+            const char *start = allowlist_input;
+            const char *comma = NULL;
+            bool first = true;
+            while (*start) {
+                while (*start == ' ')
+                    start++;
+                comma = strchr(start, ',');
+                if (!comma)
+                    comma = start + strlen(start);
+
+                size_t len = comma - start;
+                while (len > 0 && start[len - 1] == ' ')
+                    len--;
+
+                if (len > 0) {
+                    if (!first)
+                        fprintf(f, ",");
+                    fprintf(f, "\"%.*s\"", (int)len, start);
+                    first = false;
+                }
+
+                start = comma;
+                if (*start == ',')
+                    start++;
+            }
+        }
+        fprintf(f, "],\n");
+        fprintf(f, "    \"dnd_schedule\": [\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"start_minute_of_day\": 1320,\n");
+        fprintf(f, "        \"end_minute_of_day\": 480,\n");
+        fprintf(f, "        \"days_of_week_mask\": 127\n");
+        fprintf(f, "      }\n");
+        fprintf(f, "    ]\n");
+    } else {
+        fprintf(f, "\n");
+    }
+
+    fprintf(f, "  },\n");
+
+    /* Write follow-up watcher configuration. */
+    fprintf(f, "  \"follow_up_watcher\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", follow_up_watcher_enabled ? "true" : "false");
+    fprintf(f, "    \"interval_seconds\": 300\n");
+    fprintf(f, "  },\n");
+
+    /* Write proactive throttle configuration. */
+    fprintf(f, "  \"proactive_throttle\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", proactive_throttle_enabled ? "true" : "false");
+    fprintf(f, "    \"per_contact_daily_max\": 1\n");
+    fprintf(f, "  },\n");
+
     fprintf(f, "  \"agent\": {\"persona\": \"default\"},\n");
     fprintf(f, "  \"memory\": {\"backend\": \"sqlite\", \"auto_save\": true},\n");
     fprintf(f, "  \"gateway\": {\"port\": 3000, \"host\": \"127.0.0.1\"}\n");

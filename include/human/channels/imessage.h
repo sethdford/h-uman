@@ -66,6 +66,23 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
 hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contact_id_len,
                                            int64_t *out_msg_id, uint64_t *out_read_at_ms);
 
+/** Find the most recent INBOUND message from `contact_id` that has NO
+ * outbound REPLY from seth since. Sets *out_msg_id to the chat.db ROWID
+ * and *out_read_at_ms to the wall-clock ms of the inbound message; sets
+ * both to 0 when there is no unreplied inbound (user has responded or
+ * no inbound exists).
+ *
+ * Returns HU_OK whether or not a result is found. Returns non-OK only on
+ * I/O / SQL failures.
+ *
+ * This is the inverse of hu_imessage_find_unreplied_read: it detects when
+ * the USER (seth) is being unresponsive to a contact's message, enabling
+ * proactive follow-ups via the daemon follow-up watcher (US-48-3).
+ *
+ * In test mode (HU_IS_TEST) returns HU_OK with no result. */
+hu_error_t hu_imessage_find_inbound_unreplied(const char *contact_id, size_t contact_id_len,
+                                              int64_t *out_msg_id, uint64_t *out_read_at_ms);
+
 /** Count positive tapbacks (love/like/laugh/emphasis) on our GIF messages from this
  * contact in the last 24 hours. Uses direct SQL on chat.db associated_message_type.
  * Returns 0 on non-macOS or when SQLite unavailable. */
@@ -197,6 +214,22 @@ int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch);
 /* Resolve the poll-status JSON path ("$HOME/.human/imessage.poll_status").
  * Writes into buf; returns false if HOME unset or buffer too small. */
 bool hu_imessage_status_path(char *buf, size_t cap);
+
+/** Detect the user's own iMessage handle from ~/Library/Messages/chat.db.
+ *
+ * Reads the Messages.app SQLite database and queries for the "Me" record
+ * (the logged-in user's handle). Returns the handle string (e.g. "+15551234567"
+ * or "user@icloud.com") in buf, or HU_ERR_NOT_FOUND if not available.
+ *
+ * Returns:
+ *   HU_OK — buf filled with NUL-terminated handle (< buf_size)
+ *   HU_ERR_NOT_FOUND — chat.db unreadable or "Me" record missing
+ *   HU_ERR_IO — database I/O error
+ *   HU_ERR_INVALID_ARGUMENT — buf or buf_size invalid
+ *
+ * Non-macOS: returns HU_ERR_NOT_SUPPORTED.
+ * Under HU_IS_TEST: returns HU_ERR_NOT_FOUND (fixture-based testing preferred). */
+hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size_t buf_size);
 
 /* ── Non-allowlisted sender courtesy reply (US-9.3) ─────────────────────
  *
@@ -414,6 +447,13 @@ size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch);
 /** Test hook for Tenor fallback JSON string extraction (`gif_json_extract`). */
 size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
                                          char *out, size_t cap);
+
+/** Test-only: set a callback function pointer that will be invoked instead of osascript send.
+ * Callback receives (target, target_len, message, message_len) and should log the send
+ * attempt to a file or buffer for test assertions. Pass NULL to disable the stub. */
+typedef void (*hu_imessage_test_send_stub_fn)(const char *target, size_t target_len,
+                                              const char *message, size_t message_len);
+void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
 #endif
 
 #endif /* HU_CHANNELS_IMESSAGE_H */

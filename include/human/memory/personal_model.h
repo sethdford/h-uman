@@ -462,7 +462,7 @@ hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *mo
  * Resolution order:
  *   1. `HUMAN_PERSONAL_MODEL_PATH` environment variable (full path, overrides
  *      everything; intended for tests and explicit operator overrides).
- *   2. `$HOME/.human/personal_model.bin`.
+ *   2. `$HOME/.human/models/personal_model.db` (SQLite, per stakeholder decision).
  *
  * Writes the resolved path into `buf` and returns it (NUL-terminated). Returns
  * NULL when neither override nor `HOME` is available, or when the resolved

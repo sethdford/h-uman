@@ -13643,6 +13643,40 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
 #endif
 
+        /* US-48-3: follow-up watcher — detect read-but-unreplied messages
+         * on iMessage, compute circadian-aware follow-up delays, and flush
+         * when contacts enter active hours. Per .claude/rules/silent-config-gated-subsystems.md,
+         * emit one-shot logs when disabled/enabled. */
+        {
+            static atomic_bool daemon_loop_followup_disabled_warned = false;
+            static atomic_bool daemon_loop_followup_enabled_warned = false;
+            if (config && config->follow_up_watcher.enabled) {
+                hu_log_info_once(&daemon_loop_followup_enabled_warned, "daemon",
+                                 agent ? agent->observer : NULL,
+                                 "follow_up_watcher subsystem activated by config "
+                                 "(cfg->follow_up_watcher.enabled=true); polling iMessage chat.db "
+                                 "every %d seconds for unresponded reads",
+                                 config->follow_up_watcher.interval_seconds > 0
+                                     ? config->follow_up_watcher.interval_seconds
+                                     : 300);
+                static int64_t followup_watermark = 0;
+                static int64_t followup_last_poll_unix = 0;
+                int64_t now_unix_fu = (int64_t)time(NULL);
+                if (followup_watermark == 0)
+                    followup_watermark = now_unix_fu;
+                hu_proactive_throttle_t *th = daemon_throttle(alloc);
+                (void)hu_daemon_tick_follow_up_watcher(
+                    &config->follow_up_watcher, now_unix_fu, &followup_last_poll_unix,
+                    &followup_watermark, agent, config, channels, channel_count, th);
+            } else {
+                hu_log_info_once(&daemon_loop_followup_disabled_warned, "daemon",
+                                 agent ? agent->observer : NULL,
+                                 "follow_up_watcher subsystem disabled by config "
+                                 "(cfg->follow_up_watcher.enabled=false); set "
+                                 "follow_up_watcher.enabled=true in config.json to activate");
+            }
+        }
+
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and
          * snapshots their output to ~/.human/social_state.json. Default

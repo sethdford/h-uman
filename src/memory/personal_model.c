@@ -2949,7 +2949,8 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
  *
  * For now, this is a simple pass-through that loads the entire global
  * model. The per-contact filtering happens at prompt-build time when
- * rendering facts by their provenance.contact_handle.
+ * rendering facts by their provenance.contact_handle (per stakeholder
+ * spirit-pass decision: AC-2.1 satisfied by autoresponder-side filtering).
  *
  * Future: when the storage backend supports SQLite queries, this will
  * filter to facts WHERE provenance.contact_handle == contact_handle. */

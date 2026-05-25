@@ -244,6 +244,16 @@ typedef struct hu_reaction_collection_config {
     char chatdb_path[256];
 } hu_reaction_collection_config_t;
 
+typedef struct hu_follow_up_watcher_config {
+    bool enabled;
+    int interval_seconds; /* default 300 (5 min) */
+} hu_follow_up_watcher_config_t;
+
+typedef struct hu_proactive_throttle_config {
+    bool enabled;
+    int per_contact_daily_max; /* default 1 */
+} hu_proactive_throttle_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -680,6 +690,8 @@ typedef struct hu_config {
     hu_plugins_config_t plugins;
     hu_feeds_config_t feeds;
     hu_reaction_collection_config_t reaction_collection;
+    hu_follow_up_watcher_config_t follow_up_watcher;
+    hu_proactive_throttle_config_t proactive_throttle;
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;

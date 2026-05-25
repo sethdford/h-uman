@@ -1,0 +1,47 @@
+{
+  "ts": "20260524T233222Z",
+  "target": "Sprint-48 story US-48-4: Audit + harden silent config-gated subsystems.\n\nWorktree: /Users/sethford/Projects/human-sprint-48-impl-US48-4\nBranch: sprint-48-imessage-aloop-close-impl-US48-4\nBase: sprint-48-imessage-aloop-close\nCommits to review (in order):\n  9d3b82c0 feat(config,daemon): one-shot logging discipline for config-gated subsystems\n  fb202dea test(config): add NULL cfg path test for reaction_collection subsystem\n\nDiff vs base \u2014 see: git diff sprint-48-imessage-aloop-close..sprint-48-imessage-aloop-close-impl-US48-4\n\nFiles touched:\n  CMakeLists.txt                         (+1)\n  src/daemon_reaction_poll.c             (+16/-11) \u2014 log wording change to match rule template + one-shot guards\n  src/config_validate.c                  (audit only, 0 LOC change)\n  tests/test_config_gated_subsystems.c   (+177 new file, 6 tests including NULL cfg path round-2)\n  tests/test_main.c                      (+2 register runner)\n  tests/test_silent_disable_compliance.c (+6 wording-update assertions)\n\nAcceptance criteria (sprints/sprint-48/stories.md, US-48-4 section):\n  AC-4.1: Grep audit finds all `if (!cfg->X.enabled)` patterns\n  AC-4.2: Disabled path emits one-shot 'X subsystem disabled by config (cfg->X.enabled=false); set X.enabled=true in config.json to activate'\n  AC-4.3: Enabled path emits one-shot 'X subsystem activated by config (cfg->X.enabled=true)'\n  AC-4.4: Config parser elevates 'unknown key' warnings to a single banner at daemon startup\n  AC-4.5: Tests verify exactly-1-line-per-first-invocation discipline\n\nRule being enforced: ~/.claude/rules/silent-config-gated-subsystems.md\n\nPrior gates:\n  Verifier (round 1): PASS \u2014 full suite 11,707 PASS, 0 ASan, AC-4.1 through AC-4.4 verified independently; AC-4.5 marked INCONCLUSIVE (test code not read).\n  Critic (round 1): HAS_FINDINGS severity=HIGH count=1. HIGH = NULL cfg branch in daemon_reaction_poll.c:119-124 implemented but untested. Plus 1 MED (test_config_gated_subsystems.c naming is aspirational; redundant with test_silent_disable_compliance.c) + 1 LOW (log.h macro doc).\n  Implementer round 2: commit fb202dea adds test_reaction_collection_null_cfg_logs_warning_once: 3 invocations with NULL cfg, freopen-captured stderr, count_substr('cfg is NULL') == 1.\n  Critic (round 2): CLEAN \u2014 HIGH closed, test load-bearing.\n\nEach aspect verifier should cd into the worktree and read the diff + the new test. Independently judge their aspect.\n\nEnd each aspect's verdict with RESULT_<aspect>-verifier=PASS|FAIL and CONFIDENCE.",
+  "aspects": [
+    {
+      "aspect": "correctness",
+      "verdict": "unknown",
+      "confidence": 0.5,
+      "rationale": "",
+      "elapsed_s": 3.79
+    },
+    {
+      "aspect": "edge-case",
+      "verdict": "unknown",
+      "confidence": 0.5,
+      "rationale": "",
+      "elapsed_s": 3.68
+    },
+    {
+      "aspect": "regression",
+      "verdict": "unknown",
+      "confidence": 0.5,
+      "rationale": "",
+      "elapsed_s": 3.69
+    },
+    {
+      "aspect": "security",
+      "verdict": "unknown",
+      "confidence": 0.5,
+      "rationale": "",
+      "elapsed_s": 3.68
+    },
+    {
+      "aspect": "style",
+      "verdict": "unknown",
+      "confidence": 0.5,
+      "rationale": "",
+      "elapsed_s": 3.81
+    }
+  ],
+  "aggregate": {
+    "verdict": "INCONCLUSIVE",
+    "pass_weight": 0,
+    "fail_weight": 0,
+    "split": false
+  }
+}
