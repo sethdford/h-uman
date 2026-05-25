@@ -7,11 +7,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Neutral baseline for truth-table cases — every field set to a value that
+ * does NOT trigger any conditional nudge in thread_logodds, so each test
+ * isolates ONLY the field it explicitly varies. Specifically:
+ *   - seconds_since_parent=60 falls between the "fresh" (<10, -0.8) and
+ *     "moderately old" (>120, +0.4) branches → no time nudge.
+ *   - density=2.0 is well under both >6 and >12 branches → no density nudge.
+ *   - formality=0.5 makes the (formality - 0.5) * 0.6 term zero.
+ *   - position/pending/mirror/our default to 0 from {0} init → no nudge.
+ * Caveat: leaving seconds=0 here would silently fire the "fresh, no need"
+ * -0.8 suppression and pull every "neutral" case toward FLAT, which is
+ * a fixture bug not a predicate bug. */
 static hu_reply_style_facts_t neutral_facts(void) {
     hu_reply_style_facts_t f = {0};
     f.persona_thread_affinity = 0.3f;
     f.persona_formality = 0.5f;
     f.conv_density_msgs_per_min = 2.0f;
+    f.seconds_since_parent = 60;
     f.parent_emotional_intensity = HU_EMOTION_THRESHOLD_LOW;
     return f;
 }
