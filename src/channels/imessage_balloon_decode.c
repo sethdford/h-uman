@@ -233,6 +233,24 @@ hu_error_t hu_imessage_ingest_balloon_row(struct hu_personal_model *model, const
         hu_imessage_balloon_decode(bundle_id, payload, payload_len, detail, sizeof(detail));
     if (kind == HU_IMESSAGE_BALLOON_UNKNOWN)
         return HU_OK;
-    return hu_imessage_ingest_balloon(model, sender_handle, is_from_me, kind,
-                                      detail[0] ? detail : NULL, timestamp_unix, in_group_chat);
+    hu_error_t balloon_err =
+        hu_imessage_ingest_balloon(model, sender_handle, is_from_me, kind,
+                                   detail[0] ? detail : NULL, timestamp_unix, in_group_chat);
+    /* B5 wire: voice messages carry tone signal (speech rate) that the
+     * transcript alone discards. Extract the duration from the same
+     * payload, classify via hu_audio_tone_classify, and ingest the
+     * resulting "<handle>'s voice message sounded <label>." fact as a
+     * SECOND personal-model entry alongside the transcript. No-op when:
+     *   - is_from_me (we model others' tone, not the user's own)
+     *   - duration extraction returned 0.0 (older iOS / archiver-wrapped)
+     *   - transcript was empty (no word_count signal)
+     *   - classifier returned UNKNOWN
+     * Failure of the tone ingest does NOT propagate — the transcript
+     * ingest's success/failure is what the caller cares about. */
+    if (kind == HU_IMESSAGE_BALLOON_AUDIO_TRANSCRIPT && detail[0]) {
+        double duration = hu_imessage_extract_audio_duration(payload, payload_len);
+        (void)hu_imessage_ingest_audio_tone(model, sender_handle, is_from_me, detail, duration,
+                                            timestamp_unix, in_group_chat);
+    }
+    return balloon_err;
 }

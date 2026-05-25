@@ -125,4 +125,23 @@ typedef struct hu_llamacpp_config {
 hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_config_t *config,
                                        hu_provider_t *out);
 
+/* Phase 2b.2 — pure predicate for the cache-hit skip-decode decision.
+ *
+ * The chat path takes the skip-decode shortcut iff ALL four conditions
+ * hold:
+ *   1. sys_hit             — cache lookup matched the system prefix
+ *   2. operator_opt_in     — config->kvcache_skip_decode is true
+ *   3. cached_n_past > 0   — the cached prefix is non-empty
+ *   4. n_tokens > cached_n_past — there's a user portion to decode
+ *
+ * Extracting the decision into a pure predicate lets tests pin every
+ * branch of the 4-input truth table without a libllama-linked build,
+ * which is the only way Phase 2b.2 gets pre-merge verification — the
+ * test preset stubs libllama and the real chat path can't be exercised.
+ *
+ * The chat function calls this predicate; tests call the same predicate.
+ * One source of truth for the decision; zero duplication. */
+bool hu_llamacpp_should_skip_decode(bool sys_hit, bool operator_opt_in, int32_t cached_n_past,
+                                    int32_t n_tokens);
+
 #endif

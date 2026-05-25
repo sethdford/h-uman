@@ -3623,6 +3623,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_sampling.c
     tests/test_llamacpp_kvcache.c
     tests/test_llamacpp_kv_quant.c
+    tests/test_llamacpp_skip_decode.c
     tests/test_llamacpp_decode.c
     tests/test_llamacpp_lora_hotswap.c
     tests/test_llamacpp_chat_metal.c

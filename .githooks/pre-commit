@@ -122,3 +122,17 @@ if [ -n "$staged_gate_inputs" ] && [ -x "scripts/check-test-source-gate-symmetry
         exit 1
     fi
 fi
+
+# tests-that-pin-bugs antipattern check — recurred 3 times in Sprint 49
+# (US-C1.1, US-C1.2, US-C1.4) where an assertion was gated on whether
+# the input-under-test exists, so the test silently PASSED when the
+# input was missing. See .claude/rules/tests-that-pin-bugs.md +
+# scripts/check-test-silent-pass.sh for the detector and opt-out.
+if [ -x "scripts/check-test-silent-pass.sh" ]; then
+    if ! scripts/check-test-silent-pass.sh; then
+        echo ""
+        echo "Pre-commit blocked: tests-that-pin-bugs antipattern."
+        echo "See .claude/rules/tests-that-pin-bugs.md for the fix pattern."
+        exit 1
+    fi
+fi

@@ -652,6 +652,7 @@ void run_llamacpp_factory_config_tests(void);
 void run_llamacpp_sampling_tests(void);
 void run_llamacpp_kvcache_tests(void);
 void run_llamacpp_kv_quant_tests(void);
+void run_llamacpp_skip_decode_tests(void);
 void run_llamacpp_decode_tests(void);
 void run_llamacpp_lora_hotswap_tests(void);
 void run_llamacpp_chat_metal_tests(void);
@@ -1447,6 +1448,7 @@ int main(int argc, char **argv) {
     run_llamacpp_sampling_tests();
     run_llamacpp_kvcache_tests();
     run_llamacpp_kv_quant_tests();
+    run_llamacpp_skip_decode_tests();
     run_llamacpp_decode_tests();
     run_llamacpp_lora_hotswap_tests();
     run_llamacpp_chat_metal_tests();
