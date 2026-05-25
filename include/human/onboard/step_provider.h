@@ -71,4 +71,11 @@ const char *hu_onboard_provider_choice_to_name(hu_onboard_provider_choice_t c);
 hu_onboard_step_result_t hu_onboard_step_provider_run_phase1(hu_onboard_step_t *self,
                                                              hu_onboard_state_t *state);
 
+/* Sprint 55 Phase 2 step runner: with user_data injection, deterministic;
+ * without, prints a 4-option menu, reads one line from stdin, persists
+ * the choice into state, and returns NEXT/REPEAT/QUIT. The vtable's
+ * .run pointer routes here as of Phase 2. */
+hu_onboard_step_result_t hu_onboard_step_provider_run(hu_onboard_step_t *self,
+                                                      hu_onboard_state_t *state);
+
 #endif /* HU_ONBOARD_STEP_PROVIDER_H */

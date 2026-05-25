@@ -20,7 +20,10 @@
 #include "human/onboard/step.h"
 #include "human/onboard/step_provider.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ── Pure byte classifier ─────────────────────────────────────────── */
 
@@ -88,15 +91,84 @@ static void test_create_returns_valid_vtable(void) {
 
 /* ── run() with test injection ────────────────────────────────────── */
 
-static void test_run_with_no_user_data_returns_repeat_phase_1(void) {
-    /* Phase 1 contract: without injection, step has no stdin handling,
-     * so it returns REPEAT (the dispatcher will re-render). Phase 2
-     * adds the real interactive read loop. */
+/* Helper: write `text` to a fresh temp file and freopen() it onto stdin.
+ * Returns the FILE* (the redirected stdin) on success, NULL on failure.
+ * Each call mints a new mkstemp() path; concurrent tests don't collide. */
+static FILE *redirect_stdin_from_string(const char *text) {
+    char path[] = "/tmp/hu_onboard_provider_stdin_XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0)
+        return NULL;
+    FILE *w = fdopen(fd, "w");
+    if (!w) {
+        close(fd);
+        return NULL;
+    }
+    if (text && *text)
+        fputs(text, w);
+    fclose(w);
+    return freopen(path, "r", stdin);
+}
+
+static void test_run_with_no_user_data_and_closed_stdin_returns_quit(void) {
+    /* Sprint 55 Phase 2: without injection, the step reads from stdin.
+     * If stdin is closed / EOF, fgets returns NULL → step returns
+     * QUIT (clean exit). This pins the EOF-handling contract. */
     hu_onboard_step_t *step = hu_onboard_step_provider_create();
     step->user_data = NULL;
+
+    FILE *f = redirect_stdin_from_string(""); /* empty → immediate EOF */
+    HU_ASSERT_NOT_NULL(f);
+
+    hu_onboard_state_t state;
+    hu_onboard_state_init(&state);
+    HU_ASSERT_EQ((int)step->run(step, &state), (int)HU_ONBOARD_QUIT);
+    /* No persistence on QUIT path. */
+    HU_ASSERT_STR_EQ(state.provider.provider_name, "");
+}
+
+static void test_run_with_no_user_data_and_stdin_digit_1_persists_mlx(void) {
+    /* Phase 2 stdin path: '1\n' on stdin → choice MLX local → NEXT +
+     * persisted name. */
+    hu_onboard_step_t *step = hu_onboard_step_provider_create();
+    step->user_data = NULL;
+
+    FILE *f = redirect_stdin_from_string("1\n");
+    HU_ASSERT_NOT_NULL(f);
+
+    hu_onboard_state_t state;
+    hu_onboard_state_init(&state);
+    HU_ASSERT_EQ((int)step->run(step, &state), (int)HU_ONBOARD_NEXT);
+    HU_ASSERT_STR_EQ(state.provider.provider_name, "mlx_local");
+}
+
+static void test_run_with_no_user_data_and_stdin_q_returns_quit(void) {
+    /* Stdin 'q\n' → QUIT, no name persisted. */
+    hu_onboard_step_t *step = hu_onboard_step_provider_create();
+    step->user_data = NULL;
+
+    FILE *f = redirect_stdin_from_string("q\n");
+    HU_ASSERT_NOT_NULL(f);
+
+    hu_onboard_state_t state;
+    hu_onboard_state_init(&state);
+    HU_ASSERT_EQ((int)step->run(step, &state), (int)HU_ONBOARD_QUIT);
+    HU_ASSERT_STR_EQ(state.provider.provider_name, "");
+}
+
+static void test_run_with_no_user_data_and_stdin_junk_returns_repeat(void) {
+    /* Stdin 'x\n' → INVALID choice → REPEAT, no persistence. The
+     * dispatcher re-renders the step. */
+    hu_onboard_step_t *step = hu_onboard_step_provider_create();
+    step->user_data = NULL;
+
+    FILE *f = redirect_stdin_from_string("x\n");
+    HU_ASSERT_NOT_NULL(f);
+
     hu_onboard_state_t state;
     hu_onboard_state_init(&state);
     HU_ASSERT_EQ((int)step->run(step, &state), (int)HU_ONBOARD_REPEAT);
+    HU_ASSERT_STR_EQ(state.provider.provider_name, "");
 }
 
 static void test_run_with_injected_mlx_choice_persists_name(void) {
@@ -208,7 +280,10 @@ void run_onboard_step_provider_tests(void) {
 
     HU_RUN_TEST(test_create_returns_valid_vtable);
 
-    HU_RUN_TEST(test_run_with_no_user_data_returns_repeat_phase_1);
+    HU_RUN_TEST(test_run_with_no_user_data_and_closed_stdin_returns_quit);
+    HU_RUN_TEST(test_run_with_no_user_data_and_stdin_digit_1_persists_mlx);
+    HU_RUN_TEST(test_run_with_no_user_data_and_stdin_q_returns_quit);
+    HU_RUN_TEST(test_run_with_no_user_data_and_stdin_junk_returns_repeat);
     HU_RUN_TEST(test_run_with_injected_mlx_choice_persists_name);
     HU_RUN_TEST(test_run_with_injected_anthropic_choice_persists_name);
     HU_RUN_TEST(test_run_with_injected_quit_does_not_persist_name);
