@@ -391,6 +391,32 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
+static hu_error_t parse_initiative(hu_allocator_t *a, hu_config_t *cfg,
+                                   const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->initiative.enabled = hu_json_get_bool(obj, "enabled", cfg->initiative.enabled);
+    int tick = (int)hu_json_get_number(obj, "tick_interval_sec", cfg->initiative.tick_interval_sec);
+    if (tick > 0)
+        cfg->initiative.tick_interval_sec = tick;
+    double thresh =
+        hu_json_get_number(obj, "confidence_threshold", cfg->initiative.confidence_threshold);
+    if (thresh > 0.0 && thresh <= 1.0)
+        cfg->initiative.confidence_threshold = thresh;
+    int recency = (int)hu_json_get_number(obj, "per_contact_min_seconds",
+                                          cfg->initiative.per_contact_min_seconds);
+    if (recency > 0)
+        cfg->initiative.per_contact_min_seconds = recency;
+    const char *model = hu_json_get_string(obj, "propose_model");
+    if (model && model[0]) {
+        if (cfg->initiative.propose_model)
+            a->free(a->ctx, cfg->initiative.propose_model,
+                    strlen(cfg->initiative.propose_model) + 1);
+        cfg->initiative.propose_model = hu_strdup(a, model);
+    }
+    return HU_OK;
+}
+
 static hu_error_t parse_reaction_collection(hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
@@ -1390,6 +1416,16 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         if (rc_err != HU_OK) {
             hu_json_free(a, root);
             return rc_err;
+        }
+    }
+
+    /* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/. */
+    hu_json_value_t *init_obj = hu_json_object_get(root, "initiative");
+    if (init_obj) {
+        hu_error_t ie = parse_initiative(a, cfg, init_obj);
+        if (ie != HU_OK) {
+            hu_json_free(a, root);
+            return ie;
         }
     }
 

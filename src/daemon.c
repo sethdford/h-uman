@@ -22,6 +22,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/multimodal_policy.h"
@@ -13765,6 +13766,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             static int64_t social_tick_last_run = 0;
             int64_t now_unix_st = (int64_t)time(NULL);
             (void)hu_daemon_social_tick(config, now_unix_st, &social_tick_last_run);
+        }
+
+        /* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/.
+         * T1 skeleton: governor-only tick that always returns SKIP. The
+         * tick function itself handles the disabled / enabled one-shot log
+         * lines, so we always call it (no outer enabled-gate needed). */
+        if (config) {
+            static int64_t initiative_last_tick_unix = 0;
+            static uint64_t initiative_tick_id = 0;
+            int64_t now_unix_init = (int64_t)time(NULL);
+            const hu_autoresponder_config_t *ar_cfg_init = daemon_autoresponder_config();
+            hu_init_proposer_result_t init_result = HU_INIT_RESULT_SKIP;
+            (void)hu_init_proposer_tick(&config->initiative, ar_cfg_init,
+                                        /*tz_offset_seconds=*/0, &gov_budget,
+                                        /*last_inbound_unix=*/0, now_unix_init,
+                                        &initiative_last_tick_unix, &initiative_tick_id,
+                                        &init_result);
         }
 #endif
 

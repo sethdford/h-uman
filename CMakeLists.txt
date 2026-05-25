@@ -1120,6 +1120,7 @@ set(HU_CORE_SOURCES
     src/usage.c
     src/oauth.c
     src/vertex_adc.c
+    src/agent/init_proposer.c
     src/memory/vector/math.c
     src/memory/vector/cosine.c
     src/memory/vector/chunker.c
@@ -3063,6 +3064,7 @@ set(HU_TEST_SOURCES
     tests/test_string.c
     tests/test_log_once.c
     tests/test_vertex_adc.c
+    tests/test_init_proposer.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_config_banner_runtime_failfast.c

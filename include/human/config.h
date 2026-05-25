@@ -254,6 +254,20 @@ typedef struct hu_proactive_throttle_config {
     int per_contact_daily_max; /* default 1 */
 } hu_proactive_throttle_config_t;
 
+/* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/.
+ *
+ * Periodic proposer that ticks during awake hours and asks "should I bring
+ * something up to Seth?" — even when no inbound event fires. Disabled by
+ * default; flip enabled=true after one week of dry-run logs and threshold
+ * tuning per the spec. */
+typedef struct hu_initiative_config {
+    bool enabled;                /* default false (kill switch, AC-7) */
+    int tick_interval_sec;       /* default 1800 = 30 min (DECISION-1) */
+    double confidence_threshold; /* default 0.85 (DECISION-2) */
+    char *propose_model;         /* default "gemini-3.5-flash" (DECISION-3) */
+    int per_contact_min_seconds; /* default 600 = 10 min; recency floor */
+} hu_initiative_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -692,6 +706,7 @@ typedef struct hu_config {
     hu_reaction_collection_config_t reaction_collection;
     hu_follow_up_watcher_config_t follow_up_watcher;
     hu_proactive_throttle_config_t proactive_throttle;
+    hu_initiative_config_t initiative;
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;

@@ -24,6 +24,7 @@ void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
+void run_init_proposer_tests(void);
 void run_config_gated_subsystems_tests(void);
 void run_silent_disable_compliance_tests(void);
 void run_io_secure_tests(void);
@@ -882,6 +883,7 @@ int main(int argc, char **argv) {
     run_string_tests();
     run_log_once_tests();
     run_vertex_adc_tests();
+    run_init_proposer_tests();
     run_config_gated_subsystems_tests();
     run_silent_disable_compliance_tests();
     run_io_secure_tests();

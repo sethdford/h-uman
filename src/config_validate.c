@@ -75,6 +75,10 @@ static const char *const hu_config_top_keys[] = {
      * picks them up correctly. */
     "learning",
     "inference",
+    /* 2026-05-25: initiative layer (proactive proposer skeleton). See
+     * docs/plans/2026-05-25-initiative-layer/. Disabled by default — flipping
+     * cfg->initiative.enabled=true in config.json starts the periodic tick. */
+    "initiative",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);
