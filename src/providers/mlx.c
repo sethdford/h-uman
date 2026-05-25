@@ -26,6 +26,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
+#include "human/providers/mlx_stream_utf8.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -542,53 +543,9 @@ static bool mlx_supports_streaming(void *ctx) {
 #define HU_MLX_STREAM_SELECT_USEC  100000 /* 100ms poll */
 #define HU_MLX_STREAM_TIMEOUT_SECS 180
 
-/* Returns true if the byte at *p starts a UTF-8 codepoint AND the
- * codepoint is FULLY present in the remaining `n` bytes. Used to
- * decide whether to hold a partial multi-byte at the chunk tail. */
-static size_t mlx_utf8_codepoint_len(unsigned char first) {
-    if ((first & 0x80) == 0)
-        return 1; /* ASCII */
-    if ((first & 0xE0) == 0xC0)
-        return 2;
-    if ((first & 0xF0) == 0xE0)
-        return 3;
-    if ((first & 0xF8) == 0xF0)
-        return 4;
-    return 1; /* malformed lead — treat as 1 to avoid stalling */
-}
-
-/* Trim trailing partial UTF-8 sequence from buf[0..len]. Returns the
- * adjusted length safe to emit; remainder stays in the caller's buffer
- * for the next read. */
-static size_t mlx_utf8_safe_emit_len(const char *buf, size_t len) {
-    if (len == 0)
-        return 0;
-    /* Walk back at most 3 bytes looking for the start of a codepoint
-     * that isn't fully completed within `len`. */
-    size_t back = (len < 4) ? len : 4;
-    for (size_t i = 0; i < back; i++) {
-        size_t pos = len - 1 - i;
-        unsigned char b = (unsigned char)buf[pos];
-        if ((b & 0x80) == 0) {
-            /* ASCII byte — safe to emit through here */
-            return len;
-        }
-        if ((b & 0xC0) == 0xC0) {
-            /* Lead byte of a multi-byte codepoint */
-            size_t cp_len = mlx_utf8_codepoint_len(b);
-            size_t remaining = len - pos;
-            if (remaining < cp_len) {
-                /* Incomplete codepoint at tail — emit up to `pos` only */
-                return pos;
-            }
-            /* Codepoint complete; safe to emit through `len` */
-            return len;
-        }
-        /* Continuation byte — keep walking back */
-    }
-    /* Walked back the max; treat as safe (defensive — malformed input) */
-    return len;
-}
+/* UTF-8 helpers extracted to src/providers/mlx_stream_utf8.c so they
+ * can be unit-tested without the (gated) subprocess driver. Used
+ * here via the public header. Sprint 55 US-M3-B4 Phase 2. */
 
 /* Emit a chunk via the callback. Returns the callback's return value
  * (true = continue, false = caller wants stop). */
@@ -724,7 +681,7 @@ static hu_error_t mlx_run_subprocess_streaming(hu_allocator_t *alloc, const mlx_
         size_t room = sizeof(hold_buf) - hold_len;
         if (room == 0) {
             /* Defensive flush — buffer full; emit safe prefix and shift. */
-            size_t safe = mlx_utf8_safe_emit_len(hold_buf, hold_len);
+            size_t safe = hu_mlx_utf8_safe_emit_len(hold_buf, hold_len);
             if (safe > 0) {
                 if (!mlx_emit_chunk(callback, callback_ctx, hold_buf, safe, false)) {
                     cancelled = true;
@@ -765,7 +722,7 @@ static hu_error_t mlx_run_subprocess_streaming(hu_allocator_t *alloc, const mlx_
             }
         }
         if (has_ws) {
-            size_t safe = mlx_utf8_safe_emit_len(hold_buf, last_ws);
+            size_t safe = hu_mlx_utf8_safe_emit_len(hold_buf, last_ws);
             if (safe > 0) {
                 if (!mlx_emit_chunk(callback, callback_ctx, hold_buf, safe, false)) {
                     cancelled = true;

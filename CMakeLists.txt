@@ -1283,6 +1283,7 @@ list(APPEND HU_CORE_SOURCES
     src/providers/embedded.c
     src/providers/llamacpp.c
     src/providers/mlx.c
+    src/providers/mlx_stream_utf8.c
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
     src/providers/llamacpp_decode.c
@@ -2999,6 +3000,7 @@ set(HU_TEST_SOURCES
     tests/test_canvas_tool.c
     tests/test_consistency.c
     tests/test_mlx_provider.c
+    tests/test_mlx_stream_utf8.c
     tests/test_persona_fidelity.c
     tests/test_persona_fidelity_cross.c
     tests/test_persona_fidelity_judge.c

@@ -726,6 +726,7 @@ void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
 void run_mlx_provider_tests(void);
+void run_mlx_stream_utf8_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
 void run_persona_fidelity_validator_tests(void);
@@ -1538,6 +1539,7 @@ int main(int argc, char **argv) {
     run_background_registry_tests();
     run_consistency_tests();
     run_mlx_provider_tests();
+    run_mlx_stream_utf8_tests();
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
     run_persona_fidelity_validator_tests();
