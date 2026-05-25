@@ -50,6 +50,7 @@ void run_vault_tests(void);
 void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
+void run_install_docs_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
 void run_ensemble_tests(void);
@@ -879,6 +880,7 @@ int main(int argc, char **argv) {
     run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
+    run_install_docs_tests();
     run_provider_tests();
     run_provider_http_tests();
     run_ensemble_tests();
