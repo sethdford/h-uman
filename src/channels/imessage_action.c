@@ -34,9 +34,10 @@ static float thread_logodds(const hu_reply_style_facts_t *f) {
     if (f->other_threaded_replies_recent >= 5)
         l += 0.4f;
 
-    /* Density — rapid-fire kills threading. */
+    /* Density — rapid-fire suppresses threading, but softly.
+     * Seth still occasionally threads in fast chat when content warrants. */
     if (f->conv_density_msgs_per_min > 6.0f)
-        l -= 1.0f;
+        l -= 0.5f;
     if (f->conv_density_msgs_per_min > 12.0f)
         l -= 0.8f;
 
