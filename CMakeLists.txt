@@ -548,6 +548,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_chatdb.c
     src/doctor/check_provider.c
     src/doctor/exit_code.c
+    src/doctor/json_output.c
     src/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
@@ -3211,6 +3212,7 @@ set(HU_TEST_SOURCES
     tests/test_doctor_chatdb.c
     tests/test_doctor_check_provider.c
     tests/test_doctor_exit_codes.c
+    tests/test_doctor_json_output.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c

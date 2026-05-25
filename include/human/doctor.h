@@ -46,6 +46,43 @@
 struct hu_doctor_check_result;
 int hu_doctor_compute_exit_code(const struct hu_doctor_check_result *results, size_t count);
 
+/* Sprint 54 US-C3.7 — Doctor `--json` output (Phase 1: pure emitter).
+ *
+ * Emit the doctor v1 JSON schema to a FILE *. The schema is LOCKED at
+ * v1; future enhancements ship as v2 via explicit opt-in to prevent
+ * silent breakage for monitoring consumers.
+ *
+ *   {"version":1,
+ *    "ts":"2026-05-25T14:30:00Z",
+ *    "checks":[{"name":"...","verdict":"pass|fail","reason":"..."}, ...],
+ *    "aggregate":"pass|fail"}
+ *
+ * - `aggregate` is "pass" iff every check verdict is PASS or NA; else "fail".
+ * - `reason` strings have " and \\ escaped; control chars dropped.
+ * - `ts` is rendered as ISO-8601 UTC (fixed-width 20 chars).
+ * - Trailing newline emitted after the JSON object.
+ *
+ * The emitter takes a zip of (name, verdict, reason) — the registry
+ * holds names on the check vtable while results carry verdict + reason.
+ * Phase 2's cmd_doctor() wire builds the entry array by walking the
+ * registry and zipping with run_all's output.
+ *
+ * Phase 1 contract: pure emitter function + 14 contract tests. Phase 2
+ * wires the --json CLI flag in cmd_doctor() to call this function
+ * (deferred — gated on the registry-driven main() rewrite). */
+#include <stdio.h>
+#include <time.h>
+
+typedef struct hu_doctor_json_entry {
+    const char *name;        /* stable kebab-case check identifier */
+    int verdict;             /* hu_doctor_verdict_t value */
+    const char *reason;      /* human-readable; "" or NULL → empty */
+    const char *detail_json; /* optional structured detail; unused in v1 emitter */
+} hu_doctor_json_entry_t;
+
+hu_error_t hu_doctor_emit_json_v1(const hu_doctor_json_entry_t *entries, size_t count,
+                                  time_t now_epoch, FILE *out);
+
 typedef enum hu_diag_severity {
     HU_DIAG_OK,
     HU_DIAG_WARN,
