@@ -97,7 +97,10 @@ static void factory_apply_kvcache_skip_decode_env(hu_llamacpp_config_t *lc) {
  * Operators wire a draft model alongside the target without a rebuild
  * via three optional env vars (all silently ignored if unset):
  *
- *   HU_LLAMACPP_DRAFT_MODEL=/path/to/gemma-3-270m.gguf
+ *   HU_LLAMACPP_DRAFT_MODEL=/path/to/gemma-4-E2B-it.gguf
+ *     (preferred same-family draft for gemma-4-* targets;
+ *      gemma-3-270m.gguf is a smaller cross-family fallback —
+ *      same 262k vocab so tokens line up, lower acceptance rate)
  *   HU_LLAMACPP_DRAFT_MIN_P=0.05    (default unset → 0; provider uses
  *                                    upstream default)
  *   HU_LLAMACPP_DRAFT_MAX_TOKENS=5  (default unset → 0; provider uses

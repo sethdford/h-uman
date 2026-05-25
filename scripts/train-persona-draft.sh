@@ -17,7 +17,7 @@
 # Usage:
 #   scripts/train-persona-draft.sh \
 #     --persona seth \
-#     --base google/gemma-3-270m-it \
+#     --base google/gemma-4-E2B-it \
 #     --output ~/.human/models/seth-draft.safetensors \
 #     --iters 200
 #
@@ -25,9 +25,27 @@
 #   --persona NAME           Persona to source examples from
 #                            (must exist in ~/.human/personas/)
 #   --base ID-OR-PATH        Base draft model (HF id or local path).
-#                            Gemma repos under `google/*` are GATED on
-#                            HuggingFace — visit the model page once and
-#                            click "Acknowledge license" before first run.
+#                            CHOOSING A DRAFT FOR SPEC DECODE:
+#                            The draft MUST share a tokenizer with the
+#                            target. All Gemma 3 and Gemma 4 models use
+#                            the same 262,144-token SentencePiece vocab,
+#                            so any Gemma works as a draft for any other
+#                            Gemma — but same-family raises acceptance.
+#                            Recommended for gemma-4-31B targets:
+#                              google/gemma-4-E2B-it (2B params,
+#                              model_type=gemma4, loads with mlx_lm
+#                              0.31.2, NOT gated)
+#                            Future / ideal (when mlx_lm adds support):
+#                              google/gemma-4-31B-it-assistant (470M,
+#                              4 layers, purpose-built for spec decode,
+#                              model_type=gemma4_assistant — NOT supported
+#                              by mlx_lm 0.31.2 yet; track upstream)
+#                            Fallback for constrained RAM:
+#                              google/gemma-3-270m-it (gated; visit
+#                              https://huggingface.co/google/gemma-3-270m-it
+#                              and click "Acknowledge license" once)
+#                            All google/gemma-4-* repos are currently NOT
+#                            gated; google/gemma-3-* repos ARE gated.
 #   --output PATH            Where to save the trained adapter
 #
 # Optional args:
