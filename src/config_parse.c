@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config_internal.h"
@@ -289,14 +290,23 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
     return HU_OK;
 }
 
-/* US-7.7 — `inference` block:
+/* US-7.7 + Phase 1c (Gemma throughput program) — `inference` block:
  *   {
  *     "best_of_n": 4,                  // default 1 (disabled); clamped 0..8
- *     "best_of_n_cost_cap_ms": 1500    // default 0 (no cap); soft wall-clock cap
+ *     "best_of_n_cost_cap_ms": 1500,   // default 0 (no cap); soft wall-clock cap
+ *
+ *     // Phase 1c — Gemma throughput knobs. These mirror the operator
+ *     // env vars consumed by src/providers/factory.c. The parser bridges
+ *     // config → env via setenv(..., overwrite=0) so operator-set env
+ *     // ALWAYS wins. Config supplies the default when env is unset.
+ *     "kv_quant":      "q8_0",   // "fp16" (default) | "q8_0" | "q4_0"
+ *     "flash_attn":    true,     // default true (Mac Metal table-stakes)
+ *     "draft_model":   "/path/to/draft.gguf"  // empty = spec decode off
  *   }
- * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2 AND
- * the active provider is "llamacpp". Cloud-provider misconfiguration is
- * surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
+ *
+ * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2
+ * AND the active provider is "llamacpp". Cloud-provider misconfiguration
+ * is surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
 static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
     (void)a;
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -314,6 +324,70 @@ static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_
     if (cap > (double)UINT32_MAX)
         cap = (double)UINT32_MAX;
     cfg->inference.best_of_n_cost_cap_ms = (uint32_t)cap;
+
+    /* Phase 1c — bridge config → env so the existing factory env-var
+     * consumers pick up the values. overwrite=0 means an operator-set
+     * env var ALWAYS wins over the config. Config provides the
+     * persistent default when env is unset.
+     *
+     * Why setenv-and-discard rather than struct fields + getter:
+     *   1. Factory already reads getenv — zero new plumbing
+     *   2. Operators have one source of truth at runtime (the env)
+     *   3. Doctor / CLI status commands read the same env, so the
+     *      reported value matches what the factory actually used
+     *   4. No allocator-owned strings to free at config_deinit
+     */
+    const char *kvq = hu_json_get_string(obj, "kv_quant");
+    if (kvq && *kvq)
+        setenv("HU_LLAMACPP_KV_QUANT", kvq, /*overwrite=*/0);
+    /* flash_attn defaults to TRUE; we only emit FALSE to the env when
+     * the config explicitly disables it. Operator unset + config absent
+     * = factory's true default. Config-true with operator unset = same
+     * (no env emitted = factory default). Config-false + operator unset
+     * = env="off" via this branch. */
+    if (hu_json_object_get(obj, "flash_attn")) {
+        bool fa = hu_json_get_bool(obj, "flash_attn", true);
+        if (!fa)
+            setenv("HU_LLAMACPP_FLASH_ATTN", "off", /*overwrite=*/0);
+    }
+    const char *dm = hu_json_get_string(obj, "draft_model");
+    if (dm && *dm)
+        setenv("HU_LLAMACPP_DRAFT_MODEL", dm, /*overwrite=*/0);
+    /* Phase 2c — bridge inference.kvcache_skip_decode → env. Same
+     * overwrite=0 posture as the other knobs: operator-set env wins.
+     * The factory's strict-token matching (1 / on / true) means we
+     * emit "1" specifically — JSON true → env "1", JSON false → env
+     * absent (factory's safe default OFF). */
+    if (hu_json_object_get(obj, "kvcache_skip_decode")) {
+        bool skip = hu_json_get_bool(obj, "kvcache_skip_decode", false);
+        if (skip)
+            setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", "1", /*overwrite=*/0);
+    }
+    return HU_OK;
+}
+
+/* Spec 2026-05-19 — `learning` block:
+ *   { "dpo_pair_training_threshold": 100 }
+ *
+ * `dpo_pair_training_threshold` clamped to [0, INT_MAX]. Negative
+ * values are coerced to 0 (operator-disabled state). 0 explicitly
+ * disables the trigger; the daemon emits a `hu_log_info_once` line on
+ * first tick per ~/.claude/rules/silent-config-gated-subsystems.md. */
+static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    double th = hu_json_get_number(obj, "dpo_pair_training_threshold",
+                                   (double)cfg->learning.dpo_pair_training_threshold);
+    if (th < 0.0)
+        th = 0.0;
+    if (th > 2147483647.0)
+        th = 2147483647.0;
+    cfg->learning.dpo_pair_training_threshold = (int)th;
+    /* Spec 2026-05-19 M3 closure / AC-M3-7 — frontier auto-training
+     * opt-in. Off by default; daemon emits a hu_log_info_once on the
+     * first tick whether enabled or disabled. */
+    cfg->learning.m3_frontier_auto_training =
+        hu_json_get_bool(obj, "m3_frontier_auto_training", cfg->learning.m3_frontier_auto_training);
     return HU_OK;
 }
 
@@ -1151,6 +1225,14 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
 
     cfg->config_version = (int)hu_json_get_number(root, "config_version", 1.0);
 
+    /* Spec 2026-05-19 — initialize the learning trigger threshold to the
+     * compile-time default (100) BEFORE parsing the `learning` block.
+     * Callers memset the config to zero, which would otherwise look like
+     * "operator explicitly disabled". The `parse_learning` step below
+     * overrides this when the key is present, including 0. */
+    if (cfg->learning.dpo_pair_training_threshold == 0)
+        cfg->learning.dpo_pair_training_threshold = HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
+
     const char *workspace = hu_json_get_string(root, "workspace");
     if (workspace && strstr(workspace, "..")) {
         workspace = NULL; /* Reject path traversal */
@@ -1296,6 +1378,11 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *inference_obj = hu_json_object_get(root, "inference");
     if (inference_obj)
         parse_inference(a, cfg, inference_obj);
+
+    /* Spec 2026-05-19 — `learning` block (DPO pair-count trigger). */
+    hu_json_value_t *learning_obj = hu_json_object_get(root, "learning");
+    if (learning_obj)
+        parse_learning(cfg, learning_obj);
 
     hu_json_value_t *reaction_obj = hu_json_object_get(root, "reaction_collection");
     if (reaction_obj) {

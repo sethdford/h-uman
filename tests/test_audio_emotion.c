@@ -81,6 +81,32 @@ static void test_render_unknown_writes_nothing_populated_renders(void) {
     HU_ASSERT_TRUE(strstr(buf, "energetic") != NULL);
 }
 
+/* B5 wire helper — production-facing fact-formatter. */
+static void test_format_fact_unknown_returns_zero(void) {
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_audio_tone_format_fact("alice", HU_AUDIO_TONE_UNKNOWN, buf, sizeof(buf)),
+                 0);
+}
+
+static void test_format_fact_populated_omits_prompt_prefix(void) {
+    char buf[256] = {0};
+    size_t n = hu_audio_tone_format_fact("alice", HU_AUDIO_TONE_ENERGETIC, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    /* Must NOT carry the "VOICE TONE:" prompt prefix — facts are
+     * canonical English for the fact-extractor, not prompt blocks. */
+    HU_ASSERT_TRUE(strstr(buf, "VOICE TONE:") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "alice") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "energetic") != NULL);
+}
+
+static void test_format_fact_null_or_empty_returns_zero(void) {
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_audio_tone_format_fact(NULL, HU_AUDIO_TONE_NEUTRAL, buf, sizeof(buf)), 0);
+    HU_ASSERT_EQ((int)hu_audio_tone_format_fact("", HU_AUDIO_TONE_NEUTRAL, buf, sizeof(buf)), 0);
+    HU_ASSERT_EQ((int)hu_audio_tone_format_fact("alice", HU_AUDIO_TONE_NEUTRAL, NULL, sizeof(buf)),
+                 0);
+}
+
 static void test_render_null_or_empty_returns_zero(void) {
     char buf[256] = {0};
     HU_ASSERT_EQ((int)hu_audio_tone_render(NULL, HU_AUDIO_TONE_NEUTRAL, buf, sizeof(buf)), 0);
@@ -101,4 +127,7 @@ void run_audio_emotion_tests(void) {
     HU_RUN_TEST(test_label_lookup);
     HU_RUN_TEST(test_render_unknown_writes_nothing_populated_renders);
     HU_RUN_TEST(test_render_null_or_empty_returns_zero);
+    HU_RUN_TEST(test_format_fact_unknown_returns_zero);
+    HU_RUN_TEST(test_format_fact_populated_omits_prompt_prefix);
+    HU_RUN_TEST(test_format_fact_null_or_empty_returns_zero);
 }

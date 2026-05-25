@@ -39,9 +39,9 @@ struct hu_tool;
 /* An active goal the agent should keep in mind on every turn. */
 typedef struct hu_active_goal {
     char text[160];
-    float salience;          /* 0..1, how prominent right now */
+    float salience; /* 0..1, how prominent right now */
     int64_t expressed_at;
-    int64_t expires_at;      /* 0 = persistent */
+    int64_t expires_at; /* 0 = persistent */
 } hu_active_goal_t;
 
 /* P3.2 — semantic origin tag for a negative-memory row. ORTHOGONAL to
@@ -107,9 +107,9 @@ typedef struct hu_world_recent_change {
 typedef struct hu_negative_memory {
     int64_t id;
     char text[200];
-    char scope[64];          /* "topic", "contact", "channel", ... */
+    char scope[64]; /* "topic", "contact", "channel", ... */
     char reason[120];
-    hu_belief_t belief;      /* W8: how sure we are this is a hard rule */
+    hu_belief_t belief; /* W8: how sure we are this is a hard rule */
     int64_t created_at;
     /* P3.2 — semantic origin (defaults to USER_EXPLICIT for back-compat
      * with rows inserted before the column existed; the schema migration
@@ -191,7 +191,32 @@ typedef struct hu_theory_of_mind {
  *   recent_tools_used[] — tools actually invoked recently (distinct from
  *     capabilities = what we *can* use). */
 #define HU_SELF_DRIFT_HISTORY 4
-#define HU_SELF_RECENT_TOOLS 6
+#define HU_SELF_RECENT_TOOLS  6
+
+/* Spec 2026-05-19 self-model-scaffold — Phase D (AC-SM-4).
+ *
+ * Most-recent rows of the periodic `agent_self_observations` aggregate
+ * table. Backward-compatible: any existing caller that zero-initializes
+ * `hu_self_model_t` (the common path) gets a zero-count array.
+ *
+ * Each slot is a compact value-typed snapshot of one observation row;
+ * no string columns are copied — only scalars / hashes / counts. This
+ * preserves AC-SM-7 (never store content; the world model carries only
+ * aggregate scalars). Populated by
+ * `hu_world_model_merge_self_observations` at world-model build time. */
+#define HU_SELF_RECENT_OBSERVATIONS 4
+
+typedef struct hu_self_observation_summary {
+    int64_t observation_id;
+    int64_t window_start_ts_ms;
+    int64_t window_end_ts_ms;
+    uint32_t n_turns;
+    double response_length_mean;
+    double response_length_stddev;
+    double tool_selection_entropy;
+    uint32_t latency_p50_ms;
+    uint32_t latency_p95_ms;
+} hu_self_observation_summary_t;
 
 typedef struct hu_self_model {
     char name[64];
@@ -206,6 +231,14 @@ typedef struct hu_self_model {
     char recent_emotional_register[32];
     char recent_tools_used[HU_SELF_RECENT_TOOLS][32];
     size_t recent_tools_used_count;
+    /* Phase D — most recent N self-observation rows, ordered newest-first.
+     * `recent_self_observations_count` is the number of valid slots, capped
+     * at HU_SELF_RECENT_OBSERVATIONS. Filled by
+     * hu_world_model_merge_self_observations from the agent_self_observations
+     * SQLite table; empty (count == 0) when the table is missing, empty, or
+     * the spec's HU_ENABLE_SELF_MODEL flag is OFF. */
+    hu_self_observation_summary_t recent_self_observations[HU_SELF_RECENT_OBSERVATIONS];
+    size_t recent_self_observations_count;
 } hu_self_model_t;
 
 /* P5.6 — multimodal context cells. Forward-looking seams that the
@@ -387,16 +420,15 @@ typedef struct hu_world_model {
 
     /* Cache metadata. */
     int64_t built_at;
-    int64_t valid_until;     /* unix ms; 0 = no TTL */
+    int64_t valid_until; /* unix ms; 0 = no TTL */
 } hu_world_model_t;
 
 /* Build a fresh world model for `contact_id`. Caller owns the returned
  * struct; free with hu_world_model_free. The function does not consult any
  * cache — for the cached path use hu_world_model_load. */
 hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                 const char *contact_id, size_t cid_len,
-                                 int64_t now_ms,
-                                 hu_world_model_t **out);
+                                const char *contact_id, size_t cid_len, int64_t now_ms,
+                                hu_world_model_t **out);
 
 /* Cached load. Behavior:
  *  - cache hit (entry not expired): returns a clone of the cached entry
@@ -410,10 +442,8 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
  * paths that have a channel handle should call the `_with_channel`
  * variant so the per-channel persona overlay (P1.2) drives distinct
  * cached snapshots for the same contact across Slack / SMS / iMessage. */
-hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                const char *contact_id, size_t cid_len,
-                                int64_t now_ms,
-                                hu_world_model_t **out);
+hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc, const char *contact_id,
+                               size_t cid_len, int64_t now_ms, hu_world_model_t **out);
 
 /* P2.4 — channel-aware cached load. Cache key is `(contact_id, channel)`
  * so the same person on Slack vs SMS gets distinct snapshots, which is
@@ -422,8 +452,7 @@ hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
  * lookup. `channel_len < 32` (cache slot capacity). */
 hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                             const char *contact_id, size_t cid_len,
-                                            const char *channel, size_t channel_len,
-                                            int64_t now_ms,
+                                            const char *channel, size_t channel_len, int64_t now_ms,
                                             hu_world_model_t **out);
 
 /* Invalidate cached entries.
@@ -440,8 +469,8 @@ hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_
  * clears only the (contact, channel) entry. Use when a write is
  * known-scoped to one channel (e.g., a channel-only ToM scenario). */
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
-void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len,
-                                       const char *channel, size_t channel_len);
+void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len, const char *channel,
+                                       size_t channel_len);
 
 /* P2.5 — observability: report cache slot capacity, total loads, hits,
  * and total evictions since process start (or last `_reset_for_tests`).
@@ -463,9 +492,8 @@ void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm);
 
 /* --- negative memory CRUD (used by the synthesizer + later workstreams) --- */
 
-hu_error_t hu_negative_memory_add(struct hu_graph *g, const char *contact_id,
-                                   size_t cid_len, const hu_negative_memory_t *nm,
-                                   int64_t *out_id);
+hu_error_t hu_negative_memory_add(struct hu_graph *g, const char *contact_id, size_t cid_len,
+                                  const hu_negative_memory_t *nm, int64_t *out_id);
 
 /* Same insert as `hu_negative_memory_add` but uses `hu_memory_facade_sqlite_db`
  * (W7-first; no graph handle). Prefer in bridge / agent paths that already
@@ -491,30 +519,27 @@ hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *cont
  * for self-RAG abstention, HU_WRITE_SOURCE_CHANNEL_OPEN for unverified
  * webhook input, etc.). `now_ms == 0` uses OS clock for recency scoring. */
 hu_error_t hu_negative_memory_add_facade_gated(hu_memory_facade_t *m, const char *contact_id,
-                                                size_t cid_len, const hu_negative_memory_t *nm,
-                                                hu_write_source_t source, int64_t now_ms,
-                                                int64_t *out_id);
+                                               size_t cid_len, const hu_negative_memory_t *nm,
+                                               hu_write_source_t source, int64_t now_ms,
+                                               int64_t *out_id);
 
 hu_error_t hu_negative_memory_list(struct hu_graph *g, hu_allocator_t *alloc,
-                                    const char *contact_id, size_t cid_len,
-                                    size_t limit, hu_negative_memory_t **out,
-                                    size_t *out_count);
+                                   const char *contact_id, size_t cid_len, size_t limit,
+                                   hu_negative_memory_t **out, size_t *out_count);
 
 /* Same rows as `hu_negative_memory_list` but uses `hu_memory_facade_sqlite_db`
  * — prefer from `hu_world_model_build` and other W7-first paths. */
 hu_error_t hu_negative_memory_list_facade(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                           const char *contact_id, size_t cid_len, size_t limit,
-                                           hu_negative_memory_t **out, size_t *out_count);
+                                          const char *contact_id, size_t cid_len, size_t limit,
+                                          hu_negative_memory_t **out, size_t *out_count);
 
-void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm,
-                              size_t count);
+void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm, size_t count);
 
 /* M2 ↔ W9 bridge: merge personal model signal into an already-built world
  * model. Copies goals, topics, style summary, and dominant emotion from the
  * personal model when the world model lacks that data. Safe with NULL pm
  * (no-op). Idempotent: repeated calls overwrite the same fields. */
-void hu_world_model_merge_personal(hu_world_model_t *wm,
-                                   const hu_personal_model_t *pm);
+void hu_world_model_merge_personal(hu_world_model_t *wm, const hu_personal_model_t *pm);
 
 /* P6.1 — Goal-conditioned re-ranking. HippoRAG-style PageRank seeded
  * from goal anchors: tokens shared between `goal_text` and an
@@ -538,10 +563,8 @@ void hu_world_model_merge_personal(hu_world_model_t *wm,
  * Idempotent: re-running with the same goal_text leaves the order
  * unchanged. Safe to call from any thread that owns the world-model
  * pointer (no shared cache state is touched). */
-hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm,
-                                           const char *goal_text,
-                                           size_t goal_text_len,
-                                           hu_allocator_t *alloc);
+hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm, const char *goal_text,
+                                          size_t goal_text_len, hu_allocator_t *alloc);
 
 /* P1.1 + P1.2 + P1.3 — Persona-grounded ToM synthesis.
  *
@@ -569,11 +592,9 @@ hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm,
  *
  * Confidence: each merged source bumps `tom.confidence.mean` by 0.05, capped
  * at 0.85 — we never claim certainty here. */
-void hu_world_model_merge_persona(hu_world_model_t *wm,
-                                  const struct hu_persona *persona,
+void hu_world_model_merge_persona(hu_world_model_t *wm, const struct hu_persona *persona,
                                   const char *channel, size_t channel_len,
-                                  const struct hu_persona_delta *deltas,
-                                  size_t deltas_count);
+                                  const struct hu_persona_delta *deltas, size_t deltas_count);
 
 /* P5.2 / Story F.1 — surface the agent's usable-tool list on
  * `wm->self_model.capabilities`.
@@ -588,8 +609,7 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
  * Borrows nothing from `tools` — the name strings are copied into
  * the inline slab so the world-model snapshot remains POD-safe
  * across install/clone (no pointers into the agent's tool registry). */
-void hu_world_model_merge_self_capabilities(hu_world_model_t *wm,
-                                            const struct hu_tool *tools,
+void hu_world_model_merge_self_capabilities(hu_world_model_t *wm, const struct hu_tool *tools,
                                             size_t tools_count);
 
 /* Story F.2 — copy non-neutral `wm->dominant_emotion` into
@@ -600,9 +620,21 @@ void hu_world_model_merge_self_emotion(hu_world_model_t *wm);
 /* Story F.2 — surface tools the agent actually invoked recently (up to 6,
  * 31-char names). Distinct from capabilities (registry). Borrows nothing —
  * names are copied from the caller's pointer array. */
-void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm,
-                                            const char *const *tool_names,
+void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm, const char *const *tool_names,
                                             size_t tool_names_count);
+
+/* Spec 2026-05-19 self-model-scaffold — Phase D (AC-SM-4).
+ *
+ * Read the top-N most-recent rows from `agent_self_observations`
+ * (table created in Phase C) and populate
+ * `wm->self_model.recent_self_observations[]`. Empty table or missing
+ * table → `recent_self_observations_count = 0`; never an error.
+ *
+ * Idempotent and additive — does NOT clear other self_model fields.
+ * Forward-declares `struct sqlite3` so callers that do not have the
+ * SQLite header in scope can still see the prototype. */
+struct sqlite3;
+void hu_world_model_merge_self_observations(hu_world_model_t *wm, struct sqlite3 *db);
 
 #ifdef __cplusplus
 }

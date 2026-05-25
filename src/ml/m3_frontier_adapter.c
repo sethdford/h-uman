@@ -1,10 +1,17 @@
 /* M3 frontier adapter stub — see include/human/ml/m3_frontier_adapter.h */
 
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/core/log.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
 
 /* Pin the on-wire outcome record size so a future field addition can't
  * silently bloat the ring buffer beyond the agreed 384 KB ceiling
@@ -33,6 +40,12 @@ struct hu_m3_frontier_adapter {
     hu_m3_inference_outcome_t outcomes[HU_M3_OUTCOMES_RING_CAPACITY];
     size_t head;
     uint64_t total_recorded;
+
+    /* Spec 1 Task 8 (AC-M3-4 expanded): drain marker. Position in the
+     * monotonic total_recorded sequence "up to which" the drainer has
+     * persisted outcomes. Strictly <= total_recorded; advanced only by
+     * `hu_m3_frontier_adapter_advance_drain_marker`. */
+    uint64_t drain_marker;
 };
 
 bool hu_m3_adapter_should_disable(bool cfg_disabled) {
@@ -375,3 +388,237 @@ hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_a
     *out_cap = cap;
     return HU_OK;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 7 (AC-M3-4): outcome-ring population helper.
+ * ───────────────────────────────────────────────────────────────── */
+
+hu_error_t hu_m3_record_outcome_from_provider_result(
+    hu_m3_frontier_adapter_t *adapter, uint64_t timestamp_unix_ms, uint32_t prompt_tokens,
+    uint32_t completion_tokens, uint64_t latency_ms, uint64_t contact_hash, uint8_t turn_kind) {
+    if (!adapter)
+        return HU_OK;
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    if (timestamp_unix_ms == 0) {
+        struct timespec ts;
+        if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+            timestamp_unix_ms = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+        }
+    }
+    outcome.timestamp_unix_ms = timestamp_unix_ms;
+    outcome.latency_ms = latency_ms;
+    outcome.contact_id_hash = contact_hash;
+    outcome.prompt_tokens = prompt_tokens;
+    outcome.completion_tokens = completion_tokens;
+    outcome.turn_kind = turn_kind;
+    return hu_m3_frontier_adapter_record_outcome(adapter, &outcome);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 8 (AC-M3-4 expanded): drain marker + drainer.
+ * ───────────────────────────────────────────────────────────────── */
+
+uint64_t hu_m3_frontier_adapter_drain_marker(const hu_m3_frontier_adapter_t *adapter) {
+    return adapter ? adapter->drain_marker : 0ULL;
+}
+
+void hu_m3_frontier_adapter_advance_drain_marker(hu_m3_frontier_adapter_t *adapter,
+                                                 uint64_t recorded_through) {
+    if (!adapter)
+        return;
+    if (recorded_through <= adapter->drain_marker)
+        return;
+    if (recorded_through > adapter->total_recorded)
+        recorded_through = adapter->total_recorded;
+    adapter->drain_marker = recorded_through;
+}
+
+#ifdef HU_ENABLE_SQLITE
+
+hu_error_t hu_m3_outcomes_init_table(sqlite3 *db) {
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *sql_table = "CREATE TABLE IF NOT EXISTS m3_outcomes("
+                            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                            "timestamp_unix_ms INTEGER NOT NULL, "
+                            "latency_ms INTEGER NOT NULL, "
+                            "prompt_hash INTEGER NOT NULL, "
+                            "response_hash INTEGER NOT NULL, "
+                            "contact_id_hash INTEGER NOT NULL, "
+                            "prompt_tokens INTEGER NOT NULL, "
+                            "completion_tokens INTEGER NOT NULL, "
+                            "model_id INTEGER NOT NULL, "
+                            "adapter_id INTEGER NOT NULL, "
+                            "guard_decision INTEGER NOT NULL, "
+                            "turn_kind INTEGER NOT NULL, "
+                            "drained_ts_ms INTEGER NOT NULL"
+                            ");";
+    char *err_msg = NULL;
+    int rc = sqlite3_exec(db, sql_table, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        if (err_msg)
+            sqlite3_free(err_msg);
+        return HU_ERR_IO;
+    }
+    const char *sql_idx = "CREATE INDEX IF NOT EXISTS idx_m3_outcomes_timestamp "
+                          "ON m3_outcomes(timestamp_unix_ms);";
+    rc = sqlite3_exec(db, sql_idx, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        if (err_msg)
+            sqlite3_free(err_msg);
+        return HU_ERR_IO;
+    }
+    return HU_OK;
+}
+
+hu_error_t hu_m3_drain_outcomes_to_sqlite(hu_m3_frontier_adapter_t *adapter, sqlite3 *db,
+                                          int64_t now_ts_ms, hu_allocator_t *alloc,
+                                          size_t max_outcomes, int64_t *out_drained) {
+    if (out_drained)
+        *out_drained = 0;
+    if (!db || !alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!adapter)
+        return HU_OK;
+
+    uint64_t total = adapter->total_recorded;
+    uint64_t marker = adapter->drain_marker;
+    if (total <= marker)
+        return HU_OK;
+
+    /* The ring holds up to CAPACITY records. If unread > CAPACITY,
+     * records have been dropped — advance the marker past them anyway
+     * to keep progress (operator sees gap via persisted row count vs
+     * total_recorded). */
+    uint64_t unread = total - marker;
+    if (unread > (uint64_t)HU_M3_OUTCOMES_RING_CAPACITY)
+        unread = (uint64_t)HU_M3_OUTCOMES_RING_CAPACITY;
+    size_t want = (size_t)unread;
+    if (max_outcomes == 0)
+        max_outcomes = HU_M3_OUTCOMES_RING_CAPACITY;
+    if (want > max_outcomes)
+        want = max_outcomes;
+    if (want == 0)
+        return HU_OK;
+
+    hu_m3_inference_outcome_t *snap =
+        (hu_m3_inference_outcome_t *)alloc->alloc(alloc->ctx, sizeof(*snap) * want);
+    if (!snap)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    size_t snap_count = 0;
+    hu_error_t err = hu_m3_frontier_adapter_snapshot_outcomes(adapter, snap, want, &snap_count);
+    if (err != HU_OK) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * want);
+        return err;
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "INSERT INTO m3_outcomes("
+                                "timestamp_unix_ms, latency_ms, prompt_hash, response_hash, "
+                                "contact_id_hash, prompt_tokens, completion_tokens, model_id, "
+                                "adapter_id, guard_decision, turn_kind, drained_ts_ms) "
+                                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * want);
+        return HU_ERR_IO;
+    }
+
+    (void)sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+    hu_error_t insert_err = HU_OK;
+    int64_t inserted = 0;
+    for (size_t i = 0; i < snap_count; i++) {
+        const hu_m3_inference_outcome_t *o = &snap[i];
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_int64(stmt, 1, (int64_t)o->timestamp_unix_ms);
+        sqlite3_bind_int64(stmt, 2, (int64_t)o->latency_ms);
+        sqlite3_bind_int64(stmt, 3, (int64_t)o->prompt_hash);
+        sqlite3_bind_int64(stmt, 4, (int64_t)o->response_hash);
+        sqlite3_bind_int64(stmt, 5, (int64_t)o->contact_id_hash);
+        sqlite3_bind_int(stmt, 6, (int)o->prompt_tokens);
+        sqlite3_bind_int(stmt, 7, (int)o->completion_tokens);
+        sqlite3_bind_int(stmt, 8, (int)o->model_id);
+        sqlite3_bind_int(stmt, 9, (int)o->adapter_id);
+        sqlite3_bind_int(stmt, 10, (int)o->guard_decision);
+        sqlite3_bind_int(stmt, 11, (int)o->turn_kind);
+        sqlite3_bind_int64(stmt, 12, now_ts_ms);
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE) {
+            insert_err = HU_ERR_IO;
+            break;
+        }
+        inserted++;
+    }
+    sqlite3_finalize(stmt);
+
+    if (insert_err != HU_OK) {
+        (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * want);
+        return insert_err;
+    }
+    (void)sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+
+    /* Marker = total at function entry. Concurrent records that land
+     * after this point are still > total and remain to be drained next
+     * tick. */
+    hu_m3_frontier_adapter_advance_drain_marker(adapter, total);
+
+    alloc->free(alloc->ctx, snap, sizeof(*snap) * want);
+    if (out_drained)
+        *out_drained = inserted;
+    return HU_OK;
+}
+
+static atomic_bool g_warned_m3_drain_enabled = false;
+static atomic_bool g_warned_m3_drain_null_db = false;
+
+#if HU_IS_TEST
+void hu_daemon_tick_m3_outcome_drain_reset_warn_guards_for_test(void) {
+    atomic_store(&g_warned_m3_drain_enabled, false);
+    atomic_store(&g_warned_m3_drain_null_db, false);
+}
+#endif
+
+hu_error_t hu_daemon_tick_m3_outcome_drain(hu_m3_frontier_adapter_t *adapter, sqlite3 *db,
+                                           int64_t now_ts_ms, int64_t *last_run_ts_ms_inout,
+                                           int64_t interval_seconds, hu_allocator_t *alloc,
+                                           int64_t *out_drained) {
+    if (out_drained)
+        *out_drained = 0;
+    if (!last_run_ts_ms_inout || !alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    if (!db) {
+        hu_log_info_once(&g_warned_m3_drain_null_db, "daemon", NULL,
+                         "m3 outcome drainer tick called with NULL sqlite3 db — "
+                         "outcome ring will wrap silently. Open the daemon's primary "
+                         "memory db before scheduling the drain tick.");
+        return HU_OK;
+    }
+
+    if (interval_seconds <= 0)
+        interval_seconds = 300;
+
+    int64_t interval_ms = interval_seconds * 1000;
+    if (*last_run_ts_ms_inout > 0 && now_ts_ms - *last_run_ts_ms_inout < interval_ms)
+        return HU_OK;
+
+    hu_log_info_once(&g_warned_m3_drain_enabled, "daemon", NULL,
+                     "m3 outcome drainer tick enabled — draining outcome ring every %lld "
+                     "seconds into m3_outcomes table",
+                     (long long)interval_seconds);
+
+    int64_t drained = 0;
+    hu_error_t err = hu_m3_drain_outcomes_to_sqlite(adapter, db, now_ts_ms, alloc, 0, &drained);
+    *last_run_ts_ms_inout = now_ts_ms;
+    if (out_drained)
+        *out_drained = drained;
+    return err;
+}
+
+#endif /* HU_ENABLE_SQLITE */

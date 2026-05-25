@@ -29,7 +29,113 @@
 #include "human/providers/openai.h"
 #include "human/providers/openai_codex.h"
 #include "human/providers/openrouter.h"
+#include <stdlib.h>
 #include <string.h>
+
+/* Phase 1b (Gemma throughput program) — env-var bridge for KV quant.
+ *
+ * Operators flip Q8 KV without a rebuild by setting
+ * HU_LLAMACPP_KV_QUANT=q8_0 (or q4_0 / fp16) in the daemon's env. The
+ * factory reads it once per provider creation and threads the parsed
+ * value into hu_llamacpp_config_t.kv_quant. Unrecognized values fall
+ * back to FP16 with no warning here — the parse function is the
+ * authoritative truth and the operator's typo gets ignored silently
+ * rather than emitting per-creation log spam. A future doctor check
+ * is the right place to elevate the unrecognized-value signal. */
+static void factory_apply_kv_quant_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    const char *env = getenv("HU_LLAMACPP_KV_QUANT");
+    if (!env || !*env)
+        return; /* leave default (FP16 from zero-init) */
+    lc->kv_quant = hu_kv_quant_from_string(env, NULL);
+}
+
+/* Phase 4 — Flash Attention default + opt-out.
+ *
+ * The factory defaults flash_attn=true. Operators disable for
+ * debugging with HU_LLAMACPP_FLASH_ATTN=off (or "false" / "0").
+ * Anything else (set, unset, or yes/on/1) keeps it enabled — FA is
+ * the table-stakes default for Mac-targeted builds per practitioner
+ * signal. Tests that construct hu_llamacpp_config_t directly get the
+ * zero-init default (false) and opt in explicitly if needed. */
+static void factory_apply_flash_attn_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    lc->flash_attn = true; /* default ON for factory-built configs */
+    const char *env = getenv("HU_LLAMACPP_FLASH_ATTN");
+    if (!env || !*env)
+        return;
+    /* Disable on the canonical "off-ish" tokens: off / 0 / false. Anything
+     * else (set, unset, yes / on / 1 / typo) keeps the default — same
+     * friendly-to-typos posture as the other env bridges in this file. */
+    if (strcmp(env, "off") == 0 || strcmp(env, "0") == 0 || strcmp(env, "false") == 0)
+        lc->flash_attn = false;
+}
+
+/* Phase 2b.2 — opt-in KV cache skip-decode env bridge.
+ *
+ * Default OFF (preserves Phase 2b SAFE behavior). Operator opts in via
+ * HU_LLAMACPP_KVCACHE_SKIP_DECODE set to "1" / "on" / "true". This is
+ * the ONE env bridge in this file with STRICT on-token matching rather
+ * than the friendly-to-typos posture used elsewhere: mis-enabling this
+ * can silently corrupt KV in real linked-libllama builds, so operators
+ * must opt in unambiguously. Anything else (typo, "yes", "enable") keeps
+ * the safe default rather than risking a silent enable. */
+static void factory_apply_kvcache_skip_decode_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    const char *env = getenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    if (!env || !*env)
+        return; /* unset → default OFF */
+    if (strcmp(env, "1") == 0 || strcmp(env, "on") == 0 || strcmp(env, "true") == 0)
+        lc->kvcache_skip_decode = true;
+}
+
+/* Phase 3b — env-var bridge for cross-model speculative decoding.
+ *
+ * Operators wire a draft model alongside the target without a rebuild
+ * via three optional env vars (all silently ignored if unset):
+ *
+ *   HU_LLAMACPP_DRAFT_MODEL=/path/to/gemma-4-E2B-it.gguf
+ *     (preferred same-family draft for gemma-4-* targets;
+ *      gemma-3-270m.gguf is a smaller cross-family fallback —
+ *      same 262k vocab so tokens line up, lower acceptance rate)
+ *   HU_LLAMACPP_DRAFT_MIN_P=0.05    (default unset → 0; provider uses
+ *                                    upstream default)
+ *   HU_LLAMACPP_DRAFT_MAX_TOKENS=5  (default unset → 0; provider uses
+ *                                    upstream default)
+ *
+ * The draft_model_path is heap-allocated here (strdup); the factory
+ * frees it after hu_llamacpp_provider_create returns, matching the
+ * existing model_path ownership pattern.
+ *
+ * Unparseable numeric values default to 0 (use upstream default)
+ * rather than failing — same friendly-to-typos posture as KV quant. */
+static void factory_apply_spec_decode_env(hu_allocator_t *alloc, hu_llamacpp_config_t *lc) {
+    if (!alloc || !lc)
+        return;
+    const char *path = getenv("HU_LLAMACPP_DRAFT_MODEL");
+    if (path && *path) {
+        char *owned = hu_strdup(alloc, path);
+        if (owned)
+            lc->draft_model_path = owned;
+    }
+    const char *min_p = getenv("HU_LLAMACPP_DRAFT_MIN_P");
+    if (min_p && *min_p) {
+        char *end = NULL;
+        float v = (float)strtod(min_p, &end);
+        if (end && end != min_p && v >= 0.0f && v <= 1.0f)
+            lc->draft_min_p = v;
+    }
+    const char *max_t = getenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
+    if (max_t && *max_t) {
+        char *end = NULL;
+        long v = strtol(max_t, &end, 10);
+        if (end && end != max_t && v > 0 && v < 64)
+            lc->draft_max_tokens = (int)v;
+    }
+}
 
 static const struct {
     const char *name;
@@ -125,6 +231,15 @@ static const struct {
     {"litellm", "http://localhost:4000"},
     {"mlx_local", "http://127.0.0.1:8741/v1"},
     {"mlx-local", "http://127.0.0.1:8741/v1"},
+    /* Phase 3a.2 — "mlx-http" alias matches the Gemma throughput
+     * program spec. Same target as mlx-local, but the name documents
+     * intent (HTTP-talks-to-mlx-server, vs the "mlx" key which routes
+     * to CoreML via a separate factory branch). Operators picking
+     * between providers see "mlx" (subprocess one-shot, no streaming),
+     * "mlx-http" (HTTP to mlx-server.py, streaming, warm model), and
+     * "coreml" (native CoreML — different code path entirely). */
+    {"mlx-http", "http://127.0.0.1:8741/v1"},
+    {"mlx_http", "http://127.0.0.1:8741/v1"},
 };
 
 static const size_t hu_compat_providers_count =
@@ -242,9 +357,15 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
                 return HU_ERR_OUT_OF_MEMORY;
             lc.model_path = path;
         }
+        factory_apply_kv_quant_env(&lc);
+        factory_apply_spec_decode_env(alloc, &lc);
+        factory_apply_flash_attn_env(&lc);
+        factory_apply_kvcache_skip_decode_env(&lc);
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        if (lc.draft_model_path)
+            alloc->free(alloc->ctx, lc.draft_model_path, strlen(lc.draft_model_path) + 1);
         return r;
     }
 
@@ -313,24 +434,33 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
 #include <stdlib.h>
 static hu_llamacpp_config_t s_last_llamacpp_config;
 static char *s_last_llamacpp_model_path_copy;
+static char *s_last_llamacpp_draft_model_path_copy;
 static bool s_last_llamacpp_config_set = false;
+
+static char *capture_dup(const char *s) {
+    if (!s)
+        return NULL;
+    size_t n = strlen(s);
+    char *copy = (char *)malloc(n + 1);
+    if (copy)
+        memcpy(copy, s, n + 1);
+    return copy;
+}
 
 static void hu_llamacpp_factory_capture_for_test(const hu_llamacpp_config_t *cfg) {
     if (s_last_llamacpp_model_path_copy) {
         free(s_last_llamacpp_model_path_copy);
         s_last_llamacpp_model_path_copy = NULL;
     }
-    s_last_llamacpp_config = *cfg;
-    if (cfg->model_path) {
-        size_t n = strlen(cfg->model_path);
-        s_last_llamacpp_model_path_copy = (char *)malloc(n + 1);
-        if (s_last_llamacpp_model_path_copy) {
-            memcpy(s_last_llamacpp_model_path_copy, cfg->model_path, n + 1);
-            s_last_llamacpp_config.model_path = s_last_llamacpp_model_path_copy;
-        } else {
-            s_last_llamacpp_config.model_path = NULL;
-        }
+    if (s_last_llamacpp_draft_model_path_copy) {
+        free(s_last_llamacpp_draft_model_path_copy);
+        s_last_llamacpp_draft_model_path_copy = NULL;
     }
+    s_last_llamacpp_config = *cfg;
+    s_last_llamacpp_model_path_copy = capture_dup(cfg->model_path);
+    s_last_llamacpp_config.model_path = s_last_llamacpp_model_path_copy;
+    s_last_llamacpp_draft_model_path_copy = capture_dup(cfg->draft_model_path);
+    s_last_llamacpp_config.draft_model_path = s_last_llamacpp_draft_model_path_copy;
     s_last_llamacpp_config_set = true;
 }
 
@@ -343,44 +473,50 @@ void hu_llamacpp_factory_reset_for_test(void) {
         free(s_last_llamacpp_model_path_copy);
         s_last_llamacpp_model_path_copy = NULL;
     }
+    if (s_last_llamacpp_draft_model_path_copy) {
+        free(s_last_llamacpp_draft_model_path_copy);
+        s_last_llamacpp_draft_model_path_copy = NULL;
+    }
     s_last_llamacpp_config_set = false;
     memset(&s_last_llamacpp_config, 0, sizeof(s_last_llamacpp_config));
 }
 #endif
 
-hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc,
-                                         const hu_provider_entry_t *entry,
+hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc, const hu_provider_entry_t *entry,
                                          hu_provider_t *out) {
     if (!alloc || !entry || !entry->name || !out)
         return HU_ERR_INVALID_ARGUMENT;
     size_t name_len = strlen(entry->name);
-    bool is_llamacpp =
-        (name_len == 8 && memcmp(entry->name, "llamacpp", 8) == 0) ||
-        (name_len == 9 && memcmp(entry->name, "llama.cpp", 9) == 0);
+    bool is_llamacpp = (name_len == 8 && memcmp(entry->name, "llamacpp", 8) == 0) ||
+                       (name_len == 9 && memcmp(entry->name, "llama.cpp", 9) == 0);
     if (is_llamacpp) {
         hu_llamacpp_config_t lc = {0};
         if (entry->base_url && entry->base_url[0]) {
             char *path = hu_strdup(alloc, entry->base_url);
-            if (!path) return HU_ERR_OUT_OF_MEMORY;
+            if (!path)
+                return HU_ERR_OUT_OF_MEMORY;
             lc.model_path = path;
         }
         lc.context_size = entry->context_size;
-        lc.threads      = entry->threads;
-        lc.use_gpu      = entry->use_gpu;
+        lc.threads = entry->threads;
+        lc.use_gpu = entry->use_gpu;
         lc.n_gpu_layers = entry->n_gpu_layers;
+        factory_apply_kv_quant_env(&lc);
+        factory_apply_spec_decode_env(alloc, &lc);
+        factory_apply_flash_attn_env(&lc);
+        factory_apply_kvcache_skip_decode_env(&lc);
 #ifdef HU_IS_TEST
         hu_llamacpp_factory_capture_for_test(&lc);
 #endif
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        if (lc.draft_model_path)
+            alloc->free(alloc->ctx, lc.draft_model_path, strlen(lc.draft_model_path) + 1);
         return r;
     }
     /* Non-llamacpp: defer to the legacy by-name path. */
-    return hu_provider_create(alloc, entry->name, name_len,
-                              entry->api_key,
-                              entry->api_key ? strlen(entry->api_key) : 0,
-                              entry->base_url,
-                              entry->base_url ? strlen(entry->base_url) : 0,
-                              out);
+    return hu_provider_create(alloc, entry->name, name_len, entry->api_key,
+                              entry->api_key ? strlen(entry->api_key) : 0, entry->base_url,
+                              entry->base_url ? strlen(entry->base_url) : 0, out);
 }

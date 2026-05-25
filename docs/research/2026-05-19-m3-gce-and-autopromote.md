@@ -1,3 +1,11 @@
+---
+title: "M3 Auto-Promote Enabled + GCE Training Backend (2026-05-19)"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-gce-and-autopromote
+---
+
 # M3 Auto-Promote Enabled + GCE Training Backend (2026-05-19)
 
 User instruction: "1 flip 3 use the Google Cloud account and CLI we have

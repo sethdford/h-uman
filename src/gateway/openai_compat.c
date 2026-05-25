@@ -13,12 +13,32 @@
 #include "human/provider.h"
 #include "human/providers/factory.h"
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Agent-state serialization (2026-05-25 hotfix for ASan heap-use-after-free
+ * triggered when two HTTP worker threads called hu_agent_clear_history /
+ * hu_agent_internal_append_history / hu_agent_turn concurrently on the SAME
+ * shared app_ctx->agent — see stack in ~/.human/logs/daemon-merged.log).
+ *
+ * The agent's history array is heap-allocated and freed wholesale by
+ * clear_history; readers (gvr_check, prompt builder, output validators)
+ * keep raw pointers into those entries across the request. A concurrent
+ * clear_history from another worker frees the memory mid-read.
+ *
+ * Provider-level lock (PR #18 / g_compatible_chat_lock in compatible.c)
+ * sits BELOW this race — both threads have already entered the agent
+ * critical section by the time they call the provider.
+ *
+ * Coarse global lock is acceptable because the agent is fundamentally a
+ * single-tenant per-process object today. Multi-agent multi-tenant work
+ * is tracked separately. */
+static pthread_mutex_t g_openai_compat_agent_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Resolve provider name and model from OpenAI model string.
  * "anthropic/claude-sonnet" -> provider=anthropic, model=claude-sonnet
@@ -188,11 +208,11 @@ static void openai_compat_agent_stream_cb(const hu_agent_stream_event_t *event, 
 }
 #endif /* !HU_IS_TEST */
 
-void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
-                                              hu_allocator_t *alloc,
-                                              const hu_app_context_t *app_ctx, int *out_status,
-                                              char **out_body, size_t *out_body_len,
-                                              const char **out_content_type) {
+/* Inner handler — must be called with g_openai_compat_agent_lock held.
+ * Trampoline wrapper below acquires/releases the lock. */
+static void hu_openai_compat_handle_chat_completions_inner(
+    const char *body, size_t body_len, hu_allocator_t *alloc, const hu_app_context_t *app_ctx,
+    int *out_status, char **out_body, size_t *out_body_len, const char **out_content_type) {
     *out_status = 500;
     *out_body = NULL;
     *out_body_len = 0;
@@ -408,12 +428,19 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 hu_json_buf_free(&buf);
                 if (err == HU_ERR_OUT_OF_MEMORY)
                     error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
-                else if (err == HU_ERR_PROVIDER_UNAVAILABLE)
-                    /* M4 follow-up 2026-05-24: agent_turn's transport-error fast-fail
-                     * surfaces here. 503 (not 502) is the correct code for
-                     * "downstream temporarily unavailable, retry later" — tells
-                     * clients to back off rather than treating it as a permanent
-                     * gateway failure. */
+                else if (err == HU_ERR_PROVIDER_UNAVAILABLE || err == HU_ERR_IO ||
+                         err == HU_ERR_TIMEOUT)
+                    /* M4 follow-up 2026-05-24 (gap-A): map ALL transport-failure
+                     * codes to 503 ("downstream temporarily unavailable, retry
+                     * later") so batch + streaming paths return uniformly. The
+                     * streaming path (hu_agent_turn_stream_v2) does NOT route
+                     * through the degradation layer, so HU_ERR_IO / _TIMEOUT
+                     * surface raw here — without the agent_turn fast-fail
+                     * translating them to HU_ERR_PROVIDER_UNAVAILABLE first.
+                     * Without this branch the streaming path returned 502 on
+                     * transport failure while the batch path returned 503.
+                     * iMessage daemon uses the streaming path, so this also
+                     * lines up internal-vs-external client behavior. */
                     error_response(alloc, 503, "Provider unavailable", out_status, out_body,
                                    out_body_len);
                 else
@@ -503,7 +530,16 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
             provider.vtable->deinit(provider.ctx, alloc);
         if (err != HU_OK) {
             hu_json_buf_free(&buf);
-            error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
+            /* M4 follow-up 2026-05-24 (gap-A critic finding): non-agent
+             * fallback streaming path. Same transport-failure → 503 mapping
+             * as the agent path (line ~411) so clients get consistent
+             * back-off semantics regardless of whether their request landed
+             * on the agent or the fallback provider. */
+            if (err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE)
+                error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                               out_body_len);
+            else
+                error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
             if (resp.content)
                 hu_chat_response_free(alloc, &resp);
             return;
@@ -817,11 +853,15 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 return;
             }
             if (agent_err != HU_OK) {
-                /* M4 follow-up 2026-05-24: transport-failure fast-fail (PROVIDER_UNAVAILABLE)
-                 * maps to HTTP 503 ("downstream temporarily unavailable") so clients
-                 * back off instead of treating it as a permanent gateway failure.
-                 * Other agent errors still surface as 502 ("Agent error"). */
-                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE)
+                /* M4 follow-up 2026-05-24: transport-failure codes (PROVIDER_UNAVAILABLE,
+                 * IO, TIMEOUT) all map to HTTP 503 ("downstream temporarily unavailable")
+                 * so clients back off instead of treating it as a permanent gateway
+                 * failure. PROVIDER_UNAVAILABLE comes from agent_turn's fast-fail (the
+                 * degradation-translated code path). IO/TIMEOUT surface raw on paths
+                 * that don't go through degradation (gap-A 2026-05-24). Other agent
+                 * errors still surface as 502 ("Agent error"). */
+                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE || agent_err == HU_ERR_IO ||
+                    agent_err == HU_ERR_TIMEOUT)
                     error_response(alloc, 503, "Provider unavailable", out_status, out_body,
                                    out_body_len);
                 else
@@ -890,7 +930,14 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
         provider.vtable->deinit(provider.ctx, alloc);
 
     if (err != HU_OK) {
-        error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
+        /* M4 follow-up 2026-05-24 (gap-A critic finding): non-agent
+         * fallback batch path. Mirror of the streaming-side fix at
+         * line ~511 so transport-failure responses are consistently 503
+         * across batch + streaming, agent + fallback. */
+        if (err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE)
+            error_response(alloc, 503, "Provider unavailable", out_status, out_body, out_body_len);
+        else
+            error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
         if (resp.content)
             hu_chat_response_free(alloc, &resp);
         return;
@@ -960,6 +1007,20 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
     *out_body_len = buf.len;
     hu_json_buf_free(&buf);
 #endif
+}
+
+/* Public entry point — serializes concurrent requests on the shared
+ * app_ctx->agent via g_openai_compat_agent_lock. See the lock's
+ * declaration comment for the heap-use-after-free this prevents. */
+void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
+                                              hu_allocator_t *alloc,
+                                              const hu_app_context_t *app_ctx, int *out_status,
+                                              char **out_body, size_t *out_body_len,
+                                              const char **out_content_type) {
+    pthread_mutex_lock(&g_openai_compat_agent_lock);
+    hu_openai_compat_handle_chat_completions_inner(body, body_len, alloc, app_ctx, out_status,
+                                                   out_body, out_body_len, out_content_type);
+    pthread_mutex_unlock(&g_openai_compat_agent_lock);
 }
 
 void hu_openai_compat_handle_models(hu_allocator_t *alloc, const hu_app_context_t *app_ctx,

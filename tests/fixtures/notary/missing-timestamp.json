@@ -1,0 +1,13 @@
+{
+  "issues": [
+    {
+      "severity": "error",
+      "architecture": "x86_64",
+      "message": "The binary must be notarized before it can be submitted; this typically means the binary uses a timestamp server when signed.",
+      "docUrl": "https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution",
+      "path": "Payload/Applications/Human.app/Contents/MacOS/human"
+    }
+  ],
+  "id": "test-missing-timestamp",
+  "statusCode": 4000
+}

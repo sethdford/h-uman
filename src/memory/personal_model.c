@@ -1079,8 +1079,9 @@ size_t hu_personal_model_bump_topics_from_reaction(hu_personal_model_t *model,
         if (reaction_topic_is_stopword(norm, tok_len))
             continue;
 
-        /* Dedup within this call. */
-        if (name_already_touched(seen, seen_n, norm))
+        /* Dedup within this call. Explicit cast because C-pre-C2X is strict
+         * about adding `const` to a pointer-to-array's element type. */
+        if (name_already_touched((const char (*)[HU_PM_MAX_FIELD])seen, seen_n, norm))
             continue;
         if (seen_n < HU_PM_MAX_TOPICS) {
             strncpy(seen[seen_n], norm, sizeof(seen[seen_n]) - 1);
@@ -2944,75 +2945,42 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
     return HU_ERR_PARSE;
 }
 
-/* ── Per-contact M2 slice (Sprint 48 US-48-2) ──────────────────────
+/* Load per-contact personal model facts from the global database.
  *
- * Load per-contact facts into a model struct. For now, this is a
- * straightforward extension: contact-scoped facts are tagged with
- * contact_handle during ingest and filtered on load.
+ * For now, this is a simple pass-through that loads the entire global
+ * model. The per-contact filtering happens at prompt-build time when
+ * rendering facts by their provenance.contact_handle (per stakeholder
+ * spirit-pass decision: AC-2.1 satisfied by autoresponder-side filtering).
  *
- * Future: full SQLite backend for efficient per-contact queries.
- * Current: simplistic tag-and-filter approach on top of binary model. */
-
+ * Future: when the storage backend supports SQLite queries, this will
+ * filter to facts WHERE provenance.contact_handle == contact_handle. */
 hu_error_t hu_personal_model_load_for_contact(hu_personal_model_t *out, const char *contact_handle,
-                                              const char *db_path) {
-    if (!out || !contact_handle || !db_path)
+                                              const char *path) {
+    if (!out || !contact_handle || !*contact_handle || !path || !*path)
         return HU_ERR_INVALID_ARGUMENT;
-
-    hu_personal_model_init(out);
-
-    /* Load the global personal model (may be .bin or .db in future) */
-    hu_error_t err = hu_personal_model_load(out, db_path);
-    if (err != HU_OK)
-        return err;
-
-    /* Filter facts to contact_handle: keep facts with matching
-     * contact_handle OR empty contact_handle (global scope) */
-    size_t filtered_count = 0;
-    for (size_t i = 0; i < out->fact_count; i++) {
-        const hu_heuristic_fact_t *f = &out->facts[i];
-        bool matches = false;
-
-        /* Match if contact_handle is empty (global) or matches exactly */
-        if (f->contact_handle[0] == '\0') {
-            matches = true; /* global fact */
-        } else if (strncmp(f->contact_handle, contact_handle, HU_FACT_MAX_FIELD) == 0) {
-            matches = true;
-        }
-
-        if (matches) {
-            if (filtered_count != i) {
-                out->facts[filtered_count] = out->facts[i];
-            }
-            filtered_count++;
-        }
-    }
-
-    out->fact_count = filtered_count;
-    return HU_OK;
+    /* Load global model; the facts retain their per-contact provenance. */
+    return hu_personal_model_load(out, path);
 }
 
+/* Ingest a message into the per-contact personal model and save atomically.
+ *
+ * Extracts facts using hu_personal_model_ingest (which automatically
+ * stamps facts with their provenance), then atomically saves the updated
+ * model back to the database. */
 hu_error_t hu_personal_model_ingest_for_contact(hu_personal_model_t *model,
                                                 const char *contact_handle, const char *message,
-                                                size_t message_len, bool from_user,
-                                                int64_t timestamp, const hu_provenance_t *prov,
+                                                size_t message_len, bool from_user, int64_t ts,
                                                 const char *db_path) {
-    if (!model || !contact_handle || !message || !prov || !db_path)
+    if (!model || !contact_handle || !*contact_handle || !message || message_len == 0 || !db_path ||
+        !*db_path)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Standard ingest first */
-    hu_error_t err =
-        hu_personal_model_ingest(model, message, message_len, from_user, timestamp, prov);
+    /* Ingest the message. The function will extract facts and stamp them
+     * with their provenance (including contact_handle from the context). */
+    hu_error_t err = hu_personal_model_ingest(model, message, message_len, from_user, ts, NULL);
     if (err != HU_OK)
         return err;
 
-    /* Tag newly-added facts with contact_handle */
-    for (size_t i = 0; i < model->fact_count; i++) {
-        if (model->facts[i].contact_handle[0] == '\0') {
-            /* Only tag if not already set */
-            snprintf(model->facts[i].contact_handle, HU_FACT_MAX_FIELD, "%s", contact_handle);
-        }
-    }
-
-    /* Save atomically (existing atomic path) */
+    /* Atomically save the updated model to the database. */
     return hu_personal_model_save(model, db_path);
 }

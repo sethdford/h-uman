@@ -774,7 +774,7 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
     size_t prompt_len = hu_autoresponder_build_prompt(
         NULL, /* autoresponder_config — NULL means skip the DND/allowlist checks */
         contact_handle, "imessage", follow_up_trigger, NULL, /* persona_summary=NULL for now */
-        &contact_model, prompt_buf, sizeof(prompt_buf));
+        &contact_model, (int64_t)time(NULL), prompt_buf, sizeof(prompt_buf));
 
     if (prompt_len == 0 || prompt_len >= sizeof(prompt_buf)) {
         hu_log_warn("follow_up_watcher", NULL,

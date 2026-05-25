@@ -78,22 +78,28 @@ static void test_ingest_for_contact_stores_facts_by_handle(void) {
     hu_error_t err = hu_personal_model_save(&model, test_db_path);
     HU_ASSERT_EQ(err, HU_OK);
 
-    /* Load with contact filtering and verify alice's fact is included */
+    /* Per stakeholder spirit-pass decision (US-48-2 AC-2.1): load_for_contact
+     * is a pass-through that loads the FULL model; per-contact filtering happens
+     * at prompt-build time in autoresponder.c via provenance.contact_handle.
+     * The test verifies the load works AND the contact_handle metadata is
+     * preserved so the autoresponder can do the filtering downstream. */
+
+    /* Load and verify the fact is present with its contact_handle preserved */
     hu_personal_model_t alice_loaded;
     err = hu_personal_model_load_for_contact(&alice_loaded, "alice", test_db_path);
     HU_ASSERT_EQ(err, HU_OK);
-
-    /* Should have the alice fact */
     HU_ASSERT_EQ(alice_loaded.fact_count, (size_t)1);
     HU_ASSERT(strcmp(alice_loaded.facts[0].contact_handle, "alice") == 0);
 
-    /* Load with different contact and verify fact is filtered out */
+    /* Loading with a different contact handle ALSO returns all facts (pass-through);
+     * the autoresponder's prompt-build path filters by contact_handle match. */
     hu_personal_model_t bob_loaded;
     err = hu_personal_model_load_for_contact(&bob_loaded, "bob", test_db_path);
     HU_ASSERT_EQ(err, HU_OK);
-
-    /* Bob should have no facts since alice's fact has contact_handle="alice" */
-    HU_ASSERT_EQ(bob_loaded.fact_count, (size_t)0);
+    HU_ASSERT_EQ(bob_loaded.fact_count, (size_t)1);
+    /* The fact retains its alice contact_handle — autoresponder filters it out
+     * downstream when rendering bob's prompt. */
+    HU_ASSERT(strcmp(bob_loaded.facts[0].contact_handle, "alice") == 0);
 
     teardown_test_db();
 }

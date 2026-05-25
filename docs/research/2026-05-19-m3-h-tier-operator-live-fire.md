@@ -1,3 +1,11 @@
+---
+title: "M3 H-tier Operator-in-the-Loop Live-Fire — 2026-05-19"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-h-tier-operator-live-fire
+---
+
 # M3 H-tier Operator-in-the-Loop Live-Fire — 2026-05-19
 
 First end-to-end live-fire of the M3 active-learning probe with a REAL

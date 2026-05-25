@@ -111,10 +111,32 @@ struct hu_personal_model;
 
 #include "human/core/error.h"
 
+#ifdef HU_ENABLE_IMESSAGE
 hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
-                                       const hu_reaction_event_t *event, const char *custom_emoji,
-                                       const char *target_text_preview, bool is_from_me_target,
-                                       bool in_group_chat);
+                                             const hu_reaction_event_t *event,
+                                             const char *custom_emoji,
+                                             const char *target_text_preview,
+                                             bool is_from_me_target, bool in_group_chat);
+#else
+/* HU_ENABLE_IMESSAGE=OFF stub. Without the iMessage channel compiled in,
+ * imessage_ingest.c isn't built — so callers in reaction_handler.c need an
+ * inline no-op to satisfy the link contract (per
+ * ~/.claude/rules/test-source-gate-symmetry.md). The reaction-handler path
+ * still works for non-iMessage channels; this stub silently skips the
+ * personal-model bump that only iMessage tapbacks provide. */
+static inline hu_error_t
+hu_reaction_ingest_personal_model(struct hu_personal_model *model, const hu_reaction_event_t *event,
+                                  const char *custom_emoji, const char *target_text_preview,
+                                  bool is_from_me_target, bool in_group_chat) {
+    (void)model;
+    (void)event;
+    (void)custom_emoji;
+    (void)target_text_preview;
+    (void)is_from_me_target;
+    (void)in_group_chat;
+    return HU_OK;
+}
+#endif
 
 hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *sender_handle,
                                    bool is_from_me, const char *old_text, const char *new_text,
@@ -147,6 +169,28 @@ hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const cha
  * is present, the blob is malformed, or any argument is invalid. */
 size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, size_t payload_len,
                                             char *out, size_t cap);
+
+/* Extract the recording duration (seconds) from a voice-message payload_data
+ * plist. Apple has used several keys across iOS releases; we try them in
+ * order: "duration", "audio_duration", "recording_duration". Returns the
+ * first numeric (integer or real) value found, or 0.0 if no recognized key
+ * is present. 0.0 is also returned for any parse / arg failure — callers
+ * must treat 0.0 as "unknown" (not "instantaneous"). */
+double hu_imessage_extract_audio_duration(const unsigned char *payload_blob, size_t payload_len);
+
+/* B5 production wire: classify a voice-message's tone heuristically (via
+ * hu_audio_tone_classify) and ingest the resulting fact into the personal
+ * model. No-op when classification returns UNKNOWN (e.g. duration==0,
+ * empty transcript). Safe to call even when model is NULL (returns OK).
+ * Designed to be called alongside the transcript-ingest in the iMessage
+ * audio path, so a single voice message produces:
+ *   (a) the transcript ("alice said: ...")
+ *   (b) the tone fact   ("alice's voice message sounded energetic.")
+ * Both are stamped with the same provenance and timestamp. */
+hu_error_t hu_imessage_ingest_audio_tone(struct hu_personal_model *model, const char *sender_handle,
+                                         bool is_from_me, const char *transcript_text,
+                                         double duration_seconds, int64_t timestamp_unix,
+                                         bool in_group_chat);
 
 /* Extract the edit chain from a message_summary_info plist. Apple
  * stores per-part edit histories under the "ec" key as a dict keyed by

@@ -21,6 +21,33 @@
 
 #include "human/provider.h"
 
+/* Phase 1 (Gemma throughput program) — KV-cache quantization.
+ *
+ * llama.cpp's `llama_context_params.type_k` / `.type_v` accept GGML
+ * tensor types for the per-token K and V caches. FP16 is the default
+ * and matches pre-quant behavior; Q8_0 halves KV RSS at ~10-15% TPS
+ * gain (memory-bandwidth bound at batch=1); Q4_0 halves it again with
+ * larger quality risk at long context.
+ *
+ * The enum is unconditional (independent of HU_LLAMACPP_LINKED) so
+ * operator-facing config code can reference it without pulling in
+ * llama.cpp headers. The actual GGML type assignment happens inside
+ * the llama_context init under the `HU_LLAMACPP_LINKED` gate. */
+typedef enum hu_kv_quant {
+    HU_KV_QUANT_FP16 = 0, /* default — no quantization (GGML_TYPE_F16) */
+    HU_KV_QUANT_Q8_0 = 1, /* INT8 K + V — ~50% RSS, ~10-15% TPS */
+    HU_KV_QUANT_Q4_0 = 2, /* INT4 K + V — opt-in, long-context risk */
+} hu_kv_quant_t;
+
+/* Parse a config-shaped kv_quant string ("fp16" / "q8_0" / "q4_0",
+ * case-insensitive). Unknown / NULL / empty input returns
+ * HU_KV_QUANT_FP16 (safe default) and sets *out_recognized = false so
+ * the caller can warn the operator. *out_recognized may be NULL. */
+hu_kv_quant_t hu_kv_quant_from_string(const char *s, bool *out_recognized);
+
+/* Inverse: stable lowercase name for logging / health endpoints. */
+const char *hu_kv_quant_to_string(hu_kv_quant_t q);
+
 typedef struct hu_llamacpp_config {
     /* Path to a GGUF model on disk. May be NULL when the build is
      * unlinked; the chat path returns NOT_SUPPORTED in that case. */
@@ -32,10 +59,89 @@ typedef struct hu_llamacpp_config {
     /* GPU layer offload, when the libllama build supports it. */
     bool use_gpu;
     int n_gpu_layers;
+    /* Phase 1 — KV quantization at context init. Default FP16 keeps
+     * pre-quant behavior; the operator opts in to Q8_0 / Q4_0 either
+     * via config or a follow-up env-var bridge in the factory. */
+    hu_kv_quant_t kv_quant;
+    /* Phase 2b.2 (Gemma throughput program) — opt-in actual decode-skip
+     * on cache hit. Phase 2b made the hit path SAFE by always clearing
+     * KV (hit == miss) while recording the would-have-been savings in
+     * the tokens_would_skip counter. This field unlocks the real win:
+     *
+     *   - true (operator opts in): on cache hit, skip llama_memory_clear
+     *     and submit only the user-portion tokens (tokens + cached_n_past,
+     *     n_tokens - cached_n_past). llama.cpp KV cache resumes at
+     *     position cached_n_past — saves prefix decode time.
+     *
+     *   - false (default): pre-Phase-2b.2 SAFE behavior preserved. Always
+     *     clear, always decode full prompt. tokens_would_skip still
+     *     accumulates so the operator can measure the opportunity before
+     *     flipping the switch.
+     *
+     * Operator opts in via HU_LLAMACPP_KVCACHE_SKIP_DECODE=1 once they
+     * have an HU_LLAMACPP_LINKED build to verify against — the test
+     * preset stubs libllama so the skip-decode path is fundamentally
+     * un-runtime-tested without operator participation. Defaulting OFF
+     * means an upgrade can't silently regress correctness if a libllama
+     * version difference breaks the batch-position assumption. */
+    bool kvcache_skip_decode;
+    /* Phase 4 (Gemma throughput program) — Flash Attention on Metal.
+     *
+     * llama.cpp's llama_context_params.flash_attn enables FA-style
+     * fused attention kernels when the backend supports them. On
+     * M-series Macs (Metal backend) this is free 15-30% TPS once
+     * libllama version supports it; on CPU-only builds it's typically
+     * a no-op or a small win.
+     *
+     * The factory defaults flash_attn=true at provider creation. Direct
+     * struct constructors (mostly tests) get the zero-init default of
+     * false and opt in explicitly. Operators disable for debugging via
+     * HU_LLAMACPP_FLASH_ATTN=off. Per practitioner signal (Philip
+     * Turner's metal-flash-attention work, llama.cpp b3500+), FA on
+     * Metal is the table-stakes default for any Mac-targeted build. */
+    bool flash_attn;
+    /* Phase 3b (Gemma throughput program) — speculative decoding draft
+     * model. When non-NULL, the chat path runs cross-model spec decode:
+     * a small draft model (e.g. Gemma-3-270M) proposes draft_max_tokens
+     * tokens; the target model verifies in parallel; verified prefix is
+     * emitted. Hits ~1.5-2× decode TPS at batch=1 on M-series when the
+     * draft is well-aligned with the target distribution.
+     *
+     * The Phase 6 milestone (A3 from the SOTA roadmap) trains a persona-
+     * aligned draft via the same LoRA pipeline used for personalization;
+     * acceptance rate climbs from ~0% (unaligned) to ≥50% (aligned).
+     *
+     * draft_model_path: borrowed pointer at config time, deep-copied by
+     * hu_llamacpp_provider_create. NULL disables spec decode (the
+     * default — pre-Phase-3b behavior is byte-identical).
+     * draft_min_p: confidence threshold for accepting a draft token.
+     * draft_max_tokens: how many tokens the draft proposes per round
+     * before the target verifies. 0 → upstream default (typically 5). */
+    char *draft_model_path;
+    float draft_min_p;
+    int draft_max_tokens;
 } hu_llamacpp_config_t;
 
-hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
-                                       const hu_llamacpp_config_t *config,
+hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_config_t *config,
                                        hu_provider_t *out);
+
+/* Phase 2b.2 — pure predicate for the cache-hit skip-decode decision.
+ *
+ * The chat path takes the skip-decode shortcut iff ALL four conditions
+ * hold:
+ *   1. sys_hit             — cache lookup matched the system prefix
+ *   2. operator_opt_in     — config->kvcache_skip_decode is true
+ *   3. cached_n_past > 0   — the cached prefix is non-empty
+ *   4. n_tokens > cached_n_past — there's a user portion to decode
+ *
+ * Extracting the decision into a pure predicate lets tests pin every
+ * branch of the 4-input truth table without a libllama-linked build,
+ * which is the only way Phase 2b.2 gets pre-merge verification — the
+ * test preset stubs libllama and the real chat path can't be exercised.
+ *
+ * The chat function calls this predicate; tests call the same predicate.
+ * One source of truth for the decision; zero duplication. */
+bool hu_llamacpp_should_skip_decode(bool sys_hit, bool operator_opt_in, int32_t cached_n_past,
+                                    int32_t n_tokens);
 
 #endif

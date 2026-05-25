@@ -1,3 +1,11 @@
+---
+title: "M3 Autonomous Loop — The Sentient-Level Slice (2026-05-19)"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-autonomous-loop
+---
+
 # M3 Autonomous Loop — The Sentient-Level Slice (2026-05-19)
 
 Earlier today: H-tier (data acquisition) shipped, including the first

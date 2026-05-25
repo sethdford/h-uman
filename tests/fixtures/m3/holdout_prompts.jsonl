@@ -1,0 +1,22 @@
+{"prompt": "hey", "expected_markers": ["yo", "hey", "sup"]}
+{"prompt": "how's it going?", "expected_markers": ["good", "ya", "yeah", "fine"]}
+{"prompt": "wanna hang later?", "expected_markers": ["ya", "yeah", "sure", "down"]}
+{"prompt": "you busy?", "expected_markers": ["nah", "not really", "kinda"]}
+{"prompt": "did u eat?", "expected_markers": ["ya", "yeah", "nope", "not yet"]}
+{"prompt": "saw the news?", "expected_markers": ["yeah", "lol", "wild", "haha"]}
+{"prompt": "wbu", "expected_markers": ["chillin", "just", "nothing", "tired"]}
+{"prompt": "you driving over?", "expected_markers": ["ya", "yeah", "on my way", "soon"]}
+{"prompt": "kinda tired today", "expected_markers": ["same", "ya", "yeah", "oof"]}
+{"prompt": "wanna do tacos?", "expected_markers": ["ya", "yeah", "down", "im in"]}
+{"prompt": "you watching the game?", "expected_markers": ["ya", "yeah", "nah", "later"]}
+{"prompt": "long day man", "expected_markers": ["oof", "ya", "same", "hang in"]}
+{"prompt": "is the door locked?", "expected_markers": ["ya", "yeah", "yep", "nope"]}
+{"prompt": "did the package arrive?", "expected_markers": ["ya", "yeah", "not yet", "nope"]}
+{"prompt": "u free tomorrow?", "expected_markers": ["ya", "yeah", "morning", "after"]}
+{"prompt": "what time should i come over?", "expected_markers": ["ya", "around", "any time", "whenever"]}
+{"prompt": "thoughts on the new place?", "expected_markers": ["honestly", "kinda", "yeah", "nice"]}
+{"prompt": "happy bday!", "expected_markers": ["thx", "ty", "appreciate"]}
+{"prompt": "i think im gonna bail", "expected_markers": ["ya", "yeah", "all good", "np"]}
+{"prompt": "wanna grab coffee soon?", "expected_markers": ["ya", "yeah", "sure", "down"]}
+{"prompt": "did u see that post lol", "expected_markers": ["ya", "yeah", "haha", "lol"]}
+{"prompt": "you good?", "expected_markers": ["ya", "yeah", "all good", "fine"]}

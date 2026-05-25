@@ -63,3 +63,20 @@ size_t hu_audio_tone_render(const char *contact_handle, hu_audio_tone_t tone, ch
         return 0;
     return (size_t)((size_t)n < cap ? (size_t)n : cap - 1);
 }
+
+size_t hu_audio_tone_format_fact(const char *contact_handle, hu_audio_tone_t tone, char *out,
+                                 size_t cap) {
+    if (!contact_handle || !*contact_handle || !out || cap < 16)
+        return 0;
+    out[0] = '\0';
+    if (tone == HU_AUDIO_TONE_UNKNOWN)
+        return 0;
+    /* No prompt prefix — this is a canonical-English FACT that the
+     * personal-model fact-extractor will parse. Subject is the contact,
+     * predicate is "sounded <label>", object is empty. */
+    int n = snprintf(out, cap, "%s's voice message sounded %s.", contact_handle,
+                     hu_audio_tone_label(tone));
+    if (n < 0)
+        return 0;
+    return (size_t)((size_t)n < cap ? (size_t)n : cap - 1);
+}

@@ -30,7 +30,9 @@
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
 #endif
+#include "human/agent/action_directives.h"
 #include "human/agent/training_data_runner.h"
+#include "human/agent/training_runner_shared.h"
 #include "human/agent/verifier_metrics.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
@@ -180,6 +182,7 @@ static bool g_identity_graph_loaded = false;
  * first-run default (info-level log per silent-config-gated-subsystems
  * rule). */
 #include "human/autoresponder.h"
+#include "human/ml/lora_nightly.h" /* N2: nightly LoRA export→train→swap tick */
 static hu_autoresponder_config_t g_autoresponder_cfg;
 static bool g_autoresponder_loaded = false;
 
@@ -3623,12 +3626,82 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                         /* W13/W14 — auto-enqueue LoRA training when enough
                          * signals have accumulated. The runner is already
-                         * registered; we just need a job in the queue. */
+                         * registered; we just need a job in the queue.
+                         *
+                         * Spec 2026-05-19 (Task 2): routes through the
+                         * shared training-runner entry alongside the new
+                         * pair-count trigger so both triggers produce
+                         * structurally identical scheduler records. */
                         if (agent->learner) {
                             size_t pending = hu_learner_pending_count(agent->learner);
                             if (pending >= 10) {
-                                (void)hu_w14_scheduler_enqueue_lora(agent->w14_scheduler, now_ms,
-                                                                    300000);
+                                (void)hu_training_runner_enqueue_lora_persona(
+                                    agent->w14_scheduler, now_ms, 300000,
+                                    HU_TRAINING_TRIGGER_LEARNER_PENDING, agent->observer);
+                            }
+                        }
+                        /* Spec 2026-05-19 (Task 3) — DPO pair-count trigger.
+                         * When uncommitted reaction-derived DPO pairs cross
+                         * `learning.dpo_pair_training_threshold`, enqueue a
+                         * training run via the same shared entry. Per
+                         * ~/.claude/rules/silent-config-gated-subsystems.md,
+                         * emit one info-level line on first tick for both
+                         * the disabled (threshold==0) and enabled paths. */
+                        if (agent && agent->sota.dpo_collector.alloc) {
+                            int threshold = config
+                                                ? config->learning.dpo_pair_training_threshold
+                                                : HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
+                            static atomic_bool warned_pair_count_disabled = false;
+                            static atomic_bool warned_pair_count_enabled = false;
+                            if (threshold <= 0) {
+                                hu_log_info_once(
+                                    &warned_pair_count_disabled, "daemon", agent->observer,
+                                    "DPO pair-count training trigger disabled by config "
+                                    "(learning.dpo_pair_training_threshold=0); set "
+                                    "learning.dpo_pair_training_threshold to a positive integer "
+                                    "in config.json to activate");
+                            } else {
+                                hu_log_info_once(&warned_pair_count_enabled, "daemon",
+                                                 agent->observer,
+                                                 "DPO pair-count training trigger active "
+                                                 "(learning.dpo_pair_training_threshold=%d)",
+                                                 threshold);
+                                /* Spec 2026-05-19 M3 closure / AC-M3-7 —
+                                 * frontier-MLX auto-training gate. Emit one
+                                 * info-line on first tick whether the gate
+                                 * is on or off, per
+                                 * ~/.claude/rules/silent-config-gated-subsystems.md. */
+                                bool frontier_auto =
+                                    config ? config->learning.m3_frontier_auto_training : false;
+                                static atomic_bool warned_frontier_disabled = false;
+                                static atomic_bool warned_frontier_enabled = false;
+                                if (frontier_auto) {
+                                    hu_log_info_once(
+                                        &warned_frontier_enabled, "daemon", agent->observer,
+                                        "M3 frontier-MLX auto-training ENABLED "
+                                        "(learning.m3_frontier_auto_training=true) — pair-count "
+                                        "trigger will dispatch with target=frontier_mlx");
+                                } else {
+                                    hu_log_info_once(
+                                        &warned_frontier_disabled, "daemon", agent->observer,
+                                        "M3 frontier-MLX auto-training disabled by config "
+                                        "(learning.m3_frontier_auto_training=false); pair-count "
+                                        "trigger will dispatch with target=huml_reference. Set "
+                                        "learning.m3_frontier_auto_training=true in config.json to "
+                                        "activate the M3 closure path");
+                                }
+                                size_t pair_count = 0;
+                                if (hu_dpo_pair_count(&agent->sota.dpo_collector, &pair_count) ==
+                                        HU_OK &&
+                                    hu_training_runner_pair_count_should_fire(pair_count,
+                                                                              threshold)) {
+                                    hu_training_target_model_t target =
+                                        frontier_auto ? HU_TRAINING_TARGET_FRONTIER_MLX
+                                                      : HU_TRAINING_TARGET_HUML_REFERENCE;
+                                    (void)hu_training_runner_enqueue_lora_persona_target(
+                                        agent->w14_scheduler, now_ms, 300000,
+                                        HU_TRAINING_TRIGGER_PAIR_COUNT, target, agent->observer);
+                                }
                             }
                         }
 #endif /* HU_ENABLE_LEARNING — outcome drain + LoRA auto-enqueue */
@@ -3868,6 +3941,71 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             autodream_done_today = false;
                             evolver_done_today = false;
                         }
+                    }
+                }
+
+                /* Sprint B N2 — LoRA nightly tick.
+                 *
+                 * Fires at 04:00 local time once per day, AFTER the 03:00
+                 * autodream + 03:05 persona evolver have finished their
+                 * SQLite work. Calls hu_lora_nightly_run, which:
+                 *   1. checks should_run (≥24h since last run + ≥20 new pairs)
+                 *   2. exports dpo_pairs → JSONL
+                 *   3. (when enabled) invokes mlx_lm.lora via subprocess
+                 *      with a 30-min hard timeout
+                 *   4. atomically rotates ~/.human/adapter-current
+                 *   5. POSTs /v1/adapters/swap to the live MLX server
+                 *
+                 * BLOCKING CAVEAT: subprocess training holds this loop
+                 * for up to 30 min. The 4 AM slot is chosen to minimize
+                 * user impact. Opt-in via env var HU_NIGHTLY_LORA_ENABLED=1
+                 * until the daemon-config plumbing lands as a follow-up.
+                 *
+                 * Last-run tracking is in-memory only for this slice —
+                 * after a daemon restart we'll re-run the next 4 AM
+                 * regardless of when the previous run was. Persisting to
+                 * ~/.human/lora-nightly.state is a clean follow-up. */
+                {
+                    static bool lora_nightly_done_today = false;
+                    static int64_t lora_last_run_unix = 0;
+                    struct tm tm_nightly;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_nightly =
+                        (localtime_s(&tm_nightly, &t) == 0) ? &tm_nightly : NULL;
+#else
+                    struct tm *lt_nightly = localtime_r(&t, &tm_nightly);
+#endif
+                    const char *nightly_enabled = getenv("HU_NIGHTLY_LORA_ENABLED");
+                    bool gate_on = nightly_enabled && nightly_enabled[0] == '1';
+                    if (lt_nightly && gate_on) {
+                        if (lt_nightly->tm_hour == 4 && lt_nightly->tm_min == 0 &&
+                            !lora_nightly_done_today) {
+                            hu_lora_nightly_config_t lcfg;
+                            if (hu_lora_nightly_config_init_defaults(&lcfg)) {
+                                size_t pair_count = 0;
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "lora-nightly: starting at 04:00 (may block up to "
+                                            "30m)");
+                                hu_error_t lr =
+                                    hu_lora_nightly_run(alloc, &lcfg, (int64_t)t, &pair_count);
+                                if (lr == HU_OK) {
+                                    lora_last_run_unix = (int64_t)t;
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: ok (%zu pairs exported)",
+                                                pair_count);
+                                } else if (lr == HU_ERR_NOT_FOUND) {
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: skipped (no new pairs)");
+                                } else {
+                                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: failed (err=%d)", (int)lr);
+                                }
+                            }
+                            lora_nightly_done_today = true;
+                            (void)lora_last_run_unix; /* reserved for next-tier persistence */
+                        }
+                        if (lt_nightly->tm_hour == 6)
+                            lora_nightly_done_today = false;
                     }
                 }
                 /* P7: Feed processor poll — every 5 minutes (per-type intervals apply) */
@@ -4689,6 +4827,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
                     const char *content_to_add = msgs[m].content;
                     size_t mlen = strlen(content_to_add);
+                    /* 2026-05-24 ASan fix: hoist the attachment-augmentation
+                     * buffer to the same scope as content_to_add. Previously
+                     * each augmentation branch (has_audio/has_video via
+                     * vision, has_image via vision, has_video fallback)
+                     * declared its own char[4096] INSIDE the nested if-block;
+                     * those buffers went out of scope before the memcpy at
+                     * line ~4965 read from content_to_add, causing
+                     * stack-use-after-scope (the ASan abort that took down
+                     * service-loop PID 59064 on 2026-05-24). Hoisting to one
+                     * buffer at this scope matches content_to_add's
+                     * lifetime exactly. */
+                    char augmented[4096];
 #ifndef HU_IS_TEST
                     /* Per-message attachment: images via vision; local audio/video via multimodal
                      * route. Injects description or transcription into batch text. */
@@ -4723,38 +4873,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         alloc, path, plen, &agent->provider, model, model_len,
                                         &media_desc, &media_desc_len) == HU_OK &&
                                     media_desc && media_desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use the outer-scope `augmented`
+                                     * buffer (declared at the content_to_add scope) instead of
+                                     * a nested char[4096]. Nested declaration went out of scope
+                                     * before the memcpy at line ~4965 read content_to_add. */
                                     size_t desc_copy =
                                         media_desc_len > 3800 ? 3800 : media_desc_len;
                                     int n;
                                     if (is_audio) {
                                         if (mlen > 0 && strcmp(content_to_add, "[Audio]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Audio transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Audio transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Audio transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     } else {
                                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Video transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Video transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Video transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     }
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                     }
                                 } else if (media_desc) {
@@ -4774,22 +4925,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             "vision: result=%s desc_len=%zu", hu_error_string(verr),
                                             desc_len);
                                 if (verr == HU_OK && desc && desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use outer-scope `augmented`. */
                                     size_t desc_copy = desc_len > 3800 ? 3800 : desc_len;
                                     int n;
                                     if (mlen > 0 && strcmp(content_to_add, "[Photo]") != 0) {
-                                        n = snprintf(attachment_augmented,
-                                                     sizeof(attachment_augmented),
+                                        n = snprintf(augmented, sizeof(augmented),
                                                      "%.*s\n[They sent a photo: %.*s]", (int)mlen,
                                                      content_to_add, (int)desc_copy, desc);
                                     } else {
-                                        n = snprintf(
-                                            attachment_augmented, sizeof(attachment_augmented),
-                                            "[They sent a photo: %.*s]", (int)desc_copy, desc);
+                                        n = snprintf(augmented, sizeof(augmented),
+                                                     "[They sent a photo: %.*s]", (int)desc_copy,
+                                                     desc);
                                     }
                                     alloc->free(alloc->ctx, desc, desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                         if (agent->bth_metrics)
                                             agent->bth_metrics->vision_descriptions++;
@@ -4801,18 +4951,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, path, plen + 1);
                         }
                     } else if (msgs[m].has_video) {
-                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]" */
-                        char video_augmented[4096];
+                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]".
+                         * ASan fix 2026-05-24: use outer-scope `augmented`. */
                         int n;
                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "%.*s\n[They sent a video]", (int)mlen, content_to_add);
+                            n = snprintf(augmented, sizeof(augmented), "%.*s\n[They sent a video]",
+                                         (int)mlen, content_to_add);
                         } else {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "[They sent a video]");
+                            n = snprintf(augmented, sizeof(augmented), "[They sent a video]");
                         }
-                        if (n > 0 && (size_t)n < sizeof(video_augmented)) {
-                            content_to_add = video_augmented;
+                        if (n > 0 && (size_t)n < sizeof(augmented)) {
+                            content_to_add = augmented;
                             mlen = (size_t)n;
                         }
                     }
@@ -9028,6 +9177,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* ── Spec 4 Phase A (TOM activation): user-expectation detection.
+                 *
+                 * Wires the previously dead hu_tom_detect_user_expectation() into
+                 * the pre-turn assembly path (AC-TOM-1, dead-code activation per
+                 * recon: ZERO production callers before this site). Detection
+                 * fires on every inbound user message; persisted writes are
+                 * idempotent on (contact_id, topic, session_key) via the table's
+                 * UNIQUE constraint, so re-running on the same batch is safe.
+                 *
+                 * Runs BEFORE the existing TOM context block so the freshly
+                 * recorded expectations can be surfaced as "Unmet User
+                 * Expectations" in the same turn if no belief matches. */
+#ifdef HU_ENABLE_SQLITE
+                if (!llm_decides && agent && agent->memory && combined_len > 0) {
+                    sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
+                    if (tom_db) {
+                        const char *topic_ptr = NULL;
+                        size_t topic_len = 0;
+                        hu_tom_expected_knowledge_t ktype = HU_TOM_EXPECT_REMEMBERS;
+                        if (hu_tom_detect_user_expectation(combined, combined_len, &topic_ptr,
+                                                           &topic_len, &ktype) &&
+                            topic_ptr && topic_len > 0) {
+                            (void)hu_tom_user_expectations_init_table(tom_db);
+                            (void)hu_tom_persist_user_expectation(
+                                tom_db, batch_key, topic_ptr, topic_len, ktype, batch_key, key_len,
+                                /* turn_number */ 0, (int64_t)time(NULL) * 1000);
+                        }
+                    }
+                }
+#endif
+
                 /* ── BTH Tier 1: Theory of Mind context (t1b-pre) ──────────── */
                 if (!llm_decides) {
                     size_t tom_idx = (size_t)-1;
@@ -9047,11 +9227,31 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         tom_contact_keys[tom_idx][key_len] = '\0';
                         tom_contact_count++;
                     }
-                    if (tom_idx != (size_t)-1 && tom_states[tom_idx].belief_count > 0) {
+                    /* Spec 4 Phase A Task 5: also surface persisted unresolved
+                     * user-expectations. Load happens even when belief_count == 0
+                     * because a turn-1 inbound saying "as you know I prefer X"
+                     * has no prior beliefs yet but DOES have an unmet expectation
+                     * worth flagging. */
+                    hu_tom_persisted_expectation_t *unmet_exps = NULL;
+                    size_t unmet_count = 0;
+#ifdef HU_ENABLE_SQLITE
+                    if (tom_idx != (size_t)-1 && agent && agent->memory) {
+                        sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
+                        if (tom_db) {
+                            (void)hu_tom_user_expectations_load_unresolved(
+                                tom_db, alloc, batch_key, 8, &unmet_exps, &unmet_count);
+                        }
+                    }
+#endif
+                    bool tom_has_content =
+                        (tom_idx != (size_t)-1) &&
+                        (tom_states[tom_idx].belief_count > 0 || unmet_count > 0);
+                    if (tom_has_content) {
                         char *tom_ctx = NULL;
                         size_t tom_ctx_len = 0;
-                        if (hu_tom_build_context(&tom_states[tom_idx], alloc, &tom_ctx,
-                                                 &tom_ctx_len) == HU_OK &&
+                        if (hu_tom_build_context_with_expectations(&tom_states[tom_idx], unmet_exps,
+                                                                   unmet_count, alloc, &tom_ctx,
+                                                                   &tom_ctx_len) == HU_OK &&
                             tom_ctx && tom_ctx_len > 0) {
                             if (convo_ctx) {
                                 size_t total = convo_ctx_len + tom_ctx_len + 2;
@@ -9073,6 +9273,60 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (tom_ctx)
                                 alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
                         }
+                    }
+#ifdef HU_ENABLE_ACTION_LAYERS
+                    /* Spec 2026-05-24-action-layers: append drift + clarify
+                     * directives to convo_ctx when their conditions are met.
+                     * Both functions are no-ops when their source tables are
+                     * empty or thresholds unmet — costs ~2 SQLite SELECTs
+                     * per turn at the worst. */
+                    {
+                        struct sqlite3 *al_db = hu_sqlite_memory_get_db(agent->memory);
+                        char al_drift[HU_ACTION_DIRECTIVE_MAX_LEN];
+                        char al_clarify[HU_ACTION_DIRECTIVE_MAX_LEN];
+                        size_t al_drift_n =
+                            hu_action_directive_drift(al_db, al_drift, sizeof(al_drift));
+                        struct timespec al_ts;
+                        clock_gettime(CLOCK_REALTIME, &al_ts);
+                        int64_t al_now_ms =
+                            (int64_t)al_ts.tv_sec * 1000 + (int64_t)al_ts.tv_nsec / 1000000;
+                        size_t al_clarify_n = hu_action_directive_clarify(
+                            al_db, batch_key, key_len, batch_key, key_len, al_now_ms, al_clarify,
+                            sizeof(al_clarify));
+                        size_t al_total = al_drift_n + al_clarify_n;
+                        if (al_total > 0) {
+                            size_t new_total = convo_ctx_len + al_total + 4;
+                            char *new_buf = (char *)alloc->alloc(alloc->ctx, new_total);
+                            if (new_buf) {
+                                size_t off = 0;
+                                if (convo_ctx) {
+                                    memcpy(new_buf, convo_ctx, convo_ctx_len);
+                                    off = convo_ctx_len;
+                                    new_buf[off++] = '\n';
+                                }
+                                if (al_drift_n > 0) {
+                                    memcpy(new_buf + off, al_drift, al_drift_n);
+                                    off += al_drift_n;
+                                    new_buf[off++] = '\n';
+                                }
+                                if (al_clarify_n > 0) {
+                                    memcpy(new_buf + off, al_clarify, al_clarify_n);
+                                    off += al_clarify_n;
+                                }
+                                new_buf[off] = '\0';
+                                if (convo_ctx)
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = new_buf;
+                                convo_ctx_len = off;
+                            }
+                        }
+                    }
+#endif
+#ifdef HU_ENABLE_SQLITE
+                    if (unmet_exps)
+                        hu_tom_persisted_expectations_free(alloc, unmet_exps, unmet_count);
+#endif
+                    if (tom_idx != (size_t)-1 && tom_states[tom_idx].belief_count > 0) {
 
                         /* ── Phase 4: MToM gap detection ─────────── */
                         hu_tom_gap_t *tom_gaps = NULL;
@@ -10915,16 +11169,48 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_fc_result_t fc_tom;
                         memset(&fc_tom, 0, sizeof(fc_tom));
                         (void)hu_fast_capture(alloc, combined, combined_len, &fc_tom);
+                        /* Spec 4 Phase B / AC-TOM-4: also write through to the
+                         * persisted tom_user_beliefs table tagged with the
+                         * current session_key + turn_number, so beliefs gain
+                         * conversation-local temporality. The in-memory belief
+                         * state stays the hot-path cache; the persisted row
+                         * is the durable, temporal layer used by Phase D
+                         * staleness detection. */
+#ifdef HU_ENABLE_SQLITE
+                        sqlite3 *belief_db =
+                            agent && agent->memory ? hu_sqlite_memory_get_db(agent->memory) : NULL;
+                        if (belief_db) {
+                            (void)hu_tom_user_beliefs_init_table(belief_db);
+                        }
+                        int64_t belief_now_ms = (int64_t)time(NULL) * 1000;
+#endif
                         if (fc_tom.primary_topic && fc_tom.primary_topic[0]) {
                             (void)hu_tom_record_belief(
                                 &tom_states[tom_idx], alloc, fc_tom.primary_topic,
                                 strlen(fc_tom.primary_topic), HU_BELIEF_KNOWS, 0.8f);
+#ifdef HU_ENABLE_SQLITE
+                            if (belief_db) {
+                                (void)hu_tom_persist_belief(
+                                    belief_db, batch_key, fc_tom.primary_topic,
+                                    strlen(fc_tom.primary_topic), HU_BELIEF_KNOWS, 0.8f, batch_key,
+                                    key_len,
+                                    /* turn_number */ 0, belief_now_ms);
+                            }
+#endif
                         }
                         for (size_t ei = 0; ei < fc_tom.entity_count && ei < 3; ei++) {
                             if (fc_tom.entities[ei].name[0]) {
                                 (void)hu_tom_record_belief(
                                     &tom_states[tom_idx], alloc, fc_tom.entities[ei].name,
                                     strlen(fc_tom.entities[ei].name), HU_BELIEF_KNOWS, 0.6f);
+#ifdef HU_ENABLE_SQLITE
+                                if (belief_db) {
+                                    (void)hu_tom_persist_belief(
+                                        belief_db, batch_key, fc_tom.entities[ei].name,
+                                        strlen(fc_tom.entities[ei].name), HU_BELIEF_KNOWS, 0.6f,
+                                        batch_key, key_len, /* turn_number */ 0, belief_now_ms);
+                                }
+#endif
                             }
                         }
                         hu_fc_result_deinit(&fc_tom, alloc);
@@ -13316,6 +13602,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                    &observer_watermark);
         }
 
+        /* Spec 2026-05-19 — TOM expectation GC tick. Periodically deletes
+         * resolved expectations older than 30d (default) so the table
+         * doesn't grow unbounded. Interval-gated internally; safe to call
+         * every loop iteration. Gated on SQLite (no-op without it). */
+#ifdef HU_ENABLE_SQLITE
+        if (agent && agent->memory) {
+            static int64_t tom_gc_last_run_ms = 0;
+            struct timespec gc_ts;
+            clock_gettime(CLOCK_REALTIME, &gc_ts);
+            int64_t gc_now_ms = (int64_t)gc_ts.tv_sec * 1000 + (int64_t)gc_ts.tv_nsec / 1000000;
+            struct sqlite3 *gc_db = hu_sqlite_memory_get_db(agent->memory);
+            (void)hu_daemon_tick_tom_expectation_gc(gc_db, gc_now_ms, &tom_gc_last_run_ms,
+                                                    /*interval_seconds=*/86400,
+                                                    /*ttl_ms=*/(int64_t)30 * 86400 * 1000);
+        }
+#endif
+
+        /* Spec 2026-05-19 self-model-scaffold — periodic aggregation tick.
+         * Computes self-observations from the recent behavior log every
+         * 100 turns OR 60 min, then writes drift signals into
+         * agent_self_concerns. Interval-gated internally. Gated on the
+         * SELF_MODEL flag so it's a true no-op when the subsystem is off. */
+#if defined(HU_ENABLE_SELF_MODEL) && defined(HU_ENABLE_SQLITE)
+        if (agent && agent->memory) {
+            static int64_t sm_last_run_ms = 0;
+            static size_t sm_last_total_records = 0;
+            struct timespec sm_ts;
+            clock_gettime(CLOCK_REALTIME, &sm_ts);
+            int64_t sm_now_ms = (int64_t)sm_ts.tv_sec * 1000 + (int64_t)sm_ts.tv_nsec / 1000000;
+            struct sqlite3 *sm_db = hu_sqlite_memory_get_db(agent->memory);
+            /* Baseline values from spec defaults — calibration integration
+             * is a separate follow-up. Reasonable defaults for early
+             * deployment; drift signal only fires past min_baseline_n. */
+            (void)hu_daemon_tick_self_observation_aggregate(
+                sm_db, &agent->behavior_log, sm_now_ms, &sm_last_run_ms, &sm_last_total_records,
+                /*every_n_turns=*/100, /*every_sec=*/3600,
+                /*baseline_mean=*/80.0, /*baseline_stddev=*/40.0, /*baseline_n=*/50,
+                /*drift_threshold_sigma=*/2.0, /*min_baseline_n=*/50);
+        }
+#endif
+
         /* US-48-3: follow-up watcher — detect read-but-unreplied messages
          * on iMessage, compute circadian-aware follow-up delays, and flush
          * when contacts enter active hours. Per .claude/rules/silent-config-gated-subsystems.md,
@@ -13382,9 +13709,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_channel_monitor_destroy(chan_monitor);
     if (agent)
         agent->bth_metrics = NULL;
-    /* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
-     * the facade's hu_memory_t handle for its SQLite job queue, so the
-     * facade must outlive every tick the scheduler will ever run. */
+/* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
+ * the facade's hu_memory_t handle for its SQLite job queue, so the
+ * facade must outlive every tick the scheduler will ever run. */
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif

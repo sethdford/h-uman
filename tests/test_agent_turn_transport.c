@@ -29,6 +29,7 @@
 #include "test_framework.h"
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 /* Forward-declare the internal helpers (tests/ isn't on src/agent's include path). */
 bool hu_agent_internal_is_transport_error(hu_error_t err);
@@ -246,6 +247,54 @@ static void agent_turn_transport_error_bails_after_one_retry(void) {
     ttf_close(&f);
 }
 
+/* GAP-B (2026-05-24 audit follow-up): the prior `bails_after_one_retry` test
+ * pins the iter COUNT contract but NOT the wall-clock latency budget. Pre-fix
+ * the production behavior was: 3+ chat calls + verifier + drift loops totaling
+ * ~90 SECONDS. The chip's acceptance criterion was "bail within 5 seconds."
+ *
+ * This test pins a much tighter budget — the mock provider returns instantly,
+ * so the *only* wall-clock cost is the agent_turn machinery itself (prompt
+ * build, persona injection, response_guard setup, the `continue` for retry,
+ * and the cleanup path). That work should complete in tens of milliseconds,
+ * not seconds. A 1000ms (1s) ceiling catches the 90s regression with 90x
+ * safety margin while leaving room for CI variance + ASan slowdown.
+ *
+ * If this test ever fails because the budget got tight, that's a signal —
+ * agent_turn's per-iteration overhead has grown. Don't just raise the budget;
+ * profile what changed. */
+static void agent_turn_transport_error_bails_within_1s_budget(void) {
+    ttf_fixture_t f;
+    ttf_open(&f);
+    f.mock.errs[0] = HU_ERR_IO;
+    f.mock.errs[1] = HU_ERR_IO;
+    for (size_t i = 2; i < 8; i++)
+        f.mock.errs[i] = HU_ERR_INVALID_ARGUMENT;
+    f.mock.script_count = 8;
+
+    /* CLOCK_MONOTONIC mirrors hu_agent_internal_monotonic_ms in agent_internal.h
+     * so the test measures the same wall-clock the M3 outcome pipeline does. */
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_error_t err = hu_agent_turn(&f.agent, "hi", 2, &resp, &resp_len);
+
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    uint64_t elapsed_ms = (uint64_t)(t_end.tv_sec - t_start.tv_sec) * 1000ULL +
+                          (uint64_t)((t_end.tv_nsec - t_start.tv_nsec) / 1000000L);
+
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_PROVIDER_UNAVAILABLE);
+    HU_ASSERT_EQ(f.mock.calls_made, 2u);
+    /* Hard ceiling: 1000ms. Empirical actual is tens of ms with a mock
+     * provider. If this jumps, agent_turn's overhead grew — investigate. */
+    HU_ASSERT(elapsed_ms < 1000);
+
+    if (resp)
+        f.alloc.free(f.alloc.ctx, resp, resp_len + 1);
+    ttf_close(&f);
+}
+
 /* Spec: a single transient transport error must NOT bail — the retry on
  * call 2 should succeed and the agent should produce a normal response.
  * Without this contract, transient network blips would degrade every turn. */
@@ -288,6 +337,7 @@ void run_agent_turn_transport_tests(void) {
 
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(agent_turn_transport_error_bails_after_one_retry);
+    HU_RUN_TEST(agent_turn_transport_error_bails_within_1s_budget);
     HU_RUN_TEST(agent_turn_transport_error_recovers_on_second_call);
 #endif
 }

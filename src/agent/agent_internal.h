@@ -24,6 +24,21 @@ void hu_agent_internal_generate_trace_id(char *buf);
 uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end);
 void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *usage);
 
+/* Spec 2026-05-19 self-model-scaffold — Phase B canonical write site.
+ *
+ * Emit one record into `agent->behavior_log` from the data staged in
+ * `agent->behavior_log_pending` plus agent-resident metadata
+ * (memory_session_id -> contact_hash, active_channel -> channel_id,
+ * wall clock -> timestamp). Clears the pending stash after emit so a
+ * stale stash never bleeds into the next turn.
+ *
+ * Invoked once per successful provider turn from inside
+ * `hu_agent_m3_on_provider_success` (both the HU_ENABLE_ML and OFF
+ * variants). The grep test in tests/test_self_model_single_write_site.c
+ * pins that `hu_agent_behavior_log_record(` appears exactly once in
+ * src/ — inside the body of THIS function. */
+void hu_agent_internal_emit_behavior_record(hu_agent_t *agent);
+
 /* Monotonic wall-clock in milliseconds, used to thread latency through
  * to hu_agent_m3_record_chat_outcome. Defined inline here so both
  * agent_stream.c and agent_turn.c can call it without duplicating the

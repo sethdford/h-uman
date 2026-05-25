@@ -27,6 +27,7 @@ _human() {
                 onboard:Interactive setup wizard
                 setup:Local / on-device model setup
                 doctor:Run system diagnostics
+                drafts:Predictive draft suggestions (Sprint B Story 1)
                 demo:Reproducible end-to-end demonstrations
                 cron:Manage scheduled tasks
                 channel:Channel management

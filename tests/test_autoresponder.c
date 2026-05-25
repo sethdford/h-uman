@@ -199,8 +199,9 @@ static void test_prompt_includes_assistant_framing(void) {
     hu_autoresponder_config_t cfg;
     init_cfg(&cfg);
     char buf[2048] = {0};
-    size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hey are you free?",
-                                             "Tone: warm, casual.", NULL, buf, sizeof(buf));
+    size_t n =
+        hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hey are you free?",
+                                      "Tone: warm, casual.", NULL, 1000000000LL, buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_TRUE(strstr(buf, "assistant") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "Seth") != NULL);
@@ -210,7 +211,8 @@ static void test_prompt_forbids_claiming_to_be_user(void) {
     hu_autoresponder_config_t cfg;
     init_cfg(&cfg);
     char buf[2048] = {0};
-    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, NULL, buf, sizeof(buf));
+    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, NULL, 1000000000LL, buf,
+                                  sizeof(buf));
     /* Must contain explicit prohibition. */
     HU_ASSERT_TRUE(strstr(buf, "NEVER claim to be the user") != NULL);
 }
@@ -219,7 +221,8 @@ static void test_prompt_null_incoming_falls_back_to_empty(void) {
     hu_autoresponder_config_t cfg;
     init_cfg(&cfg);
     char buf[1024] = {0};
-    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", NULL, NULL, NULL, buf, sizeof(buf));
+    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", NULL, NULL, NULL, 1000000000LL, buf,
+                                  sizeof(buf));
     HU_ASSERT_TRUE(strstr(buf, "(empty)") != NULL);
 }
 
@@ -243,7 +246,7 @@ static void test_fact_with_xml_tags_in_object_is_sanitized_in_prompt(void) {
 
     char buf[2048] = {0};
     size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hello", NULL,
-                                             &contact_model, buf, sizeof(buf));
+                                             &contact_model, time(NULL), buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     /* The dangerous XML tags must be stripped */
     HU_ASSERT_TRUE(strstr(buf, "<system>") == NULL);
@@ -269,7 +272,7 @@ static void test_fact_with_backtick_in_predicate_is_sanitized_in_prompt(void) {
 
     char buf[2048] = {0};
     size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, &contact_model,
-                                             buf, sizeof(buf));
+                                             time(NULL), buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     /* The backtick must be stripped */
     HU_ASSERT_TRUE(strstr(buf, "`") == NULL);
@@ -294,7 +297,7 @@ static void test_clean_fact_passes_through_unchanged_in_prompt(void) {
 
     char buf[2048] = {0};
     size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, &contact_model,
-                                             buf, sizeof(buf));
+                                             time(NULL), buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     /* Clean text should appear verbatim in the Contact insights section */
     HU_ASSERT_TRUE(strstr(buf, "alice prefers dark chocolate") != NULL);
@@ -571,6 +574,50 @@ static void test_digest_default_window_when_since_seconds_nonpositive(void) {
     HU_ASSERT_EQ((int)d.total_replies, 1);
 }
 
+/* ── per-channel regression (1) ──────────────────────────────────────
+ *
+ * The A-loop daemon wire sits in the central inbound dispatch and
+ * uses channel-agnostic vtable methods (`send`, `human_active_recently`).
+ * These tests pin that the LIBRARY-LEVEL predicate + prompt builder
+ * are also channel-agnostic — so adding a new channel doesn't require
+ * touching autoresponder code. */
+
+static void test_should_respond_is_channel_agnostic(void) {
+    /* The predicate doesn't read channel at all — should_respond gates
+     * on allowlist + DND + enabled only. This test pins that
+     * invariant: same contact + time → same answer regardless of
+     * which channel the inbound came from. The daemon wire passes
+     * the channel name into _generate (for the prompt), but
+     * should_respond is intentionally channel-blind because DND is
+     * a person-level mode, not a per-channel one. */
+    hu_autoresponder_config_t cfg;
+    init_cfg(&cfg);
+    add_allow(&cfg, "alice");
+    add_schedule(&cfg, 10 * 60, 12 * 60, HU_DOW_MASK_DAILY);
+    int64_t t = mk_local_time(0, 11, 0);
+    bool first = hu_autoresponder_should_respond(&cfg, "alice", t, 0);
+    /* Calling again with a different "channel context" — same answer. */
+    bool second = hu_autoresponder_should_respond(&cfg, "alice", t, 0);
+    HU_ASSERT_TRUE(first);
+    HU_ASSERT_TRUE(second);
+}
+
+static void test_build_prompt_includes_channel_name_when_provided(void) {
+    /* The prompt builder DOES carry the channel name as context for
+     * the LLM. Verify each Tier-1 channel name passes through to the
+     * rendered prompt — this is the contract the daemon wire relies
+     * on when it calls _generate with whatever ch->vtable->name returns. */
+    hu_autoresponder_config_t cfg;
+    init_cfg(&cfg);
+    const char *channels[] = {"imessage", "slack", "discord", "telegram", NULL};
+    for (size_t i = 0; channels[i]; i++) {
+        char buf[2048] = {0};
+        hu_autoresponder_build_prompt(&cfg, "alice", channels[i], "hi", NULL, NULL, 1000000000LL,
+                                      buf, sizeof(buf));
+        HU_ASSERT_TRUE(strstr(buf, channels[i]) != NULL);
+    }
+}
+
 void run_autoresponder_tests(void) {
     HU_TEST_SUITE("autoresponder");
     /* allowlist */
@@ -619,4 +666,7 @@ void run_autoresponder_tests(void) {
     HU_RUN_TEST(test_digest_per_contact_counts_correct);
     HU_RUN_TEST(test_digest_malformed_lines_skipped);
     HU_RUN_TEST(test_digest_default_window_when_since_seconds_nonpositive);
+    /* per-channel regression (1) */
+    HU_RUN_TEST(test_should_respond_is_channel_agnostic);
+    HU_RUN_TEST(test_build_prompt_includes_channel_name_when_provided);
 }

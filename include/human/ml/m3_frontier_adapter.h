@@ -232,6 +232,128 @@ hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_a
 void hu_m3_outcomes_register_global_adapter(hu_m3_frontier_adapter_t *adapter);
 hu_m3_frontier_adapter_t *hu_m3_outcomes_global_adapter(void);
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 7 (AC-M3-4): outcome-ring population from provider results.
+ *
+ * This is the seam the spec asks for in design.md — `hu_agent_m3_*`
+ * pre-existing helpers already populate the ring at 11 call sites in
+ * agent_turn.c + agent_stream.c via `hu_agent_m3_record_chat_outcome`.
+ * That path needs full prompt+response bytes (hashes are computed from
+ * them).
+ *
+ * This NEW helper records an outcome from a provider-result-only view
+ * (token_count, latency_ms, contact_hash) — the data the streaming
+ * path has at first-chunk receipt time before the response is fully
+ * accumulated. It writes directly into the ring buffer so production
+ * paths can call it at points where the full text isn't yet known.
+ *
+ * NULL adapter is a no-op (returns HU_OK), matching the rest of the
+ * outcome ring API. */
+hu_error_t hu_m3_record_outcome_from_provider_result(
+    hu_m3_frontier_adapter_t *adapter, uint64_t timestamp_unix_ms, uint32_t prompt_tokens,
+    uint32_t completion_tokens, uint64_t latency_ms, uint64_t contact_hash, uint8_t turn_kind);
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 8 (AC-M3-4 expanded): outcome-ring drainer.
+ *
+ * The outcome ring is a circular write-buffer: at 4096 capacity it wraps
+ * silently and the dropped records are lost. Without a production
+ * drainer, populating the ring is a half-fix — the training loop can
+ * only see at most the last 4096 outcomes, and if the daemon serves
+ * more than that between training runs the data falls off.
+ *
+ * The drainer reads outcomes via snapshot, persists them to SQLite, and
+ * advances a per-process "drain marker" so the next drain only persists
+ * NEWLY-RECORDED outcomes. The marker is `total_recorded` at last drain.
+ *
+ * Daemon-tick semantics (silent-config-gated-subsystems.md):
+ *   - The tick is interval-gated; the operator-visible log line on first
+ *     enabled tick names the interval; a separate once-guarded log fires
+ *     when called with a NULL db (so a misconfigured daemon doesn't
+ *     silently drop outcomes).
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Read-only: total outcomes drained so far (monotonic across process
+ * lifetime, NOT capped to ring size). NULL adapter returns 0. */
+uint64_t hu_m3_frontier_adapter_drain_marker(const hu_m3_frontier_adapter_t *adapter);
+
+/* Advance the drain marker to `recorded_through` (typically the value of
+ * `hu_m3_frontier_adapter_outcomes_recorded` at the time the caller
+ * snapshotted). The marker is monotonic — values <= current marker are
+ * silently ignored to keep concurrent drainers from rolling it back. */
+void hu_m3_frontier_adapter_advance_drain_marker(hu_m3_frontier_adapter_t *adapter,
+                                                 uint64_t recorded_through);
+
+#ifdef HU_ENABLE_SQLITE
+struct sqlite3;
+typedef struct sqlite3 sqlite3;
+
+/* Create the m3_outcomes table + index if missing. Schema:
+ *   CREATE TABLE m3_outcomes(
+ *     id INTEGER PRIMARY KEY AUTOINCREMENT,
+ *     timestamp_unix_ms INTEGER NOT NULL,
+ *     latency_ms        INTEGER NOT NULL,
+ *     prompt_hash       INTEGER NOT NULL,
+ *     response_hash     INTEGER NOT NULL,
+ *     contact_id_hash   INTEGER NOT NULL,
+ *     prompt_tokens     INTEGER NOT NULL,
+ *     completion_tokens INTEGER NOT NULL,
+ *     model_id          INTEGER NOT NULL,
+ *     adapter_id        INTEGER NOT NULL,
+ *     guard_decision    INTEGER NOT NULL,
+ *     turn_kind         INTEGER NOT NULL,
+ *     drained_ts_ms     INTEGER NOT NULL
+ *   );
+ *   CREATE INDEX idx_m3_outcomes_timestamp ON m3_outcomes(timestamp_unix_ms);
+ *
+ * Idempotent — safe to call on every daemon boot. */
+hu_error_t hu_m3_outcomes_init_table(sqlite3 *db);
+
+/* Drain newly-recorded outcomes from the adapter's ring into the
+ * m3_outcomes table. Reads at most `max_outcomes` records (0 == use
+ * default of HU_M3_OUTCOMES_RING_CAPACITY); persists records whose
+ * "position" in the monotonic total_recorded sequence is strictly
+ * greater than the current drain marker; advances the marker.
+ *
+ * `now_ts_ms` is the wall-clock for the drained_ts_ms column.
+ * `*out_drained` receives the count of rows actually persisted.
+ *
+ * Returns:
+ *   HU_OK on success (including the no-new-outcomes case where
+ *     *out_drained == 0).
+ *   HU_ERR_INVALID_ARGUMENT on NULL db.
+ *   HU_ERR_OUT_OF_MEMORY if the snapshot buffer can't be allocated.
+ *   HU_ERR_IO on a SQLite insert failure.
+ *
+ * Safe to call with a NULL adapter (becomes a no-op with
+ * *out_drained == 0). */
+hu_error_t hu_m3_drain_outcomes_to_sqlite(hu_m3_frontier_adapter_t *adapter, sqlite3 *db,
+                                          int64_t now_ts_ms, hu_allocator_t *alloc,
+                                          size_t max_outcomes, int64_t *out_drained);
+
+/* Daemon-tick wrapper. Interval-gated: the drain runs at most once per
+ * `interval_seconds`; calls in between return HU_OK without touching
+ * the db. `last_run_ts_ms_inout` is updated only when the drain
+ * actually runs.
+ *
+ * The first-enabled tick emits an hu_log_info_once landmark naming the
+ * interval. NULL db short-circuits to HU_OK with a separate once-guard
+ * warning so a misconfigured daemon is observable rather than silent.
+ *
+ * Returns the same error class as `hu_m3_drain_outcomes_to_sqlite`. */
+hu_error_t hu_daemon_tick_m3_outcome_drain(hu_m3_frontier_adapter_t *adapter, sqlite3 *db,
+                                           int64_t now_ts_ms, int64_t *last_run_ts_ms_inout,
+                                           int64_t interval_seconds, hu_allocator_t *alloc,
+                                           int64_t *out_drained);
+
+#if HU_IS_TEST
+/* Reset the daemon-tick once-guards so a test can re-arm the
+ * first-enabled / null-db warnings. */
+void hu_daemon_tick_m3_outcome_drain_reset_warn_guards_for_test(void);
+#endif
+
+#endif /* HU_ENABLE_SQLITE */
+
 #ifdef __cplusplus
 }
 #endif

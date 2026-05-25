@@ -119,6 +119,12 @@ if(HU_ENABLE_ML)
 else()
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" OFF)
 endif()
+# Spec 2026-05-19 self-model-scaffold — observe-only behavioral self-model.
+# Records per-turn metrics (length, tool-sequence hash, emotional register,
+# latency) into a ring buffer for later aggregation. Defaults OFF so it ships
+# behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
+option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
+option(HU_ENABLE_ACTION_LAYERS "Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -909,6 +915,17 @@ set(HU_CORE_SOURCES
     src/agent/persona_eval.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
+    # Spec 2026-05-19 — shared training-runner entry. Always compiled; the
+    # body is stubbed when HU_ENABLE_LEARNING is OFF so callers don't need
+    # conditional compilation. See header for the contract.
+    src/agent/training_runner_shared.c
+    # Spec 2026-05-19 self-model-scaffold — agent behavioral self-model.
+    # Always compiled; body wrapped in `#ifdef HU_ENABLE_SELF_MODEL` with an
+    # `#else` stub-runner branch per `.claude/rules/test-source-gate-symmetry.md`
+    # so the public symbols resolve at link time in both build variants.
+    # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
+    src/agent/self_model.c
+    src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1217,6 +1234,13 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/lora_export.c
+    src/ml/lora_subprocess.c
+    # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
+    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
+    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
+    # minimal-build, design-tokens, completions, docs, static-analysis and
+    # ~30 other CI jobs across every open PR with an undefined-reference
+    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1502,6 +1526,7 @@ if(HU_ENABLE_ML)
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c
+        src/ml/lora_nightly.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
@@ -1519,6 +1544,10 @@ if(HU_ENABLE_ML)
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
         src/ml/fidelity.c
+        # Spec 2026-05-19 M3 closure / AC-M3-5: fidelity-based A/B gate
+        # comparing candidate vs baseline adapter outputs on a held-out
+        # prompt set. Pure judging math; no inference, no HTTP.
+        src/ml/m3_ab_fidelity_gate.c
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
@@ -1837,6 +1866,20 @@ if(HU_ENABLE_ML)
 endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_IMESSAGE)
+    # Propagated so header guards in include/human/channels/imessage_ingest.h
+    # pick the real declaration vs. the inline stub when imessage_ingest.c
+    # is in CHANNEL_SOURCES. Per ~/.claude/rules/test-source-gate-symmetry.md.
+    # Other targets (human, human_core_test, human_tests) get this near
+    # their own ML_DEFINITIONS lines after their add_library/add_executable.
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -2435,6 +2478,15 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human PRIVATE HU_ENABLE_ACTION_LAYERS=1)
+endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -2750,8 +2802,17 @@ target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_T
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -2949,6 +3010,8 @@ set(HU_TEST_SOURCES
     tests/test_audio_emotion.c
     tests/test_style_adapter.c
     tests/test_lora_export.c
+    tests/test_lora_nightly.c
+    tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -2959,6 +3022,7 @@ set(HU_TEST_SOURCES
     # test_persona_encryption.c — moved to gated block below; references
     # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
+    tests/test_homebrew_formula.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c
     tests/test_filler_pctt.c
@@ -2994,6 +3058,11 @@ set(HU_TEST_SOURCES
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
+    tests/test_m3_route_per_turn_call_sites.c
+    tests/test_m3_swap_failure_observability.c
+    tests/test_m3_outcome_ring_population.c
+    tests/test_m3_ab_fidelity_gate.c
+    tests/test_m3_frontier_auto_invocation.c
     tests/test_sql_transaction.c
     tests/test_normalize.c
     tests/test_memory_util.c
@@ -3004,6 +3073,10 @@ set(HU_TEST_SOURCES
     tests/test_sensitivity.c
     tests/test_vault.c
     tests/test_vault_aead.c
+    tests/test_app_bundle_structure.c
+    tests/test_pkg_builder.c
+    tests/test_install_docs.c
+    tests/test_sign_and_notarize.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
@@ -3045,6 +3118,7 @@ set(HU_TEST_SOURCES
     tests/test_gateway_http.c
     tests/test_memory_full.c
     tests/test_tools_all.c
+    tests/test_diagnose_notary.c
     tests/test_infrastructure.c
     tests/test_memory_subsystems.c
     tests/test_memory_new.c
@@ -3184,6 +3258,16 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    # Spec 2026-05-19 self-model-scaffold — ring-buffer correctness +
+    # OFF-flag no-op behavior. Test file body is internally gated with
+    # `#ifdef HU_ENABLE_SELF_MODEL` and provides an `#else` stub-runner
+    # so it links cleanly in both build variants per
+    # `.claude/rules/test-source-gate-symmetry.md`.
+    tests/test_self_model_behavior_log.c
+    tests/test_action_directives.c
+    # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
+    # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
+    tests/test_self_model_phase_bcde.c
     tests/test_w7_render_null_safety.c
     tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
@@ -3204,6 +3288,7 @@ set(HU_TEST_SOURCES
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
+    tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
@@ -3220,6 +3305,11 @@ set(HU_TEST_SOURCES
     # cross-arm64 with undefined-reference linker errors.
     tests/test_w15_backup_restore.c
     tests/test_w14_scheduler.c
+    # Spec 2026-05-19 — DPO pair-count auto-training trigger. Both test
+    # files use internal-#ifdef-wrap-with-stub-runner so they stay in the
+    # unconditional list per ~/.claude/rules/test-source-gate-symmetry.md.
+    tests/test_dpo_pair_count_trigger.c
+    tests/test_training_runner_shared_entry.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
     tests/test_b11_pressure_history_e2e.c
@@ -3325,6 +3415,7 @@ set(HU_TEST_SOURCES
     tests/test_weakness.c
     tests/test_anti_sycophancy.c
     tests/test_mutual_tom.c
+    tests/test_tom_activation.c
     tests/test_opinion_history.c
     tests/test_trust.c
     tests/test_sota_humanness.c
@@ -3342,6 +3433,7 @@ set(HU_TEST_SOURCES
     tests/test_skill_routing.c
     tests/test_dual_process.c
     tests/test_repair.c
+    tests/test_release_workflow.c
 )
 if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
@@ -3539,11 +3631,14 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_factory_config.c
     tests/test_llamacpp_sampling.c
     tests/test_llamacpp_kvcache.c
+    tests/test_llamacpp_kv_quant.c
+    tests/test_llamacpp_skip_decode.c
     tests/test_llamacpp_decode.c
     tests/test_llamacpp_lora_hotswap.c
     tests/test_llamacpp_chat_metal.c
     tests/test_llamacpp_best_of_n.c
     tests/test_doctor_best_of_n_warning.c
+    tests/test_doctor_inference.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c
@@ -3831,8 +3926,17 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
@@ -4475,6 +4579,37 @@ add_custom_target(benchmark
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running benchmarks..."
 )
+
+# macOS App Bundle target (US-C1.1)
+if(APPLE)
+    set(APP_BUNDLE_PATH ${CMAKE_BINARY_DIR}/Human.app)
+    set(APP_BUNDLE_CONTENTS ${APP_BUNDLE_PATH}/Contents)
+    set(APP_BUNDLE_MACOS ${APP_BUNDLE_CONTENTS}/MacOS)
+    set(APP_BUNDLE_RESOURCES ${APP_BUNDLE_CONTENTS}/Resources)
+    set(APP_PLIST_SOURCE ${CMAKE_SOURCE_DIR}/apps/macOS/Human.app/Contents/Info.plist)
+
+    add_custom_target(build_app_bundle ALL
+        DEPENDS human
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${APP_BUNDLE_CONTENTS} ${APP_BUNDLE_MACOS} ${APP_BUNDLE_RESOURCES}
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/human ${APP_BUNDLE_MACOS}/human
+        COMMAND ${CMAKE_COMMAND} -E copy ${APP_PLIST_SOURCE} ${APP_BUNDLE_CONTENTS}/Info.plist
+        COMMAND chmod 755 ${APP_BUNDLE_MACOS}/human
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Building macOS app bundle: ${APP_BUNDLE_PATH}"
+        VERBATIM
+    )
+
+    # Verify bundle dependencies (no rpath leakage)
+    # Uses scripts/release/verify-bundle.sh as single source of truth
+    add_custom_target(verify_bundle_dependencies
+        DEPENDS build_app_bundle
+        COMMAND ${CMAKE_COMMAND} -E echo "Verifying bundle dependencies..."
+        COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/release/verify-bundle.sh ${APP_BUNDLE_PATH}
+        COMMENT "Verifying macOS app bundle has system-only dependencies..."
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        VERBATIM
+    )
+endif()
 
 # Print build info
 message(STATUS "Human v0.5.0")

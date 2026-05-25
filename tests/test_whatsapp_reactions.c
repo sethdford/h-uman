@@ -9,12 +9,12 @@
  * Per test-source-gate-symmetry rule: production symbol lives in
  * src/channels/whatsapp_reactions.c (gated by HU_ENABLE_WHATSAPP in
  * CMakeLists.txt). Internal-#ifdef-wrap-with-stub-runner pattern: test
- * bodies guarded on HU_HAS_WHATSAPP so non-whatsapp build variants
+ * bodies guarded on HU_ENABLE_WHATSAPP so non-whatsapp build variants
  * link cleanly. */
 
 #include "test_framework.h"
 
-#ifdef HU_HAS_WHATSAPP
+#ifdef HU_ENABLE_WHATSAPP
 
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
@@ -213,10 +213,10 @@ void run_whatsapp_reactions_tests(void) {
     HU_RUN_TEST(test_whatsapp_question_emits_question);
 }
 
-#else /* !HU_HAS_WHATSAPP */
+#else /* !HU_ENABLE_WHATSAPP — stub runner so the symbol resolves */
 
 void run_whatsapp_reactions_tests(void) {
     (void)0;
 }
 
-#endif
+#endif /* HU_ENABLE_WHATSAPP */

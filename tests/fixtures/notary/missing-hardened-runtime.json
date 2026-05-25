@@ -1,0 +1,13 @@
+{
+  "issues": [
+    {
+      "severity": "error",
+      "architecture": "arm64",
+      "message": "The binary with the plist key NSExecutableArchitectures does not have the hardened runtime entitlement enabled; enable it with codesign --options runtime",
+      "docUrl": "https://developer.apple.com/documentation/security/hardened_runtime",
+      "path": "Payload/Applications/Human.app/Contents/MacOS/human"
+    }
+  ],
+  "id": "test-missing-hardened",
+  "statusCode": 4000
+}

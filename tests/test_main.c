@@ -33,6 +33,11 @@ void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
 void run_mlx_load_adapter_tests(void);
 void run_m3_route_per_turn_tests(void);
+void run_m3_route_per_turn_call_sites_tests(void);
+void run_m3_swap_failure_observability_tests(void);
+void run_m3_outcome_ring_population_tests(void);
+void run_m3_ab_fidelity_gate_tests(void);
+void run_m3_frontier_auto_invocation_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
 void run_tunnel_tests(void);
@@ -44,6 +49,10 @@ void run_normalize_tests(void);
 void run_sensitivity_tests(void);
 void run_vault_tests(void);
 void run_vault_aead_tests(void);
+void run_app_bundle_structure_tests(void);
+void run_pkg_builder_tests(void);
+void run_install_docs_tests(void);
+void run_sign_notarize_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
 void run_ensemble_tests(void);
@@ -251,6 +260,7 @@ void run_otel_trace_tests(void);
 void run_mcp_audit_tests(void);
 void run_voice_tests(void);
 void run_cli_tests(void);
+void run_diagnose_notary_tests(void);
 void run_update_tests(void);
 void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
@@ -333,6 +343,7 @@ void run_response_guard_retry_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
+void run_agent_turn_state_tests(void);     /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void); /* M4 follow-up: transport-error fast-fail */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
@@ -351,6 +362,17 @@ void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
 void run_w14_scheduler_tests(void);
+/* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
+void run_dpo_pair_count_trigger_tests(void);
+void run_training_runner_shared_entry_tests(void);
+/* Spec 2026-05-19 self-model-scaffold — Phase A. Test file uses the
+ * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
+ * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
+void run_self_model_behavior_log_tests(void);
+void run_action_directives_tests(void);
+/* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
+ * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
+void run_self_model_phase_bcde_tests(void);
 #ifdef HU_ENABLE_LEARNING
 void run_w16_evaluation_tests(void);
 void run_w16_eval_cli_tests(void);
@@ -426,6 +448,7 @@ void run_sota_features_tests(void);
 void run_mood_tests(void);
 void run_style_tracker_tests(void);
 void run_theory_of_mind_tests(void);
+void run_tom_activation_tests(void);
 void run_anticipatory_tests(void);
 void run_context_engine_tests(void);
 void run_exec_env_tests(void);
@@ -632,11 +655,14 @@ void run_llamacpp_provider_tests(void);
 void run_llamacpp_factory_config_tests(void);
 void run_llamacpp_sampling_tests(void);
 void run_llamacpp_kvcache_tests(void);
+void run_llamacpp_kv_quant_tests(void);
+void run_llamacpp_skip_decode_tests(void);
 void run_llamacpp_decode_tests(void);
 void run_llamacpp_lora_hotswap_tests(void);
 void run_llamacpp_chat_metal_tests(void);
 void run_llamacpp_best_of_n_tests(void);
 void run_doctor_best_of_n_warning_tests(void);
+void run_doctor_inference_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -672,6 +698,7 @@ void run_plugin_hooks_tests(void);
 void run_approval_gate_tests(void);
 void run_workflow_commands_tests(void);
 void run_repair_tests(void);
+void run_release_workflow_tests(void);
 void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
@@ -685,6 +712,7 @@ void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
 void run_canvas_persist_tests(void);
 void run_canvas_render_tests(void);
+void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
 void run_mlx_provider_tests(void);
@@ -711,6 +739,8 @@ void run_identity_continuity_tests(void);
 void run_audio_emotion_tests(void);
 void run_style_adapter_tests(void);
 void run_lora_export_tests(void);
+void run_lora_nightly_tests(void);
+void run_lora_subprocess_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
@@ -849,6 +879,11 @@ int main(int argc, char **argv) {
     run_w7_render_null_safety_tests();
     run_mlx_load_adapter_tests();
     run_m3_route_per_turn_tests();
+    run_m3_route_per_turn_call_sites_tests();
+    run_m3_swap_failure_observability_tests();
+    run_m3_outcome_ring_population_tests();
+    run_m3_ab_fidelity_gate_tests();
+    run_m3_frontier_auto_invocation_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
     run_tunnel_tests();
@@ -860,6 +895,10 @@ int main(int argc, char **argv) {
     run_sensitivity_tests();
     run_vault_tests();
     run_vault_aead_tests();
+    run_app_bundle_structure_tests();
+    run_pkg_builder_tests();
+    run_install_docs_tests();
+    run_sign_notarize_tests();
     run_provider_tests();
     run_provider_http_tests();
     run_ensemble_tests();
@@ -923,6 +962,7 @@ int main(int argc, char **argv) {
     run_gateway_http_tests();
     run_memory_full_tests();
     run_tools_all_tests();
+    run_diagnose_notary_tests();
     run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();
@@ -1121,6 +1161,8 @@ int main(int argc, char **argv) {
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
     run_agent_tests();
+    /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
+    run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
     run_w6_e2e_adversarial_tests();
@@ -1140,6 +1182,13 @@ int main(int argc, char **argv) {
 #endif
     run_w15_backup_restore_tests();
     run_w14_scheduler_tests();
+    /* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
+    run_dpo_pair_count_trigger_tests();
+    run_training_runner_shared_entry_tests();
+    /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
+    run_self_model_behavior_log_tests();
+    run_action_directives_tests();
+    run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
     run_w16_eval_cli_tests();
@@ -1216,6 +1265,7 @@ int main(int argc, char **argv) {
     run_mood_tests();
     run_style_tracker_tests();
     run_theory_of_mind_tests();
+    run_tom_activation_tests();
     run_anticipatory_tests();
     run_context_engine_tests();
     run_exec_env_tests();
@@ -1407,11 +1457,14 @@ int main(int argc, char **argv) {
     run_llamacpp_factory_config_tests();
     run_llamacpp_sampling_tests();
     run_llamacpp_kvcache_tests();
+    run_llamacpp_kv_quant_tests();
+    run_llamacpp_skip_decode_tests();
     run_llamacpp_decode_tests();
     run_llamacpp_lora_hotswap_tests();
     run_llamacpp_chat_metal_tests();
     run_llamacpp_best_of_n_tests();
     run_doctor_best_of_n_warning_tests();
+    run_doctor_inference_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();
@@ -1453,6 +1506,7 @@ int main(int argc, char **argv) {
     run_approval_gate_tests();
     run_workflow_commands_tests();
     run_repair_tests();
+    run_release_workflow_tests();
     run_daemon_cron_tests();
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
@@ -1487,6 +1541,8 @@ int main(int argc, char **argv) {
     run_audio_emotion_tests();
     run_style_adapter_tests();
     run_lora_export_tests();
+    run_lora_nightly_tests();
+    run_lora_subprocess_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();
     run_personal_model_simulation_tests();
@@ -1529,6 +1585,7 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+    run_homebrew_formula_tests();
 #ifdef HU_ENABLE_RL_FULL
     /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when
      * the RL-full gate is ON, so default release/dev builds are byte-

@@ -452,6 +452,204 @@ class LlmJudge:
         }
 
 
+class FidelityJudge:
+    """Spec 2026-05-19 M3 closure / AC-M3-5 — communication-style fidelity
+    judge.
+
+    Per design D-M3-5: scores both adapters' outputs against the user's
+    communication-style fingerprint using the same heuristic shipped in
+    `src/memory/personal_model.c::hu_communication_style_fidelity_score`,
+    then emits PASS iff `(candidate_mean - baseline_mean) >= threshold`
+    (default 0.05 absolute on the [0, 1] scale).
+
+    Input shape: two JSONL files, one row per held-out response.
+    Required field per row:
+
+        {"response": "<model output text>"}
+
+    Optional fields like "prompt" are ignored.
+
+    Why we reimplement the scorer in Python rather than calling the C
+    binary: the harness must be runnable on machines without the full
+    h-uman build (CI runners, dev laptops). Keeping the scorer
+    self-contained removes a build dependency. The implementation MUST
+    stay in lockstep with the C version — see the SCORER_TIE_TEST
+    fixture in `tests/test_m3_ab_fidelity_gate.c` for byte-level cross-
+    checks against the canonical C scorer.
+    """
+
+    # Default target fingerprint when no personal_model.bin is provided.
+    # Mirrors the synthetic fallback in src/ml/fidelity.c::
+    # hu_ml_fidelity_resolve_target so the two surfaces stay aligned.
+    DEFAULT_TARGET = {
+        "lowercase_ratio": 0.85,
+        "abbreviation_ratio": 0.20,
+        "avg_message_length": 60,
+    }
+
+    DEFAULT_THRESHOLD = 0.05
+
+    # Abbreviation patterns — must match
+    # src/memory/personal_model.c::hu_pm_extract_response_features.
+    # We keep a conservative subset to avoid drift; the C scorer is the
+    # source of truth.
+    _ABBREVS = (
+        " u ", " ur ", " r ", " idk ", " lol ", " omg ", " btw ",
+        " tbh ", " tho ", " thx ", " ty ", " np ", " ya ", " yep ",
+        " yeah ", " nah ", " kinda ", " gonna ", " wanna ", " ok ",
+        " lmao ", " brb ", " imo ", " imho ", " bc ", " w/ ", " w/o ",
+    )
+
+    def __init__(self, baseline_responses_jsonl: Path,
+                 candidate_responses_jsonl: Path,
+                 threshold: float | None = None,
+                 target: dict | None = None):
+        self.baseline_responses = baseline_responses_jsonl
+        self.candidate_responses = candidate_responses_jsonl
+        self.threshold = (
+            threshold if threshold is not None else self.DEFAULT_THRESHOLD
+        )
+        self.target = target or self.DEFAULT_TARGET
+
+    @staticmethod
+    def _extract_features(text: str) -> dict:
+        if not text:
+            return {"lowercase_ratio": 0.0, "abbreviation_ratio": 0.0,
+                    "byte_len": 0}
+        # lowercase_ratio: fraction of alpha chars that are lowercase
+        alpha = [c for c in text if c.isalpha()]
+        if alpha:
+            lower = sum(1 for c in alpha if c.islower())
+            lowercase_ratio = lower / len(alpha)
+        else:
+            lowercase_ratio = 0.0
+        # abbreviation_ratio: fraction of whitespace tokens that match
+        # one of the canonical abbreviation patterns. We use the same
+        # space-padded comparison as the C scorer.
+        padded = " " + text.lower() + " "
+        abbrev_hits = sum(1 for a in FidelityJudge._ABBREVS if a in padded)
+        # Token-ish denominator: number of spaces + 1, capped.
+        tokens = max(1, padded.count(" ") - 1)
+        abbreviation_ratio = min(1.0, abbrev_hits / float(tokens))
+        return {
+            "lowercase_ratio": lowercase_ratio,
+            "abbreviation_ratio": abbreviation_ratio,
+            "byte_len": len(text.encode("utf-8")),
+        }
+
+    @staticmethod
+    def _axis_match(observed: float, target: float) -> float:
+        # Same shape as hu_pm_axis_match in personal_model.c:
+        # 1.0 - clamp(|obs - tgt|, 0, 1).
+        if target <= 0.0:
+            return 1.0 if observed == 0.0 else 0.0
+        diff = abs(observed - target)
+        rel = diff / target
+        if rel >= 1.0:
+            return 0.0
+        return 1.0 - rel
+
+    @staticmethod
+    def _length_match(byte_len: int, target_avg: float) -> float:
+        if target_avg <= 0.0:
+            return 1.0 if byte_len == 0 else 0.0
+        diff = abs(float(byte_len) - target_avg)
+        rel = diff / target_avg
+        if rel >= 1.0:
+            return 0.0
+        return 1.0 - rel
+
+    def _score_response(self, response: str) -> float | None:
+        if not response:
+            return None
+        feats = FidelityJudge._extract_features(response)
+        ll = FidelityJudge._axis_match(feats["lowercase_ratio"],
+                                       self.target["lowercase_ratio"])
+        ab = FidelityJudge._axis_match(feats["abbreviation_ratio"],
+                                       self.target["abbreviation_ratio"])
+        lm = FidelityJudge._length_match(feats["byte_len"],
+                                         self.target["avg_message_length"])
+        return (ll + ab + lm) / 3.0
+
+    def _score_jsonl(self, path: Path) -> tuple[float, int, int]:
+        """Returns (mean_score, scored_count, skipped_count). Mean is 0.0
+        when scored_count is 0."""
+        if not path.exists():
+            return (0.0, 0, 0)
+        total = 0.0
+        scored = 0
+        skipped = 0
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            response = rec.get("response", "")
+            score = self._score_response(response)
+            if score is None:
+                skipped += 1
+                continue
+            total += score
+            scored += 1
+        mean = (total / scored) if scored > 0 else 0.0
+        return (mean, scored, skipped)
+
+    def evaluate(self, baseline: dict, candidate: dict) -> dict:
+        # The adapter-metadata dicts are passed through unmodified — the
+        # judge doesn't need them but the harness expects them in the
+        # output for downstream consumers.
+        if not self.baseline_responses or not self.baseline_responses.exists():
+            return {
+                "judge": "fidelity", "verdict": "skipped",
+                "reason": f"baseline responses JSONL missing: "
+                          f"{self.baseline_responses}",
+                "baseline": baseline, "candidate": candidate,
+            }
+        if not self.candidate_responses or not self.candidate_responses.exists():
+            return {
+                "judge": "fidelity", "verdict": "skipped",
+                "reason": f"candidate responses JSONL missing: "
+                          f"{self.candidate_responses}",
+                "baseline": baseline, "candidate": candidate,
+            }
+        b_mean, b_scored, b_skipped = self._score_jsonl(self.baseline_responses)
+        c_mean, c_scored, c_skipped = self._score_jsonl(self.candidate_responses)
+        if b_scored == 0 or c_scored == 0:
+            return {
+                "judge": "fidelity", "verdict": "skipped",
+                "reason": f"zero scored responses (baseline={b_scored}, "
+                          f"candidate={c_scored})",
+                "baseline": baseline, "candidate": candidate,
+                "baseline_mean": b_mean, "candidate_mean": c_mean,
+            }
+        delta = c_mean - b_mean
+        if delta >= self.threshold:
+            verdict = "pass"
+        elif delta <= -self.threshold:
+            verdict = "regress"
+        else:
+            verdict = "no-change"
+        return {
+            "judge": "fidelity",
+            "verdict": verdict,
+            "reason": (f"baseline_mean={b_mean:.4f} candidate_mean={c_mean:.4f} "
+                       f"delta={delta:+.4f} threshold={self.threshold:.4f}"),
+            "baseline": baseline, "candidate": candidate,
+            "baseline_mean": b_mean,
+            "candidate_mean": c_mean,
+            "delta": delta,
+            "threshold": self.threshold,
+            "baseline_scored": b_scored,
+            "candidate_scored": c_scored,
+            "baseline_skipped": b_skipped,
+            "candidate_skipped": c_skipped,
+        }
+
+
 class SftPromptsJudge:
     """Live-inference judge. Loads eval prompts from JSONL, runs each
     against an MLX server with both adapters swapped in, scores responses
@@ -550,11 +748,21 @@ def main():
                     help="Path to the BASELINE adapter (existing known-good)")
     ap.add_argument("--candidate", type=Path, required=True,
                     help="Path to the CANDIDATE adapter (newly trained)")
-    ap.add_argument("--judge", choices=["metadata", "sft-prompts", "llm"], default="metadata",
+    ap.add_argument("--judge", choices=["metadata", "sft-prompts", "llm", "fidelity"],
+                    default="metadata",
                     help="Judge implementation (default: metadata)")
     ap.add_argument("--completions-jsonl", type=Path,
                     help="For --judge llm: JSONL of "
                          "{prompt, baseline_output, candidate_output} per line")
+    ap.add_argument("--baseline-responses-jsonl", type=Path,
+                    help="For --judge fidelity: JSONL of "
+                         "{response: '...'} per line from the BASELINE adapter")
+    ap.add_argument("--candidate-responses-jsonl", type=Path,
+                    help="For --judge fidelity: JSONL of "
+                         "{response: '...'} per line from the CANDIDATE adapter")
+    ap.add_argument("--fidelity-threshold", type=float, default=0.05,
+                    help="Absolute fidelity delta required for PASS "
+                         "(default 0.05, per spec D-M3-5)")
     ap.add_argument("--prompts-jsonl", type=Path,
                     default=Path(__file__).resolve().parent.parent
                     / "eval_suites" / "m3-personalization" / "prompts.jsonl",
@@ -584,6 +792,16 @@ def main():
                   file=sys.stderr)
             sys.exit(2)
         judge = LlmJudge(args.completions_jsonl)
+    elif args.judge == "fidelity":
+        if (args.baseline_responses_jsonl is None
+                or args.candidate_responses_jsonl is None):
+            print("ERROR: --baseline-responses-jsonl and "
+                  "--candidate-responses-jsonl are required for --judge fidelity",
+                  file=sys.stderr)
+            sys.exit(2)
+        judge = FidelityJudge(args.baseline_responses_jsonl,
+                              args.candidate_responses_jsonl,
+                              threshold=args.fidelity_threshold)
     else:
         judge = SftPromptsJudge(args.mlx_url, args.prompts_jsonl)
 

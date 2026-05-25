@@ -65,10 +65,33 @@ extern "C" {
  * smaller than PIPE_BUF (4096 bytes). Records over that size could
  * interleave — we mitigate by truncating prompt + rejected +
  * accepted to bounded lengths below. */
+#ifdef HU_ENABLE_ML
 hu_error_t hu_m3_rewrite_pair_record(hu_allocator_t *alloc, const char *path, const char *prompt,
                                      size_t prompt_len, const char *rejected, size_t rejected_len,
                                      const char *accepted, size_t accepted_len,
                                      unsigned char turn_kind);
+#else
+/* HU_ENABLE_ML=OFF stub. The pair-record file is M3 training data; without
+ * the ML subsystem there is nothing to train, so the record is a no-op.
+ * Defined inline so call sites in agent_turn.c / agent_stream.c link cleanly
+ * in non-ML builds (per ~/.claude/rules/test-source-gate-symmetry.md). */
+static inline hu_error_t hu_m3_rewrite_pair_record(hu_allocator_t *alloc, const char *path,
+                                                   const char *prompt, size_t prompt_len,
+                                                   const char *rejected, size_t rejected_len,
+                                                   const char *accepted, size_t accepted_len,
+                                                   unsigned char turn_kind) {
+    (void)alloc;
+    (void)path;
+    (void)prompt;
+    (void)prompt_len;
+    (void)rejected;
+    (void)rejected_len;
+    (void)accepted;
+    (void)accepted_len;
+    (void)turn_kind;
+    return HU_OK;
+}
+#endif
 
 /* Max bytes per field in the JSONL record. Records exceeding the
  * cap are TRUNCATED, not rejected — DPO training prefers a truncated

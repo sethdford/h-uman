@@ -281,9 +281,9 @@ static void test_flush_invokes_send_via_mock_imessage_channel(void) {
     hu_personal_model_t test_model;
     memset(&test_model, 0, sizeof(test_model));
     char test_prompt[4096];
-    size_t test_prompt_len =
-        hu_autoresponder_build_prompt(NULL, contact_handle, "imessage", "It's been a while...",
-                                      NULL, &test_model, test_prompt, sizeof(test_prompt));
+    size_t test_prompt_len = hu_autoresponder_build_prompt(
+        NULL, contact_handle, "imessage", "It's been a while...", NULL, &test_model,
+        (int64_t)time(NULL), test_prompt, sizeof(test_prompt));
     fprintf(stderr, "[TEST] autoresponder generated %zu bytes\n", test_prompt_len);
 
     /* Call flush function with mock channel array. */
