@@ -22,6 +22,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
@@ -13803,6 +13804,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 &config->initiative, ar_cfg_init, /*tz_offset_seconds=*/0, &gov_budget, agent,
                 agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
                 &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
+
+            /* T8 v0.1 — persist non-gated decisions to JSONL so a future
+             * tuner / dashboard can see what the LLM actually proposed.
+             * Gated ticks (SKIP / GATED_*) are skipped — they're already
+             * in the daemon log line and would dominate the JSONL by
+             * volume without adding signal. */
+            bool persist_decision = (init_result == HU_INIT_RESULT_FIRED ||
+                                     init_result == HU_INIT_RESULT_LOW_CONFIDENCE ||
+                                     init_result == HU_INIT_RESULT_NEGATIVE ||
+                                     init_result == HU_INIT_RESULT_LLM_ERROR ||
+                                     init_result == HU_INIT_RESULT_PARSE_ERROR);
+            if (persist_decision) {
+                (void)hu_init_outcome_append(alloc, now_unix_init, initiative_tick_id, init_result,
+                                             &init_decision, config->initiative.target_handle,
+                                             config->initiative.dry_run);
+            }
             /* T4 delivery wire (2026-05-25). When the proposer FIREs,
              * route init_decision.draft through the iMessage channel.
              *
