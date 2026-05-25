@@ -254,6 +254,7 @@ void run_otel_trace_tests(void);
 void run_mcp_audit_tests(void);
 void run_voice_tests(void);
 void run_cli_tests(void);
+void run_diagnose_notary_tests(void);
 void run_update_tests(void);
 void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
@@ -938,6 +939,7 @@ int main(int argc, char **argv) {
     run_gateway_http_tests();
     run_memory_full_tests();
     run_tools_all_tests();
+    run_diagnose_notary_tests();
     run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();

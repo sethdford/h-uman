@@ -1,0 +1,13 @@
+{
+  "issues": [
+    {
+      "severity": "error",
+      "architecture": "arm64",
+      "message": "The binary uses an SDK older than the recommended macOS 10.15; rebuild with macOS 10.15 SDK or later",
+      "docUrl": "https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution",
+      "path": "Payload/Applications/Human.app/Contents/MacOS/human"
+    }
+  ],
+  "id": "test-sdk-old",
+  "statusCode": 4000
+}
