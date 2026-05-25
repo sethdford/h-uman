@@ -33,6 +33,15 @@ bool hu_config_provider_requires_api_key(const char *provider) {
         return false;
     if (strcmp(provider, "ensemble") == 0)
         return false;
+    /* Composite providers — wrap other providers, never need their own key.
+     * Sprint 58 reliability audit identified that the "reliable" wrapper
+     * was emitting a spurious "requires an API key but none is configured"
+     * warning at daemon startup because this exemption list missed it.
+     * "router" is the same shape — composite wrapper over named providers. */
+    if (strcmp(provider, "reliable") == 0)
+        return false;
+    if (strcmp(provider, "router") == 0)
+        return false;
     return true;
 }
 
