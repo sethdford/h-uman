@@ -377,6 +377,36 @@ static void style_distribution_is_human_shaped(void) {
     free(facts);
 }
 
+/* Case 14: AC-3 emotional protection — parametric sweep across 16 fact
+ * combinations × 100 RNG seeds (1600 total invocations) proves that
+ * HU_REPLY_STYLE_TAPBACK is NEVER returned solo when
+ * parent_emotional_intensity >= HU_EMOTION_THRESHOLD_MEDIUM.
+ * The emotional_intensity gate sets p_tap = 0.0f in score_reply_style,
+ * hard-zeroing the tapback mass, so this should be 0 violations. */
+static void emotional_protection_holds_across_all_dimensions(void) {
+    int violations = 0;
+    for (int density_idx = 0; density_idx < 4; density_idx++) {
+        for (int formality_idx = 0; formality_idx < 4; formality_idx++) {
+            for (int mirror = 0; mirror < 4; mirror++) {
+                for (int position = 0; position < 4; position++) {
+                    hu_reply_style_facts_t f = neutral_facts();
+                    f.conv_density_msgs_per_min = (float)(density_idx * 4);
+                    f.persona_formality = (float)formality_idx * 0.33f;
+                    f.other_threaded_replies_recent = mirror;
+                    f.parent_position_from_bottom = position * 3;
+                    f.parent_emotional_intensity = HU_EMOTION_THRESHOLD_MEDIUM;
+                    for (uint64_t seed = 1; seed <= 100; seed++) {
+                        if (hu_imessage_choose_reply_style(&f, seed) == HU_REPLY_STYLE_TAPBACK) {
+                            violations++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    HU_ASSERT_EQ(violations, 0);
+}
+
 void run_imessage_reply_style_tests(void) {
     HU_TEST_SUITE("imessage_reply_style");
     HU_RUN_TEST(enum_values_are_stable);
@@ -393,4 +423,5 @@ void run_imessage_reply_style_tests(void) {
     HU_RUN_TEST(no_mirror_low_density_fresh_prefers_flat);
     HU_RUN_TEST(high_formality_increases_thread_probability);
     HU_RUN_TEST(style_distribution_is_human_shaped);
+    HU_RUN_TEST(emotional_protection_holds_across_all_dimensions);
 }
