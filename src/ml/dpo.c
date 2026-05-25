@@ -664,7 +664,7 @@ hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
          * High counts indicate the corpus needs cleaning (or the write
          * path regressed). See docs/plans/2026-05-19-dpo-corpus-inverted.md. */
         hu_log_info("dpo", NULL,
-                    "iterate_pairs: skipped %zu legacy unpaired rows "
+                    "dpo_export: skipped %zu legacy unpaired rows "
                     "(empty/short side); kept %zu",
                     skipped_unpaired, n);
     }
@@ -694,7 +694,9 @@ hu_error_t hu_dpo_get_best_examples(hu_dpo_collector_t *collector, hu_allocator_
 
     sqlite3_stmt *stmt = NULL;
     const char *sql = "SELECT prompt, chosen, rejected FROM dpo_pairs "
-                      "WHERE margin > 0.5 ORDER BY margin DESC LIMIT ?";
+                      "WHERE margin > 0.5 "
+                      "AND LENGTH(chosen) >= 4 AND LENGTH(rejected) >= 4 "
+                      "ORDER BY margin DESC LIMIT ?";
     if (sqlite3_prepare_v2(collector->db, sql, -1, &stmt, NULL) != SQLITE_OK)
         return HU_ERR_IO;
 
@@ -840,8 +842,13 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
 
     int lim = (batch_size > 0 && batch_size < 100) ? (int)batch_size : 20;
     sqlite3_stmt *stmt = NULL;
+    /* Symmetric with hu_dpo_export (line 612): both sides must be at least
+     * 4 bytes to be eligible for judging. Prevents 1-3 byte responses ("k",
+     * "ok", "yes") from being scored — the asymmetry between `chosen != ''`
+     * and the 4-byte export filter was the lingering half of the 2026-05-19
+     * DPO-corpus-inverted bug (docs/plans/2026-05-19-dpo-corpus-inverted.md). */
     const char *sql = "SELECT prompt, chosen, rejected, margin FROM dpo_pairs "
-                      "WHERE chosen != '' AND rejected != '' "
+                      "WHERE LENGTH(chosen) >= 4 AND LENGTH(rejected) >= 4 "
                       "ORDER BY margin DESC LIMIT ?";
     if (sqlite3_prepare_v2(collector->db, sql, -1, &stmt, NULL) != SQLITE_OK)
         return HU_ERR_IO;
@@ -858,10 +865,29 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
         if (!prompt || !chosen || !rejected)
             continue;
 
-        /* Get log-probability proxy for chosen response via LLM scoring */
+        /* Get log-probability proxy for chosen response via LLM scoring.
+         *
+         * Audit 2026-05-25: the original prompt ("rate how well this response
+         * answers the prompt") was a GENERIC-HELPFULNESS judge. It systematically
+         * preferred verbose AI-style replies ("Hey there! I'm doing great, thanks
+         * for asking!") over Seth's terse natural ones ("not much, just got home.
+         * you?"). Loss converged to exactly ln(2) ≈ 0.6931 with alignment=0.00
+         * because the judge was wrong-direction on every pair. See
+         * docs/plans/2026-05-25-initiative-layer/audit-lora-training-judge.md
+         *
+         * New prompt scores for naturalness as Seth's texting style — terse,
+         * lowercase-tolerant, conversational, doesn't perform helpfulness.
+         * This aligns the judge with the actual product goal (sound like Seth)
+         * rather than the generic LLM-trained prior (sound helpful). */
         static const char score_sys[] =
-            "Rate how well this response answers the prompt on a scale of 0-100. "
-            "Output ONLY a number.";
+            "You are evaluating text replies for a personal AI named after Seth, "
+            "who texts in a casual, terse, lowercase-tolerant style. Seth does NOT "
+            "perform helpfulness — no 'Hey there!', no 'How can I help?', no "
+            "exclamation cascades, no preamble. He says what he means in as few "
+            "words as the situation calls for. "
+            "Rate how much this response sounds like Seth's natural texting on a "
+            "scale of 0-100, where 100 = unmistakably Seth and 0 = a generic AI "
+            "performing helpfulness. Output ONLY a number, no explanation.";
 
         char chosen_prompt[4096];
         int cn =
