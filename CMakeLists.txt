@@ -1101,6 +1101,7 @@ set(HU_CORE_SOURCES
     src/onboard/state.c
     src/onboard/dispatcher.c
     src/onboard/step_welcome.c
+    src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
     src/daemon_lifecycle.c
@@ -3213,6 +3214,7 @@ set(HU_TEST_SOURCES
     tests/test_doctor_check_provider.c
     tests/test_doctor_exit_codes.c
     tests/test_doctor_json_output.c
+    tests/test_onboard_step_provider.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
