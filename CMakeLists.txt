@@ -1232,8 +1232,13 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/lora_export.c
-    src/ml/lora_nightly.c
     src/ml/lora_subprocess.c
+    # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
+    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
+    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
+    # minimal-build, design-tokens, completions, docs, static-analysis and
+    # ~30 other CI jobs across every open PR with an undefined-reference
+    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1518,6 +1523,7 @@ if(HU_ENABLE_ML)
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c
+        src/ml/lora_nightly.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
@@ -3268,6 +3274,7 @@ set(HU_TEST_SOURCES
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
+    tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c

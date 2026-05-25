@@ -15,7 +15,7 @@
 
 #include "test_framework.h"
 
-#ifdef HU_HAS_MATRIX
+#ifdef HU_ENABLE_MATRIX
 
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
@@ -229,10 +229,10 @@ void run_matrix_reactions_tests(void) {
     HU_RUN_TEST(test_matrix_laugh_emits_laugh);
 }
 
-#else /* !HU_HAS_MATRIX */
+#else /* !HU_ENABLE_MATRIX — stub runner so the symbol resolves */
 
 void run_matrix_reactions_tests(void) {
     (void)0;
 }
 
-#endif
+#endif /* HU_ENABLE_MATRIX */

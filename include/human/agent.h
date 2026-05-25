@@ -495,6 +495,28 @@ struct hu_agent {
         bool has_data; /* true once any field has been stashed for this turn */
     } behavior_log_pending;
 
+    /* Per-turn behavioral state (Spec 2026-05-19 AC-SM-1 follow-up).
+     * Reset at turn start, populated as the turn progresses:
+     *   - tool_count + tool_sequence_hash: incremented at each tool
+     *     dispatch via hu_agent_turn_state_track_tool()
+     *   - emotional_register: set after world-model merge_self_emotion
+     *     via hu_agent_turn_state_set_emotional_register()
+     *   - persona_delta_kind: set when a delta is applied via
+     *     hu_agent_turn_state_set_persona_delta()
+     *
+     * hu_agent_internal_emit_behavior_record() reads from here when the
+     * stash (behavior_log_pending above) left the corresponding field
+     * zero — "override pattern" where explicit stashes win and the
+     * turn-state fills in the rest.
+     *
+     * Privacy: counters + hash + enums only. No content. */
+    struct {
+        uint16_t tool_count;
+        uint32_t tool_sequence_hash; /* running FNV-1a of "name1|name2|..." */
+        uint8_t emotional_register;  /* hu_agent_emotional_register_t */
+        uint8_t persona_delta_kind;  /* hu_agent_persona_delta_kind_t */
+    } current_turn_state;
+
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
     bool on_device_available; /* true if on-device inference server was detected at startup */
     char *persona_prompt;     /* custom identity override; owned */
@@ -700,6 +722,23 @@ typedef struct hu_agent_behavior_stash {
 } hu_agent_behavior_stash_t;
 
 void hu_agent_m3_stash_behavior_metrics(hu_agent_t *agent, const hu_agent_behavior_stash_t *stash);
+
+/* Per-turn state helpers (Spec 2026-05-19 AC-SM-1 follow-up).
+ *
+ * Caller policy:
+ *   - reset() at the start of each new turn (one canonical site each in
+ *     agent_turn.c + agent_stream.c entry)
+ *   - track_tool() at each tool dispatch (4+ sites; cheap to call,
+ *     safe with NULL args)
+ *   - set_emotional_register() once after world_model_merge_self_emotion
+ *   - set_persona_delta() in persona delta apply success branch
+ *
+ * All are NULL-safe and lock-free. Per AC-SM-7 (privacy): no content
+ * captured — counters + hash + enums only. */
+void hu_agent_turn_state_reset(hu_agent_t *agent);
+void hu_agent_turn_state_track_tool(hu_agent_t *agent, const char *tool_name, size_t tool_name_len);
+void hu_agent_turn_state_set_emotional_register(hu_agent_t *agent, uint8_t reg);
+void hu_agent_turn_state_set_persona_delta(hu_agent_t *agent, uint8_t kind);
 
 /* Phase G1 (2026-05-18) — per-turn contact-routing hook.
  *

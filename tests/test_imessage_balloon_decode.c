@@ -14,8 +14,11 @@
  * "amount" / "currency" / "value" / "latitude" / "longitude" — these
  * tests pin behavioral compliance on top. */
 
-#include "human/channels/imessage_balloon_decode.h"
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_IMESSAGE
+
+#include "human/channels/imessage_balloon_decode.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -342,3 +345,11 @@ void run_imessage_balloon_decode_tests(void) {
     HU_RUN_TEST(test_decoders_handle_null_safely);
     HU_RUN_TEST(test_decoders_handle_garbage_blob_safely);
 }
+
+#else /* !HU_ENABLE_IMESSAGE — stub runner so the symbol resolves */
+
+void run_imessage_balloon_decode_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_IMESSAGE */
