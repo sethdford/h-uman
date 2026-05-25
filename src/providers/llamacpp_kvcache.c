@@ -33,17 +33,51 @@ hu_error_t hu_llamacpp_kvcache_init(hu_llamacpp_kvcache_t *cache) {
 void hu_llamacpp_kvcache_reset(hu_llamacpp_kvcache_t *cache) {
     if (!cache)
         return;
-    /* Phase 0.3 — reset() clears the cache SLOT but preserves the
-     * lifetime hit/miss counters. reset() fires on LoRA hot-swap
-     * (llamacpp.c:455), and operators want to see the cache had been
-     * doing useful work even after a swap invalidates it. Use
-     * hu_llamacpp_kvcache_init() if you want a fully zeroed struct. */
-    cache->system_prompt_hash = 0;
-    cache->n_past_system = 0;
+    /* Phase 0.3 + Phase 2 — reset() clears every cache slot but
+     * preserves the lifetime hit/miss counters and the tick. reset()
+     * fires on LoRA hot-swap (llamacpp.c), and operators want to see
+     * that the cache had been doing useful work even after a swap
+     * invalidates it. Use hu_llamacpp_kvcache_init() for a fully
+     * zeroed struct. */
+    for (size_t i = 0; i < HU_LLAMACPP_KVCACHE_SLOTS; i++) {
+        cache->slots[i].system_prompt_hash = 0;
+        cache->slots[i].n_past_system = 0;
+        cache->slots[i].last_used_tick = 0;
+    }
 }
 
 void hu_llamacpp_kvcache_free(hu_llamacpp_kvcache_t *cache) {
     hu_llamacpp_kvcache_reset(cache);
+}
+
+/* Phase 2 — multi-slot LRU helpers.
+ *
+ * Linear scan over HU_LLAMACPP_KVCACHE_SLOTS is fine at N=4 — branch
+ * prediction handles it and the per-slot data fits in a single cache
+ * line. If N grows past 16 we'd want a sorted-by-hash array, but that's
+ * unrequired today.
+ */
+
+static hu_llamacpp_kvcache_slot_t *find_slot_by_hash(hu_llamacpp_kvcache_t *cache, uint64_t h) {
+    for (size_t i = 0; i < HU_LLAMACPP_KVCACHE_SLOTS; i++) {
+        if (cache->slots[i].system_prompt_hash == h)
+            return &cache->slots[i];
+    }
+    return NULL;
+}
+
+static hu_llamacpp_kvcache_slot_t *pick_eviction_target(hu_llamacpp_kvcache_t *cache) {
+    /* Prefer an empty slot (hash == 0). Otherwise the slot with the
+     * smallest last_used_tick. Tie-break by lowest index for
+     * deterministic test behavior. */
+    hu_llamacpp_kvcache_slot_t *target = &cache->slots[0];
+    for (size_t i = 0; i < HU_LLAMACPP_KVCACHE_SLOTS; i++) {
+        if (cache->slots[i].system_prompt_hash == 0)
+            return &cache->slots[i];
+        if (cache->slots[i].last_used_tick < target->last_used_tick)
+            target = &cache->slots[i];
+    }
+    return target;
 }
 
 hu_error_t hu_llamacpp_kvcache_record_system(hu_llamacpp_kvcache_t *cache,
@@ -51,8 +85,22 @@ hu_error_t hu_llamacpp_kvcache_record_system(hu_llamacpp_kvcache_t *cache,
                                              int32_t n_past_system) {
     if (!cache || !system_prompt || n_past_system <= 0)
         return HU_ERR_INVALID_ARGUMENT;
-    cache->system_prompt_hash = hu_llamacpp_kvcache_fnv1a(system_prompt, system_prompt_len);
-    cache->n_past_system = n_past_system;
+    uint64_t h = hu_llamacpp_kvcache_fnv1a(system_prompt, system_prompt_len);
+    cache->tick++;
+    /* Re-recording an existing entry must NOT evict another slot. The
+     * caller is either re-asserting the same prefix (no-op semantically)
+     * or extending its decode depth (the n_past should be at least as
+     * large as before, but we trust the caller). */
+    hu_llamacpp_kvcache_slot_t *existing = find_slot_by_hash(cache, h);
+    if (existing) {
+        existing->n_past_system = n_past_system;
+        existing->last_used_tick = cache->tick;
+        return HU_OK;
+    }
+    hu_llamacpp_kvcache_slot_t *target = pick_eviction_target(cache);
+    target->system_prompt_hash = h;
+    target->n_past_system = n_past_system;
+    target->last_used_tick = cache->tick;
     return HU_OK;
 }
 
@@ -64,16 +112,15 @@ hu_error_t hu_llamacpp_kvcache_lookup_system(hu_llamacpp_kvcache_t *cache,
     /* Phase 0.3 — hit/miss accounting. Programmer errors (NULL args)
      * deliberately do NOT count toward miss telemetry; only honest
      * lookups against a usable cache participate in the hit rate. */
-    if (cache->system_prompt_hash == 0) {
-        atomic_fetch_add_explicit(&cache->misses, 1, memory_order_relaxed);
-        return HU_ERR_NOT_FOUND;
-    }
     uint64_t h = hu_llamacpp_kvcache_fnv1a(system_prompt, system_prompt_len);
-    if (h != cache->system_prompt_hash) {
+    hu_llamacpp_kvcache_slot_t *match = find_slot_by_hash(cache, h);
+    if (!match || match->system_prompt_hash == 0) {
         atomic_fetch_add_explicit(&cache->misses, 1, memory_order_relaxed);
         return HU_ERR_NOT_FOUND;
     }
-    *out_n_past_system = cache->n_past_system;
+    *out_n_past_system = match->n_past_system;
+    cache->tick++;
+    match->last_used_tick = cache->tick;
     atomic_fetch_add_explicit(&cache->hits, 1, memory_order_relaxed);
     return HU_OK;
 }
