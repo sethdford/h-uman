@@ -3052,6 +3052,7 @@ set(HU_TEST_SOURCES
     tests/test_app_bundle_structure.c
     tests/test_pkg_builder.c
     tests/test_install_docs.c
+    tests/test_sign_and_notarize.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
