@@ -30,6 +30,7 @@
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
 #endif
+#include "human/agent/action_directives.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/training_runner_shared.h"
 #include "human/agent/verifier_metrics.h"
@@ -181,6 +182,7 @@ static bool g_identity_graph_loaded = false;
  * first-run default (info-level log per silent-config-gated-subsystems
  * rule). */
 #include "human/autoresponder.h"
+#include "human/ml/lora_nightly.h" /* N2: nightly LoRA export→train→swap tick */
 static hu_autoresponder_config_t g_autoresponder_cfg;
 static bool g_autoresponder_loaded = false;
 
@@ -3941,6 +3943,71 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+
+                /* Sprint B N2 — LoRA nightly tick.
+                 *
+                 * Fires at 04:00 local time once per day, AFTER the 03:00
+                 * autodream + 03:05 persona evolver have finished their
+                 * SQLite work. Calls hu_lora_nightly_run, which:
+                 *   1. checks should_run (≥24h since last run + ≥20 new pairs)
+                 *   2. exports dpo_pairs → JSONL
+                 *   3. (when enabled) invokes mlx_lm.lora via subprocess
+                 *      with a 30-min hard timeout
+                 *   4. atomically rotates ~/.human/adapter-current
+                 *   5. POSTs /v1/adapters/swap to the live MLX server
+                 *
+                 * BLOCKING CAVEAT: subprocess training holds this loop
+                 * for up to 30 min. The 4 AM slot is chosen to minimize
+                 * user impact. Opt-in via env var HU_NIGHTLY_LORA_ENABLED=1
+                 * until the daemon-config plumbing lands as a follow-up.
+                 *
+                 * Last-run tracking is in-memory only for this slice —
+                 * after a daemon restart we'll re-run the next 4 AM
+                 * regardless of when the previous run was. Persisting to
+                 * ~/.human/lora-nightly.state is a clean follow-up. */
+                {
+                    static bool lora_nightly_done_today = false;
+                    static int64_t lora_last_run_unix = 0;
+                    struct tm tm_nightly;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_nightly =
+                        (localtime_s(&tm_nightly, &t) == 0) ? &tm_nightly : NULL;
+#else
+                    struct tm *lt_nightly = localtime_r(&t, &tm_nightly);
+#endif
+                    const char *nightly_enabled = getenv("HU_NIGHTLY_LORA_ENABLED");
+                    bool gate_on = nightly_enabled && nightly_enabled[0] == '1';
+                    if (lt_nightly && gate_on) {
+                        if (lt_nightly->tm_hour == 4 && lt_nightly->tm_min == 0 &&
+                            !lora_nightly_done_today) {
+                            hu_lora_nightly_config_t lcfg;
+                            if (hu_lora_nightly_config_init_defaults(&lcfg)) {
+                                size_t pair_count = 0;
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "lora-nightly: starting at 04:00 (may block up to "
+                                            "30m)");
+                                hu_error_t lr =
+                                    hu_lora_nightly_run(alloc, &lcfg, (int64_t)t, &pair_count);
+                                if (lr == HU_OK) {
+                                    lora_last_run_unix = (int64_t)t;
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: ok (%zu pairs exported)",
+                                                pair_count);
+                                } else if (lr == HU_ERR_NOT_FOUND) {
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: skipped (no new pairs)");
+                                } else {
+                                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: failed (err=%d)", (int)lr);
+                                }
+                            }
+                            lora_nightly_done_today = true;
+                            (void)lora_last_run_unix; /* reserved for next-tier persistence */
+                        }
+                        if (lt_nightly->tm_hour == 6)
+                            lora_nightly_done_today = false;
+                    }
+                }
                 /* P7: Feed processor poll — every 5 minutes (per-type intervals apply) */
                 {
                     static uint64_t last_feed_poll_types[HU_FEED_COUNT] = {0};
@@ -4760,6 +4827,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
                     const char *content_to_add = msgs[m].content;
                     size_t mlen = strlen(content_to_add);
+                    /* 2026-05-24 ASan fix: hoist the attachment-augmentation
+                     * buffer to the same scope as content_to_add. Previously
+                     * each augmentation branch (has_audio/has_video via
+                     * vision, has_image via vision, has_video fallback)
+                     * declared its own char[4096] INSIDE the nested if-block;
+                     * those buffers went out of scope before the memcpy at
+                     * line ~4965 read from content_to_add, causing
+                     * stack-use-after-scope (the ASan abort that took down
+                     * service-loop PID 59064 on 2026-05-24). Hoisting to one
+                     * buffer at this scope matches content_to_add's
+                     * lifetime exactly. */
+                    char augmented[4096];
 #ifndef HU_IS_TEST
                     /* Per-message attachment: images via vision; local audio/video via multimodal
                      * route. Injects description or transcription into batch text. */
@@ -4794,38 +4873,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         alloc, path, plen, &agent->provider, model, model_len,
                                         &media_desc, &media_desc_len) == HU_OK &&
                                     media_desc && media_desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use the outer-scope `augmented`
+                                     * buffer (declared at the content_to_add scope) instead of
+                                     * a nested char[4096]. Nested declaration went out of scope
+                                     * before the memcpy at line ~4965 read content_to_add. */
                                     size_t desc_copy =
                                         media_desc_len > 3800 ? 3800 : media_desc_len;
                                     int n;
                                     if (is_audio) {
                                         if (mlen > 0 && strcmp(content_to_add, "[Audio]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Audio transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Audio transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Audio transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     } else {
                                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Video transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Video transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Video transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     }
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                     }
                                 } else if (media_desc) {
@@ -4845,22 +4925,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             "vision: result=%s desc_len=%zu", hu_error_string(verr),
                                             desc_len);
                                 if (verr == HU_OK && desc && desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use outer-scope `augmented`. */
                                     size_t desc_copy = desc_len > 3800 ? 3800 : desc_len;
                                     int n;
                                     if (mlen > 0 && strcmp(content_to_add, "[Photo]") != 0) {
-                                        n = snprintf(attachment_augmented,
-                                                     sizeof(attachment_augmented),
+                                        n = snprintf(augmented, sizeof(augmented),
                                                      "%.*s\n[They sent a photo: %.*s]", (int)mlen,
                                                      content_to_add, (int)desc_copy, desc);
                                     } else {
-                                        n = snprintf(
-                                            attachment_augmented, sizeof(attachment_augmented),
-                                            "[They sent a photo: %.*s]", (int)desc_copy, desc);
+                                        n = snprintf(augmented, sizeof(augmented),
+                                                     "[They sent a photo: %.*s]", (int)desc_copy,
+                                                     desc);
                                     }
                                     alloc->free(alloc->ctx, desc, desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                         if (agent->bth_metrics)
                                             agent->bth_metrics->vision_descriptions++;
@@ -4872,18 +4951,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, path, plen + 1);
                         }
                     } else if (msgs[m].has_video) {
-                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]" */
-                        char video_augmented[4096];
+                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]".
+                         * ASan fix 2026-05-24: use outer-scope `augmented`. */
                         int n;
                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "%.*s\n[They sent a video]", (int)mlen, content_to_add);
+                            n = snprintf(augmented, sizeof(augmented), "%.*s\n[They sent a video]",
+                                         (int)mlen, content_to_add);
                         } else {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "[They sent a video]");
+                            n = snprintf(augmented, sizeof(augmented), "[They sent a video]");
                         }
-                        if (n > 0 && (size_t)n < sizeof(video_augmented)) {
-                            content_to_add = video_augmented;
+                        if (n > 0 && (size_t)n < sizeof(augmented)) {
+                            content_to_add = augmented;
                             mlen = (size_t)n;
                         }
                     }
@@ -9196,6 +9274,54 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
                         }
                     }
+#ifdef HU_ENABLE_ACTION_LAYERS
+                    /* Spec 2026-05-24-action-layers: append drift + clarify
+                     * directives to convo_ctx when their conditions are met.
+                     * Both functions are no-ops when their source tables are
+                     * empty or thresholds unmet — costs ~2 SQLite SELECTs
+                     * per turn at the worst. */
+                    {
+                        struct sqlite3 *al_db = hu_sqlite_memory_get_db(agent->memory);
+                        char al_drift[HU_ACTION_DIRECTIVE_MAX_LEN];
+                        char al_clarify[HU_ACTION_DIRECTIVE_MAX_LEN];
+                        size_t al_drift_n =
+                            hu_action_directive_drift(al_db, al_drift, sizeof(al_drift));
+                        struct timespec al_ts;
+                        clock_gettime(CLOCK_REALTIME, &al_ts);
+                        int64_t al_now_ms =
+                            (int64_t)al_ts.tv_sec * 1000 + (int64_t)al_ts.tv_nsec / 1000000;
+                        size_t al_clarify_n = hu_action_directive_clarify(
+                            al_db, batch_key, key_len, batch_key, key_len, al_now_ms, al_clarify,
+                            sizeof(al_clarify));
+                        size_t al_total = al_drift_n + al_clarify_n;
+                        if (al_total > 0) {
+                            size_t new_total = convo_ctx_len + al_total + 4;
+                            char *new_buf = (char *)alloc->alloc(alloc->ctx, new_total);
+                            if (new_buf) {
+                                size_t off = 0;
+                                if (convo_ctx) {
+                                    memcpy(new_buf, convo_ctx, convo_ctx_len);
+                                    off = convo_ctx_len;
+                                    new_buf[off++] = '\n';
+                                }
+                                if (al_drift_n > 0) {
+                                    memcpy(new_buf + off, al_drift, al_drift_n);
+                                    off += al_drift_n;
+                                    new_buf[off++] = '\n';
+                                }
+                                if (al_clarify_n > 0) {
+                                    memcpy(new_buf + off, al_clarify, al_clarify_n);
+                                    off += al_clarify_n;
+                                }
+                                new_buf[off] = '\0';
+                                if (convo_ctx)
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = new_buf;
+                                convo_ctx_len = off;
+                            }
+                        }
+                    }
+#endif
 #ifdef HU_ENABLE_SQLITE
                     if (unmet_exps)
                         hu_tom_persisted_expectations_free(alloc, unmet_exps, unmet_count);
@@ -11067,7 +11193,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 (void)hu_tom_persist_belief(
                                     belief_db, batch_key, fc_tom.primary_topic,
                                     strlen(fc_tom.primary_topic), HU_BELIEF_KNOWS, 0.8f, batch_key,
-                                    key_len, /* turn_number */ 0, belief_now_ms);
+                                    key_len,
+                                    /* turn_number */ 0, belief_now_ms);
                             }
 #endif
                         }
@@ -13475,6 +13602,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                    &observer_watermark);
         }
 
+        /* Spec 2026-05-19 — TOM expectation GC tick. Periodically deletes
+         * resolved expectations older than 30d (default) so the table
+         * doesn't grow unbounded. Interval-gated internally; safe to call
+         * every loop iteration. Gated on SQLite (no-op without it). */
+#ifdef HU_ENABLE_SQLITE
+        if (agent && agent->memory) {
+            static int64_t tom_gc_last_run_ms = 0;
+            struct timespec gc_ts;
+            clock_gettime(CLOCK_REALTIME, &gc_ts);
+            int64_t gc_now_ms = (int64_t)gc_ts.tv_sec * 1000 + (int64_t)gc_ts.tv_nsec / 1000000;
+            struct sqlite3 *gc_db = hu_sqlite_memory_get_db(agent->memory);
+            (void)hu_daemon_tick_tom_expectation_gc(gc_db, gc_now_ms, &tom_gc_last_run_ms,
+                                                    /*interval_seconds=*/86400,
+                                                    /*ttl_ms=*/(int64_t)30 * 86400 * 1000);
+        }
+#endif
+
+        /* Spec 2026-05-19 self-model-scaffold — periodic aggregation tick.
+         * Computes self-observations from the recent behavior log every
+         * 100 turns OR 60 min, then writes drift signals into
+         * agent_self_concerns. Interval-gated internally. Gated on the
+         * SELF_MODEL flag so it's a true no-op when the subsystem is off. */
+#if defined(HU_ENABLE_SELF_MODEL) && defined(HU_ENABLE_SQLITE)
+        if (agent && agent->memory) {
+            static int64_t sm_last_run_ms = 0;
+            static size_t sm_last_total_records = 0;
+            struct timespec sm_ts;
+            clock_gettime(CLOCK_REALTIME, &sm_ts);
+            int64_t sm_now_ms = (int64_t)sm_ts.tv_sec * 1000 + (int64_t)sm_ts.tv_nsec / 1000000;
+            struct sqlite3 *sm_db = hu_sqlite_memory_get_db(agent->memory);
+            /* Baseline values from spec defaults — calibration integration
+             * is a separate follow-up. Reasonable defaults for early
+             * deployment; drift signal only fires past min_baseline_n. */
+            (void)hu_daemon_tick_self_observation_aggregate(
+                sm_db, &agent->behavior_log, sm_now_ms, &sm_last_run_ms, &sm_last_total_records,
+                /*every_n_turns=*/100, /*every_sec=*/3600,
+                /*baseline_mean=*/80.0, /*baseline_stddev=*/40.0, /*baseline_n=*/50,
+                /*drift_threshold_sigma=*/2.0, /*min_baseline_n=*/50);
+        }
+#endif
+
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and
          * snapshots their output to ~/.human/social_state.json. Default
@@ -13507,9 +13675,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_channel_monitor_destroy(chan_monitor);
     if (agent)
         agent->bth_metrics = NULL;
-    /* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
-     * the facade's hu_memory_t handle for its SQLite job queue, so the
-     * facade must outlive every tick the scheduler will ever run. */
+/* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
+ * the facade's hu_memory_t handle for its SQLite job queue, so the
+ * facade must outlive every tick the scheduler will ever run. */
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif

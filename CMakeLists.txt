@@ -124,6 +124,7 @@ endif()
 # latency) into a ring buffer for later aggregation. Defaults OFF so it ships
 # behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
 option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
+option(HU_ENABLE_ACTION_LAYERS "Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -923,6 +924,7 @@ set(HU_CORE_SOURCES
     # so the public symbols resolve at link time in both build variants.
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
+    src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1230,7 +1232,13 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/lora_export.c
-    src/ml/lora_nightly.c
+    src/ml/lora_subprocess.c
+    # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
+    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
+    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
+    # minimal-build, design-tokens, completions, docs, static-analysis and
+    # ~30 other CI jobs across every open PR with an undefined-reference
+    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1515,6 +1523,7 @@ if(HU_ENABLE_ML)
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c
+        src/ml/lora_nightly.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
@@ -1865,6 +1874,9 @@ if(HU_ENABLE_IMESSAGE)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -2469,6 +2481,9 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human PRIVATE HU_ENABLE_ACTION_LAYERS=1)
+endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -2793,6 +2808,9 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ACTION_LAYERS=1)
+endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -2988,6 +3006,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3237,6 +3256,7 @@ set(HU_TEST_SOURCES
     # so it links cleanly in both build variants per
     # `.claude/rules/test-source-gate-symmetry.md`.
     tests/test_self_model_behavior_log.c
+    tests/test_action_directives.c
     # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
     # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
     tests/test_self_model_phase_bcde.c
@@ -3260,6 +3280,7 @@ set(HU_TEST_SOURCES
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
+    tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
@@ -3901,6 +3922,9 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).

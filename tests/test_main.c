@@ -339,6 +339,7 @@ void run_response_guard_retry_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
+void run_agent_turn_state_tests(void);     /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void); /* M4 follow-up: transport-error fast-fail */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
@@ -364,6 +365,7 @@ void run_training_runner_shared_entry_tests(void);
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
 void run_self_model_behavior_log_tests(void);
+void run_action_directives_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
  * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
 void run_self_model_phase_bcde_tests(void);
@@ -729,6 +731,7 @@ void run_audio_emotion_tests(void);
 void run_style_adapter_tests(void);
 void run_lora_export_tests(void);
 void run_lora_nightly_tests(void);
+void run_lora_subprocess_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
@@ -1145,6 +1148,8 @@ int main(int argc, char **argv) {
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
     run_agent_tests();
+    /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
+    run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
     run_w6_e2e_adversarial_tests();
@@ -1169,6 +1174,7 @@ int main(int argc, char **argv) {
     run_training_runner_shared_entry_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
+    run_action_directives_tests();
     run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
@@ -1518,6 +1524,7 @@ int main(int argc, char **argv) {
     run_style_adapter_tests();
     run_lora_export_tests();
     run_lora_nightly_tests();
+    run_lora_subprocess_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();
     run_personal_model_simulation_tests();

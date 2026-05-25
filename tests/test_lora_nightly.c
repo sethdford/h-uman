@@ -17,8 +17,11 @@
  *  10. orchestrator end-to-end returns NOT_SUPPORTED in test build
  */
 
-#include "human/ml/lora_nightly.h"
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_ML
+
+#include "human/ml/lora_nightly.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +69,11 @@ static void test_config_defaults_fills_paths_from_home(void) {
     HU_ASSERT_TRUE(strstr(cfg.adapters_dir, "/.human/adapters") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.current_symlink, "/.human/adapter-current") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.mlx_base_url, "127.0.0.1:8741") != NULL);
+    /* N1: defaults now include a base_model. Verify it's a non-empty,
+     * mlx-community-shaped identifier (just sanity — exact id may
+     * change as the runbook recommends different starting models). */
+    HU_ASSERT_TRUE(cfg.base_model[0] != '\0');
+    HU_ASSERT_TRUE(strstr(cfg.base_model, "/") != NULL); /* org/model shape */
     HU_ASSERT_TRUE(!cfg.dry_run);
     if (orig_home) {
         setenv("HOME", orig_home, 1);
@@ -161,3 +169,9 @@ void run_lora_nightly_tests(void) {
     HU_RUN_TEST(test_rotate_symlink_null_or_empty_args);
     HU_RUN_TEST(test_orchestrator_returns_not_supported_in_test_build);
 }
+
+#else /* !HU_ENABLE_ML — stub runner so the symbol always resolves */
+
+void run_lora_nightly_tests(void) { /* no-op when ML is disabled */ }
+
+#endif /* HU_ENABLE_ML */

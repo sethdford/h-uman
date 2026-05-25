@@ -42,9 +42,9 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
                                                       strlen(plan->steps[i].tool_name));
         if (!tool) {
             hu_planner_mark_step(plan, i, HU_PLAN_STEP_FAILED);
-            result_off = hu_buf_appendf(result_buf, sizeof(result_buf), result_off,
-                                        "  [%zu] %s: tool not found\n", i + 1,
-                                        plan->steps[i].tool_name);
+            result_off =
+                hu_buf_appendf(result_buf, sizeof(result_buf), result_off,
+                               "  [%zu] %s: tool not found\n", i + 1, plan->steps[i].tool_name);
             {
                 hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TOOL_CALL, .data = {{0}}};
                 ev.data.tool_call.tool = plan->steps[i].tool_name;
@@ -66,6 +66,8 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
         hu_tool_result_t result = hu_tool_result_fail("invalid arguments", 16);
         clock_t tool_start = clock();
         if (args) {
+            hu_agent_turn_state_track_tool(agent, plan->steps[i].tool_name,
+                                           strlen(plan->steps[i].tool_name));
             tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
             hu_json_free(agent->alloc, args);
         }
@@ -86,8 +88,8 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
         const char *desc =
             plan->steps[i].description ? plan->steps[i].description : plan->steps[i].tool_name;
         result_off = hu_buf_appendf(result_buf, sizeof(result_buf), result_off,
-                                    "  [%zu] %s: %s (%llums)\n", i + 1, desc, ok ? "done" : "FAILED",
-                                    (unsigned long long)tool_duration_ms);
+                                    "  [%zu] %s: %s (%llums)\n", i + 1, desc,
+                                    ok ? "done" : "FAILED", (unsigned long long)tool_duration_ms);
 
         /* Replan on failure: one attempt, only when original goal is available */
         if (!ok && original_goal && original_goal_len > 0 && !replanned && agent->provider.vtable &&
@@ -96,17 +98,18 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
             size_t prog_off = 0;
             for (size_t j = 0; j < i; j++) {
                 if (plan->steps[j].status == HU_PLAN_STEP_DONE && plan->steps[j].description) {
-                    prog_off = hu_buf_appendf(progress_buf, sizeof(progress_buf), prog_off,
-                                              "  [%zu] %s: done\n", j + 1, plan->steps[j].description);
+                    prog_off =
+                        hu_buf_appendf(progress_buf, sizeof(progress_buf), prog_off,
+                                       "  [%zu] %s: done\n", j + 1, plan->steps[j].description);
                 }
             }
             if (prog_off == 0)
                 prog_off = hu_buf_appendf(progress_buf, sizeof(progress_buf), 0, "(none)");
 
             char fail_buf[512];
-            size_t fail_off = hu_buf_appendf(fail_buf, sizeof(fail_buf), 0, "%s: %s",
-                                             plan->steps[i].tool_name,
-                                             result.error_msg ? result.error_msg : "failed");
+            size_t fail_off =
+                hu_buf_appendf(fail_buf, sizeof(fail_buf), 0, "%s: %s", plan->steps[i].tool_name,
+                               result.error_msg ? result.error_msg : "failed");
 
             const char **tool_names = NULL;
             size_t tn_count = 0;
@@ -177,8 +180,9 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
                     }
                     plan->steps_count = i + 1 + new_plan->steps_count;
                     replanned = true;
-                    result_off = hu_buf_appendf(result_buf, sizeof(result_buf), result_off,
-                                                "  [replan] %zu new steps\n", new_plan->steps_count);
+                    result_off =
+                        hu_buf_appendf(result_buf, sizeof(result_buf), result_off,
+                                       "  [replan] %zu new steps\n", new_plan->steps_count);
                 }
 
                 hu_plan_free(agent->alloc, new_plan);

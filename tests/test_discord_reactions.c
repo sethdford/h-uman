@@ -14,9 +14,12 @@
  * The inline gateway branch in discord.c silently absorbs filter
  * rejections; the test helper has the stricter return contract so
  * tests can pin the filter behavior. Both contracts are intentional. */
+#include "test_framework.h"
+
+#ifdef HU_ENABLE_DISCORD
+
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
-#include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -210,3 +213,11 @@ void run_discord_reactions_tests(void) {
     HU_RUN_TEST(test_discord_question_mark_emits_question);
     HU_RUN_TEST(test_discord_emphasize_emits_emphasize);
 }
+
+#else /* !HU_ENABLE_DISCORD — stub runner so the symbol resolves */
+
+void run_discord_reactions_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_DISCORD */

@@ -5,8 +5,11 @@
  * scanner returns HU_ERR_NOT_SUPPORTED under HU_IS_TEST so we test the
  * stub contract instead. */
 
-#include "human/channels/imessage_gaps.h"
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_IMESSAGE
+
+#include "human/channels/imessage_gaps.h"
 
 #include <stdint.h>
 
@@ -107,3 +110,11 @@ void run_imessage_gaps_tests(void) {
     HU_RUN_TEST(test_gap_classify_boundary_max_gap);
     HU_RUN_TEST(test_scan_returns_not_supported_in_test_mode);
 }
+
+#else /* !HU_ENABLE_IMESSAGE — stub runner so the symbol resolves */
+
+void run_imessage_gaps_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_IMESSAGE */
