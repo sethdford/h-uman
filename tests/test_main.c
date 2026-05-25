@@ -215,6 +215,7 @@ void run_identity_tests(void);
 void run_channel_manager_tests(void);
 void run_new_modules_tests(void);
 void run_provider_all_tests(void);
+void run_chat_response_diag_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
 void run_idempotency_hula_integration_tests(void);
@@ -1032,6 +1033,7 @@ int main(int argc, char **argv) {
     run_channel_manager_tests();
     run_new_modules_tests();
     run_provider_all_tests();
+    run_chat_response_diag_tests();
     run_channel_all_tests();
     run_meta_common_tests();
     run_channel_integration_tests();

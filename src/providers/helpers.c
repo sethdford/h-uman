@@ -45,6 +45,9 @@ void hu_chat_response_free(hu_allocator_t *alloc, hu_chat_response_t *resp) {
     if (resp->reasoning_content) {
         alloc->free(alloc->ctx, (void *)resp->reasoning_content, resp->reasoning_content_len + 1);
     }
+    if (resp->finish_reason) {
+        alloc->free(alloc->ctx, (void *)resp->finish_reason, resp->finish_reason_len + 1);
+    }
     if (resp->tool_calls && resp->tool_calls_count > 0) {
         for (size_t i = 0; i < resp->tool_calls_count; i++) {
             const hu_tool_call_t *tc = &resp->tool_calls[i];
@@ -67,7 +70,8 @@ void hu_stream_chat_result_free(hu_allocator_t *alloc, hu_stream_chat_result_t *
     if (result->content)
         alloc->free(alloc->ctx, (void *)result->content, result->content_len + 1);
     if (result->reasoning_content)
-        alloc->free(alloc->ctx, (void *)result->reasoning_content, result->reasoning_content_len + 1);
+        alloc->free(alloc->ctx, (void *)result->reasoning_content,
+                    result->reasoning_content_len + 1);
     if (result->model)
         alloc->free(alloc->ctx, (void *)result->model, result->model_len + 1);
     if (result->tool_calls && result->tool_calls_count > 0) {

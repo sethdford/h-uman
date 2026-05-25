@@ -3160,6 +3160,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_manager.c
     tests/test_new_modules.c
     tests/test_provider_all.c
+    tests/test_chat_response_diag.c
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c

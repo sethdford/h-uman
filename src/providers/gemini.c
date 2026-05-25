@@ -944,7 +944,22 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         out->usage.prompt_tokens = (uint32_t)hu_json_get_number(usage, "promptTokenCount", 0);
         out->usage.completion_tokens =
             (uint32_t)hu_json_get_number(usage, "candidatesTokenCount", 0);
+        out->usage.thoughts_tokens = (uint32_t)hu_json_get_number(usage, "thoughtsTokenCount", 0);
         out->usage.total_tokens = out->usage.prompt_tokens + out->usage.completion_tokens;
+    }
+    /* T1b — surface finishReason for the empty-response diagnostic. The
+     * 2026-05-24 reactive-iMessage regression was a Gemini 3.x thinking-
+     * budget starvation: finishReason="MAX_TOKENS", thoughtsTokenCount=72,
+     * candidatesTokenCount=0. Without surfacing finishReason, the daemon
+     * logged "empty assistant response" with no actionable context. */
+    if (candidates && candidates->type == HU_JSON_ARRAY && candidates->data.array.len > 0) {
+        hu_json_value_t *first = candidates->data.array.items[0];
+        const char *fr = hu_json_get_string(first, "finishReason");
+        if (fr) {
+            size_t fr_len = strlen(fr);
+            out->finish_reason = hu_strndup(alloc, fr, fr_len);
+            out->finish_reason_len = out->finish_reason ? fr_len : 0;
+        }
     }
     hu_json_free(alloc, parsed);
     return HU_OK;
