@@ -1092,6 +1092,7 @@ set(HU_CORE_SOURCES
     src/context/context_engine_rag.c
     src/mcp_registry.c
     src/onboard.c
+    src/onboard/state.c
     src/interactions/choices.c
     src/daemon.c
     src/daemon_lifecycle.c
@@ -3099,6 +3100,7 @@ set(HU_TEST_SOURCES
     tests/test_e2e_conversation.c
     tests/test_e2e_agent_loop.c
     tests/test_subsystems.c
+    tests/test_onboard_state.c
     tests/test_onboard_nextstep.c
     tests/test_daemon_cron.c
     tests/test_daemon_lifecycle.c

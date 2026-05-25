@@ -133,6 +133,7 @@ void run_e2e_tests(void);
 void run_e2e_conversation_tests(void);
 void run_e2e_agent_loop_tests(void);
 void run_subsystems_tests(void);
+void run_onboard_state_tests(void);
 void run_onboard_nextstep_tests(void);
 void run_config_parse_tests(void);
 void run_config_migrate_tests(void);
@@ -946,6 +947,7 @@ int main(int argc, char **argv) {
     run_e2e_conversation_tests();
     run_e2e_agent_loop_tests();
     run_subsystems_tests();
+    run_onboard_state_tests();
     run_onboard_nextstep_tests();
     run_config_parse_tests();
     run_config_migrate_tests();
