@@ -1000,17 +1000,19 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
     hu_doctor_registry_register_defaults(reg);
 
     /* The registry's legacy check wrappers (install, config_semantics,
-     * etc.) cast ctx to a struct {alloc, items, count, cap} —
+     * etc.) cast ctx to a struct {alloc, items, count, cap, cfg} —
      * src/doctor/registry.c::hu_doctor_adapter_ctx_t. Newer checks
-     * (chatdb, check_provider) ignore ctx. Layout must match the
-     * private adapter struct exactly; field order checked manually
-     * since the type isn't exported. */
+     * (chatdb) ignore ctx; provider_smoke (US-C3.3 Phase 2) reads
+     * `cfg` so it can call hu_provider_create_from_config. Layout
+     * must match the private adapter struct exactly; field order
+     * checked manually since the type isn't exported. */
     struct doctor_adapter_ctx {
         hu_allocator_t *alloc;
         void *items; /* hu_diag_item_t * — checks allocate their own */
         size_t count;
         size_t cap;
-    } adapter_ctx = {alloc, NULL, 0, 0};
+        const void *cfg; /* Sprint 55 Phase 2 — `const hu_config *` for provider_smoke */
+    } adapter_ctx = {alloc, NULL, 0, 0, cfg_ptr};
 
     size_t reg_count = hu_doctor_registry_count(reg);
     if (reg_count == 0) {

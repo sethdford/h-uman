@@ -17,24 +17,11 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/doctor/check.h"
+#include "human/providers/factory.h" /* pulls in hu_provider_t */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Forward-declare hu_config to avoid pulling the entire config header
- * into a check that only needs the pointer type. */
-struct hu_config;
-
-/* Forward-declare hu_provider_t + factory entry point. We use
- * hu_provider_create_from_config because it resolves the configured
- * provider name + credentials in one call. */
-struct hu_provider;
-typedef struct hu_provider hu_provider_t;
-extern hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const struct hu_config *cfg,
-                                                 const char *name, size_t name_len,
-                                                 hu_provider_t *out);
-extern void hu_provider_destroy(hu_provider_t *provider, hu_allocator_t *alloc);
 
 /* Static reason buffers — borrowed pointers per the check.h contract. */
 static char s_reason_buf[256];
@@ -125,33 +112,49 @@ const char *hu_doctor_check_provider_reason_message(hu_doctor_provider_reason_t 
 static hu_doctor_check_result_t check_provider_run(hu_doctor_check_t *self, void *ctx) {
     (void)self;
 
-    /* Ctx is `const hu_config *`. NULL means doctor wasn't given a
-     * config — return NA (counts as PASS in aggregate per check.h
-     * comment). This is the "doctor invoked without config" path,
-     * which is structurally fine. */
-    const struct hu_config *cfg = (const struct hu_config *)ctx;
-    if (!cfg) {
+    /* Sprint 55 Phase 2 — ctx is hu_doctor_check_provider_ctx_t *
+     * (allocator + cfg). NULL ctx OR NULL cfg means doctor wasn't
+     * given a config — return NA. */
+    const hu_doctor_check_provider_ctx_t *pctx = (const hu_doctor_check_provider_ctx_t *)ctx;
+    if (!pctx || !pctx->cfg) {
         return (hu_doctor_check_result_t){
             HU_DOCTOR_NA, "no config provided to doctor — provider check skipped", NULL};
     }
+    if (!pctx->alloc) {
+        /* Structural bug — registry must always pass an allocator. */
+        return (hu_doctor_check_result_t){HU_DOCTOR_FAIL,
+                                          "provider check invoked without allocator (bug)", NULL};
+    }
 
-    /* Phase 1 (this slice): structural check only. The classifier
-     * is fully implemented and unit-tested via the public
-     * hu_doctor_check_provider_classify() function. The full
-     * factory-call path (hu_provider_create_from_config + 1-token
-     * smoke) lands in Phase 2 when:
-     *   (a) doctor.c::main() switches from old dispatch to the
-     *       registry (separate sprint story), AND
-     *   (b) the registry passes a (config, allocator) pair via
-     *       ctx — currently ctx is just `const hu_config *`.
-     *
-     * Until then, this check returns PASS on a non-NULL config to
-     * exercise the vtable wire-up; the real verdict comes from the
-     * classifier when the factory call is wired.
-     *
-     * Tracking: sprints/sprint-54/designs/US-C3.3.md "Deferred (Phase 2)". */
-    (void)cfg;
-    return (hu_doctor_check_result_t){HU_DOCTOR_PASS, "", NULL};
+#if HU_IS_TEST
+    /* Tests don't exercise real provider creation. The classifier and
+     * reason-message paths are covered by their own pure-function
+     * tests (test_doctor_check_provider.c). Return NA so the doctor
+     * run-all flow can be exercised end-to-end without spinning up
+     * provider state. */
+    return (hu_doctor_check_result_t){HU_DOCTOR_NA, "smoke check skipped under HU_IS_TEST", NULL};
+#else
+    /* Production path — call the configured provider's factory. We
+     * pass name=NULL/0 so hu_provider_create_from_config uses
+     * cfg->default_provider. The factory does NOT make a network
+     * round-trip; it constructs the in-process vtable instance.
+     * That's deliberately scoped: AC-1.2 of US-C3.3 asked only for
+     * "can be instantiated", and going further (1-token API call)
+     * requires a mock-provider fault-injection pattern we don't
+     * have yet. The classifier is still the right shape for that
+     * future extension. */
+    hu_provider_t prov = (hu_provider_t){0};
+    hu_error_t err = hu_provider_create_from_config(pctx->alloc, pctx->cfg, NULL, 0, &prov);
+    hu_doctor_provider_reason_t reason = hu_doctor_check_provider_classify(err);
+
+    if (err == HU_OK) {
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, pctx->alloc);
+        return (hu_doctor_check_result_t){HU_DOCTOR_PASS, "", NULL};
+    }
+    const char *msg = hu_doctor_check_provider_reason_message(reason);
+    return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, msg, NULL};
+#endif
 }
 
 /* ── Vtable entry ─────────────────────────────────────────────────── */

@@ -32,6 +32,20 @@
 #include "human/core/error.h"
 #include "human/doctor/check.h"
 
+struct hu_config;
+
+/* Sprint 55 Phase 2 — ctx contract for the provider_smoke check.
+ *
+ * The registry constructs this from its internal adapter and passes
+ * the address as the ctx argument to hu_doctor_check_provider.run().
+ * Both fields may be NULL; the check returns NA in that case rather
+ * than FAIL (a doctor invocation without a config is structurally
+ * fine — the operator is checking the binary, not their setup). */
+typedef struct hu_doctor_check_provider_ctx {
+    hu_allocator_t *alloc;
+    const struct hu_config *cfg;
+} hu_doctor_check_provider_ctx_t;
+
 /* Public vtable entry — registered by registry.c::register_defaults */
 extern hu_doctor_check_t hu_doctor_check_provider;
 

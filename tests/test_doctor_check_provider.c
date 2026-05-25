@@ -159,16 +159,32 @@ static void test_run_with_null_ctx_returns_na(void) {
     HU_ASSERT_NOT_NULL(result.reason);
 }
 
-static void test_run_with_non_null_ctx_returns_pass_phase_1(void) {
-    /* Phase 1 contract: any non-NULL ctx → PASS. Phase 2 will exercise
-     * the actual factory call + smoke. The test is here so Phase 2's
-     * regression is caught: when run() starts returning non-PASS for
-     * a structurally-valid ctx, this test will fail and force the
-     * Phase-2 author to update the contract intentionally. */
-    int dummy_ctx_marker = 1; /* not a real hu_config; Phase 1 doesn't deref it */
+static void test_run_with_ctx_but_null_cfg_returns_na(void) {
+    /* Sprint 55 Phase 2: ctx is hu_doctor_check_provider_ctx_t.
+     * NULL cfg inside the ctx → NA (operator didn't supply config). */
+    hu_doctor_check_provider_ctx_t pctx = {.alloc = NULL, .cfg = NULL};
     hu_doctor_check_result_t result =
-        hu_doctor_check_provider.run(&hu_doctor_check_provider, &dummy_ctx_marker);
-    HU_ASSERT_EQ((int)result.verdict, (int)HU_DOCTOR_PASS);
+        hu_doctor_check_provider.run(&hu_doctor_check_provider, &pctx);
+    HU_ASSERT_EQ((int)result.verdict, (int)HU_DOCTOR_NA);
+    HU_ASSERT_NOT_NULL(result.reason);
+}
+
+static void test_run_with_cfg_under_test_mode_returns_na(void) {
+    /* Phase 2: when cfg is non-NULL, the check would normally call
+     * the provider factory. Under HU_IS_TEST (always defined for
+     * this binary) the smoke is skipped and the check returns NA
+     * with an explanatory reason. This pins the gate so a future
+     * change that accidentally drops the HU_IS_TEST guard will
+     * fail this test instead of silently making network calls in
+     * the test suite. */
+    int dummy_cfg_marker = 1; /* placeholder — HU_IS_TEST short-circuits before deref */
+    hu_doctor_check_provider_ctx_t pctx = {.alloc = (hu_allocator_t *)&dummy_cfg_marker,
+                                           .cfg = (const struct hu_config *)&dummy_cfg_marker};
+    hu_doctor_check_result_t result =
+        hu_doctor_check_provider.run(&hu_doctor_check_provider, &pctx);
+    HU_ASSERT_EQ((int)result.verdict, (int)HU_DOCTOR_NA);
+    HU_ASSERT_NOT_NULL(result.reason);
+    HU_ASSERT_TRUE(strstr(result.reason, "HU_IS_TEST") != NULL);
 }
 
 /* ── runner ───────────────────────────────────────────────────────── */
@@ -198,5 +214,6 @@ void run_doctor_check_provider_tests(void) {
     HU_RUN_TEST(test_vtable_fix_is_null_no_autofix);
 
     HU_RUN_TEST(test_run_with_null_ctx_returns_na);
-    HU_RUN_TEST(test_run_with_non_null_ctx_returns_pass_phase_1);
+    HU_RUN_TEST(test_run_with_ctx_but_null_cfg_returns_na);
+    HU_RUN_TEST(test_run_with_cfg_under_test_mode_returns_na);
 }

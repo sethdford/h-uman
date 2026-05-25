@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
+#include "human/doctor/check_provider.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -115,11 +116,17 @@ const char *hu_doctor_registry_check_name(const hu_doctor_registry_t *r, size_t 
  * hu_error_t and appends to diag_item arrays. We adapt it to the
  * hu_doctor_check_result_t return value. */
 
+/* Sprint 55 Phase 2 extension: cfg pointer added at the END so
+ * legacy callers passing a 4-field struct still read the first 4
+ * fields correctly (cfg defaults to NULL → checks fall back to NA).
+ * New-style checks (provider_smoke) read cfg via the public ctx
+ * struct in human/doctor/check_provider.h. */
 typedef struct {
     hu_allocator_t *alloc;
     hu_diag_item_t *items;
     size_t count;
     size_t cap;
+    const void *cfg; /* Sprint 55 Phase 2 — borrowed `const hu_config *` */
 } hu_doctor_adapter_ctx_t;
 
 /* Wrapper: install check */
@@ -228,12 +235,21 @@ static hu_doctor_check_result_t run_chatdb_readable_check(hu_doctor_check_t *sel
     return hu_doctor_check_chatdb.run(self, ctx);
 }
 
-/* Wrapper: provider_smoke check (external vtable) — Sprint 54 US-C3.3 */
+/* Wrapper: provider_smoke check (external vtable) — Sprint 54 US-C3.3 /
+ *                                                    Sprint 55 Phase 2.
+ *
+ * Constructs the public ctx struct {alloc, cfg} from our private
+ * adapter struct, then delegates. The external check is allocator-
+ * and config-aware (needed for hu_provider_create_from_config).
+ *
+ * NULL cfg is handled inside the check (returns NA). */
 static hu_doctor_check_result_t run_provider_smoke_check(hu_doctor_check_t *self, void *ctx) {
-    /* Delegate to the external check vtable. ctx is `const hu_config *`
-     * per include/human/doctor/check_provider.h. NULL is handled
-     * inside the check (returns NA). */
-    return hu_doctor_check_provider.run(self, ctx);
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_provider_ctx_t pctx = {
+        .alloc = uctx ? uctx->alloc : NULL,
+        .cfg = uctx ? uctx->cfg : NULL,
+    };
+    return hu_doctor_check_provider.run(self, &pctx);
 }
 
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
