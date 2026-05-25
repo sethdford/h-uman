@@ -686,6 +686,12 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_
                 /* Leave at llama_context_default_params() — GGML_TYPE_F16. */
                 break;
             }
+            /* Phase 4 — Flash Attention on Metal. Free 15-30% TPS when
+             * the linked libllama version exposes the field (b3500+).
+             * Older builds where llama_context_params lacks flash_attn
+             * will fail to compile — that's the desired signal: bump
+             * vendored llama.cpp or build the FA support in. */
+            cp.flash_attn = config->flash_attn;
             c->ctx = llama_init_from_model(c->model, cp);
         }
     }

@@ -63,6 +63,21 @@ typedef struct hu_llamacpp_config {
      * pre-quant behavior; the operator opts in to Q8_0 / Q4_0 either
      * via config or a follow-up env-var bridge in the factory. */
     hu_kv_quant_t kv_quant;
+    /* Phase 4 (Gemma throughput program) — Flash Attention on Metal.
+     *
+     * llama.cpp's llama_context_params.flash_attn enables FA-style
+     * fused attention kernels when the backend supports them. On
+     * M-series Macs (Metal backend) this is free 15-30% TPS once
+     * libllama version supports it; on CPU-only builds it's typically
+     * a no-op or a small win.
+     *
+     * The factory defaults flash_attn=true at provider creation. Direct
+     * struct constructors (mostly tests) get the zero-init default of
+     * false and opt in explicitly. Operators disable for debugging via
+     * HU_LLAMACPP_FLASH_ATTN=off. Per practitioner signal (Philip
+     * Turner's metal-flash-attention work, llama.cpp b3500+), FA on
+     * Metal is the table-stakes default for any Mac-targeted build. */
+    bool flash_attn;
     /* Phase 3b (Gemma throughput program) — speculative decoding draft
      * model. When non-NULL, the chat path runs cross-model spec decode:
      * a small draft model (e.g. Gemma-3-270M) proposes draft_max_tokens

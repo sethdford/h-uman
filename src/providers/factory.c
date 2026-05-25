@@ -51,6 +51,28 @@ static void factory_apply_kv_quant_env(hu_llamacpp_config_t *lc) {
     lc->kv_quant = hu_kv_quant_from_string(env, NULL);
 }
 
+/* Phase 4 — Flash Attention default + opt-out.
+ *
+ * The factory defaults flash_attn=true. Operators disable for
+ * debugging with HU_LLAMACPP_FLASH_ATTN=off (or "false" / "0").
+ * Anything else (set, unset, or yes/on/1) keeps it enabled — FA is
+ * the table-stakes default for Mac-targeted builds per practitioner
+ * signal. Tests that construct hu_llamacpp_config_t directly get the
+ * zero-init default (false) and opt in explicitly if needed. */
+static void factory_apply_flash_attn_env(hu_llamacpp_config_t *lc) {
+    if (!lc)
+        return;
+    lc->flash_attn = true; /* default ON for factory-built configs */
+    const char *env = getenv("HU_LLAMACPP_FLASH_ATTN");
+    if (!env || !*env)
+        return;
+    /* Disable on the canonical "off-ish" tokens: off / 0 / false. Anything
+     * else (set, unset, yes / on / 1 / typo) keeps the default — same
+     * friendly-to-typos posture as the other env bridges in this file. */
+    if (strcmp(env, "off") == 0 || strcmp(env, "0") == 0 || strcmp(env, "false") == 0)
+        lc->flash_attn = false;
+}
+
 /* Phase 3b — env-var bridge for cross-model speculative decoding.
  *
  * Operators wire a draft model alongside the target without a rebuild
@@ -306,6 +328,7 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
         }
         factory_apply_kv_quant_env(&lc);
         factory_apply_spec_decode_env(alloc, &lc);
+        factory_apply_flash_attn_env(&lc);
         hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
         if (lc.model_path)
             alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
@@ -448,6 +471,7 @@ hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc, const hu_provide
         lc.n_gpu_layers = entry->n_gpu_layers;
         factory_apply_kv_quant_env(&lc);
         factory_apply_spec_decode_env(alloc, &lc);
+        factory_apply_flash_attn_env(&lc);
 #ifdef HU_IS_TEST
         hu_llamacpp_factory_capture_for_test(&lc);
 #endif

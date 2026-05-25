@@ -398,6 +398,110 @@ static void test_factory_draft_env_invalid_numerics_ignored(void) {
     hu_llamacpp_factory_reset_for_test();
 }
 
+/* Phase 4 — HU_LLAMACPP_FLASH_ATTN env-var. The factory defaults
+ * flash_attn=true (FA is table-stakes on Mac Metal builds). Operators
+ * disable for debugging by setting the env to "off" / "0" / "false".
+ * Anything else (including typos and "on"/"1"/"yes"/empty) keeps it
+ * enabled — same friendly-to-typos posture as the other env bridges. */
+
+static void test_factory_flash_attn_defaults_to_true(void) {
+    hu_llamacpp_factory_reset_for_test();
+    unsetenv("HU_LLAMACPP_FLASH_ATTN");
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/fa-default.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_TRUE(captured->flash_attn);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_flash_attn_env_off_disables(void) {
+    hu_llamacpp_factory_reset_for_test();
+    setenv("HU_LLAMACPP_FLASH_ATTN", "off", 1);
+
+    hu_allocator_t a = alloc();
+    hu_provider_entry_t entry = {
+        .name = (char *)"llamacpp",
+        .base_url = (char *)"/tmp/fa-off.gguf",
+    };
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+    const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+    HU_ASSERT_NOT_NULL(captured);
+    HU_ASSERT_FALSE(captured->flash_attn);
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &a);
+    unsetenv("HU_LLAMACPP_FLASH_ATTN");
+    hu_llamacpp_factory_reset_for_test();
+}
+
+static void test_factory_flash_attn_env_zero_and_false_also_disable(void) {
+    /* Pin all three off-tokens because operators conflate them
+     * across env conventions. */
+    const char *off_tokens[] = {"0", "false"};
+    for (size_t i = 0; i < sizeof(off_tokens) / sizeof(off_tokens[0]); i++) {
+        hu_llamacpp_factory_reset_for_test();
+        setenv("HU_LLAMACPP_FLASH_ATTN", off_tokens[i], 1);
+
+        hu_allocator_t a = alloc();
+        hu_provider_entry_t entry = {
+            .name = (char *)"llamacpp",
+            .base_url = (char *)"/tmp/fa-token.gguf",
+        };
+        hu_provider_t prov = {0};
+        HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+        const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+        HU_ASSERT_NOT_NULL(captured);
+        HU_ASSERT_FALSE(captured->flash_attn);
+
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, &a);
+        unsetenv("HU_LLAMACPP_FLASH_ATTN");
+        hu_llamacpp_factory_reset_for_test();
+    }
+}
+
+static void test_factory_flash_attn_env_unrecognized_keeps_default(void) {
+    /* Adversarial: typos and "on"-flavored values must not silently
+     * flip the default. The default is true; only the exact off-tokens
+     * disable. */
+    const char *keep_tokens[] = {"on", "1", "yes", "true", "ON", "typo"};
+    for (size_t i = 0; i < sizeof(keep_tokens) / sizeof(keep_tokens[0]); i++) {
+        hu_llamacpp_factory_reset_for_test();
+        setenv("HU_LLAMACPP_FLASH_ATTN", keep_tokens[i], 1);
+
+        hu_allocator_t a = alloc();
+        hu_provider_entry_t entry = {
+            .name = (char *)"llamacpp",
+            .base_url = (char *)"/tmp/fa-keep.gguf",
+        };
+        hu_provider_t prov = {0};
+        HU_ASSERT_EQ(hu_provider_create_from_entry(&a, &entry, &prov), HU_OK);
+
+        const hu_llamacpp_config_t *captured = hu_llamacpp_factory_last_config();
+        HU_ASSERT_NOT_NULL(captured);
+        HU_ASSERT_TRUE(captured->flash_attn);
+
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, &a);
+        unsetenv("HU_LLAMACPP_FLASH_ATTN");
+        hu_llamacpp_factory_reset_for_test();
+    }
+}
+
 void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_forwards_full_llamacpp_config);
     HU_RUN_TEST(test_factory_llamacpp_dotted_alias);
@@ -414,4 +518,8 @@ void run_llamacpp_factory_config_tests(void) {
     HU_RUN_TEST(test_factory_draft_min_p_env_sets_threshold);
     HU_RUN_TEST(test_factory_draft_max_tokens_env_sets_value);
     HU_RUN_TEST(test_factory_draft_env_invalid_numerics_ignored);
+    HU_RUN_TEST(test_factory_flash_attn_defaults_to_true);
+    HU_RUN_TEST(test_factory_flash_attn_env_off_disables);
+    HU_RUN_TEST(test_factory_flash_attn_env_zero_and_false_also_disable);
+    HU_RUN_TEST(test_factory_flash_attn_env_unrecognized_keeps_default);
 }
