@@ -500,6 +500,347 @@ static const char *mlx_active_adapter(void *ctx) {
     return NULL;
 }
 
+/* ── Sprint 54 US-M3-B4: streaming ────────────────────────────────────── */
+
+/* Report whether this build CAN stream from MLX. The capability depends
+ * on the same HU_MLX_SUBPROCESS_ACTIVE gate as mlx_chat — if the
+ * subprocess isn't linkable (no HU_ENABLE_MLX_PROVIDER, off-arch, or
+ * test mode), streaming is unsupported and we must say so honestly. */
+static bool mlx_supports_streaming(void *ctx) {
+    (void)ctx;
+#if HU_MLX_SUBPROCESS_ACTIVE
+    return true;
+#else
+    return false;
+#endif
+}
+
+#if HU_MLX_SUBPROCESS_ACTIVE
+/* Phase 1 streaming subprocess: fork + pipe + exec
+ * `python3 -u -m mlx_lm.generate ...` with NON-BLOCKING stdout. Reads
+ * available bytes via select() with a short timeout, accumulates them
+ * into a chunk buffer, and emits chunks via the caller's callback
+ * whenever:
+ *   (a) a whitespace byte appears (token boundary heuristic — mlx_lm's
+ *       output is word-paced), OR
+ *   (b) the buffer fills HU_MLX_STREAM_CHUNK_MAX (defensive flush).
+ *
+ * UTF-8 boundary safety: if the buffered tail ends with a partial
+ * multi-byte sequence, we hold it until the next read completes the
+ * codepoint. mlx_lm output is text, so partial-UTF-8 at chunk edges
+ * is the main correctness concern.
+ *
+ * Cancellation: if the caller's callback returns false, the loop sends
+ * SIGTERM to the child, drains stdout, and waitpid's. No zombies.
+ *
+ * Phase 1 contract: structural correctness + zombie safety + cancellation.
+ * Phase 2 contract (deferred): chunks-equal-batch determinism test
+ * requires a fixture model on disk and a stable mlx_lm.generate seed.
+ * See sprints/sprint-54/designs/US-M3-B4.md.
+ */
+#define HU_MLX_STREAM_CHUNK_MAX    1024
+#define HU_MLX_STREAM_SELECT_USEC  100000 /* 100ms poll */
+#define HU_MLX_STREAM_TIMEOUT_SECS 180
+
+/* Returns true if the byte at *p starts a UTF-8 codepoint AND the
+ * codepoint is FULLY present in the remaining `n` bytes. Used to
+ * decide whether to hold a partial multi-byte at the chunk tail. */
+static size_t mlx_utf8_codepoint_len(unsigned char first) {
+    if ((first & 0x80) == 0)
+        return 1; /* ASCII */
+    if ((first & 0xE0) == 0xC0)
+        return 2;
+    if ((first & 0xF0) == 0xE0)
+        return 3;
+    if ((first & 0xF8) == 0xF0)
+        return 4;
+    return 1; /* malformed lead — treat as 1 to avoid stalling */
+}
+
+/* Trim trailing partial UTF-8 sequence from buf[0..len]. Returns the
+ * adjusted length safe to emit; remainder stays in the caller's buffer
+ * for the next read. */
+static size_t mlx_utf8_safe_emit_len(const char *buf, size_t len) {
+    if (len == 0)
+        return 0;
+    /* Walk back at most 3 bytes looking for the start of a codepoint
+     * that isn't fully completed within `len`. */
+    size_t back = (len < 4) ? len : 4;
+    for (size_t i = 0; i < back; i++) {
+        size_t pos = len - 1 - i;
+        unsigned char b = (unsigned char)buf[pos];
+        if ((b & 0x80) == 0) {
+            /* ASCII byte — safe to emit through here */
+            return len;
+        }
+        if ((b & 0xC0) == 0xC0) {
+            /* Lead byte of a multi-byte codepoint */
+            size_t cp_len = mlx_utf8_codepoint_len(b);
+            size_t remaining = len - pos;
+            if (remaining < cp_len) {
+                /* Incomplete codepoint at tail — emit up to `pos` only */
+                return pos;
+            }
+            /* Codepoint complete; safe to emit through `len` */
+            return len;
+        }
+        /* Continuation byte — keep walking back */
+    }
+    /* Walked back the max; treat as safe (defensive — malformed input) */
+    return len;
+}
+
+/* Emit a chunk via the callback. Returns the callback's return value
+ * (true = continue, false = caller wants stop). */
+static bool mlx_emit_chunk(hu_stream_callback_t cb, void *cb_ctx, const char *delta,
+                           size_t delta_len, bool is_final) {
+    if (!cb)
+        return true;
+    hu_stream_chunk_t chunk = {0};
+    chunk.type = HU_STREAM_CONTENT;
+    chunk.delta = delta;
+    chunk.delta_len = delta_len;
+    chunk.is_final = is_final;
+    return cb(cb_ctx, &chunk);
+}
+
+/* Streaming subprocess driver. See header comment above for contract. */
+static hu_error_t mlx_run_subprocess_streaming(hu_allocator_t *alloc, const mlx_ctx_t *ctx,
+                                               const char *prompt, size_t prompt_len,
+                                               hu_stream_callback_t callback, void *callback_ctx) {
+    if (!alloc || !ctx || !prompt || prompt_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!ctx->model_path_owned || ctx->model_path_owned_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char max_tokens_buf[16];
+    int mt = (ctx->max_tokens > 0) ? ctx->max_tokens : HU_MLX_DEFAULT_MAX_TOKENS;
+    snprintf(max_tokens_buf, sizeof(max_tokens_buf), "%d", mt);
+
+    /* argv: python3 -u -m mlx_lm.generate --model X [--adapter-path Y]
+     *       --max-tokens N --prompt - */
+    char *argv[14];
+    int ai = 0;
+    argv[ai++] = (char *)"python3";
+    argv[ai++] = (char *)"-u"; /* unbuffered stdout — critical for streaming */
+    argv[ai++] = (char *)"-m";
+    argv[ai++] = (char *)"mlx_lm.generate";
+    argv[ai++] = (char *)"--model";
+    argv[ai++] = ctx->model_path_owned;
+    if (ctx->adapter_path_owned && ctx->adapter_path_owned_len > 0) {
+        argv[ai++] = (char *)"--adapter-path";
+        argv[ai++] = ctx->adapter_path_owned;
+    }
+    argv[ai++] = (char *)"--max-tokens";
+    argv[ai++] = max_tokens_buf;
+    argv[ai++] = (char *)"--prompt";
+    argv[ai++] = (char *)"-";
+    argv[ai] = NULL;
+
+    int stdout_fds[2];
+    int stdin_fds[2];
+    if (pipe(stdout_fds) != 0)
+        return HU_ERR_IO;
+    if (pipe(stdin_fds) != 0) {
+        close(stdout_fds[0]);
+        close(stdout_fds[1]);
+        return HU_ERR_IO;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(stdout_fds[0]);
+        close(stdout_fds[1]);
+        close(stdin_fds[0]);
+        close(stdin_fds[1]);
+        return HU_ERR_IO;
+    }
+
+    if (pid == 0) {
+        /* Child */
+        close(stdout_fds[0]);
+        close(stdin_fds[1]);
+        dup2(stdin_fds[0], STDIN_FILENO);
+        dup2(stdout_fds[1], STDOUT_FILENO);
+        dup2(stdout_fds[1], STDERR_FILENO);
+        close(stdin_fds[0]);
+        close(stdout_fds[1]);
+        execvp("python3", argv);
+        _exit(127);
+    }
+
+    /* Parent */
+    close(stdout_fds[1]);
+    close(stdin_fds[0]);
+
+    /* Write prompt to child stdin (blocking is fine — prompts are small). */
+    size_t written = 0;
+    while (written < prompt_len) {
+        ssize_t w = write(stdin_fds[1], prompt + written, prompt_len - written);
+        if (w <= 0)
+            break;
+        written += (size_t)w;
+    }
+    close(stdin_fds[1]);
+    if (written < prompt_len) {
+        close(stdout_fds[0]);
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        return HU_ERR_IO;
+    }
+
+    /* Make stdout non-blocking for select-driven reads. */
+    int flags = fcntl(stdout_fds[0], F_GETFL, 0);
+    fcntl(stdout_fds[0], F_SETFL, flags | O_NONBLOCK);
+
+    /* Buffer holds bytes read but not yet emitted (held back for UTF-8
+     * boundary safety). */
+    char hold_buf[HU_MLX_STREAM_CHUNK_MAX];
+    size_t hold_len = 0;
+
+    bool cancelled = false;
+    bool timed_out = false;
+    time_t deadline = time(NULL) + HU_MLX_STREAM_TIMEOUT_SECS;
+
+    for (;;) {
+        if (time(NULL) > deadline) {
+            timed_out = true;
+            break;
+        }
+
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(stdout_fds[0], &rfds);
+        struct timeval tv = {.tv_sec = 0, .tv_usec = HU_MLX_STREAM_SELECT_USEC};
+        int sel = select(stdout_fds[0] + 1, &rfds, NULL, NULL, &tv);
+        if (sel < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (sel == 0)
+            continue; /* poll timeout — loop and re-check deadline */
+
+        size_t room = sizeof(hold_buf) - hold_len;
+        if (room == 0) {
+            /* Defensive flush — buffer full; emit safe prefix and shift. */
+            size_t safe = mlx_utf8_safe_emit_len(hold_buf, hold_len);
+            if (safe > 0) {
+                if (!mlx_emit_chunk(callback, callback_ctx, hold_buf, safe, false)) {
+                    cancelled = true;
+                    break;
+                }
+                memmove(hold_buf, hold_buf + safe, hold_len - safe);
+                hold_len -= safe;
+            }
+            room = sizeof(hold_buf) - hold_len;
+        }
+
+        ssize_t n = read(stdout_fds[0], hold_buf + hold_len, room);
+        if (n == 0) {
+            /* EOF — emit remainder and exit loop */
+            if (hold_len > 0) {
+                (void)mlx_emit_chunk(callback, callback_ctx, hold_buf, hold_len, false);
+                hold_len = 0;
+            }
+            break;
+        }
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EINTR)
+                continue;
+            break;
+        }
+        hold_len += (size_t)n;
+
+        /* Emit on whitespace-boundary heuristic: find last whitespace in
+         * the buffer, emit through there (UTF-8-safe), keep the rest. */
+        size_t last_ws = 0;
+        bool has_ws = false;
+        for (size_t i = hold_len; i > 0; i--) {
+            char c = hold_buf[i - 1];
+            if (c == ' ' || c == '\n' || c == '\t') {
+                last_ws = i;
+                has_ws = true;
+                break;
+            }
+        }
+        if (has_ws) {
+            size_t safe = mlx_utf8_safe_emit_len(hold_buf, last_ws);
+            if (safe > 0) {
+                if (!mlx_emit_chunk(callback, callback_ctx, hold_buf, safe, false)) {
+                    cancelled = true;
+                    break;
+                }
+                memmove(hold_buf, hold_buf + safe, hold_len - safe);
+                hold_len -= safe;
+            }
+        }
+    }
+
+    close(stdout_fds[0]);
+
+    if (cancelled) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        /* Cancellation is a clean caller-initiated stop, not an error. */
+        (void)mlx_emit_chunk(callback, callback_ctx, NULL, 0, true);
+        return HU_OK;
+    }
+
+    if (timed_out) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        return HU_ERR_TIMEOUT;
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    /* Emit final chunk so the caller knows the stream completed. */
+    (void)mlx_emit_chunk(callback, callback_ctx, NULL, 0, true);
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        return HU_ERR_PROVIDER_RESPONSE;
+
+    return HU_OK;
+}
+#endif /* HU_MLX_SUBPROCESS_ACTIVE */
+
+static hu_error_t mlx_stream_chat(void *ctx, hu_allocator_t *alloc,
+                                  const hu_chat_request_t *request, const char *model,
+                                  size_t model_len, double temperature,
+                                  hu_stream_callback_t callback, void *callback_ctx,
+                                  hu_stream_chat_result_t *out) {
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+
+    if (!ctx || !alloc || !request)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_MLX_SUBPROCESS_ACTIVE
+    /* Unlinked / test build: same NOT_SUPPORTED contract as mlx_chat.
+     * Don't touch `out` or invoke the callback — the dispatcher's
+     * fallback path relies on those staying untouched on NOT_SUPPORTED. */
+    (void)callback;
+    (void)callback_ctx;
+    (void)out;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    mlx_ctx_t *c = (mlx_ctx_t *)ctx;
+    char combined[65536];
+    size_t combined_len = flatten_chat_request(request, combined, sizeof(combined));
+    if (combined_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+
+    return mlx_run_subprocess_streaming(alloc, c, combined, combined_len, callback, callback_ctx);
+#endif
+}
+
 /* ── vtable ───────────────────────────────────────────────────────────── */
 
 static const hu_provider_vtable_t mlx_vtable = {
@@ -510,8 +851,8 @@ static const hu_provider_vtable_t mlx_vtable = {
     .deinit = mlx_deinit,
     .warmup = NULL,
     .chat_with_tools = NULL,
-    .supports_streaming = NULL,
-    .stream_chat = NULL,
+    .supports_streaming = mlx_supports_streaming,
+    .stream_chat = mlx_stream_chat,
     .supports_vision = NULL,
     .supports_vision_for_model = NULL,
     .load_adapter = mlx_load_adapter,

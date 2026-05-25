@@ -207,6 +207,111 @@ static void mlx_provider_create_resolves_model_path_valid_threaded(void) {
     p.vtable->deinit(p.ctx, &alloc);
 }
 
+/* ── Sprint 54 US-M3-B4: streaming wire (Phase 1) ─────────────────── */
+
+/* Counts invocations of the test callback so we can prove the gate-off
+ * path doesn't call it. */
+typedef struct {
+    int call_count;
+} test_stream_ctx_t;
+
+static bool test_stream_cb(void *ctx, const hu_stream_chunk_t *chunk) {
+    test_stream_ctx_t *s = (test_stream_ctx_t *)ctx;
+    s->call_count++;
+    (void)chunk;
+    return true; /* continue */
+}
+
+/* Phase 1 contract: in test mode (HU_IS_TEST → HU_MLX_SUBPROCESS_ACTIVE=0),
+ * supports_streaming MUST return false so the daemon doesn't try to use
+ * the unsupported path. */
+static void mlx_provider_supports_streaming_false_in_test_build(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_config_t cfg = {
+        .model_path = "test-model",
+        .model_path_len = strlen("test-model"),
+    };
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+    HU_ASSERT_NOT_NULL(p.vtable);
+    HU_ASSERT_NOT_NULL(p.vtable->supports_streaming);
+    /* In test build the gate is off; streaming is not actually wired. */
+    HU_ASSERT_EQ((int)p.vtable->supports_streaming(p.ctx), 0);
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
+/* Phase 1 contract: stream_chat is wired in the vtable (not NULL).
+ * Without this, callers can't even dispatch to it. */
+static void mlx_provider_stream_chat_is_wired_in_vtable(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_config_t cfg = {
+        .model_path = "test-model",
+        .model_path_len = strlen("test-model"),
+    };
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+    HU_ASSERT_NOT_NULL(p.vtable);
+    HU_ASSERT_NOT_NULL(p.vtable->stream_chat);
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
+/* Phase 1 contract: stream_chat returns NOT_SUPPORTED in test build
+ * AND does NOT invoke the callback. The daemon's fallback path relies
+ * on this invariant to retry with another provider cleanly. */
+static void mlx_provider_stream_chat_returns_not_supported_and_skips_callback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_config_t cfg = {
+        .model_path = "test-model",
+        .model_path_len = strlen("test-model"),
+    };
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+
+    hu_chat_message_t msgs[1] = {{
+        .role = HU_ROLE_USER,
+        .content = "hi",
+        .content_len = 2,
+    }};
+    hu_chat_request_t req = {.messages = msgs, .messages_count = 1};
+    hu_stream_chat_result_t result = {0};
+    test_stream_ctx_t stream_ctx = {0};
+
+    hu_error_t err = p.vtable->stream_chat(p.ctx, &alloc, &req, NULL, 0, 0.7, test_stream_cb,
+                                           &stream_ctx, &result);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_SUPPORTED);
+    /* Critical: callback MUST NOT have been invoked on the unsupported
+     * path — otherwise the daemon would see phantom partial output. */
+    HU_ASSERT_EQ(stream_ctx.call_count, 0);
+
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
+/* Phase 1 contract: stream_chat rejects NULL args cleanly. */
+static void mlx_provider_stream_chat_rejects_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_config_t cfg = {
+        .model_path = "test-model",
+        .model_path_len = strlen("test-model"),
+    };
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_stream_chat_result_t result = {0};
+
+    /* NULL ctx */
+    HU_ASSERT_EQ((int)p.vtable->stream_chat(NULL, &alloc, &req, NULL, 0, 0.7, NULL, NULL, &result),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+    /* NULL alloc */
+    HU_ASSERT_EQ((int)p.vtable->stream_chat(p.ctx, NULL, &req, NULL, 0, 0.7, NULL, NULL, &result),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+    /* NULL request */
+    HU_ASSERT_EQ((int)p.vtable->stream_chat(p.ctx, &alloc, NULL, NULL, 0, 0.7, NULL, NULL, &result),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
 void run_mlx_provider_tests(void) {
     HU_TEST_SUITE("mlx_provider");
     HU_RUN_TEST(mlx_provider_create_succeeds_with_defaults);
@@ -219,4 +324,8 @@ void run_mlx_provider_tests(void) {
     HU_RUN_TEST(mlx_provider_create_resolves_model_path_null_allowed);
     HU_RUN_TEST(mlx_provider_create_resolves_model_path_empty_allowed);
     HU_RUN_TEST(mlx_provider_create_resolves_model_path_valid_threaded);
+    HU_RUN_TEST(mlx_provider_supports_streaming_false_in_test_build);
+    HU_RUN_TEST(mlx_provider_stream_chat_is_wired_in_vtable);
+    HU_RUN_TEST(mlx_provider_stream_chat_returns_not_supported_and_skips_callback);
+    HU_RUN_TEST(mlx_provider_stream_chat_rejects_null_args);
 }
