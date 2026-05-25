@@ -606,6 +606,86 @@ static void test_synth_ingest_advances_style_sample_count(void) {
     HU_ASSERT_TRUE(model.style.sample_count >= 1);
 }
 
+/* ── B5 wire: audio tone classification + ingest ──────────────────── */
+
+static void test_extract_audio_duration_returns_zero_for_null_payload(void) {
+    double d = hu_imessage_extract_audio_duration(NULL, 0);
+    HU_ASSERT_TRUE(d == 0.0);
+}
+
+static void test_extract_audio_duration_returns_zero_for_malformed_blob(void) {
+    /* Random bytes — definitely not a bplist00. */
+    unsigned char junk[64];
+    for (size_t i = 0; i < sizeof(junk); i++)
+        junk[i] = (unsigned char)(i * 7);
+    double d = hu_imessage_extract_audio_duration(junk, sizeof(junk));
+    HU_ASSERT_TRUE(d == 0.0);
+}
+
+static void test_ingest_audio_tone_noop_on_null_model(void) {
+    /* Null model is documented as safe → returns HU_OK. */
+    hu_error_t err = hu_imessage_ingest_audio_tone(NULL, "Alice", false, "hello there friend", 4.0,
+                                                   1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_audio_tone_noop_on_from_me(void) {
+    /* Tone is signal ABOUT others — voice messages I record about myself
+     * aren't useful persona signal for the model. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    bool before = hu_personal_model_has_content(&model);
+    hu_error_t err =
+        hu_imessage_ingest_audio_tone(&model, "me", /*is_from_me=*/true,
+                                      "look how fast I can talk fast fast", 2.0, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model) == before);
+}
+
+static void test_ingest_audio_tone_noop_on_zero_duration(void) {
+    /* Duration==0 → classifier returns UNKNOWN → ingest no-ops. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    bool before = hu_personal_model_has_content(&model);
+    hu_error_t err =
+        hu_imessage_ingest_audio_tone(&model, "Alice", false, "hi there", 0.0, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model) == before);
+}
+
+static void test_ingest_audio_tone_noop_on_empty_transcript(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    bool before = hu_personal_model_has_content(&model);
+    hu_error_t err =
+        hu_imessage_ingest_audio_tone(&model, "Alice", false, "", 10.0, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model) == before);
+}
+
+static void test_ingest_audio_tone_classifies_energetic_speech(void) {
+    /* 12 words in 2 seconds → 360 wpm → ENERGETIC. Fact MUST land. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_audio_tone(
+        &model, "Alice", false, "ok ok ok wait i can totally make it work for sure",
+        /*duration_seconds=*/2.0, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model));
+}
+
+static void test_ingest_audio_tone_classifies_deliberate_speech(void) {
+    /* 4 words in 10 seconds → 24 wpm — long+low triggers HESITANT bucket
+     * (long pause-laden speech). Either DELIBERATE or HESITANT is a
+     * legitimate tone → fact MUST land regardless of which. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_audio_tone(&model, "Alice", false, "yeah, i don't know",
+                                                   /*duration_seconds=*/10.0, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model));
+}
+
 /* ── runner ───────────────────────────────────────────────────────── */
 
 void run_imessage_ingest_tests(void) {
@@ -650,4 +730,12 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_multi_contact_reactions_both_surface_in_prompt);
     HU_RUN_TEST(test_first_person_text_does_yield_facts);
     HU_RUN_TEST(test_synth_ingest_advances_style_sample_count);
+    HU_RUN_TEST(test_extract_audio_duration_returns_zero_for_null_payload);
+    HU_RUN_TEST(test_extract_audio_duration_returns_zero_for_malformed_blob);
+    HU_RUN_TEST(test_ingest_audio_tone_noop_on_null_model);
+    HU_RUN_TEST(test_ingest_audio_tone_noop_on_from_me);
+    HU_RUN_TEST(test_ingest_audio_tone_noop_on_zero_duration);
+    HU_RUN_TEST(test_ingest_audio_tone_noop_on_empty_transcript);
+    HU_RUN_TEST(test_ingest_audio_tone_classifies_energetic_speech);
+    HU_RUN_TEST(test_ingest_audio_tone_classifies_deliberate_speech);
 }

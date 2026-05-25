@@ -170,6 +170,28 @@ hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const cha
 size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, size_t payload_len,
                                             char *out, size_t cap);
 
+/* Extract the recording duration (seconds) from a voice-message payload_data
+ * plist. Apple has used several keys across iOS releases; we try them in
+ * order: "duration", "audio_duration", "recording_duration". Returns the
+ * first numeric (integer or real) value found, or 0.0 if no recognized key
+ * is present. 0.0 is also returned for any parse / arg failure — callers
+ * must treat 0.0 as "unknown" (not "instantaneous"). */
+double hu_imessage_extract_audio_duration(const unsigned char *payload_blob, size_t payload_len);
+
+/* B5 production wire: classify a voice-message's tone heuristically (via
+ * hu_audio_tone_classify) and ingest the resulting fact into the personal
+ * model. No-op when classification returns UNKNOWN (e.g. duration==0,
+ * empty transcript). Safe to call even when model is NULL (returns OK).
+ * Designed to be called alongside the transcript-ingest in the iMessage
+ * audio path, so a single voice message produces:
+ *   (a) the transcript ("alice said: ...")
+ *   (b) the tone fact   ("alice's voice message sounded energetic.")
+ * Both are stamped with the same provenance and timestamp. */
+hu_error_t hu_imessage_ingest_audio_tone(struct hu_personal_model *model, const char *sender_handle,
+                                         bool is_from_me, const char *transcript_text,
+                                         double duration_seconds, int64_t timestamp_unix,
+                                         bool in_group_chat);
+
 /* Extract the edit chain from a message_summary_info plist. Apple
  * stores per-part edit histories under the "ec" key as a dict keyed by
  * part-index strings ("0", "1", ...). Each part value is an array of

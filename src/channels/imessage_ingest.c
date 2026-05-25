@@ -15,11 +15,13 @@
 
 #include "human/agent/channel_trust.h"
 #include "human/channels/imessage.h"
+#include "human/memory/audio_emotion.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
 #include "human/util/bplist.h"
 #include "human/util/typedstream.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -560,6 +562,101 @@ size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, s
 
     hu_bplist_free(p);
     return n;
+}
+
+double hu_imessage_extract_audio_duration(const unsigned char *payload_blob, size_t payload_len) {
+    if (!payload_blob || payload_len == 0)
+        return 0.0;
+
+    hu_bplist_t *p = NULL;
+    if (hu_bplist_parse(payload_blob, payload_len, &p) != HU_OK)
+        return 0.0;
+
+    double seconds = 0.0;
+    size_t root = hu_bplist_root(p);
+    if (hu_bplist_kind(p, root) == HU_BPLIST_DICT) {
+        /* Try documented + observed Apple keys in priority order. INT is
+         * acceptable (some iOS versions stored whole-second durations);
+         * REAL is preferred. */
+        static const char *const keys[] = {"duration", "audio_duration", "recording_duration",
+                                           NULL};
+        for (size_t i = 0; keys[i] != NULL; i++) {
+            size_t v = hu_bplist_dict_lookup(p, root, keys[i]);
+            if (v == SIZE_MAX)
+                continue;
+            hu_bplist_kind_t k = hu_bplist_kind(p, v);
+            if (k == HU_BPLIST_REAL) {
+                seconds = hu_bplist_get_real(p, v);
+                break;
+            }
+            if (k == HU_BPLIST_INT) {
+                seconds = (double)hu_bplist_get_int(p, v);
+                break;
+            }
+        }
+    }
+
+    hu_bplist_free(p);
+    /* Guard against negative / NaN — callers expect 0.0 == unknown. */
+    if (!(seconds > 0.0))
+        return 0.0;
+    return seconds;
+}
+
+/* Count whitespace-separated word tokens in a NUL-terminated UTF-8 string.
+ * Adequate for the speech-rate heuristic — we don't need linguistic
+ * accuracy, just a rough words-per-minute proxy. */
+static int count_transcript_words(const char *text) {
+    if (!text)
+        return 0;
+    int words = 0;
+    bool in_word = false;
+    for (const char *s = text; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        bool is_sep = (c <= 0x20) || c == ',' || c == '.' || c == '!' || c == '?' || c == ';';
+        if (!is_sep) {
+            if (!in_word) {
+                in_word = true;
+                words++;
+            }
+        } else {
+            in_word = false;
+        }
+    }
+    return words;
+}
+
+hu_error_t hu_imessage_ingest_audio_tone(struct hu_personal_model *model, const char *sender_handle,
+                                         bool is_from_me, const char *transcript_text,
+                                         double duration_seconds, int64_t timestamp_unix,
+                                         bool in_group_chat) {
+    /* Defensive: every input is allowed to be missing — we just no-op. */
+    if (!model)
+        return HU_OK;
+    /* Tone is a fact ABOUT the sender. First-person voice messages (the
+     * user recording themselves) are uninteresting signal here — the
+     * persona system models OTHER people's tone, not the user's own. */
+    if (is_from_me)
+        return HU_OK;
+    if (!sender_handle || !sender_handle[0])
+        return HU_OK;
+    if (!transcript_text || !transcript_text[0])
+        return HU_OK;
+    if (!(duration_seconds > 0.0))
+        return HU_OK; /* unknown duration → can't classify */
+
+    int word_count = count_transcript_words(transcript_text);
+    hu_audio_tone_t tone = hu_audio_tone_classify(duration_seconds, word_count);
+    if (tone == HU_AUDIO_TONE_UNKNOWN)
+        return HU_OK;
+
+    char fact[160];
+    size_t fn = hu_audio_tone_format_fact(sender_handle, tone, fact, sizeof(fact));
+    if (fn == 0)
+        return HU_OK;
+
+    hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
+    return ingest_synthesized(model, fact, fn, /*from_user=*/true, timestamp_unix, &prov);
 }
 
 /* Resolve a single edit-event's text. The "t" key may either be:
