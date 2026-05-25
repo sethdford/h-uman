@@ -1974,6 +1974,7 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     const char *after_path = NULL;
     float floor_delta = 0.f;
     bool require_positive = false;
+    bool json_output = false;
 
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--persona");
@@ -2004,10 +2005,14 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
             require_positive = true;
             continue;
         }
+        if (strcmp(argv[i], "--json") == 0) {
+            json_output = true;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf(
                 "Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
-                "                       [--floor-delta F] [--require-positive]\n\n"
+                "                       [--floor-delta F] [--require-positive] [--json]\n\n"
                 "Score two response sets against a persona's communication-\n"
                 "style fingerprint and report the mean fidelity delta\n"
                 "(after - before). A positive delta indicates the LoRA\n"
@@ -2020,7 +2025,8 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
                 "  --before <path>       JSON array of pre-LoRA responses\n"
                 "  --after <path>        JSON array of post-LoRA responses\n"
                 "  --floor-delta F       Exit non-zero when delta < F\n"
-                "  --require-positive    Exit non-zero when delta <= 0\n");
+                "  --require-positive    Exit non-zero when delta <= 0\n"
+                "  --json                Output results as JSON to stdout\n");
             printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
             return HU_OK;
         }
@@ -2174,13 +2180,21 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
 
-    printf("[lora-ab] persona '%s' A/B fidelity:\n"
-           "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
-           "[lora-ab]   after:  scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
-           "[lora-ab]   delta:  %+.3f (after - before)\n",
-           persona_name, sum_before.scored, sum_before.skipped, sum_before.mean,
-           sum_before.min_score, sum_before.max_score, sum_after.scored, sum_after.skipped,
-           sum_after.mean, sum_after.min_score, sum_after.max_score, delta);
+    if (json_output) {
+        /* JSON output mode (AC-7.5): emit structured JSON with delta key */
+        printf("{\"baseline\": %.3f, \"adapted\": %.3f, \"delta\": %.3f}\n", sum_before.mean,
+               sum_after.mean, delta);
+    } else {
+        /* Text output mode (default) */
+        printf("[lora-ab] persona '%s' A/B fidelity:\n"
+               "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
+               "[lora-ab]   after:  scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
+               "[lora-ab]   delta:  %+.3f (after - before)\n",
+               persona_name, sum_before.scored, sum_before.skipped, sum_before.mean,
+               sum_before.min_score, sum_before.max_score, sum_after.scored, sum_after.skipped,
+               sum_after.mean, sum_after.min_score, sum_after.max_score, delta);
+    }
+
     if (require_positive && delta <= 0.f) {
         fprintf(stderr, "[lora-ab] FAIL: delta=%+.3f <= 0 (require-positive set)\n", delta);
         return HU_ERR_INVALID_ARGUMENT;
@@ -2189,11 +2203,13 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
         fprintf(stderr, "[lora-ab] FAIL: delta=%+.3f < floor=%+.3f\n", delta, floor_delta);
         return HU_ERR_INVALID_ARGUMENT;
     }
-    if (sum_after.scored == 0 || sum_before.scored == 0) {
-        printf("[lora-ab] note: at least one set had 0 scored responses — "
-               "delta may not be meaningful.\n");
+    if (!json_output) {
+        if (sum_after.scored == 0 || sum_before.scored == 0) {
+            printf("[lora-ab] note: at least one set had 0 scored responses — "
+                   "delta may not be meaningful.\n");
+        }
+        printf("[lora-ab] doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
     }
-    printf("[lora-ab] doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
     return HU_OK;
 }
 

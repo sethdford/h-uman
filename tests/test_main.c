@@ -543,6 +543,7 @@ void run_ml_tests(void);
 void run_mlx_admin_tests(void);
 void run_ml_cli_actually_trains_tests(void);
 void run_ml_fidelity_judgment_tests(void);
+void run_fidelity_delta_tests(void);
 /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
  * rl_trainer_simpo + rl_trainer_orpo C tests orphaned by main's RL
  * architecture rework — files deleted, declarations removed. Sprint 12
@@ -1358,6 +1359,7 @@ int main(int argc, char **argv) {
     run_mlx_admin_tests();
     run_ml_cli_actually_trains_tests();
     run_ml_fidelity_judgment_tests();
+    run_fidelity_delta_tests();
     /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
      * rl_trainer_orpo/simpo suites removed — they pinned Sprint 11's
      * per-trainer factory pattern, orphaned by main's RL architecture
