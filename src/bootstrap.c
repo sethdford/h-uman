@@ -26,6 +26,7 @@
 #include "human/plugin_discovery.h"
 #include "human/plugin_loader.h"
 #include "human/providers/factory.h"
+#include "human/vertex_adc.h"
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
 #include "human/providers/apple.h"
 #endif
@@ -871,10 +872,22 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         ctx->provider = &bi->provider;
         ctx->provider_ok = true;
 
-        const char *gemini_key = getenv("GEMINI_API_KEY");
-        if (gemini_key && gemini_key[0]) {
-            hu_embedding_provider_t gem_provider =
-                hu_embedding_gemini_create(alloc, gemini_key, NULL, 0);
+        /* Prefer Vertex AI + ADC bearer auth (matches the rest of h-uman's
+         * Gemini access per CLAUDE.md "All Gemini access uses Vertex AI with
+         * ADC, not API keys"). Falls back to AI Studio API key only if ADC is
+         * not configured. Final fallback: local embedder. */
+        hu_embedding_provider_t gem_provider = {0};
+        const char *adc_project = hu_vertex_adc_default_project(alloc);
+        if (adc_project && adc_project[0]) {
+            gem_provider = hu_embedding_gemini_create_vertex(alloc, NULL, NULL, NULL, 0);
+        }
+        if (!gem_provider.ctx) {
+            const char *gemini_key = getenv("GEMINI_API_KEY");
+            if (gemini_key && gemini_key[0]) {
+                gem_provider = hu_embedding_gemini_create(alloc, gemini_key, NULL, 0);
+            }
+        }
+        if (gem_provider.ctx) {
             bi->embedder = hu_embedder_gemini_adapter_create(alloc, gem_provider);
         }
         if (!bi->embedder.ctx) {

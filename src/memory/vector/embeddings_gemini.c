@@ -3,13 +3,15 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/vertex_adc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define GEMINI_DEFAULT_MODEL "text-embedding-004"
-#define GEMINI_DEFAULT_DIMS  768
-#define GEMINI_BASE_URL      "https://generativelanguage.googleapis.com"
+#define GEMINI_DEFAULT_MODEL    "text-embedding-004"
+#define GEMINI_DEFAULT_DIMS     768
+#define GEMINI_BASE_URL         "https://generativelanguage.googleapis.com"
+#define VERTEX_DEFAULT_LOCATION "us-central1"
 
 typedef struct gemini_ctx {
     hu_allocator_t *alloc;
@@ -17,6 +19,11 @@ typedef struct gemini_ctx {
     char *api_key;
     char *model;
     size_t dims;
+    /* Vertex-mode fields. When project_id is non-NULL, gemini_embed routes
+     * via Vertex AI :predict with an ADC Bearer token instead of the legacy
+     * AI Studio :embedContent + ?key= path. */
+    char *project_id;
+    char *location;
 } gemini_ctx_t;
 
 #if HU_IS_TEST
@@ -83,6 +90,135 @@ static hu_error_t parse_gemini_response(hu_allocator_t *alloc, const char *json_
     return HU_OK;
 }
 
+/* Parse Vertex AI :predict response:
+ *   {"predictions":[{"embeddings":{"values":[0.1, ...], "statistics":{...}}}], ...}
+ *
+ * Vertex wraps the single embedding in a predictions[] array and the inner
+ * field is `embeddings` (plural) — both differences from the AI Studio
+ * :embedContent response. */
+static hu_error_t parse_vertex_response(hu_allocator_t *alloc, const char *json_body,
+                                        size_t json_len, hu_embedding_provider_result_t *out) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, json_body, json_len, &root);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT)
+        return HU_ERR_JSON_PARSE;
+
+    hu_json_value_t *preds = hu_json_object_get(root, "predictions");
+    if (!preds || preds->type != HU_JSON_ARRAY || preds->data.array.len == 0) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+    hu_json_value_t *pred0 = preds->data.array.items[0];
+    if (!pred0 || pred0->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+    hu_json_value_t *emb = hu_json_object_get(pred0, "embeddings");
+    if (!emb || emb->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+    hu_json_value_t *vals = hu_json_object_get(emb, "values");
+    if (!vals || vals->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+
+    size_t n = vals->data.array.len;
+    float *arr = (float *)alloc->alloc(alloc->ctx, n * sizeof(float));
+    if (!arr) {
+        hu_json_free(alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < n; i++) {
+        hu_json_value_t *item = vals->data.array.items[i];
+        if (item->type == HU_JSON_NUMBER) {
+            arr[i] = (float)item->data.number;
+        } else if (item->type == HU_JSON_STRING) {
+            arr[i] = (float)atof(item->data.string.ptr);
+        } else {
+            alloc->free(alloc->ctx, arr, n * sizeof(float));
+            hu_json_free(alloc, root);
+            return HU_ERR_JSON_PARSE;
+        }
+    }
+
+    hu_json_free(alloc, root);
+    out->values = arr;
+    out->dimensions = n;
+    return HU_OK;
+}
+
+/* Vertex AI :predict path. Body shape:
+ *   {"instances":[{"content":"<text>","task_type":"SEMANTIC_SIMILARITY"}]}
+ * URL shape:
+ *   https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:predict
+ * Auth: Bearer token from hu_vertex_adc_token() (refreshed-on-demand). */
+static hu_error_t gemini_embed_vertex(gemini_ctx_t *g, hu_allocator_t *alloc, const char *text,
+                                      size_t text_len, hu_embedding_provider_result_t *out) {
+    hu_json_buf_t buf;
+    if (hu_json_buf_init(&buf, alloc) != HU_OK)
+        return HU_ERR_OUT_OF_MEMORY;
+    if (hu_json_buf_append_raw(&buf, "{\"instances\":[{\"content\":", 25) != HU_OK)
+        goto fail;
+    if (hu_json_append_string(&buf, text, text_len) != HU_OK)
+        goto fail;
+    if (hu_json_buf_append_raw(&buf, ",\"task_type\":\"SEMANTIC_SIMILARITY\"}]}", 37) != HU_OK)
+        goto fail;
+
+    char url[768];
+    int ulen = snprintf(url, sizeof(url),
+                        "https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/"
+                        "publishers/google/models/%s:predict",
+                        g->location, g->project_id, g->location, g->model);
+    if (ulen <= 0 || (size_t)ulen >= sizeof(url)) {
+        hu_json_buf_free(&buf);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    char *token = NULL;
+    size_t token_len = 0;
+    hu_error_t terr = hu_vertex_adc_token(alloc, &token, &token_len);
+    if (terr != HU_OK) {
+        hu_json_buf_free(&buf);
+        return terr;
+    }
+
+    /* hu_http_post_json prepends "Authorization: " and always sets
+     * Content-Type: application/json, so the auth_header arg is just the
+     * scheme + token (e.g. "Bearer ya29.…"). */
+    char auth_hdr[2048];
+    int alen = snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %s", token);
+    alloc->free(alloc->ctx, token, token_len + 1);
+    if (alen <= 0 || (size_t)alen >= sizeof(auth_hdr)) {
+        hu_json_buf_free(&buf);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_post_json(alloc, url, auth_hdr, buf.ptr, buf.len, &resp);
+    hu_json_buf_free(&buf);
+    if (err != HU_OK)
+        return err;
+    if (resp.status_code != 200 || !resp.body) {
+        hu_log_warn("embeddings_gemini", NULL, "vertex embed failed: HTTP %d (body_len=%zu)",
+                    resp.status_code, resp.body_len);
+        int sc = resp.status_code;
+        hu_http_response_free(alloc, &resp);
+        return (sc == 429)                ? HU_ERR_PROVIDER_RATE_LIMITED
+               : (sc == 401 || sc == 403) ? HU_ERR_PROVIDER_AUTH
+                                          : HU_ERR_IO;
+    }
+
+    hu_error_t parse_err = parse_vertex_response(alloc, resp.body, resp.body_len, out);
+    hu_http_response_free(alloc, &resp);
+    return parse_err;
+
+fail:
+    hu_json_buf_free(&buf);
+    return HU_ERR_OUT_OF_MEMORY;
+}
+
 static hu_error_t gemini_embed(void *ctx, hu_allocator_t *alloc, const char *text, size_t text_len,
                                hu_embedding_provider_result_t *out) {
     gemini_ctx_t *g = (gemini_ctx_t *)ctx;
@@ -93,6 +229,11 @@ static hu_error_t gemini_embed(void *ctx, hu_allocator_t *alloc, const char *tex
         out->values = (float *)alloc->alloc(alloc->ctx, 0);
         out->dimensions = 0;
         return HU_OK;
+    }
+
+    /* Vertex mode: project_id presence is the discriminator. */
+    if (g->project_id && g->project_id[0] && g->location && g->location[0]) {
+        return gemini_embed_vertex(g, alloc, text, text_len, out);
     }
 
     /* Build body: {"model":"models/xxx","content":{"parts":[{"text":"..."}]}} */
@@ -135,9 +276,9 @@ static hu_error_t gemini_embed(void *ctx, hu_allocator_t *alloc, const char *tex
                     resp.status_code, resp.body_len);
         int sc = resp.status_code;
         hu_http_response_free(alloc, &resp);
-        return (sc == 429) ? HU_ERR_PROVIDER_RATE_LIMITED
-             : (sc == 401 || sc == 403) ? HU_ERR_PROVIDER_AUTH
-             : HU_ERR_IO;
+        return (sc == 429)                ? HU_ERR_PROVIDER_RATE_LIMITED
+               : (sc == 401 || sc == 403) ? HU_ERR_PROVIDER_AUTH
+                                          : HU_ERR_IO;
     }
 
     hu_error_t parse_err = parse_gemini_response(alloc, resp.body, resp.body_len, out);
@@ -170,6 +311,10 @@ static void gemini_deinit(void *ctx, hu_allocator_t *alloc) {
         alloc->free(alloc->ctx, g->api_key, strlen(g->api_key) + 1);
     if (g->model)
         alloc->free(alloc->ctx, g->model, strlen(g->model) + 1);
+    if (g->project_id)
+        alloc->free(alloc->ctx, g->project_id, strlen(g->project_id) + 1);
+    if (g->location)
+        alloc->free(alloc->ctx, g->location, strlen(g->location) + 1);
     alloc->free(alloc->ctx, g, sizeof(gemini_ctx_t));
 }
 
@@ -197,6 +342,45 @@ hu_embedding_provider_t hu_embedding_gemini_create(hu_allocator_t *alloc, const 
     g->dims = (dims > 0) ? dims : GEMINI_DEFAULT_DIMS;
 
     if (!g->base_url || !g->api_key || !g->model) {
+        gemini_deinit(g, alloc);
+        return hu_embedding_provider_noop_create(alloc);
+    }
+
+    p.ctx = g;
+    return p;
+}
+
+hu_embedding_provider_t hu_embedding_gemini_create_vertex(hu_allocator_t *alloc,
+                                                          const char *project_id,
+                                                          const char *location, const char *model,
+                                                          size_t dims) {
+    hu_embedding_provider_t p = {.ctx = NULL, .vtable = &gemini_vtable};
+    if (!alloc)
+        return p;
+
+    /* Resolve project. Order: explicit arg → GOOGLE_CLOUD_PROJECT env →
+     * ADC file's quota_project_id. Fail closed (noop) if nothing resolves
+     * — better than burning network on unauth loops. */
+    const char *resolved_project =
+        (project_id && project_id[0]) ? project_id : hu_vertex_adc_default_project(alloc);
+    if (!resolved_project || !resolved_project[0]) {
+        hu_log_warn("embeddings_gemini", NULL,
+                    "vertex: no project resolved (set GOOGLE_CLOUD_PROJECT or run "
+                    "`gcloud auth application-default login`)");
+        return hu_embedding_provider_noop_create(alloc);
+    }
+
+    gemini_ctx_t *g = (gemini_ctx_t *)alloc->alloc(alloc->ctx, sizeof(gemini_ctx_t));
+    if (!g)
+        return p;
+    memset(g, 0, sizeof(*g));
+    g->alloc = alloc;
+    g->project_id = hu_strdup(alloc, resolved_project);
+    g->location = hu_strdup(alloc, (location && location[0]) ? location : VERTEX_DEFAULT_LOCATION);
+    g->model = hu_strdup(alloc, (model && model[0]) ? model : GEMINI_DEFAULT_MODEL);
+    g->dims = (dims > 0) ? dims : GEMINI_DEFAULT_DIMS;
+
+    if (!g->project_id || !g->location || !g->model) {
         gemini_deinit(g, alloc);
         return hu_embedding_provider_noop_create(alloc);
     }
