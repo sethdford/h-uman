@@ -472,12 +472,8 @@ static void test_mlx_lora_adapter_biases_completion(void) {
     HU_ASSERT_NOT_NULL(provider.vtable);
 
     /* Fixture lookup: check if the adapter exists at the expected path.
-     * The path is user-specific; we use glob or explicit naming.
-     * For now, we check the exact path from the design. */
-    const char *adapter_dir = "~/.human/training-data/adapters/seth-lora-v4-repair-20260525-071921";
+     * The path is user-specific; we expand $HOME explicitly. */
     char check_path[1024];
-
-    /* Expand ~ to HOME */
     const char *home = getenv("HOME");
     if (!home)
         home = "/tmp";

@@ -484,7 +484,7 @@ static hu_error_t mlx_load_adapter(void *ctx, hu_allocator_t *alloc, const char 
                            ((uint64_t)magic[6] << 48) | ((uint64_t)magic[7] << 56);
 
     /* Reasonable header sizes: 0 (fixture marker) to 1MB (max plausible JSON) */
-    if (header_size > (1024 * 1024)) {
+    if (header_size > (uint64_t)(1024 * 1024)) {
         hu_log_warn("mlx_provider", NULL,
                     "load_adapter: safetensors header size implausible (%llu bytes); "
                     "file may be corrupted",
