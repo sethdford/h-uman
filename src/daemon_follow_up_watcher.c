@@ -41,9 +41,14 @@ void hu_daemon_follow_up_watcher_reset_warn_guards_for_test(void) {
 hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_config *cfg,
                                             int64_t now_unix, int64_t *last_poll_unix_inout,
                                             int64_t *watermark_inout, struct hu_agent *agent,
-                                            const struct hu_config *config) {
-    (void)agent;  /* unused in stub */
-    (void)config; /* unused in stub */
+                                            const struct hu_config *config,
+                                            hu_service_channel_t *channels, size_t channel_count,
+                                            struct hu_proactive_throttle *throttle) {
+    (void)agent;         /* unused in stub */
+    (void)config;        /* unused in stub */
+    (void)channels;      /* unused in stub */
+    (void)channel_count; /* unused in stub */
+    (void)throttle;      /* unused in stub */
     if (!cfg || !last_poll_unix_inout || !watermark_inout)
         return HU_ERR_INVALID_ARGUMENT;
 

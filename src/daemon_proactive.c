@@ -730,9 +730,13 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
-                                                 const char *contact_handle,
-                                                 struct hu_config *cfg) {
+                                                 const char *contact_handle, struct hu_config *cfg,
+                                                 hu_service_channel_t *channels,
+                                                 size_t channel_count,
+                                                 struct hu_proactive_throttle *throttle) {
     if (!alloc || !agent || !contact_handle || !contact_handle[0] || !cfg)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!channels || channel_count == 0 || !throttle)
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_log_info("follow_up_watcher", NULL, "follow-up flush initiated for contact %s",
@@ -781,55 +785,48 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
     hu_log_info("follow_up_watcher", NULL, "built follow-up prompt (%zu bytes) for contact %s",
                 prompt_len, contact_handle);
 
-    /* Step 3: BLOCKING — Send via iMessage.
-     *
-     * The hu_daemon_follow_up_flush_for_contact function signature does not include
-     * access to the service_channels array. The daemon has iMessage channels in its
-     * main loop context, but they are not passed to this function.
-     *
-     * To send the draft, we would need:
-     *   - The hu_service_channel_t array (from the daemon main loop)
-     *   - A way to find the iMessage channel in that array
-     *   - Call channel->vtable->send(channel->ctx, contact_handle, ..., prompt_buf, prompt_len,
-     * NULL, 0)
-     *
-     * SOLUTION: Add service_channels and channel_count parameters to the function signature.
-     * This requires updating:
-     *   - include/human/daemon_proactive.h
-     *   - src/daemon_follow_up_watcher.c (call site)
-     *   - src/daemon.c (call site where watcher is invoked)
-     *
-     * For R2, this gap is documented and the call site stub remains. The model load +
-     * prompt build infrastructure is in place and tested.
-     */
-
-    hu_log_info("follow_up_watcher", NULL,
-                "follow-up prompt ready for %s, but iMessage send path not wired "
-                "(blocking: service_channels not in function signature)",
-                contact_handle);
+    /* Step 3: Send via iMessage.
+     * Find the iMessage channel in the service channels array and call its send vtable. */
+    hu_error_t send_err = HU_ERR_NOT_FOUND;
+    for (size_t i = 0; i < channel_count; i++) {
+        hu_service_channel_t *ch = &channels[i];
+        if (!ch->channel || !ch->channel->vtable || !ch->channel->vtable->name)
+            continue;
+        const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+        if (ch_name && strcmp(ch_name, "imessage") == 0) {
+            /* Found iMessage channel. Send the follow-up prompt. */
+            send_err =
+                ch->channel->vtable->send(ch->channel->ctx, contact_handle, strlen(contact_handle),
+                                          prompt_buf, prompt_len, NULL, /* media */
+                                          0);                           /* media_count */
+            if (send_err == HU_OK) {
+                hu_log_info("follow_up_watcher", NULL, "follow-up sent via iMessage to contact %s",
+                            contact_handle);
+            } else {
+                hu_log_warn("follow_up_watcher", NULL,
+                            "iMessage send failed for contact %s (err=%d)", contact_handle,
+                            send_err);
+            }
+            break;
+        }
+    }
+    if (send_err == HU_ERR_NOT_FOUND) {
+        hu_log_warn("follow_up_watcher", NULL,
+                    "iMessage channel not found in service channels; cannot send follow-up");
+    }
 
     /* Step 4: Record throttle event (for rate-limiting).
-     * BLOCKING: The throttle state (hu_proactive_throttle_t) is not passed to this function.
-     * The function signature does not include access to the throttle state maintained in
-     * the daemon loop context.
-     *
-     * To record the send:
-     *   - Get the current time: uint64_t now_ms = (now_unix * 1000);
-     *   - Call: hu_proactive_throttle_record_send(&throttle_state, contact_handle, "follow_up",
-     * now_ms);
-     *   - Check the return: if false, skip the send (rate-limited).
-     *
-     * SOLUTION: Add hu_proactive_throttle_t *throttle parameter to the function signature.
-     * This requires updating:
-     *   - include/human/daemon_proactive.h
-     *   - src/daemon_follow_up_watcher.c (call site)
-     *   - src/daemon.c (call site where watcher is invoked)
-     */
-
-    hu_log_info(
-        "follow_up_watcher", NULL,
-        "throttle recording skipped for %s (blocking: throttle state not in function signature)",
-        contact_handle);
+     * Track the send so we don't violate the follow-up throttle limits. */
+    int64_t now_unix = time(NULL);
+    uint64_t now_ms = (uint64_t)now_unix * 1000;
+    bool allowed = hu_proactive_throttle_record_send(throttle, contact_handle, "follow_up", now_ms);
+    if (!allowed) {
+        hu_log_warn("follow_up_watcher", NULL, "throttle blocked follow-up send for contact %s",
+                    contact_handle);
+    } else {
+        hu_log_info("follow_up_watcher", NULL, "throttle recorded follow-up send for contact %s",
+                    contact_handle);
+    }
 
     return HU_OK;
 }

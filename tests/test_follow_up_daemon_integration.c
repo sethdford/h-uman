@@ -59,8 +59,8 @@ static void test_daemon_tick_respects_interval(void) {
     int64_t watermark = 1000;
     int64_t now = 1100; /* 100 seconds later — NOT enough for 300s interval */
 
-    hu_error_t err =
-        hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL);
+    hu_error_t err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL,
+                                                      NULL, 0, NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();
@@ -82,7 +82,8 @@ static void test_daemon_tick_respects_interval(void) {
 
     /* Now test with interval elapsed: 1400 is 400 seconds later, > 300s interval. */
     now = 1400;
-    err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL);
+    err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL, NULL, 0,
+                                           NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();
@@ -124,8 +125,8 @@ static void test_followup_watcher_disabled_logs_once(void) {
     int64_t now = 1000;
 
     /* Reset guard would go here; skipped for stub. */
-    hu_error_t err =
-        hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL);
+    hu_error_t err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL,
+                                                      NULL, 0, NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();
@@ -153,6 +154,13 @@ static void test_flush_for_contact_returns_ok_when_called(void) {
 
     const char *contact_handle = "+15551234567";
 
+    /* Provide fixture channels and throttle for the function signature.
+     * In a test environment, we pass NULL or minimal fixtures since we're
+     * testing the function's robustness, not the full send path. */
+    hu_proactive_throttle_t throttle;
+    memset(&throttle, 0, sizeof(throttle));
+    hu_proactive_throttle_init(&throttle, &alloc);
+
     /* In a real scenario, agent would be initialized from the daemon context.
      * For this interface test, a NULL agent is acceptable since we're not
      * exercising the agent turn machinery.
@@ -160,7 +168,8 @@ static void test_flush_for_contact_returns_ok_when_called(void) {
      * This test is primarily checking that the function executes the model load
      * and prompt build pipeline without crashing. The actual autoresponder output
      * is not validated here (it would require a full agent context). */
-    hu_error_t err = hu_daemon_follow_up_flush_for_contact(&alloc, NULL, contact_handle, &cfg);
+    hu_error_t err = hu_daemon_follow_up_flush_for_contact(&alloc, NULL, contact_handle, &cfg, NULL,
+                                                           0, &throttle);
 
     /* The function may return HU_OK or another error (e.g., if personal model
      * loading fails due to missing DB or other I/O issues in test environment).

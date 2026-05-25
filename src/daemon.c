@@ -13337,9 +13337,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 int64_t now_unix_fu = (int64_t)time(NULL);
                 if (followup_watermark == 0)
                     followup_watermark = now_unix_fu;
-                (void)hu_daemon_tick_follow_up_watcher(&config->follow_up_watcher, now_unix_fu,
-                                                       &followup_last_poll_unix,
-                                                       &followup_watermark, agent, config);
+                hu_proactive_throttle_t *th = daemon_throttle(alloc);
+                (void)hu_daemon_tick_follow_up_watcher(
+                    &config->follow_up_watcher, now_unix_fu, &followup_last_poll_unix,
+                    &followup_watermark, agent, config, channels, channel_count, th);
             } else {
                 hu_log_info_once(&daemon_loop_followup_disabled_warned, "daemon",
                                  agent ? agent->observer : NULL,
