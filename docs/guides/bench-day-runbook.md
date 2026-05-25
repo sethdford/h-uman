@@ -47,16 +47,27 @@ ls -lh ~/.human/models/*31b*4bit*.gguf 2>/dev/null \
     || echo "No 31B — that's fine, this runbook benches 4B"
 
 # Draft model for spec decode (Phase 3b)
-ls -lh ~/.human/models/gemma-3-270m*.gguf 2>/dev/null \
+ls -lh ~/.human/models/gemma-4-E2B*.gguf ~/.human/models/gemma-3-270m*.gguf 2>/dev/null \
     || echo "No draft — Step 6 (Phase 3b) will be skipped without one"
 ```
 
-If draft missing, fetch it (pick your URL + SHA from the
-[Gemma-3-270M GGUF release page](https://huggingface.co/ggml-org)):
+If draft missing, fetch one. Production guidance:
+- **Preferred for gemma-4-* targets**: `gemma-4-E2B-it` GGUF (e.g.
+  unsloth/gemma-4-E2B-it-GGUF) — same Gemma 4 family as the 31B target,
+  highest acceptance rate, NOT gated on HuggingFace.
+- **Ideal once tooling catches up**: `google/gemma-4-31B-it-assistant`
+  (470M, purpose-built draft for the 31B target). NOT gated, but its
+  `gemma4_assistant` architecture is not yet supported by mlx_lm 0.31.2
+  — track the upstream-watch (`scripts/check-mlx-lm-cb-upstream.sh`).
+- **Fallback**: `gemma-3-270m` GGUF. Smallest, lowest RAM, but
+  cross-generation draft so acceptance rate is lower. The Gemma 3
+  family shares the same 262k vocab as Gemma 4 so the tokens line up,
+  but the distributions diverge more than within-family.
 
 ```bash
+# Same-family draft for gemma-4 targets (recommended):
 scripts/fetch-gemma.sh \
-    --draft "<URL-to-gemma-3-270m-Q4_K_M.gguf>" \
+    --draft "<URL-to-gemma-4-E2B-it-Q4_K_M.gguf>" \
     --draft-sha "<sha256-from-upstream>"
 ```
 
@@ -182,7 +193,8 @@ scripts/bench-gemma-perf.py --compare \
 # Server: restart with
 #   HU_LLAMACPP_KV_QUANT=q8_0
 #   HU_LLAMACPP_FLASH_ATTN=on
-#   HU_LLAMACPP_DRAFT_MODEL=$HOME/.human/models/gemma-3-270m-...gguf
+#   HU_LLAMACPP_DRAFT_MODEL=$HOME/.human/models/gemma-4-E2B-it-...gguf
+#     (or gemma-3-270m-...gguf as a smaller cross-family fallback)
 #   HU_LLAMACPP_DRAFT_MIN_P=0.05
 #   HU_LLAMACPP_DRAFT_MAX_TOKENS=5
 # then:

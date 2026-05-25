@@ -205,7 +205,7 @@ files.
 
 | # | Slice | File:line |
 |---|---|---|
-| 3b.1 | Fetch a Gemma-3-270M (or 1B) draft model alongside the 4B/31B target | Extend `scripts/fetch-gemma.sh` to optionally pull a draft checkpoint. |
+| 3b.1 | Fetch a draft model alongside the 4B/31B target. **Recommended: `google/gemma-4-E2B-it` (2B, model_type `gemma4`, NOT gated, loads in mlx_lm 0.31.2).** Future-ideal: `google/gemma-4-31B-it-assistant` (470M, 4 layers, purpose-built — blocked on mlx_lm adding `gemma4_assistant`). Fallback: `gemma-3-270m-it` (gated, cross-family draft — same 262k vocab so tokens line up). | Extend `scripts/fetch-gemma.sh` to optionally pull a draft checkpoint. |
 | 3b.2 | Wire `--draft-model` + `--draft-min-p` + `--draft-max-tokens` for llama.cpp | [src/providers/llamacpp.c](../../src/providers/llamacpp.c) launch path. Default `draft_min_p = 0.05`, `draft_max_tokens = 5` (practitioner-signal consensus values). |
 | 3b.3 | Wire the equivalent in mlx-lm via `mlx_lm.server`'s spec decode flag | [scripts/mlx-server.py](../../scripts/mlx-server.py). |
 | 3b.4 | Acceptance-rate telemetry | New counter `hu_inference_spec_decode_acceptance_total` / `_attempted_total`. Surface in `/health`. **This is the metric that tells us whether to invest in A3 aligned-draft training.** |
@@ -364,7 +364,7 @@ score, not just the test suite. Per
 | Q | Owner | When needed |
 |---|---|---|
 | Is our vendored llama.cpp recent enough to expose `--cache-type-k q8_0` and `--draft-model`? Verify `git log third_party/llama.cpp/`. | ML subsystem | Before Phase 1 starts |
-| Which Gemma draft do we pull (Gemma-3-270M vs 1B)? Size vs acceptance-rate tradeoff. | Inference subsystem | Before Phase 3b.1 |
+| ~~Which Gemma draft do we pull (Gemma-3-270M vs 1B)?~~ **Resolved 2026-05-25:** Recommend `google/gemma-4-E2B-it` for same-family acceptance with mlx_lm 0.31.2 support. The ideal target — `google/gemma-4-31B-it-assistant` (470M, 4-layer) — is blocked on mlx_lm adding its `gemma4_assistant` model_type. | Inference subsystem | RESOLVED |
 | Do we have a 50-turn fixture conversation for evaluating cache hit rate (T4)? If not, fixture creation is a prerequisite. | QA | Before Phase 2 exits |
 | What's the M3 Bridge B inference phase ETA? Phase 6 gates on it. | ML subsystem | Before sprint-plus-2 planning |
 
