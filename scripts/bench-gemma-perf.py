@@ -297,6 +297,137 @@ def compare(args):
               f"{ttft_a:>7.2f}s   {ttft_b:>7.2f}s   {_delta(ttft_a, ttft_b):>8}")
 
 
+# Phase 4e — bench-day workflow wrapper. Each mode tag maps to a set of
+# env vars the operator must set BEFORE restarting the server. The
+# wrapper can't restart the server itself (might be launchd / tmux /
+# operator-shell-managed) so it prompts the operator to do it and
+# resumes when they press Enter.
+COMPARE_MODES = {
+    "baseline": {
+        # Pre-Phase-1 behavior. Operator unsets all the Phase-1+ env vars.
+        "env": {
+            "HU_LLAMACPP_KV_QUANT": "",
+            "HU_LLAMACPP_FLASH_ATTN": "off",
+            "HU_LLAMACPP_DRAFT_MODEL": "",
+        },
+        "describe": "Phase-0 baseline: FP16 KV, Flash Attention off, no spec decode",
+    },
+    "q8": {
+        "env": {
+            "HU_LLAMACPP_KV_QUANT": "q8_0",
+            "HU_LLAMACPP_FLASH_ATTN": "off",
+            "HU_LLAMACPP_DRAFT_MODEL": "",
+        },
+        "describe": "Phase 1: INT8 KV only (FA still off, no spec decode)",
+    },
+    "fa": {
+        "env": {
+            "HU_LLAMACPP_KV_QUANT": "",
+            "HU_LLAMACPP_FLASH_ATTN": "on",
+            "HU_LLAMACPP_DRAFT_MODEL": "",
+        },
+        "describe": "Phase 4: Flash Attention only (FP16 KV, no spec decode)",
+    },
+    "q8+fa": {
+        "env": {
+            "HU_LLAMACPP_KV_QUANT": "q8_0",
+            "HU_LLAMACPP_FLASH_ATTN": "on",
+            "HU_LLAMACPP_DRAFT_MODEL": "",
+        },
+        "describe": "Phase 1 + Phase 4 stacked",
+    },
+    "q8+fa+draft": {
+        "env": {
+            "HU_LLAMACPP_KV_QUANT": "q8_0",
+            "HU_LLAMACPP_FLASH_ATTN": "on",
+            # Operator MUST point this at their draft GGUF (use
+            # scripts/fetch-gemma.sh --draft to download). The wrapper
+            # leaves this blank so the operator notices and substitutes.
+            "HU_LLAMACPP_DRAFT_MODEL": "<set-to-draft-path>",
+        },
+        "describe": "Phase 1 + Phase 4 + Phase 3b spec decode (full Tier-1 stack)",
+    },
+}
+
+
+def compare_modes(args):
+    """Phase 4e — drive the bench through a sequence of env-var modes,
+    prompting the operator to restart the server between each. Emits a
+    per-mode JSON file and a final comparison table.
+    """
+    modes = [m.strip() for m in args.compare_modes.split(",") if m.strip()]
+    unknown = [m for m in modes if m not in COMPARE_MODES]
+    if unknown:
+        print(f"compare-modes: unknown mode(s): {unknown}", file=sys.stderr)
+        print(f"compare-modes: known modes: {sorted(COMPARE_MODES.keys())}", file=sys.stderr)
+        sys.exit(2)
+    if len(modes) < 2:
+        print(f"compare-modes: need at least 2 modes (got {modes})", file=sys.stderr)
+        sys.exit(2)
+
+    out_dir = args.compare_modes_out or "/tmp/bench-gemma"
+    os.makedirs(out_dir, exist_ok=True)
+    results_paths = []
+
+    print(f"compare-modes: running {len(modes)} modes")
+    print(f"compare-modes: results → {out_dir}/")
+    print()
+
+    for i, mode in enumerate(modes, 1):
+        cfg = COMPARE_MODES[mode]
+        print(f"━━━ [{i}/{len(modes)}] mode: {mode} ━━━")
+        print(f"  {cfg['describe']}")
+        print()
+        print("  Operator action — restart your inference server with:")
+        for k, v in cfg["env"].items():
+            if v:
+                print(f"    export {k}='{v}'")
+            else:
+                print(f"    unset  {k}")
+        print(f"    # then restart the server at {args.url}")
+        print()
+        if not args.compare_modes_yes:
+            try:
+                input("  Press Enter when the server is ready (Ctrl+C to abort)… ")
+            except KeyboardInterrupt:
+                print("\ncompare-modes: aborted", file=sys.stderr)
+                sys.exit(130)
+        else:
+            print("  (--compare-modes-yes set — proceeding without prompt)")
+        # Sanity: probe /health to confirm the server is reachable.
+        h = health(args.url)
+        if h.get("error"):
+            print(f"  warning: /health probe failed: {h['error']}", file=sys.stderr)
+
+        out_path = os.path.join(out_dir, f"bench-{mode}.json")
+        # Build a per-mode args namespace re-using the run() machinery.
+        per_mode_args = argparse.Namespace(
+            url=args.url,
+            n=args.n,
+            max_tokens=args.max_tokens,
+            tag=mode,
+            out=out_path,
+            measure_rss=args.measure_rss,
+            server_pid=args.server_pid,
+        )
+        run(per_mode_args)
+        results_paths.append(out_path)
+        print()
+
+    # Emit a comparison table: every non-baseline run diffed against
+    # the FIRST one (operator chose the order, so first is the
+    # reference). Falls through to compare() which already knows how
+    # to read two JSON files.
+    print("━━━ comparison vs first mode ━━━")
+    baseline_path = results_paths[0]
+    print(f"  reference: {baseline_path}  (mode={modes[0]})")
+    print()
+    for i in range(1, len(results_paths)):
+        print(f"  diff: {modes[0]} → {modes[i]}")
+        compare(argparse.Namespace(compare=[baseline_path, results_paths[i]]))
+        print()
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--url", default=DEFAULT_URL)
@@ -314,9 +445,22 @@ def main():
     p.add_argument("--server-pid", type=int, default=0,
                    help="explicit PID of the inference server (overrides "
                         "lsof-based auto-detection for --measure-rss).")
+    # Phase 4e — bench-day workflow wrapper.
+    p.add_argument("--compare-modes",
+                   help="comma-separated list of modes to bench in sequence. "
+                        "Known modes: " + ",".join(sorted(COMPARE_MODES.keys())) + ". "
+                        "Operator restarts the server between modes with the "
+                        "env vars the script prints.")
+    p.add_argument("--compare-modes-out",
+                   help="directory for per-mode JSON output (default /tmp/bench-gemma).")
+    p.add_argument("--compare-modes-yes", action="store_true",
+                   help="don't prompt between modes (CI / scripted operator).")
     args = p.parse_args()
     if args.compare:
         compare(args)
+        return
+    if args.compare_modes:
+        compare_modes(args)
         return
     run(args)
 
