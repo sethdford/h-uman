@@ -17,11 +17,14 @@
  * tests at the bottom. Those tests are gated off by default because they
  * would need a real-disk DB; they document how to exercise the path manually.
  */
+#include "test_framework.h"
+
+#ifdef HU_ENABLE_SQLITE
+
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
 #include "human/ml/dpo.h"
-#include "test_framework.h"
 #include <sqlite3.h>
 #include <string.h>
 
@@ -332,3 +335,9 @@ void run_reaction_handler_lookup_store_tests(void) {
     HU_RUN_TEST(test_neutral_polarity_no_dpo_row_inserted);
     HU_RUN_TEST(test_negative_polarity_records_rejected_not_chosen);
 }
+
+#else /* !HU_ENABLE_SQLITE — stub runner so the symbol always resolves */
+
+void run_reaction_handler_lookup_store_tests(void) { /* no-op when SQLite is disabled */ }
+
+#endif /* HU_ENABLE_SQLITE */

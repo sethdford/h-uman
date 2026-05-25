@@ -17,8 +17,11 @@
  *  10. orchestrator end-to-end returns NOT_SUPPORTED in test build
  */
 
-#include "human/ml/lora_nightly.h"
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_ML
+
+#include "human/ml/lora_nightly.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,3 +164,9 @@ void run_lora_nightly_tests(void) {
     HU_RUN_TEST(test_rotate_symlink_null_or_empty_args);
     HU_RUN_TEST(test_orchestrator_returns_not_supported_in_test_build);
 }
+
+#else /* !HU_ENABLE_ML — stub runner so the symbol always resolves */
+
+void run_lora_nightly_tests(void) { /* no-op when ML is disabled */ }
+
+#endif /* HU_ENABLE_ML */
