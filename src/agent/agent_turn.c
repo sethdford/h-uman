@@ -287,6 +287,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/preferences.h"
 #include "human/agent/proactive.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
 #include "human/agent/superhuman.h"
@@ -3843,15 +3844,32 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .moment_context_len = moment_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            /* B3 Phase 3 — populate trim gate fields from the operator
+             * config so the builder skips DEAD fields when both the
+             * subsystem is enabled AND the long-lived budget has enough
+             * samples. Threshold zeros fall back to builder defaults
+             * (16 bytes / 100 samples). */
+            .prompt_budget_trim_enabled =
+                agent->config ? agent->config->prompt_budget.enabled : false,
+            .prompt_budget_dead_field_min_bytes =
+                agent->config ? agent->config->prompt_budget.dead_field_min_bytes : 0,
+            .prompt_budget_min_samples_before_tag =
+                agent->config ? agent->config->prompt_budget.min_samples_before_tag : 0,
         };
-        /* Sprint 55 B3 — thread the agent's prompt-budget observer.
-         * The builder's per-field stats are fed into it; when enough
-         * observations accumulate AND cfg.prompt_budget_trim_enabled
-         * is true, the trim gate skips DEAD fields. stats out-array
-         * is NULL (we don't need a per-call snapshot — the budget
-         * accumulator is the source of truth for the doctor check). */
-        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, agent->prompt_budget, &system_prompt,
-                                     &system_prompt_len);
+        /* B3 Phase 3 — observation half of the wire. The parallel B3
+         * commit (d5485023) threads agent->prompt_budget for the trim
+         * READ side (is_dead check) but passed NULL stats and never
+         * called observe, leaving observation_count permanently 0 and
+         * the trim gate inert. Stack stats array captures per-field
+         * bytes; hu_prompt_budget_observe folds them into the long-
+         * lived accumulator so doctor + the trim gate have real data. */
+        hu_prompt_field_stat_t prompt_field_stats[HU_PROMPT_FIELD_COUNT] = {0};
+        err = hu_prompt_build_system(agent->alloc, &cfg, prompt_field_stats, agent->prompt_budget,
+                                     &system_prompt, &system_prompt_len);
+        if (err == HU_OK && agent->prompt_budget) {
+            hu_prompt_budget_observe(agent->prompt_budget, prompt_field_stats,
+                                     HU_PROMPT_FIELD_COUNT);
+        }
         /* Prompt-size budget guard. MLX backends return empty responses
          * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:
          * body_len=28291 → "Server returned nothing"). Cap at 16 KB so
@@ -7410,55 +7428,54 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         }
                     }
                     if (mod_result.violence) {
-                        hu_log_info("agent_turn", NULL,
-                                    "violence flagged (score=%.2f), "
-                                    "injecting de-escalation\n",
+                        hu_log_warn("agent_turn", NULL,
+                                    "CRITICAL FIX 2026-05-26: violence flagged "
+                                    "(score=%.2f); replacing unsafe LLM output with safe "
+                                    "canned response. Prior code path prepended the "
+                                    "internal [SAFETY] directive text TO the outgoing "
+                                    "message, which sent the directive verbatim to the "
+                                    "recipient (Betty Ford got '[SAFETY] This response "
+                                    "touches on violence. De-escalate...'). Directive was "
+                                    "intended for system-prompt regenerate, not "
+                                    "user-facing reply. Band-aid: replace with safe "
+                                    "decline; proper fix is regenerate-with-sterner-prompt.",
                                     mod_result.violence_score);
-                        /* Inject de-escalation directive */
-                        static const char deesc[] = "[SAFETY] This response touches on violence. "
-                                                    "De-escalate: acknowledge feelings without "
-                                                    "endorsing harm. Redirect toward constructive "
-                                                    "alternatives.";
-                        size_t dir_len = sizeof(deesc) - 1;
-                        size_t orig_len = *response_len_out;
-                        size_t new_len = dir_len + 2 + orig_len;
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+                        /* Replace unsafe output with a safe canned decline.
+                         * Seth-shaped, short, no bracket markers, no directive
+                         * text. Channel receives this and sends. */
+                        static const char safe_decline[] = "rather not get into that one";
+                        size_t safe_len = sizeof(safe_decline) - 1;
+                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
                         if (safe) {
-                            memcpy(safe, deesc, dir_len);
-                            safe[dir_len] = '\n';
-                            safe[dir_len + 1] = '\n';
-                            memcpy(safe + dir_len + 2, *response_out, orig_len);
-                            safe[new_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
+                            memcpy(safe, safe_decline, safe_len);
+                            safe[safe_len] = '\0';
+                            agent->alloc->free(agent->alloc->ctx, *response_out,
+                                               *response_len_out + 1);
                             *response_out = safe;
-                            *response_len_out = new_len;
+                            *response_len_out = safe_len;
                         }
                     }
                     if (mod_result.hate) {
                         hu_log_info("agent_turn", NULL,
-                                    "hate speech flagged (score=%.2f), "
-                                    "injecting boundary\n",
+                                    "hate speech flagged (score=%.2f); "
+                                    "replacing with safe decline (was prepending "
+                                    "[SAFETY] boundary directive to outgoing — same "
+                                    "class of bug as the violence branch above)",
                                     mod_result.hate_score);
-                        /* Inject boundary-setting directive */
-                        static const char boundary[] =
-                            "[SAFETY] This response contains content "
-                            "targeting groups based on identity. Set a "
-                            "clear boundary: \"I can't engage with content "
-                            "that targets people based on who they are.\" "
-                            "Redirect the conversation respectfully.";
-                        size_t dir_len = sizeof(boundary) - 1;
-                        size_t orig_len = *response_len_out;
-                        size_t new_len = dir_len + 2 + orig_len;
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+                        /* Replace unsafe output with a safe canned decline.
+                         * Prior code prepended the boundary directive text to
+                         * *response_out, which sent the directive verbatim to
+                         * the recipient. */
+                        static const char hate_decline[] = "i'm gonna pass on this one";
+                        size_t safe_len = sizeof(hate_decline) - 1;
+                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
                         if (safe) {
-                            memcpy(safe, boundary, dir_len);
-                            safe[dir_len] = '\n';
-                            safe[dir_len + 1] = '\n';
-                            memcpy(safe + dir_len + 2, *response_out, orig_len);
-                            safe[new_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
+                            memcpy(safe, hate_decline, safe_len);
+                            safe[safe_len] = '\0';
+                            agent->alloc->free(agent->alloc->ctx, *response_out,
+                                               *response_len_out + 1);
                             *response_out = safe;
-                            *response_len_out = new_len;
+                            *response_len_out = safe_len;
                         }
                     }
                 }
