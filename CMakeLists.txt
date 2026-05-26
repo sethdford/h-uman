@@ -918,6 +918,16 @@ set(HU_CORE_SOURCES
     src/agent/response_guard.c
     src/agent/response_guard_retry.c
     src/agent/outbound_sanitize.c
+    # Sprint 59 — outbound validation pipeline (composable stages).
+    # See docs/plans/2026-05-26-sprint-59-outbound-safety/design.md
+    src/agent/outbound/pipeline.c
+    src/agent/outbound/pipeline_configs.c
+    src/agent/outbound/strip.c
+    src/agent/outbound/shape.c
+    src/agent/outbound/echo.c
+    src/agent/outbound/crosstalk.c
+    src/agent/outbound/persona.c
+    src/agent/outbound/moderation.c
     src/agent/multimodal_policy.c
     src/agent/persona_eval.c
     src/agent/verifier_metrics.c
@@ -3317,6 +3327,8 @@ set(HU_TEST_SOURCES
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    # Sprint 59 — outbound validation pipeline (Phase A runner contract).
+    tests/test_outbound_pipeline.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
