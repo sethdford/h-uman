@@ -407,6 +407,9 @@ if(HU_ENABLE_IMESSAGE)
     # reply style per conversation (flat/threaded/tapback variants).
     # Wired at send time before hu_imessage_send. Pure classifier.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
+    # Tier 1 Phase 2 (iMessage action surface F1): build facts struct from
+    # conversation state. Pure bridge between dispatcher (F2) and predicate (Phase A).
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
     # Threaded inline reply path (Tier 1: Cmd-R via AX, Tier 2/3 in C2/C3).
     list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 endif()
@@ -3251,6 +3254,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
     tests/test_imessage_custom_tapback.c
+    tests/test_imessage_action_facts.c
     tests/test_imessage_sticker.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
