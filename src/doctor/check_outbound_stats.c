@@ -28,17 +28,8 @@
  * use is fine because doctor runs checks sequentially. */
 static char s_detail_buf[HU_DOCTOR_OUTBOUND_STATS_JSON_BUF];
 
-/* Verdict-kind names in stable wire order. Matches the integer
- * values of hu_outbound_verdict_kind_t (SEND=0..REJECT=3). */
-static const char *const VERDICT_FIELD_NAMES[HU_OUTBOUND_STATS_VERDICT_COUNT] = {
-    "send",
-    "rewrite",
-    "regenerate",
-    "reject",
-};
-
-size_t hu_doctor_check_outbound_stats_render_json(
-    const struct hu_outbound_stats_snapshot *snap, char *buf, size_t cap) {
+size_t hu_doctor_check_outbound_stats_render_json(const struct hu_outbound_stats_snapshot *snap,
+                                                  char *buf, size_t cap) {
     if (!snap || !buf || cap == 0)
         return 0;
     /* Per-verdict totals across all stages, computed inline. */
@@ -60,10 +51,8 @@ size_t hu_doctor_check_outbound_stats_render_json(
         n = snprintf(buf + off, cap - off,
                      "%s{\"name\":\"%s\",\"send\":%llu,\"rewrite\":%llu,"
                      "\"regenerate\":%llu,\"reject\":%llu}",
-                     s == 0 ? "" : ",", stage_name,
-                     (unsigned long long)snap->counts[s][0],
-                     (unsigned long long)snap->counts[s][1],
-                     (unsigned long long)snap->counts[s][2],
+                     s == 0 ? "" : ",", stage_name, (unsigned long long)snap->counts[s][0],
+                     (unsigned long long)snap->counts[s][1], (unsigned long long)snap->counts[s][2],
                      (unsigned long long)snap->counts[s][3]);
         if (n < 0 || (size_t)n >= cap - off)
             return 0;
@@ -78,8 +67,6 @@ size_t hu_doctor_check_outbound_stats_render_json(
     if (n < 0 || (size_t)n >= cap - off)
         return 0;
     off += (size_t)n;
-    (void)VERDICT_FIELD_NAMES; /* reserved for a future variant that emits
-                                * verdict_kind => count maps */
     return off;
 }
 
@@ -98,8 +85,8 @@ static hu_doctor_check_result_t outbound_stats_run(hu_doctor_check_t *self, void
         result.reason = "outbound stats snapshot unavailable";
         return result;
     }
-    size_t written = hu_doctor_check_outbound_stats_render_json(
-        &snap, s_detail_buf, sizeof(s_detail_buf));
+    size_t written =
+        hu_doctor_check_outbound_stats_render_json(&snap, s_detail_buf, sizeof(s_detail_buf));
     if (written == 0) {
         /* JSON buffer too small (unlikely with 2KB) or snprintf
          * error. Surface as PASS with no detail so the check doesn't
