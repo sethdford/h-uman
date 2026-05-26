@@ -400,6 +400,92 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
     }
 }
 
+/* Call the LLM via the structured chat() vtable so we can set the three
+ * controls chat_with_system() hides:
+ *
+ *   max_tokens = 512        — enough for the compact JSON decision
+ *                             {"should_propose":bool,"confidence":num,
+ *                              "draft":"...","reason":"..."} comfortably.
+ *
+ *   thinking_budget = 0     — this is a DETERMINISTIC binary classifier,
+ *                             not a reasoning task. Gemini 3.x defaults
+ *                             thinking ON with a large invisible budget
+ *                             that comes out of max_tokens. Production
+ *                             logs (2026-05-26) showed `err=42` (JSON
+ *                             parse fail) on responses truncated to
+ *                             ~57 chars at `"draft": "",` — thinking
+ *                             ate the budget. CLAUDE.md "Gemini 3.x
+ *                             thinking-token budget gotcha" documents
+ *                             this exact failure mode.
+ *
+ *   response_format = json   — providers that honor JSON mode force the
+ *                             output shape. Gemini-3.x respects it.
+ *
+ * On success, caller takes ownership of *out_response (heap, alloc) and
+ * MUST free via alloc->free(*out_response, *out_response_len + 1).
+ *
+ * On failure, *out_response is NULL.
+ */
+static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provider *provider,
+                                         const char *sys_prompt, const char *user_msg,
+                                         const char *model, char **out_response,
+                                         size_t *out_response_len) {
+    *out_response = NULL;
+    *out_response_len = 0;
+
+    /* Prefer the structured chat() vtable. Some test mocks only set
+     * chat_with_system(); fall back so we don't break those callers. */
+    if (provider->vtable && provider->vtable->chat) {
+        hu_chat_message_t msgs[2];
+        memset(msgs, 0, sizeof(msgs));
+        msgs[0].role = HU_ROLE_SYSTEM;
+        msgs[0].content = sys_prompt;
+        msgs[0].content_len = strlen(sys_prompt);
+        msgs[1].role = HU_ROLE_USER;
+        msgs[1].content = user_msg;
+        msgs[1].content_len = strlen(user_msg);
+
+        hu_chat_request_t req;
+        memset(&req, 0, sizeof(req));
+        req.messages = msgs;
+        req.messages_count = 2;
+        req.model = model;
+        req.model_len = strlen(model);
+        req.temperature = 0.2;
+        req.max_tokens = 512;    /* compact JSON; not a long-form generation */
+        req.thinking_budget = 0; /* deterministic classifier — no thinking */
+        req.response_format = "json_object";
+        req.response_format_len = strlen("json_object");
+
+        hu_chat_response_t resp;
+        memset(&resp, 0, sizeof(resp));
+        hu_error_t err =
+            provider->vtable->chat(provider->ctx, alloc, &req, model, strlen(model), 0.2, &resp);
+        if (err == HU_OK && resp.content && resp.content_len > 0) {
+            char *buf = (char *)alloc->alloc(alloc->ctx, resp.content_len + 1);
+            if (buf) {
+                memcpy(buf, resp.content, resp.content_len);
+                buf[resp.content_len] = '\0';
+                *out_response = buf;
+                *out_response_len = resp.content_len;
+            } else {
+                err = HU_ERR_OUT_OF_MEMORY;
+            }
+        }
+        hu_chat_response_free(alloc, &resp);
+        return err;
+    }
+
+    /* Fallback path for providers/mocks without structured chat(). The
+     * truncation risk above DOES apply here, but it's the only path
+     * available — better to attempt than to hard-fail. */
+    if (!provider->vtable || !provider->vtable->chat_with_system)
+        return HU_ERR_NOT_SUPPORTED;
+    return provider->vtable->chat_with_system(provider->ctx, alloc, sys_prompt, strlen(sys_prompt),
+                                              user_msg, strlen(user_msg), model, strlen(model), 0.2,
+                                              out_response, out_response_len);
+}
+
 hu_error_t hu_init_proposer_parse_response(const char *response, size_t response_len,
                                            hu_init_decision_t *out) {
     if (!response || !out)
@@ -523,17 +609,15 @@ hu_error_t hu_init_proposer_tick_with_provider(
         memset(out_decision, 0, sizeof(*out_decision));
     return HU_OK;
 #else
-    /* Production: call provider->chat_with_system, parse response,
-     * evaluate against confidence threshold. */
+    /* Production: structured chat() with max_tokens + thinking_budget=0
+     * + response_format=json. See init_proposer_call_llm helper for the
+     * full rationale on each request field. */
     const char *model =
         (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
     char *response = NULL;
     size_t response_len = 0;
-    /* Temperature 0.2 — the decision is largely deterministic; a bit of
-     * sampling jitter helps when the bundle is borderline. */
-    hu_error_t lerr = provider->vtable->chat_with_system(
-        provider->ctx, alloc, sys_prompt, strlen(sys_prompt), user_msg, strlen(user_msg), model,
-        strlen(model), 0.2, &response, &response_len);
+    hu_error_t lerr = init_proposer_call_llm(alloc, provider, sys_prompt, user_msg, model,
+                                             &response, &response_len);
     if (lerr != HU_OK || !response || response_len == 0) {
         hu_log_warn("init_proposer", NULL, "LLM call failed: err=%d (response_len=%zu)", (int)lerr,
                     response_len);
@@ -760,9 +844,8 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
         (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
     char *response = NULL;
     size_t response_len = 0;
-    hu_error_t lerr = provider->vtable->chat_with_system(
-        provider->ctx, alloc, sys_prompt, strlen(sys_prompt), user_msg, strlen(user_msg), model,
-        strlen(model), 0.2, &response, &response_len);
+    hu_error_t lerr = init_proposer_call_llm(alloc, provider, sys_prompt, user_msg, model,
+                                             &response, &response_len);
     if (lerr != HU_OK || !response || response_len == 0) {
         hu_log_warn("init_proposer", NULL, "LLM call (ex) failed: err=%d (response_len=%zu)",
                     (int)lerr, response_len);
