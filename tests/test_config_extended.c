@@ -554,12 +554,13 @@ static void test_config_parse_agent_context_pressure(void) {
 
 static void test_config_parse_agent_metacognition(void) {
     hu_config_t *cfg = make_config_with_arena();
-    const char *j = "{\"agent\":{\"metacognition\":{"
-                    "\"enabled\":true,\"confidence_threshold\":0.25,\"coherence_threshold\":0.15,"
-                    "\"repetition_threshold\":0.55,\"max_reflects\":3,\"max_regen\":2,"
-                    "\"hysteresis_min\":4,\"use_calibrated_risk\":false,\"risk_high_threshold\":0.71,"
-                    "\"w_low_confidence\":0.11,\"w_low_coherence\":0.12,\"w_repetition\":0.13,"
-                    "\"w_stuck\":0.14,\"w_low_satisfaction\":0.15,\"w_low_trajectory\":0.16}}}";
+    const char *j =
+        "{\"agent\":{\"metacognition\":{"
+        "\"enabled\":true,\"confidence_threshold\":0.25,\"coherence_threshold\":0.15,"
+        "\"repetition_threshold\":0.55,\"max_reflects\":3,\"max_regen\":2,"
+        "\"hysteresis_min\":4,\"use_calibrated_risk\":false,\"risk_high_threshold\":0.71,"
+        "\"w_low_confidence\":0.11,\"w_low_coherence\":0.12,\"w_repetition\":0.13,"
+        "\"w_stuck\":0.14,\"w_low_satisfaction\":0.15,\"w_low_trajectory\":0.16}}}";
     hu_error_t err = hu_config_parse_json(cfg, j, strlen(j));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(cfg->agent.metacognition.enabled);
@@ -924,7 +925,8 @@ static void test_config_parse_default_model_provider_prefix(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg = {0};
     hu_config_load(&backing, &cfg);
-    const char *j = "{\"default_provider\":\"gemini\",\"default_model\":\"gemini-3.1-flash-lite-preview\"}";
+    const char *j =
+        "{\"default_provider\":\"gemini\",\"default_model\":\"gemini-3.1-flash-lite-preview\"}";
     hu_config_parse_json(&cfg, j, strlen(j));
     HU_ASSERT_STR_EQ(cfg.default_provider, "gemini");
     HU_ASSERT_STR_EQ(cfg.default_model, "gemini-3.1-flash-lite-preview");
@@ -1284,11 +1286,10 @@ static void test_config_parse_very_long_key_value(void) {
 
 static void test_config_parse_model_router_judge(void) {
     hu_config_t *cfg = make_config_with_arena();
-    const char *json =
-        "{\"agent\":{\"model_router\":{\"judge_enabled\":true,"
-        "\"judge_model\":\"gemini-3.1-flash-lite-preview\","
-        "\"reflexive_model\":\"gemini-3.1-flash-lite-preview\","
-        "\"deep_model\":\"gemini-3.1-pro-preview\"}}}";
+    const char *json = "{\"agent\":{\"model_router\":{\"judge_enabled\":true,"
+                       "\"judge_model\":\"gemini-3.1-flash-lite-preview\","
+                       "\"reflexive_model\":\"gemini-3.1-flash-lite-preview\","
+                       "\"deep_model\":\"gemini-3.1-pro-preview\"}}}";
     hu_error_t err = hu_config_parse_json(cfg, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(cfg->agent.mr_judge_enabled);
@@ -1313,9 +1314,8 @@ static void test_config_parse_model_router_judge_disabled_by_default(void) {
 
 static void test_config_parse_on_device_model(void) {
     hu_config_t *cfg = make_config_with_arena();
-    const char *json =
-        "{\"agent\":{\"model_router\":{\"on_device_model\":\"custom-model\","
-        "\"on_device_enabled\":false}}}";
+    const char *json = "{\"agent\":{\"model_router\":{\"on_device_model\":\"custom-model\","
+                       "\"on_device_enabled\":false}}}";
     hu_error_t err = hu_config_parse_json(cfg, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(cfg->agent.mr_on_device_model);
@@ -1340,7 +1340,8 @@ static void test_config_parse_on_device_enabled_default(void) {
 
 static void test_config_parse_persona_contacts_populated(void) {
     hu_config_t *cfg = make_config_with_arena();
-    const char *j = "{\"agent\":{\"persona_contacts\":{\"alice\":\"friendly\",\"bob\":\"formal\"}}}";
+    const char *j =
+        "{\"agent\":{\"persona_contacts\":{\"alice\":\"friendly\",\"bob\":\"formal\"}}}";
     hu_config_parse_json(cfg, j, strlen(j));
     HU_ASSERT_EQ(cfg->agent.persona_contacts_count, 2u);
     HU_ASSERT_NOT_NULL(cfg->agent.persona_contacts);
@@ -1380,6 +1381,116 @@ static void test_config_parse_persona_contacts_non_object_clears(void) {
     HU_ASSERT_EQ(cfg->agent.persona_contacts_count, 0u);
     HU_ASSERT_NULL(cfg->agent.persona_contacts);
     free_config(cfg);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * M3 Bridge B Phase B4 T2 — mlx_local SSE-streaming config contract.
+ *
+ * Pins the operator-facing surface of the new cfg.mlx_local sub-object:
+ *   - streaming_enabled defaults to true (opt-out, not opt-in, because
+ *     the buffered fallback path is correct and silent opt-in would
+ *     hide the latency win from operators who never read changelogs)
+ *   - first_token_budget_ms defaults to 500 (warn-once threshold)
+ *   - JSON overrides win
+ *   - Defensive: zero / negative first_token_budget_ms doesn't overwrite
+ *     the established default — the parser guards with `if (budget > 0)`
+ * ──────────────────────────────────────────────────────────────────── */
+
+static void test_config_mlx_local_streaming_defaults_true(void) {
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    setenv("HOME", "/nonexistent_human_mlx_local_default_test", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
+    /* Default per spec D6 — opt-OUT, not opt-in. */
+    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
+    hu_config_deinit(&cfg);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else
+        unsetenv("HOME");
+}
+
+static void test_config_mlx_local_first_token_budget_defaults_500(void) {
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    setenv("HOME", "/nonexistent_human_mlx_local_budget_test", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
+    HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 500);
+    hu_config_deinit(&cfg);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else
+        unsetenv("HOME");
+}
+
+static void test_config_mlx_local_streaming_disabled_via_json(void) {
+    /* Operator opt-out path: explicit false in JSON wins over the
+     * default-true. After this lands, the daemon emits a one-shot
+     * info log line per silent-config-gated-subsystems.md. */
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    setenv("HOME", "/nonexistent_human_mlx_local_disable_test", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
+    /* Override via parse-json after defaults are seeded. */
+    const char *json = "{\"mlx_local\":{\"streaming_enabled\":false}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
+    /* Budget default must be preserved since the JSON didn't touch it. */
+    HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 500);
+    hu_config_deinit(&cfg);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else
+        unsetenv("HOME");
+}
+
+static void test_config_mlx_local_first_token_budget_override(void) {
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    setenv("HOME", "/nonexistent_human_mlx_local_budget_override_test", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
+    const char *json = "{\"mlx_local\":{\"first_token_budget_ms\":250}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+    HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 250);
+    /* streaming_enabled default must survive an override that only sets
+     * the sibling field. */
+    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
+    hu_config_deinit(&cfg);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else
+        unsetenv("HOME");
+}
+
+static void test_config_mlx_local_negative_budget_keeps_default(void) {
+    /* Defensive parse: a negative or zero budget value MUST NOT overwrite
+     * the established default. Operator typo (e.g. -1 from a misplaced
+     * minus sign) shouldn't silently disable the warn-once latency
+     * threshold by setting the budget to <=0. */
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    setenv("HOME", "/nonexistent_human_mlx_local_negative_budget_test", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg = {0};
+    HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
+    HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 500);
+    const char *json = "{\"mlx_local\":{\"first_token_budget_ms\":-1}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+    /* Default preserved — guard is `if (budget > 0)`. */
+    HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 500);
+    hu_config_deinit(&cfg);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else
+        unsetenv("HOME");
 }
 
 void run_config_extended_tests(void) {
@@ -1516,4 +1627,10 @@ void run_config_extended_tests(void) {
     HU_RUN_TEST(test_config_parse_persona_contacts_empty_object);
     HU_RUN_TEST(test_config_parse_persona_contacts_reload_clears);
     HU_RUN_TEST(test_config_parse_persona_contacts_non_object_clears);
+    /* M3 Bridge B Phase B4 T2 — mlx_local SSE-streaming config gate. */
+    HU_RUN_TEST(test_config_mlx_local_streaming_defaults_true);
+    HU_RUN_TEST(test_config_mlx_local_first_token_budget_defaults_500);
+    HU_RUN_TEST(test_config_mlx_local_streaming_disabled_via_json);
+    HU_RUN_TEST(test_config_mlx_local_first_token_budget_override);
+    HU_RUN_TEST(test_config_mlx_local_negative_budget_keeps_default);
 }

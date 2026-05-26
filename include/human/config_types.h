@@ -109,6 +109,32 @@ typedef struct hu_molora_config {
     hu_molora_channel_entry_t entries[HU_MOLORA_CONFIG_MAX_CHANNELS];
 } hu_molora_config_t;
 
+/* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
+ * configuration for the production daemon's HTTP-based mlx_local
+ * provider when it talks to a streaming mlx-server.
+ *
+ * `streaming_enabled` (default TRUE) opts INTO the SSE-streaming path
+ * for chat completions; falling back to the buffered response shape
+ * when set to FALSE. Default true because the fallback path is
+ * correct — opt-in would mean the latency win never reaches anyone
+ * who doesn't read the changelog. Operators flip to false only when
+ * diagnosing a streaming-specific regression.
+ *
+ * `first_token_budget_ms` (default 500) is the operator-visible budget
+ * for the first SSE event to arrive after POST send. If the actual
+ * first-token latency exceeds this, the provider logs warn-once with
+ * the measured value so operators can decide whether the server has
+ * regressed.
+ *
+ * When streaming_enabled=false, the daemon emits one info-level log
+ * line at startup per ~/.claude/rules/silent-config-gated-subsystems.md
+ * — operators must never silently lose the streaming win without
+ * seeing the disabled reason. */
+typedef struct hu_mlx_local_config {
+    bool streaming_enabled;    /* default true */
+    int first_token_budget_ms; /* default 500; <=0 clamps to 500 */
+} hu_mlx_local_config_t;
+
 typedef struct hu_personalization_config {
     bool enabled;
     char *lora_adapter_path;

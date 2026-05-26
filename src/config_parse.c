@@ -418,13 +418,70 @@ static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *o
     return HU_OK;
 }
 
+/* M3 B4 T2 — parse the `mlx_local` config block. Defaults are seeded in
+ * hu_config_load_defaults; this parser only updates fields the user
+ * explicitly set. Non-positive first_token_budget_ms is clamped to the
+ * default at validate time, not here. */
+static hu_error_t parse_mlx_local(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->mlx_local.streaming_enabled =
+        hu_json_get_bool(obj, "streaming_enabled", cfg->mlx_local.streaming_enabled);
+    int budget =
+        (int)hu_json_get_number(obj, "first_token_budget_ms", cfg->mlx_local.first_token_budget_ms);
+    if (budget > 0)
+        cfg->mlx_local.first_token_budget_ms = budget;
+    return HU_OK;
+}
+
 /* Sprint 41 follow-up #2 — operator-facing runtime knobs for response_guard.
  * Currently just the G9 kill switch; future detectors land here. */
-static hu_error_t parse_response_guard(hu_config_t *cfg, const hu_json_value_t *obj) {
+static hu_error_t parse_response_guard(hu_allocator_t *a, hu_config_t *cfg,
+                                       const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
     cfg->response_guard.naked_opener_enabled =
         hu_json_get_bool(obj, "naked_opener_enabled", cfg->response_guard.naked_opener_enabled);
+
+    /* Sprint 41 follow-up #4 — disabled_channels: array of channel-name
+     * strings on which G9 should NOT fire. Default empty (G9 active on
+     * all channels). Capped at HU_RESPONSE_GUARD_MAX_DISABLED_CHANNELS;
+     * extra entries are silently dropped (operators won't list 32+). */
+    hu_json_value_t *dc = hu_json_object_get(obj, "g9_disabled_channels");
+    if (dc && dc->type == HU_JSON_ARRAY) {
+        /* Free any previous list (config reload re-populates). */
+        if (cfg->response_guard.g9_disabled_channels) {
+            for (size_t i = 0; i < cfg->response_guard.g9_disabled_channels_count; i++) {
+                if (cfg->response_guard.g9_disabled_channels[i])
+                    a->free(a->ctx, cfg->response_guard.g9_disabled_channels[i],
+                            strlen(cfg->response_guard.g9_disabled_channels[i]) + 1);
+            }
+            a->free(a->ctx, cfg->response_guard.g9_disabled_channels,
+                    cfg->response_guard.g9_disabled_channels_count * sizeof(char *));
+            cfg->response_guard.g9_disabled_channels = NULL;
+            cfg->response_guard.g9_disabled_channels_count = 0;
+        }
+        size_t cap = dc->data.array.len;
+        if (cap > HU_RESPONSE_GUARD_MAX_DISABLED_CHANNELS)
+            cap = HU_RESPONSE_GUARD_MAX_DISABLED_CHANNELS;
+        if (cap > 0) {
+            cfg->response_guard.g9_disabled_channels =
+                (char **)a->alloc(a->ctx, cap * sizeof(char *));
+            if (!cfg->response_guard.g9_disabled_channels)
+                return HU_ERR_OUT_OF_MEMORY;
+            for (size_t i = 0; i < cap; i++) {
+                hu_json_value_t *item = dc->data.array.items[i];
+                if (!item || item->type != HU_JSON_STRING)
+                    continue;
+                cfg->response_guard
+                    .g9_disabled_channels[cfg->response_guard.g9_disabled_channels_count] =
+                    hu_strdup(a, item->data.string.ptr);
+                if (cfg->response_guard
+                        .g9_disabled_channels[cfg->response_guard.g9_disabled_channels_count])
+                    cfg->response_guard.g9_disabled_channels_count++;
+            }
+        }
+    }
     return HU_OK;
 }
 
@@ -1487,10 +1544,21 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         }
     }
 
+    /* M3 Bridge B Phase B4 — mlx_local HTTP-streaming gate +
+     * first-token budget. See docs/plans/2026-05-26-m3-b4-mlx-local-sse/. */
+    hu_json_value_t *ml_obj = hu_json_object_get(root, "mlx_local");
+    if (ml_obj) {
+        hu_error_t mle = parse_mlx_local(cfg, ml_obj);
+        if (mle != HU_OK) {
+            hu_json_free(a, root);
+            return mle;
+        }
+    }
+
     /* Sprint 41 follow-up #2 — response_guard runtime knobs (G9 kill switch). */
     hu_json_value_t *rg_obj = hu_json_object_get(root, "response_guard");
     if (rg_obj) {
-        hu_error_t rge = parse_response_guard(cfg, rg_obj);
+        hu_error_t rge = parse_response_guard(a, cfg, rg_obj);
         if (rge != HU_OK) {
             hu_json_free(a, root);
             return rge;

@@ -84,6 +84,12 @@ static const char *const hu_config_top_keys[] = {
      * docs/plans/2026-05-25-director-compression/. Disabled by default;
      * Phase 1 ships the measurement, Phase 2 wires the trim. */
     "prompt_budget",
+    /* 2026-05-26: M3 Bridge B Phase B4 — mlx_local SSE streaming gate
+     * + first-token budget. See docs/plans/2026-05-26-m3-b4-mlx-local-sse/.
+     * streaming_enabled defaults true; operator opts out via
+     * {"mlx_local": {"streaming_enabled": false}} to diagnose
+     * streaming-specific regressions. */
+    "mlx_local",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);

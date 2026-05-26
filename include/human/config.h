@@ -319,7 +319,19 @@ typedef struct hu_response_guard_config {
      * hu_response_guard_set_naked_opener_globally_disabled() applies
      * !naked_opener_enabled at daemon startup. */
     bool naked_opener_enabled;
+    /* Sprint 41 follow-up #4 — per-channel G9 disable list. When a
+     * channel name appears here, G9 does not fire on outbound messages
+     * to that channel. Use case: voice channel where short backchannel-
+     * style openings can be valid (listener hears them as conversational
+     * fillers, not written gibberish). Caller-owned heap strings;
+     * freed via hu_config_deinit. */
+    char **g9_disabled_channels;
+    size_t g9_disabled_channels_count;
 } hu_response_guard_config_t;
+
+/* Hard cap on the disabled-channels list — bounds the parse-time array
+ * allocation. Generous; production channel inventory is small. */
+#define HU_RESPONSE_GUARD_MAX_DISABLED_CHANNELS 32
 
 typedef struct hu_imessage_channel_config {
     char *default_target;
@@ -744,6 +756,7 @@ typedef struct hu_config {
     hu_cron_config_t cron;
     hu_scheduler_config_t scheduler;
     hu_personalization_config_t personalization;
+    hu_mlx_local_config_t mlx_local; /* B4: streaming gate + first-token budget */
     hu_learning_config_t learning;   /* Spec 2026-05-19 — DPO pair-count training trigger */
     hu_inference_config_t inference; /* US-7.7 — best-of-N at inference (default off) */
     hu_behavior_config_t behavior;

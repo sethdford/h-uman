@@ -437,6 +437,17 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * operator opts out via {"response_guard": {"naked_opener_enabled":
      * false}} in config.json. */
     cfg->response_guard.naked_opener_enabled = true;
+
+    /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
+     * mlx_local streaming defaults. SSE consumption is ON by default
+     * because the fallback to buffered response is correct; opt-in would
+     * mean the latency win never reaches anyone who doesn't read the
+     * changelog. Operator flips to false via
+     * {"mlx_local": {"streaming_enabled": false}} only when diagnosing
+     * a streaming-specific regression. first_token_budget_ms is the
+     * threshold above which the provider logs warn-once. */
+    cfg->mlx_local.streaming_enabled = true;
+    cfg->mlx_local.first_token_budget_ms = 500;
 }
 
 static void sync_autonomy_level_from_string(hu_config_t *cfg) {

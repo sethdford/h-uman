@@ -28,6 +28,9 @@
 #include "human/agent/lora_runner.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#ifdef HU_ENABLE_SQLITE
+#include "human/agent/outbound_crosstalk_sqlite.h"
+#endif
 #include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
@@ -2786,6 +2789,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
     }
 
+#ifdef HU_ENABLE_SQLITE
+    /* Sprint 60 follow-up — wire outbound crosstalk stage's cross-contact
+     * bleed check to the production messages table. The stage already
+     * shipped (Sprint 59 Phase B); without a registered lookup it runs
+     * in degraded mode (metadata-pattern check only). Registration is
+     * conditional on agent->memory being SQLite-backed; the corresponding
+     * unregister sits with the personal-model teardown below so the
+     * static callback never sees a freed sqlite3 *. */
+    if (agent && agent->memory) {
+        sqlite3 *crosstalk_db = hu_sqlite_memory_get_db(agent->memory);
+        hu_outbound_crosstalk_register_sqlite(crosstalk_db);
+    }
+#endif
+
     /* Sprint A.7 — daemon-side identity-graph loader.
      *
      * Activates cross-channel canonicalization: "Alice@imessage" +
@@ -3283,6 +3300,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          "personalization.lora_adapter_path=\"~/.human/...\" in config.json. "
                          "Common mistake: mlx_local.adapter_path is NOT the right key.",
                          why);
+    }
+
+    /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
+     * silent-config-gated warning per ~/.claude/rules/silent-config-
+     * gated-subsystems.md. When the operator has explicitly disabled
+     * SSE streaming, surface the fact at startup so they don't later
+     * wonder why the latency win is missing. The T4 mlx_local consumer
+     * will honor this flag; until T4 lands, this warning is purely
+     * informational (production traffic still uses the buffered path
+     * regardless of the flag). */
+    if (agent && config && !config->mlx_local.streaming_enabled) {
+        static atomic_bool warned_mlx_streaming_off = false;
+        hu_log_info_once(&warned_mlx_streaming_off, "human", agent->observer,
+                         "mlx_local: SSE streaming DISABLED by config "
+                         "(mlx_local.streaming_enabled=false). All chat completions will "
+                         "use the buffered-response path. To re-enable streaming, set "
+                         "{\"mlx_local\": {\"streaming_enabled\": true}} in config.json "
+                         "or remove the override (default is true).");
     }
     if (config && config->personalization.enabled && config->personalization.lora_adapter_path &&
         agent && agent->provider.vtable) {
@@ -14044,6 +14079,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+#ifdef HU_ENABLE_SQLITE
+    /* Sprint 60 follow-up teardown: clear the static crosstalk lookup
+     * BEFORE the SQLite memory is closed so the callback never sees a
+     * freed sqlite3 *. Idempotent — safe if registration didn't fire
+     * (e.g. agent->memory was non-SQLite). */
+    hu_outbound_crosstalk_unregister_sqlite();
+#endif
     /* Sprint A.7 teardown: detach the identity graph borrow. The static
      * storage itself is process-lifetime; this just ensures the reaction
      * handler doesn't hold a stale pointer if the process ever live-reloads. */
