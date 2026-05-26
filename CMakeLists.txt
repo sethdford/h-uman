@@ -3247,6 +3247,7 @@ tests/test_imessage_action_telemetry.c
 tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
+    tests/test_imessage_custom_tapback.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c

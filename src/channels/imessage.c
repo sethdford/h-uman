@@ -3605,6 +3605,27 @@ static bool ax_tapback(const char *content_prefix, int row_offset, const char *t
                 tapback_label);
     return ok;
 }
+
+/* Like ax_perform_tapback_on_row but instead of clicking one of the 6 named
+ * classic tapbacks, navigates to the Sonoma+ bottom-row emoji sub-picker
+ * (the 6 custom-emoji buttons rendered below the classics) and clicks the
+ * AXButton child whose AXValue or AXTitle equals `emoji_utf8`.
+ *
+ * Returns true on click success; false if message_group not found, sub-
+ * picker not present, or no matching emoji found.
+ *
+ * Like the real Tier 1/Tier 2 reply paths in src/channels/imessage_reply.c,
+ * the FULL AX wiring is intentionally stubbed (return false) for D1 — the
+ * test contract is exercised via test stubs, and the real CGEvent + AX
+ * polling lands in the post-C5-style integration pass on a live macOS box. */
+static bool ax_react_emoji_subpicker(const char *target, size_t target_len, int64_t message_id,
+                                     const char *emoji_utf8) {
+    (void)target;
+    (void)target_len;
+    (void)message_id;
+    (void)emoji_utf8;
+    return false; /* Real AX wiring deferred to integration pass */
+}
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */
 
 /* ── IMCore private framework bridge ────────────────────────────────── */
@@ -3729,6 +3750,38 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size
 }
 
 #endif /* !HU_IS_TEST && __APPLE__ */
+
+/* Test-only stub interface — set by hu_imessage_set_test_react_emoji_stub. */
+static bool (*g_test_react_emoji_subpicker)(const char *emoji_utf8) = NULL;
+
+#if HU_IS_TEST
+void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8)) {
+    g_test_react_emoji_subpicker = stub;
+}
+#endif
+
+/* Public: attempt to react with an arbitrary emoji via AX sub-picker.
+ * Returns HU_OK on success, HU_ERR_NOT_SUPPORTED if not available
+ * (caller can then fall back to classic-tapback mapping in D2). */
+hu_error_t hu_imessage_react_emoji_subpicker(void *ctx, const char *target, size_t target_len,
+                                             int64_t message_id, const char *emoji_utf8) {
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message_id;
+    if (!emoji_utf8 || !emoji_utf8[0])
+        return HU_ERR_INVALID_ARGUMENT;
+
+    bool ok = false;
+    if (g_test_react_emoji_subpicker) {
+        ok = g_test_react_emoji_subpicker(emoji_utf8);
+    } else {
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
+        ok = ax_react_emoji_subpicker(target, target_len, message_id, emoji_utf8);
+#endif
+    }
+    return ok ? HU_OK : HU_ERR_NOT_SUPPORTED;
+}
 
 /* ── Typing indicators: three-tier fallback ──────────────────────────
  * Tier 1: IMCore private framework (direct API, no UI, macOS 14-15)
