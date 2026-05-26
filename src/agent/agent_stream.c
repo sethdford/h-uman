@@ -1413,6 +1413,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         req.temperature = turn_temp;
         req.tools = (turn_needs_tools && agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = turn_needs_tools ? agent->tool_specs_count : 0;
+        /* G5 fix (2026-05-26): apply tier-routed thinking budget to streaming requests.
+         * Mirrors agent_turn.c:4951-4952. Without this, Gemini 3.x silently runs with
+         * thinking disabled on streaming surfaces even when the daemon routed the turn
+         * to ANALYTICAL/DEEP/EXPERT tier — degrading reasoning quality on every
+         * streamed turn. Same F2-family bug as gemini-3x-thinking-gotcha.md. */
+        if (agent->turn_thinking_budget > 0)
+            req.thinking_budget = agent->turn_thinking_budget;
 
         /* Buffer provider text until the final content clears guards. Tool
          * events still stream through stream_chunk_to_event_cb. */
