@@ -236,6 +236,7 @@ void run_channel_integration_tests(void);
 void run_config_extended_tests(void);
 void run_config_getters_tests(void);
 void run_config_validation_tests(void);
+void run_config_action_surface_tests(void);
 void run_json_extended_tests(void);
 void run_security_extended_tests(void);
 void run_security_pipeline_tests(void);
@@ -1113,6 +1114,7 @@ int main(int argc, char **argv) {
     run_config_extended_tests();
     run_config_getters_tests();
     run_config_validation_tests();
+    run_config_action_surface_tests();
     run_json_extended_tests();
     run_security_extended_tests();
     run_security_pipeline_tests();

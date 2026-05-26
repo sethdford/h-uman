@@ -3245,6 +3245,7 @@ set(HU_TEST_SOURCES
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
+    tests/test_config_action_surface.c
     tests/test_json_extended.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c

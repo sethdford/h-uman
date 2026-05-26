@@ -363,6 +363,14 @@ typedef struct hu_response_guard_config {
  * allocation. Generous; production channel inventory is small. */
 #define HU_RESPONSE_GUARD_MAX_DISABLED_CHANNELS 32
 
+typedef struct hu_imessage_action_surface_v2_config {
+    bool enabled;                  /* master gate (default true on macOS, false elsewhere) */
+    float thread_affinity_default; /* persona_thread_affinity default (default 0.3) */
+    int min_reply_delay_ms;        /* persona pacing floor (default 1500) */
+    int reply_delay_variance_ms;   /* persona pacing jitter (default 600) */
+    char *sticker_dir;             /* local sticker directory (default ~/.human/stickers) */
+} hu_imessage_action_surface_v2_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -372,6 +380,7 @@ typedef struct hu_imessage_channel_config {
     char *response_mode;          /* DEPRECATED: use daemon.response_mode */
     bool use_imsg_cli;            /* prefer steipete/imsg CLI for send/react when available */
     char *loopback_handle;        /* treat is_from_me=1 from this handle as incoming (self-test) */
+    hu_imessage_action_surface_v2_config_t action_surface_v2;
     hu_channel_daemon_config_t daemon;
 } hu_imessage_channel_config_t;
 
