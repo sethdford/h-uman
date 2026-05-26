@@ -1334,6 +1334,25 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     sched_msg[sched_len - 1] = '\0';
                     sched_len--;
                 }
+                /* Sprint 59 outbound safety — scheduled sends bypass the
+                 * proactive/F25 sanitizer call sites, so cross-contact bleed
+                 * and metadata-leak would slip through here. The Annie/Mindy/
+                 * Betty incident's verbatim string COULD have come out via a
+                 * scheduled send. Route every scheduled send through the
+                 * pipeline (currently configured the same as proactive). */
+                {
+                    size_t sched_san_len = sched_len;
+                    const char *sched_san_reason = NULL;
+                    if (!hu_outbound_sanitize(sched_msg, &sched_san_len, &sched_san_reason)) {
+                        hu_log_warn("human", agent ? agent->observer : NULL,
+                                    "scheduled send to %s REJECTED by outbound pipeline: %s "
+                                    "(would have sent: %.*s)",
+                                    sched_contact, sched_san_reason ? sched_san_reason : "unknown",
+                                    (int)(sched_len > 80 ? 80 : sched_len), sched_msg);
+                        continue;
+                    }
+                    sched_len = sched_san_len;
+                }
                 channels[sc].channel->vtable->send(channels[sc].channel->ctx, sched_contact,
                                                    strlen(sched_contact), sched_msg, sched_len,
                                                    NULL, 0);
