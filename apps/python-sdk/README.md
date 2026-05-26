@@ -73,6 +73,14 @@ Constructor argument precedence:
 
 - `validate(program: dict) -> HulaResult` — structure, refs, depth, cycles
 - `run(program: dict) -> HulaResult` — execute with the CLI's demo tools
+- `schema() -> HulaResult` — return the canonical hula-program JSON Schema
+- `expand(template: str, vars: dict) -> HulaResult` — substitute `{{keys}}`
+- `compile(source: str, lite: bool = False) -> HulaResult` — lite-syntax
+  or canonical-JSON → canonical JSON. NOTE: this is a syntactic transform,
+  not LLM-driven synthesis. Phase 3 will add the synthesis wrapper.
+- `replay(trace: dict, config_path: str | None = None) -> HulaResult` —
+  re-run an embedded program from a captured trace. Pair with the
+  `HU_HULA_TRACE_DIR` env var on a prior `run` call to capture traces.
 
 ### `class HulaResult`
 
@@ -111,10 +119,11 @@ Tests use stdlib `unittest` (no pytest dep). They skip cleanly if no
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | subprocess wrapper, `validate` + `run` | ✅ this PR |
-| 2 | `ctypes` in-process binding (requires shared libhuman.dylib) | 📋 |
-| 3 | `compile` (LLM-driven program synthesis) wrapper | 📋 |
-| 4 | Hosted docs + PyPI package + version-pinned binary auto-download | 📋 |
+| 1   | subprocess wrapper, `validate` + `run` | ✅ |
+| 1.5 | full CLI parity: `schema`/`expand`/`compile`/`replay` | ✅ |
+| 2   | `ctypes` in-process binding (requires shared libhuman.dylib) | 📋 |
+| 3   | LLM-driven program synthesis wrapper | 📋 |
+| 4   | Hosted docs + PyPI package + version-pinned binary auto-download | 📋 |
 
 ## See also
 

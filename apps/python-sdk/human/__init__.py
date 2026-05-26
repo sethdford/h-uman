@@ -41,8 +41,11 @@ from typing import Optional
 
 # Mirrored from include/human/hula_sdk.h. Bumped in lock-step with the C
 # macros so Python consumers can detect API breaks.
+#
+# 0.2.0 (2026-05-26) — Phase 1.5: added expand/compile/replay/schema
+# 0.1.0 (2026-05-26) — Phase 1: subprocess wrapper, validate + run
 HULA_SDK_VERSION_MAJOR = 0
-HULA_SDK_VERSION_MINOR = 1
+HULA_SDK_VERSION_MINOR = 2
 HULA_SDK_VERSION_PATCH = 0
 HULA_SDK_VERSION_STRING = f"{HULA_SDK_VERSION_MAJOR}.{HULA_SDK_VERSION_MINOR}.{HULA_SDK_VERSION_PATCH}"
 
@@ -128,6 +131,143 @@ class HuLa:
         embed the C SDK directly (see include/human/hula_sdk.h).
         """
         return self._run_with_program("run", program)
+
+    def schema(self) -> HulaResult:
+        """Return the canonical HuLa JSON Schema.
+
+        `result.stdout` contains the schema's path on the first line
+        followed by the schema body. Useful for validating dicts
+        against the published schema before calling `validate`.
+        """
+        proc = subprocess.run(
+            [self.human_bin, "hula", "schema"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return HulaResult(
+            ok=(proc.returncode == 0),
+            returncode=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+        )
+
+    def expand(self, template: str, vars: dict) -> HulaResult:
+        """Expand `{{key}}` placeholders in `template` using `vars`.
+
+        Wraps `human hula expand <tmpl> <vars.json>`. Both the
+        template body and the vars dict are written to temp files;
+        the expanded text comes back in `result.stdout`.
+        """
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".tmpl.txt", delete=False
+        ) as tt:
+            tt.write(template)
+            tmpl_path = tt.name
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".vars.json", delete=False
+        ) as tv:
+            json.dump(vars, tv)
+            vars_path = tv.name
+        try:
+            proc = subprocess.run(
+                [self.human_bin, "hula", "expand", tmpl_path, vars_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return HulaResult(
+                ok=(proc.returncode == 0),
+                returncode=proc.returncode,
+                stdout=proc.stdout,
+                stderr=proc.stderr,
+            )
+        finally:
+            for p in (tmpl_path, vars_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    def compile(self, source: str, lite: bool = False) -> HulaResult:
+        """Compile a HuLa program source to canonical JSON.
+
+        With `lite=True`, `source` is treated as lite-syntax HuLa.
+        With `lite=False` (default), `source` is expected to be a
+        canonical HuLa JSON program — the CLI normalizes it.
+
+        Note: despite the name, this is NOT LLM-driven synthesis. It
+        is a syntactic transform from lite-syntax (or JSON) to
+        canonical JSON. LLM-driven program synthesis is on the M5
+        Phase 3 roadmap.
+        """
+        suffix = ".hula" if lite else ".hula.json"
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=suffix, delete=False
+        ) as tf:
+            tf.write(source)
+            tmp_path = tf.name
+        try:
+            argv = [self.human_bin, "hula", "compile"]
+            if lite:
+                argv.append("--lite")
+            argv.append(tmp_path)
+            proc = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return HulaResult(
+                ok=(proc.returncode == 0),
+                returncode=proc.returncode,
+                stdout=proc.stdout,
+                stderr=proc.stderr,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def replay(self, trace: dict, config_path: Optional[str] = None) -> HulaResult:
+        """Re-run an embedded HuLa program from a captured trace.
+
+        `trace` is a HuLa trace JSON object — typically captured via
+        `HU_HULA_TRACE_DIR=/path` on a prior `run` call. The trace
+        carries the original program and inputs; `replay` re-executes
+        them deterministically.
+
+        Pass `config_path` to use a `human` config.json (so the same
+        tools are wired) instead of the CLI's demo tools.
+        """
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".trace.json", delete=False
+        ) as tf:
+            json.dump(trace, tf)
+            tmp_path = tf.name
+        try:
+            argv = [self.human_bin, "hula", "replay"]
+            if config_path:
+                argv.extend(["--config", config_path])
+            argv.append(tmp_path)
+            proc = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return HulaResult(
+                ok=(proc.returncode == 0),
+                returncode=proc.returncode,
+                stdout=proc.stdout,
+                stderr=proc.stderr,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 __all__ = [

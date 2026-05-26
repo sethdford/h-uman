@@ -94,6 +94,42 @@ class TestPythonSdkSmoke(unittest.TestCase):
         self.assertEqual(r.stdout, "x")
         self.assertEqual(r.stderr, "")
 
+    def test_schema_returns_published_schema(self):
+        """schema() returns the canonical hula-program.schema.json body."""
+        hula = HuLa()
+        result = hula.schema()
+        self.assertTrue(result.ok,
+                        f"schema failed: rc={result.returncode}, "
+                        f"stderr={result.stderr!r}")
+        # Schema body begins with a JSON `{` and references draft 2020-12
+        self.assertIn("$schema", result.stdout)
+        self.assertIn("hula-program", result.stdout)
+
+    def test_expand_substitutes_template_keys(self):
+        """expand() replaces {{key}} with values from the vars dict."""
+        hula = HuLa()
+        result = hula.expand("Hi {{name}} from {{place}}.",
+                             {"name": "Seth", "place": "h-uman"})
+        self.assertTrue(result.ok,
+                        f"expand failed: rc={result.returncode}, "
+                        f"stderr={result.stderr!r}")
+        self.assertIn("Hi Seth from h-uman.", result.stdout)
+
+    def test_compile_passes_through_canonical_json(self):
+        """compile() on a canonical-JSON HuLa program normalizes it."""
+        program_json = (
+            '{"name":"compile_smoke","version":1,'
+            '"root":{"id":"n1","op":"emit",'
+            '"emit_key":"k","emit_value":"v"}}'
+        )
+        hula = HuLa()
+        result = hula.compile(program_json, lite=False)
+        self.assertTrue(result.ok,
+                        f"compile failed: rc={result.returncode}, "
+                        f"stderr={result.stderr!r}")
+        # Output is canonical JSON — at minimum contains the EMIT node
+        self.assertIn("emit", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
