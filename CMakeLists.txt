@@ -405,6 +405,8 @@ if(HU_ENABLE_IMESSAGE)
     # reply style per conversation (flat/threaded/tapback variants).
     # Wired at send time before hu_imessage_send. Pure classifier.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
+    # Threaded inline reply path (Tier 1: Cmd-R via AX, Tier 2/3 in C2/C3).
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -3241,6 +3243,9 @@ set(HU_TEST_SOURCES
     tests/test_imessage_react_contract.c
 tests/test_imessage_reply_pacing.c
 tests/test_imessage_action_telemetry.c    tests/test_follow_up.c
+tests/test_imessage_action_telemetry.c
+    tests/test_imessage_threaded_reply.c
+    tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
