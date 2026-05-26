@@ -360,6 +360,8 @@ void run_outbound_strip_tests(void);
 void run_outbound_shape_tests(void);
 void run_outbound_echo_tests(void);
 void run_outbound_crosstalk_tests(void);
+void run_outbound_persona_tests(void);
+void run_outbound_moderation_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
@@ -1208,6 +1210,8 @@ int main(int argc, char **argv) {
     run_outbound_shape_tests();
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
+    run_outbound_persona_tests();
+    run_outbound_moderation_tests();
     run_multimodal_policy_tests();
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */

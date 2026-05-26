@@ -539,7 +539,7 @@ typedef struct compatible_stream_ctx {
     hu_allocator_t *alloc;
     hu_stream_callback_t callback;
     void *callback_ctx;
-    hu_sse_parser_t parser;
+    hu_provider_sse_parser_t parser;
     hu_error_t last_error;
     char *content_buf;
     size_t content_len;
@@ -733,7 +733,7 @@ static void compatible_sse_event_cb(const char *event_type, size_t event_type_le
 
 static size_t compatible_stream_write_cb(const char *data, size_t len, void *userdata) {
     compatible_stream_ctx_t *s = (compatible_stream_ctx_t *)userdata;
-    hu_error_t err = hu_sse_parser_feed(&s->parser, data, len, compatible_sse_event_cb, s);
+    hu_error_t err = hu_provider_sse_parser_feed(&s->parser, data, len, compatible_sse_event_cb, s);
     if (err != HU_OK) {
         hu_log_error("compatible", NULL, "SSE parser feed error: %s (data_len=%zu)",
                      hu_error_string(err), len);
@@ -899,7 +899,7 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     sctx.callback = callback;
     sctx.callback_ctx = callback_ctx;
     sctx.last_error = HU_OK;
-    err = hu_sse_parser_init(&sctx.parser, alloc);
+    err = hu_provider_sse_parser_init(&sctx.parser, alloc);
     if (err != HU_OK) {
         alloc->free(alloc->ctx, body, body_len);
         return err;

@@ -537,7 +537,7 @@ typedef struct anthropic_stream_ctx {
     hu_allocator_t *alloc;
     hu_stream_callback_t callback;
     void *callback_ctx;
-    hu_sse_parser_t parser;
+    hu_provider_sse_parser_t parser;
     hu_error_t last_error;
     char *content_buf;
     size_t content_len;
@@ -781,7 +781,7 @@ static void anthropic_sse_event_cb(const char *event_type, size_t event_type_len
 
 static size_t anthropic_stream_write_cb(const char *data, size_t len, void *userdata) {
     anthropic_stream_ctx_t *s = (anthropic_stream_ctx_t *)userdata;
-    hu_error_t err = hu_sse_parser_feed(&s->parser, data, len, anthropic_sse_event_cb, s);
+    hu_error_t err = hu_provider_sse_parser_feed(&s->parser, data, len, anthropic_sse_event_cb, s);
     if (err != HU_OK) {
         s->last_error = err;
         return 0;
@@ -1228,7 +1228,7 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
         }                                                                \
     } while (0)
 
-    err = hu_sse_parser_init(&sctx.parser, alloc);
+    err = hu_provider_sse_parser_init(&sctx.parser, alloc);
     if (err != HU_OK) {
         alloc->free(alloc->ctx, body, body_len);
         return err;

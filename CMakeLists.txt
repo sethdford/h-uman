@@ -831,6 +831,7 @@ set(HU_CORE_SOURCES
     src/providers/helpers.c
     src/providers/provider_http.c
     src/providers/sse.c
+    src/util/sse_parser.c
     src/providers/scrub.c
     src/providers/reliable.c
     src/providers/from_config.c
@@ -3161,6 +3162,7 @@ set(HU_TEST_SOURCES
     tests/test_memory_new.c
     tests/test_http.c
     tests/test_sse.c
+    tests/test_sse_parser.c
     tests/test_streaming.c
     tests/test_websocket.c
     tests/test_ws_integration.c
@@ -3340,6 +3342,10 @@ set(HU_TEST_SOURCES
     tests/test_outbound_echo.c
     # Sprint 59 Phase B — crosstalk stage (cross-contact bleed + metadata leak).
     tests/test_outbound_crosstalk.c
+    # Sprint 59 Phase B — persona stage (Seth-voice fidelity).
+    tests/test_outbound_persona.c
+    # Sprint 59 Phase B — moderation stage (PII + violence/hate).
+    tests/test_outbound_moderation.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c

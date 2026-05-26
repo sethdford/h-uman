@@ -364,7 +364,7 @@ typedef struct {
     hu_allocator_t *alloc;
     hu_stream_callback_t callback;
     void *callback_ctx;
-    hu_sse_parser_t parser;
+    hu_provider_sse_parser_t parser;
     hu_error_t last_error;
     char *content_buf;
     size_t content_len;
@@ -441,7 +441,7 @@ static size_t apple_stream_write_cb(const char *chunk, size_t chunk_len, void *u
     apple_stream_ctx_t *sctx = (apple_stream_ctx_t *)userdata;
     if (sctx->last_error != HU_OK)
         return 0;
-    hu_error_t err = hu_sse_parser_feed(&sctx->parser, chunk, chunk_len, apple_sse_event_cb, sctx);
+    hu_error_t err = hu_provider_sse_parser_feed(&sctx->parser, chunk, chunk_len, apple_sse_event_cb, sctx);
     if (err != HU_OK)
         sctx->last_error = err;
     return chunk_len;
@@ -563,7 +563,7 @@ static hu_error_t apple_stream_chat(void *ctx, hu_allocator_t *alloc,
     sctx.callback = callback;
     sctx.callback_ctx = callback_ctx;
     sctx.last_error = HU_OK;
-    err = hu_sse_parser_init(&sctx.parser, alloc);
+    err = hu_provider_sse_parser_init(&sctx.parser, alloc);
     if (err != HU_OK) {
         alloc->free(alloc->ctx, body, body_len);
         return err;

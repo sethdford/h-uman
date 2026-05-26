@@ -2046,8 +2046,8 @@ static void test_factory_cerebras_creates_compatible(void) {
 
 static void test_sse_parser_init_deinit(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(p.buffer);
     hu_sse_parser_deinit(&p);
@@ -2071,12 +2071,12 @@ static void sse_capture_cb(const char *et, size_t et_len, const char *data, size
 
 static void test_sse_parser_feed_callback(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     s_sse_captured[0] = '\0';
     s_sse_captured_len = 0;
     const char *stream = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n";
-    hu_error_t err = hu_sse_parser_feed(&p, stream, strlen(stream), sse_capture_cb, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_capture_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(s_sse_captured_len > 0);
     hu_sse_parser_deinit(&p);
@@ -2638,13 +2638,13 @@ static void sse_multiline_cb(const char *et, size_t et_len, const char *data, si
 
 static void test_sse_parse_multiline_data(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     s_sse_multiline_event_count = 0;
     s_sse_multiline_last_data[0] = '\0';
     const char *stream =
         "event: message\ndata: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n";
-    hu_error_t err = hu_sse_parser_feed(&p, stream, strlen(stream), sse_multiline_cb, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_multiline_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(s_sse_multiline_event_count >= 1);
     hu_sse_parser_deinit(&p);
@@ -2652,25 +2652,25 @@ static void test_sse_parse_multiline_data(void) {
 
 static void test_sse_parse_callback_order(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     sse_order_idx = 0;
     const char *stream =
         "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n\n";
-    hu_error_t err = hu_sse_parser_feed(&p, stream, strlen(stream), sse_cb_order, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_cb_order, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     hu_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_feed_incremental(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     sse_got_delta = 0;
-    hu_error_t err = hu_sse_parser_feed(&p, "data: ", 6, sse_cb_delta, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, "data: ", 6, sse_cb_delta, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     const char *chunk2 = "{\"choices\":[{\"delta\":{\"content\":\"y\"}}]}\n\n";
-    err = hu_sse_parser_feed(&p, chunk2, strlen(chunk2), sse_cb_delta, NULL);
+    err = hu_provider_sse_parser_feed(&p, chunk2, strlen(chunk2), sse_cb_delta, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(sse_got_delta == 1);
     hu_sse_parser_deinit(&p);

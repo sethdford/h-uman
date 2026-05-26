@@ -15,7 +15,7 @@ static bool field_eq(const char *a, size_t alen, const char *b) {
     return alen == blen && memcmp(a, b, alen) == 0;
 }
 
-hu_error_t hu_sse_parser_init(hu_sse_parser_t *p, hu_allocator_t *alloc) {
+hu_error_t hu_provider_sse_parser_init(hu_provider_sse_parser_t *p, hu_allocator_t *alloc) {
     if (!p || !alloc)
         return HU_ERR_INVALID_ARGUMENT;
     memset(p, 0, sizeof(*p));
@@ -29,7 +29,7 @@ hu_error_t hu_sse_parser_init(hu_sse_parser_t *p, hu_allocator_t *alloc) {
     return HU_OK;
 }
 
-void hu_sse_parser_deinit(hu_sse_parser_t *p) {
+void hu_sse_parser_deinit(hu_provider_sse_parser_t *p) {
     if (!p)
         return;
     if (p->buffer && p->alloc) {
@@ -64,7 +64,7 @@ static void parse_field(const char *line, size_t line_len, const char **field_ou
     }
 }
 
-hu_error_t hu_sse_parser_feed(hu_sse_parser_t *p, const char *bytes, size_t len,
+hu_error_t hu_provider_sse_parser_feed(hu_provider_sse_parser_t *p, const char *bytes, size_t len,
                               hu_sse_event_cb callback, void *userdata) {
     if (!p || !p->alloc || !callback)
         return HU_ERR_INVALID_ARGUMENT;

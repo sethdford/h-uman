@@ -163,7 +163,7 @@ typedef struct gemini_stream_ctx {
     hu_allocator_t *alloc;
     hu_stream_callback_t callback;
     void *callback_ctx;
-    hu_sse_parser_t parser;
+    hu_provider_sse_parser_t parser;
     char *content_buf;
     size_t content_len;
     size_t content_cap;
@@ -405,7 +405,7 @@ static size_t gemini_stream_write_cb(const char *chunk, size_t chunk_len, void *
     if (s->last_error != HU_OK)
         return chunk_len;
     hu_error_t err =
-        hu_sse_parser_feed(&s->parser, chunk, chunk_len, gemini_sse_event_cb, userdata);
+        hu_provider_sse_parser_feed(&s->parser, chunk, chunk_len, gemini_sse_event_cb, userdata);
     if (err != HU_OK)
         s->last_error = err;
     return chunk_len;
@@ -1428,7 +1428,7 @@ static hu_error_t gemini_stream_chat(void *ctx, hu_allocator_t *alloc,
         .tool_calls_cap = 0,
         .last_error = HU_OK,
     };
-    err = hu_sse_parser_init(&sctx.parser, alloc);
+    err = hu_provider_sse_parser_init(&sctx.parser, alloc);
     if (err != HU_OK) {
         alloc->free(alloc->ctx, body, body_len);
         return err;

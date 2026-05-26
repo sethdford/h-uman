@@ -13,16 +13,16 @@ typedef struct hu_sse_parser {
     size_t buf_len;
     size_t buf_cap;
     hu_allocator_t *alloc;
-} hu_sse_parser_t;
+} hu_provider_sse_parser_t;
 
 typedef void (*hu_sse_event_cb)(const char *event_type, size_t event_type_len, const char *data,
                                 size_t data_len, void *userdata);
 
-hu_error_t hu_sse_parser_init(hu_sse_parser_t *p, hu_allocator_t *alloc);
-void hu_sse_parser_deinit(hu_sse_parser_t *p);
+hu_error_t hu_provider_sse_parser_init(hu_provider_sse_parser_t *p, hu_allocator_t *alloc);
+void hu_sse_parser_deinit(hu_provider_sse_parser_t *p);
 
 /* Feed raw bytes. Calls callback for each complete event. */
-hu_error_t hu_sse_parser_feed(hu_sse_parser_t *p, const char *bytes, size_t len,
+hu_error_t hu_provider_sse_parser_feed(hu_provider_sse_parser_t *p, const char *bytes, size_t len,
                               hu_sse_event_cb callback, void *userdata);
 
 /* ── Line-level parsing (for tests and simple use) ── */

@@ -42,12 +42,12 @@ static void test_sse_parser_single_event(void) {
     sse_last_data[0] = '\0';
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
 
     const char *input = "data: {\"foo\":1}\n\n";
-    err = hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"foo\"") != NULL);
@@ -60,12 +60,12 @@ static void test_sse_parser_multi_event(void) {
     sse_event_count = 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
 
     const char *input = "data: a\n\ndata: b\n\ndata: c\n\n";
-    err = hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 3);
 
@@ -76,15 +76,15 @@ static void test_sse_parser_partial_feed(void) {
     sse_event_count = 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
 
-    err = hu_sse_parser_feed(&p, "data: ", 6, sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, "data: ", 6, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 0);
 
-    err = hu_sse_parser_feed(&p, "{\"x\":1}\n\n", 9, sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, "{\"x\":1}\n\n", 9, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"x\"") != NULL);
@@ -95,10 +95,10 @@ static void test_sse_parser_partial_feed(void) {
 static void test_sse_parser_event_type(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = "event: custom\ndata: {\"x\":1}\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
     hu_sse_parser_deinit(&p);
 }
@@ -106,10 +106,10 @@ static void test_sse_parser_event_type(void) {
 static void test_sse_parser_multiline_data(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = "data: line1\ndata: line2\ndata: line3\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "line1") != NULL ||
                    strstr(sse_last_data, "line2") != NULL ||
@@ -120,10 +120,10 @@ static void test_sse_parser_multiline_data(void) {
 static void test_sse_parser_empty_event(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = "\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
     hu_sse_parser_deinit(&p);
 }
@@ -131,10 +131,10 @@ static void test_sse_parser_empty_event(void) {
 static void test_sse_parser_comment_ignored(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = ": comment line\ndata: ok\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "ok") != NULL);
     hu_sse_parser_deinit(&p);
@@ -142,27 +142,27 @@ static void test_sse_parser_comment_ignored(void) {
 
 static void test_sse_parser_init_null_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(NULL, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(NULL, &alloc);
     HU_ASSERT_NEQ(err, HU_OK);
-    err = hu_sse_parser_init(&p, NULL);
+    err = hu_provider_sse_parser_init(&p, NULL);
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_sse_parser_feed_null_callback_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
-    hu_error_t err = hu_sse_parser_feed(&p, "data: x\n\n", 9, NULL, NULL);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, "data: x\n\n", 9, NULL, NULL);
     HU_ASSERT_NEQ(err, HU_OK);
     hu_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_feed_empty_ok(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
-    hu_error_t err = hu_sse_parser_feed(&p, "", 0, sse_event_cb, NULL);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, "", 0, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     hu_sse_parser_deinit(&p);
 }
@@ -170,10 +170,10 @@ static void test_sse_parser_feed_empty_ok(void) {
 static void test_sse_parser_two_empty_events(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = "\n\n\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
     hu_sse_parser_deinit(&p);
 }
@@ -181,10 +181,10 @@ static void test_sse_parser_two_empty_events(void) {
 static void test_sse_parser_data_with_spaces(void) {
     sse_event_count = 0;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
     const char *input = "data:   {\"trimmed\":1}\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "trimmed") != NULL || strstr(sse_last_data, "1") != NULL);
     hu_sse_parser_deinit(&p);
@@ -194,12 +194,12 @@ static void test_sse_parser_done_signal(void) {
     sse_event_count = 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
 
     const char *input = "data: [DONE]\n\n";
-    err = hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "DONE") != NULL);
@@ -212,14 +212,14 @@ static void test_sse_parser_incomplete_data_buffered(void) {
     sse_event_count = 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
 
-    hu_error_t err = hu_sse_parser_feed(&p, "data: ", 5, sse_event_cb, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, "data: ", 5, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 0);
 
-    err = hu_sse_parser_feed(&p, "{\"x\":1}\n\n", 9, sse_event_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, "{\"x\":1}\n\n", 9, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"x\"") != NULL);
@@ -233,11 +233,11 @@ static void test_sse_parser_missing_event_type_defaults_message(void) {
     sse_last_event_type[0] = '\0';
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
 
     const char *input = "data: hello\n\n";
-    hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_STR_EQ(sse_last_event_type, "message");
     HU_ASSERT_TRUE(strstr(sse_last_data, "hello") != NULL);
@@ -250,11 +250,11 @@ static void test_sse_parser_empty_data_field(void) {
     sse_event_count = 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
 
     const char *input = "data: \n\n";
-    hu_error_t err = hu_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_EQ(sse_last_data_len, 0u);
@@ -265,10 +265,10 @@ static void test_sse_parser_empty_data_field(void) {
 /* Edge case: feed with NULL bytes (len 0) is allowed and returns OK */
 static void test_sse_parser_feed_null_bytes_len_zero_ok(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_provider_sse_parser_init(&p, &alloc);
 
-    hu_error_t err = hu_sse_parser_feed(&p, NULL, 0, sse_event_cb, NULL);
+    hu_error_t err = hu_provider_sse_parser_feed(&p, NULL, 0, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_sse_parser_deinit(&p);
