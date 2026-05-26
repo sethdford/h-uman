@@ -3,6 +3,8 @@
 
 #include "human/util/harmony_filter.h"
 
+#include "human/providers/mlx_stream_utf8.h" /* hu_mlx_utf8_safe_emit_len */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,15 +170,23 @@ static size_t safe_boundary(const char *buf, size_t len) {
      * latest `<`. If one exists, hold from that position onward
      * (next push or finish will resolve whether it's a marker). */
     size_t window_start = (len > HU_HARMONY_LOOKAHEAD) ? len - HU_HARMONY_LOOKAHEAD : 0;
+    size_t marker_boundary = len;
     for (size_t i = len; i > window_start; i--) {
-        if (buf[i - 1] == '<')
-            return i - 1;
+        if (buf[i - 1] == '<') {
+            marker_boundary = i - 1;
+            break;
+        }
     }
-    /* No `<` anywhere in the last LOOKAHEAD bytes — the entire
-     * buffer is safe to emit. Any markers starting earlier in the
-     * buffer have full lookahead available to strip_pass, and the
-     * tail has no marker start at all. */
-    return len;
+    /* T5 — additionally clamp to a UTF-8 safe emit boundary so the
+     * filter never hands the consumer a partial codepoint at the tail.
+     * mlx-server.py streams tokens that may land mid-codepoint when a
+     * libcurl read happens to split a multi-byte sequence; without
+     * this, the user callback sees malformed UTF-8.
+     *
+     * Apply the UTF-8 clamp to the marker-safe prefix [0, marker_boundary).
+     * Held-back tail bytes (whether for marker or partial-codepoint
+     * reasons) are emitted on the next push or final finish. */
+    return hu_mlx_utf8_safe_emit_len(buf, marker_boundary);
 }
 
 /* Build an empty-string output (caller convenience to avoid duplication). */

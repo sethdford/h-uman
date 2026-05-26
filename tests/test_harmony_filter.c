@@ -423,6 +423,102 @@ static void test_harmony_wrap_inner_stop_signal_propagates(void) {
     hu_harmony_filter_free(f);
 }
 
+/* ──────────────────────────────────────────────────────────────────
+ * T5 — UTF-8 boundary correctness. Filter must never emit a partial
+ * codepoint at the tail; the held-back bytes complete on the next
+ * push or final finish.
+ * ────────────────────────────────────────────────────────────────── */
+
+static void test_harmony_filter_holds_back_partial_utf8_codepoint(void) {
+    /* 😀 = U+1F600 = F0 9F 98 80 (4 bytes). Push only the first 2 bytes;
+     * the filter must hold them back (no partial emission). */
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+
+    const char partial[] = {(char)0xF0, (char)0x9F, '\0'}; /* 2-byte partial */
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_harmony_filter_push(f, partial, 2, &out, &out_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Nothing safe to emit yet — the lead byte signals a 4-byte
+     * codepoint, only 2 bytes received. */
+    HU_ASSERT_EQ(out_len, (size_t)0);
+    HU_ASSERT_EQ(hu_harmony_filter_buffered_bytes(f), (size_t)2);
+    a.free(a.ctx, out, out_len + 1);
+
+    hu_harmony_filter_free(f);
+}
+
+static void test_harmony_filter_completes_split_emoji_across_chunks(void) {
+    /* Push 2 bytes of a 4-byte emoji, then the remaining 2 bytes plus
+     * trailing pad. Composite output across all callbacks should equal
+     * the single-chunk equivalent. */
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+
+    const char first[] = {'h', 'i', ' ', (char)0xF0, (char)0x9F, '\0'};
+    const char rest[] = {(char)0x98, (char)0x80, '!', ' ', '\0'};
+
+    char *out1 = NULL;
+    size_t out1_len = 0;
+    HU_ASSERT_EQ(hu_harmony_filter_push(f, first, 5, &out1, &out1_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out1);
+    /* "hi " is safe; the F0 9F lead is held back. */
+    HU_ASSERT_STR_EQ(out1, "hi ");
+
+    char *out2 = NULL;
+    size_t out2_len = 0;
+    HU_ASSERT_EQ(hu_harmony_filter_push(f, rest, 4, &out2, &out2_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out2);
+    /* Now the codepoint completes; "😀! " gets emitted. */
+    HU_ASSERT_EQ(out2_len, (size_t)6); /* 4 bytes emoji + '!' + ' ' */
+    /* Compose and verify against the single-chunk equivalent. */
+    size_t total = out1_len + out2_len;
+    char *composite = (char *)a.alloc(a.ctx, total + 1);
+    HU_ASSERT_NOT_NULL(composite);
+    memcpy(composite, out1, out1_len);
+    memcpy(composite + out1_len, out2, out2_len);
+    composite[total] = '\0';
+    const char expected[] = {'h',        'i',        ' ', (char)0xF0, (char)0x9F,
+                             (char)0x98, (char)0x80, '!', ' ',        '\0'};
+    HU_ASSERT_EQ(memcmp(composite, expected, 9), 0);
+
+    a.free(a.ctx, out1, out1_len + 1);
+    a.free(a.ctx, out2, out2_len + 1);
+    a.free(a.ctx, composite, total + 1);
+    hu_harmony_filter_free(f);
+}
+
+static void test_harmony_filter_drains_partial_utf8_on_finish(void) {
+    /* End-of-stream with an incomplete codepoint in the buffer — finish
+     * MUST drain those bytes (as literal, since no more data is coming).
+     * This matches the non-streaming strip_harmony semantics: malformed
+     * trailing UTF-8 at EOF is emitted verbatim, not silently dropped. */
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+
+    const char partial[] = {'o', 'k', ' ', (char)0xF0, (char)0x9F, '\0'};
+    char *out1 = NULL;
+    size_t out1_len = 0;
+    HU_ASSERT_EQ(hu_harmony_filter_push(f, partial, 5, &out1, &out1_len), HU_OK);
+    HU_ASSERT_STR_EQ(out1, "ok ");
+    a.free(a.ctx, out1, out1_len + 1);
+
+    /* Stream ends — finish drains "F0 9F" as literal. */
+    char *out2 = NULL;
+    size_t out2_len = 0;
+    HU_ASSERT_EQ(hu_harmony_filter_finish(f, &out2, &out2_len), HU_OK);
+    HU_ASSERT_EQ(out2_len, (size_t)2);
+    HU_ASSERT_EQ((unsigned char)out2[0], (unsigned char)0xF0);
+    HU_ASSERT_EQ((unsigned char)out2[1], (unsigned char)0x9F);
+    a.free(a.ctx, out2, out2_len + 1);
+
+    hu_harmony_filter_free(f);
+}
+
 void run_harmony_filter_tests(void);
 void run_harmony_filter_tests(void) {
     HU_TEST_SUITE("harmony_filter");
@@ -442,4 +538,8 @@ void run_harmony_filter_tests(void) {
     HU_RUN_TEST(test_harmony_wrap_passes_through_tool_chunks_unchanged);
     HU_RUN_TEST(test_harmony_wrap_holds_back_partial_marker_silently);
     HU_RUN_TEST(test_harmony_wrap_inner_stop_signal_propagates);
+    /* T5: UTF-8 boundary correctness. */
+    HU_RUN_TEST(test_harmony_filter_holds_back_partial_utf8_codepoint);
+    HU_RUN_TEST(test_harmony_filter_completes_split_emoji_across_chunks);
+    HU_RUN_TEST(test_harmony_filter_drains_partial_utf8_on_finish);
 }
