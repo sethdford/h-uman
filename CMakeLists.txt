@@ -3624,6 +3624,7 @@ endif()
 # HU_ENABLE_SQLITE — the lookup itself is SQLite-gated.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_crosstalk_sqlite.c)
+    list(APPEND HU_TEST_SOURCES tests/test_outbound_e2e_sota_proof.c)
 endif()
 
 # SOTA capability tests
