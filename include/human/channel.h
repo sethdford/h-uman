@@ -128,6 +128,27 @@ typedef struct hu_channel_vtable {
     hu_error_t (*react)(void *ctx, const char *target, size_t target_len, int64_t message_id,
                         hu_reaction_type_t reaction);
 
+    /* Optional — send a threaded inline reply.
+     * parent_msg_guid identifies the inbound message being replied to.
+     * Channels without threading support return HU_ERR_NOT_SUPPORTED.
+     * NULL = channel does not support threaded replies. */
+    hu_error_t (*reply)(void *ctx, const char *target, size_t target_len,
+                        const char *parent_msg_guid, size_t parent_msg_guid_len, const char *body,
+                        size_t body_len);
+
+    /* Optional — react with an arbitrary UTF-8 emoji codepoint.
+     * Distinct from react() which sends the 6 classic enum tapbacks.
+     * emoji_utf8 is a UTF-8 string (not just one codepoint, but typically one).
+     * NULL = channel does not support arbitrary emoji reactions. */
+    hu_error_t (*react_emoji)(void *ctx, const char *target, size_t target_len, int64_t message_id,
+                              const char *emoji_utf8, size_t emoji_utf8_len);
+
+    /* Optional — send a sticker file as an attachment.
+     * sticker_path is an absolute filesystem path to the sticker image file.
+     * NULL = channel does not support sending stickers. */
+    hu_error_t (*send_sticker)(void *ctx, const char *target, size_t target_len,
+                               const char *sticker_path, size_t sticker_path_len);
+
     /* Optional — resolve attachment path/URL for a message.
      * Returns allocated string (caller frees) or NULL if unavailable.
      * NULL vtable entry = channel does not support attachment resolution. */
