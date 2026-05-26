@@ -3997,6 +3997,7 @@ static const hu_channel_vtable_t imessage_vtable = {
     .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
                              size_t))hu_imessage_reply,
     .react_emoji = hu_imessage_react_emoji_with_fallback,
+    .send_sticker = hu_imessage_send_sticker,
     .get_attachment_path = imessage_vt_get_attachment_path,
     .human_active_recently = imessage_vt_human_active_recently,
     .get_latest_attachment_path = imessage_vt_get_latest_attachment_path,

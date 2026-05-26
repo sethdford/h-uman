@@ -478,4 +478,23 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
                                                  int64_t message_id, const char *emoji_utf8,
                                                  size_t emoji_utf8_len);
 
+/** Public: send a sticker file as an iMessage attachment via the imsg CLI.
+ * sticker_path is an absolute filesystem path to the sticker image file.
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null/empty args,
+ * HU_ERR_NOT_FOUND if the sticker file doesn't exist, HU_ERR_NOT_SUPPORTED
+ * if the underlying send fails (imsg unavailable, permissions, etc.).
+ * Signature matches vtable->send_sticker slot exactly. */
+hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target_len,
+                                    const char *sticker_path, size_t sticker_path_len);
+
+#ifdef HU_IS_TEST
+/** Test-only: set a callback function pointer that will be invoked instead of imsg send.
+ * Callback receives (target, target_len, sticker_path) and should return HU_OK on success
+ * or HU_ERR_NOT_SUPPORTED on failure. Pass NULL to disable the stub and use production
+ * behavior. */
+void hu_imessage_set_test_send_sticker_stub(hu_error_t (*stub)(const char *target,
+                                                               size_t target_len,
+                                                               const char *sticker_path));
+#endif
+
 #endif /* HU_CHANNELS_IMESSAGE_H */

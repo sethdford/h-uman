@@ -377,6 +377,8 @@ if(HU_ENABLE_IMESSAGE)
     # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
     # in src/channels/imessage.c near hu_imessage_poll for the full story.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+    # E2: sticker send action surface. Wired via vtable.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
     # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
     # primitives that render iMessage events into canonical English for
     # personal-model ingestion. No chat.db / Apple deps; ingest wiring
@@ -3249,6 +3251,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
     tests/test_imessage_custom_tapback.c
+    tests/test_imessage_sticker.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
