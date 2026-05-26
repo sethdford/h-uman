@@ -2097,6 +2097,21 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         hu_protective_is_boundary(agent->memory, cp->contact_id,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
+                    /* Sprint 41 (2026-05-26 Jordan incident) — quiet-hour gate.
+                     * Mirrors what init_proposer already enforces. The previous
+                     * proactive-send path consulted only rate-limit + per-contact
+                     * recency throttles, so "do not disturb 22:00-08:00" was
+                     * silently ignored. The predicate returns false when the
+                     * autoresponder is disabled or unconfigured — operators who
+                     * deliberately disabled DND keep the prior behavior. */
+                    if (!skip && hu_daemon_proactive_should_skip_for_quiet_hours(
+                                     daemon_autoresponder_config(), (int64_t)now,
+                                     /*tz_offset_seconds=*/0)) {
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "proactive check-in to %s skipped: autoresponder quiet hours",
+                                    cp->name ? cp->name : cp->contact_id);
+                        skip = true;
+                    }
                     /* FU-1: defer proactive check-in if reactive turn fired recently. */
                     if (!skip && hu_daemon_proactive_should_defer(
                                      &agent->contact_send_recency, cp->contact_id,
