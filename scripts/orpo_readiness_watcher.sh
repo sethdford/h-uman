@@ -73,7 +73,12 @@ fi
 
 # Trigger the ORPO training pipeline. Uses the existing
 # human ml dpo-train command per docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md.
-HU_BIN=~/Documents/h-uman/build/human
+# G16 (2026-05-26): try canonical dev path first, fall back to Documents
+# (historic clone), then PATH lookup.
+HU_BIN=~/Projects/h-uman/build/human
+if [ ! -x "$HU_BIN" ]; then
+    HU_BIN=~/Documents/h-uman/build/human
+fi
 if [ ! -x "$HU_BIN" ]; then
     HU_BIN=$(command -v human || true)
 fi

@@ -149,9 +149,16 @@ static bool mlx_auto_serve(const char *prov_name) {
     if (!home)
         home = "/tmp";
 
-    char candidates[3][HU_CLI_MAX_PATH];
+    /* G16 (2026-05-26): search candidates in deploy-priority order. ~/Documents/h-uman
+     * was the historic dev-clone path but moved to ~/Projects/h-uman around Apr 2026;
+     * keep Documents in the list for backwards compatibility (one-and-done; nothing
+     * to migrate if a user still has an old clone there) but place Projects first
+     * so a fresh install resolves to the canonical location. */
+    char candidates[4][HU_CLI_MAX_PATH];
     size_t ncand = 0;
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/.human/bin/human-serve.sh", home);
+    snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Projects/h-uman/scripts/human-serve.sh",
+             home);
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Documents/h-uman/scripts/human-serve.sh",
              home);
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/h-uman/scripts/human-serve.sh", home);
@@ -656,6 +663,16 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         hu_config_deinit(&cfg);
         return err;
     }
+    /* 2026-05 Chip F — borrow the loaded cfg so per-turn paths (agent_turn.c,
+     * agent_stream.c, media_gif.c, media_video.c) can read runtime config
+     * fields like prompt_budget.enabled and media_gen.vertex_project. Without
+     * this assignment, the per-turn ternary `agent->config ? ... : false`
+     * evaluates to false even when the operator has explicitly enabled the
+     * feature in config.json — discovered during Chip D as the deeper bug
+     * behind the misleading prompt_budget boot warning. `cfg` outlives
+     * `agent` (cfg lives in this function's stack frame which encloses the
+     * agent's lifetime; agent.config is a borrowed pointer, not owned). */
+    agent.config = &cfg;
     hu_metacognition_apply_config(&agent.infra.metacognition, &cfg.agent.metacognition);
     hu_voice_config_t voice_cfg = {0};
     (void)hu_voice_config_from_settings(&cfg, &voice_cfg);

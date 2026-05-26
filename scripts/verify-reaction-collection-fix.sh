@@ -10,14 +10,15 @@
 #     ai.human.intelligence-cycle.plist
 #
 # Each check fails loud (set -euo pipefail) and exits non-zero on regression.
-# Run AFTER the production binary at ~/Documents/h-uman/build/human is rebuilt.
+# Run AFTER the production binary at ~/Projects/h-uman/build/human is rebuilt.
+# (Historic clone path was ~/Documents/h-uman; G16 redirect 2026-05-26.)
 set -euo pipefail
 
 CONFIG=~/.human/config.json
 LOG=~/.human/logs/intelligence-cycle-error.log
 PLIST=~/Library/LaunchAgents/ai.human.intelligence-cycle.plist
 DB=~/.human/memory.db
-PROD_BIN=~/Documents/h-uman/build/human
+PROD_BIN=~/Projects/h-uman/build/human
 DEV_BIN=/Users/sethford/Projects/h-uman/.claude/worktrees/jovial-wright-29b50b/build/human
 
 # --- check 1: config file has the block --------------------------------
