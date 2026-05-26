@@ -1,12 +1,12 @@
-#include "test_framework.h"
 #include "human/agent/adapter_id.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/scheduler.h"
+#include "human/core/allocator.h"
 #include "human/eval/eval_gate.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #include "human/persona/persona_deltas.h"
-#include "human/core/allocator.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -45,14 +45,26 @@ static void test_proof_directory_gate_decision_json_only_on_reject(void) {
     (void)mkdir("/tmp/test-home", 0755);
     (void)mkdir("/tmp/test-home/.human", 0755);
     (void)mkdir("/tmp/test-home/.human/proofs", 0755);
+    /* Defensive cleanup of THIS test's proof dir — sibling tests in the
+     * suite (e.g. test_runner_promotes_measured_gate_scores) use the
+     * same HOME + clock and may leave manifest.json from a successful
+     * promotion; this test asserts manifest.json does NOT exist on the
+     * reject path, so leftover state from those siblings would make us
+     * fail spuriously. The adapter_id pattern matches what
+     * hu_format_adapter_id produces for ("dpo", step=0, clock=1747042800). */
+    {
+        char clean_cmd[512];
+        snprintf(clean_cmd, sizeof(clean_cmd),
+                 "rm -rf /tmp/test-home/.human/proofs/*-dpo-step-* 2>/dev/null");
+        (void)system(clean_cmd);
+    }
 
     hu_job_spec_t spec;
     memset(&spec, 0, sizeof(spec));
     HU_ASSERT_EQ(hu_lora_training_runner(NULL, &spec, 2000, &ctx), HU_OK);
 
     char adapter_id[128];
-    HU_ASSERT_EQ(hu_format_adapter_id("dpo", 0, 1747042800, adapter_id, sizeof(adapter_id)),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_format_adapter_id("dpo", 0, 1747042800, adapter_id, sizeof(adapter_id)), HU_OK);
     char proof_gate[512];
     snprintf(proof_gate, sizeof(proof_gate), "/tmp/test-home/.human/proofs/%s/gate_decision.json",
              adapter_id);
