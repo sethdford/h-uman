@@ -957,6 +957,166 @@ static hu_error_t trust_find_or_create_slot(const char *contact_id, size_t cid_l
     return HU_OK;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * iMessage Action Surface Dispatcher (F2) — Phase A–E integration
+ * ────────────────────────────────────────────────────────────────────────── */
+
+#include "human/channels/imessage_action.h"
+#include "human/channels/imessage_action_facts.h"
+#include "human/core/time.h"
+#include "human/persona/pacing.h"
+
+/* Dispatcher: route iMessage reply through predicate (Phase A) to choose
+ * between threaded / flat / tapback based on reply style facts. */
+hu_error_t hu_daemon_dispatch_imessage_reply(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
+    if (!ch || !ch->vtable || !target || !body) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Check the action-surface-v2 config gate (A5).  If disabled, do a flat
+     * send and return predictably. Emit one-shot log on first disable. */
+    bool asv2_enabled = (config && config->channels.imessage.action_surface_v2.enabled);
+    if (!asv2_enabled) {
+        static bool warned_once = false;
+        if (!warned_once) {
+            warned_once = true;
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "action_surface_v2 disabled (iMessage.action_surface_v2.enabled=false); "
+                        "set true in config to enable threaded replies / tapback");
+        }
+        if (ch->vtable->send) {
+            return ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+        }
+        return HU_ERR_NOT_SUPPORTED;
+    }
+
+    /* Build facts from snapshot + persona. */
+    hu_reply_style_facts_t facts;
+    hu_imessage_build_reply_facts((const hu_conversation_snapshot_t *)snapshot, persona, &facts);
+
+    /* Pick style via predicate with seeded RNG. Mixing inferred_message_id
+     * lets tests pin a deterministic seed by varying that parameter; in
+     * production it's the inbound message rowid which varies naturally. */
+    uint64_t rng_seed = (uint64_t)time(NULL) * 1000ULL + (uint64_t)target_len +
+                        (uint64_t)inferred_message_id_for_react;
+    hu_reply_style_t style = hu_imessage_choose_reply_style(&facts, rng_seed);
+
+    /* Pacing (C5) — start. */
+    uint64_t pace_start = 0;
+    hu_persona_pace_reply_start(&pace_start);
+
+    /* Dispatch by style. */
+    hu_error_t err = HU_OK;
+    const char *tier_used = "flat_fallback";
+    switch (style) {
+    case HU_REPLY_STYLE_THREADED: {
+        bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
+        if (threaded_attempted) {
+            err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
+                                    body, body_len);
+            if (err == HU_OK) {
+                tier_used = "threaded";
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "imessage_dispatch: threaded reply sent");
+            }
+        }
+        /* Fall through to flat send if (a) reply slot was NULL or
+         * parent_msg_guid wasn't provided (threaded_attempted==false), or
+         * (b) the reply attempt returned non-OK. Always-do-something
+         * contract — never silently no-op. */
+        if (!threaded_attempted || err != HU_OK) {
+            if (ch->vtable->send) {
+                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+                if (err == HU_OK) {
+                    tier_used = "flat_fallback";
+                    hu_log_info("human", agent ? agent->observer : NULL,
+                                "imessage_dispatch: threaded unavailable, flat fallback");
+                }
+            }
+        }
+        break;
+    }
+
+    case HU_REPLY_STYLE_FLAT:
+        if (ch->vtable->send) {
+            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            if (err == HU_OK) {
+                tier_used = "flat";
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "imessage_dispatch: flat send");
+            }
+        }
+        break;
+
+    case HU_REPLY_STYLE_TAPBACK:
+        if (ch->vtable->react_emoji) {
+            const char *emoji = "👍"; /* universal-positive default */
+            err = ch->vtable->react_emoji(ch->ctx, target, target_len,
+                                          inferred_message_id_for_react, emoji, strlen(emoji));
+            if (err == HU_OK) {
+                tier_used = "tapback";
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "imessage_dispatch: tapback emoji sent");
+            }
+        }
+        if (err != HU_OK || !ch->vtable->react_emoji) {
+            if (ch->vtable->send) {
+                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+                if (err == HU_OK) {
+                    tier_used = "flat_fallback";
+                    hu_log_info("human", agent ? agent->observer : NULL,
+                                "imessage_dispatch: tapback unavailable, flat fallback");
+                }
+            }
+        }
+        break;
+
+    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
+        /* Both: tapback first (best-effort), then text. */
+        if (ch->vtable->react_emoji) {
+            const char *emoji = "❤️"; /* heart for emotional acknowledgment */
+            (void)ch->vtable->react_emoji(ch->ctx, target, target_len,
+                                          inferred_message_id_for_react, emoji, strlen(emoji));
+        }
+        if (ch->vtable->send) {
+            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            if (err == HU_OK) {
+                tier_used = "tapback_plus_flat";
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "imessage_dispatch: tapback + flat");
+            }
+        }
+        break;
+    }
+
+    /* Pacing — finish (sleep if elapsed < persona.min_reply_delay_ms * 1.2). */
+    if (persona) {
+        hu_persona_pace_reply_finish(persona, pace_start);
+    }
+
+    /* Telemetry: log the action-surface decision + outcome. */
+    if (config) {
+        hu_imessage_action_log_t log_entry = {0};
+        log_entry.ts_unix = (int64_t)time(NULL);
+        /* target_chat_id_hash: for tests, we pass target directly; in production,
+         * the caller would hash it for privacy. */
+        log_entry.target_chat_id_hash = target;
+        log_entry.facts = facts;
+        log_entry.style_chosen = style;
+        log_entry.send_result = (int)err;
+        log_entry.tier_used = tier_used;
+        uint64_t pace_end = hu_time_get_current_ms();
+        log_entry.elapsed_ms = (int)(pace_end - pace_start);
+        (void)hu_imessage_action_log_jsonl(&log_entry);
+    }
+
+    return err;
+}
+
 hu_error_t hu_daemon_get_trust_state(const char *contact_id, size_t cid_len,
                                      hu_trust_state_t *out) {
     if (!out)
@@ -1429,7 +1589,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 hu_error_t qerr = hu_imessage_find_unreplied_read(
                     cp->contact_id, strlen(cp->contact_id), &fmsg_id, &fread_at_ms);
 #else
-                /* Builds without HU_ENABLE_IMESSAGE can't query chat.db. The
+                /* Builds without HU_HAS_IMESSAGE can't query chat.db. The
                  * loop's outer guard at line 1284 already filters to imessage
                  * channels; we only reach this point when imessage support is
                  * compiled in. Stub-out as NOT_SUPPORTED for the unreachable
@@ -12856,10 +13016,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : NULL;
                                 size_t pv_cnt =
                                     (seg == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
-                                ch->channel->vtable->send(
-                                    ch->channel->ctx, send_target, send_target_len,
-                                    choreo_plan.segments[seg].text,
-                                    choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
+                                /* F2b: Route through action-surface dispatcher for iMessage
+                                 * when enabled, else flat send */
+                                const char *ch_name_choreo =
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : NULL;
+                                if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
+                                    config && config->channels.imessage.action_surface_v2.enabled) {
+                                    hu_conversation_snapshot_t snap = {0};
+                                    (void)hu_daemon_dispatch_imessage_reply(
+                                        ch->channel, agent ? agent->persona : NULL, agent, config,
+                                        send_target, send_target_len, NULL, 0,
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len,
+                                        (const struct hu_conversation_snapshot *)&snap,
+                                        (int64_t)msgs[batch_start].message_id);
+                                } else {
+                                    ch->channel->vtable->send(
+                                        ch->channel->ctx, send_target, send_target_len,
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
+                                }
                             }
                             hu_choreography_plan_free(alloc, &choreo_plan);
                         }
@@ -12945,18 +13123,68 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     dt_ms = 2000;
                                                 usleep((useconds_t)(dt_ms * 1000));
                                             }
-                                            ch->channel->vtable->send(
-                                                ch->channel->ctx, batch_key, key_len, dt_chunks[dt],
-                                                strlen(dt_chunks[dt]), (dt == 0) ? pv_ptr : NULL,
-                                                (dt == 0) ? pv_cnt : 0);
+                                            size_t dt_len = strlen(dt_chunks[dt]);
+                                            /* F2b: Route through action-surface dispatcher for
+                                             * iMessage when enabled, else flat send */
+                                            const char *ch_name_f2b =
+                                                ch->channel->vtable->name
+                                                    ? ch->channel->vtable->name(ch->channel->ctx)
+                                                    : NULL;
+                                            if (ch_name_f2b &&
+                                                strcmp(ch_name_f2b, "imessage") == 0 && config &&
+                                                config->channels.imessage.action_surface_v2
+                                                    .enabled) {
+                                                /* Build snapshot for dispatcher */
+                                                hu_conversation_snapshot_t snap = {0};
+                                                /* For now, populate with zeros — the dispatcher
+                                                 * will still function, choosing style based on
+                                                 * defaults. Production can enhance this to query
+                                                 * chat.db if needed for richer context. */
+                                                (void)hu_daemon_dispatch_imessage_reply(
+                                                    ch->channel, agent ? agent->persona : NULL,
+                                                    agent, config, batch_key, key_len, NULL, 0,
+                                                    dt_chunks[dt], dt_len,
+                                                    (const struct hu_conversation_snapshot *)&snap,
+                                                    (int64_t)msgs[batch_start].message_id);
+                                            } else {
+                                                ch->channel->vtable->send(ch->channel->ctx,
+                                                                          batch_key, key_len,
+                                                                          dt_chunks[dt], dt_len,
+                                                                          (dt == 0) ? pv_ptr : NULL,
+                                                                          (dt == 0) ? pv_cnt : 0);
+                                            }
                                         }
                                     }
                                 }
 #endif
-                                if (!did_double_text)
-                                    ch->channel->vtable->send(
-                                        ch->channel->ctx, batch_key, key_len, fragments[f].text,
-                                        fragments[f].text_len, pv_ptr, pv_cnt);
+                                if (!did_double_text) {
+                                    /* F2b: Route through action-surface dispatcher for iMessage
+                                     * when enabled, else flat send */
+                                    const char *ch_name_f2b =
+                                        ch->channel->vtable->name
+                                            ? ch->channel->vtable->name(ch->channel->ctx)
+                                            : NULL;
+                                    if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
+                                        config &&
+                                        config->channels.imessage.action_surface_v2.enabled) {
+                                        /* Build snapshot for dispatcher */
+                                        hu_conversation_snapshot_t snap = {0};
+                                        /* For now, populate with zeros — the dispatcher will
+                                         * still function, choosing style based on defaults.
+                                         * Production can enhance this to query chat.db if
+                                         * needed for richer context. */
+                                        (void)hu_daemon_dispatch_imessage_reply(
+                                            ch->channel, agent ? agent->persona : NULL, agent,
+                                            config, batch_key, key_len, NULL, 0, fragments[f].text,
+                                            fragments[f].text_len,
+                                            (const struct hu_conversation_snapshot *)&snap,
+                                            (int64_t)msgs[batch_start].message_id);
+                                    } else {
+                                        ch->channel->vtable->send(
+                                            ch->channel->ctx, batch_key, key_len, fragments[f].text,
+                                            fragments[f].text_len, pv_ptr, pv_cnt);
+                                    }
+                                }
 #if defined(HU_ENABLE_RL_FULL)
                                 if (config && config->reaction_collection.enabled && f == 0 &&
                                     fragments[f].text && fragments[f].text_len > 0 &&
@@ -13044,9 +13272,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                          send_target_len, send_text, send_text_len,
-                                                          pv_ptr, pv_cnt);
+                                /* F2c: Route through action-surface dispatcher for iMessage
+                                 * when enabled, else flat send. This is the reactive-reply
+                                 * path for short single-fragment messages with no choreography
+                                 * and no multi-fragment split. */
+                                const char *ch_name_f2c =
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : NULL;
+                                if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
+                                    config->channels.imessage.action_surface_v2.enabled) {
+                                    hu_conversation_snapshot_t snap = {0};
+                                    (void)hu_daemon_dispatch_imessage_reply(
+                                        ch->channel, agent ? agent->persona : NULL, agent, config,
+                                        send_target, send_target_len, NULL, 0, send_text,
+                                        send_text_len,
+                                        (const struct hu_conversation_snapshot *)&snap,
+                                        (int64_t)msgs[batch_start].message_id);
+                                } else {
+                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                              send_target_len, send_text,
+                                                              send_text_len, pv_ptr, pv_cnt);
+                                }
                                 if (fmt_text)
                                     alloc->free(alloc->ctx, fmt_text, fmt_len + 1);
                                 if (pv_cnt > 0) {

@@ -549,6 +549,9 @@ static const hu_channel_vtable_t signal_vtable = {
     .load_conversation_history = signal_load_conversation_history,
     .get_response_constraints = signal_get_response_constraints,
     .react = signal_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .get_attachment_path = NULL,
     .human_active_recently = signal_human_active_recently,
 };

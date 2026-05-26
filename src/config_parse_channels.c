@@ -16,9 +16,8 @@ static void parse_daemon_object(hu_allocator_t *a, hu_channel_daemon_config_t *d
             a->free(a->ctx, dcfg->response_mode, strlen(dcfg->response_mode) + 1);
         dcfg->response_mode = hu_strdup(a, rm);
     }
-    dcfg->user_response_window_sec =
-        (int)hu_json_get_number(daemon_obj, "user_response_window_sec",
-                                (double)dcfg->user_response_window_sec);
+    dcfg->user_response_window_sec = (int)hu_json_get_number(
+        daemon_obj, "user_response_window_sec", (double)dcfg->user_response_window_sec);
     dcfg->poll_interval_sec =
         (int)hu_json_get_number(daemon_obj, "poll_interval_sec", (double)dcfg->poll_interval_sec);
     dcfg->voice_enabled = hu_json_get_bool(daemon_obj, "voice_enabled", dcfg->voice_enabled);
@@ -172,6 +171,25 @@ static void parse_imessage_channel(hu_allocator_t *a, hu_config_t *cfg,
             a->free(a->ctx, cfg->channels.imessage.loopback_handle,
                     strlen(cfg->channels.imessage.loopback_handle) + 1);
         cfg->channels.imessage.loopback_handle = hu_strdup(a, lb);
+    }
+
+    hu_json_value_t *asv2_obj = hu_json_object_get(obj, "action_surface_v2");
+    if (asv2_obj && asv2_obj->type == HU_JSON_OBJECT) {
+        cfg->channels.imessage.action_surface_v2.enabled =
+            hu_json_get_bool(asv2_obj, "enabled", cfg->channels.imessage.action_surface_v2.enabled);
+        cfg->channels.imessage.action_surface_v2.thread_affinity_default =
+            (float)hu_json_get_number(asv2_obj, "thread_affinity_default", 0.3);
+        cfg->channels.imessage.action_surface_v2.min_reply_delay_ms =
+            (int)hu_json_get_number(asv2_obj, "min_reply_delay_ms", 1500.0);
+        cfg->channels.imessage.action_surface_v2.reply_delay_variance_ms =
+            (int)hu_json_get_number(asv2_obj, "reply_delay_variance_ms", 600.0);
+        const char *sd = hu_json_get_string(asv2_obj, "sticker_dir");
+        if (sd) {
+            if (cfg->channels.imessage.action_surface_v2.sticker_dir)
+                a->free(a->ctx, cfg->channels.imessage.action_surface_v2.sticker_dir,
+                        strlen(cfg->channels.imessage.action_surface_v2.sticker_dir) + 1);
+            cfg->channels.imessage.action_surface_v2.sticker_dir = hu_strdup(a, sd);
+        }
     }
 
     parse_daemon_config(a, &cfg->channels.imessage.daemon, obj);
@@ -916,8 +934,8 @@ static void parse_signal_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_j
                 a->free(a->ctx, s->allow_from[i], strlen(s->allow_from[i]) + 1);
         }
         s->allow_from_count = 0;
-        for (size_t i = 0;
-             i < af->data.array.len && s->allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX; i++) {
+        for (size_t i = 0; i < af->data.array.len && s->allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX;
+             i++) {
             hu_json_value_t *item = af->data.array.items[i];
             if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
                 s->allow_from[s->allow_from_count++] = hu_strdup(a, item->data.string.ptr);
@@ -932,8 +950,7 @@ static void parse_signal_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_j
         }
         s->group_allow_from_count = 0;
         for (size_t i = 0;
-             i < gaf->data.array.len && s->group_allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX;
-             i++) {
+             i < gaf->data.array.len && s->group_allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX; i++) {
             hu_json_value_t *item = gaf->data.array.items[i];
             if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
                 s->group_allow_from[s->group_allow_from_count++] =
@@ -1083,8 +1100,7 @@ hu_error_t parse_channels(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
                 a->free(a->ctx, cfg->channels.pwa.apps,
                         cfg->channels.pwa.apps_count * sizeof(char *));
             }
-            parse_string_array(a, &cfg->channels.pwa.apps, &cfg->channels.pwa.apps_count,
-                               apps_arr);
+            parse_string_array(a, &cfg->channels.pwa.apps, &cfg->channels.pwa.apps_count, apps_arr);
         }
         cfg->channels.pwa.poll_interval_sec =
             (int)hu_json_get_number(pwa_obj, "poll_interval_sec", 5.0);

@@ -7,7 +7,7 @@
 
 #include "test_framework.h"
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 
 #include "human/channels/imessage_gaps.h"
 
@@ -111,10 +111,10 @@ void run_imessage_gaps_tests(void) {
     HU_RUN_TEST(test_scan_returns_not_supported_in_test_mode);
 }
 
-#else /* !HU_ENABLE_IMESSAGE — stub runner so the symbol resolves */
+#else /* !HU_HAS_IMESSAGE — stub runner so the symbol resolves */
 
 void run_imessage_gaps_tests(void) {
     (void)0;
 }
 
-#endif /* HU_ENABLE_IMESSAGE */
+#endif /* HU_HAS_IMESSAGE */

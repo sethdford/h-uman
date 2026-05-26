@@ -60,6 +60,7 @@ static void set_defaults_rollback(hu_config_t *cfg, hu_allocator_t *a) {
     HU_SET_DEF_FREE_STR(cfg->memory_backend);
     HU_SET_DEF_FREE_STR(cfg->default_model);
     HU_SET_DEF_FREE_STR(cfg->default_provider);
+    HU_SET_DEF_FREE_STR(cfg->channels.imessage.action_surface_v2.sticker_dir);
 #undef HU_SET_DEF_FREE_STR
     memset(cfg, 0, sizeof(*cfg));
 }
@@ -302,6 +303,19 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->heartbeat.enabled = false;
     cfg->heartbeat.interval_minutes = 30;
     cfg->channels.cli = true;
+#ifdef __APPLE__
+    cfg->channels.imessage.action_surface_v2.enabled = true;
+#else
+    cfg->channels.imessage.action_surface_v2.enabled = false;
+#endif
+    cfg->channels.imessage.action_surface_v2.thread_affinity_default = 0.3f;
+    cfg->channels.imessage.action_surface_v2.min_reply_delay_ms = 1500;
+    cfg->channels.imessage.action_surface_v2.reply_delay_variance_ms = 600;
+    cfg->channels.imessage.action_surface_v2.sticker_dir = hu_strdup(a, "~/.human/stickers");
+    if (!cfg->channels.imessage.action_surface_v2.sticker_dir) {
+        set_defaults_rollback(cfg, a);
+        return;
+    }
     cfg->channels.default_channel = NULL;
     /* channels.default_daemon and per-channel .daemon: zeroed here; successive
      * hu_config_parse_json (global then workspace in config_load_impl) overlays

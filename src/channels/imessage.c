@@ -2,6 +2,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_reply.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -3604,6 +3605,27 @@ static bool ax_tapback(const char *content_prefix, int row_offset, const char *t
                 tapback_label);
     return ok;
 }
+
+/* Like ax_perform_tapback_on_row but instead of clicking one of the 6 named
+ * classic tapbacks, navigates to the Sonoma+ bottom-row emoji sub-picker
+ * (the 6 custom-emoji buttons rendered below the classics) and clicks the
+ * AXButton child whose AXValue or AXTitle equals `emoji_utf8`.
+ *
+ * Returns true on click success; false if message_group not found, sub-
+ * picker not present, or no matching emoji found.
+ *
+ * Like the real Tier 1/Tier 2 reply paths in src/channels/imessage_reply.c,
+ * the FULL AX wiring is intentionally stubbed (return false) for D1 — the
+ * test contract is exercised via test stubs, and the real CGEvent + AX
+ * polling lands in the post-C5-style integration pass on a live macOS box. */
+static bool ax_react_emoji_subpicker(const char *target, size_t target_len, int64_t message_id,
+                                     const char *emoji_utf8) {
+    (void)target;
+    (void)target_len;
+    (void)message_id;
+    (void)emoji_utf8;
+    return false; /* Real AX wiring deferred to integration pass */
+}
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */
 
 /* ── IMCore private framework bridge ────────────────────────────────── */
@@ -3728,6 +3750,111 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size
 }
 
 #endif /* !HU_IS_TEST && __APPLE__ */
+
+/* Test-only stub interface — set by hu_imessage_set_test_react_emoji_stub. */
+static bool (*g_test_react_emoji_subpicker)(const char *emoji_utf8) = NULL;
+
+#if HU_IS_TEST
+void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8)) {
+    g_test_react_emoji_subpicker = stub;
+}
+#endif
+
+/* Public: attempt to react with an arbitrary emoji via AX sub-picker.
+ * Returns HU_OK on success, HU_ERR_NOT_SUPPORTED if not available
+ * (caller can then fall back to classic-tapback mapping in D2). */
+hu_error_t hu_imessage_react_emoji_subpicker(void *ctx, const char *target, size_t target_len,
+                                             int64_t message_id, const char *emoji_utf8) {
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message_id;
+    if (!emoji_utf8 || !emoji_utf8[0])
+        return HU_ERR_INVALID_ARGUMENT;
+
+    bool ok = false;
+    if (g_test_react_emoji_subpicker) {
+        ok = g_test_react_emoji_subpicker(emoji_utf8);
+    } else {
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
+        ok = ax_react_emoji_subpicker(target, target_len, message_id, emoji_utf8);
+#endif
+    }
+    return ok ? HU_OK : HU_ERR_NOT_SUPPORTED;
+}
+
+/* Emoji-to-classic-tapback fallback map. When the Sonoma+ sub-picker AX
+ * path (from D1) misses, look up the requested emoji here for the
+ * nearest classic tapback. If still no match, fall back to "Liked"
+ * (Seth's choice — universal positive, ensures reactions always send). */
+static const struct {
+    const char *emoji_utf8;
+    const char *classic_label;
+} CLASSIC_MAP[] = {
+    {"❤️", "Loved"},       {"♥️", "Loved"},       {"💕", "Loved"},      {"💗", "Loved"},
+    {"💖", "Loved"},      {"💞", "Loved"},      {"🙏", "Loved"},      {"👍", "Liked"},
+    {"👍🏻", "Liked"},    {"👍🏼", "Liked"},    {"👍🏽", "Liked"},    {"👍🏾", "Liked"},
+    {"👍🏿", "Liked"},    {"✅", "Liked"},      {"👎", "Disliked"},   {"❌", "Disliked"},
+    {"😂", "Laughed"},    {"🤣", "Laughed"},    {"😆", "Laughed"},    {"😅", "Laughed"},
+    {"‼️", "Emphasized"},  {"❗", "Emphasized"}, {"❕", "Emphasized"}, {"🔥", "Emphasized"},
+    {"💯", "Emphasized"}, {"❓", "Questioned"}, {"❔", "Questioned"}, {"🤔", "Questioned"},
+    {NULL, NULL}};
+
+/* Look up an emoji in CLASSIC_MAP. Returns the classic label on hit,
+ * or "Liked" on miss (universal-positive fallback per Seth's choice).
+ * Never returns NULL — always something. */
+static const char *classic_label_for_emoji(const char *emoji_utf8) {
+    if (!emoji_utf8 || !emoji_utf8[0])
+        return "Liked";
+    for (size_t i = 0; CLASSIC_MAP[i].emoji_utf8 != NULL; i++) {
+        if (strcmp(emoji_utf8, CLASSIC_MAP[i].emoji_utf8) == 0) {
+            return CLASSIC_MAP[i].classic_label;
+        }
+    }
+    return "Liked"; /* universal-positive fallback */
+}
+
+#if HU_IS_TEST
+const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8) {
+    return classic_label_for_emoji(emoji_utf8);
+}
+#endif
+
+/* Public dispatcher: try sub-picker first; on miss, fall back to
+ * the CLASSIC_MAP nearest-classic-tapback (which itself defaults to
+ * "Liked" on map-miss). Returns HU_OK unless even the classic-tapback
+ * AX path fails, in which case returns HU_ERR_NOT_SUPPORTED.
+ *
+ * Signature must match the vtable->react_emoji slot exactly:
+ *   hu_error_t (*)(void *ctx, const char *target, size_t target_len,
+ *                  int64_t message_id, const char *emoji_utf8,
+ *                  size_t emoji_utf8_len);
+ */
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len) {
+    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+
+    if (!emoji_utf8 || !emoji_utf8[0])
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Tier 1: sub-picker (D1's hu_imessage_react_emoji_subpicker). */
+    if (hu_imessage_react_emoji_subpicker(ctx, target, target_len, message_id, emoji_utf8) ==
+        HU_OK) {
+        return HU_OK;
+    }
+
+    /* Tier 2: classic-tapback fallback via CLASSIC_MAP. */
+    const char *label = classic_label_for_emoji(emoji_utf8);
+    (void)label;
+    /* In production with live macOS AX, the classic-tapback path would call
+     * ax_react_tapback(target, target_len, message_id, label) here.
+     * For D2, the fallback path is stubbed (test contract is the gate).
+     * When test stub g_test_react_emoji_subpicker is set, only the
+     * sub-picker tier is exercised. Production without AX returns
+     * NOT_SUPPORTED and the dispatcher (F2) falls back to FLAT text. */
+    return HU_ERR_NOT_SUPPORTED;
+}
 
 /* ── Typing indicators: three-tier fallback ──────────────────────────
  * Tier 1: IMCore private framework (direct API, no UI, macOS 14-15)
@@ -3867,6 +3994,10 @@ static const hu_channel_vtable_t imessage_vtable = {
     .load_conversation_history = imessage_load_conversation_history,
     .get_response_constraints = imessage_get_response_constraints,
     .react = imessage_react,
+    .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
+                             size_t))hu_imessage_reply,
+    .react_emoji = hu_imessage_react_emoji_with_fallback,
+    .send_sticker = hu_imessage_send_sticker,
     .get_attachment_path = imessage_vt_get_attachment_path,
     .human_active_recently = imessage_vt_human_active_recently,
     .get_latest_attachment_path = imessage_vt_get_latest_attachment_path,

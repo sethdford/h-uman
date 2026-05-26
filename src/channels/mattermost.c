@@ -564,6 +564,9 @@ static const hu_channel_vtable_t mattermost_vtable = {
     .load_conversation_history = mattermost_load_conversation_history,
     .get_response_constraints = mattermost_get_response_constraints,
     .react = mattermost_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .human_active_recently = mattermost_human_active_recently,
 };
 

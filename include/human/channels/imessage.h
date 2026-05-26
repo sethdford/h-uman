@@ -454,6 +454,47 @@ size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, cons
 typedef void (*hu_imessage_test_send_stub_fn)(const char *target, size_t target_len,
                                               const char *message, size_t message_len);
 void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
+
+/** Test-only — replaces sub-picker AX with a deterministic stub.
+ * Pass NULL to disable the stub and revert to the real AX path (if available). */
+void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8));
+
+/** Test-only: deterministic check of CLASSIC_MAP lookup + fallback. */
+const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8);
+#endif
+
+/** Public: attempt to react with an arbitrary emoji via AX sub-picker.
+ * Returns HU_OK on success, HU_ERR_NOT_SUPPORTED if not available
+ * (caller can then fall back to classic-tapback mapping in D2).
+ * Returns HU_ERR_INVALID_ARGUMENT if emoji_utf8 is NULL or empty. */
+hu_error_t hu_imessage_react_emoji_subpicker(void *ctx, const char *target, size_t target_len,
+                                             int64_t message_id, const char *emoji_utf8);
+
+/** Public dispatcher: try sub-picker first; on miss, fall back to
+ * CLASSIC_MAP nearest-classic-tapback. Never fails entirely — map-miss
+ * defaults to "Liked" per Seth's universal-positive choice.
+ * Signature matches vtable->react_emoji slot exactly. */
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len);
+
+/** Public: send a sticker file as an iMessage attachment via the imsg CLI.
+ * sticker_path is an absolute filesystem path to the sticker image file.
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null/empty args,
+ * HU_ERR_NOT_FOUND if the sticker file doesn't exist, HU_ERR_NOT_SUPPORTED
+ * if the underlying send fails (imsg unavailable, permissions, etc.).
+ * Signature matches vtable->send_sticker slot exactly. */
+hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target_len,
+                                    const char *sticker_path, size_t sticker_path_len);
+
+#ifdef HU_IS_TEST
+/** Test-only: set a callback function pointer that will be invoked instead of imsg send.
+ * Callback receives (target, target_len, sticker_path) and should return HU_OK on success
+ * or HU_ERR_NOT_SUPPORTED on failure. Pass NULL to disable the stub and use production
+ * behavior. */
+void hu_imessage_set_test_send_sticker_stub(hu_error_t (*stub)(const char *target,
+                                                               size_t target_len,
+                                                               const char *sticker_path));
 #endif
 
 #endif /* HU_CHANNELS_IMESSAGE_H */

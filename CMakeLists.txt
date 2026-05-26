@@ -194,9 +194,9 @@ option(HU_ENABLE_WEB "Build Web channel" OFF)
 option(HU_ENABLE_EMAIL "Build Email channel" OFF)
 option(HU_ENABLE_IMAP "Build IMAP channel" OFF)
 if(APPLE)
-    option(HU_ENABLE_IMESSAGE "Build iMessage channel" ON)
+    option(HU_HAS_IMESSAGE "Build iMessage channel" ON)
 else()
-    option(HU_ENABLE_IMESSAGE "Build iMessage channel" OFF)
+    option(HU_HAS_IMESSAGE "Build iMessage channel" OFF)
 endif()
 option(HU_IMESSAGE_TAPBACK_ENABLED "Enable iMessage tapback reactions via JXA (requires accessibility)" OFF)
 if(APPLE)
@@ -269,7 +269,7 @@ if(HU_ENABLE_ALL_CHANNELS)
     set(HU_ENABLE_WEB ON)
     set(HU_ENABLE_EMAIL ON)
     set(HU_ENABLE_IMAP ON)
-    set(HU_ENABLE_IMESSAGE ON)
+    set(HU_HAS_IMESSAGE ON)
     set(HU_ENABLE_MATTERMOST ON)
     set(HU_ENABLE_ONEBOT ON)
     set(HU_ENABLE_DINGTALK ON)
@@ -369,7 +369,7 @@ endif()
 if(HU_ENABLE_IMAP)
     list(APPEND CHANNEL_SOURCES src/channels/imap.c)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
     # Phase 2 Task 11 (RL SOTA): tapback inbound poll. Lives in its own TU
     # to avoid an enum-name collision between human/channels/reaction_event.h
@@ -377,6 +377,8 @@ if(HU_ENABLE_IMESSAGE)
     # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
     # in src/channels/imessage.c near hu_imessage_poll for the full story.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+    # E2: sticker send action surface. Wired via vtable.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
     # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
     # primitives that render iMessage events into canonical English for
     # personal-model ingestion. No chat.db / Apple deps; ingest wiring
@@ -401,6 +403,15 @@ if(HU_ENABLE_IMESSAGE)
     # distribution, response latency, initiation ratio, frequency
     # aggregates per contact. Pure helpers + SQL scanner (HU_IS_TEST stub).
     list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
+    # Tier 1 Phase 2 (iMessage action surface): predicate that selects
+    # reply style per conversation (flat/threaded/tapback variants).
+    # Wired at send time before hu_imessage_send. Pure classifier.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
+    # Tier 1 Phase 2 (iMessage action surface F1): build facts struct from
+    # conversation state. Pure bridge between dispatcher (F2) and predicate (Phase A).
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
+    # Threaded inline reply path (Tier 1: Cmd-R via AX, Tier 2/3 in C2/C3).
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -660,6 +671,7 @@ set(HU_CORE_SOURCES
     # (from calibrate) into a prompt-ready paragraph, ready to splice
     # into the agent's persona context.
     src/persona/social_insights.c
+    src/persona/sticker.c
     src/gateway/event_bridge.c
     src/gateway/tenant.c
     src/runtime/native.c
@@ -1912,13 +1924,13 @@ endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LEARNING=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     # Propagated so header guards in include/human/channels/imessage_ingest.h
     # pick the real declaration vs. the inline stub when imessage_ingest.c
     # is in CHANNEL_SOURCES. Per ~/.claude/rules/test-source-gate-symmetry.md.
     # Other targets (human, human_core_test, human_tests) get this near
     # their own ML_DEFINITIONS lines after their add_library/add_executable.
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_IMESSAGE=1)
+    target_compile_definitions(human_core PRIVATE HU_HAS_IMESSAGE=1)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
@@ -1982,7 +1994,7 @@ endif()
 if(HU_ENABLE_IMAP)
     target_compile_definitions(human_core PRIVATE HU_HAS_IMAP=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_core PRIVATE HU_HAS_IMESSAGE=1)
     if(HU_IMESSAGE_TAPBACK_ENABLED)
         target_compile_definitions(human_core PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
@@ -2523,8 +2535,8 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human PRIVATE HU_ENABLE_ML=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
-    target_compile_definitions(human PRIVATE HU_ENABLE_IMESSAGE=1)
+if(HU_HAS_IMESSAGE)
+    target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
@@ -2544,7 +2556,7 @@ endif()
 if(HU_ENABLE_EMAIL)
     target_compile_definitions(human PRIVATE HU_HAS_EMAIL=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
     if(HU_IMESSAGE_TAPBACK_ENABLED)
         target_compile_definitions(human PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
@@ -2847,8 +2859,8 @@ target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_T
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_IMESSAGE=1)
+if(HU_HAS_IMESSAGE)
+    target_compile_definitions(human_core_test PRIVATE HU_HAS_IMESSAGE=1)
 endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LEARNING=1)
@@ -2905,7 +2917,7 @@ endif()
 if(HU_ENABLE_IMAP)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_IMAP=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_IMESSAGE=1)
 endif()
 if(HU_ENABLE_PWA)
@@ -3060,7 +3072,7 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
-    # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
+    # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
     # hu_imessage_create AND hu_telegram_create). minimal-build doesn't
     # enable either, so unconditional registration breaks the link.
     tests/test_personal_model_simulation.c
@@ -3226,20 +3238,32 @@ set(HU_TEST_SOURCES
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c
+    tests/test_channel_vtable_action_surface.c
     tests/test_gmail.c
     tests/test_imessage_extended.c
+    tests/test_imessage_reply_style.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
+tests/test_imessage_reply_pacing.c
+tests/test_imessage_action_telemetry.c    tests/test_follow_up.c
+tests/test_imessage_action_telemetry.c
+tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
+    tests/test_imessage_threaded_reply.c
+    tests/test_imessage_custom_tapback.c
+    tests/test_imessage_action_facts.c
+    tests/test_imessage_dispatcher.c
+    tests/test_imessage_sticker.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
+    tests/test_config_action_surface.c
     tests/test_json_extended.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c
@@ -3525,7 +3549,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
@@ -3807,7 +3831,7 @@ if(HU_ENABLE_ML)
 endif()
 
 # test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.
-if(HU_ENABLE_IMESSAGE AND HU_ENABLE_TELEGRAM)
+if(HU_HAS_IMESSAGE AND HU_ENABLE_TELEGRAM)
     list(APPEND HU_TEST_SOURCES tests/test_channel_overlay_apply.c)
 endif()
 
@@ -3962,7 +3986,7 @@ endif()
 if(HU_ENABLE_MQTT)
     target_compile_definitions(human_tests PRIVATE HU_HAS_MQTT=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
+if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_tests PRIVATE HU_HAS_IMESSAGE=1)
     if(HU_IMESSAGE_TAPBACK_ENABLED)
         target_compile_definitions(human_tests PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
@@ -4034,8 +4058,8 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1)
 endif()
-if(HU_ENABLE_IMESSAGE)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_IMESSAGE=1)
+if(HU_HAS_IMESSAGE)
+    target_compile_definitions(human_tests PRIVATE HU_HAS_IMESSAGE=1)
 endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_LEARNING=1)
@@ -4167,7 +4191,7 @@ if(HU_ENABLE_INTEGRATION_TESTS)
     target_include_directories(human_integration_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/include)
     target_compile_definitions(human_integration_tests PRIVATE HU_ENABLE_CURL=1 HU_HTTP_CURL=1
         HU_ENABLE_SQLITE=1)
-    if(HU_ENABLE_IMESSAGE)
+    if(HU_HAS_IMESSAGE)
         target_compile_definitions(human_integration_tests PRIVATE HU_HAS_IMESSAGE=1)
         if(HU_IMESSAGE_TAPBACK_ENABLED)
             target_compile_definitions(human_integration_tests PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
@@ -4338,7 +4362,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
         if(HU_ENABLE_TIKTOK)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_TIKTOK=1)
         endif()
-        if(HU_ENABLE_IMESSAGE)
+        if(HU_HAS_IMESSAGE)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_IMESSAGE=1)
         endif()
         if(HU_ENABLE_SIGNAL)
@@ -4460,7 +4484,7 @@ if(HU_ENABLE_FUZZ)
     target_compile_options(fuzz_http_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_http_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 
-    if(HU_ENABLE_IMESSAGE)
+    if(HU_HAS_IMESSAGE)
         add_executable(fuzz_imessage_attributed_body fuzz/fuzz_imessage_attributed_body.c)
         set_target_properties(fuzz_imessage_attributed_body PROPERTIES LINKER_LANGUAGE CXX)
         target_compile_definitions(fuzz_imessage_attributed_body PRIVATE HU_IS_TEST=1)

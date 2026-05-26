@@ -7,7 +7,7 @@
  * user_responded_recently, and the full format pipeline.
  *
  * Requires: macOS, Full Disk Access, Messages.app signed in.
- * Build:    cmake -DHU_ENABLE_INTEGRATION_TESTS=ON -DHU_ENABLE_IMESSAGE=ON \
+ * Build:    cmake -DHU_ENABLE_INTEGRATION_TESTS=ON -DHU_HAS_IMESSAGE=ON \
  *                 -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_CURL=ON ..
  * Run:      ./build/human_integration_tests --suite="iMessage Real"
  */

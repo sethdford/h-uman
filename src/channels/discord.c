@@ -761,6 +761,9 @@ static const hu_channel_vtable_t discord_vtable = {
     .load_conversation_history = discord_load_conversation_history,
     .get_response_constraints = discord_get_response_constraints,
     .react = discord_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .get_attachment_path = discord_get_attachment_path,
     .human_active_recently = discord_human_active_recently,
 };
