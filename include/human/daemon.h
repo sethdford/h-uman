@@ -159,4 +159,22 @@ hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_co
                                             hu_service_channel_t *channels, size_t channel_count,
                                             hu_proactive_throttle_t *throttle);
 
+/* iMessage Action Surface Dispatcher (F2) — Phase A–E integration.
+ *
+ * Routes outbound iMessage replies through the predicate (Phase A) to choose
+ * between threaded reply / flat send / tapback, with pacing (C5) and telemetry.
+ * When action_surface_v2 is disabled, falls back to flat send (always-do-something).
+ * Returns HU_ERR_INVALID_ARGUMENT if ch, target, body are NULL.
+ * Returns HU_ERR_NOT_SUPPORTED if chosen style's vtable method is unavailable.
+ * Otherwise returns the error from the chosen send path. */
+struct hu_agent;
+struct hu_persona;
+struct hu_channel;
+struct hu_conversation_snapshot;
+hu_error_t hu_daemon_dispatch_imessage_reply(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react);
+
 #endif /* HU_DAEMON_H */
