@@ -2239,6 +2239,135 @@ static void dpo_log_is_noop_under_hu_is_test(void) {
     HU_ASSERT_EQ(err, HU_OK);
 }
 
+/* ── Sprint 41 follow-up #3 — G9 retry-outcome telemetry ─────────────── */
+
+static void g9_retry_outcome_rescued_increments_correct_counter(void) {
+    hu_guard_reject_stats_reset();
+    hu_response_guard_record_g9_retry_outcome(/*retry_succeeded=*/true,
+                                              /*retry_tripped_g9_again=*/false);
+    hu_guard_reject_stats_t s;
+    hu_guard_reject_stats_snapshot(&s);
+    HU_ASSERT_EQ(s.g9_retry_rescued, (uint64_t)1);
+    HU_ASSERT_EQ(s.g9_retry_thrashed, (uint64_t)0);
+    HU_ASSERT_EQ(s.g9_retry_starved, (uint64_t)0);
+}
+
+static void g9_retry_outcome_thrashed_when_retry_trips_g9_again(void) {
+    hu_guard_reject_stats_reset();
+    hu_response_guard_record_g9_retry_outcome(/*retry_succeeded=*/true,
+                                              /*retry_tripped_g9_again=*/true);
+    hu_guard_reject_stats_t s;
+    hu_guard_reject_stats_snapshot(&s);
+    HU_ASSERT_EQ(s.g9_retry_rescued, (uint64_t)0);
+    HU_ASSERT_EQ(s.g9_retry_thrashed, (uint64_t)1);
+    HU_ASSERT_EQ(s.g9_retry_starved, (uint64_t)0);
+}
+
+static void g9_retry_outcome_starved_when_retry_failed(void) {
+    hu_guard_reject_stats_reset();
+    hu_response_guard_record_g9_retry_outcome(/*retry_succeeded=*/false,
+                                              /*retry_tripped_g9_again=*/false);
+    hu_guard_reject_stats_t s;
+    hu_guard_reject_stats_snapshot(&s);
+    HU_ASSERT_EQ(s.g9_retry_starved, (uint64_t)1);
+}
+
+/* ── Sprint 41 follow-up #3 — DPO daily-rotated path ────────────────── */
+
+#include "human/agent/response_guard_dpo.h"
+
+static void dpo_path_for_day_emits_utc_dated_filename(void) {
+    /* 1779840000 = 2026-05-27 00:00:00 UTC (gmtime-verified). */
+    char buf[256];
+    size_t n =
+        hu_response_guard_dpo_path_for_day("/home/seth", (int64_t)1779840000, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_EQ(buf, "/home/seth/.human/training-data/m3-dpo-rejections-2026-05-27.jsonl");
+}
+
+static void dpo_path_for_day_rolls_at_utc_midnight(void) {
+    /* 2026-05-27 23:59:59 UTC = 1779840000 + 86399 → same day.
+     * 2026-05-28 00:00:00 UTC = 1779840000 + 86400 → next day. */
+    char before[256];
+    char after[256];
+    (void)hu_response_guard_dpo_path_for_day("/h", (int64_t)1779840000 + 86399, before,
+                                             sizeof(before));
+    (void)hu_response_guard_dpo_path_for_day("/h", (int64_t)1779840000 + 86400, after,
+                                             sizeof(after));
+    HU_ASSERT_TRUE(strstr(before, "2026-05-27") != NULL);
+    HU_ASSERT_TRUE(strstr(after, "2026-05-28") != NULL);
+}
+
+static void dpo_path_for_day_returns_zero_on_null_home(void) {
+    char buf[64];
+    HU_ASSERT_EQ(hu_response_guard_dpo_path_for_day(NULL, 1779840000, buf, sizeof(buf)), (size_t)0);
+    HU_ASSERT_EQ(hu_response_guard_dpo_path_for_day("", 1779840000, buf, sizeof(buf)), (size_t)0);
+}
+
+static void dpo_path_for_day_returns_zero_on_tiny_buffer(void) {
+    char tiny[16];
+    HU_ASSERT_EQ(
+        hu_response_guard_dpo_path_for_day("/home/seth/long/path", 1779840000, tiny, sizeof(tiny)),
+        (size_t)0);
+}
+
+/* ── Sprint 41 follow-up #4 — per-channel G9 disable list ─────────────── */
+
+static void g9_disabled_for_channel_returns_false_when_list_empty(void) {
+    hu_response_guard_set_g9_disabled_channels(NULL, 0);
+    HU_ASSERT_FALSE(hu_response_guard_g9_disabled_for_channel("imessage", 8));
+}
+
+static void g9_disabled_for_channel_matches_listed_channel(void) {
+    const char *list[] = {"voice", "discord"};
+    hu_response_guard_set_g9_disabled_channels(list, 2);
+    HU_ASSERT_TRUE(hu_response_guard_g9_disabled_for_channel("voice", 5));
+    HU_ASSERT_TRUE(hu_response_guard_g9_disabled_for_channel("discord", 7));
+    HU_ASSERT_FALSE(hu_response_guard_g9_disabled_for_channel("imessage", 8));
+    hu_response_guard_set_g9_disabled_channels(NULL, 0); /* clean up */
+}
+
+static void g9_disabled_for_channel_is_case_insensitive(void) {
+    const char *list[] = {"Voice"};
+    hu_response_guard_set_g9_disabled_channels(list, 1);
+    HU_ASSERT_TRUE(hu_response_guard_g9_disabled_for_channel("voice", 5));
+    HU_ASSERT_TRUE(hu_response_guard_g9_disabled_for_channel("VOICE", 5));
+    hu_response_guard_set_g9_disabled_channels(NULL, 0);
+}
+
+static void g9_disabled_for_channel_does_not_partial_match(void) {
+    /* Channel "voice" must not match "voicebox" or "vo" — whole-name only. */
+    const char *list[] = {"voice"};
+    hu_response_guard_set_g9_disabled_channels(list, 1);
+    HU_ASSERT_FALSE(hu_response_guard_g9_disabled_for_channel("voicebox", 8));
+    HU_ASSERT_FALSE(hu_response_guard_g9_disabled_for_channel("vo", 2));
+    hu_response_guard_set_g9_disabled_channels(NULL, 0);
+}
+
+static void g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed(void) {
+    /* End-to-end via hu_response_guard_check_ex with ctx.naked_opener_disabled
+     * set, simulating what agent_turn does after consulting the channel list. */
+    const char *raw = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    hu_guard_context_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    /* Mirror agent_turn: caller consults the list and sets the bit. */
+    const char *list[] = {"voice"};
+    hu_response_guard_set_g9_disabled_channels(list, 1);
+    ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel("voice", 5);
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_naked_discourse_opener);
+    hu_response_guard_set_g9_disabled_channels(NULL, 0);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -2362,7 +2491,7 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(critique_echo_predicate_handles_short_input);
     HU_RUN_TEST(critique_echo_predicate_handles_null_safe);
 
-    /* Sprint 41 — G9 naked discourse-marker opener (2026-05-26 Jordan
+    /* Sprint 41 — G9 naked discourse-marker opener (SPRINT41_DATE_LATER Jordan
      * incident: production sent "tbh morning. you awake yet?" to a real
      * contact, an unsemantic concatenation produced by the LoRA adapter
      * that learned discourse markers as high-probability sentence-
@@ -2393,4 +2522,22 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(dpo_format_truncates_safely_on_overflow);
     HU_RUN_TEST(dpo_format_returns_zero_on_zero_capacity);
     HU_RUN_TEST(dpo_log_is_noop_under_hu_is_test);
+
+    /* Sprint 41 follow-up #3 — G9 retry-outcome telemetry. */
+    HU_RUN_TEST(g9_retry_outcome_rescued_increments_correct_counter);
+    HU_RUN_TEST(g9_retry_outcome_thrashed_when_retry_trips_g9_again);
+    HU_RUN_TEST(g9_retry_outcome_starved_when_retry_failed);
+
+    /* Sprint 41 follow-up #3 — DPO daily-rotated path. */
+    HU_RUN_TEST(dpo_path_for_day_emits_utc_dated_filename);
+    HU_RUN_TEST(dpo_path_for_day_rolls_at_utc_midnight);
+    HU_RUN_TEST(dpo_path_for_day_returns_zero_on_null_home);
+    HU_RUN_TEST(dpo_path_for_day_returns_zero_on_tiny_buffer);
+
+    /* Sprint 41 follow-up #4 — per-channel G9 disable list. */
+    HU_RUN_TEST(g9_disabled_for_channel_returns_false_when_list_empty);
+    HU_RUN_TEST(g9_disabled_for_channel_matches_listed_channel);
+    HU_RUN_TEST(g9_disabled_for_channel_is_case_insensitive);
+    HU_RUN_TEST(g9_disabled_for_channel_does_not_partial_match);
+    HU_RUN_TEST(g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed);
 }

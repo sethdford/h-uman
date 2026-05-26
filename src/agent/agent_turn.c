@@ -6443,6 +6443,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     guard_ctx.director_history = (const char *const *)agent->director_history;
                     guard_ctx.director_history_lens = agent->director_history_lens;
                     guard_ctx.director_history_count = agent->director_history_count;
+                    /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
+                    guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
+                        agent->active_channel, agent->active_channel_len);
                     if (agent->persona) {
                         if (agent->persona->name && agent->persona->name_len > 1) {
                             guard_ctx.persona_name = agent->persona->name;
@@ -6514,6 +6517,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 &retry_len, &retry_report);
                             uint64_t ab_retry_latency_ms =
                                 hu_agent_internal_monotonic_ms() - ab_retry_t0_ms;
+                            /* Sprint 41 follow-up #3 — G9 retry-outcome telemetry.
+                             * Only fires when the ORIGINAL rejection was a G9 hit.
+                             * Distinguishes "G9 caught a real Jordan-class leak"
+                             * (rescued) from "LoRA is stuck in the bad pattern"
+                             * (thrashed) from "retry produced nothing" (starved).
+                             * Answers operator question: is G9 helping or hurting? */
+                            if (guard_report.detected_naked_discourse_opener) {
+                                bool retry_ok =
+                                    (retry_err == HU_OK && retry_content && retry_len > 0);
+                                bool retry_tripped_g9 =
+                                    retry_ok &&
+                                    hu_response_is_naked_discourse_opener(retry_content, retry_len);
+                                hu_response_guard_record_g9_retry_outcome(retry_ok,
+                                                                          retry_tripped_g9);
+                            }
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                 /* Spec 2026-05-19 self-model-scaffold Phase B:
                                  * stash response_guard-retry length + latency.

@@ -9,7 +9,7 @@
 
 static void mlx_local_create_connect_destroy(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mlx_local_config_t cfg = {
+    hu_voice_mlx_local_config_t cfg = {
         .endpoint = "http://127.0.0.1:8741",
         .model = "gemma-4-e4b-it-4bit",
         .system_prompt = "You are a helpful assistant.",

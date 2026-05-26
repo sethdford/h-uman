@@ -707,6 +707,11 @@ static atomic_uint_fast64_t s_guard_stat_persona_identity;
 /* Sprint 41 — G9 naked discourse-marker opener. */
 static atomic_uint_fast64_t s_guard_stat_naked_opener;
 
+/* Sprint 41 follow-up #3 — G9 retry-outcome breakdown. */
+static atomic_uint_fast64_t s_guard_stat_g9_retry_rescued;
+static atomic_uint_fast64_t s_guard_stat_g9_retry_thrashed;
+static atomic_uint_fast64_t s_guard_stat_g9_retry_starved;
+
 /* Sprint 41 follow-up — process-wide G9 kill switch. */
 static atomic_bool s_g9_globally_disabled;
 
@@ -716,6 +721,84 @@ void hu_response_guard_set_naked_opener_globally_disabled(bool disabled) {
 
 bool hu_response_guard_naked_opener_globally_disabled(void) {
     return atomic_load_explicit(&s_g9_globally_disabled, memory_order_relaxed);
+}
+
+/* Sprint 41 follow-up #4 — per-channel G9 disable list.
+ *
+ * The list is small (production channel count is single digits), so a
+ * linear scan is fine and we don't need a hash table. Process-private
+ * storage: a heap-allocated array of dup'd channel strings + a count.
+ * Both protected by a mutex around the writer path; readers do a
+ * snapshot under the lock and scan the snapshot lock-free.
+ *
+ * Liveness contract: hu_response_guard_g9_disabled_for_channel can be
+ * called from any thread at any time. The setter is called only from
+ * daemon startup and config-reload paths, both of which are
+ * single-threaded with respect to the response_guard subsystem.
+ *
+ * To keep the lock-free fast path simple, we use atomic load/store of a
+ * pointer-to-array pair, with a tiny strdup arena per snapshot. */
+#include <stdlib.h>
+
+typedef struct {
+    char **names;
+    size_t count;
+} g9_channel_list_t;
+
+static atomic_uintptr_t s_g9_disabled_channels; /* g9_channel_list_t * */
+
+static void g9_channel_list_free(g9_channel_list_t *l) {
+    if (!l)
+        return;
+    for (size_t i = 0; i < l->count; i++)
+        free(l->names[i]);
+    free(l->names);
+    free(l);
+}
+
+void hu_response_guard_set_g9_disabled_channels(const char *const *channels, size_t count) {
+    g9_channel_list_t *new_list = NULL;
+    if (count > 0 && channels) {
+        new_list = (g9_channel_list_t *)calloc(1, sizeof(*new_list));
+        if (!new_list)
+            return;
+        new_list->names = (char **)calloc(count, sizeof(char *));
+        if (!new_list->names) {
+            free(new_list);
+            return;
+        }
+        for (size_t i = 0; i < count; i++) {
+            if (channels[i]) {
+                new_list->names[new_list->count] = strdup(channels[i]);
+                if (new_list->names[new_list->count])
+                    new_list->count++;
+            }
+        }
+    }
+    uintptr_t old = atomic_exchange_explicit(&s_g9_disabled_channels, (uintptr_t)new_list,
+                                             memory_order_acq_rel);
+    g9_channel_list_free((g9_channel_list_t *)old);
+}
+
+bool hu_response_guard_g9_disabled_for_channel(const char *channel, size_t channel_len) {
+    if (!channel || channel_len == 0)
+        return false;
+    g9_channel_list_t *snap =
+        (g9_channel_list_t *)atomic_load_explicit(&s_g9_disabled_channels, memory_order_acquire);
+    if (!snap || snap->count == 0)
+        return false;
+    /* Case-insensitive whole-name match. Channel names in production are
+     * short ASCII slugs ("imessage", "voice", "discord") so strncasecmp
+     * is fine. */
+    for (size_t i = 0; i < snap->count; i++) {
+        const char *name = snap->names[i];
+        if (!name)
+            continue;
+        size_t nlen = strlen(name);
+        if (nlen == channel_len && strncasecmp(name, channel, channel_len) == 0)
+            return true;
+    }
+    return false;
 }
 
 static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
@@ -746,6 +829,12 @@ void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
         atomic_load_explicit(&s_guard_stat_persona_identity, memory_order_relaxed);
     out->naked_discourse_opener =
         atomic_load_explicit(&s_guard_stat_naked_opener, memory_order_relaxed);
+    out->g9_retry_rescued =
+        atomic_load_explicit(&s_guard_stat_g9_retry_rescued, memory_order_relaxed);
+    out->g9_retry_thrashed =
+        atomic_load_explicit(&s_guard_stat_g9_retry_thrashed, memory_order_relaxed);
+    out->g9_retry_starved =
+        atomic_load_explicit(&s_guard_stat_g9_retry_starved, memory_order_relaxed);
 }
 
 void hu_guard_reject_stats_reset(void) {
@@ -755,6 +844,21 @@ void hu_guard_reject_stats_reset(void) {
     atomic_store_explicit(&s_guard_stat_persona_pii, 0, memory_order_relaxed);
     atomic_store_explicit(&s_guard_stat_persona_identity, 0, memory_order_relaxed);
     atomic_store_explicit(&s_guard_stat_naked_opener, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_g9_retry_rescued, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_g9_retry_thrashed, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_g9_retry_starved, 0, memory_order_relaxed);
+}
+
+void hu_response_guard_record_g9_retry_outcome(bool retry_succeeded, bool retry_tripped_g9_again) {
+    if (!retry_succeeded) {
+        atomic_fetch_add_explicit(&s_guard_stat_g9_retry_starved, 1, memory_order_relaxed);
+        return;
+    }
+    if (retry_tripped_g9_again) {
+        atomic_fetch_add_explicit(&s_guard_stat_g9_retry_thrashed, 1, memory_order_relaxed);
+        return;
+    }
+    atomic_fetch_add_explicit(&s_guard_stat_g9_retry_rescued, 1, memory_order_relaxed);
 }
 
 bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len) {

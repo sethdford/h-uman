@@ -11,8 +11,18 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#ifndef HU_DPO_REJECTIONS_PATH
-#define HU_DPO_REJECTIONS_PATH "/.human/training-data/m3-dpo-rejections.jsonl"
+/* Sprint 41 follow-up #3 — daily-rotated path. Previously the logger
+ * appended to a single unbounded file (~/.human/training-data/m3-dpo-
+ * rejections.jsonl) — fine for week-1 but disk-pressure-risk by month-2
+ * on an active deployment with multiple rejections per day. We rotate
+ * by UTC day: m3-dpo-rejections-YYYY-MM-DD.jsonl. UTC chosen because
+ * the LoRA training pipeline ingests by day boundary; mixing local TZ
+ * would split a day's rejections across two files when DST shifts. */
+#ifndef HU_DPO_REJECTIONS_DIR
+#define HU_DPO_REJECTIONS_DIR "/.human/training-data"
+#endif
+#ifndef HU_DPO_REJECTIONS_PREFIX
+#define HU_DPO_REJECTIONS_PREFIX "m3-dpo-rejections-"
 #endif
 
 /* Append-escape one JSON string into out[*pos..out_cap). Returns false if
@@ -152,13 +162,35 @@ size_t hu_response_guard_format_dpo_negative_jsonl(const char *prompt, size_t pr
 #undef ABORT_TRUNC
 }
 
+/* Sprint 41 follow-up #3 — pure helper that derives the rotated filename
+ * from a Unix timestamp. Exposed for testing without disk I/O. Returns
+ * bytes written (excl. NUL); 0 on overflow. */
+size_t hu_response_guard_dpo_path_for_day(const char *home, int64_t ts_unix, char *out,
+                                          size_t out_cap) {
+    if (!home || !*home || !out || out_cap == 0)
+        return 0;
+    /* Use gmtime so day boundaries are UTC (matches the LoRA training
+     * pipeline's ingest-by-day convention). */
+    time_t t = (time_t)ts_unix;
+    struct tm tm_buf;
+    if (!gmtime_r(&t, &tm_buf))
+        return 0;
+    int n = snprintf(out, out_cap, "%s%s/%s%04d-%02d-%02d.jsonl", home, HU_DPO_REJECTIONS_DIR,
+                     HU_DPO_REJECTIONS_PREFIX, tm_buf.tm_year + 1900, tm_buf.tm_mon + 1,
+                     tm_buf.tm_mday);
+    if (n <= 0 || (size_t)n >= out_cap)
+        return 0;
+    return (size_t)n;
+}
+
 hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_len,
                                               const char *rejected, size_t rejected_len,
                                               const char *detector, const char *channel,
                                               int64_t ts_unix) {
 #ifdef HU_IS_TEST
     /* Tests must not write to disk — keeps the suite hermetic. The pure
-     * formatter is still tested directly. */
+     * formatter + the pure path-derivation function are still tested
+     * directly. */
     (void)prompt;
     (void)prompt_len;
     (void)rejected;
@@ -172,11 +204,9 @@ hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_
     if (!home || !home[0])
         return HU_ERR_IO;
 
-    /* Build the full path. Use a stack buffer — paths over 1KB on real
-     * systems are vanishingly rare and we'd rather fail than alloc. */
+    /* Build the daily-rotated path. */
     char path[1024];
-    int n = snprintf(path, sizeof(path), "%s%s", home, HU_DPO_REJECTIONS_PATH);
-    if (n <= 0 || (size_t)n >= sizeof(path))
+    if (hu_response_guard_dpo_path_for_day(home, ts_unix, path, sizeof(path)) == 0)
         return HU_ERR_IO;
 
     /* Format the JSONL line into a stack buffer. 8 KiB is more than enough

@@ -69,6 +69,21 @@ hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_
                                               const char *detector, const char *channel,
                                               int64_t ts_unix);
 
+/* Sprint 41 follow-up #3 — derive the daily-rotated DPO rejection file
+ * path from a Unix timestamp. Pure function (no I/O); exposed for unit
+ * tests so the rotation logic can be locked without writing to disk.
+ *
+ * Format: <home>/.human/training-data/m3-dpo-rejections-YYYY-MM-DD.jsonl
+ *
+ * Day boundary is UTC (matches the LoRA training pipeline's ingest-by-
+ * day convention; mixing local TZ would split a day's rejections across
+ * two files when DST shifts).
+ *
+ * Returns bytes written (excluding NUL terminator), 0 on overflow or
+ * NULL inputs. */
+size_t hu_response_guard_dpo_path_for_day(const char *home, int64_t ts_unix, char *out,
+                                          size_t out_cap);
+
 #ifdef __cplusplus
 }
 #endif

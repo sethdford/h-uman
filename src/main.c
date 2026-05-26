@@ -1636,6 +1636,10 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         if (app_ctx.cfg) {
             hu_response_guard_set_naked_opener_globally_disabled(
                 !app_ctx.cfg->response_guard.naked_opener_enabled);
+            /* Sprint 41 follow-up #4 — install per-channel G9 disable list. */
+            hu_response_guard_set_g9_disabled_channels(
+                (const char *const *)app_ctx.cfg->response_guard.g9_disabled_channels,
+                app_ctx.cfg->response_guard.g9_disabled_channels_count);
         }
         svc_app_ctx.alloc = alloc;
         svc_app_ctx.tools = app_ctx.tools;

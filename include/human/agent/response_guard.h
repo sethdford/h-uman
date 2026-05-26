@@ -199,6 +199,25 @@ typedef struct {
     uint64_t persona_identity_echo;
     /* Sprint 41 — naked discourse-marker opener (G9). */
     uint64_t naked_discourse_opener;
+    /* Sprint 41 follow-up #3 — G9 retry-outcome breakdown.
+     *
+     *   g9_retry_rescued  — G9 rejected → retry succeeded with a clean
+     *                       response that does NOT trip G9 again. The
+     *                       guard saved a real Jordan-class leak.
+     *   g9_retry_thrashed — G9 rejected → retry ALSO tripped G9. The
+     *                       LoRA is stuck in the bad opener pattern; the
+     *                       fallback path (canned response) ships.
+     *   g9_retry_starved  — G9 rejected → retry failed or returned empty,
+     *                       so no message reaches the user via this turn.
+     *
+     * Operators read these to answer "is G9 helping or hurting?":
+     *   - rescued / (rescued + thrashed + starved) ≈ rescue rate
+     *   - thrashed > 5% → LoRA needs retraining with DPO negatives
+     *   - starved > 1% → contact is silently underserved; tune marker list
+     *     or disable G9 for that channel. */
+    uint64_t g9_retry_rescued;
+    uint64_t g9_retry_thrashed;
+    uint64_t g9_retry_starved;
 } hu_guard_reject_stats_t;
 
 void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
@@ -268,6 +287,43 @@ bool hu_response_is_naked_discourse_opener(const char *s, size_t len);
  * Thread-safe: atomic bool. */
 void hu_response_guard_set_naked_opener_globally_disabled(bool disabled);
 bool hu_response_guard_naked_opener_globally_disabled(void);
+
+/* Sprint 41 follow-up #3 — record the outcome of a G9-triggered retry.
+ *
+ * Call this from the agent_turn / agent_stream retry path AFTER the
+ * second response_guard_check has run on the retry result. Pass:
+ *   - retry_succeeded: the retry produced a non-empty response that the
+ *     daemon will actually send (HU_GUARD_OK or HU_GUARD_REWROTE on the
+ *     retry).
+ *   - retry_tripped_g9_again: the retry produced a response that ALSO
+ *     trips G9 (caller checked via hu_response_is_naked_discourse_opener
+ *     on the retry text OR observed HU_GUARD_REJECT with
+ *     detected_naked_discourse_opener set).
+ *
+ * Pure function over (retry_succeeded, retry_tripped_g9_again):
+ *   ( true,  false) → rescued
+ *   ( true,  true)  → thrashed (sent but bad — should not happen if guard
+ *                      is wired correctly; counted defensively)
+ *   ( false, _    ) → starved
+ *
+ * No-op when neither input applies (e.g. the original response was OK).
+ * Thread-safe atomic increments. */
+void hu_response_guard_record_g9_retry_outcome(bool retry_succeeded, bool retry_tripped_g9_again);
+
+/* Sprint 41 follow-up #4 — per-channel G9 disable list.
+ *
+ * Daemon snapshots config->response_guard.g9_disabled_channels at startup
+ * via hu_response_guard_set_g9_disabled_channels. The list is then
+ * consulted by hu_response_guard_g9_disabled_for_channel from the
+ * guard_context construction sites (agent_turn / agent_stream) — when
+ * the current channel matches, those sites set
+ * ctx->naked_opener_disabled = true and G9 is bypassed for that call.
+ *
+ * Setter copies the channel names into a process-private array so the
+ * caller's config strings can be freed independently. Passing NULL+0
+ * clears the list. Thread-safe via atomic snapshot pointer. */
+void hu_response_guard_set_g9_disabled_channels(const char *const *channels, size_t count);
+bool hu_response_guard_g9_disabled_for_channel(const char *channel, size_t channel_len);
 
 void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
                                   size_t contact_key_len, size_t candidate_count, size_t best_idx,

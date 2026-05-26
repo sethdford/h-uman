@@ -23,19 +23,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct hu_mlx_local_config {
-    const char *endpoint;       /* http://127.0.0.1:8741 */
-    const char *model;          /* model name (informational) */
+typedef struct hu_voice_mlx_local_config {
+    const char *endpoint; /* http://127.0.0.1:8741 */
+    const char *model;    /* model name (informational) */
     const char *system_prompt;
-    const char *voice_id;       /* TTS voice (for downstream Cartesia/Piper) */
+    const char *voice_id; /* TTS voice (for downstream Cartesia/Piper) */
     int sample_rate;
     int max_tokens;
     float temperature;
-} hu_mlx_local_config_t;
+} hu_voice_mlx_local_config_t;
 
 typedef struct hu_mlx_local_session {
     hu_allocator_t *alloc;
-    hu_mlx_local_config_t config;
+    hu_voice_mlx_local_config_t config;
     bool connected;
 
     /* Accumulated transcript chunks from SSE stream */
@@ -44,7 +44,7 @@ typedef struct hu_mlx_local_session {
     size_t pending_transcript_cap;
 
     /* SSE connection state */
-    void *curl_handle;  /* CURL easy handle for active stream */
+    void *curl_handle; /* CURL easy handle for active stream */
     bool stream_active;
     bool stream_done;
 
@@ -93,8 +93,8 @@ static hu_error_t mlx_send_audio(void *ctx, const void *pcm16, size_t len) {
     return HU_OK;
 }
 
-static hu_error_t mlx_recv_event(void *ctx, hu_allocator_t *alloc,
-                                 hu_voice_rt_event_t *out, int timeout_ms) {
+static hu_error_t mlx_recv_event(void *ctx, hu_allocator_t *alloc, hu_voice_rt_event_t *out,
+                                 int timeout_ms) {
     hu_mlx_local_session_t *s = (hu_mlx_local_session_t *)ctx;
     if (!s || !alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -140,8 +140,8 @@ static hu_error_t mlx_recv_event(void *ctx, hu_allocator_t *alloc,
 #endif
 }
 
-static hu_error_t mlx_add_tool(void *ctx, const char *name,
-                               const char *description, const char *parameters_json) {
+static hu_error_t mlx_add_tool(void *ctx, const char *name, const char *description,
+                               const char *parameters_json) {
     (void)ctx;
     (void)name;
     (void)description;
@@ -208,8 +208,8 @@ static hu_error_t mlx_reconnect(void *ctx) {
     return HU_OK;
 }
 
-static hu_error_t mlx_send_tool_response(void *ctx, const char *name,
-                                         const char *call_id, const char *response_json) {
+static hu_error_t mlx_send_tool_response(void *ctx, const char *name, const char *call_id,
+                                         const char *response_json) {
     (void)ctx;
     (void)name;
     (void)call_id;
@@ -235,7 +235,7 @@ static const hu_voice_provider_vtable_t mlx_local_vtable = {
 /* ── Public API ────────────────────────────────────────────────── */
 
 hu_error_t hu_voice_provider_mlx_local_create(hu_allocator_t *alloc,
-                                              const hu_mlx_local_config_t *config,
+                                              const hu_voice_mlx_local_config_t *config,
                                               hu_voice_provider_t *out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;

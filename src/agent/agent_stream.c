@@ -1545,6 +1545,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 guard_ctx.director_history = (const char *const *)agent->director_history;
                 guard_ctx.director_history_lens = agent->director_history_lens;
                 guard_ctx.director_history_count = agent->director_history_count;
+                /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
+                guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
+                    agent->active_channel, agent->active_channel_len);
                 if (agent->persona) {
                     if (agent->persona->name && agent->persona->name_len > 1) {
                         guard_ctx.persona_name = agent->persona->name;
@@ -1625,6 +1628,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         &safe_content_len, &retry_report);
                     uint64_t recovered_retry_latency_ms =
                         hu_agent_internal_monotonic_ms() - recovered_retry_t0_ms;
+                    /* Sprint 41 follow-up #3 — G9 retry-outcome telemetry. */
+                    if (guard_report.detected_naked_discourse_opener) {
+                        bool retry_ok =
+                            (retry_err == HU_OK && safe_content && safe_content_len > 0);
+                        bool retry_tripped_g9 = retry_ok && hu_response_is_naked_discourse_opener(
+                                                                safe_content, safe_content_len);
+                        hu_response_guard_record_g9_retry_outcome(retry_ok, retry_tripped_g9);
+                    }
                     if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
                         /* Post-retry persona_voice check: catch AI-disclosure that
                          * leaked through the repair prompt anyway. response_guard
@@ -2490,6 +2501,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             guard_ctx.director_history = (const char *const *)agent->director_history;
             guard_ctx.director_history_lens = agent->director_history_lens;
             guard_ctx.director_history_count = agent->director_history_count;
+            /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
+            guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
+                agent->active_channel, agent->active_channel_len);
             if (agent->persona) {
                 if (agent->persona->name && agent->persona->name_len > 1) {
                     guard_ctx.persona_name = agent->persona->name;
@@ -2591,6 +2605,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             msg, msg_len, ranchor, ranchor_len, &retry_txt, &retry_txt_len, &rr);
                         uint64_t ps_retry_latency_ms =
                             hu_agent_internal_monotonic_ms() - ps_retry_t0_ms;
+                        /* Sprint 41 follow-up #3 — G9 retry-outcome telemetry. */
+                        if (guard_report.detected_naked_discourse_opener) {
+                            bool retry_ok = (rre == HU_OK && retry_txt && retry_txt_len > 0);
+                            bool retry_tripped_g9 =
+                                retry_ok &&
+                                hu_response_is_naked_discourse_opener(retry_txt, retry_txt_len);
+                            hu_response_guard_record_g9_retry_outcome(retry_ok, retry_tripped_g9);
+                        }
                         if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
                             if (!hu_persona_voice_response_is_clean(retry_txt, retry_txt_len)) {
                                 hu_log_error("agent_stream", agent->observer,

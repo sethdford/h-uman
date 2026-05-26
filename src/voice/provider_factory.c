@@ -97,7 +97,7 @@ hu_error_t hu_voice_provider_create_from_config(hu_allocator_t *alloc, const hu_
     }
 
     if (strcmp(mode, "mlx_local") == 0) {
-        hu_mlx_local_config_t mlc = {
+        hu_voice_mlx_local_config_t mlc = {
             .endpoint = "http://127.0.0.1:8741",
             .model = rt_model,
             .voice_id = rt_voice,
@@ -170,7 +170,7 @@ hu_error_t hu_voice_provider_create_from_extras(hu_allocator_t *alloc, const cha
     }
 
     if (strcmp(mode, "mlx_local") == 0) {
-        hu_mlx_local_config_t mlc = {
+        hu_voice_mlx_local_config_t mlc = {
             .endpoint = "http://127.0.0.1:8741",
             .model = model,
             .system_prompt = extras->system_instruction,

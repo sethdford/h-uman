@@ -242,8 +242,10 @@ static const char *const s_system_prompt =
     "Consider only the context provided in the user message below. Do NOT invent "
     "facts. If the context is empty or thin, propose nothing.\n"
     "\n"
-    "Return ONLY a single JSON object — no prose before or after — in this exact "
-    "shape:\n"
+    "Return ONLY a single JSON object on a single line — no prose, no preamble, "
+    "no markdown code fences (no triple-backticks, no ```json wrapper). The "
+    "very first character of your output MUST be `{` and the last must be `}`. "
+    "Shape:\n"
     "{\n"
     "  \"should_propose\": <true|false>,\n"
     "  \"confidence\": <0.0..1.0>,\n"
@@ -324,10 +326,39 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
     *out_end = 0;
     if (!text || len == 0)
         return;
+
+    /* Strip a leading markdown code fence if present — gemini-3.1-flash-lite
+     * often wraps the JSON in ```json … ``` despite the prompt asking for
+     * raw output. We compute a `text_offset` into the ORIGINAL buffer so
+     * out_start / out_end stay caller-relative (the caller does
+     * `response + js_start` against the unmodified pointer). The brace-
+     * matcher below still requires a complete object inside, so a
+     * truncated fenced payload still fails cleanly. */
+    size_t text_offset = 0;
+    if (len >= 3) {
+        for (size_t i = 0; i + 2 < len; i++) {
+            if (text[i] == '`' && text[i + 1] == '`' && text[i + 2] == '`') {
+                size_t after = i + 3;
+                while (after < len && ((text[after] >= 'a' && text[after] <= 'z') ||
+                                       (text[after] >= 'A' && text[after] <= 'Z'))) {
+                    after++;
+                }
+                while (after < len && (text[after] == ' ' || text[after] == '\n' ||
+                                       text[after] == '\r' || text[after] == '\t')) {
+                    after++;
+                }
+                text_offset = after;
+                break;
+            }
+        }
+    }
+    const char *scan = text + text_offset;
+    size_t scan_len = len - text_offset;
+
     size_t start = 0;
     bool found_start = false;
-    for (size_t i = 0; i < len; i++) {
-        if (text[i] == '{') {
+    for (size_t i = 0; i < scan_len; i++) {
+        if (scan[i] == '{') {
             start = i;
             found_start = true;
             break;
@@ -338,8 +369,8 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
     int depth = 0;
     bool in_str = false;
     bool esc = false;
-    for (size_t i = start; i < len; i++) {
-        char c = text[i];
+    for (size_t i = start; i < scan_len; i++) {
+        char c = scan[i];
         if (in_str) {
             if (esc) {
                 esc = false;
@@ -359,8 +390,8 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
         } else if (c == '}') {
             depth--;
             if (depth == 0) {
-                *out_start = start;
-                *out_end = i + 1;
+                *out_start = text_offset + start;
+                *out_end = text_offset + i + 1;
                 return;
             }
         }
