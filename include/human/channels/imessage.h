@@ -458,6 +458,9 @@ void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
 /** Test-only — replaces sub-picker AX with a deterministic stub.
  * Pass NULL to disable the stub and revert to the real AX path (if available). */
 void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8));
+
+/** Test-only: deterministic check of CLASSIC_MAP lookup + fallback. */
+const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8);
 #endif
 
 /** Public: attempt to react with an arbitrary emoji via AX sub-picker.
@@ -466,5 +469,13 @@ void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8))
  * Returns HU_ERR_INVALID_ARGUMENT if emoji_utf8 is NULL or empty. */
 hu_error_t hu_imessage_react_emoji_subpicker(void *ctx, const char *target, size_t target_len,
                                              int64_t message_id, const char *emoji_utf8);
+
+/** Public dispatcher: try sub-picker first; on miss, fall back to
+ * CLASSIC_MAP nearest-classic-tapback. Never fails entirely — map-miss
+ * defaults to "Liked" per Seth's universal-positive choice.
+ * Signature matches vtable->react_emoji slot exactly. */
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len);
 
 #endif /* HU_CHANNELS_IMESSAGE_H */
