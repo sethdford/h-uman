@@ -41,6 +41,11 @@ typedef enum hu_init_proposer_result {
     HU_INIT_RESULT_PARSE_ERROR = 7,    /* T3: LLM response wasn't valid JSON */
     HU_INIT_RESULT_LOW_CONFIDENCE = 8, /* T3: LLM proposed but confidence < threshold */
     HU_INIT_RESULT_NEGATIVE = 9,       /* T3: LLM returned should_propose=false */
+    /* M3 Dispatch T2 (2026-05-26) — the LLM returned a high-confidence
+     * draft but response_guard_check_ex rejected it (G1–G9 detector
+     * fired). The draft has been captured as a DPO negative pair for
+     * future LoRA training. Daemon caller skips the send. */
+    HU_INIT_RESULT_GUARD_REJECT = 10,
 } hu_init_proposer_result_t;
 
 /* Sprint 41 follow-up #2 — single-source-of-truth proactive arbiter.
@@ -348,5 +353,19 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
 size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose_inputs_t *inputs,
                                                       int64_t now_unix, int64_t last_inbound_unix,
                                                       char *out, size_t out_cap);
+
+/* M3 Dispatch T2 — pure verdict-mapping helper. Maps the outcome of
+ * hu_response_guard_check_ex (run on a FIRED decision's draft) to the
+ * appropriate tick result:
+ *
+ *   HU_GUARD_OK       → keep FIRED (caller sends decision.draft as-is)
+ *   HU_GUARD_REWROTE  → keep FIRED (caller MUST swap draft for the rewrite)
+ *   HU_GUARD_REJECT   → downgrade to HU_INIT_RESULT_GUARD_REJECT
+ *
+ * Pure — no I/O. Exposed so the post-FIRE verdict logic is unit-testable
+ * without spinning a provider. Takes `int` rather than the enum directly
+ * so this header doesn't require a transitive include of response_guard.h;
+ * callers pass `(int)guard_outcome`. */
+hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outcome);
 
 #endif /* HU_AGENT_INIT_PROPOSER_H */

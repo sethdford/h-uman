@@ -12,6 +12,8 @@
 #include "human/agent/init_proposer.h"
 #include "human/agent.h"
 #include "human/agent/governor.h"
+#include "human/agent/response_guard.h"
+#include "human/agent/response_guard_dpo.h"
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/core/json.h"
@@ -681,6 +683,22 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
     return pos;
 }
 
+/* M3 Dispatch T2 — pure verdict mapping. Exposed in the header so the
+ * post-FIRE behavior is unit-testable without spinning a provider. */
+hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outcome) {
+    switch (guard_outcome) {
+    case HU_GUARD_OK:
+    case HU_GUARD_REWROTE:
+        return HU_INIT_RESULT_FIRED;
+    case HU_GUARD_REJECT:
+        return HU_INIT_RESULT_GUARD_REJECT;
+    default:
+        /* Defensive: any future outcome we don't recognize is treated
+         * as a reject so unknown failures never let a draft slip past. */
+        return HU_INIT_RESULT_GUARD_REJECT;
+    }
+}
+
 hu_error_t hu_init_proposer_tick_with_provider_ex(
     const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
     int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
@@ -766,6 +784,100 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
 
     double threshold = cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85;
     hu_init_proposer_result_t verdict = hu_init_proposer_evaluate_decision(&decision, threshold);
+
+    /* M3 Dispatch T2 — validator chain on the FIRED draft. Reactive
+     * agent_turn already runs response_guard_check_ex on every outbound;
+     * proactive must apply the same gate so G1–G9 detectors (semantic
+     * leak, length anomaly, persona PII echo, naked discourse-marker
+     * opener — the Jordan incident class) protect proactive outbounds
+     * uniformly. On REJECT we capture the rejection as a DPO negative
+     * pair (Sprint 41 follow-up #3) and downgrade to GUARD_REJECT; the
+     * caller skips the send. Unlike reactive, proactive does NOT retry
+     * — the next tick can try again, and retrying a propose-or-skip
+     * prompt with a repair-style instruction is semantically odd
+     * (no inbound user-msg to repair toward). */
+    if (verdict == HU_INIT_RESULT_FIRED && decision.draft_len > 0) {
+        hu_guard_context_t guard_ctx;
+        memset(&guard_ctx, 0, sizeof(guard_ctx));
+        if (agent && agent->persona) {
+            if (agent->persona->name && agent->persona->name_len > 1) {
+                guard_ctx.persona_name = agent->persona->name;
+                guard_ctx.persona_name_len = agent->persona->name_len;
+            }
+            const char *id =
+                agent->persona->identity ? agent->persona->identity : agent->persona->core_anchor;
+            if (id) {
+                guard_ctx.persona_identity = id;
+                guard_ctx.persona_identity_len = strlen(id);
+            }
+            if (agent->persona->biography) {
+                guard_ctx.persona_biography = agent->persona->biography;
+                guard_ctx.persona_biography_len = strlen(agent->persona->biography);
+            }
+        }
+        /* Per-channel G9 disable (Sprint 41 follow-up #4) — consult the
+         * runtime channel list. Voice-style channels can suppress G9
+         * without affecting other detectors. */
+        if (inputs->channel_name && inputs->channel_name_len > 0) {
+            guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
+                inputs->channel_name, inputs->channel_name_len);
+        }
+
+        char *guard_out = NULL;
+        size_t guard_out_len = 0;
+        hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
+        hu_guard_report_t guard_report;
+        memset(&guard_report, 0, sizeof(guard_report));
+        hu_error_t gerr =
+            hu_response_guard_check_ex(alloc, decision.draft, decision.draft_len, &guard_ctx,
+                                       &guard_out, &guard_out_len, &guard_outcome, &guard_report);
+        if (gerr == HU_OK) {
+            verdict = hu_init_proposer_evaluate_guard_outcome((int)guard_outcome);
+            if (guard_outcome == HU_GUARD_REWROTE && guard_out && guard_out_len > 0) {
+                /* Copy rewrite back into the decision's fixed buffer,
+                 * truncating if the rewrite is somehow longer than
+                 * HU_INIT_DRAFT_MAX (extremely rare — guard typically
+                 * STRIPS bytes, never adds). */
+                size_t copy = guard_out_len < sizeof(decision.draft) - 1
+                                  ? guard_out_len
+                                  : sizeof(decision.draft) - 1;
+                memcpy(decision.draft, guard_out, copy);
+                decision.draft[copy] = '\0';
+                decision.draft_len = copy;
+                alloc->free(alloc->ctx, guard_out, guard_out_len + 1);
+            } else if (guard_outcome == HU_GUARD_REJECT) {
+                /* Capture the rejection as a DPO negative pair. The
+                 * "prompt" for proactive is the propose-or-skip USER
+                 * message — captures WHAT context the model was trying
+                 * to respond to when it produced the rejected draft. */
+                const char *dpo_detector = "unknown";
+                if (guard_report.detected_naked_discourse_opener)
+                    dpo_detector = "naked_discourse_opener";
+                else if (guard_report.detected_persona_identity_echo)
+                    dpo_detector = "persona_identity_echo";
+                else if (guard_report.detected_persona_pii_echo)
+                    dpo_detector = "persona_pii_echo";
+                else if (guard_report.detected_director_echo)
+                    dpo_detector = "director_echo";
+                else if (guard_report.detected_length_anomaly)
+                    dpo_detector = "length_anomaly";
+                else if (guard_report.detected_semantic_leak)
+                    dpo_detector = "semantic_leak";
+                else if (guard_report.detected_degenerate_repetition)
+                    dpo_detector = "degenerate_repetition";
+                (void)hu_response_guard_log_dpo_negative(user_msg, strlen(user_msg), decision.draft,
+                                                         decision.draft_len, dpo_detector,
+                                                         inputs->channel_name, (int64_t)now_unix);
+                hu_log_warn("init_proposer", NULL,
+                            "FIRED draft GUARD-REJECTED (channel=%.*s detector=%s len=%zu) — "
+                            "skipping send, captured as DPO negative",
+                            (int)inputs->channel_name_len,
+                            inputs->channel_name ? inputs->channel_name : "", dpo_detector,
+                            decision.draft_len);
+            }
+        }
+    }
+
     hu_log_info("init_proposer", NULL,
                 "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
                 "draft_len=%zu result=%d",

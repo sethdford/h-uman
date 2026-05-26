@@ -13960,7 +13960,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                      init_result == HU_INIT_RESULT_LOW_CONFIDENCE ||
                                      init_result == HU_INIT_RESULT_NEGATIVE ||
                                      init_result == HU_INIT_RESULT_LLM_ERROR ||
-                                     init_result == HU_INIT_RESULT_PARSE_ERROR);
+                                     init_result == HU_INIT_RESULT_PARSE_ERROR ||
+                                     init_result == HU_INIT_RESULT_GUARD_REJECT);
             if (persist_decision) {
                 (void)hu_init_outcome_append(alloc, now_unix_init, initiative_tick_id, init_result,
                                              &init_decision, config->initiative.target_handle,

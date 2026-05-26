@@ -204,6 +204,59 @@ static void compose_identity_block_renders_before_content(void) {
     HU_ASSERT(contact_pos < memory_pos);
 }
 
+/* ── M3 Dispatch T2 — pure verdict-mapping helper tests ─────────────── */
+
+#include "human/agent/response_guard.h"
+
+static void guard_outcome_ok_keeps_fired(void) {
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome((int)HU_GUARD_OK),
+                 (int)HU_INIT_RESULT_FIRED);
+}
+
+static void guard_outcome_rewrote_keeps_fired(void) {
+    /* REWROTE is "caller must swap to rewrite" — still a send. */
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome((int)HU_GUARD_REWROTE),
+                 (int)HU_INIT_RESULT_FIRED);
+}
+
+static void guard_outcome_reject_downgrades_to_guard_reject(void) {
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome((int)HU_GUARD_REJECT),
+                 (int)HU_INIT_RESULT_GUARD_REJECT);
+}
+
+static void guard_outcome_unknown_defaults_to_guard_reject(void) {
+    /* Defensive: any future outcome we don't recognize fails CLOSED — a
+     * draft never slips past on an enum value we don't yet know how to
+     * interpret. Bug-pinning test for the default branch. */
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome(99),
+                 (int)HU_INIT_RESULT_GUARD_REJECT);
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome(-1),
+                 (int)HU_INIT_RESULT_GUARD_REJECT);
+}
+
+/* End-to-end pure-helper proof: the Jordan production failure
+ * ("tbh morning. you awake yet?") would be caught by the verdict
+ * helper if passed through response_guard. Pins the integration
+ * shape without requiring a mock provider. */
+static void guard_outcome_jordan_draft_would_be_rejected(void) {
+    const char *jordan = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = hu_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, jordan, strlen(jordan), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
+    HU_ASSERT_TRUE(report.detected_naked_discourse_opener);
+    /* The verdict helper maps that REJECT to GUARD_REJECT — confirming
+     * the wire from response_guard back to the tick result enum. */
+    HU_ASSERT_EQ((int)hu_init_proposer_evaluate_guard_outcome((int)outcome),
+                 (int)HU_INIT_RESULT_GUARD_REJECT);
+}
+
 void run_init_proposer_compose_tests(void);
 void run_init_proposer_compose_tests(void) {
     HU_TEST_SUITE("init_proposer_compose");
@@ -215,4 +268,10 @@ void run_init_proposer_compose_tests(void) {
     HU_RUN_TEST(compose_returns_zero_for_null_or_zero_cap);
     HU_RUN_TEST(compose_truncates_safely_on_small_buffer);
     HU_RUN_TEST(compose_identity_block_renders_before_content);
+    /* T2 — pure verdict-mapping helper. */
+    HU_RUN_TEST(guard_outcome_ok_keeps_fired);
+    HU_RUN_TEST(guard_outcome_rewrote_keeps_fired);
+    HU_RUN_TEST(guard_outcome_reject_downgrades_to_guard_reject);
+    HU_RUN_TEST(guard_outcome_unknown_defaults_to_guard_reject);
+    HU_RUN_TEST(guard_outcome_jordan_draft_would_be_rejected);
 }
