@@ -928,6 +928,11 @@ set(HU_CORE_SOURCES
     src/agent/outbound/shape.c
     src/agent/outbound/echo.c
     src/agent/outbound/crosstalk.c
+    # Sprint 60 follow-up — SQLite-backed lookup that closes the
+    # "degraded mode" gap noted at sprint-59 STATUS.md item #3.
+    # Internally guarded by #ifdef HU_ENABLE_SQLITE so this entry
+    # stays unconditional; body compiles to nothing without the flag.
+    src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
     src/agent/multimodal_policy.c
@@ -3610,6 +3615,14 @@ endif()
 # only. Gate on HU_ENABLE_SQLITE — the helper itself is SQLite-gated.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_daemon_proactive_feed_scope.c)
+endif()
+
+# Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
+# messages table directly via sqlite3 to verify the lookup returns
+# only OTHER contacts' content + the 7-day filter. Gated on
+# HU_ENABLE_SQLITE — the lookup itself is SQLite-gated.
+if(HU_ENABLE_SQLITE)
+    list(APPEND HU_TEST_SOURCES tests/test_outbound_crosstalk_sqlite.c)
 endif()
 
 # SOTA capability tests

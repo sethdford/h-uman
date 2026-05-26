@@ -59,11 +59,30 @@ Per-stage suites (all PASS):
 | outbound_moderation | 11/11 |
 | outbound_corpus_regression | 3/3 |
 | daemon_proactive_feed_scope | 4/4 |
+| outbound_crosstalk_sqlite | 6/6 |
 
 Total Sprint 59 net add: **92 tests** (12253 → 12345).
+Sprint 60 carryover net add: **6 tests** (crosstalk SQLite wiring).
 Full suite: **12345/12345 passed, 4 skipped, 0 failures.**
 
-## What's still open (Sprint 60 candidates)
+## Closed Sprint 60 carryovers
+
+3. **Crosstalk SQLite wiring** — DONE. `src/agent/outbound/crosstalk_sqlite.c`
+   implements the lookup with `SELECT content FROM messages WHERE
+   session_id != ? AND created_at > datetime('now', '-7 days') ORDER BY
+   created_at DESC LIMIT 64`. Daemon wiring in `src/daemon.c` registers
+   via `hu_outbound_crosstalk_register_sqlite(hu_sqlite_memory_get_db
+   (agent->memory))` after the personal-model sink setup, and
+   unregisters before the SQLite memory is closed. The cross-contact
+   Jaccard check now runs in the production path; the degraded-mode
+   warning at `crosstalk.c:275` only fires if `agent->memory` is non-
+   SQLite. Pinned by `tests/test_outbound_crosstalk_sqlite.c` (6/6),
+   including the end-to-end Annie/Mindy/Betty regression that inserts
+   "but boy I am just more lonely now than ever" for an OTHER contact,
+   then asserts the stage REJECTs the same content sent to the
+   recipient with reason `crosstalk_other_contact`.
+
+## What's still open (remaining Sprint 60 candidates)
 
 1. **Persona stage ML wiring** — currently uses heuristic project-jargon
    detection. Could consult `eval_shape_classifier` for fidelity-score
@@ -71,16 +90,11 @@ Full suite: **12345/12345 passed, 4 skipped, 0 failures.**
 2. **Reactive-path consolidation** — Q-5 user decision was "not in
    Sprint 59". After 2 weeks of production data on the new pipeline,
    evaluate whether to displace `response_guard.c`.
-3. **Crosstalk SQLite wiring** — the lookup callback hook is in place
-   but production needs the daemon to call
-   `hu_outbound_crosstalk_set_lookup()` with a SQL-backed lookup at
-   startup. Today the cross-contact check runs in degraded mode
-   (metadata-only); proactive remains protected by other stages.
-4. **Per-path stage configs** — pipeline_configs.c has reactive,
+3. **Per-path stage configs** — pipeline_configs.c has reactive,
    proactive, f25, temporal, scheduled, burst configured. Burst is
    empty (pipeline skipped); the wiring for sub-sends inheriting
    primary verdict needs validation.
-5. **Doctor stats** — `/v1/outbound/stats` doctor check (per-stage
+4. **Doctor stats** — `/v1/outbound/stats` doctor check (per-stage
    verdict counts) is on the wish list. Sprint 60.
 
 ## Operational note
