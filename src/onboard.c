@@ -101,6 +101,33 @@ static const char hu_starter_persona_json_part1[] =
     "      \"emoji_usage\": \"none\",\n"
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
+    "    },\n"
+    /* M4 (2026-05-26) — Tier-2 channel overlays. WhatsApp/Signal mirror
+     * iMessage texting norms; email defaults to longer professional
+     * structure. Operators can override any of these via their own
+     * persona JSON; these defaults exist so the first run on these
+     * channels already feels native instead of falling through to a
+     * generic neutral tone. */
+    "    \"whatsapp\": {\n"
+    "      \"formality\": \"casual\",\n"
+    "      \"avg_length\": \"short\",\n"
+    "      \"emoji_usage\": \"moderate\",\n"
+    "      \"style_notes\": \"Casual texting style. "
+    "Short messages. Emoji reactions fit naturally.\"\n"
+    "    },\n"
+    "    \"signal\": {\n"
+    "      \"formality\": \"casual\",\n"
+    "      \"avg_length\": \"short\",\n"
+    "      \"emoji_usage\": \"low\",\n"
+    "      \"style_notes\": \"Privacy-aware texting. Short, direct. "
+    "Skip metadata-heavy formatting.\"\n"
+    "    },\n"
+    "    \"email\": {\n"
+    "      \"formality\": \"professional\",\n"
+    "      \"avg_length\": \"long\",\n"
+    "      \"emoji_usage\": \"none\",\n"
+    "      \"style_notes\": \"Structured email: greeting, body, "
+    "sign-off. Direct subject lines.\"\n"
     "    }\n"
     "  },\n";
 

@@ -190,6 +190,38 @@ static void persona_directive_tier1_batch_yields_zero_null_overlay(void) {
     HU_ASSERT_EQ(snap.counts[HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT], 1U);
 }
 
+/* M4 (2026-05-26) — pin the Tier-2 overlays added to the starter
+ * persona JSON (whatsapp / signal / email). New users on these
+ * channels should hit a sane default tone immediately instead of
+ * falling through to neutral. */
+static void persona_directive_starter_persona_loads_tier2_overlays(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+
+    size_t starter_len = 0;
+    const char *starter_json = hu_starter_persona_get(&starter_len);
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, starter_json, starter_len, &persona), HU_OK);
+
+    const hu_persona_overlay_t *whatsapp = find_overlay(&persona, "whatsapp");
+    HU_ASSERT_NOT_NULL(whatsapp);
+    HU_ASSERT_STR_EQ(whatsapp->formality, "casual");
+    HU_ASSERT_STR_EQ(whatsapp->avg_length, "short");
+
+    const hu_persona_overlay_t *signal = find_overlay(&persona, "signal");
+    HU_ASSERT_NOT_NULL(signal);
+    HU_ASSERT_STR_EQ(signal->formality, "casual");
+    HU_ASSERT_STR_EQ(signal->emoji_usage, "low");
+
+    const hu_persona_overlay_t *email = find_overlay(&persona, "email");
+    HU_ASSERT_NOT_NULL(email);
+    HU_ASSERT_STR_EQ(email->formality, "professional");
+    HU_ASSERT_STR_EQ(email->avg_length, "long");
+    HU_ASSERT_STR_EQ(email->emoji_usage, "none");
+
+    hu_persona_deinit(&alloc, &persona);
+}
+
 void run_persona_directive_channels_tests(void) {
     HU_TEST_SUITE("persona_directive_channels");
     HU_RUN_TEST(persona_directive_starter_persona_loads_four_tier1_overlays);
@@ -199,4 +231,5 @@ void run_persona_directive_channels_tests(void) {
     HU_RUN_TEST(persona_directive_slack_overlay_fires_formal_terse);
     HU_RUN_TEST(persona_directive_telegram_overlay_fires_casual_or_short);
     HU_RUN_TEST(persona_directive_tier1_batch_yields_zero_null_overlay);
+    HU_RUN_TEST(persona_directive_starter_persona_loads_tier2_overlays);
 }
