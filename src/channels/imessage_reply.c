@@ -1,17 +1,21 @@
 #include "human/channels/imessage_reply.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include <stdio.h>
 #include <string.h>
 
 /* Test-only stubs — set by hu_imessage_set_test_reply_stubs. */
 static hu_imessage_reply_tier_fn g_test_tier1 = NULL;
 static hu_imessage_reply_tier_fn g_test_tier2 = NULL;
+static hu_imessage_reply_flat_send_fn g_test_flat_send = NULL;
 static char g_last_tier[32] = {0};
 
 void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
-                                      hu_imessage_reply_tier_fn tier2) {
+                                      hu_imessage_reply_tier_fn tier2,
+                                      hu_imessage_reply_flat_send_fn flat_send) {
     g_test_tier1 = tier1;
     g_test_tier2 = tier2;
+    g_test_flat_send = flat_send;
 }
 
 const char *hu_imessage_test_last_reply_tier(void) {
@@ -118,6 +122,24 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
         return HU_OK;
     }
 
-    /* Tier 3 (flat fallback) lands in C3. */
-    return HU_ERR_NOT_SUPPORTED;
+    /* Tier 3: flat-send fallback. Log WARN explaining the degradation
+     * (per silent-config-gated-subsystems.md visibility discipline). */
+    hu_log_warn("imessage", NULL,
+                "threaded reply degraded to flat-send (parent_guid=%.*s reason=ax_unavailable)",
+                (int)(parent_msg_guid_len > 40 ? 40 : parent_msg_guid_len),
+                parent_msg_guid ? parent_msg_guid : "(null)");
+
+    hu_error_t err = HU_ERR_NOT_SUPPORTED;
+    if (g_test_flat_send) {
+        err = g_test_flat_send(target, target_len, body, body_len);
+    } else {
+        /* In production, when no test stub is set, return NOT_SUPPORTED.
+         * The dispatcher in F2 (daemon-level) will see NOT_SUPPORTED and
+         * fall through to its own vtable->send call. This is cleaner
+         * separation: this function tries the threaded path; the dispatcher
+         * decides what to do on failure. */
+        err = HU_ERR_NOT_SUPPORTED;
+    }
+    snprintf(g_last_tier, sizeof(g_last_tier), "flat_fallback");
+    return err;
 }

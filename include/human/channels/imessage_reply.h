@@ -29,8 +29,15 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
 typedef bool (*hu_imessage_reply_tier_fn)(const char *parent_msg_guid, size_t parent_msg_guid_len,
                                           const char *body, size_t body_len);
 
+/* Test-only — replaces the production flat-send fallback (Tier 3).
+ * In production, Tier 3 calls the existing iMessage send path. */
+typedef hu_error_t (*hu_imessage_reply_flat_send_fn)(const char *target, size_t target_len,
+                                                     const char *body, size_t body_len);
+
+/* Updated signature — takes THREE stubs now (tier1, tier2, flat-send). */
 void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
-                                      hu_imessage_reply_tier_fn tier2);
+                                      hu_imessage_reply_tier_fn tier2,
+                                      hu_imessage_reply_flat_send_fn flat_send);
 
 /* Test-only — returns the tier that was used by the most recent call,
  * one of: "cmdR" | "ax_menu" | "flat_fallback" | "" (none). */
