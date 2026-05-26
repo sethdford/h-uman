@@ -103,25 +103,44 @@ have a dashboard yet — they're surfaced via log lines + the
    catching the regression class, not just an instance. Worth more
    than the deleted struct round-trip tests it replaced.
 
-## What this sprint did NOT do
+## Follow-up work
 
-These remain on the operator/follow-up list:
+All five follow-up items now have either implementation or scoped
+spec. Update from the prior "did NOT do" list:
 
-- **Operator CLI for runtime kill switches** (`human ctl guard disable g9`).
-  Atomics exist; no CLI surfaces them. Needs ~2-3h of `cli.c` work
-  when the iMessage action-surface chain settles.
-- **DPO file consumer / summarizer.** The file accumulates daily but
-  nothing reads it. Planned: `scripts/dpo-rejections-summary.py`
-  (covered separately).
-- **Doctor check for unified-dispatch health.** Telemetry counters
-  exist; `human doctor` doesn't surface them. Planned next.
-- **A/B framework for LoRA adapter promotion.** The unified path
-  produces DPO negatives → those feed nightly LoRA retrain → no
-  framework yet decides "is the new adapter better than the current
-  one?" Multi-day sprint of its own.
-- **Multi-detector arbitration with uncertainty.** G1–G9 run as
-  ordered filters. SOTA shape: ensemble weighted by historical
-  accuracy per channel, learned router. Out of scope.
+- ✅ **Operator CLI for runtime kill switches** —
+  `e36e43d6 feat(cli): human ctl guard`. Read-only inspector +
+  edit-advice tool (status / disable-g9 / enable-g9 / list-channels).
+  Real runtime mutation deferred to IPC follow-up sprint.
+- ✅ **DPO file consumer / summarizer** —
+  `f7093a71 feat(scripts): DPO rejections summarizer`. 7-day window,
+  per-detector + per-channel histograms, top-K most-rejected drafts,
+  WEAK/DIFFUSE/FOCUSED/STUCK retraining-signal verdict.
+- ✅ **Doctor check for unified-dispatch health** —
+  `f5117ed7 feat(doctor): unified-dispatch health check`. Reads
+  Sprint 41 #3 retry-outcome telemetry; PASS/FAIL/NA verdict at
+  calibrated thresholds; 9 tests.
+- ✅ **A/B framework for LoRA adapter promotion** —
+  `3adf351e feat(scripts): A/B adapter promotion decision tool`.
+  Decision-only (PROMOTE / KEEP / ROLLBACK) reading eval-fidelity
+  verdicts; 4 branches verified end-to-end. Auto-symlink-flip on
+  PROMOTE deferred to operational follow-up.
+- 📋 **Multi-detector arbitration with uncertainty** —
+  `0308844e docs(spec): multi-detector arbitration` SCOPED but
+  NOT implemented. The 3-file spec at
+  `docs/plans/2026-05-27-multi-detector-arbitration/` is BLOCKED on
+  production-data gates (≥1000 DPO rejections, non-uniform per-
+  detector rescue rates, real operator demand). 90-day sunset
+  clause baked in.
+
+## Open operational follow-ups (small, post-deploy)
+
+  - IPC-driven runtime mutation for `human ctl guard` (poke daemon
+    atomics without restart). Multi-day spec on its own.
+  - Auto-symlink-flip on adapter PROMOTE verdict. ~2h once a nightly
+    cron is wired.
+  - Multi-detector arbitration **prerequisite T0** (per-detector
+    retry counters) — independently shippable, no gate. ~0.5 day.
 
 ## Jordan resolution
 
