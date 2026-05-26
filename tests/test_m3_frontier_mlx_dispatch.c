@@ -131,7 +131,6 @@ static void test_lora_training_runner_frontier_mlx_path_increments_swap_counter(
      * Production callers reach this via hu_training_runner_enqueue_lora_
      * persona_target, which needs a real scheduler; the setter exists
      * specifically to avoid that for unit tests. */
-    hu_training_target_model_t prev = hu_training_runner_last_enqueued_target();
     hu_training_runner_test_set_last_enqueued_target(HU_TRAINING_TARGET_FRONTIER_MLX);
 
     /* Build the minimum ctx the runner needs. A learner is required by
@@ -165,8 +164,15 @@ static void test_lora_training_runner_frontier_mlx_path_increments_swap_counter(
     uint64_t after = hu_training_runner_post_train_swap_attempts();
     HU_ASSERT_EQ(after, before + 1);
 
-    /* Restore so subsequent tests in this process don't observe FRONTIER_MLX. */
-    hu_training_runner_test_set_last_enqueued_target(prev);
+    /* ALWAYS restore to HUML_REFERENCE so subsequent tests in this
+     * process never observe FRONTIER_MLX. Saving "prev" before set is
+     * unsafe — if some earlier test in the process enqueued FRONTIER_MLX
+     * (e.g. via a real hu_training_runner_enqueue_lora_persona_target
+     * call), prev would already be FRONTIER_MLX and the restore would
+     * be a no-op, leaving global state polluted for the eval_gate +
+     * e2e_rl_loop tests that follow. HUML_REFERENCE is the documented
+     * default and the only safe restore target. */
+    hu_training_runner_test_set_last_enqueued_target(HU_TRAINING_TARGET_HUML_REFERENCE);
     hu_learner_close(learner);
 }
 
