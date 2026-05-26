@@ -61,6 +61,25 @@ typedef struct hu_runtime_config {
     char *gce_instance;
 } hu_runtime_config_t;
 
+/* 2026-05 audit follow-up — per-model fallback chain. When the primary
+ * provider is local (e.g. mlx_local) and serves a model name that the
+ * cloud fallback (e.g. gemini) doesn't recognize, the reliable provider's
+ * fallback path would otherwise call the cloud with an unknown model →
+ * silent failure. This struct lets the operator declare "if request asks
+ * for model X, the fallback should substitute Y" — wired through to
+ * hu_reliable_create_ex's model_fallbacks arg.
+ *
+ * JSON shape under reliability:
+ *   "model_fallbacks": [
+ *     { "model": "gemma-4-31b-it-4bit", "fallbacks": ["gemini-3.5-flash"] }
+ *   ]
+ */
+typedef struct hu_config_model_fallback {
+    char *model;            /* the model name a request asks for */
+    char **fallback_models; /* substitutes tried in order on retry */
+    size_t fallback_models_len;
+} hu_config_model_fallback_t;
+
 typedef struct hu_reliability_config {
     char *primary_provider; /* used when default_provider is "reliable" */
     uint32_t provider_retries;
@@ -71,6 +90,8 @@ typedef struct hu_reliability_config {
     uint32_t scheduler_retries;
     char **fallback_providers;
     size_t fallback_providers_len;
+    hu_config_model_fallback_t *model_fallbacks;
+    size_t model_fallbacks_len;
 } hu_reliability_config_t;
 
 typedef struct hu_router_config {
@@ -262,6 +283,15 @@ typedef struct hu_follow_up_watcher_config {
 typedef struct hu_proactive_throttle_config {
     bool enabled;
     int per_contact_daily_max; /* default 1 */
+    /* M3 Dispatch T3 (2026-05-26) — feature flag for the unified
+     * dispatch rollout. When true, daemon_proactive's scheduler loop
+     * routes through hu_init_proposer_tick_with_provider_ex (the
+     * unified composer + guard pipeline). When false (default), uses
+     * the legacy hu_agent_turn-based path. Spec at
+     * docs/plans/2026-05-26-m3-dispatch-unification/. Defaults to false
+     * to enable the 1-week A/B observation period (T6) before flipping
+     * to default-true (T7) and deleting the legacy path (T8). */
+    bool use_unified_dispatch;
 } hu_proactive_throttle_config_t;
 
 /* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/.

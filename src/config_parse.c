@@ -403,6 +403,24 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
+/* M3 Dispatch T3 (2026-05-26) — proactive_throttle config. Currently
+ * just the use_unified_dispatch feature flag; other proactive throttle
+ * knobs (per_contact_daily_max) are wired by the throttle subsystem
+ * directly. Spec at docs/plans/2026-05-26-m3-dispatch-unification/. */
+static hu_error_t parse_proactive_throttle(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->proactive_throttle.enabled =
+        hu_json_get_bool(obj, "enabled", cfg->proactive_throttle.enabled);
+    int max = (int)hu_json_get_number(obj, "per_contact_daily_max",
+                                      cfg->proactive_throttle.per_contact_daily_max);
+    if (max > 0)
+        cfg->proactive_throttle.per_contact_daily_max = max;
+    cfg->proactive_throttle.use_unified_dispatch =
+        hu_json_get_bool(obj, "use_unified_dispatch", cfg->proactive_throttle.use_unified_dispatch);
+    return HU_OK;
+}
+
 static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
@@ -1060,6 +1078,70 @@ static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
         if (fp_err != HU_OK)
             return fp_err;
     }
+
+    /* 2026-05 audit follow-up — per-model fallback chains. Lets the operator
+     * declare model-name substitutions when the chain crosses a provider
+     * boundary (e.g. local mlx model name → cloud gemini model name). See
+     * the comment on hu_config_model_fallback_t in include/human/config.h
+     * for the JSON shape. Silently parses zero entries when the key is
+     * absent — pre-existing configs are unaffected. */
+    hu_json_value_t *mf = hu_json_object_get(obj, "model_fallbacks");
+    if (mf && mf->type == HU_JSON_ARRAY) {
+        /* Free any prior contents — handles config-reload cycles. */
+        if (cfg->reliability.model_fallbacks) {
+            for (size_t i = 0; i < cfg->reliability.model_fallbacks_len; i++) {
+                hu_config_model_fallback_t *e = &cfg->reliability.model_fallbacks[i];
+                if (e->model)
+                    a->free(a->ctx, e->model, strlen(e->model) + 1);
+                if (e->fallback_models) {
+                    for (size_t j = 0; j < e->fallback_models_len; j++)
+                        if (e->fallback_models[j])
+                            a->free(a->ctx, e->fallback_models[j],
+                                    strlen(e->fallback_models[j]) + 1);
+                    a->free(a->ctx, e->fallback_models, e->fallback_models_len * sizeof(char *));
+                }
+            }
+            a->free(a->ctx, cfg->reliability.model_fallbacks,
+                    cfg->reliability.model_fallbacks_len * sizeof(hu_config_model_fallback_t));
+            cfg->reliability.model_fallbacks = NULL;
+            cfg->reliability.model_fallbacks_len = 0;
+        }
+
+        size_t n = mf->data.array.len;
+        if (n > 0) {
+            hu_config_model_fallback_t *entries = (hu_config_model_fallback_t *)a->alloc(
+                a->ctx, n * sizeof(hu_config_model_fallback_t));
+            if (!entries)
+                return HU_ERR_OUT_OF_MEMORY;
+            memset(entries, 0, n * sizeof(hu_config_model_fallback_t));
+
+            size_t valid = 0;
+            for (size_t i = 0; i < n; i++) {
+                hu_json_value_t *item = mf->data.array.items[i];
+                if (!item || item->type != HU_JSON_OBJECT)
+                    continue;
+                const char *model_name = hu_json_get_string(item, "model");
+                if (!model_name || !model_name[0])
+                    continue;
+                hu_json_value_t *fbs = hu_json_object_get(item, "fallbacks");
+                if (!fbs || fbs->type != HU_JSON_ARRAY || fbs->data.array.len == 0)
+                    continue;
+                entries[valid].model = hu_strdup(a, model_name);
+                if (!entries[valid].model)
+                    continue;
+                hu_error_t arr_err = parse_string_array(a, &entries[valid].fallback_models,
+                                                        &entries[valid].fallback_models_len, fbs);
+                if (arr_err != HU_OK) {
+                    a->free(a->ctx, entries[valid].model, strlen(entries[valid].model) + 1);
+                    entries[valid].model = NULL;
+                    continue;
+                }
+                valid++;
+            }
+            cfg->reliability.model_fallbacks = entries;
+            cfg->reliability.model_fallbacks_len = valid;
+        }
+    }
     return HU_OK;
 }
 
@@ -1562,6 +1644,16 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         if (rge != HU_OK) {
             hu_json_free(a, root);
             return rge;
+        }
+    }
+
+    /* M3 Dispatch T3 — proactive_throttle config (use_unified_dispatch). */
+    hu_json_value_t *pt_obj = hu_json_object_get(root, "proactive_throttle");
+    if (pt_obj) {
+        hu_error_t pte = parse_proactive_throttle(cfg, pt_obj);
+        if (pte != HU_OK) {
+            hu_json_free(a, root);
+            return pte;
         }
     }
 

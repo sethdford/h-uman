@@ -438,6 +438,12 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * false}} in config.json. */
     cfg->response_guard.naked_opener_enabled = true;
 
+    /* M3 Dispatch T3 — proactive_throttle.use_unified_dispatch defaults
+     * to FALSE so the rollout enters the 1-week A/B observation period
+     * before flipping to default-true (T7). Operators opt-in early via
+     * {"proactive_throttle": {"use_unified_dispatch": true}}. */
+    cfg->proactive_throttle.use_unified_dispatch = false;
+
     /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
      * mlx_local streaming defaults. REVISED 2026-05-26 (T3): default is
      * FALSE. Earlier T2 spec said default-true on the assumption that
