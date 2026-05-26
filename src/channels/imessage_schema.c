@@ -251,7 +251,33 @@ hu_error_t hu_imessage_schema_probe(const char *db_path, hu_imessage_schema_caps
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const char *path = db_path ? db_path : "~/Library/Messages/chat.db";
+    /* 2026-05-26 fix: sqlite3_open_v2 doesn't expand `~` — that's a
+     * shell construct. The original default `"~/Library/Messages/chat.db"`
+     * tried to open a file literally named `~/Library/...` which never
+     * exists, so the probe ALWAYS returned HU_ERR_IO on macOS. Operators
+     * never saw the schema fingerprint log; every startup fell to "blind
+     * queries" mode silently. Match the pattern used by the other
+     * readers (imessage.c:878, :1121, :2005, :2193, :2300, :2356) and
+     * resolve via $HOME explicitly.
+     *
+     * `default_path` is on the stack — sized for the longest realistic
+     * $HOME path; if $HOME is unset we fall back to the literal tilde
+     * which the existing log message will surface as an IO error, the
+     * same operator-visible failure mode as before. */
+    char default_path[512];
+    const char *resolved = db_path;
+    if (!resolved) {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            int n =
+                snprintf(default_path, sizeof(default_path), "%s/Library/Messages/chat.db", home);
+            if (n > 0 && (size_t)n < sizeof(default_path))
+                resolved = default_path;
+        }
+        if (!resolved)
+            resolved = "~/Library/Messages/chat.db"; /* surface as IO error */
+    }
+    const char *path = resolved;
 
     /* Cache hit short-circuit */
     if (g_cache.valid && strncmp(g_cache.path, path, sizeof(g_cache.path)) == 0) {
