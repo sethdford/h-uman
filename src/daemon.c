@@ -13272,9 +13272,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                          send_target_len, send_text, send_text_len,
-                                                          pv_ptr, pv_cnt);
+                                /* F2c: Route through action-surface dispatcher for iMessage
+                                 * when enabled, else flat send. This is the reactive-reply
+                                 * path for short single-fragment messages with no choreography
+                                 * and no multi-fragment split. */
+                                const char *ch_name_f2c =
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : NULL;
+                                if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
+                                    config->channels.imessage.action_surface_v2.enabled) {
+                                    hu_conversation_snapshot_t snap = {0};
+                                    (void)hu_daemon_dispatch_imessage_reply(
+                                        ch->channel, agent ? agent->persona : NULL, agent, config,
+                                        send_target, send_target_len, NULL, 0, send_text,
+                                        send_text_len,
+                                        (const struct hu_conversation_snapshot *)&snap,
+                                        (int64_t)msgs[batch_start].message_id);
+                                } else {
+                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                              send_target_len, send_text,
+                                                              send_text_len, pv_ptr, pv_cnt);
+                                }
                                 if (fmt_text)
                                     alloc->free(alloc->ctx, fmt_text, fmt_len + 1);
                                 if (pv_cnt > 0) {
