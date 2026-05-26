@@ -4948,8 +4948,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
         if (agent->turn_temperature > 0.0)
             turn_temp = agent->turn_temperature;
-        if (agent->turn_thinking_budget > 0)
-            req.thinking_budget = agent->turn_thinking_budget;
+        /* G11 (2026-05-26): apply per-turn request overrides via the shared helper.
+         * Centralized so parity with agent_stream.c is enforced — see
+         * tests/test_agent_turn_request_overrides.c. */
+        hu_agent_internal_apply_turn_request_overrides(agent, &req);
 
         /* Planning mode: give the model more room to reason when the cognition
          * system detects a complex task, without overriding explicit CoT config. */

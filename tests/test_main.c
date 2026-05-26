@@ -304,7 +304,8 @@ void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
 void run_imessage_react_contract_tests(void);
 void run_imessage_reply_pacing_tests(void);
-void run_imessage_action_telemetry_tests(void);void run_follow_up_tests(void);
+void run_imessage_action_telemetry_tests(void);
+void run_follow_up_tests(void);
 void run_imessage_action_telemetry_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
@@ -399,9 +400,10 @@ void run_outbound_stats_tests(void);
 void run_doctor_outbound_stats_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
-void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
-void run_agent_turn_state_tests(void);     /* #26: per-turn state tracking */
-void run_agent_turn_transport_tests(void); /* M4 follow-up: transport-error fast-fail */
+void run_agent_tests(void);                        /* Sprint 46 R5.3 carryover */
+void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
+void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -1187,10 +1189,11 @@ int main(int argc, char **argv) {
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
     run_imessage_react_contract_tests();
-run_imessage_reply_pacing_tests();
-run_imessage_action_telemetry_tests();    run_follow_up_tests();
-run_imessage_action_telemetry_tests();
-run_imessage_action_telemetry_tests();
+    run_imessage_reply_pacing_tests();
+    run_imessage_action_telemetry_tests();
+    run_follow_up_tests();
+    run_imessage_action_telemetry_tests();
+    run_imessage_action_telemetry_tests();
     run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
     run_imessage_custom_tapback_tests();
@@ -1281,6 +1284,8 @@ run_imessage_action_telemetry_tests();
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* G11: per-turn request override parity helper (G5 regression guard) */
+    run_agent_turn_request_overrides_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();

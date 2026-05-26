@@ -126,6 +126,18 @@ bool hu_agent_internal_is_transport_error(hu_error_t err) {
     return err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE;
 }
 
+void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
+                                                    hu_chat_request_t *req) {
+    /* See agent_internal.h for contract. Currently a single contract:
+     * positive turn_thinking_budget overrides the request's thinking_budget.
+     * Zero or negative budget is the "no override" sentinel (per
+     * include/human/agent.h:297 "0 = no thinking config"). */
+    if (!agent || !req)
+        return;
+    if (agent->turn_thinking_budget > 0)
+        req->thinking_budget = agent->turn_thinking_budget;
+}
+
 hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
                                                         size_t *out_len) {
     if (!alloc || !out || !out_len)

@@ -111,6 +111,25 @@ hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *mo
  * `is_transport_error_*` tests in tests/test_agent_turn_transport.c. */
 bool hu_agent_internal_is_transport_error(hu_error_t err);
 
+/* G11 (2026-05-26): Apply per-turn request overrides onto a chat request.
+ *
+ * The daemon dispatcher stages tier-routed model-selection state on the
+ * agent before invoking either agent_turn (non-streaming) or agent_stream
+ * (streaming). Currently this helper applies:
+ *   - agent->turn_thinking_budget → req->thinking_budget (only when > 0)
+ *
+ * Both code paths MUST call this — that's the parity contract. Before G5,
+ * agent_stream.c forgot the assignment, silently downgrading every
+ * streamed turn to thinking_budget=0 even when the daemon had routed
+ * the turn to ANALYTICAL/DEEP/EXPERT tier. Centralizing the application
+ * here makes drift between the two paths impossible: if either path
+ * stops calling this helper, the regression tests in
+ * tests/test_agent_turn_request_overrides.c fail.
+ *
+ * NULL-safe on both arguments (no-op when either is NULL). */
+void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
+                                                    hu_chat_request_t *req);
+
 /* Build the fallback response text for a provider-unavailable bail-out.
  *
  * Caller-owned string written to *out / *out_len; free with alloc->free
