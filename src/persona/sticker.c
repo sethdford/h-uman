@@ -7,6 +7,12 @@
 #include <sys/stat.h>
 
 /* Path to override the LRU file location (for testing). */
+/* Test-only LRU path override. Stored in a static buffer (NOT just a pointer
+ * to caller memory) so the path survives after the caller's stack frame is
+ * destroyed. Earlier draft stored the pointer directly — caused a dangling
+ * pointer and an LRU file written to a garbage filename in the worktree
+ * root when the test's local `lru_path[512]` buffer went out of scope. */
+static char test_lru_path_buf[512];
 static const char *test_lru_path = NULL;
 
 /* Parse a filename of the form <context>-<mood>-<tone>_<seq>.<ext>
@@ -396,5 +402,11 @@ bool hu_persona_pick_sticker(const char *sticker_dir, const hu_sticker_query_t *
 }
 
 void hu_persona_sticker_set_test_lru_path(const char *path) {
-    test_lru_path = path;
+    if (path) {
+        strncpy(test_lru_path_buf, path, sizeof(test_lru_path_buf) - 1);
+        test_lru_path_buf[sizeof(test_lru_path_buf) - 1] = '\0';
+        test_lru_path = test_lru_path_buf;
+    } else {
+        test_lru_path = NULL;
+    }
 }
