@@ -13016,10 +13016,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : NULL;
                                 size_t pv_cnt =
                                     (seg == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
-                                ch->channel->vtable->send(
-                                    ch->channel->ctx, send_target, send_target_len,
-                                    choreo_plan.segments[seg].text,
-                                    choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
+                                /* F2b: Route through action-surface dispatcher for iMessage
+                                 * when enabled, else flat send */
+                                const char *ch_name_choreo =
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : NULL;
+                                if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
+                                    config && config->channels.imessage.action_surface_v2.enabled) {
+                                    hu_conversation_snapshot_t snap = {0};
+                                    (void)hu_daemon_dispatch_imessage_reply(
+                                        ch->channel, agent ? agent->persona : NULL, agent, config,
+                                        send_target, send_target_len, NULL, 0,
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len,
+                                        (const struct hu_conversation_snapshot *)&snap,
+                                        (int64_t)msgs[batch_start].message_id);
+                                } else {
+                                    ch->channel->vtable->send(
+                                        ch->channel->ctx, send_target, send_target_len,
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
+                                }
                             }
                             hu_choreography_plan_free(alloc, &choreo_plan);
                         }
@@ -13105,18 +13123,68 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     dt_ms = 2000;
                                                 usleep((useconds_t)(dt_ms * 1000));
                                             }
-                                            ch->channel->vtable->send(
-                                                ch->channel->ctx, batch_key, key_len, dt_chunks[dt],
-                                                strlen(dt_chunks[dt]), (dt == 0) ? pv_ptr : NULL,
-                                                (dt == 0) ? pv_cnt : 0);
+                                            size_t dt_len = strlen(dt_chunks[dt]);
+                                            /* F2b: Route through action-surface dispatcher for
+                                             * iMessage when enabled, else flat send */
+                                            const char *ch_name_f2b =
+                                                ch->channel->vtable->name
+                                                    ? ch->channel->vtable->name(ch->channel->ctx)
+                                                    : NULL;
+                                            if (ch_name_f2b &&
+                                                strcmp(ch_name_f2b, "imessage") == 0 && config &&
+                                                config->channels.imessage.action_surface_v2
+                                                    .enabled) {
+                                                /* Build snapshot for dispatcher */
+                                                hu_conversation_snapshot_t snap = {0};
+                                                /* For now, populate with zeros — the dispatcher
+                                                 * will still function, choosing style based on
+                                                 * defaults. Production can enhance this to query
+                                                 * chat.db if needed for richer context. */
+                                                (void)hu_daemon_dispatch_imessage_reply(
+                                                    ch->channel, agent ? agent->persona : NULL,
+                                                    agent, config, batch_key, key_len, NULL, 0,
+                                                    dt_chunks[dt], dt_len,
+                                                    (const struct hu_conversation_snapshot *)&snap,
+                                                    (int64_t)msgs[batch_start].message_id);
+                                            } else {
+                                                ch->channel->vtable->send(ch->channel->ctx,
+                                                                          batch_key, key_len,
+                                                                          dt_chunks[dt], dt_len,
+                                                                          (dt == 0) ? pv_ptr : NULL,
+                                                                          (dt == 0) ? pv_cnt : 0);
+                                            }
                                         }
                                     }
                                 }
 #endif
-                                if (!did_double_text)
-                                    ch->channel->vtable->send(
-                                        ch->channel->ctx, batch_key, key_len, fragments[f].text,
-                                        fragments[f].text_len, pv_ptr, pv_cnt);
+                                if (!did_double_text) {
+                                    /* F2b: Route through action-surface dispatcher for iMessage
+                                     * when enabled, else flat send */
+                                    const char *ch_name_f2b =
+                                        ch->channel->vtable->name
+                                            ? ch->channel->vtable->name(ch->channel->ctx)
+                                            : NULL;
+                                    if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
+                                        config &&
+                                        config->channels.imessage.action_surface_v2.enabled) {
+                                        /* Build snapshot for dispatcher */
+                                        hu_conversation_snapshot_t snap = {0};
+                                        /* For now, populate with zeros — the dispatcher will
+                                         * still function, choosing style based on defaults.
+                                         * Production can enhance this to query chat.db if
+                                         * needed for richer context. */
+                                        (void)hu_daemon_dispatch_imessage_reply(
+                                            ch->channel, agent ? agent->persona : NULL, agent,
+                                            config, batch_key, key_len, NULL, 0, fragments[f].text,
+                                            fragments[f].text_len,
+                                            (const struct hu_conversation_snapshot *)&snap,
+                                            (int64_t)msgs[batch_start].message_id);
+                                    } else {
+                                        ch->channel->vtable->send(
+                                            ch->channel->ctx, batch_key, key_len, fragments[f].text,
+                                            fragments[f].text_len, pv_ptr, pv_cnt);
+                                    }
+                                }
 #if defined(HU_ENABLE_RL_FULL)
                                 if (config && config->reaction_collection.enabled && f == 0 &&
                                     fragments[f].text && fragments[f].text_len > 0 &&
