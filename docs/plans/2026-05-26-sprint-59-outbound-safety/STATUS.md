@@ -62,10 +62,15 @@ Per-stage suites (all PASS):
 | outbound_crosstalk_sqlite | 6/6 |
 | outbound_e2e_sota_proof | 3/3 |
 | outbound_persona_classifier | 10/10 |
+| burst_egress | 5/5 |
+| outbound_stats | 9/9 |
+| doctor_outbound_stats | 6/6 |
 
 Total Sprint 59 net add: **92 tests** (12253 → 12345).
-Sprint 60 carryover net add: **19 tests** (crosstalk SQLite + E2E SOTA proof + persona shape-classifier ML wiring).
-Full suite: **12508/12508 passed, 5 skipped, 0 failures.**
+Sprint 60 carryover net add: **39 tests** (crosstalk SQLite, E2E SOTA
+proof, persona shape-classifier ML wiring, burst-egress pipeline
+wiring, outbound stats, doctor outbound-stats check).
+Full suite: **12559/12559 passed, 5 skipped, 0 failures.**
 
 ## Closed Sprint 60 carryovers
 
@@ -90,7 +95,7 @@ Full suite: **12508/12508 passed, 5 skipped, 0 failures.**
    fires first. Original `outbound_persona` suite remains 22/22 PASS
    — no regressions to corpus #11-18 coverage.
 
-3. **Crosstalk SQLite wiring** — DONE. `src/agent/outbound/crosstalk_sqlite.c`
+2. **Crosstalk SQLite wiring** — DONE. `src/agent/outbound/crosstalk_sqlite.c`
    implements the lookup with `SELECT content FROM messages WHERE
    session_id != ? AND created_at > datetime('now', '-7 days') ORDER BY
    created_at DESC LIMIT 64`. Daemon wiring in `src/daemon.c` registers
@@ -115,7 +120,7 @@ content → SEND) and degraded-mode contract (no SQLite lookup → SEND).
 
 ## Closed Sprint 60 carryovers (continued)
 
-4. **Burst-path wiring** — DONE. Found the production gap:
+3. **Burst-path wiring** — DONE. Found the production gap:
    `src/daemon.c` near the burst-fragment for-loop parsed an LLM
    response into N fragments (3-4 typical) and sent each via
    `ch->channel->vtable->send` directly. The outbound pipeline (and
@@ -152,25 +157,67 @@ content → SEND) and degraded-mode contract (no SQLite lookup → SEND).
    fragment, no "trust the primary" assumption that the LLM could
    sneak past.
 
+4. **Doctor `/v1/outbound/stats`** — DONE. Per-stage × per-verdict
+   counters live in `src/agent/outbound/stats.c` (atomic
+   `uint_least64_t[7][4]` = 224 bytes static). The pipeline runner at
+   `src/agent/outbound/pipeline.c` calls `hu_outbound_stats_record`
+   after each stage runs, alongside the existing structured log line.
+   Sub-microsecond cost per stage; thread-safe via relaxed atomics.
+
+   Doctor check at `src/doctor/check_outbound_stats.c` snapshots the
+   counters and emits per-stage JSON detail. Always returns
+   `HU_DOCTOR_PASS` — purely informational, not a gate. Registered in
+   `src/doctor/registry.c::hu_doctor_registry_register_defaults` so
+   the check fires from `human doctor` and surfaces in `--json` output
+   for dashboards.
+
+   Pinned by `tests/test_outbound_stats.c` (9/9) covering name→enum
+   mapping, OTHER-bucket fallback, increment correctness, out-of-range
+   verdict clamping, snapshot read, reset semantics, and a 4×1000
+   concurrent-record thread-safety smoke test (4000 expected, 4000
+   observed). Plus `tests/test_doctor_outbound_stats.c` (6/6) pinning
+   the check's PASS verdict, JSON shape, totals correctness, null-arg
+   handling, overflow-returns-zero behavior, and metadata stability.
+
 ## What's still open (remaining Sprint 60 candidates)
 
-2. **Reactive-path consolidation** — Q-5 user decision was "not in
+5. **Reactive-path consolidation** — Q-5 user decision was "not in
    Sprint 59". After 2 weeks of production data on the new pipeline,
    evaluate whether to displace `response_guard.c`.
-5. **Doctor stats** — `/v1/outbound/stats` doctor check (per-stage
-   verdict counts) is on the wish list. Sprint 60.
 
 ## Operational note
 
-The Annie/Mindy/Betty incident is now blocked at TWO layers:
+The Annie/Mindy/Betty incident is now blocked at FIVE independent
+layers:
 
-- **Upstream (Phase C)**: `daemon_proactive.c:424` calls per-contact
-  feed lookup, so the awareness context for Mindy contains only
-  Mindy's feed items. The structural source of the bleed is gone.
-- **Egress (Phases A-E)**: Even if some future path bypasses Phase C,
-  the `crosstalk` stage catches verbatim/near-verbatim bleed via
-  5-gram Jaccard, and `shape`/`echo`/`persona`/`moderation` catch the
-  other failure modes from the 24-row corpus.
+1. **Upstream feed scope (Phase C)** — `daemon_proactive.c:425` calls
+   `hu_daemon_proactive_get_contact_feed_items` which queries only this
+   contact's feed items. The structural source of the bleed is gone.
+2. **Egress crosstalk stage** (Phases A-B + Sprint 60 #2) — the
+   `crosstalk` stage catches verbatim/near-verbatim bleed via 5-gram
+   Jaccard against the production `messages` table (real corpus, not
+   degraded-mode no-op).
+3. **Persona ML wiring** (Sprint 60 #1) — `hu_shape_classify` plus the
+   AI-opener fail-flag mask catch single-flag out-of-voice content
+   ("Certainly!", "Here are…", bullet lists) that the heuristic
+   blocklists alone would have missed.
+4. **Burst-fragment pipeline routing** (Sprint 60 #3) — every burst
+   sub-send goes through `HU_OUTBOUND_PATH_REACTIVE` via
+   `hu_burst_egress_validate_fragment`. First REJECT breaks the loop
+   and drops all remaining fragments — no partial garbled bursts.
+5. **End-to-end gate** — `tests/test_outbound_e2e_sota_proof.c` (3/3)
+   fails CI if any of the above layers ever stops working. The
+   replay-shape test inserts Mindy's verbatim content for `+CONTACT_MINDY`
+   and then sends the same content as a proactive to `+CONTACT_ANNIE`;
+   the full production pipeline (file-based SQLite, production
+   registration helper, every stage in `pipeline_configs.c` for
+   `HU_OUTBOUND_PATH_PROACTIVE`) must REJECT with
+   `crosstalk_other_contact`.
+
+Plus operator visibility: `human doctor` now emits an `outbound_stats`
+check whose `detail_json` field reports per-stage × per-verdict counts
+since daemon startup. Dashboards can chart REJECT rates per stage
+without grepping the structured log lines.
 
 Defense in depth. The same incident cannot reach Annie/Mindy/Betty
 again without both layers failing simultaneously, which would require

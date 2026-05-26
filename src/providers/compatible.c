@@ -559,6 +559,18 @@ typedef struct compatible_stream_ctx {
     uint64_t t0_ns;
     uint64_t first_token_latency_ms;
     bool first_chunk_fired;
+    /* T7 — buffered fallback for servers that don't speak SSE. Sniffed
+     * on the first write_cb invocation: if the first bytes look like a
+     * JSON object ('{') instead of SSE ('data:' / ':' / 'event:'), we
+     * switch to buffered_mode for the rest of the stream — accumulate
+     * raw bytes, parse as one-shot JSON after the HTTP call, fire a
+     * single content chunk. Caches the verdict per call (each
+     * stream_chat sniffs fresh). */
+    bool buffered_mode;
+    bool sniff_done;
+    char *raw_body;
+    size_t raw_body_len;
+    size_t raw_body_cap;
 } compatible_stream_ctx_t;
 
 /* T8 — wall-clock now in ns via CLOCK_MONOTONIC. Returns 0 if the
@@ -778,8 +790,65 @@ static void compatible_sse_event_cb(const char *event_type, size_t event_type_le
     compatible_extract_stream_delta(s, data, data_len);
 }
 
+/* T7 — accumulate raw bytes into s->raw_body for buffered-mode parse.
+ * Grows geometrically up to a 4 MiB hard cap; OOM signals via
+ * s->last_error and the caller stops feeding. */
+#define HU_COMPATIBLE_RAW_BODY_MAX ((size_t)4 * 1024 * 1024)
+static void compatible_raw_body_append(compatible_stream_ctx_t *s, const char *data, size_t len) {
+    if (!s || !data || len == 0)
+        return;
+    size_t needed = s->raw_body_len + len + 1;
+    if (needed > HU_COMPATIBLE_RAW_BODY_MAX) {
+        s->last_error = HU_ERR_OUT_OF_MEMORY;
+        return;
+    }
+    if (needed > s->raw_body_cap) {
+        size_t new_cap = s->raw_body_cap ? s->raw_body_cap : (size_t)1024;
+        while (new_cap < needed)
+            new_cap *= (size_t)2;
+        if (new_cap > HU_COMPATIBLE_RAW_BODY_MAX)
+            new_cap = HU_COMPATIBLE_RAW_BODY_MAX;
+        char *nb = (char *)s->alloc->alloc(s->alloc->ctx, new_cap);
+        if (!nb) {
+            s->last_error = HU_ERR_OUT_OF_MEMORY;
+            return;
+        }
+        if (s->raw_body_len > 0)
+            memcpy(nb, s->raw_body, s->raw_body_len);
+        if (s->raw_body)
+            s->alloc->free(s->alloc->ctx, s->raw_body, s->raw_body_cap);
+        s->raw_body = nb;
+        s->raw_body_cap = new_cap;
+    }
+    memcpy(s->raw_body + s->raw_body_len, data, len);
+    s->raw_body_len += len;
+    s->raw_body[s->raw_body_len] = '\0';
+}
+
 static size_t compatible_stream_write_cb(const char *data, size_t len, void *userdata) {
     compatible_stream_ctx_t *s = (compatible_stream_ctx_t *)userdata;
+
+    /* T7 — sniff on first chunk to decide SSE vs buffered mode. SSE
+     * responses start with "data:", ":" (comment), or "event:". A JSON
+     * response starts with "{" (or whitespace before it). Be permissive:
+     * if the first non-whitespace byte is '{', treat as buffered. */
+    if (!s->sniff_done && len > 0) {
+        size_t i = 0;
+        while (i < len && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n'))
+            i++;
+        if (i < len && data[i] == '{') {
+            s->buffered_mode = true;
+        }
+        s->sniff_done = true;
+    }
+
+    if (s->buffered_mode) {
+        compatible_raw_body_append(s, data, len);
+        if (s->last_error != HU_OK)
+            return 0;
+        return len;
+    }
+
     hu_error_t err = hu_provider_sse_parser_feed(&s->parser, data, len, compatible_sse_event_cb, s);
     if (err != HU_OK) {
         hu_log_error("compatible", NULL, "SSE parser feed error: %s (data_len=%zu)",
@@ -988,6 +1057,49 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
+
+    /* T7 — buffered fallback. If write_cb detected the server returned
+     * a JSON object instead of an SSE stream, parse the accumulated
+     * raw_body now and emit a single content chunk through the wrapped
+     * callback (so harmony filtering still applies). Caller still gets
+     * the final_chunk + tool_done emissions below. Logged one-shot so
+     * operators see the server-version mismatch without log spam. */
+    if (sctx.buffered_mode && sctx.raw_body && sctx.raw_body_len > 0) {
+        static atomic_bool warned_buffered_fallback = false;
+        hu_log_info_once(&warned_buffered_fallback, "compatible", NULL,
+                         "stream_chat: server returned non-SSE response (%zu bytes); "
+                         "using buffered fallback. Upgrade mlx-server to a streaming-"
+                         "capable version for incremental token delivery.",
+                         sctx.raw_body_len);
+        hu_json_value_t *fb_root = NULL;
+        if (hu_json_parse(alloc, sctx.raw_body, sctx.raw_body_len, &fb_root) == HU_OK && fb_root) {
+            hu_json_value_t *choices = hu_json_object_get(fb_root, "choices");
+            if (choices && choices->type == HU_JSON_ARRAY && choices->data.array.len > 0) {
+                hu_json_value_t *first = choices->data.array.items[0];
+                hu_json_value_t *msg = first ? hu_json_object_get(first, "message") : NULL;
+                const char *content = msg ? hu_json_get_string(msg, "content") : NULL;
+                if (content) {
+                    size_t clen = strlen(content);
+                    if (clen > 0) {
+                        compatible_append_content(&sctx, content, clen);
+                        hu_stream_chunk_t chunk;
+                        memset(&chunk, 0, sizeof(chunk));
+                        chunk.type = HU_STREAM_CONTENT;
+                        chunk.delta = content;
+                        chunk.delta_len = clen;
+                        compatible_fire_chunk(&sctx, &chunk);
+                    }
+                }
+            }
+            hu_json_free(alloc, fb_root);
+        }
+    }
+    if (sctx.raw_body) {
+        alloc->free(alloc->ctx, sctx.raw_body, sctx.raw_body_cap);
+        sctx.raw_body = NULL;
+        sctx.raw_body_cap = 0;
+        sctx.raw_body_len = 0;
+    }
 
     /* T8 — log warn-once if first-token latency exceeded the soft
      * budget. Hardcoded to 500 ms (matches cfg.mlx_local.first_token_
