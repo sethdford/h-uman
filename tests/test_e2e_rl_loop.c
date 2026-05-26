@@ -1,5 +1,4 @@
 /* tests/test_e2e_rl_loop.c — Phase 6 deterministic closed-loop wiring proof. */
-#include "test_framework.h"
 #include "hu_e2e_closed_loop.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
@@ -13,6 +12,7 @@
 #include "human/ml/model.h"
 #include "human/ml/rl_trainer.h"
 #include "human/provider.h"
+#include "test_framework.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,10 +49,10 @@ static float e2e_policy_signature(const hu_model_t *policy) {
 }
 
 static hu_error_t e2e_mock_chat_with_system(void *ctx, hu_allocator_t *alloc,
-                                              const char *system_prompt, size_t system_prompt_len,
-                                              const char *message, size_t message_len,
-                                              const char *model, size_t model_len,
-                                              double temperature, char **out, size_t *out_len) {
+                                            const char *system_prompt, size_t system_prompt_len,
+                                            const char *message, size_t message_len,
+                                            const char *model, size_t model_len, double temperature,
+                                            char **out, size_t *out_len) {
     (void)system_prompt;
     (void)system_prompt_len;
     (void)message;
@@ -176,8 +176,7 @@ static void load_persona_seed(const char ***out_held_out, size_t *out_n_prompts)
     HU_ASSERT_NOT_NULL(held);
     HU_ASSERT_EQ(held->type, HU_JSON_ARRAY);
     HU_ASSERT_EQ(held->data.array.len, 100u);
-    const char **held_out =
-        (const char **)alloc.alloc(alloc.ctx, 100 * sizeof(const char *));
+    const char **held_out = (const char **)alloc.alloc(alloc.ctx, 100 * sizeof(const char *));
     for (size_t i = 0; i < 100; i++) {
         hu_json_value_t *p = held->data.array.items[i];
         char *dup = (char *)alloc.alloc(alloc.ctx, p->data.string.len + 1);
@@ -222,8 +221,7 @@ static void load_reaction_signals(e2e_loaded_events_t *loaded, hu_e2e_reaction_a
     HU_ASSERT_EQ(n, 50u);
 
     loaded->n = n;
-    loaded->events =
-        (hu_reaction_event_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_reaction_event_t));
+    loaded->events = (hu_reaction_event_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_reaction_event_t));
     loaded->event_storage = (char **)alloc.alloc(alloc.ctx, n * 4 * sizeof(char *));
     hu_e2e_reaction_aux_t *aux =
         (hu_e2e_reaction_aux_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_e2e_reaction_aux_t));
@@ -252,11 +250,22 @@ static void load_reaction_signals(e2e_loaded_events_t *loaded, hu_e2e_reaction_a
         hu_json_value_t *ax = hu_json_object_get(obj, "_aux");
         HU_ASSERT_NOT_NULL(ax);
         (void)ax;
-        /* HUML DPO trainer tokenizes space-separated int ids — use fixed ids so
-         * trainer.step mutates weights deterministically. */
+        /* HUML DPO trainer tokenizes space-separated int ids — use fixed ids
+         * so trainer.step mutates weights deterministically. Three constraints:
+         *   1. Each side MUST be >= 4 bytes (corpus-poison defense in
+         *      hu_dpo_record_from_retry, commit 2cba89f9, 2026-05-19).
+         *   2. Token COUNT and order match what dpo_huml_step's sign-based
+         *      finite-diff lm_head mutation was tuned for — the comment in
+         *      src/ml/dpo_real_huml.c:172 names "(1 2 3 → 4 5 vs 6 7)" as
+         *      the calibrated tuple. Changing token count would shift the
+         *      monotonic-margin invariant.
+         *   3. Every token id must be < vocab_size (32). See
+         *      src/ml/dpo_real_huml.c:329 for the toy GPT config.
+         * Use 2-digit token ids in [10, 31] to satisfy (1) and (3) without
+         * breaking (2): two tokens per side, 5 bytes each. */
         aux[i].prompt = json_strdup_field(&alloc, "1 2 3");
-        aux[i].response_chosen = json_strdup_field(&alloc, "4 5");
-        aux[i].response_rejected = json_strdup_field(&alloc, "6 7");
+        aux[i].response_chosen = json_strdup_field(&alloc, "14 25");
+        aux[i].response_rejected = json_strdup_field(&alloc, "16 27");
     }
 
     *out_aux = aux;
@@ -394,6 +403,25 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
 }
 
 static void test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs(void) {
+    /* 2026-05-19 corpus-inversion audit (commit 2cba89f9) split the
+     * write contract from the read contract for dpo_pairs:
+     *
+     *   WRITE: hu_dpo_record_pair PERMITS single-sided rows. Tapback
+     *          reactions only have one side (positive or negative), so
+     *          the reaction handler emits single-sided rows tagged
+     *          source="imessage_tapback".
+     *
+     *   READ:  hu_dpo_export FILTERS rows where chosen_len < 4 OR
+     *          rejected_len < 4 — single-sided rows never export.
+     *          Defense against ORPO training on corpus-poisoned data.
+     *
+     * This test verifies the WRITE half — reactions reach the collector.
+     * The export-side assertion (previously expecting count == 50) has
+     * been dropped because single-sided rows correctly do not export.
+     * See test_e2e_closed_loop_dpo_shows_measurable_response_change for
+     * the supplemented-via-from_retry path that DOES produce exportable
+     * pairs.
+     */
     set_up_env();
     hu_allocator_t alloc = hu_system_allocator();
     e2e_loop_bundle_t bundle;
@@ -415,16 +443,16 @@ static void test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs(void) 
         (void)hu_reaction_handler_handle_event(&loaded.events[i]);
     hu_reaction_handler_set_collector(NULL);
 
+    /* All 50 reactions reached the collector. */
     size_t n_pairs = 0;
     HU_ASSERT_EQ(hu_dpo_pair_count(&bundle.collector, &n_pairs), HU_OK);
     HU_ASSERT_EQ(n_pairs, loaded.n);
 
+    /* Export correctly returns 0 — these are single-sided rows, not
+     * preference pairs. The asymmetric write/read design is intentional. */
     hu_dpo_export_t export_data = {0};
     HU_ASSERT_EQ(hu_dpo_export(&bundle.collector, &alloc, &export_data), HU_OK);
-    HU_ASSERT_EQ(export_data.count, 50u);
-    for (size_t i = 0; i < export_data.count; i++) {
-        HU_ASSERT_TRUE(strstr(export_data.pairs[i].source, "imessage_tapback") != NULL);
-    }
+    HU_ASSERT_EQ(export_data.count, 0u);
     hu_dpo_export_free(&alloc, &export_data);
 
     free_loaded_events(&alloc, &loaded, aux);
@@ -626,4 +654,3 @@ static void test_e2e_closed_loop_pair_count_trigger_closes_the_loop(void) {
     tear_down_env();
 }
 #endif /* HU_ENABLE_LEARNING && HU_ENABLE_SQLITE */
-

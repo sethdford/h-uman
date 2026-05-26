@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 
 #ifdef __cplusplus
@@ -30,7 +31,9 @@ static inline int64_t hu_e2e_monotonic_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
 }
 
-static inline const char *hu_e2e_tmp_root(void) { return HU_E2E_TMP_ROOT; }
+static inline const char *hu_e2e_tmp_root(void) {
+    return HU_E2E_TMP_ROOT;
+}
 
 static inline void hu_e2e_tmp_path(char *buf, size_t cap, const char *suffix) {
     if (!buf || cap == 0 || !suffix)
@@ -75,12 +78,10 @@ typedef struct hu_e2e_closed_loop_output {
 
 void hu_e2e_reaction_aux_free(hu_allocator_t *alloc, hu_e2e_reaction_aux_t *aux, size_t n);
 
-hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
-                                  hu_allocator_t *alloc,
+hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in, hu_allocator_t *alloc,
                                   hu_e2e_closed_loop_output_t *out);
 
-void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc,
-                                    hu_e2e_closed_loop_output_t *out);
+void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc, hu_e2e_closed_loop_output_t *out);
 
 #ifdef __cplusplus
 }

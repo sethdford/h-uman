@@ -1,12 +1,12 @@
-#include "test_framework.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/scheduler.h"
+#include "human/core/allocator.h"
 #include "human/eval/eval_gate.h"
-#include "human/provider_test_seam.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #include "human/persona/persona_deltas.h"
-#include "human/core/allocator.h"
+#include "human/provider_test_seam.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -22,8 +22,8 @@ static void test_runner_skips_gate_when_eval_gate_is_null(void) {
     ctx.eval_gate = NULL;
     ctx.config_template = hu_learner_default_config();
     snprintf(ctx.config_template.adapter_output_path,
-             sizeof(ctx.config_template.adapter_output_path),
-             "/tmp/hu-gate-skip-%d.adapter", (int)getpid());
+             sizeof(ctx.config_template.adapter_output_path), "/tmp/hu-gate-skip-%d.adapter",
+             (int)getpid());
 
     hu_job_spec_t spec;
     memset(&spec, 0, sizeof(spec));
@@ -104,6 +104,14 @@ static void test_runner_promotes_measured_gate_scores(void) {
         .persona_delta_min = 0.05,
         .bootstrap_samples = 200,
         .bootstrap_seed = 7,
+        /* Latency check: runner uses default candidate_p95_ms = 100.0 when
+         * ctx->gate_candidate_p95_ms is not set. The check is
+         * `candidate_p95 <= baseline + delta_max`. Without these fields,
+         * both are 0.0 and 100 <= 0 fails, blocking promotion regardless
+         * of persona scores. Give the latency check headroom matching the
+         * default p95 so persona is the sole promotion gate in this test. */
+        .baseline_p95_latency_ms = 200.0,
+        .latency_delta_max_ms = 100.0,
     };
 
     hu_learner_t *learner = NULL;
