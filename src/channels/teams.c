@@ -565,6 +565,9 @@ static const hu_channel_vtable_t teams_vtable = {
     .load_conversation_history = teams_load_conversation_history,
     .get_response_constraints = teams_get_response_constraints,
     .react = teams_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .human_active_recently = teams_human_active_recently,
 };
 

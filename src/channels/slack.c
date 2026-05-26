@@ -1192,6 +1192,9 @@ static const hu_channel_vtable_t slack_vtable = {
     .load_conversation_history = slack_load_conversation_history,
     .get_response_constraints = slack_get_response_constraints,
     .react = slack_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .get_attachment_path = slack_get_attachment_path,
     .human_active_recently = slack_human_active_recently,
 };

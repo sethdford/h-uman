@@ -594,6 +594,9 @@ static const hu_channel_vtable_t whatsapp_vtable = {
     .stop_typing = whatsapp_stop_typing,
     .get_response_constraints = whatsapp_get_response_constraints,
     .react = whatsapp_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .get_attachment_path = whatsapp_get_attachment_path,
     .human_active_recently = whatsapp_human_active_recently,
 };

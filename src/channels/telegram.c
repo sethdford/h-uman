@@ -1189,6 +1189,9 @@ static const hu_channel_vtable_t telegram_vtable = {
     .load_conversation_history = telegram_load_conversation_history,
     .get_response_constraints = telegram_get_response_constraints,
     .react = telegram_react,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
     .get_attachment_path = telegram_get_attachment_path,
     .human_active_recently = telegram_human_active_recently,
 };

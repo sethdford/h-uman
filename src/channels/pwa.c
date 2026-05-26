@@ -258,6 +258,9 @@ static const hu_channel_vtable_t pwa_vtable = {
     .load_conversation_history = NULL, /* PWA receives messages via gateway push; no server-side history API */
     .get_response_constraints = pwa_get_response_constraints,
     .react = NULL,
+    .reply = NULL,
+    .react_emoji = NULL,
+    .send_sticker = NULL,
 };
 
 /* Build app list from all drivers with read_messages_js when apps is NULL. */
