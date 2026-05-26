@@ -917,6 +917,7 @@ set(HU_CORE_SOURCES
     src/agent/response_verifier.c
     src/agent/response_guard.c
     src/agent/response_guard_retry.c
+    src/agent/outbound_sanitize.c
     src/agent/multimodal_policy.c
     src/agent/persona_eval.c
     src/agent/verifier_metrics.c

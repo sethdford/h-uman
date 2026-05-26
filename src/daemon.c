@@ -27,6 +27,7 @@
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/multimodal_policy.h"
+#include "human/agent/outbound_sanitize.h"
 #include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
@@ -1220,9 +1221,32 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                             cp->name ? cp->name : cp->contact_id);
                                 break;
                             }
+                            /* 2026-05-26 incident fix: sanitize F25 outbound
+                             * before send. The Annie/Mindy/Betty event surfaced
+                             * the F25 check-in sending identical garbled text
+                             * to multiple family contacts (cross-contact bleed
+                             * still under investigation — Bug #2 not yet
+                             * root-caused). Even before that fix lands, the
+                             * sanitizer strips U+FFFC + rejects directive
+                             * echoes so the family-tier failure mode is
+                             * contained. */
+                            size_t msg_sanitized_len = (size_t)w;
+                            const char *sanitize_reason = NULL;
+                            if (!hu_outbound_sanitize(msg_buf, &msg_sanitized_len,
+                                                      &sanitize_reason)) {
+                                hu_log_warn(
+                                    "human", agent ? agent->observer : NULL,
+                                    "F25 emotional check-in to %s REJECTED by sanitizer: %s "
+                                    "(would have sent: %.*s)",
+                                    cp->name ? cp->name : cp->contact_id,
+                                    sanitize_reason ? sanitize_reason : "unknown",
+                                    (int)(msg_sanitized_len > 80 ? 80 : msg_sanitized_len),
+                                    msg_buf);
+                                break;
+                            }
                             hu_error_t send_err = channels[c].channel->vtable->send(
                                 channels[c].channel->ctx, target_part, target_len, msg_buf,
-                                (size_t)w, NULL, 0);
+                                msg_sanitized_len, NULL, 0);
                             if (send_err == HU_OK) {
                                 (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
                                 hu_contact_send_recency_record(
@@ -2117,6 +2141,26 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                         "proactive check-in to %s skipped: send-cap",
                                         cp->name ? cp->name : cp->contact_id);
                             skip = true;
+                        }
+                        if (!skip) {
+                            /* 2026-05-26 Annie/Mindy/Betty incident fix:
+                             * sanitize outbound BEFORE channel send. Strips
+                             * U+FFFC (iMessage attachment placeholder) and
+                             * rejects messages that look like LLM directive
+                             * echoes (e.g. "shared history", "principle",
+                             * "[SAFETY] ..."). See
+                             * include/human/agent/outbound_sanitize.h. */
+                            const char *sanitize_reason = NULL;
+                            if (!hu_outbound_sanitize(response, &response_len, &sanitize_reason)) {
+                                hu_log_warn("human", agent ? agent->observer : NULL,
+                                            "proactive check-in to %s REJECTED by sanitizer: %s "
+                                            "(would have sent: %.*s)",
+                                            cp->name ? cp->name : cp->contact_id,
+                                            sanitize_reason ? sanitize_reason : "unknown",
+                                            (int)(response_len > 80 ? 80 : response_len),
+                                            response ? response : "(null)");
+                                skip = true;
+                            }
                         }
                         if (!skip) {
                             channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
