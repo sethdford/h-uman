@@ -379,6 +379,10 @@ void run_outbound_persona_tests(void);
 void run_outbound_persona_classifier_tests(void);
 void run_outbound_moderation_tests(void);
 void run_outbound_corpus_regression_tests(void);
+/* Sprint 60 — outbound stats (per-stage × per-verdict counters). */
+void run_outbound_stats_tests(void);
+/* Sprint 60 — doctor check exposing outbound stats. */
+void run_doctor_outbound_stats_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
@@ -1239,6 +1243,8 @@ int main(int argc, char **argv) {
     run_outbound_persona_classifier_tests();
     run_outbound_moderation_tests();
     run_outbound_corpus_regression_tests();
+    run_outbound_stats_tests();
+    run_doctor_outbound_stats_tests();
     run_multimodal_policy_tests();
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */

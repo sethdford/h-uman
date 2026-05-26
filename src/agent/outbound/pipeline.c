@@ -20,6 +20,7 @@
  */
 
 #include "human/agent/outbound_pipeline.h"
+#include "human/agent/outbound_stats.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -210,6 +211,12 @@ restart:
         hu_log_info("outbound", NULL, "stage=%s verdict=%d reason=%s path=%s",
                     stage->name ? stage->name : "?", (int)v.kind, v.reason ? v.reason : "-",
                     hu_outbound_path_name(ctx->path));
+
+        /* Sprint 60 — bump per-stage × per-verdict counter so the
+         * doctor /v1/outbound/stats check can report aggregated
+         * activity without operators having to grep logs.
+         * Atomic-relaxed; sub-microsecond cost per stage. */
+        hu_outbound_stats_record(stage->name, (int)v.kind);
 
         switch (v.kind) {
         case HU_OUTBOUND_SEND:

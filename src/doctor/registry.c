@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
+#include "human/doctor/check_outbound_stats.h"
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
 #include "human/doctor/check_reaction_collection_wired.h"
@@ -430,6 +431,15 @@ static hu_doctor_check_result_t run_reaction_collection_wired_check(hu_doctor_ch
     return hu_doctor_check_reaction_collection_wired.run(self, &rwctx);
 }
 
+/* Sprint 60 (sprint-59 STATUS.md item #5) — outbound pipeline stats.
+ * The check is informational (always PASS); ctx is unused because
+ * the snapshot reads from process-wide static state in
+ * src/agent/outbound/stats.c. */
+static hu_doctor_check_result_t run_outbound_stats_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_outbound_stats.run(self, NULL);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -452,6 +462,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          "Catches reaction_collection.enabled=true but HU_ENABLE_RL_FULL=OFF "
          "(silent-failure guard)",
          run_reaction_collection_wired_check, NULL, NULL},
+        {"outbound_stats", "Per-stage × per-verdict counters for the outbound pipeline (Sprint 60)",
+         run_outbound_stats_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},

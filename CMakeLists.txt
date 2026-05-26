@@ -555,6 +555,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
     src/doctor/check_provider.c
+    src/doctor/check_outbound_stats.c
     src/doctor/check_reaction_collection_wired.c
     src/doctor/exit_code.c
     src/doctor/json_output.c
@@ -943,6 +944,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    src/agent/outbound/stats.c
     src/agent/burst_egress.c
     src/agent/multimodal_policy.c
     src/agent/persona_eval.c
@@ -3366,6 +3368,8 @@ set(HU_TEST_SOURCES
     tests/test_outbound_moderation.c
     # Sprint 59 Phase E — end-to-end corpus regression against 24 incident rows.
     tests/test_outbound_corpus_regression.c
+    tests/test_outbound_stats.c
+    tests/test_doctor_outbound_stats.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
