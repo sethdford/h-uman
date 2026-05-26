@@ -116,3 +116,81 @@ hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *fa
         return HU_REPLY_STYLE_TAPBACK_PLUS_FLAT;
     return HU_REPLY_STYLE_FLAT;
 }
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include "human/core/error.h"
+
+/* Build the log directory path. Returns 0 on success, -1 on overflow.
+ * Honors HU_IMESSAGE_ACTION_LOG_DIR env var for test isolation. */
+static int resolve_log_dir(char *out, size_t out_cap) {
+    const char *env_dir = getenv("HU_IMESSAGE_ACTION_LOG_DIR");
+    if (env_dir && env_dir[0]) {
+        int n = snprintf(out, out_cap, "%s", env_dir);
+        return (n > 0 && (size_t)n < out_cap) ? 0 : -1;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    int n = snprintf(out, out_cap, "%s/.human/logs", home);
+    return (n > 0 && (size_t)n < out_cap) ? 0 : -1;
+}
+
+static const char *style_name(hu_reply_style_t s) {
+    switch (s) {
+    case HU_REPLY_STYLE_FLAT:
+        return "FLAT";
+    case HU_REPLY_STYLE_THREADED:
+        return "THREADED";
+    case HU_REPLY_STYLE_TAPBACK:
+        return "TAPBACK";
+    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
+        return "TAPBACK_PLUS_FLAT";
+    }
+    return "UNKNOWN";
+}
+
+hu_error_t hu_imessage_action_log_jsonl(const hu_imessage_action_log_t *log) {
+    if (!log)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char dir[512];
+    if (resolve_log_dir(dir, sizeof(dir)) != 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* mkdir -p equivalent. */
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+        return HU_ERR_IO;
+    }
+
+    char path[1024];
+    int n = snprintf(path, sizeof(path), "%s/imessage_action.jsonl", dir);
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *f = fopen(path, "a");
+    if (!f)
+        return HU_ERR_IO;
+
+    fprintf(f,
+            "{\"ts\":%lld,\"chat\":\"%s\","
+            "\"facts\":{\"sec_since_parent\":%lld,\"pos\":%d,\"pq\":%d,"
+            "\"o_th\":%d,\"u_th\":%d,\"density\":%.2f,\"q\":%s,"
+            "\"formality\":%.2f,\"thread_aff\":%.2f,\"emo\":%d},"
+            "\"style\":\"%s\",\"result\":%d,\"tier\":\"%s\",\"elapsed_ms\":%d}\n",
+            (long long)log->ts_unix, log->target_chat_id_hash ? log->target_chat_id_hash : "",
+            (long long)log->facts.seconds_since_parent, log->facts.parent_position_from_bottom,
+            log->facts.pending_questions_in_window, log->facts.other_threaded_replies_recent,
+            log->facts.our_threaded_replies_recent, (double)log->facts.conv_density_msgs_per_min,
+            log->facts.parent_was_a_question ? "true" : "false",
+            (double)log->facts.persona_formality, (double)log->facts.persona_thread_affinity,
+            log->facts.parent_emotional_intensity, style_name(log->style_chosen), log->send_result,
+            log->tier_used ? log->tier_used : "", log->elapsed_ms);
+    fclose(f);
+    return HU_OK;
+}

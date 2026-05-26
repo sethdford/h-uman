@@ -50,4 +50,25 @@ hu_reply_style_scores_t hu_imessage_score_reply_style(const hu_reply_style_facts
 hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *facts,
                                                 uint64_t rng_seed);
 
+#include <stddef.h>
+
+#include "human/core/error.h"
+
+/* One JSONL entry per reply-style decision + send attempt. */
+typedef struct {
+    int64_t ts_unix;                 /* unix epoch seconds */
+    const char *target_chat_id_hash; /* opaque hex string, agent-supplied */
+    hu_reply_style_facts_t facts;    /* full input facts */
+    hu_reply_style_t style_chosen;   /* what the predicate picked */
+    int send_result;                 /* hu_error_t int value, 0 = HU_OK */
+    const char *tier_used;           /* "cmdR"|"ax_menu"|"flat_fallback"|"tapback" */
+    int elapsed_ms;                  /* wall-clock for the send */
+} hu_imessage_action_log_t;
+
+/* Append one JSONL line to the action-log file. Resolves log dir from
+ * env var HU_IMESSAGE_ACTION_LOG_DIR if set (for tests), else
+ * ~/.human/logs/. Creates the dir if missing. Returns HU_OK on success.
+ * Failure is non-fatal — the caller already did the real work. */
+hu_error_t hu_imessage_action_log_jsonl(const hu_imessage_action_log_t *log);
+
 #endif

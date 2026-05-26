@@ -3239,8 +3239,8 @@ set(HU_TEST_SOURCES
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
-    tests/test_imessage_reply_pacing.c
-    tests/test_follow_up.c
+tests/test_imessage_reply_pacing.c
+tests/test_imessage_action_telemetry.c    tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
