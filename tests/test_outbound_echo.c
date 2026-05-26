@@ -16,7 +16,7 @@
 #include "human/agent/outbound_pipeline.h"
 #include "human/core/allocator.h"
 
-extern hu_outbound_stage_t hu_outbound_stage_echo;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_echo;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -40,7 +40,7 @@ static hu_outbound_verdict_t run_echo(const char *content, const char *prompt) {
     ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
     ctx.regenerate_budget = 1;
 
-    return hu_outbound_stage_echo.run(&hu_outbound_stage_echo, &msg, &ctx);
+    return hu_outbound_pipeline_stage_echo.run(&hu_outbound_pipeline_stage_echo, &msg, &ctx);
 }
 
 /* ----------------------------------------------------------------- */

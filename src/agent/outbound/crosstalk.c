@@ -250,7 +250,7 @@ void hu_outbound_crosstalk_set_lookup(hu_outbound_crosstalk_lookup_fn_t fn, void
 /* Stage entry                                                       */
 /* ----------------------------------------------------------------- */
 
-static hu_outbound_verdict_t crosstalk_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t crosstalk_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                            hu_outbound_context_t *ctx) {
     (void)self;
     if (!msg || !msg->content || msg->content_len == 0)
@@ -313,7 +313,7 @@ static hu_outbound_verdict_t crosstalk_run(hu_outbound_stage_t *self, hu_outboun
     return verdict;
 }
 
-hu_outbound_stage_t hu_outbound_stage_crosstalk = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk = {
     .name = "crosstalk",
     .run = crosstalk_run,
     .state = NULL,

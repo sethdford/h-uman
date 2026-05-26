@@ -55,7 +55,7 @@ typedef struct fake_stage_state {
     int call_count;
 } fake_stage_state_t;
 
-static hu_outbound_verdict_t fake_stage_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t fake_stage_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                             hu_outbound_context_t *ctx) {
     (void)msg;
     fake_stage_state_t *st = (fake_stage_state_t *)self->state;

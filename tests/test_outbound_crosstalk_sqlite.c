@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern hu_outbound_stage_t hu_outbound_stage_crosstalk;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk;
 
 static void run_sql_or_fail(sqlite3 *db, const char *sql) {
     char *err = NULL;
@@ -199,7 +199,7 @@ static void test_register_then_stage_rejects_crosstalk(void) {
     ctx.recipient_contact_id_len = strlen("+CONTACT_RECIPIENT");
 
     hu_outbound_verdict_t v =
-        hu_outbound_stage_crosstalk.run(&hu_outbound_stage_crosstalk, &msg, &ctx);
+        hu_outbound_pipeline_stage_crosstalk.run(&hu_outbound_pipeline_stage_crosstalk, &msg, &ctx);
     HU_ASSERT_TRUE(v.kind == HU_OUTBOUND_REJECT);
     HU_ASSERT_NOT_NULL(v.reason);
     HU_ASSERT_TRUE(strstr(v.reason, "crosstalk_other_contact") != NULL);
@@ -209,7 +209,7 @@ static void test_register_then_stage_rejects_crosstalk(void) {
     /* After unregister, the same content goes to SEND (degraded mode,
      * no cross-contact corpus available). */
     hu_outbound_verdict_t v2 =
-        hu_outbound_stage_crosstalk.run(&hu_outbound_stage_crosstalk, &msg, &ctx);
+        hu_outbound_pipeline_stage_crosstalk.run(&hu_outbound_pipeline_stage_crosstalk, &msg, &ctx);
     HU_ASSERT_TRUE(v2.kind == HU_OUTBOUND_SEND);
 
     sqlite3_close(db);
@@ -239,7 +239,7 @@ static void test_register_null_is_equivalent_to_unregister(void) {
     ctx.recipient_contact_id_len = strlen("+CONTACT_RECIPIENT");
 
     hu_outbound_verdict_t v =
-        hu_outbound_stage_crosstalk.run(&hu_outbound_stage_crosstalk, &msg, &ctx);
+        hu_outbound_pipeline_stage_crosstalk.run(&hu_outbound_pipeline_stage_crosstalk, &msg, &ctx);
     HU_ASSERT_TRUE(v.kind == HU_OUTBOUND_SEND); /* degraded; lookup was cleared */
 
     hu_outbound_crosstalk_unregister_sqlite();

@@ -15,7 +15,7 @@
 #include "human/agent/outbound_pipeline.h"
 #include "human/core/allocator.h"
 
-extern hu_outbound_stage_t hu_outbound_stage_moderation;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -37,7 +37,7 @@ static hu_outbound_verdict_t run_moderation(const char *content) {
     ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
     ctx.regenerate_budget = 1;
 
-    return hu_outbound_stage_moderation.run(&hu_outbound_stage_moderation, &msg, &ctx);
+    return hu_outbound_pipeline_stage_moderation.run(&hu_outbound_pipeline_stage_moderation, &msg, &ctx);
 }
 
 /* ----------------------------------------------------------------- */
@@ -118,7 +118,7 @@ static void test_moderation_null_content_returns_send(void) {
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
     hu_outbound_verdict_t v =
-        hu_outbound_stage_moderation.run(&hu_outbound_stage_moderation, &msg, &ctx);
+        hu_outbound_pipeline_stage_moderation.run(&hu_outbound_pipeline_stage_moderation, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 

@@ -75,7 +75,7 @@ static size_t count_sentence_terminators(const char *content, size_t len) {
     return count;
 }
 
-static hu_outbound_verdict_t shape_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t shape_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                        hu_outbound_context_t *ctx) {
     (void)self;
     (void)ctx;
@@ -103,7 +103,7 @@ static hu_outbound_verdict_t shape_run(hu_outbound_stage_t *self, hu_outbound_me
     return hu_outbound_verdict_send();
 }
 
-hu_outbound_stage_t hu_outbound_stage_shape = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_shape = {
     .name = "shape",
     .run = shape_run,
     .state = NULL,

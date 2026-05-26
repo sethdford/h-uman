@@ -2110,7 +2110,68 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
                 char *response = NULL;
                 size_t response_len = 0;
-                hu_error_t err = hu_agent_turn(agent, prompt, prompt_len, &response, &response_len);
+                hu_error_t err = HU_OK;
+
+                /* M3 Dispatch T4+T5 (2026-05-26) — unified dispatch branch.
+                 * When `cfg->proactive_throttle.use_unified_dispatch` is true,
+                 * route proactive composition through init_proposer's
+                 * tick_with_provider_ex (T1's compose-inputs path + T2's
+                 * response_guard send-wrap). Memory context plumbed via
+                 * hu_daemon_build_callback_context with the same output-
+                 * safety predicate applied inside init_proposer's prompt
+                 * builder (T5). When false (default during T6 A/B), the
+                 * legacy hu_agent_turn path runs unchanged. */
+                char *unified_mem_ctx = NULL;
+                size_t unified_mem_ctx_len = 0;
+                if (config && config->proactive_throttle.use_unified_dispatch && agent &&
+                    agent->provider.vtable) {
+                    if (agent->memory) {
+                        unified_mem_ctx = hu_daemon_build_callback_context(
+                            alloc, agent->memory, cp->contact_id, strlen(cp->contact_id), prompt,
+                            prompt_len, &unified_mem_ctx_len, agent);
+                    }
+
+                    hu_proactive_compose_inputs_t inputs;
+                    memset(&inputs, 0, sizeof(inputs));
+                    inputs.contact_id = cp->contact_id;
+                    inputs.contact_id_len = strlen(cp->contact_id);
+                    inputs.channel_name = ch_part;
+                    inputs.channel_name_len = strlen(ch_part);
+                    inputs.memory_context = unified_mem_ctx;
+                    inputs.memory_context_len = unified_mem_ctx_len;
+                    inputs.content_is_safe = hu_daemon_callback_content_is_safe;
+
+                    int64_t unified_last_tick = 0;
+                    uint64_t unified_tick_id = 0;
+                    hu_init_proposer_result_t unified_result = HU_INIT_RESULT_SKIP;
+                    hu_init_decision_t unified_decision;
+                    memset(&unified_decision, 0, sizeof(unified_decision));
+                    (void)hu_init_proposer_tick_with_provider_ex(
+                        &config->initiative, daemon_autoresponder_config(),
+                        /*tz_offset_seconds=*/0, &gov_budget, agent, &agent->provider, alloc,
+                        &inputs, /*last_inbound_unix=*/0, (int64_t)now, &unified_last_tick,
+                        &unified_tick_id, &unified_result, &unified_decision);
+
+                    if (unified_result == HU_INIT_RESULT_FIRED && unified_decision.draft_len > 0) {
+                        response = (char *)alloc->alloc(alloc->ctx, unified_decision.draft_len + 1);
+                        if (response) {
+                            memcpy(response, unified_decision.draft, unified_decision.draft_len);
+                            response[unified_decision.draft_len] = '\0';
+                            response_len = unified_decision.draft_len;
+                        } else {
+                            err = HU_ERR_OUT_OF_MEMORY;
+                        }
+                    } else {
+                        hu_log_info(
+                            "human", agent ? agent->observer : NULL,
+                            "proactive (unified) to %s: result=%d — skipping send this tick",
+                            cp->name ? cp->name : cp->contact_id, (int)unified_result);
+                    }
+                    if (unified_mem_ctx)
+                        alloc->free(alloc->ctx, unified_mem_ctx, unified_mem_ctx_len + 1);
+                } else {
+                    err = hu_agent_turn(agent, prompt, prompt_len, &response, &response_len);
+                }
                 agent->proactive_turn = false;
 
                 if (err == HU_OK && response && response_len > 0) {
@@ -10505,12 +10566,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 : NULL;
                                         char *validated_content = NULL;
                                         size_t validated_len = 0;
-                                        hu_outbound_verdict_kind_t burst_kind = HU_OUTBOUND_REJECT;
-                                        hu_error_t burst_err = hu_burst_egress_validate_fragment(
+                                        int burst_kind = HU_BURST_EGRESS_REJECT;
+                                        hu_error_t fragment_err = hu_burst_egress_validate_fragment(
                                             alloc, burst_channel_name, send_target, send_target_len,
                                             burst_msgs[bi], bm_len, &validated_content,
                                             &validated_len, &burst_kind);
-                                        if (burst_err == HU_OK && burst_kind == HU_OUTBOUND_SEND &&
+                                        if (fragment_err == HU_OK &&
+                                            burst_kind == HU_BURST_EGRESS_SEND &&
                                             validated_content) {
                                             ch->channel->vtable->send(
                                                 ch->channel->ctx, send_target, send_target_len,
@@ -10522,7 +10584,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 "human", agent ? agent->observer : NULL,
                                                 "burst dropped at fragment %d "
                                                 "(kind=%d, err=%d) — remaining fragments skipped",
-                                                bi, (int)burst_kind, (int)burst_err);
+                                                bi, burst_kind, (int)fragment_err);
                                             if (validated_content)
                                                 alloc->free(alloc->ctx, validated_content,
                                                             validated_len + 1);

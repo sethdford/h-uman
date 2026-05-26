@@ -32,7 +32,7 @@
  * The stage structs themselves live as static singletons in
  * pipeline_configs.c — the pipeline borrows them. */
 struct hu_outbound_pipeline {
-    hu_outbound_stage_t **stages; /* borrowed; not owned by pipeline */
+    hu_outbound_pipeline_stage_t **stages; /* borrowed; not owned by pipeline */
     size_t stage_count;
     hu_outbound_path_t path;
     hu_allocator_t *alloc;
@@ -40,13 +40,13 @@ struct hu_outbound_pipeline {
 
 /* Defined in pipeline_configs.c — builds the stages array for a path. */
 hu_error_t hu_outbound_pipeline_configs_build_stages(hu_allocator_t *alloc, hu_outbound_path_t path,
-                                                     hu_outbound_stage_t ***out_stages,
+                                                     hu_outbound_pipeline_stage_t ***out_stages,
                                                      size_t *out_count);
 
 /* One-shot startup log per path. */
 static atomic_uint_least32_t s_startup_log_mask = 0;
 
-static void log_startup_if_first(hu_outbound_path_t path, hu_outbound_stage_t **stages,
+static void log_startup_if_first(hu_outbound_path_t path, hu_outbound_pipeline_stage_t **stages,
                                  size_t count) {
     uint32_t bit = (uint32_t)1u << (uint32_t)path;
     uint32_t prev = atomic_fetch_or_explicit(&s_startup_log_mask, bit, memory_order_relaxed);
@@ -78,7 +78,7 @@ hu_error_t hu_outbound_pipeline_for_path(hu_allocator_t *alloc, hu_outbound_path
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
-    hu_outbound_stage_t **stages = NULL;
+    hu_outbound_pipeline_stage_t **stages = NULL;
     size_t count = 0;
     hu_error_t err = hu_outbound_pipeline_configs_build_stages(alloc, path, &stages, &count);
     if (err != HU_OK)
@@ -200,7 +200,7 @@ hu_error_t hu_outbound_pipeline_run(hu_outbound_pipeline_t *pipeline, hu_outboun
 
 restart:
     for (size_t i = 0; i < pipeline->stage_count; i++) {
-        hu_outbound_stage_t *stage = pipeline->stages[i];
+        hu_outbound_pipeline_stage_t *stage = pipeline->stages[i];
         if (!stage || !stage->run)
             continue;
 

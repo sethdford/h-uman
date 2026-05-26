@@ -109,12 +109,12 @@ typedef struct hu_outbound_context {
 } hu_outbound_context_t;
 
 /* Stage — single concern, returns a verdict. */
-typedef struct hu_outbound_stage {
+typedef struct hu_outbound_pipeline_stage {
     const char *name;
-    hu_outbound_verdict_t (*run)(struct hu_outbound_stage *self, hu_outbound_message_t *msg,
-                                 hu_outbound_context_t *ctx);
+    hu_outbound_verdict_t (*run)(struct hu_outbound_pipeline_stage *self,
+                                 hu_outbound_message_t *msg, hu_outbound_context_t *ctx);
     void *state; /* stage-private state if needed; pipeline does not touch */
-} hu_outbound_stage_t;
+} hu_outbound_pipeline_stage_t;
 
 /* Pipeline — ordered list of stages. Opaque to callers; build via
  * hu_outbound_pipeline_for_path. */

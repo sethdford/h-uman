@@ -96,7 +96,7 @@ static int has_cc_pattern(const char *s, size_t len) {
     return 0;
 }
 
-static hu_outbound_verdict_t moderation_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t moderation_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                             hu_outbound_context_t *ctx) {
     (void)self;
     if (!msg || !msg->content || msg->content_len == 0)
@@ -147,7 +147,7 @@ static hu_outbound_verdict_t moderation_run(hu_outbound_stage_t *self, hu_outbou
                                           "Rewrite to be appropriate for this contact.");
 }
 
-hu_outbound_stage_t hu_outbound_stage_moderation = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation = {
     .name = "moderation",
     .run = moderation_run,
     .state = NULL,

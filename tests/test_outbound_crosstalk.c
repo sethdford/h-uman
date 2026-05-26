@@ -16,7 +16,7 @@
 #include "human/agent/outbound_pipeline.h"
 #include "human/core/allocator.h"
 
-extern hu_outbound_stage_t hu_outbound_stage_crosstalk;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -84,7 +84,7 @@ static hu_outbound_verdict_t run_crosstalk(const char *content, fake_corpus_t *f
     ctx.recipient_contact_id_len = strlen("+18018285260");
 
     hu_outbound_verdict_t v =
-        hu_outbound_stage_crosstalk.run(&hu_outbound_stage_crosstalk, &msg, &ctx);
+        hu_outbound_pipeline_stage_crosstalk.run(&hu_outbound_pipeline_stage_crosstalk, &msg, &ctx);
 
     /* Clean up — leave lookup unregistered for next test. */
     hu_outbound_crosstalk_set_lookup(NULL, NULL);

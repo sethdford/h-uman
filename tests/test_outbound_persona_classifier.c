@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern hu_outbound_stage_t hu_outbound_stage_persona;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -53,7 +53,7 @@ static hu_outbound_verdict_t run_persona_with_channel(const char *content, const
     ctx.recipient_contact_id = "+TEST_RECIPIENT";
     ctx.recipient_contact_id_len = strlen("+TEST_RECIPIENT");
 
-    return hu_outbound_stage_persona.run(&hu_outbound_stage_persona, &msg, &ctx);
+    return hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
 }
 
 /* ── Shape-classifier-driven REGENERATEs ──────────────────────────── */

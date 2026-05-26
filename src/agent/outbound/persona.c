@@ -136,7 +136,7 @@ static int contains_ci(const char *haystack, size_t hlen, const char *needle) {
     return 0;
 }
 
-static hu_outbound_verdict_t persona_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                          hu_outbound_context_t *ctx) {
     (void)self;
     (void)ctx;
@@ -189,7 +189,7 @@ static hu_outbound_verdict_t persona_run(hu_outbound_stage_t *self, hu_outbound_
     return hu_outbound_verdict_send();
 }
 
-hu_outbound_stage_t hu_outbound_stage_persona = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona = {
     .name = "persona",
     .run = persona_run,
     .state = NULL,

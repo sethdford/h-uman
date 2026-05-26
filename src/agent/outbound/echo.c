@@ -199,7 +199,7 @@ static double prompt_token_overlap(const char *msg, size_t mlen, const char *pro
 
 #define ECHO_OVERLAP_THRESHOLD 0.40
 
-static hu_outbound_verdict_t echo_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t echo_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                       hu_outbound_context_t *ctx) {
     (void)self;
     (void)ctx;
@@ -243,7 +243,7 @@ static hu_outbound_verdict_t echo_run(hu_outbound_stage_t *self, hu_outbound_mes
     return hu_outbound_verdict_send();
 }
 
-hu_outbound_stage_t hu_outbound_stage_echo = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_echo = {
     .name = "echo",
     .run = echo_run,
     .state = NULL,

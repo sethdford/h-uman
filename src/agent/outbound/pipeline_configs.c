@@ -31,63 +31,63 @@
 #include <string.h>
 
 /* Stage singletons — implemented in their own .c files. Each file
- * exports a `hu_outbound_stage_t hu_outbound_stage_<name>` symbol. */
-extern hu_outbound_stage_t hu_outbound_stage_strip;
-extern hu_outbound_stage_t hu_outbound_stage_shape;
-extern hu_outbound_stage_t hu_outbound_stage_echo;
-extern hu_outbound_stage_t hu_outbound_stage_crosstalk;
-extern hu_outbound_stage_t hu_outbound_stage_persona;
-extern hu_outbound_stage_t hu_outbound_stage_moderation;
+ * exports a `hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_<name>` symbol. */
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_strip;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_shape;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_echo;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation;
 
 /* Per-path stage lists. NULL-terminated for ease of static
  * declaration. The build_stages function below converts to the
  * count-and-array form the pipeline expects. */
-static hu_outbound_stage_t *s_reactive_stages[] = {
-    &hu_outbound_stage_strip,
-    &hu_outbound_stage_crosstalk,
+static hu_outbound_pipeline_stage_t *s_reactive_stages[] = {
+    &hu_outbound_pipeline_stage_strip,
+    &hu_outbound_pipeline_stage_crosstalk,
     NULL,
 };
 
-static hu_outbound_stage_t *s_proactive_stages[] = {
-    &hu_outbound_stage_strip,
-    &hu_outbound_stage_shape,
-    &hu_outbound_stage_echo,
-    &hu_outbound_stage_crosstalk,
-    &hu_outbound_stage_persona,
-    &hu_outbound_stage_moderation,
+static hu_outbound_pipeline_stage_t *s_proactive_stages[] = {
+    &hu_outbound_pipeline_stage_strip,
+    &hu_outbound_pipeline_stage_shape,
+    &hu_outbound_pipeline_stage_echo,
+    &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona,
+    &hu_outbound_pipeline_stage_moderation,
     NULL,
 };
 
-static hu_outbound_stage_t *s_f25_stages[] = {
-    &hu_outbound_stage_strip,
-    &hu_outbound_stage_shape,
-    &hu_outbound_stage_echo,
-    &hu_outbound_stage_crosstalk,
-    &hu_outbound_stage_persona,
-    &hu_outbound_stage_moderation,
+static hu_outbound_pipeline_stage_t *s_f25_stages[] = {
+    &hu_outbound_pipeline_stage_strip,
+    &hu_outbound_pipeline_stage_shape,
+    &hu_outbound_pipeline_stage_echo,
+    &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona,
+    &hu_outbound_pipeline_stage_moderation,
     NULL,
 };
 
-static hu_outbound_stage_t *s_temporal_stages[] = {
-    &hu_outbound_stage_strip,   &hu_outbound_stage_shape,      &hu_outbound_stage_crosstalk,
-    &hu_outbound_stage_persona, &hu_outbound_stage_moderation, NULL,
+static hu_outbound_pipeline_stage_t *s_temporal_stages[] = {
+    &hu_outbound_pipeline_stage_strip,   &hu_outbound_pipeline_stage_shape,      &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona, &hu_outbound_pipeline_stage_moderation, NULL,
 };
 
-static hu_outbound_stage_t *s_scheduled_stages[] = {
-    &hu_outbound_stage_strip,
-    &hu_outbound_stage_crosstalk,
-    &hu_outbound_stage_moderation,
+static hu_outbound_pipeline_stage_t *s_scheduled_stages[] = {
+    &hu_outbound_pipeline_stage_strip,
+    &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_moderation,
     NULL,
 };
 
 /* Burst inherits primary verdict — pipeline NOT run. Caller-side
  * convention; pipeline_for_path returns an empty stages list. */
-static hu_outbound_stage_t *s_burst_stages[] = {
+static hu_outbound_pipeline_stage_t *s_burst_stages[] = {
     NULL,
 };
 
-static hu_outbound_stage_t **stages_for_path(hu_outbound_path_t path, size_t *out_count) {
-    hu_outbound_stage_t **list = NULL;
+static hu_outbound_pipeline_stage_t **stages_for_path(hu_outbound_path_t path, size_t *out_count) {
+    hu_outbound_pipeline_stage_t **list = NULL;
     switch (path) {
     case HU_OUTBOUND_PATH_REACTIVE:
         list = s_reactive_stages;
@@ -123,7 +123,7 @@ static hu_outbound_stage_t **stages_for_path(hu_outbound_path_t path, size_t *ou
 }
 
 hu_error_t hu_outbound_pipeline_configs_build_stages(hu_allocator_t *alloc, hu_outbound_path_t path,
-                                                     hu_outbound_stage_t ***out_stages,
+                                                     hu_outbound_pipeline_stage_t ***out_stages,
                                                      size_t *out_count) {
     if (!alloc || !out_stages || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -131,7 +131,7 @@ hu_error_t hu_outbound_pipeline_configs_build_stages(hu_allocator_t *alloc, hu_o
     *out_count = 0;
 
     size_t n = 0;
-    hu_outbound_stage_t **src = stages_for_path(path, &n);
+    hu_outbound_pipeline_stage_t **src = stages_for_path(path, &n);
     if (n == 0) {
         /* Burst / unknown — return empty list, not an error.
          * The pipeline runner handles a zero-stage pipeline as
@@ -139,7 +139,7 @@ hu_error_t hu_outbound_pipeline_configs_build_stages(hu_allocator_t *alloc, hu_o
         return HU_OK;
     }
 
-    hu_outbound_stage_t **arr = (hu_outbound_stage_t **)alloc->alloc(alloc->ctx, n * sizeof(*arr));
+    hu_outbound_pipeline_stage_t **arr = (hu_outbound_pipeline_stage_t **)alloc->alloc(alloc->ctx, n * sizeof(*arr));
     if (!arr)
         return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < n; i++)

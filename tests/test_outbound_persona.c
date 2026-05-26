@@ -16,7 +16,7 @@
 #include "human/agent/outbound_pipeline.h"
 #include "human/core/allocator.h"
 
-extern hu_outbound_stage_t hu_outbound_stage_persona;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -38,7 +38,7 @@ static hu_outbound_verdict_t run_persona(const char *content) {
     ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
     ctx.regenerate_budget = 1;
 
-    return hu_outbound_stage_persona.run(&hu_outbound_stage_persona, &msg, &ctx);
+    return hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
 }
 
 /* ----------------------------------------------------------------- */
@@ -126,7 +126,7 @@ static void test_persona_null_content_returns_send(void) {
     hu_outbound_message_t msg = {0};
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
-    hu_outbound_verdict_t v = hu_outbound_stage_persona.run(&hu_outbound_stage_persona, &msg, &ctx);
+    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 

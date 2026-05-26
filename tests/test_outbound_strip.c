@@ -19,7 +19,7 @@
 #include "human/core/allocator.h"
 
 /* The stage singleton lives in src/agent/outbound/strip.c. */
-extern hu_outbound_stage_t hu_outbound_stage_strip;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_strip;
 
 static hu_allocator_t *test_alloc(void) {
     static hu_allocator_t a;
@@ -54,7 +54,7 @@ static hu_outbound_verdict_t run_strip(const char *content_literal) {
     ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
     ctx.regenerate_budget = 1;
 
-    hu_outbound_verdict_t v = hu_outbound_stage_strip.run(&hu_outbound_stage_strip, &msg, &ctx);
+    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
 
     alloc->free(alloc->ctx, msg.content, n + 1);
     return v;
@@ -81,7 +81,7 @@ static void test_strip_null_content_returns_send(void) {
     hu_outbound_message_t msg = {0};
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
-    hu_outbound_verdict_t v = hu_outbound_stage_strip.run(&hu_outbound_stage_strip, &msg, &ctx);
+    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 

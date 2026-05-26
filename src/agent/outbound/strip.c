@@ -126,7 +126,7 @@ static size_t strip_codepoints(unsigned char *buf, size_t len) {
     return w;
 }
 
-static hu_outbound_verdict_t strip_run(hu_outbound_stage_t *self, hu_outbound_message_t *msg,
+static hu_outbound_verdict_t strip_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                        hu_outbound_context_t *ctx) {
     (void)self;
     if (!msg || !msg->content || msg->content_len == 0)
@@ -151,7 +151,7 @@ static hu_outbound_verdict_t strip_run(hu_outbound_stage_t *self, hu_outbound_me
     return hu_outbound_verdict_rewrite("strip_codepoints", (char *)work, new_len);
 }
 
-hu_outbound_stage_t hu_outbound_stage_strip = {
+hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_strip = {
     .name = "strip",
     .run = strip_run,
     .state = NULL,
