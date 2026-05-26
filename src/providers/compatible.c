@@ -5,6 +5,7 @@
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/helpers.h"
+#include "human/providers/mlx_stream_utf8.h" /* T5: utf8 boundary helpers */
 #include "human/providers/provider_http.h"
 #include "human/util/harmony_filter.h"
 #include <pthread.h>
@@ -571,6 +572,20 @@ typedef struct compatible_stream_ctx {
     char *raw_body;
     size_t raw_body_len;
     size_t raw_body_cap;
+    /* T5 (2026-05-26) — UTF-8 boundary safety carry buffer. SSE events
+     * align with mlx-server tokens, not bytes; a multi-byte codepoint can
+     * straddle two tokens if the tokenizer emits byte-level pieces (rare
+     * but real for some Unicode ranges with `ensure_ascii=False` servers).
+     * When the content of one event ends with the START bytes of a multi-
+     * byte UTF-8 sequence, those bytes get stashed here and prepended to
+     * the next event's content before the callback fires — so the
+     * downstream consumer never sees a partial codepoint.
+     *
+     * Max valid prefix is 3 bytes (4-byte codepoint with 3 bytes seen so
+     * far). Pure logic in `hu_mlx_utf8_safe_emit_len` from
+     * src/providers/mlx_stream_utf8.c. */
+    char utf8_carry[4];
+    size_t utf8_carry_len;
 } compatible_stream_ctx_t;
 
 /* T8 — wall-clock now in ns via CLOCK_MONOTONIC. Returns 0 if the
@@ -645,13 +660,30 @@ static void compatible_extract_stream_delta(compatible_stream_ctx_t *s, const ch
     if (content) {
         size_t clen = strlen(content);
         if (clen > 0) {
+            /* Final assembled content_buf (out->content) accumulates EVERY
+             * byte exactly once, in event-arrival order — no carry logic
+             * needed here because the final out->content has no boundary
+             * to split a codepoint across. */
             compatible_append_content(s, content, clen);
-            hu_stream_chunk_t chunk;
-            memset(&chunk, 0, sizeof(chunk));
-            chunk.type = HU_STREAM_CONTENT;
-            chunk.delta = content;
-            chunk.delta_len = clen;
-            compatible_fire_chunk(s, &chunk);
+
+            /* T5 (2026-05-26) — UTF-8 boundary safety for the STREAMED
+             * callback. SSE events align with tokens; a token that's a
+             * lone byte of a multi-byte codepoint would otherwise reach
+             * the consumer as a malformed byte. The helper stitches the
+             * prior carry + new content, fires only complete codepoints,
+             * and stashes the trailing partial sequence for next event. */
+            char emit_buf[512];
+            size_t fire_len =
+                hu_mlx_utf8_carry_emit(s->utf8_carry, &s->utf8_carry_len, sizeof(s->utf8_carry),
+                                       content, clen, emit_buf, sizeof(emit_buf));
+            if (fire_len > 0) {
+                hu_stream_chunk_t chunk;
+                memset(&chunk, 0, sizeof(chunk));
+                chunk.type = HU_STREAM_CONTENT;
+                chunk.delta = emit_buf;
+                chunk.delta_len = fire_len;
+                compatible_fire_chunk(s, &chunk);
+            }
         }
     }
 
