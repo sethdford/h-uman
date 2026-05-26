@@ -47,10 +47,40 @@
  */
 
 #include "human/agent/outbound_pipeline.h"
+#include "human/eval/shape.h"
 
 #include <ctype.h>
 #include <stddef.h>
 #include <string.h>
+
+/* Sprint 60 — shape-classifier REGENERATE conditions.
+ *
+ * The classifier returns hu_shape_result_t with .score, .passed, and
+ * .fail_flags. We REGENERATE when EITHER of two conditions fires:
+ *
+ *   (a) !shape.passed
+ *       Catches structural failures: bullet/numbered lists on
+ *       no-markdown channels (BULLET_LIST/NUMBERED_LIST/HEADER/
+ *       CODE_FENCE flags), way-too-long content, or score < 0.7.
+ *       This is the classifier's own definition of "fail."
+ *
+ *   (b) shape.fail_flags & HU_PERSONA_SHAPE_AI_OPENER_MASK
+ *       Catches single AI-assistant openers that don't drag the
+ *       score below the passed threshold on their own ("Certainly!"
+ *       deducts only 0.15, leaving 0.85 — passed=true). These
+ *       openers are individually mild for the eval scoring scheme
+ *       but unambiguous out-of-voice signals in production.
+ *
+ * Why not just lower the score threshold? Single AI openers score
+ * 0.85; lowering the threshold to 0.85 would false-positive on a
+ * variety of legitimate borderline content. Targeting the flag
+ * bits directly catches the unambiguous case without collateral.
+ *
+ * Per Q-3 user decision: REGENERATE only (never REJECT). The LLM
+ * gets one chance to rewrite. */
+#define HU_PERSONA_SHAPE_AI_OPENER_MASK                                              \
+    (HU_SHAPE_FAIL_DEPENDING_ON | HU_SHAPE_FAIL_HERE_ARE | HU_SHAPE_FAIL_CERTAINLY | \
+     HU_SHAPE_FAIL_ABSOLUTELY | HU_SHAPE_FAIL_GREAT_QUESTION | HU_SHAPE_FAIL_I_UNDERSTAND)
 
 /* Project / technical jargon. Case-insensitive substring match.
  * Order doesn't matter; we walk the list. */
@@ -129,6 +159,31 @@ static hu_outbound_verdict_t persona_run(hu_outbound_stage_t *self, hu_outbound_
                 "Don't narrate yourself. Write what Seth would say, not what "
                 "an assistant would say about itself.");
         }
+    }
+
+    /* Sprint 60 — deterministic shape classifier gate. The heuristics
+     * above catch known DOMAIN failure modes (project jargon, AI
+     * self-narration). hu_shape_classify catches STRUCTURAL failure
+     * modes (length, markdown, AI-assistant openers like "Certainly!"
+     * / "Great question!") with channel-aware rules.
+     *
+     * Channel resolution: ctx->channel_name is the iMessage/Slack/etc
+     * string; NULL falls back to iMessage (strictest) via the
+     * classifier's own default. Empty content also defers to the
+     * classifier — its NULL/EMPTY_RESPONSE flags surface there.
+     *
+     * Threshold per design.md Q-3 (see header comment for rationale). */
+    hu_shape_channel_t channel = hu_shape_channel_from_string(
+        ctx ? ctx->channel_name : NULL, (ctx && ctx->channel_name) ? strlen(ctx->channel_name) : 0);
+    hu_shape_result_t shape = {0};
+    if (hu_shape_classify(msg->content, msg->content_len, channel, &shape) == HU_OK &&
+        (!shape.passed || (shape.fail_flags & HU_PERSONA_SHAPE_AI_OPENER_MASK))) {
+        return hu_outbound_verdict_regenerate(
+            "persona_shape_off_voice",
+            "Reply doesn't match Seth's voice for this channel. Strip the "
+            "AI-assistant openers ('Certainly', 'Great question'), the bullet "
+            "lists, and the boilerplate. Reply how Seth would: short, casual, "
+            "no headers, no markdown.");
     }
 
     return hu_outbound_verdict_send();

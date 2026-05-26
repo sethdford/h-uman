@@ -3352,6 +3352,8 @@ set(HU_TEST_SOURCES
     tests/test_outbound_crosstalk.c
     # Sprint 59 Phase B — persona stage (Seth-voice fidelity).
     tests/test_outbound_persona.c
+    # Sprint 60 — persona stage ML wiring (shape-classifier upgrade).
+    tests/test_outbound_persona_classifier.c
     # Sprint 59 Phase B — moderation stage (PII + violence/hate).
     tests/test_outbound_moderation.c
     # Sprint 59 Phase E — end-to-end corpus regression against 24 incident rows.

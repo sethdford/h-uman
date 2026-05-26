@@ -371,6 +371,8 @@ void run_outbound_crosstalk_sqlite_tests(void);
 void run_outbound_e2e_sota_proof_tests(void);
 #endif
 void run_outbound_persona_tests(void);
+/* Sprint 60 — persona stage ML wiring (shape-classifier upgrade). */
+void run_outbound_persona_classifier_tests(void);
 void run_outbound_moderation_tests(void);
 void run_outbound_corpus_regression_tests(void);
 void run_multimodal_policy_tests(void);
@@ -1228,6 +1230,7 @@ int main(int argc, char **argv) {
     run_outbound_e2e_sota_proof_tests();
 #endif
     run_outbound_persona_tests();
+    run_outbound_persona_classifier_tests();
     run_outbound_moderation_tests();
     run_outbound_corpus_regression_tests();
     run_multimodal_policy_tests();

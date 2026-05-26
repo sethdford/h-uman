@@ -60,12 +60,35 @@ Per-stage suites (all PASS):
 | outbound_corpus_regression | 3/3 |
 | daemon_proactive_feed_scope | 4/4 |
 | outbound_crosstalk_sqlite | 6/6 |
+| outbound_e2e_sota_proof | 3/3 |
+| outbound_persona_classifier | 10/10 |
 
 Total Sprint 59 net add: **92 tests** (12253 → 12345).
-Sprint 60 carryover net add: **6 tests** (crosstalk SQLite wiring).
-Full suite: **12345/12345 passed, 4 skipped, 0 failures.**
+Sprint 60 carryover net add: **19 tests** (crosstalk SQLite + E2E SOTA proof + persona shape-classifier ML wiring).
+Full suite: **12508/12508 passed, 5 skipped, 0 failures.**
 
 ## Closed Sprint 60 carryovers
+
+1. **Persona stage ML wiring** — DONE. `src/agent/outbound/persona.c`
+   now calls `hu_shape_classify` from `include/human/eval/shape.h`
+   after the existing heuristic-blocklist scan. The classifier scores
+   the message against channel-specific shape rules (iMessage strict,
+   Slack/Discord markdown-OK, etc.) and surfaces 14 fail flags
+   covering markdown leakage, AI-assistant openers, and length. The
+   stage REGENERATEs when EITHER (a) `!shape.passed` fires (catches
+   structural fails — bullet/numbered/header markdown on no-markdown
+   channels, WAY_TOO_LONG, score < 0.7), OR (b) any AI-opener fail
+   flag is set (`CERTAINLY`, `GREAT_QUESTION`, `ABSOLUTELY`,
+   `I_UNDERSTAND`, `HERE_ARE`, `DEPENDING_ON`) — even at a single-flag
+   0.85 score that would otherwise pass the threshold. Channel
+   resolution: `ctx->channel_name` via `hu_shape_channel_from_string`
+   with NULL falling back to iMessage strict. Pinned by
+   `tests/test_outbound_persona_classifier.c` (10/10) covering the
+   four classifier-driven REGENERATE shapes, channel relaxation for
+   Slack, NULL-channel defaulting, three false-positive contracts,
+   and one composition test proving the existing heuristic still
+   fires first. Original `outbound_persona` suite remains 22/22 PASS
+   — no regressions to corpus #11-18 coverage.
 
 3. **Crosstalk SQLite wiring** — DONE. `src/agent/outbound/crosstalk_sqlite.c`
    implements the lookup with `SELECT content FROM messages WHERE
@@ -82,11 +105,16 @@ Full suite: **12345/12345 passed, 4 skipped, 0 failures.**
    then asserts the stage REJECTs the same content sent to the
    recipient with reason `crosstalk_other_contact`.
 
+**E2E SOTA proof** — `tests/test_outbound_e2e_sota_proof.c` (3/3)
+proves the FULL production stack works together: file-based SQLite
+db, production registration helper, full pipeline via
+`hu_outbound_pipeline_for_path(HU_OUTBOUND_PATH_PROACTIVE)` and
+`hu_outbound_pipeline_run`, Annie/Mindy/Betty replay → REJECT with
+`crosstalk_other_contact`. Plus false-positive contract (clean
+content → SEND) and degraded-mode contract (no SQLite lookup → SEND).
+
 ## What's still open (remaining Sprint 60 candidates)
 
-1. **Persona stage ML wiring** — currently uses heuristic project-jargon
-   detection. Could consult `eval_shape_classifier` for fidelity-score
-   gating per Q-3.
 2. **Reactive-path consolidation** — Q-5 user decision was "not in
    Sprint 59". After 2 weeks of production data on the new pipeline,
    evaluate whether to displace `response_guard.c`.
