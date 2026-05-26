@@ -1,0 +1,27 @@
+{
+  "name": "@human/hula-sdk",
+  "version": "0.1.0",
+  "description": "Node.js SDK for HuLa (Human Language) programs",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/smoke.test.js"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "human",
+    "hula",
+    "ai",
+    "agent"
+  ],
+  "license": "MIT"
+}
