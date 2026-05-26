@@ -943,6 +943,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    src/agent/burst_egress.c
     src/agent/multimodal_policy.c
     src/agent/persona_eval.c
     src/agent/verifier_metrics.c
@@ -3638,6 +3639,7 @@ endif()
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_crosstalk_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_e2e_sota_proof.c)
+    list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
 endif()
 
 # SOTA capability tests

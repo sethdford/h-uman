@@ -113,16 +113,51 @@ db, production registration helper, full pipeline via
 `crosstalk_other_contact`. Plus false-positive contract (clean
 content → SEND) and degraded-mode contract (no SQLite lookup → SEND).
 
+## Closed Sprint 60 carryovers (continued)
+
+4. **Burst-path wiring** — DONE. Found the production gap:
+   `src/daemon.c` near the burst-fragment for-loop parsed an LLM
+   response into N fragments (3-4 typical) and sent each via
+   `ch->channel->vtable->send` directly. The outbound pipeline (and
+   therefore the crosstalk / persona / shape / moderation stages)
+   never ran on any burst fragment. If the LLM hallucinated a cross-
+   contact bleed in any single fragment, the daemon shipped it.
+
+   Closed by a new security-predicate-extracted helper
+   `hu_burst_egress_validate_fragment` in
+   `src/agent/burst_egress.{c,h}`. The daemon's burst loop now calls
+   the helper for each fragment before `channel->send`; on REJECT
+   the loop BREAKS, dropping all remaining fragments and logging.
+   The helper uses `HU_OUTBOUND_PATH_REACTIVE` (strip + crosstalk)
+   and exposes a stable-integer `out_kind` (HU_BURST_EGRESS_*
+   constants) to keep the public API decoupled from the
+   `struct hu_outbound_stage` ↔ `enum hu_outbound_stage` tag
+   collision between `outbound_pipeline.h` and `channel.h`.
+
+   Pinned by `tests/test_burst_egress.c` (5/5):
+     - clean fragment → SEND with heap-owned out_content (caller
+       frees)
+     - bleed fragment (with SQLite lookup registered to a seeded
+       db) → REJECT (load-bearing: this is what the Annie/Mindy/
+       Betty replay would have hit through the burst path)
+     - channel_name plumbed through (slack vs imessage)
+     - null args → HU_ERR_INVALID_ARGUMENT
+     - empty fragment → SEND (caller-safe no-op)
+
+   Per-path stage configs is now FULLY EXERCISED: reactive,
+   proactive, f25, temporal, scheduled all route through their
+   declared stages; burst still uses zero stages (inherits primary
+   verdict by design) and the daemon explicitly routes burst
+   fragments through HU_OUTBOUND_PATH_REACTIVE — strict on every
+   fragment, no "trust the primary" assumption that the LLM could
+   sneak past.
+
 ## What's still open (remaining Sprint 60 candidates)
 
 2. **Reactive-path consolidation** — Q-5 user decision was "not in
    Sprint 59". After 2 weeks of production data on the new pipeline,
    evaluate whether to displace `response_guard.c`.
-3. **Per-path stage configs** — pipeline_configs.c has reactive,
-   proactive, f25, temporal, scheduled, burst configured. Burst is
-   empty (pipeline skipped); the wiring for sub-sends inheriting
-   primary verdict needs validation.
-4. **Doctor stats** — `/v1/outbound/stats` doctor check (per-stage
+5. **Doctor stats** — `/v1/outbound/stats` doctor check (per-stage
    verdict counts) is on the wish list. Sprint 60.
 
 ## Operational note

@@ -371,6 +371,8 @@ void run_outbound_crosstalk_tests(void);
 void run_outbound_crosstalk_sqlite_tests(void);
 /* Sprint 60 E2E SOTA proof — full pipeline through a file-based db. */
 void run_outbound_e2e_sota_proof_tests(void);
+/* Sprint 60 — burst-egress helper (daemon-side burst-loop wiring). */
+void run_burst_egress_tests(void);
 #endif
 void run_outbound_persona_tests(void);
 /* Sprint 60 — persona stage ML wiring (shape-classifier upgrade). */
@@ -1231,6 +1233,7 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_SQLITE
     run_outbound_crosstalk_sqlite_tests();
     run_outbound_e2e_sota_proof_tests();
+    run_burst_egress_tests();
 #endif
     run_outbound_persona_tests();
     run_outbound_persona_classifier_tests();
