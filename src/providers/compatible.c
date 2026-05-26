@@ -6,6 +6,7 @@
 #include "human/provider.h"
 #include "human/providers/helpers.h"
 #include "human/providers/provider_http.h"
+#include "human/util/harmony_filter.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -904,6 +905,23 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
         alloc->free(alloc->ctx, body, body_len);
         return err;
     }
+
+    /* M3 B4 T4-part3 (2026-05-26) — wrap the per-chunk user callback
+     * in a Harmony channel-marker filter so streaming content arrives
+     * cleaned (mlx-server.py's strip_thought_channels postprocessor
+     * only runs in the non-streaming path). Fail-open if init fails. */
+    hu_harmony_filter_t *harmony_filter = NULL;
+    hu_harmony_callback_wrap_t harmony_wrap;
+    memset(&harmony_wrap, 0, sizeof(harmony_wrap));
+    if (hu_harmony_filter_init(alloc, &harmony_filter) == HU_OK) {
+        harmony_wrap.inner = sctx.callback;
+        harmony_wrap.inner_ctx = sctx.callback_ctx;
+        harmony_wrap.filter = harmony_filter;
+        harmony_wrap.alloc = alloc;
+        sctx.callback = hu_harmony_callback_wrap_fn;
+        sctx.callback_ctx = &harmony_wrap;
+    }
+
     hu_log_info("compatible", NULL, "stream_chat: provider=compatible model=%.*s body_len=%zu",
                 (int)model_len, model, body_len);
     /* Serialize against concurrent chat/stream_chat to a single-threaded
@@ -916,6 +934,26 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
+
+    /* T4-part3 — drain held-back filter bytes through the original
+     * user callback. Wrapper never propagates is_final on filtered
+     * chunks; the explicit final_chunk below carries end-of-stream. */
+    if (harmony_filter) {
+        char *drained = NULL;
+        size_t drained_len = 0;
+        if (hu_harmony_filter_finish(harmony_filter, &drained, &drained_len) == HU_OK &&
+            drained_len > 0) {
+            hu_stream_chunk_t tail_chunk;
+            memset(&tail_chunk, 0, sizeof(tail_chunk));
+            tail_chunk.type = HU_STREAM_CONTENT;
+            tail_chunk.delta = drained;
+            tail_chunk.delta_len = drained_len;
+            callback(callback_ctx, &tail_chunk);
+        }
+        if (drained)
+            alloc->free(alloc->ctx, drained, drained_len + 1);
+        hu_harmony_filter_free(harmony_filter);
+    }
 
 #define COMPATIBLE_STREAM_CLEANUP_TOOLS()                            \
     do {                                                             \

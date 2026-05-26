@@ -63,9 +63,14 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, struct hu_agent *age
 
 /* Proactive check-ins: iterate contacts with proactive_checkin=true,
  * check last interaction time, and initiate natural conversations.
- * No-op when agent has no persona loaded. */
+ * No-op when agent has no persona loaded.
+ *
+ * 2026-05-26: `config` plumbed for M3 dispatch T4+T5 unified-path branch.
+ * NULL is permitted — when NULL the unified-dispatch and other
+ * config-gated branches fall back to the legacy hu_agent_turn path. */
 void hu_service_run_proactive_checkins(hu_allocator_t *alloc, struct hu_agent *agent,
-                                       hu_service_channel_t *channels, size_t channel_count);
+                                       hu_service_channel_t *channels, size_t channel_count,
+                                       const struct hu_config *config);
 
 hu_error_t hu_daemon_install(hu_allocator_t *alloc);
 hu_error_t hu_daemon_uninstall(void);

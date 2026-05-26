@@ -45,6 +45,7 @@
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #include "human/ml/lora_retrain_runner.h"
+#include "human/ml/mlx_admin.h"
 #ifdef HU_ENABLE_MOLORA
 #include "human/ml/molora.h"
 #endif
@@ -1057,7 +1058,8 @@ static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
 #define proactive_prompt_for_contact hu_daemon_proactive_prompt_for_contact
 
 void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
-                                       hu_service_channel_t *channels, size_t channel_count) {
+                                       hu_service_channel_t *channels, size_t channel_count,
+                                       const hu_config_t *config) {
     if (!alloc || !agent || !agent->persona)
         return;
 
@@ -3429,15 +3431,50 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_log_info("human", agent->observer, "personalization: loaded adapter '%s' from %s",
                         adapter_id, adapter_path);
         else if (le == HU_ERR_NOT_SUPPORTED) {
-            /* US-7.3 (INS-B): cloud providers return HU_ERR_NOT_SUPPORTED
-             * from hu_provider_load_adapter. Surface as WARN with the
-             * literal "personalization adapter ignored" string so the
-             * operator is never silently misled. One-shot per process. */
-            const char *pname =
-                (agent->provider.vtable && agent->provider.vtable->get_name)
-                    ? agent->provider.vtable->get_name(agent->provider.ctx)
-                    : (config->default_provider ? config->default_provider : "(unknown)");
-            hu_daemon_personalization_warn_adapter_ignored(agent->observer, pname, adapter_id);
+            /* US-7.3 (INS-B): the provider's own load_adapter returned
+             * HU_ERR_NOT_SUPPORTED. This is the common case when the
+             * underlying primary is the `compatible` provider — even when
+             * configured as `mlx_local` (just a named entry in the
+             * compatible factory map). Try the mlx-admin HTTP API directly
+             * before giving up: if reliability.primary_provider names
+             * mlx_local AND a mlx-server is reachable, we load the adapter
+             * out-of-band via hu_mlx_admin_swap_adapter.
+             *
+             * This makes the M3 mission's main feature fire in production.
+             * Empirical: v4-repair adapter lifts persona fidelity +27pp
+             * (commit 9ab9b86e). Before this path, the warn fired and
+             * the proven adapter sat unused. */
+            bool mlx_admin_ok = false;
+            const char *primary = config->reliability.primary_provider;
+            if (primary && strstr(primary, "mlx_local")) {
+                const char *mlx_url = getenv("HUMAN_MLX_URL");
+                if (!mlx_url || !mlx_url[0])
+                    mlx_url = "http://127.0.0.1:8741/v1";
+                hu_mlx_admin_swap_result_t swap = {0};
+                hu_error_t se = hu_mlx_admin_swap_adapter(
+                    alloc, mlx_url, strlen(mlx_url), adapter_path, strlen(adapter_path), &swap);
+                if (se == HU_OK && swap.status_code == 200) {
+                    mlx_admin_ok = true;
+                    hu_log_info("human", agent->observer,
+                                "personalization: loaded adapter '%s' via mlx-admin (%s)",
+                                adapter_id, mlx_url);
+                } else {
+                    hu_log_warn("human", agent->observer,
+                                "personalization: mlx-admin swap failed: err=%d status=%d url=%s",
+                                (int)se, (int)swap.status_code, mlx_url);
+                }
+                hu_mlx_admin_swap_result_free(alloc, &swap);
+            }
+            if (!mlx_admin_ok) {
+                /* Out-of-band path didn't fire. Surface as WARN with the
+                 * literal "personalization adapter ignored" string so the
+                 * operator is never silently misled. One-shot per process. */
+                const char *pname =
+                    (agent->provider.vtable && agent->provider.vtable->get_name)
+                        ? agent->provider.vtable->get_name(agent->provider.ctx)
+                        : (config->default_provider ? config->default_provider : "(unknown)");
+                hu_daemon_personalization_warn_adapter_ignored(agent->observer, pname, adapter_id);
+            }
         } else
             hu_log_warn("human", agent->observer,
                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
@@ -3650,7 +3687,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
                 if (proactive_due_at > 0 && t >= proactive_due_at) {
                     proactive_due_at = 0;
-                    hu_service_run_proactive_checkins(alloc, agent, channels, channel_count);
+                    hu_service_run_proactive_checkins(alloc, agent, channels, channel_count,
+                                                      config);
                     if (agent && agent->bth_metrics)
                         hu_bth_metrics_log(agent->bth_metrics);
                 }
