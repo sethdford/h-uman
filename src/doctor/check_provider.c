@@ -14,6 +14,7 @@
  */
 
 #include "human/doctor/check_provider.h"
+#include "human/config.h" /* hu_config_t fields for default_provider / reliability.primary_provider */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/doctor/check.h"
@@ -162,17 +163,49 @@ static hu_doctor_check_result_t check_provider_run(hu_doctor_check_t *self, void
      * end without spinning up provider state. */
     return (hu_doctor_check_result_t){HU_DOCTOR_NA, "smoke check skipped under HU_IS_TEST", NULL};
 #else
-    /* Production path — call the configured provider's factory. We
-     * pass name=NULL/0 so hu_provider_create_from_config uses
-     * cfg->default_provider. The factory does NOT make a network
-     * round-trip; it constructs the in-process vtable instance.
-     * That's deliberately scoped: AC-1.2 of US-C3.3 asked only for
-     * "can be instantiated", and going further (1-token API call)
-     * requires a mock-provider fault-injection pattern we don't
-     * have yet. The classifier is still the right shape for that
-     * future extension. */
+    /* Production path — call the configured provider's factory.
+     *
+     * 2026-05-26 fix: the original implementation passed name=NULL/0
+     * thinking the factory would fall back to cfg->default_provider.
+     * It doesn't — hu_provider_create_from_config rejects NULL name
+     * with HU_ERR_INVALID_ARGUMENT (from_config.c:137), which the
+     * classifier mapped to "not configured" and surfaced as
+     *     "no provider configured — add 'provider' to ~/.human/config.json"
+     * even though the operator HAD configured one. Doctor cried wolf.
+     *
+     * The fix: explicitly resolve the configured provider name. We
+     * prefer `default_provider` (the operator-facing surface) and
+     * fall back to `reliability.primary_provider` when reliable is
+     * the default, since the reliable wrapper isn't itself a thing
+     * the smoke check should instantiate — that would spin up the
+     * full retry chain just to smoke-test. We're checking "can the
+     * UNDERLYING provider be made at all", which is the meaningful
+     * health signal.
+     *
+     * Going further (1-token API call) requires a mock-provider
+     * fault-injection pattern we don't have yet. The classifier is
+     * still the right shape for that future extension. */
+    const char *resolved_name = NULL;
+    if (pctx->cfg->default_provider && pctx->cfg->default_provider[0]) {
+        resolved_name = pctx->cfg->default_provider;
+        /* If the default IS the reliable/router wrapper, smoke-test
+         * the underlying primary instead so we don't pay the wrapper-
+         * construction cost (which depends on N upstream providers). */
+        if ((strcmp(resolved_name, "reliable") == 0 || strcmp(resolved_name, "router") == 0) &&
+            pctx->cfg->reliability.primary_provider && pctx->cfg->reliability.primary_provider[0]) {
+            resolved_name = pctx->cfg->reliability.primary_provider;
+        }
+    }
+    if (!resolved_name || !resolved_name[0]) {
+        /* Genuinely no provider configured anywhere — the original
+         * NOT_CONFIGURED message is now accurate. */
+        return (hu_doctor_check_result_t){
+            HU_DOCTOR_FAIL,
+            hu_doctor_check_provider_reason_message(HU_DOCTOR_PROVIDER_NOT_CONFIGURED), NULL};
+    }
     hu_provider_t prov = (hu_provider_t){0};
-    hu_error_t err = hu_provider_create_from_config(pctx->alloc, pctx->cfg, NULL, 0, &prov);
+    hu_error_t err = hu_provider_create_from_config(pctx->alloc, pctx->cfg, resolved_name,
+                                                    strlen(resolved_name), &prov);
     hu_doctor_provider_reason_t reason = hu_doctor_check_provider_classify(err);
 
     if (err == HU_OK) {
