@@ -1595,6 +1595,7 @@ if(HU_ENABLE_ML)
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c
+        src/ml/init_dpo_bridge.c
         src/ml/lora_nightly.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
@@ -3130,7 +3131,9 @@ set(HU_TEST_SOURCES
     tests/test_init_proposer.c
     tests/test_init_proposer_compose.c
     tests/test_init_outcome.c
+    tests/test_init_dpo_bridge.c
     tests/test_prompt_budget.c
+    tests/test_prompt_budget_snapshot.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_config_banner_runtime_failfast.c
