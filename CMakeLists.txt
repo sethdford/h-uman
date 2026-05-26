@@ -3230,6 +3230,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c
+    tests/test_channel_vtable_action_surface.c
     tests/test_gmail.c
     tests/test_imessage_extended.c
     tests/test_imessage_reply_style.c

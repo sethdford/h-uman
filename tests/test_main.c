@@ -233,6 +233,7 @@ void run_idempotency_tests(void);
 void run_idempotency_hula_integration_tests(void);
 void run_meta_common_tests(void);
 void run_channel_integration_tests(void);
+void run_channel_vtable_action_surface_tests(void);
 void run_config_extended_tests(void);
 void run_config_getters_tests(void);
 void run_config_validation_tests(void);
@@ -1111,6 +1112,7 @@ int main(int argc, char **argv) {
     run_channel_all_tests();
     run_meta_common_tests();
     run_channel_integration_tests();
+    run_channel_vtable_action_surface_tests();
     run_config_extended_tests();
     run_config_getters_tests();
     run_config_validation_tests();
