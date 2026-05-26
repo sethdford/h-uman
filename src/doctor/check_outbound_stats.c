@@ -19,9 +19,26 @@
 /* Reasonable upper bound for the detail JSON:
  *   7 stages * ~120 bytes per stage entry = ~840
  *   + overall wrapper + totals = ~200
- *   = ~1100 bytes total. Round to 2KB to leave headroom for future
+ *   + Sprint 60 follow-up health fields (reject_rate, healthy,
+ *     warnings) = ~150
+ *   = ~1200 bytes total. Round to 2KB to leave headroom for future
  *     fields without re-tuning. */
 #define HU_DOCTOR_OUTBOUND_STATS_JSON_BUF 2048
+
+/* Health-metric thresholds — Sprint 60 follow-up. These choices are
+ * documented in tests/test_doctor_outbound_stats.c via the cases that
+ * pin them; operators can tune by editing here + rerunning the suite.
+ *
+ *   REJECT_RATE_THRESHOLD — fraction of (reject / total). 0.25 = 25%.
+ *     Above this AND past the sample minimum, the check emits a
+ *     "reject_rate_high" warning so dashboards can flag.
+ *
+ *   MIN_SAMPLE — minimum total records before reject_rate is
+ *     considered meaningful. Without this floor, a fresh deploy with
+ *     one adversarial test send would trip the warning permanently
+ *     at 100% reject rate. */
+#define HU_DOCTOR_OUTBOUND_STATS_REJECT_RATE_THRESHOLD 0.25
+#define HU_DOCTOR_OUTBOUND_STATS_MIN_SAMPLE            100u
 
 /* Per-call static buffer. The doctor result.detail_json is a
  * borrowed pointer; the check vtable owns the buffer. Single-threaded
@@ -61,9 +78,54 @@ size_t hu_doctor_check_outbound_stats_render_json(const struct hu_outbound_stats
 
     n = snprintf(buf + off, cap - off,
                  "],\"total_send\":%llu,\"total_rewrite\":%llu,"
-                 "\"total_regenerate\":%llu,\"total_reject\":%llu}",
+                 "\"total_regenerate\":%llu,\"total_reject\":%llu",
                  (unsigned long long)totals[0], (unsigned long long)totals[1],
                  (unsigned long long)totals[2], (unsigned long long)totals[3]);
+    if (n < 0 || (size_t)n >= cap - off)
+        return 0;
+    off += (size_t)n;
+
+    /* Sprint 60 follow-up — derived health metrics for dashboards.
+     *
+     *   reject_rate   = total_reject / (sum of all verdicts).
+     *                   0.00 when there's been no traffic yet.
+     *   healthy       = false ONLY when one of the warnings fires.
+     *   warnings      = array of stable identifier strings; operators
+     *                   alert on entries, dashboards chart trend.
+     *
+     * The OTHER bucket's nonzero count means the pipeline emitted a
+     * stage name the stats subsystem doesn't recognize — likely a new
+     * stage was added without updating the name-table in stats.c. We
+     * surface this as "unknown_stage_counts" so the typo is visible. */
+    uint64_t total_records = totals[0] + totals[1] + totals[2] + totals[3];
+    double reject_rate = (total_records == 0) ? 0.0 : (double)totals[3] / (double)total_records;
+    uint64_t other_bucket_sum = 0;
+    for (size_t v = 0; v < HU_OUTBOUND_STATS_VERDICT_COUNT; v++)
+        other_bucket_sum += snap->counts[HU_OUTBOUND_STATS_STAGE_OTHER][v];
+    bool warn_rate = (total_records >= HU_DOCTOR_OUTBOUND_STATS_MIN_SAMPLE) &&
+                     (reject_rate > HU_DOCTOR_OUTBOUND_STATS_REJECT_RATE_THRESHOLD);
+    bool warn_other = (other_bucket_sum > 0);
+    bool healthy = !warn_rate && !warn_other;
+
+    /* Build the warnings array — comma-separated, only present
+     * conditions get listed. */
+    char warnings_buf[128];
+    size_t wpos = 0;
+    warnings_buf[0] = '\0';
+    if (warn_rate) {
+        int wn = snprintf(warnings_buf + wpos, sizeof(warnings_buf) - wpos, "\"reject_rate_high\"");
+        if (wn > 0 && (size_t)wn < sizeof(warnings_buf) - wpos)
+            wpos += (size_t)wn;
+    }
+    if (warn_other) {
+        int wn = snprintf(warnings_buf + wpos, sizeof(warnings_buf) - wpos,
+                          "%s\"unknown_stage_counts\"", wpos > 0 ? "," : "");
+        if (wn > 0 && (size_t)wn < sizeof(warnings_buf) - wpos)
+            wpos += (size_t)wn;
+    }
+
+    n = snprintf(buf + off, cap - off, ",\"reject_rate\":%.2f,\"healthy\":%s,\"warnings\":[%s]}",
+                 reject_rate, healthy ? "true" : "false", warnings_buf);
     if (n < 0 || (size_t)n >= cap - off)
         return 0;
     off += (size_t)n;
