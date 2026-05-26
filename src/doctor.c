@@ -41,13 +41,24 @@ static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, 
     if (!line)
         return HU_ERR_INVALID_ARGUMENT;
     if (*n >= *cap) {
-        size_t new_cap = *cap * 2;
+        /* Grow such that new_cap > *n AND new_cap > 0 — covers two
+         * pre-existing bugs:
+         *   (a) *cap=0 → new_cap=0 → zero-byte alloc + write past end
+         *   (b) callers that hand us (*items, *count) from a sibling
+         *       check (e.g. config_semantics) which managed its own
+         *       cap privately. After such a return, *n can be much
+         *       bigger than *cap; a single doubling underflows. */
+        size_t new_cap = *cap ? *cap : 4;
+        while (new_cap <= *n)
+            new_cap *= 2;
         hu_diag_item_t *nb =
             (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * new_cap);
         if (!nb)
             return HU_ERR_OUT_OF_MEMORY;
-        memcpy(nb, *buf, sizeof(hu_diag_item_t) * (*n));
-        alloc->free(alloc->ctx, *buf, sizeof(hu_diag_item_t) * (*cap));
+        if (*buf)
+            memcpy(nb, *buf, sizeof(hu_diag_item_t) * (*n));
+        if (*buf && *cap)
+            alloc->free(alloc->ctx, *buf, sizeof(hu_diag_item_t) * (*cap));
         *buf = nb;
         *cap = new_cap;
     }

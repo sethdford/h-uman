@@ -319,6 +319,27 @@ static void test_parse_response_null_args_return_invalid(void) {
     HU_ASSERT_EQ(hu_init_proposer_parse_response("{}", 2, NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
+static void test_parse_response_strips_markdown_code_fence(void) {
+    /* gemini-3.1-flash-lite (and many other small models) often wraps the
+     * JSON in a markdown code fence despite the system prompt asking for
+     * raw output. The parser must strip ```json fences before brace-
+     * matching. Reason: 2026-05-25 service-loop-sprint58 logs showed
+     * `err=42 preview=```json {...` failures every tick. */
+    const char *fenced = "```json\n{\"should_propose\":false,\"reason\":\"too quiet\"}\n```";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(fenced, strlen(fenced), &d), HU_OK);
+    HU_ASSERT_EQ((int)d.should_propose, 0);
+}
+
+static void test_parse_response_strips_bare_triple_backtick_fence(void) {
+    /* Some models use a bare ``` (no language tag). Strip that too. */
+    const char *fenced = "```\n{\"should_propose\":true,\"confidence\":0.9,\"draft\":\"hi\"}\n```";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(fenced, strlen(fenced), &d), HU_OK);
+    HU_ASSERT_EQ((int)d.should_propose, 1);
+    HU_ASSERT(d.confidence > 0.85);
+}
+
 static void test_parse_response_truncates_oversize_draft_to_buffer(void) {
     /* Draft longer than HU_INIT_DRAFT_MAX must be truncated, not overflow. */
     char json[HU_INIT_DRAFT_MAX + 128];
@@ -456,6 +477,8 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_parse_response_missing_fields_default_to_skip);
     HU_RUN_TEST(test_parse_response_malformed_returns_parse_error);
     HU_RUN_TEST(test_parse_response_null_args_return_invalid);
+    HU_RUN_TEST(test_parse_response_strips_markdown_code_fence);
+    HU_RUN_TEST(test_parse_response_strips_bare_triple_backtick_fence);
     HU_RUN_TEST(test_parse_response_truncates_oversize_draft_to_buffer);
     HU_RUN_TEST(test_evaluate_high_confidence_propose_returns_fired);
     HU_RUN_TEST(test_evaluate_low_confidence_propose_returns_low_confidence);

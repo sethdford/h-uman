@@ -23,6 +23,89 @@ static char *resolve_key(hu_allocator_t *alloc, const hu_config_t *cfg, const ch
     return key;
 }
 
+/* 2026-05 audit follow-up — translate parsed cfg->reliability.model_fallbacks
+ * into the reliable provider's struct shape. Used by both the explicit
+ * "reliable" default_provider branch and the auto-wrap path so neither
+ * silently drops the operator's model-substitution config.
+ *
+ * Returns NULL entries + count=0 when no model_fallbacks are configured;
+ * the caller still passes those into hu_reliable_create_ex which is a
+ * no-op for zero entries. Model name strings are BORROWED from cfg
+ * (cfg outlives the provider per the existing primary_provider pattern). */
+static hu_error_t build_model_fallback_chain(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                             hu_reliable_model_fallback_entry_t **out_entries,
+                                             hu_reliable_fallback_model_t ***out_inner_arrays,
+                                             size_t *out_count, size_t *out_alloc_size) {
+    *out_entries = NULL;
+    *out_inner_arrays = NULL;
+    *out_count = 0;
+    *out_alloc_size = 0;
+    size_t n = cfg->reliability.model_fallbacks_len;
+    if (n == 0)
+        return HU_OK;
+
+    size_t alloc_size = n * sizeof(hu_reliable_model_fallback_entry_t);
+    hu_reliable_model_fallback_entry_t *entries =
+        (hu_reliable_model_fallback_entry_t *)alloc->alloc(alloc->ctx, alloc_size);
+    hu_reliable_fallback_model_t **inners = (hu_reliable_fallback_model_t **)alloc->alloc(
+        alloc->ctx, n * sizeof(hu_reliable_fallback_model_t *));
+    if (!entries || !inners) {
+        if (entries)
+            alloc->free(alloc->ctx, entries, alloc_size);
+        if (inners)
+            alloc->free(alloc->ctx, inners, n * sizeof(hu_reliable_fallback_model_t *));
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(entries, 0, alloc_size);
+    memset(inners, 0, n * sizeof(hu_reliable_fallback_model_t *));
+
+    size_t valid = 0;
+    for (size_t i = 0; i < n; i++) {
+        const hu_config_model_fallback_t *src = &cfg->reliability.model_fallbacks[i];
+        if (!src->model || src->fallback_models_len == 0)
+            continue;
+        hu_reliable_fallback_model_t *inner = (hu_reliable_fallback_model_t *)alloc->alloc(
+            alloc->ctx, src->fallback_models_len * sizeof(hu_reliable_fallback_model_t));
+        if (!inner)
+            continue; /* skip this entry rather than failing the whole chain */
+        for (size_t j = 0; j < src->fallback_models_len; j++) {
+            inner[j].model = src->fallback_models[j];
+            inner[j].model_len = src->fallback_models[j] ? strlen(src->fallback_models[j]) : 0;
+        }
+        inners[valid] = inner;
+        entries[valid].model = src->model;
+        entries[valid].model_len = strlen(src->model);
+        entries[valid].fallbacks = inner;
+        entries[valid].fallbacks_count = src->fallback_models_len;
+        valid++;
+    }
+    *out_entries = entries;
+    *out_inner_arrays = inners;
+    *out_count = valid;
+    *out_alloc_size = alloc_size;
+    return HU_OK;
+}
+
+/* Sibling of build_model_fallback_chain — frees BOTH the inner per-entry
+ * arrays AND the outer arrays. Safe to call with all-NULL inputs. */
+static void free_model_fallback_chain(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                      hu_reliable_model_fallback_entry_t *entries,
+                                      hu_reliable_fallback_model_t **inners, size_t alloc_size) {
+    if (inners) {
+        for (size_t i = 0; i < cfg->reliability.model_fallbacks_len; i++) {
+            if (inners[i]) {
+                const hu_config_model_fallback_t *src = &cfg->reliability.model_fallbacks[i];
+                alloc->free(alloc->ctx, inners[i],
+                            src->fallback_models_len * sizeof(hu_reliable_fallback_model_t));
+            }
+        }
+        alloc->free(alloc->ctx, inners,
+                    cfg->reliability.model_fallbacks_len * sizeof(hu_reliable_fallback_model_t *));
+    }
+    if (entries && alloc_size > 0)
+        alloc->free(alloc->ctx, entries, alloc_size);
+}
+
 static hu_error_t create_provider_from_name(hu_allocator_t *alloc, const hu_config_t *cfg,
                                             const char *prov_name, hu_provider_t *out) {
     if (!prov_name || !prov_name[0])
@@ -158,8 +241,8 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
                     continue;
                 hu_provider_t fb = {0};
                 if (create_provider_from_name(alloc, cfg, fb_name, &fb) != HU_OK) {
-                    hu_log_warn("provider", NULL,
-                                "reliable: skipping unconfigured fallback '%s'", fb_name);
+                    hu_log_warn("provider", NULL, "reliable: skipping unconfigured fallback '%s'",
+                                fb_name);
                     continue;
                 }
                 extras[extras_count].name = fb_name;
@@ -171,11 +254,34 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
 
         uint32_t max_retries =
             cfg->reliability.provider_retries > 0 ? cfg->reliability.provider_retries : 3;
-        uint64_t backoff_ms = cfg->reliability.provider_backoff_ms > 0
-                                  ? cfg->reliability.provider_backoff_ms
-                                  : 1000;
+        uint64_t backoff_ms =
+            cfg->reliability.provider_backoff_ms > 0 ? cfg->reliability.provider_backoff_ms : 1000;
+
+        /* 2026-05 audit follow-up — thread cfg->reliability.model_fallbacks
+         * through so the cloud-fallback path sees the right model name. */
+        hu_reliable_model_fallback_entry_t *mf_entries = NULL;
+        hu_reliable_fallback_model_t **mf_inners = NULL;
+        size_t mf_count = 0;
+        size_t mf_alloc = 0;
+        hu_error_t mferr =
+            build_model_fallback_chain(alloc, cfg, &mf_entries, &mf_inners, &mf_count, &mf_alloc);
+        if (mferr != HU_OK) {
+            if (primary.vtable && primary.vtable->deinit)
+                primary.vtable->deinit(primary.ctx, alloc);
+            for (size_t i = 0; i < extras_count; i++) {
+                if (extras[i].provider.vtable && extras[i].provider.vtable->deinit)
+                    extras[i].provider.vtable->deinit(extras[i].provider.ctx, alloc);
+            }
+            if (extras)
+                alloc->free(alloc->ctx, extras, extras_alloc_size);
+            return mferr;
+        }
+        if (mf_count > 0) {
+            hu_log_info("provider", NULL, "reliable: wired %zu model_fallback chain(s)", mf_count);
+        }
+
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
-                                    NULL, 0, out);
+                                    mf_entries, mf_count, out);
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);
@@ -185,10 +291,12 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
             }
             if (extras)
                 alloc->free(alloc->ctx, extras, extras_alloc_size);
+            free_model_fallback_chain(alloc, cfg, mf_entries, mf_inners, mf_alloc);
             return err;
         }
         if (extras)
             alloc->free(alloc->ctx, extras, extras_alloc_size);
+        free_model_fallback_chain(alloc, cfg, mf_entries, mf_inners, mf_alloc);
         return HU_OK;
     }
 
@@ -341,8 +449,32 @@ hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *
                 "default_provider '%s' auto-wrapped with %zu fallback(s) for self-healing",
                 prov_name, extras_count);
 
-    err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count, NULL, 0,
-                                out);
+    /* 2026-05 audit follow-up — thread parsed model_fallbacks (already
+     * translated by the shared helper) into hu_reliable_create_ex so the
+     * auto-wrap path doesn't silently drop the operator's chain. */
+    hu_reliable_model_fallback_entry_t *mf_entries = NULL;
+    hu_reliable_fallback_model_t **mf_inners = NULL;
+    size_t mf_count = 0;
+    size_t mf_alloc = 0;
+    hu_error_t mferr =
+        build_model_fallback_chain(alloc, cfg, &mf_entries, &mf_inners, &mf_count, &mf_alloc);
+    if (mferr != HU_OK) {
+        if (base.vtable && base.vtable->deinit)
+            base.vtable->deinit(base.ctx, alloc);
+        for (size_t i = 0; i < extras_count; i++) {
+            if (extras[i].provider.vtable && extras[i].provider.vtable->deinit)
+                extras[i].provider.vtable->deinit(extras[i].provider.ctx, alloc);
+        }
+        alloc->free(alloc->ctx, extras, extras_alloc_size);
+        return mferr;
+    }
+    if (mf_count > 0) {
+        hu_log_info("provider", NULL, "default_provider '%s' wired %zu model_fallback chain(s)",
+                    prov_name, mf_count);
+    }
+
+    err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count,
+                                mf_entries, mf_count, out);
     if (err != HU_OK) {
         if (base.vtable && base.vtable->deinit)
             base.vtable->deinit(base.ctx, alloc);
@@ -352,5 +484,6 @@ hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *
         }
     }
     alloc->free(alloc->ctx, extras, extras_alloc_size);
+    free_model_fallback_chain(alloc, cfg, mf_entries, mf_inners, mf_alloc);
     return err;
 }

@@ -3,6 +3,7 @@
 #include "human/doctor/check.h"
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
+#include "human/doctor/check_reaction_collection_wired.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -115,7 +116,142 @@ const char *hu_doctor_registry_check_name(const hu_doctor_registry_t *r, size_t 
 /* Adapter functions: convert existing hu_doctor_check_* functions to
  * vtable entries. Each adapter wraps a legacy check function that returns
  * hu_error_t and appends to diag_item arrays. We adapt it to the
- * hu_doctor_check_result_t return value. */
+ * hu_doctor_check_result_t return value.
+ *
+ * 2026-05 fix: the legacy adapters returned `(result_t){verdict, "", NULL}` —
+ * discarding the per-item diagnostic messages the wrapped check had
+ * populated. That made `human doctor` show "error" with NO reason text
+ * for every check that failed via this path (operator had to grep logs
+ * to figure out what went wrong). The helper below derives reason +
+ * detail_json from the items the wrapped check added during THIS call. */
+
+/* Map severity to stable lowercase wire string. */
+static const char *severity_to_string(hu_diag_severity_t s) {
+    switch (s) {
+    case HU_DIAG_OK:
+        return "ok";
+    case HU_DIAG_WARN:
+        return "warn";
+    case HU_DIAG_ERR:
+        return "err";
+    default:
+        return "unknown";
+    }
+}
+
+/* Append `s` to `buf` at offset `*off`, JSON-escaping `"` `\` and control
+ * bytes. Truncates rather than overflows. */
+static void append_json_escaped(char *buf, size_t cap, size_t *off, const char *s) {
+    if (!s)
+        s = "";
+    for (const char *p = s; *p && *off + 2 < cap; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') {
+            buf[(*off)++] = '\\';
+            buf[(*off)++] = (char)c;
+        } else if (c == '\n') {
+            if (*off + 2 < cap) {
+                buf[(*off)++] = '\\';
+                buf[(*off)++] = 'n';
+            }
+        } else if (c < 0x20) {
+            /* Drop other control bytes. */
+            continue;
+        } else {
+            buf[(*off)++] = (char)c;
+        }
+    }
+    if (*off < cap)
+        buf[*off] = '\0';
+}
+
+/* Derive (reason, detail_json) from the items the wrapped check appended
+ * during ITS call only — `items` should point at uctx->items + start_off
+ * and `count` = uctx->count - start_off. The caller passes its own static
+ * buffers so each adapter's result stays valid across the run_all loop. */
+static hu_doctor_check_result_t derive_check_result(hu_doctor_verdict_t verdict,
+                                                    const hu_diag_item_t *items, size_t count,
+                                                    char *reason_buf, size_t reason_cap,
+                                                    char *detail_buf, size_t detail_cap) {
+    if (!items || count == 0 || !reason_buf || reason_cap == 0)
+        return (hu_doctor_check_result_t){verdict, "", NULL};
+
+    /* Reason: first ERR item's message, else first WARN, else first item. */
+    const hu_diag_item_t *primary = NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (items[i].severity == HU_DIAG_ERR) {
+            primary = &items[i];
+            break;
+        }
+    }
+    if (!primary) {
+        for (size_t i = 0; i < count; i++) {
+            if (items[i].severity == HU_DIAG_WARN) {
+                primary = &items[i];
+                break;
+            }
+        }
+    }
+    if (!primary)
+        primary = &items[0];
+
+    snprintf(reason_buf, reason_cap, "%s", primary->message ? primary->message : "");
+
+    /* detail_json: array of {severity, category, message} for every item
+     * so the operator can see the FULL diagnostic, not just the first. */
+    if (!detail_buf || detail_cap < 4)
+        return (hu_doctor_check_result_t){verdict, reason_buf, NULL};
+
+    /* safe_off = offset right after the last item that fit COMPLETELY.
+     * If a subsequent item runs out of room mid-construction, we rewind
+     * to safe_off and emit "]" — yielding valid JSON with a truncated
+     * array rather than malformed text mid-string. */
+    size_t off = 0;
+    detail_buf[off++] = '[';
+    size_t safe_off = off;
+    for (size_t i = 0; i < count; i++) {
+        size_t item_start = off;
+        if (i > 0) {
+            if (off + 1 >= detail_cap)
+                break;
+            detail_buf[off++] = ',';
+        }
+        const char *sev = severity_to_string(items[i].severity);
+        int n = snprintf(detail_buf + off, detail_cap - off, "{\"severity\":\"%s\",\"category\":\"",
+                         sev);
+        if (n < 0 || (size_t)n >= detail_cap - off) {
+            off = item_start;
+            break;
+        }
+        off += (size_t)n;
+        append_json_escaped(detail_buf, detail_cap, &off, items[i].category);
+        int m = snprintf(detail_buf + off, detail_cap - off, "\",\"message\":\"");
+        if (m < 0 || (size_t)m >= detail_cap - off) {
+            off = item_start;
+            break;
+        }
+        off += (size_t)m;
+        append_json_escaped(detail_buf, detail_cap, &off, items[i].message);
+        /* Need room for closing `"}`. */
+        if (off + 2 >= detail_cap) {
+            off = item_start;
+            break;
+        }
+        detail_buf[off++] = '"';
+        detail_buf[off++] = '}';
+        safe_off = off;
+    }
+    /* Close the array at the last safe boundary so the output is always
+     * valid JSON, even if it truncates the trailing items. */
+    if (safe_off + 1 < detail_cap) {
+        detail_buf[safe_off++] = ']';
+        detail_buf[safe_off] = '\0';
+    } else if (safe_off < detail_cap) {
+        detail_buf[safe_off] = '\0';
+    }
+
+    return (hu_doctor_check_result_t){verdict, reason_buf, detail_buf};
+}
 
 /* Sprint 55 Phase 2 extension: cfg pointer added at the END so
  * legacy callers passing a 4-field struct still read the first 4
@@ -130,103 +266,121 @@ typedef struct {
     const void *cfg; /* Sprint 55 Phase 2 — borrowed `const hu_config *` */
 } hu_doctor_adapter_ctx_t;
 
+/* Each adapter snapshots uctx->count BEFORE the wrapped check appends so
+ * derive_check_result sees ONLY the items this check produced. Static
+ * buffers are function-local: each adapter owns its own scratch space,
+ * so result.reason / result.detail_json stay live across the whole
+ * registry_run_all loop. */
+#define ADAPTER_RETURN(verdict_expr)                                                              \
+    do {                                                                                          \
+        static char s_reason[256];                                                                \
+        static char s_detail[2048];                                                               \
+        return derive_check_result((verdict_expr), uctx->items + start_off,                       \
+                                   uctx->count - start_off, s_reason, sizeof(s_reason), s_detail, \
+                                   sizeof(s_detail));                                             \
+    } while (0)
+
 /* Wrapper: install check */
 static hu_doctor_check_result_t run_install_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err =
         hu_doctor_check_install(uctx->alloc, NULL, &uctx->items, &uctx->count, &uctx->cap);
-    /* Map error to verdict */
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: config_semantics check */
 static hu_doctor_check_result_t run_config_semantics_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
-    hu_error_t err =
-        hu_doctor_check_config_semantics(uctx->alloc, NULL, &uctx->items, &uctx->count);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    size_t start_off = uctx->count;
+    /* config_semantics REQUIRES cfg — passing NULL makes it return
+     * INVALID_ARGUMENT silently without populating any item. Plumb the
+     * cfg from uctx (set in main.c's adapter_ctx). */
+    const hu_config_t *cfg = (const hu_config_t *)uctx->cfg;
+    hu_error_t err = hu_doctor_check_config_semantics(uctx->alloc, cfg, &uctx->items, &uctx->count);
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: security check */
 static hu_doctor_check_result_t run_security_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err = hu_doctor_check_security(uctx->alloc, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: memory_health check */
 static hu_doctor_check_result_t run_memory_health_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
+    /* memory_health REQUIRES cfg to know which backend to probe. */
+    const hu_config_t *cfg = (const hu_config_t *)uctx->cfg;
     hu_error_t err =
-        hu_doctor_check_memory_health(uctx->alloc, NULL, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+        hu_doctor_check_memory_health(uctx->alloc, cfg, &uctx->items, &uctx->count, &uctx->cap);
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: skills check */
 static hu_doctor_check_result_t run_skills_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err = hu_doctor_check_skills(uctx->alloc, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: imessage check */
 static hu_doctor_check_result_t run_imessage_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     /* Use a stale_after_secs of 600 (10 minutes) by default */
     hu_error_t err =
         hu_doctor_check_imessage(uctx->alloc, 0, 600, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: verifier check */
 static hu_doctor_check_result_t run_verifier_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err =
         hu_doctor_check_verifier(uctx->alloc, 0, 600, 0.3, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: scheduler check */
 static hu_doctor_check_result_t run_scheduler_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err =
         hu_doctor_check_scheduler(uctx->alloc, 0, 600, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: response_pipeline check */
 static hu_doctor_check_result_t run_response_pipeline_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err =
         hu_doctor_check_response_pipeline(uctx->alloc, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: inference check */
 static hu_doctor_check_result_t run_inference_check(hu_doctor_check_t *self, void *ctx) {
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    size_t start_off = uctx->count;
     hu_error_t err = hu_doctor_check_inference(uctx->alloc, &uctx->items, &uctx->count, &uctx->cap);
-    hu_doctor_verdict_t verdict = (err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL;
-    return (hu_doctor_check_result_t){verdict, "", NULL};
+    ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 
 /* Wrapper: chatdb_readable check (external vtable) */
@@ -264,6 +418,18 @@ static hu_doctor_check_result_t run_prompt_budget_check(hu_doctor_check_t *self,
     return hu_doctor_check_prompt_budget.run(self, &pbctx);
 }
 
+/* Wrapper: reaction_collection_wired check — 2026-05 audit follow-up.
+ * Catches the silent failure where cfg.enabled=true but the binary was
+ * built with HU_ENABLE_RL_FULL=OFF (recorder compiled out). */
+static hu_doctor_check_result_t run_reaction_collection_wired_check(hu_doctor_check_t *self,
+                                                                    void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_reaction_collection_wired_ctx_t rwctx = {
+        .cfg = uctx ? (const struct hu_config *)uctx->cfg : NULL,
+    };
+    return hu_doctor_check_reaction_collection_wired.run(self, &rwctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -282,6 +448,10 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          run_provider_smoke_check, NULL, NULL},
         {"prompt_budget", "Reports prompt-budget config state (observer + trim gate)",
          run_prompt_budget_check, NULL, NULL},
+        {"reaction_collection_wired",
+         "Catches reaction_collection.enabled=true but HU_ENABLE_RL_FULL=OFF "
+         "(silent-failure guard)",
+         run_reaction_collection_wired_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},

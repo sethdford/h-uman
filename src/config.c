@@ -12,8 +12,7 @@ void hu_config_deinit(hu_config_t *cfg) {
     hu_allocator_t *a = &cfg->allocator;
     for (size_t i = 0; i < HU_ENSEMBLE_CONFIG_PROVIDER_NAMES_MAX; i++) {
         if (cfg->ensemble.providers[i]) {
-            a->free(a->ctx, cfg->ensemble.providers[i],
-                    strlen(cfg->ensemble.providers[i]) + 1);
+            a->free(a->ctx, cfg->ensemble.providers[i], strlen(cfg->ensemble.providers[i]) + 1);
             cfg->ensemble.providers[i] = NULL;
         }
     }
@@ -22,6 +21,28 @@ void hu_config_deinit(hu_config_t *cfg) {
         a->free(a->ctx, cfg->ensemble.strategy, strlen(cfg->ensemble.strategy) + 1);
         cfg->ensemble.strategy = NULL;
     }
+    /* 2026-05 audit follow-up — free the parsed model_fallbacks chain.
+     * Allocated via the system allocator in config_parse.c (matching the
+     * fallback_providers pattern), so explicit free is required even
+     * though the arena gets bulk-destroyed below. */
+    if (cfg->reliability.model_fallbacks) {
+        for (size_t i = 0; i < cfg->reliability.model_fallbacks_len; i++) {
+            hu_config_model_fallback_t *e = &cfg->reliability.model_fallbacks[i];
+            if (e->model)
+                a->free(a->ctx, e->model, strlen(e->model) + 1);
+            if (e->fallback_models) {
+                for (size_t j = 0; j < e->fallback_models_len; j++)
+                    if (e->fallback_models[j])
+                        a->free(a->ctx, e->fallback_models[j], strlen(e->fallback_models[j]) + 1);
+                a->free(a->ctx, e->fallback_models, e->fallback_models_len * sizeof(char *));
+            }
+        }
+        a->free(a->ctx, cfg->reliability.model_fallbacks,
+                cfg->reliability.model_fallbacks_len * sizeof(hu_config_model_fallback_t));
+        cfg->reliability.model_fallbacks = NULL;
+        cfg->reliability.model_fallbacks_len = 0;
+    }
+
     if (cfg->arena) {
         /* Arena holds most config strings (e.g. cfg->voice.* including mode, realtime_model,
          * realtime_voice); bulk-freed here. */
