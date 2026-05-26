@@ -22,6 +22,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
@@ -10486,9 +10487,48 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         burst_msgs[bi][bm_len - 1] = '\0';
                                         bm_len--;
                                     }
-                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                              send_target_len, burst_msgs[bi],
-                                                              bm_len, NULL, 0);
+                                    /* Sprint 60 — route each burst fragment through the
+                                     * outbound pipeline. Before this wiring, burst sub-
+                                     * sends bypassed all safety stages (crosstalk,
+                                     * persona, shape, moderation). If the LLM
+                                     * hallucinated a cross-contact bleed in any single
+                                     * fragment, the daemon shipped it. The helper
+                                     * lives at src/agent/burst_egress.c with the
+                                     * heap-copy + pipeline-run + verdict-handling
+                                     * encapsulated. On REJECT/REGENERATE we BREAK out
+                                     * of the loop so the user doesn't see a partial
+                                     * garbled burst series. */
+                                    {
+                                        const char *burst_channel_name =
+                                            (ch->channel->vtable->name)
+                                                ? ch->channel->vtable->name(ch->channel->ctx)
+                                                : NULL;
+                                        char *validated_content = NULL;
+                                        size_t validated_len = 0;
+                                        hu_outbound_verdict_kind_t burst_kind = HU_OUTBOUND_REJECT;
+                                        hu_error_t burst_err = hu_burst_egress_validate_fragment(
+                                            alloc, burst_channel_name, send_target, send_target_len,
+                                            burst_msgs[bi], bm_len, &validated_content,
+                                            &validated_len, &burst_kind);
+                                        if (burst_err == HU_OK && burst_kind == HU_OUTBOUND_SEND &&
+                                            validated_content) {
+                                            ch->channel->vtable->send(
+                                                ch->channel->ctx, send_target, send_target_len,
+                                                validated_content, validated_len, NULL, 0);
+                                            alloc->free(alloc->ctx, validated_content,
+                                                        validated_len + 1);
+                                        } else {
+                                            hu_log_info(
+                                                "human", agent ? agent->observer : NULL,
+                                                "burst dropped at fragment %d "
+                                                "(kind=%d, err=%d) — remaining fragments skipped",
+                                                bi, (int)burst_kind, (int)burst_err);
+                                            if (validated_content)
+                                                alloc->free(alloc->ctx, validated_content,
+                                                            validated_len + 1);
+                                            break;
+                                        }
+                                    }
                                     if (bi < n - 1) {
                                         unsigned int delay_ms =
                                             1000u + (burst_seed + (uint32_t)bi) % 2000u;

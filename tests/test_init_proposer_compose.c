@@ -298,6 +298,56 @@ static void config_use_unified_dispatch_independent_of_other_throttle_fields(voi
     HU_ASSERT_TRUE(cfg.proactive_throttle.use_unified_dispatch);
 }
 
+/* ── M3 Dispatch T4 — daemon-side compose-inputs wire smoke ─────────── */
+
+/* T4 wires daemon.c's proactive-send block to construct a
+ * hu_proactive_compose_inputs_t and call hu_init_proposer_tick_with_provider_ex
+ * when cfg->proactive_throttle.use_unified_dispatch is true. The full
+ * daemon integration test (mock provider + mock channel + assert send
+ * was called with the unified draft) is gated on a daemon test
+ * harness that doesn't exist yet; for now we pin the API contract the
+ * daemon relies on: the _ex function accepts the same inputs shape
+ * daemon.c constructs, and returns SKIP under HU_IS_TEST (no real
+ * provider call). */
+static void t4_tick_with_provider_ex_accepts_daemon_shape_inputs(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.contact_id = "alice@example.com";
+    inputs.contact_id_len = strlen(inputs.contact_id);
+    inputs.channel_name = "imessage";
+    inputs.channel_name_len = strlen(inputs.channel_name);
+    /* daemon.c populates content_is_safe = hu_daemon_callback_content_is_safe;
+     * test uses NULL since the predicate isn't visible here without
+     * the daemon-side include. The _ex path must accept NULL cleanly. */
+    inputs.content_is_safe = NULL;
+
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED; /* sentinel */
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+
+    /* Match daemon.c's call shape with a stub cfg (matches what
+     * &config->initiative would look like with defaults). NULL provider
+     * + NULL alloc mean no LLM call — _ex returns SKIP after governor
+     * gates pass. Pins that the daemon's argument shape doesn't crash
+     * the unified path. */
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = true;
+    cfg.tick_interval_sec = 1800;
+    cfg.confidence_threshold = 0.85;
+    cfg.per_contact_min_seconds = 600;
+
+    hu_error_t err = hu_init_proposer_tick_with_provider_ex(
+        &cfg, /*ar_cfg=*/NULL, /*tz_offset_seconds=*/0, /*budget=*/NULL,
+        /*agent=*/NULL, /*provider=*/NULL, /*alloc=*/NULL, &inputs, /*last_inbound_unix=*/0,
+        /*now_unix=*/1779840000, &last_tick, &tick_id, &result, &decision);
+    HU_ASSERT_EQ(err, HU_OK);
+    /* No provider → SKIP after governor gates pass. */
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_SKIP);
+}
+
 void run_init_proposer_compose_tests(void);
 void run_init_proposer_compose_tests(void) {
     HU_TEST_SUITE("init_proposer_compose");
@@ -318,4 +368,7 @@ void run_init_proposer_compose_tests(void) {
     /* T3 — use_unified_dispatch config flag. */
     HU_RUN_TEST(config_use_unified_dispatch_field_round_trips);
     HU_RUN_TEST(config_use_unified_dispatch_independent_of_other_throttle_fields);
+    /* T4 — daemon-side wire smoke (compose-inputs + tick_with_provider_ex
+     * accept the rich-context shape daemon now passes). */
+    HU_RUN_TEST(t4_tick_with_provider_ex_accepts_daemon_shape_inputs);
 }
