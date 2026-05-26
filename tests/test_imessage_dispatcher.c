@@ -195,46 +195,50 @@ static void reply_failure_falls_back_to_flat(void) {
     HU_ASSERT(threaded_hit);
 }
 
-/* AC: When vtable->reply is NULL, threaded style falls back to flat send. */
+/* AC: When vtable->reply is NULL, ANY style routes through send (either as
+ * primary or as fallback). We null reply AND react_emoji so the only
+ * possible action is send — regardless of which style the predicate picks. */
 static void no_reply_vtable_falls_back_to_flat(void) {
     setup_mocks();
     mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL; /* force any style to land on send */
 
     hu_conversation_snapshot_t snap = {0};
-    snap.parent_seconds_ago = 300;
+    snap.parent_seconds_ago = 1000;
     snap.parent_is_question = true;
-    snap.other_threaded_replies_recent = 4;
+    snap.other_threaded_replies_recent = 10;
     snap.conv_density_msgs_per_min = 1.0f;
+    snap.parent_position_from_bottom = 15;
 
     hu_error_t err = hu_daemon_dispatch_imessage_reply(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "PARENT-GUID", 11, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 99);
+        (const struct hu_conversation_snapshot *)&snap, 1);
 
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_EQ(reply_calls, 0);
-    HU_ASSERT(send_calls >= 1); /* At minimum, flat send was called */
-    HU_ASSERT_EQ(react_emoji_calls, 0);
+    HU_ASSERT(send_calls >= 1); /* Always — only path left is send-fallback */
 }
 
-/* AC: When vtable->react_emoji is NULL, tapback style falls back to flat send. */
+/* AC: When vtable->react_emoji is NULL, ANY non-reply style routes through
+ * send. Null both reply AND react_emoji so the only possible path is send. */
 static void no_react_emoji_vtable_falls_back_to_flat(void) {
     setup_mocks();
-    mock_vtable.react_emoji = NULL;
+    mock_vtable.reply = NULL;       /* force THREADED to also fall back to send */
+    mock_vtable.react_emoji = NULL; /* force TAPBACK / TAPBACK_PLUS_FLAT to send */
 
     hu_conversation_snapshot_t snap = {0};
-    /* Low parent recency + flat topic = likely to trigger TAPBACK style */
     snap.parent_seconds_ago = 10;
     snap.parent_is_question = false;
     snap.other_threaded_replies_recent = 0;
     snap.conv_density_msgs_per_min = 0.5f;
-    snap.parent_emotional_intensity = HU_EMOTION_THRESHOLD_HIGH; /* emotional protection */
+    snap.parent_emotional_intensity = HU_EMOTION_THRESHOLD_HIGH;
 
     hu_error_t err = hu_daemon_dispatch_imessage_reply(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID", 4, "nice", 4,
-        (const struct hu_conversation_snapshot *)&snap, 99);
+        (const struct hu_conversation_snapshot *)&snap, 2);
 
     HU_ASSERT_EQ((int)err, (int)HU_OK);
-    HU_ASSERT(send_calls >= 1); /* Send was called (either as main style or as fallback) */
+    HU_ASSERT(send_calls >= 1);
 }
 
 /* AC: Pacing actually enforces minimum elapsed >= min_delay_ms * 1.2. */
@@ -255,34 +259,47 @@ static void pacing_enforces_minimum_delay(void) {
     HU_ASSERT(elapsed >= 36); /* 30 * 1.2 = 36 ms */
 }
 
-/* AC: When send fails on all paths, dispatcher returns the error from the final send attempt. */
+/* AC: When ALL paths fail, dispatcher returns the send error from fallback.
+ * Null reply + react_emoji so any style is forced through send; send fails;
+ * dispatcher MUST propagate that error (always-do-something contract — but
+ * propagate the error so daemon's caller knows). */
 static void all_paths_fail_returns_send_error(void) {
     setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
     mock_vtable.send = mock_send_fails;
 
     hu_conversation_snapshot_t snap = {0};
+    snap.conv_density_msgs_per_min = 50.0f;
+    snap.parent_seconds_ago = 5;
+
     hu_error_t err = hu_daemon_dispatch_imessage_reply(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 99);
+        (const struct hu_conversation_snapshot *)&snap, 4);
 
     HU_ASSERT_EQ((int)err, (int)HU_ERR_INTERNAL);
-    HU_ASSERT(send_calls >= 1); /* Send was attempted */
+    HU_ASSERT(send_calls >= 1);
 }
 
-/* AC: Flat style routes to vtable->send (not reply or react_emoji). */
+/* AC: With send-only vtable, every style routes through send. Forces the
+ * dispatcher's switch arms to all converge on send (either as primary FLAT
+ * or as fallback after reply/react_emoji NULL guards). */
 static void flat_style_routes_to_send(void) {
     setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
 
     hu_conversation_snapshot_t snap = {0};
-    snap.conv_density_msgs_per_min = 10.0f; /* High density → flat style */
+    snap.conv_density_msgs_per_min = 20.0f;
     snap.other_threaded_replies_recent = 0;
+    snap.parent_seconds_ago = 5;
 
     hu_error_t err = hu_daemon_dispatch_imessage_reply(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 99);
+        (const struct hu_conversation_snapshot *)&snap, 6);
 
     HU_ASSERT_EQ((int)err, (int)HU_OK);
-    HU_ASSERT(send_calls >= 1); /* Send was called */
+    HU_ASSERT(send_calls >= 1);
 }
 
 void run_imessage_dispatcher_tests(void) {

@@ -1,7 +1,10 @@
+#include "test_framework.h"
+
+#ifdef HU_HAS_DISCORD
+
 #include "human/channel.h"
 #include "human/channels/discord.h"
 #include "human/core/allocator.h"
-#include "test_framework.h"
 
 /* Test that the new vtable slots (reply/react_emoji/send_sticker) are wired to NULL
  * in non-iMessage channels. This is primarily a compile-gate — if the vtable extension
@@ -29,3 +32,9 @@ void run_channel_vtable_action_surface_tests(void) {
     HU_TEST_SUITE("channel_vtable_action_surface");
     HU_RUN_TEST(vtable_has_reply_react_emoji_send_sticker_slots);
 }
+
+#else /* !HU_HAS_DISCORD — stub runner. */
+void run_channel_vtable_action_surface_tests(void) {
+    (void)0;
+}
+#endif

@@ -1,5 +1,8 @@
-#include "human/channels/imessage_action_facts.h"
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_IMESSAGE
+
+#include "human/channels/imessage_action_facts.h"
 #include <string.h>
 
 /* AC: snapshot fields map 1:1 to facts struct fields. */
@@ -66,3 +69,9 @@ void run_imessage_action_facts_tests(void) {
     HU_RUN_TEST(null_persona_uses_defaults);
     HU_RUN_TEST(null_facts_out_no_crash);
 }
+
+#else /* !HU_ENABLE_IMESSAGE — stub runner. */
+void run_imessage_action_facts_tests(void) {
+    (void)0;
+}
+#endif

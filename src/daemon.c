@@ -1013,8 +1013,9 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     hu_error_t err = HU_OK;
     const char *tier_used = "flat_fallback";
     switch (style) {
-    case HU_REPLY_STYLE_THREADED:
-        if (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0) {
+    case HU_REPLY_STYLE_THREADED: {
+        bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
+        if (threaded_attempted) {
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
                                     body, body_len);
             if (err == HU_OK) {
@@ -1023,8 +1024,11 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                             "imessage_dispatch: threaded reply sent");
             }
         }
-        /* If reply unavailable or fails, fall through to flat send. */
-        if (err != HU_OK) {
+        /* Fall through to flat send if (a) reply slot was NULL or
+         * parent_msg_guid wasn't provided (threaded_attempted==false), or
+         * (b) the reply attempt returned non-OK. Always-do-something
+         * contract — never silently no-op. */
+        if (!threaded_attempted || err != HU_OK) {
             if (ch->vtable->send) {
                 err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
                 if (err == HU_OK) {
@@ -1035,6 +1039,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
             }
         }
         break;
+    }
 
     case HU_REPLY_STYLE_FLAT:
         if (ch->vtable->send) {
