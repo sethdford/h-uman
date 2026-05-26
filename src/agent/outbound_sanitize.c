@@ -1,98 +1,39 @@
-/* Outbound-message sanitization — see header for context.
+/* Outbound-message sanitization — compatibility shim over the
+ * Sprint 59 outbound validation pipeline.
  *
- * Sized at <100 LoC because the SEMANTICS need to be obvious at a
- * glance. Operators reading this file should be able to immediately
- * see: (a) the U+FFFC strip, (b) the directive-echo rejection list,
- * (c) the safety-marker rejection. */
+ * The original (2026-05-26) implementation hardcoded directive-echo
+ * blocklists and U+FFFC stripping inline. Sprint 59 replaces that
+ * with a composable 6-stage pipeline (strip → shape → echo →
+ * crosstalk → persona → moderation). This file is now a thin
+ * adapter: callers using the old `hu_outbound_sanitize` API get
+ * the upgraded pipeline behavior without any call-site changes.
+ *
+ * Pipeline → API mapping:
+ *   SEND        → return true, content/len unchanged
+ *   REWRITE     → return true, content/len updated in-place
+ *   REGENERATE  → return false, reason set
+ *   REJECT      → return false, reason set
+ *
+ * The caller buffer is reused for REWRITE: if the rewritten length
+ * is <= original length, we memcpy back. (strip can only shrink, so
+ * this always holds for the current stage set.)
+ *
+ * Path: HU_OUTBOUND_PATH_PROACTIVE — the most defensive config; runs
+ * all six stages. Callers that need a lighter path will be migrated
+ * to the pipeline directly in Phase D2.
+ *
+ * Crosstalk gracefully degrades when no lookup callback is wired
+ * (logs once per process). The wrapper does not provide memory or
+ * persona context; pure-egress checks (strip/shape/echo/persona/
+ * moderation) still run.
+ */
 
 #include "human/agent/outbound_sanitize.h"
+
 #include <string.h>
 
-/* Known directive-shaped strings that the LLM has been observed to
- * echo back verbatim when given instruction-shaped prompts. Each
- * entry is a substring match — if the outbound body equals OR begins
- * with one of these (after trim), reject. Grow the list when new
- * echoes are observed.
- *
- * 2026-05-26 incident evidence:
- *   - "reference something specific you know about them or ask about
- *      something from a previous conversation"
- *   - "shared history"
- *   - "under 10 words"
- *   - "principle"
- *   - "[SAFETY] This response touches on violence. ..."  */
-static const char *const directive_echos[] = {
-    "[SAFETY]",
-    "reference something specific you know",
-    "ask about something from a previous conversation",
-    "shared history",
-    "under 10 words",
-    "match their energy",
-    "casual greeting back",
-    "short empathetic reaction",
-    "De-escalate: acknowledge feelings",
-    NULL,
-};
-
-/* Single-word instruction-noun list. If the outbound body (after
- * trim) is EXACTLY one of these single words, reject — the LLM
- * dropped the full directive and only echoed the noun. */
-static const char *const single_noun_echos[] = {
-    "principle", "principles", "history",  "specifically", "context",   "tone",
-    "pacing",    "directive",  "boundary", "instruction",  "guideline", NULL,
-};
-
-/* Strip ALL occurrences of U+FFFC (UTF-8 bytes EF BF BC) from the
- * content in-place. Updates *content_len_inout. Returns the number
- * of stripped occurrences (informational). */
-static size_t strip_object_replacement_char(char *content, size_t *content_len_inout) {
-    if (!content || !content_len_inout || *content_len_inout < 3)
-        return 0;
-    size_t in = 0, out = 0, stripped = 0;
-    size_t n = *content_len_inout;
-    while (in < n) {
-        if (in + 3 <= n && (unsigned char)content[in] == 0xEF &&
-            (unsigned char)content[in + 1] == 0xBF && (unsigned char)content[in + 2] == 0xBC) {
-            in += 3;
-            stripped++;
-            continue;
-        }
-        content[out++] = content[in++];
-    }
-    content[out] = '\0';
-    *content_len_inout = out;
-    return stripped;
-}
-
-/* True iff content starts with prefix (case-sensitive). */
-static bool starts_with(const char *content, size_t content_len, const char *prefix) {
-    size_t pl = strlen(prefix);
-    if (content_len < pl)
-        return false;
-    return memcmp(content, prefix, pl) == 0;
-}
-
-/* True iff content (after trim of leading/trailing whitespace) is
- * EXACTLY one of the entries in noun_list. */
-static bool equals_any_word(const char *content, size_t content_len, const char *const *noun_list) {
-    size_t start = 0, end = content_len;
-    while (start < end && (content[start] == ' ' || content[start] == '\n' ||
-                           content[start] == '\t' || content[start] == '"'))
-        start++;
-    while (end > start &&
-           (content[end - 1] == ' ' || content[end - 1] == '\n' || content[end - 1] == '\t' ||
-            content[end - 1] == '.' || content[end - 1] == '"'))
-        end--;
-    size_t trimmed_len = end - start;
-    if (trimmed_len == 0 || trimmed_len > 32) /* too long to be a single noun */
-        return false;
-    for (size_t i = 0; noun_list[i]; i++) {
-        size_t nl = strlen(noun_list[i]);
-        if (nl == trimmed_len && memcmp(content + start, noun_list[i], nl) == 0)
-            return true;
-    }
-    return false;
-}
+#include "human/agent/outbound_pipeline.h"
+#include "human/core/allocator.h"
 
 bool hu_outbound_sanitize(char *content, size_t *content_len_inout, const char **reason_out) {
     if (!content || !content_len_inout) {
@@ -100,34 +41,108 @@ bool hu_outbound_sanitize(char *content, size_t *content_len_inout, const char *
             *reason_out = "null_input";
         return false;
     }
-
-    /* Phase 1: strip U+FFFC in-place. */
-    (void)strip_object_replacement_char(content, content_len_inout);
-
-    size_t len = *content_len_inout;
-    if (len == 0) {
+    if (*content_len_inout == 0) {
         if (reason_out)
-            *reason_out = "empty_after_strip";
+            *reason_out = "empty_input";
         return false;
     }
 
-    /* Phase 2: reject if starts with a directive-shaped prefix. */
-    for (size_t i = 0; directive_echos[i]; i++) {
-        if (starts_with(content, len, directive_echos[i])) {
-            if (reason_out)
-                *reason_out = "directive_echo";
-            return false;
+    /* System allocator — pipeline needs one for stage scratch buffers
+     * (n-gram sets, rewrite buffers, etc.). All buffers are freed
+     * before return. */
+    static hu_allocator_t alloc_storage;
+    static int alloc_init = 0;
+    if (!alloc_init) {
+        alloc_storage = hu_system_allocator();
+        alloc_init = 1;
+    }
+    hu_allocator_t *alloc = &alloc_storage;
+
+    hu_outbound_pipeline_t *pipeline = NULL;
+    if (hu_outbound_pipeline_for_path(alloc, HU_OUTBOUND_PATH_PROACTIVE, &pipeline) != HU_OK ||
+        !pipeline) {
+        /* Fail open — pipeline initialization shouldn't ever block a
+         * legitimate send. */
+        if (reason_out)
+            *reason_out = NULL;
+        return true;
+    }
+
+    /* The pipeline owns msg->content during the run (so it can
+     * REWRITE by freeing+replacing the buffer). Copy the caller's
+     * content into a heap buffer the pipeline can manage. */
+    size_t orig_len = *content_len_inout;
+    char *heap_content = (char *)alloc->alloc(alloc->ctx, orig_len + 1);
+    if (!heap_content) {
+        hu_outbound_pipeline_destroy(pipeline);
+        if (reason_out)
+            *reason_out = NULL;
+        return true; /* fail open */
+    }
+    memcpy(heap_content, content, orig_len);
+    heap_content[orig_len] = '\0';
+
+    hu_outbound_message_t msg = {0};
+    msg.content = heap_content;
+    msg.content_len = orig_len;
+
+    hu_outbound_context_t ctx = {0};
+    ctx.alloc = alloc;
+    ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
+    ctx.regenerate_budget = 0; /* this API can't regenerate; treat as REJECT */
+
+    hu_outbound_verdict_t verdict = {0};
+    hu_error_t err = hu_outbound_pipeline_run(pipeline, &msg, &ctx, &verdict);
+
+    bool ok = false;
+    const char *reason = NULL;
+
+    if (err != HU_OK) {
+        /* Pipeline runtime error — fail open. */
+        ok = true;
+    } else {
+        switch (verdict.kind) {
+        case HU_OUTBOUND_SEND:
+            /* Possibly REWRITE-applied; either way msg.content is
+             * the final body. Copy back to caller buffer if it
+             * fits. (Strip only ever shrinks, so this holds for
+             * the current stage set.) */
+            if (msg.content_len <= orig_len) {
+                memcpy(content, msg.content, msg.content_len);
+                if (msg.content_len < orig_len)
+                    content[msg.content_len] = '\0';
+                *content_len_inout = msg.content_len;
+                ok = true;
+            } else {
+                /* Rewrite expanded — reject conservatively. */
+                reason = "rewrite_expansion";
+                ok = false;
+            }
+            break;
+        case HU_OUTBOUND_REJECT:
+            reason = verdict.reason ? verdict.reason : "rejected";
+            ok = false;
+            break;
+        case HU_OUTBOUND_REGENERATE:
+            /* No budget — treat as REJECT for this legacy API. */
+            reason = verdict.reason ? verdict.reason : "regenerate_requested";
+            ok = false;
+            break;
+        case HU_OUTBOUND_REWRITE:
+            /* Unreachable — pipeline applies rewrites and returns SEND. */
+            reason = "rewrite_uncaught";
+            ok = false;
+            break;
         }
     }
 
-    /* Phase 3: reject single-noun instruction echoes. */
-    if (equals_any_word(content, len, single_noun_echos)) {
-        if (reason_out)
-            *reason_out = "single_noun_echo";
-        return false;
-    }
+    /* Free msg.content (the pipeline may have replaced it via REWRITE). */
+    if (msg.content)
+        alloc->free(alloc->ctx, msg.content, msg.content_len + 1);
+    hu_outbound_verdict_clear(&verdict, alloc);
+    hu_outbound_pipeline_destroy(pipeline);
 
     if (reason_out)
-        *reason_out = NULL;
-    return true;
+        *reason_out = reason;
+    return ok;
 }

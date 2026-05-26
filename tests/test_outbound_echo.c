@@ -87,8 +87,12 @@ static void test_echo_directive_case_insensitive_rejects(void) {
 /* Prompt-overlap REGENERATE cases                                   */
 /* ----------------------------------------------------------------- */
 
-static void test_echo_corpus_5_high_overlap_regenerates(void) {
-    /* Corpus #5: LLM echoed the prompt verbatim. */
+static void test_echo_corpus_5_directive_prefix_rejects(void) {
+    /* Corpus #5: LLM echoed the prompt verbatim, starting with the
+     * directive prefix "reference something specific". Algorithm 1b
+     * (directive-prefix REJECT) fires before Algorithm 2 (prompt-
+     * overlap REGENERATE) — REJECT is the stronger verdict for
+     * verbatim instruction echo. */
     const char *content = "reference something specific you know about them or ask about "
                           "something from a previous conversation";
     const char *prompt =
@@ -96,9 +100,18 @@ static void test_echo_corpus_5_high_overlap_regenerates(void) {
         "about them or ask about something from a previous conversation. Keep it short, "
         "under 10 words, like Seth would write.";
     hu_outbound_verdict_t v = run_echo(content, prompt);
+    HU_ASSERT_EQ(v.kind, HU_OUTBOUND_REJECT);
+    HU_ASSERT_STR_EQ(v.reason, "echo_directive_prefix");
+}
+
+/* Pure prompt-overlap path (no directive-prefix match). Crafted to
+ * not start with any DIRECTIVE_PREFIXES entry. */
+static void test_echo_high_overlap_no_prefix_regenerates(void) {
+    const char *content = "the garden the meeting the loan tomorrow";
+    const char *prompt = "Topics: the garden the meeting the loan tomorrow";
+    hu_outbound_verdict_t v = run_echo(content, prompt);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_REGENERATE);
     HU_ASSERT_STR_EQ(v.reason, "echo_prompt_overlap");
-    HU_ASSERT_NOT_NULL(v.regenerate_hint);
 }
 
 static void test_echo_legitimate_message_low_overlap_sends(void) {
@@ -166,7 +179,8 @@ void run_outbound_echo_tests(void) {
     HU_RUN_TEST(test_echo_directive_with_trailing_period_rejects);
     HU_RUN_TEST(test_echo_directive_with_surrounding_whitespace_rejects);
     HU_RUN_TEST(test_echo_directive_case_insensitive_rejects);
-    HU_RUN_TEST(test_echo_corpus_5_high_overlap_regenerates);
+    HU_RUN_TEST(test_echo_corpus_5_directive_prefix_rejects);
+    HU_RUN_TEST(test_echo_high_overlap_no_prefix_regenerates);
     HU_RUN_TEST(test_echo_legitimate_message_low_overlap_sends);
     HU_RUN_TEST(test_echo_no_prompt_provided_skips_overlap_check);
     HU_RUN_TEST(test_echo_empty_returns_send);

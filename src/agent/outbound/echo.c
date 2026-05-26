@@ -56,6 +56,22 @@ static const char *const STANDALONE_DIRECTIVES[] = {
     "previous conversation", "be concise", "be brief",       NULL,
 };
 
+/* Long directive PREFIXES — when the LLM echoes the start of an
+ * instruction-shaped sentence verbatim. These match if the trimmed
+ * body STARTS with the prefix (case-insensitive). Tested against the
+ * incident corpus row #5. */
+static const char *const DIRECTIVE_PREFIXES[] = {
+    "reference something specific",
+    "ask about something from a previous",
+    "match their energy",
+    "casual greeting back",
+    "short empathetic reaction",
+    "de-escalate: acknowledge feelings",
+    "[safety]",
+    "this response",
+    NULL,
+};
+
 /* Trim leading/trailing whitespace + sentence terminators. Returns
  * pointer into s (into a trimmed window) and writes the trimmed
  * length to *out_len. The window may have NO NUL terminator. */
@@ -88,6 +104,18 @@ static int ci_match_exact(const char *a, size_t n, const char *b) {
     if (n != bl)
         return 0;
     for (size_t i = 0; i < n; i++) {
+        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i]))
+            return 0;
+    }
+    return 1;
+}
+
+/* Case-insensitive prefix check: does [a, a+n) START with `b`? */
+static int ci_starts_with(const char *a, size_t n, const char *b) {
+    size_t bl = strlen(b);
+    if (n < bl)
+        return 0;
+    for (size_t i = 0; i < bl; i++) {
         if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i]))
             return 0;
     }
@@ -183,10 +211,19 @@ static hu_outbound_verdict_t echo_run(hu_outbound_stage_t *self, hu_outbound_mes
     if (trimmed_len == 0)
         return hu_outbound_verdict_send();
 
-    /* Algorithm 1: standalone-directive REJECT. */
+    /* Algorithm 1a: standalone-directive REJECT. */
     for (size_t i = 0; STANDALONE_DIRECTIVES[i]; i++) {
         if (ci_match_exact(trimmed, trimmed_len, STANDALONE_DIRECTIVES[i])) {
             return hu_outbound_verdict_reject("echo_standalone_directive");
+        }
+    }
+
+    /* Algorithm 1b: directive-prefix REJECT — body starts with a
+     * known instruction-shaped phrase. Caught corpus #5 (long LLM
+     * echo of system prompt). */
+    for (size_t i = 0; DIRECTIVE_PREFIXES[i]; i++) {
+        if (ci_starts_with(trimmed, trimmed_len, DIRECTIVE_PREFIXES[i])) {
+            return hu_outbound_verdict_reject("echo_directive_prefix");
         }
     }
 

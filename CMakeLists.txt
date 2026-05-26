@@ -3346,6 +3346,8 @@ set(HU_TEST_SOURCES
     tests/test_outbound_persona.c
     # Sprint 59 Phase B — moderation stage (PII + violence/hate).
     tests/test_outbound_moderation.c
+    # Sprint 59 Phase E — end-to-end corpus regression against 24 incident rows.
+    tests/test_outbound_corpus_regression.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
