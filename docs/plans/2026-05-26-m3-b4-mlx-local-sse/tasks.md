@@ -3,23 +3,49 @@
 Ordered for incremental shipping. Each task is a single PR; the suite
 must stay green between PRs.
 
-## T1 — SSE parser utility (covers D1, half of AC-B4-3/AC-B4-4 testability)
+## T1 — Audit existing parser + WAIT for in-flight rename to settle (REVISED 2026-05-26)
 
-- Create `include/human/util/sse_parser.h` exposing:
-  - `hu_sse_parser_t` opaque
-  - `hu_sse_parser_init(hu_allocator_t *, hu_sse_parser_t **)`
-  - `hu_sse_parser_free(hu_sse_parser_t *)`
-  - `hu_sse_parser_push(parser, const char *bytes, size_t n)` — feed
-    raw bytes; internal accumulator keeps partial events
-  - `hu_sse_parser_pop_event(parser, char **out_data, size_t *out_len)` —
-    returns HU_OK if a complete event is available (caller owns out),
-    HU_ERR_NOT_FOUND if not enough bytes yet
-- Create `src/util/sse_parser.c` with the implementation.
-- Add `tests/test_sse_parser.c` with the four parser-unit tests from
-  the design's test plan.
-- Register in CMakeLists.txt (always-compiled — no MLX dep).
-- **Done when**: 4 new tests pass, full suite green.
-- **Est**: 4-6 hr.
+**Updated** — earlier draft of T1 proposed writing a new parser under
+`src/util/sse_parser.c`. A parser ALREADY exists at `src/providers/sse.c`
+(header `include/human/providers/sse.h`) with a callback-per-event shape
+used by `src/providers/anthropic.c`. Tests in `tests/test_streaming.c`
+cover multi-event arrival, partial buffers, and `[DONE]` semantics.
+
+**Critical context**: the existing parser is mid-namespace-rename
+(uncommitted in the working tree as of 2026-05-26). The type and most
+functions were renamed `hu_sse_parser_* → hu_provider_sse_parser_*`,
+but `hu_sse_parser_deinit` was missed (declared with new type but
+old name). T1 should NOT touch SSE code until that rename has been
+committed and reconciled. Trying to land B4 against a half-renamed
+namespace risks merge conflicts and re-introducing the same
+duplicate-symbol class of bugs.
+
+Audit results (read-only, 2026-05-26):
+- ✅ Multi-`data:` concatenation — covered (sse.c:145-170)
+- ✅ Comment lines (`:` prefix) ignored — covered (sse.c:140)
+- ✅ CRLF terminators — covered (sse.c:111, 118-119, 134, 178)
+- ✅ Partial events at buffer edge — covered (sse.c:115-116)
+- ✅ `[DONE]` sentinel — covered via line-level helper (sse.c:235-238)
+- ✅ Buffer growth — covered with realloc + 256KB cap (sse.c:81-90)
+- ✅ Event-type field (`event:`) — covered (sse.c:171-174)
+- ⚠️ No first-class `pop_event` style — feed-with-callback only. That's
+   fine for libcurl write-callback, slightly awkward for replay/mock.
+   Not a blocker for B4.
+
+Revised T1:
+- Audit complete ✅ (this section)
+- **DO NOT** add code to this area until the in-flight rename lands
+- When the rename settles, T4 (the mlx_local consumer) can wire to
+  `hu_provider_sse_parser_*` directly — no further T1 work needed
+- **Done when**: this audit is documented (it is) AND the
+  namespace rename is committed
+- **Est**: 0 additional hr (audit shipped here)
+
+**Followup (not in B4)**: the header lives in `include/human/providers/`
+but SSE is protocol-agnostic. Moving it to `include/human/util/sse.h`
++ updating 4 call sites is a one-line refactor for a future cleanup
+PR — not in scope here. The mid-flight rename to `hu_provider_sse_parser_*`
+actually moves AWAY from the eventual cross-namespace utility status.
 
 ## T2 — Config plumbing (covers AC-B4-1, AC-B4-10 config side)
 

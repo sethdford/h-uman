@@ -35,19 +35,34 @@
 
 ## Decisions
 
-### D1 — Pure SSE parser as a separate utility
+### D1 — REUSE existing `hu_sse_parser_t` from `src/providers/sse.c`
 
-**Chose**: Extract `hu_sse_parser_t` into `src/util/sse_parser.c`.
+**Chose**: Use the already-shipped `hu_sse_parser_t` at
+`include/human/providers/sse.h` + `src/providers/sse.c`. It exposes
+`hu_sse_parser_init / _feed / _deinit` with a callback-per-event
+shape, already used by `src/providers/anthropic.c` and pinned by
+`tests/test_streaming.c`.
 
-**Over**: Inlining the SSE parsing inside `mlx_local.c`.
+**Over**: Writing a parallel utility under `src/util/` with a pop-event
+API. (Earlier draft of this design proposed exactly that — discarded
+2026-05-26 after a duplicate-symbol link error revealed the existing
+parser. Lesson logged: grep for `hu_sse_*` BEFORE writing 600 lines
+of parser; per `~/.claude/rules/audit-verify-before-allege.md`.)
 
-**Because**: SSE is a small but non-trivial format (event boundaries,
-multi-line `data:` payloads, comment lines, retry hints). Keeping it
-as a pure stateful accumulator makes it (a) testable in isolation
-without any HTTP/MLX context, (b) reusable for future SSE consumers
-(e.g. a Claude API streaming provider, an Anthropic-side dashboard
-event-source), and (c) the right shape per `~/.claude/rules/security-
-predicate-extraction.md` (pure-predicate functions are easier to pin).
+**Because**: The existing parser is mature, callback-shaped (which
+fits libcurl's write-callback model better than pop semantics for
+the `mlx_local` consumer), and already linked into the test binary.
+Re-using it cuts T1 from "~5 hr build + test" to "~30 min audit",
+and the savings flow into T4 (the actual mlx_local consumer).
+
+**Caveat for future use**: the existing parser's header lives at
+`include/human/providers/sse.h` — semantically misleading since SSE
+is protocol-agnostic. If a future caller needs SSE outside the
+provider/ namespace (e.g. a generic event-source consumer), the
+right move is to MOVE the header to `include/human/util/sse.h` and
+update the four existing call sites (anthropic.c, mlx_local.c after
+T4, test_streaming.c, test_provider.c). That refactor is OUT of
+scope for B4 — flag it as a one-line follow-up.
 
 ### D2 — Reuse existing UTF-8 boundary helpers (Sprint 55 `e86a08a2`)
 
