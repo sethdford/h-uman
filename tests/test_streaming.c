@@ -53,7 +53,7 @@ static void test_sse_parser_single_event(void) {
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"foo\"") != NULL);
     HU_ASSERT_EQ(sse_last_data_len, 9); /* {"foo":1} after SSE leading-space trim */
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_multi_event(void) {
@@ -69,7 +69,7 @@ static void test_sse_parser_multi_event(void) {
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(sse_event_count, 3);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_partial_feed(void) {
@@ -89,7 +89,7 @@ static void test_sse_parser_partial_feed(void) {
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"x\"") != NULL);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_event_type(void) {
@@ -100,7 +100,7 @@ static void test_sse_parser_event_type(void) {
     const char *input = "event: custom\ndata: {\"x\":1}\n\n";
     hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_multiline_data(void) {
@@ -114,7 +114,7 @@ static void test_sse_parser_multiline_data(void) {
     HU_ASSERT_TRUE(strstr(sse_last_data, "line1") != NULL ||
                    strstr(sse_last_data, "line2") != NULL ||
                    strstr(sse_last_data, "line3") != NULL);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_empty_event(void) {
@@ -125,7 +125,7 @@ static void test_sse_parser_empty_event(void) {
     const char *input = "\n\n";
     hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_comment_ignored(void) {
@@ -137,7 +137,7 @@ static void test_sse_parser_comment_ignored(void) {
     hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "ok") != NULL);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_init_null_fails(void) {
@@ -155,7 +155,7 @@ static void test_sse_parser_feed_null_callback_fails(void) {
     hu_provider_sse_parser_init(&p, &alloc);
     hu_error_t err = hu_provider_sse_parser_feed(&p, "data: x\n\n", 9, NULL, NULL);
     HU_ASSERT_NEQ(err, HU_OK);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_feed_empty_ok(void) {
@@ -164,7 +164,7 @@ static void test_sse_parser_feed_empty_ok(void) {
     hu_provider_sse_parser_init(&p, &alloc);
     hu_error_t err = hu_provider_sse_parser_feed(&p, "", 0, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_two_empty_events(void) {
@@ -175,7 +175,7 @@ static void test_sse_parser_two_empty_events(void) {
     const char *input = "\n\n\n\n";
     hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_TRUE(sse_event_count >= 1);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_data_with_spaces(void) {
@@ -187,7 +187,7 @@ static void test_sse_parser_data_with_spaces(void) {
     hu_provider_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "trimmed") != NULL || strstr(sse_last_data, "1") != NULL);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_done_signal(void) {
@@ -204,7 +204,7 @@ static void test_sse_parser_done_signal(void) {
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "DONE") != NULL);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 /* Edge case: incomplete SSE data (no final newline) — buffered, no event until complete */
@@ -224,7 +224,7 @@ static void test_sse_parser_incomplete_data_buffered(void) {
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_TRUE(strstr(sse_last_data, "\"x\"") != NULL);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 /* Edge case: missing event type — defaults to "message" */
@@ -242,7 +242,7 @@ static void test_sse_parser_missing_event_type_defaults_message(void) {
     HU_ASSERT_STR_EQ(sse_last_event_type, "message");
     HU_ASSERT_TRUE(strstr(sse_last_data, "hello") != NULL);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 /* Edge case: empty data field — callback invoked with data_len 0 */
@@ -259,7 +259,7 @@ static void test_sse_parser_empty_data_field(void) {
     HU_ASSERT_EQ(sse_event_count, 1);
     HU_ASSERT_EQ(sse_last_data_len, 0u);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 /* Edge case: feed with NULL bytes (len 0) is allowed and returns OK */
@@ -271,7 +271,7 @@ static void test_sse_parser_feed_null_bytes_len_zero_ok(void) {
     hu_error_t err = hu_provider_sse_parser_feed(&p, NULL, 0, sse_event_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_stream_chunk_type_defaults_to_content(void) {

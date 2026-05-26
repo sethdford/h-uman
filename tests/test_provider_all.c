@@ -2050,7 +2050,7 @@ static void test_sse_parser_init_deinit(void) {
     hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(p.buffer);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
     HU_ASSERT_NULL(p.buffer);
 }
 
@@ -2079,7 +2079,7 @@ static void test_sse_parser_feed_callback(void) {
     hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_capture_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(s_sse_captured_len > 0);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_factory_google_creates_gemini(void) {
@@ -2644,10 +2644,11 @@ static void test_sse_parse_multiline_data(void) {
     s_sse_multiline_last_data[0] = '\0';
     const char *stream =
         "event: message\ndata: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n";
-    hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_multiline_cb, NULL);
+    hu_error_t err =
+        hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_multiline_cb, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(s_sse_multiline_event_count >= 1);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parse_callback_order(void) {
@@ -2659,7 +2660,7 @@ static void test_sse_parse_callback_order(void) {
         "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n\n";
     hu_error_t err = hu_provider_sse_parser_feed(&p, stream, strlen(stream), sse_cb_order, NULL);
     HU_ASSERT_EQ(err, HU_OK);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_parser_feed_incremental(void) {
@@ -2673,7 +2674,7 @@ static void test_sse_parser_feed_incremental(void) {
     err = hu_provider_sse_parser_feed(&p, chunk2, strlen(chunk2), sse_cb_delta, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(sse_got_delta == 1);
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
 }
 
 static void test_sse_extract_delta_unicode(void) {

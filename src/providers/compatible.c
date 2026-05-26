@@ -1055,7 +1055,7 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
                                    compatible_stream_write_cb, &sctx);
     pthread_mutex_unlock(&g_compatible_chat_lock);
-    hu_sse_parser_deinit(&sctx.parser);
+    hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
 
     /* T7 — buffered fallback. If write_cb detected the server returned

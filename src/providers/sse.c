@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define HU_SSE_PARSER_INIT_CAP 256
-#define HU_SSE_MAX_LINE_SIZE (256 * 1024)
+#define HU_SSE_MAX_LINE_SIZE   (256 * 1024)
 
 static bool field_eq(const char *a, size_t alen, const char *b) {
     size_t blen = strlen(b);
@@ -29,7 +29,7 @@ hu_error_t hu_provider_sse_parser_init(hu_provider_sse_parser_t *p, hu_allocator
     return HU_OK;
 }
 
-void hu_sse_parser_deinit(hu_provider_sse_parser_t *p) {
+void hu_provider_sse_parser_deinit(hu_provider_sse_parser_t *p) {
     if (!p)
         return;
     if (p->buffer && p->alloc) {
@@ -65,7 +65,7 @@ static void parse_field(const char *line, size_t line_len, const char **field_ou
 }
 
 hu_error_t hu_provider_sse_parser_feed(hu_provider_sse_parser_t *p, const char *bytes, size_t len,
-                              hu_sse_event_cb callback, void *userdata) {
+                                       hu_sse_event_cb callback, void *userdata) {
     if (!p || !p->alloc || !callback)
         return HU_ERR_INVALID_ARGUMENT;
     if (len == 0)

@@ -8,7 +8,7 @@
 /* SSE parser — feed raw bytes, get events via callback.
  * Used by OpenAI/Anthropic streaming providers. */
 
-typedef struct hu_sse_parser {
+typedef struct hu_provider_sse_parser {
     char *buffer;
     size_t buf_len;
     size_t buf_cap;
@@ -19,11 +19,11 @@ typedef void (*hu_sse_event_cb)(const char *event_type, size_t event_type_len, c
                                 size_t data_len, void *userdata);
 
 hu_error_t hu_provider_sse_parser_init(hu_provider_sse_parser_t *p, hu_allocator_t *alloc);
-void hu_sse_parser_deinit(hu_provider_sse_parser_t *p);
+void hu_provider_sse_parser_deinit(hu_provider_sse_parser_t *p);
 
 /* Feed raw bytes. Calls callback for each complete event. */
 hu_error_t hu_provider_sse_parser_feed(hu_provider_sse_parser_t *p, const char *bytes, size_t len,
-                              hu_sse_event_cb callback, void *userdata);
+                                       hu_sse_event_cb callback, void *userdata);
 
 /* ── Line-level parsing (for tests and simple use) ── */
 typedef enum hu_sse_line_result_tag {

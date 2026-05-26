@@ -1235,7 +1235,7 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
     }
     err = hu_http_post_json_stream(alloc, url_buf, NULL, extra_buf, body, body_len,
                                    anthropic_stream_write_cb, &sctx);
-    hu_sse_parser_deinit(&sctx.parser);
+    hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK) {
         ANTHROPIC_STREAM_CLEANUP_TOOLS();

@@ -1125,7 +1125,7 @@ static hu_error_t openai_stream_chat(void *ctx, hu_allocator_t *alloc,
     }
     err = hu_http_post_json_stream(alloc, url_buf, auth_len ? auth_buf : NULL, NULL, body, body_len,
                                    openai_stream_write_cb, &sctx);
-    hu_sse_parser_deinit(&sctx.parser);
+    hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
 
 /* Cleanup helper for tool buffers */
