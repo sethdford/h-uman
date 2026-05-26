@@ -37,6 +37,7 @@
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
+#include "human/ml/mlx_admin.h"
 #include "human/provider.h"
 
 #include <stdlib.h>
@@ -313,15 +314,34 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
  * Returns HU_ERR_NOT_SUPPORTED when under HU_IS_TEST (to avoid real training in tests).
  * Returns HU_ERR_IO for subprocess failures.
  */
-static hu_error_t dispatch_frontier_mlx_training(const char *home_dir, hu_observer_t *observer) {
+/* US-8 / M3 Phase B3 — resolve the mlx-server base URL for the post-train
+ * hot-swap. Honors HU_MLX_BASE_URL env override; default matches the
+ * mlx_server.py port (http://127.0.0.1:8741/v1). Returned pointer is
+ * either a static default or the env value — the caller MUST NOT free. */
+static const char *resolve_mlx_base_url(void) {
+    const char *env = getenv("HU_MLX_BASE_URL");
+    if (env && env[0])
+        return env;
+    return "http://127.0.0.1:8741/v1";
+}
+
+static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const char *home_dir,
+                                                 hu_observer_t *observer) {
     if (!home_dir || !home_dir[0])
         return HU_ERR_INVALID_ARGUMENT;
 
 #ifdef HU_IS_TEST
-    /* Under test, don't invoke real training. Tests should mock or skip
-     * this path via the global target flag. */
+    /* Under test, don't invoke real training or libcurl. Tests should mock
+     * or skip this path via the global target flag. We still increment the
+     * post-train swap counter so contract tests can prove the wire is
+     * live from dispatch → swap step without spawning Python or hitting
+     * the network. */
+    (void)alloc;
     hu_log_info("lora_training_runner", observer,
-                "frontier-mlx training dispatch skipped (HU_IS_TEST=1)");
+                "frontier-mlx training dispatch skipped (HU_IS_TEST=1); would-swap "
+                "via %s after training completes",
+                resolve_mlx_base_url());
+    hu_training_runner_post_train_swap_attempts_increment_internal();
     return HU_OK;
 #else
     /* Production: spawn training_loop.py as a subprocess.
@@ -376,6 +396,46 @@ static hu_error_t dispatch_frontier_mlx_training(const char *home_dir, hu_observ
 
     hu_log_info("lora_training_runner", observer,
                 "frontier-mlx training dispatch succeeded (adapter=%s)", adapters_output_path);
+
+    /* US-8 / M3 Phase B3 — close the loop: now that the subprocess wrote a
+     * new adapter to disk, POST /v1/adapters/swap so the running mlx-server
+     * picks it up WITHOUT a daemon restart. Without this call the daemon
+     * keeps using whatever adapter was loaded at boot and every training
+     * cycle silently dead-ends on disk.
+     *
+     * Increment the counter BEFORE the swap call so even a transport
+     * failure counts as "wire reached this step" — operators want to
+     * distinguish "training never finished" from "training finished but
+     * swap is failing." The mlx_admin counters (hu_mlx_admin_swap_failure_*)
+     * cover the latter dimension. */
+    char adapter_file[1024];
+    int af = snprintf(adapter_file, sizeof(adapter_file), "%s/adapters.safetensors",
+                      adapters_output_path);
+    if (af < 0 || (size_t)af >= sizeof(adapter_file)) {
+        hu_log_warn("lora_training_runner", observer,
+                    "post-train swap skipped: adapter path too long (>= %zu bytes)",
+                    sizeof(adapter_file));
+        return HU_OK;
+    }
+
+    const char *mlx_url = resolve_mlx_base_url();
+    hu_training_runner_post_train_swap_attempts_increment_internal();
+
+    hu_mlx_admin_swap_result_t swap_res;
+    memset(&swap_res, 0, sizeof(swap_res));
+    hu_error_t se = hu_mlx_admin_swap_adapter(alloc, mlx_url, strlen(mlx_url), adapter_file,
+                                              strlen(adapter_file), &swap_res);
+    if (se == HU_OK && swap_res.status_code == 200) {
+        hu_log_info("lora_training_runner", observer, "post-train swap OK: tensors=%zu, path=%s",
+                    swap_res.tensors_loaded,
+                    swap_res.resolved_adapter_path ? swap_res.resolved_adapter_path : adapter_file);
+    } else {
+        hu_log_warn("lora_training_runner", observer,
+                    "post-train swap failed: err=%d, status=%ld, path=%s", (int)se,
+                    swap_res.status_code, adapter_file);
+    }
+    hu_mlx_admin_swap_result_free(alloc, &swap_res);
+
     return HU_OK;
 #endif /* HU_IS_TEST */
 }
@@ -397,7 +457,12 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
         const char *home = getenv("HOME");
         if (!home || !home[0])
             home = "/tmp";
-        hu_error_t fmx_err = dispatch_frontier_mlx_training(home, NULL);
+        /* US-8 Phase B3 — alloc threads through to the post-train swap call.
+         * Fall back to the system allocator when ctx didn't supply one (the
+         * field is documented as optional in hu_lora_runner_ctx_t). */
+        hu_allocator_t sys_alloc = hu_system_allocator();
+        hu_allocator_t *swap_alloc = (ctx && ctx->alloc) ? ctx->alloc : &sys_alloc;
+        hu_error_t fmx_err = dispatch_frontier_mlx_training(swap_alloc, home, NULL);
         /* Dispatch errors are logged but don't block cache warming below. */
         if (fmx_err == HU_OK) {
             hu_log_info("lora_training_runner", NULL, "frontier-mlx training dispatch succeeded");

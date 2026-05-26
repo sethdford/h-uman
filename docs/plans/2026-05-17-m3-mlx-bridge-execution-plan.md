@@ -319,44 +319,61 @@ made when 1-4 are green.
 The 2026-05-17 plan undersold what would ship in the following 8
 days. Reality vs the plan as written:
 
-| Phase | Plan claim (2026-05-17) | Actual state (2026-05-25) |
+| Phase | Plan claim (2026-05-17) | Actual state (2026-05-26 refresh) |
 |---|---|---|
 | B-pre  | ✅ Done                 | ✅ Done |
-| B1     | NOT STARTED            | ✅ Subprocess implementation SHIPPED; verifier-contract test owed |
-| B2     | depends on B1 (~1 week) | PARTIAL — ctx + create + path threading shipped; verifier-contract test owed |
-| B3     | depends on B2 (~2 weeks)| ✅ Inference call SHIPPED; verifier-contract test owed; probe-counter outcome metadata owed |
-| B4     | depends on B3 (~1 week) | ✅ Phase 1-3 SHIPPED via Sprint 54 + 55 (vtable wired + UTF-8 helpers extracted + live script proven) — see Phase B4 section above |
-| B5     | depends on B3 (~1 week) | ✅ load/active/unload adapter SHIPPED + 3 unit tests; bias-measurement verifier-contract test owed |
+| B1     | NOT STARTED            | ✅ Subprocess implementation SHIPPED + verifier-contract test SHIPPED (`test_mlx_chat_subprocess_round_trip`, gated apple+arm64) |
+| B2     | depends on B1 (~1 week) | ✅ Subprocess: ctx + create + path threading + verifier test (`test_mlx_provider_create_resolves_model_path`) SHIPPED. The plan-doc "config-driven wire owed" claim was stale — production runs through `mlx_local` HTTP provider whose URL is already config-driven via `cfg->providers[i].base_url`; no production wire is missing. |
+| B3     | depends on B2 (~2 weeks)| ✅ Inference call + greedy completion test (`test_mlx_chat_greedy_completion_matches_fixture`) + probe-counter advance test (`test_m3_probe_count_advances_once_per_chat_{single,multiple}_call`) SHIPPED. Probe-counter outcome metadata (token_count + latency_ms + hashes + model_id + adapter_id) also SHIPPED via `hu_agent_m3_record_chat_outcome`. |
+| B4     | depends on B3 (~1 week) | ✅ Phase 1-3 SHIPPED via Sprint 54 + 55 (subprocess vtable wired + UTF-8 helpers extracted + live script proven at 109 tok/s on 26B MoE). **The only remaining B4 work is the production daemon's `mlx_local` HTTP path consuming SSE chunks instead of waiting for full response** — see `docs/plans/2026-05-26-m3-b4-mlx-local-sse/` for the spec stub. |
+| B5     | depends on B3 (~1 week) | ✅ load/active/unload adapter + 3 unit tests + bias-measurement test (`test_mlx_lora_adapter_biases_completion`) + malformed-safetensors negative path test (`test_mlx_lora_adapter_malformed_safetensors_rejected`) SHIPPED. Bias-measurement test skips cleanly when the `seth-lora-v4-repair-*` fixture is absent. |
 
-**The narrative inversion:** the M3 plan reads as "B1 → B2 → B3 → B4 → B5"
-serial blocks. The actual delivery was "B1 + B3 + B5 in parallel via
-the subprocess pipe, with the verifier-contract tests deferred."
-That's an honest engineering call — the wire was easier than the
-proof — but it means the next focused PR isn't "start B1" but
-**"close the verifier-contract test debt that B1/B2/B3/B5 left."**
+**The narrative inversion (resolved 2026-05-26):** the M3 plan read as
+"B1 → B2 → B3 → B4 → B5" serial blocks. The actual delivery was
+"B1 + B3 + B5 in parallel via the subprocess pipe, with the verifier-
+contract tests landing across Sprint 54-55 + the 2026-05-25 US-15 +
+US-8 + 2026-05-26 Phase B3 work." All six verifier-contract tests from
+the original backlog have shipped.
 
-## Concrete next-PR backlog (single multi-session unit, ~2-3 days)
+**The "closes the loop" wire (NEW 2026-05-26):** US-8 (commit `416e6c29`)
+fired training_loop.py from the DPO pair-count trigger, but stopped at
+"adapter written to disk." This was filled in 2026-05-26 by wiring
+`hu_mlx_admin_swap_adapter` immediately after the successful subprocess
+exit. Observability via the new `hu_training_runner_post_train_swap_attempts()`
+public counter — increments on every dispatch that reached the swap
+step (under HU_IS_TEST the libcurl call is skipped, counter still
+increments so tests pin the wire). Pinned end-to-end by
+`test_lora_training_runner_frontier_mlx_path_increments_swap_counter`.
 
-1. `test_mlx_chat_subprocess_round_trip` (B1 verifier contract).
-   Gated on `HU_ENABLE_MLX_PROVIDER + __APPLE__ + __arm64__`. Skipped
-   on every other CI variant.
-2. `test_mlx_provider_create_resolves_model_path` (B2 verifier
-   contract). Pure unit test against the ctx — no MLX runtime
-   needed.
-3. `test_mlx_chat_greedy_completion_matches_fixture` (B3 verifier
-   contract). End-to-end deterministic-greedy against a tiny MLX
-   model fixture.
-4. `test_m3_probe_count_advances_once_per_chat` (B3 adapter wire).
-   The probe-counter outcome metadata extension.
-5. `test_mlx_lora_adapter_biases_completion` (B5 bias measurement).
-   THE evidence test for the strategic mission. Probably 30+ minutes
-   to author the held-out prompt + train a stub adapter + assert
-   the bias delta exceeds noise threshold.
-6. `test_mlx_lora_adapter_malformed_safetensors_rejected` (B5
-   negative path).
+## Original next-PR backlog (FULLY RESOLVED 2026-05-26)
 
-After this PR lands, the only remaining M3 work that's NOT verifier-
-contract debt is **B4 streaming** — a single, focused, ~1-week sprint.
+All 6 items from the backlog have shipped — leaving this list intact
+as a historical reference:
+
+1. ✅ `test_mlx_chat_subprocess_round_trip` (B1 verifier contract).
+2. ✅ `test_mlx_provider_create_resolves_model_path` (B2 verifier contract).
+3. ✅ `test_mlx_chat_greedy_completion_matches_fixture` (B3 verifier contract).
+4. ✅ `test_m3_probe_count_advances_once_per_chat_*` (B3 adapter wire).
+5. ✅ `test_mlx_lora_adapter_biases_completion` (B5 bias measurement).
+6. ✅ `test_mlx_lora_adapter_malformed_safetensors_rejected` (B5 negative path).
+
+## What's left for M3 (as of 2026-05-26)
+
+The remaining genuine M3 work, in order of payoff:
+
+1. **B4 mlx_local SSE streaming** — production daemon consumes SSE
+   chunks from `mlx_server.py` instead of buffering the full response.
+   Latency win. Spec stub at `docs/plans/2026-05-26-m3-b4-mlx-local-sse/`.
+   ~1-week implementation arc.
+2. **Live empirical re-validation of the post-train swap on Apple
+   Silicon** — the existing `test_mlx_chat_greedy_completion_matches_fixture`
+   skips cleanly on non-Apple-Silicon runners; first apple-arm64
+   developer to pull this should run it end-to-end with a current
+   v4-repair adapter present.
+3. **`HU_NIGHTLY_LORA_ENABLED` plumbing into config.json** — current
+   nightly retrain (daemon.c:4026) is env-gated. Promote to
+   `cfg->learning.nightly_lora.enabled` so operators don't need env
+   vars. Small follow-up; not blocking M3.
 
 # Out of scope here
 

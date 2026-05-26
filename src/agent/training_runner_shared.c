@@ -10,6 +10,7 @@
 
 #include "human/agent/training_runner_shared.h"
 
+#include <stdatomic.h>
 #include <string.h>
 
 /* Spec 2026-05-19 M3 closure / AC-M3-7 — process-wide single slot
@@ -80,3 +81,23 @@ hu_error_t hu_training_runner_enqueue_lora_persona_target(hu_w14_scheduler_t *sc
 hu_training_target_model_t hu_training_runner_last_enqueued_target(void) {
     return g_last_enqueued_target;
 }
+
+/* US-8 / M3 Phase B3 — post-train adapter swap counter. Process-wide
+ * atomic, monotonic for the process lifetime. Lives in the always-
+ * compiled TU so the disabled-learning build still satisfies the public
+ * getter signature (returns 0 because the increment site is gated). */
+static atomic_uint_least64_t g_post_train_swap_attempts;
+
+uint64_t hu_training_runner_post_train_swap_attempts(void) {
+    return (uint64_t)atomic_load_explicit(&g_post_train_swap_attempts, memory_order_relaxed);
+}
+
+void hu_training_runner_post_train_swap_attempts_increment_internal(void) {
+    atomic_fetch_add_explicit(&g_post_train_swap_attempts, 1, memory_order_relaxed);
+}
+
+#ifdef HU_IS_TEST
+void hu_training_runner_test_set_last_enqueued_target(hu_training_target_model_t target) {
+    g_last_enqueued_target = target;
+}
+#endif

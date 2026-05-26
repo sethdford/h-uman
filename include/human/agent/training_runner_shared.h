@@ -110,6 +110,41 @@ hu_error_t hu_training_runner_enqueue_lora_persona_target(hu_w14_scheduler_t *sc
  * single-threaded scheduler tick; not designed for concurrent writers. */
 hu_training_target_model_t hu_training_runner_last_enqueued_target(void);
 
+/* US-8 / M3 Phase B3 — post-train adapter swap observability.
+ *
+ * Returns total count of times the frontier-MLX dispatch reached the
+ * post-training mlx-server swap step (whether the swap succeeded,
+ * failed, or was skipped under HU_IS_TEST). This is the operator/test-
+ * visible signal that closes the loop from
+ * "training_loop.py wrote a new adapter to disk" through
+ * "mlx-server was told to load it". Without an increment, training
+ * adapters never reach the running server and Bridge B M3 stalls
+ * silently at the rotate-on-disk step.
+ *
+ * Pattern mirrors hu_mlx_admin_swap_failure_total — process-wide atomic
+ * counter, safe to read concurrently, monotonic for the process lifetime.
+ *
+ * When HU_ENABLE_LEARNING is OFF this returns 0 (stub). */
+uint64_t hu_training_runner_post_train_swap_attempts(void);
+
+/* Internal — bump the counter read by the public getter above. Called
+ * from the frontier-MLX dispatch path; not for general use. Exists in the
+ * always-compiled translation unit so the increment site
+ * (src/agent/lora_training_runner.c, gated behind HU_ENABLE_LEARNING)
+ * doesn't have to host the static itself. */
+void hu_training_runner_post_train_swap_attempts_increment_internal(void);
+
+#ifdef HU_IS_TEST
+/* Test-only setter for g_last_enqueued_target. Exists so end-to-end
+ * tests of the frontier-MLX dispatch path can set the global without
+ * standing up a real hu_w14_scheduler_t (which requires a learner +
+ * memory facade — heavy for a pure-unit-test harness).
+ *
+ * Gated behind HU_IS_TEST so it cannot be called from production code.
+ * NOT thread-safe — tests are single-threaded by construction. */
+void hu_training_runner_test_set_last_enqueued_target(hu_training_target_model_t target);
+#endif
+
 /* Pure predicate. Returns true when (threshold > 0) AND (uncommitted_count
  * >= threshold). threshold == 0 is the operator-disabled state — always
  * false regardless of uncommitted_count. Negative inputs are treated as 0
