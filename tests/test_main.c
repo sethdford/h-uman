@@ -305,6 +305,7 @@ void run_imessage_react_contract_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_action_telemetry_tests(void);void run_follow_up_tests(void);
 void run_imessage_action_telemetry_tests(void);
+void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
 void run_follow_up_tests(void);
 void run_follow_up_daemon_integration_tests(void);
@@ -1183,6 +1184,8 @@ int main(int argc, char **argv) {
 run_imessage_reply_pacing_tests();
 run_imessage_action_telemetry_tests();    run_follow_up_tests();
 run_imessage_action_telemetry_tests();
+run_imessage_action_telemetry_tests();
+    run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
     run_follow_up_tests();
     run_follow_up_daemon_integration_tests();
