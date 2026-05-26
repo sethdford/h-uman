@@ -811,6 +811,44 @@ hu_error_t hu_init_outcome_resolve_pending(hu_allocator_t *alloc, int64_t now_un
     }
     if (out_resolutions_written)
         *out_resolutions_written = written;
+
+    /* Auto-pair tick — when enough new resolutions have accumulated
+     * since the last pairing pass, run the pairing converter. The
+     * counter is module-static so the threshold is enforced ACROSS
+     * resolver invocations (not just within one call). Pure predicate
+     * + thin caller per .claude/rules/security-predicate-extraction.md. */
+#ifdef HU_ENABLE_ML
+    if (written > 0) {
+        static size_t s_resolutions_since_last_pair = 0;
+        static atomic_bool s_warned_pair_disabled = false;
+        static atomic_bool s_warned_pair_failed = false;
+        s_resolutions_since_last_pair += written;
+        if (hu_init_dpo_bridge_should_pair_now(s_resolutions_since_last_pair,
+                                               HU_INIT_DPO_BRIDGE_AUTO_PAIR_DEFAULT_N)) {
+            size_t paired = 0;
+            hu_error_t perr = hu_init_dpo_bridge_pair_singles(alloc, &paired);
+            if (perr == HU_OK) {
+                hu_log_info("init_outcome", NULL,
+                            "init_outcome auto-pair: %zu pairs produced (after %zu resolutions)",
+                            paired, s_resolutions_since_last_pair);
+                s_resolutions_since_last_pair = 0;
+            } else if (perr == HU_ERR_NOT_SUPPORTED) {
+                hu_log_info_once(&s_warned_pair_disabled, "init_outcome", NULL,
+                                 "init_outcome auto-pair skipped — no dpo_collector "
+                                 "registered (HU_ENABLE_SQLITE may be off, or daemon "
+                                 "didn't register one)");
+                /* Don't reset the counter — once collector lands, the
+                 * accumulated count fires the pass immediately. */
+            } else {
+                hu_log_warn_once(&s_warned_pair_failed, "init_outcome", NULL,
+                                 "init_outcome auto-pair failed (signal lost; "
+                                 "single-sided rows remain in dpo_pairs as audit trail)");
+                s_resolutions_since_last_pair = 0; /* avoid infinite retry */
+            }
+        }
+    }
+#endif
+
     return HU_OK;
 }
 

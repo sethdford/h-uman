@@ -14,8 +14,9 @@
 #ifdef HU_ENABLE_ML
 
 #include "human/ml/init_dpo_bridge.h"
-
+#include "human/ml/cli.h"
 #include "human/ml/dpo.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,12 @@ void hu_init_dpo_bridge_set_collector(struct hu_dpo_collector *collector) {
 
 struct hu_dpo_collector *hu_init_dpo_bridge_get_collector(void) {
     return s_collector;
+}
+
+bool hu_init_dpo_bridge_should_pair_now(size_t resolutions_since_last, size_t threshold) {
+    if (threshold == 0)
+        return false; /* operator disabled auto-pair */
+    return resolutions_since_last >= threshold;
 }
 
 hu_error_t hu_init_dpo_bridge_record(hu_allocator_t *alloc, hu_init_resolution_t outcome,
@@ -316,6 +323,89 @@ hu_error_t hu_init_dpo_bridge_pair_singles(hu_allocator_t *alloc, size_t *paired
 
     if (paired_count)
         *paired_count = paired;
+    return HU_OK;
+#endif /* HU_ENABLE_SQLITE */
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * CLI handler — `human ml pair-init-singles`
+ *
+ * Operator-facing entry point that owns the lifecycle: opens the
+ * SQLite db, creates a collector, registers it with the bridge, runs
+ * the pairing pass, prints the result, and tears down. Distinct from
+ * the daemon-side auto-pair tick — that one reuses the daemon's
+ * already-registered collector.
+ * ────────────────────────────────────────────────────────────────────── */
+
+hu_error_t hu_ml_cli_pair_init_singles(hu_allocator_t *alloc, int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifndef HU_ENABLE_SQLITE
+    fprintf(stderr, "[pair-init-singles] HU_ENABLE_SQLITE not compiled in; "
+                    "the pairing pass requires the dpo_pairs table.\n");
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    /* Resolve memory.db path. Honors HU_MEMORY_DB_PATH env override
+     * so tests can point at a controlled fixture without writing into
+     * the operator's real db. */
+    char db_path[1024];
+    const char *override = getenv("HU_MEMORY_DB_PATH");
+    if (override && override[0]) {
+        snprintf(db_path, sizeof(db_path), "%s", override);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home || !*home) {
+            fprintf(stderr, "[pair-init-singles] HOME not set; cannot locate memory.db\n");
+            return HU_ERR_IO;
+        }
+        snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+    }
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "[pair-init-singles] failed to open %s: %s\n", db_path,
+                db ? sqlite3_errmsg(db) : "(null)");
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    hu_dpo_collector_t col;
+    hu_error_t cerr = hu_dpo_collector_create(alloc, db, 0, &col);
+    if (cerr != HU_OK) {
+        fprintf(stderr, "[pair-init-singles] collector_create failed: error %d\n", (int)cerr);
+        sqlite3_close(db);
+        return cerr;
+    }
+    /* Ensure tables exist — idempotent. A fresh memory.db without
+     * dpo_pairs would otherwise yield "no such table" on the SELECT. */
+    (void)hu_dpo_init_tables(&col);
+
+    /* Save the prior bridge collector (might be NULL in CLI context,
+     * but could be set if someone runs the CLI inside a process where
+     * the daemon has already registered). Restore at exit so we don't
+     * leave dangling state. */
+    struct hu_dpo_collector *prior = hu_init_dpo_bridge_get_collector();
+    hu_init_dpo_bridge_set_collector(&col);
+
+    size_t paired = 0;
+    hu_error_t perr = hu_init_dpo_bridge_pair_singles(alloc, &paired);
+
+    /* Restore prior collector BEFORE deiniting our local one — if the
+     * order were reversed, any code running between the deinit and the
+     * restore would see the singleton pointing at a freed handle. */
+    hu_init_dpo_bridge_set_collector(prior);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+
+    if (perr != HU_OK) {
+        fprintf(stderr, "[pair-init-singles] pair_singles failed: error %d\n", (int)perr);
+        return perr;
+    }
+    fprintf(stdout, "[pair-init-singles] paired %zu singles from %s\n", paired, db_path);
     return HU_OK;
 #endif /* HU_ENABLE_SQLITE */
 }

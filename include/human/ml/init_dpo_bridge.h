@@ -33,6 +33,8 @@
 #include "human/agent/init_outcome.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Stable source-tag for every single-sided row this bridge writes. The
@@ -133,6 +135,23 @@ hu_error_t hu_init_dpo_bridge_record(hu_allocator_t *alloc, hu_init_resolution_t
  * Cost: O(N) walk over single-sided rows + one INSERT and two UPDATEs
  * per pair. For ~hundreds of rows the call is sub-second. */
 hu_error_t hu_init_dpo_bridge_pair_singles(hu_allocator_t *alloc, size_t *paired_count);
+
+/* Default cadence for daemon auto-pair: pair_singles fires once per
+ * this many newly-written resolutions. Chosen so a daemon ticking
+ * every 30 min accumulates ~5 hours of signal between pairings.
+ * Operators who want immediate pairing can call the CLI subcommand. */
+#define HU_INIT_DPO_BRIDGE_AUTO_PAIR_DEFAULT_N 10
+
+/* Pure threshold predicate: should the daemon invoke the pairing pass
+ * now, given how many resolutions have landed since the last pass?
+ *
+ * Returns true iff resolutions_since_last >= threshold AND threshold > 0.
+ * A zero threshold disables auto-pairing entirely (operator must call
+ * the CLI manually). Negative counts are coerced to 0.
+ *
+ * Pure function over scalars — testable without a daemon or a db.
+ * See .claude/rules/security-predicate-extraction.md. */
+bool hu_init_dpo_bridge_should_pair_now(size_t resolutions_since_last, size_t threshold);
 
 #endif /* HU_ENABLE_ML */
 

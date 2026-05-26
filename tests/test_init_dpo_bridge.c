@@ -209,6 +209,40 @@ static void test_init_dpo_bridge_pair_singles_no_collector_returns_not_supported
 }
 #endif /* HU_ENABLE_SQLITE */
 
+/* Pure threshold predicate — testable without any sqlite or collector
+ * state. Per .claude/rules/security-predicate-extraction.md, the
+ * truth table is locked here so the daemon-tick wire never has to
+ * carry test machinery. */
+
+static void test_should_pair_now_fires_at_threshold(void) {
+    /* Boundary: exactly == threshold fires. */
+    HU_ASSERT(hu_init_dpo_bridge_should_pair_now(10, 10));
+}
+
+static void test_should_pair_now_below_threshold_returns_false(void) {
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now(9, 10));
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now(0, 10));
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now(1, 10));
+}
+
+static void test_should_pair_now_zero_threshold_disables(void) {
+    /* Zero is the "operator disabled auto-pair" signal — even with a
+     * huge accumulated count, the predicate must NOT fire. Pinned
+     * because a naive `>=` implementation would return true for
+     * (anything >= 0). */
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now(0, 0));
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now(100, 0));
+    HU_ASSERT_FALSE(hu_init_dpo_bridge_should_pair_now((size_t)-1, 0));
+}
+
+static void test_should_pair_now_above_threshold_still_fires(void) {
+    /* If the daemon misses several ticks and accumulated count >>
+     * threshold, the next call still fires (we don't gate on
+     * exact-equality). */
+    HU_ASSERT(hu_init_dpo_bridge_should_pair_now(50, 10));
+    HU_ASSERT(hu_init_dpo_bridge_should_pair_now(1000, 10));
+}
+
 static void test_init_dpo_bridge_set_collector_round_trips(void) {
     hu_dpo_collector_t col;
     mk_collector(&col);
@@ -234,6 +268,10 @@ void run_init_dpo_bridge_tests(void) {
     HU_RUN_TEST(test_init_dpo_bridge_pair_singles_does_not_cross_targets);
     HU_RUN_TEST(test_init_dpo_bridge_pair_singles_no_collector_returns_not_supported);
 #endif
+    HU_RUN_TEST(test_should_pair_now_fires_at_threshold);
+    HU_RUN_TEST(test_should_pair_now_below_threshold_returns_false);
+    HU_RUN_TEST(test_should_pair_now_zero_threshold_disables);
+    HU_RUN_TEST(test_should_pair_now_above_threshold_still_fires);
 }
 
 #else /* HU_ENABLE_ML */
