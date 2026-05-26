@@ -25,6 +25,7 @@ void run_string_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
 void run_init_proposer_tests(void);
+void run_init_proposer_compose_tests(void);
 void run_init_outcome_tests(void);
 void run_prompt_budget_tests(void);
 void run_config_gated_subsystems_tests(void);
@@ -256,6 +257,7 @@ void run_doctor_chatdb_tests(void);
 void run_doctor_check_provider_tests(void);
 void run_doctor_exit_codes_tests(void);
 void run_doctor_json_output_tests(void);
+void run_doctor_reaction_collection_wired_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
 void run_cron_session_tools_tests(void);
@@ -365,6 +367,8 @@ void run_outbound_crosstalk_tests(void);
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 #ifdef HU_ENABLE_SQLITE
 void run_outbound_crosstalk_sqlite_tests(void);
+/* Sprint 60 E2E SOTA proof — full pipeline through a file-based db. */
+void run_outbound_e2e_sota_proof_tests(void);
 #endif
 void run_outbound_persona_tests(void);
 void run_outbound_moderation_tests(void);
@@ -911,6 +915,7 @@ int main(int argc, char **argv) {
     run_log_once_tests();
     run_vertex_adc_tests();
     run_init_proposer_tests();
+    run_init_proposer_compose_tests();
     run_init_outcome_tests();
     run_prompt_budget_tests();
     run_config_gated_subsystems_tests();
@@ -1117,6 +1122,7 @@ int main(int argc, char **argv) {
     run_doctor_check_provider_tests();
     run_doctor_exit_codes_tests();
     run_doctor_json_output_tests();
+    run_doctor_reaction_collection_wired_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();
     run_cron_session_tools_tests();
@@ -1219,6 +1225,7 @@ int main(int argc, char **argv) {
     run_outbound_crosstalk_tests();
 #ifdef HU_ENABLE_SQLITE
     run_outbound_crosstalk_sqlite_tests();
+    run_outbound_e2e_sota_proof_tests();
 #endif
     run_outbound_persona_tests();
     run_outbound_moderation_tests();

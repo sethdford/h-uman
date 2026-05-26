@@ -582,3 +582,201 @@ hu_error_t hu_init_proposer_tick_with_provider(
     return HU_OK;
 #endif
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * M3 Dispatch Unification — T1 (2026-05-26)
+ *
+ * Pure-addition wrapper that lets daemon_proactive's scheduler pass rich
+ * per-contact context THROUGH init_proposer so the same propose-or-skip
+ * machinery composes both initiative-driven AND daemon-proactive-driven
+ * sends. See docs/plans/2026-05-26-m3-dispatch-unification/.
+ *
+ * T1 is the smallest useful step: new struct + new function. No existing
+ * caller is forced to migrate; T2-T8 (separate sprint tasks) wire callers
+ * over and eventually delete the legacy path. */
+
+size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose_inputs_t *inputs,
+                                                      int64_t now_unix, int64_t last_inbound_unix,
+                                                      char *out, size_t out_cap) {
+    if (!out || out_cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!inputs)
+        return 0;
+
+    /* Header — same shape as hu_init_proposer_build_propose_prompt so the
+     * LLM sees a consistent prompt schema across initiative and proactive
+     * paths. */
+    int written = snprintf(out, out_cap, "Context as of unix=%lld; last_inbound=%lld\n",
+                           (long long)now_unix, (long long)last_inbound_unix);
+    if (written < 0)
+        return 0;
+    size_t pos = (size_t)written < out_cap ? (size_t)written : out_cap - 1;
+
+    /* Identity block — channel + contact go first so the model knows
+     * WHO is being addressed before it sees the content fragments.
+     * Skipped cleanly when either is empty. */
+    if (inputs->channel_name && inputs->channel_name_len > 0 && pos + 1 < out_cap) {
+        int n = snprintf(out + pos, out_cap - pos, "\n--- channel ---\n%.*s",
+                         (int)inputs->channel_name_len, inputs->channel_name);
+        if (n > 0 && (size_t)n < out_cap - pos)
+            pos += (size_t)n;
+    }
+    if (inputs->contact_id && inputs->contact_id_len > 0 && pos + 1 < out_cap) {
+        int n = snprintf(out + pos, out_cap - pos, "\n--- contact ---\n%.*s",
+                         (int)inputs->contact_id_len, inputs->contact_id);
+        if (n > 0 && (size_t)n < out_cap - pos)
+            pos += (size_t)n;
+    }
+
+    /* Content fragments. Each gets its own labeled header so the model
+     * can see WHICH source contributed what. Memory is filtered through
+     * the optional content_is_safe predicate if present — risk-mitigation
+     * for the daemon_proactive callback path that previously leaked
+     * first-person memory entries to family contacts. */
+    struct {
+        const char *label;
+        const char *body;
+        size_t body_len;
+        bool apply_safety;
+    } fields[] = {
+        {"memory", inputs->memory_context, inputs->memory_context_len, true},
+        {"weather", inputs->weather_context, inputs->weather_context_len, false},
+        {"calendar", inputs->calendar_context, inputs->calendar_context_len, false},
+        {"feeds", inputs->feeds_context, inputs->feeds_context_len, false},
+    };
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        if (!fields[i].body || fields[i].body_len == 0)
+            continue;
+        /* Safety predicate gate. When the caller passes a predicate AND
+         * it rejects this body, we skip the source entirely (silently;
+         * the field stays unrepresented in the prompt). */
+        if (fields[i].apply_safety && inputs->content_is_safe &&
+            !inputs->content_is_safe(fields[i].body, fields[i].body_len))
+            continue;
+        if (pos + 1 >= out_cap)
+            break;
+        int n = snprintf(out + pos, out_cap - pos, "\n--- %s ---\n", fields[i].label);
+        if (n < 0)
+            break;
+        if ((size_t)n >= out_cap - pos) {
+            pos = out_cap - 1;
+            break;
+        }
+        pos += (size_t)n;
+        size_t avail = out_cap - pos - 1;
+        size_t copy = fields[i].body_len < avail ? fields[i].body_len : avail;
+        memcpy(out + pos, fields[i].body, copy);
+        pos += copy;
+    }
+
+    /* Final question — same wording as the bundle-based path. */
+    if (pos + 1 < out_cap) {
+        int n =
+            snprintf(out + pos, out_cap - pos, "\n\nShould h-uman send Seth a message right now?");
+        if (n > 0 && (size_t)n < out_cap - pos)
+            pos += (size_t)n;
+    }
+    out[pos] = '\0';
+    return pos;
+}
+
+hu_error_t hu_init_proposer_tick_with_provider_ex(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc,
+    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
+    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
+    hu_init_decision_t *out_decision) {
+    /* AC-6 backwards compatibility: inputs=NULL → identical to the
+     * original function. T2-T8 will land additional behavior; T1 is
+     * pure addition. */
+    if (!inputs) {
+        return hu_init_proposer_tick_with_provider(
+            cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, last_inbound_unix,
+            now_unix, last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    }
+
+    /* Inputs-driven path. Run the governor first (cheap, never spends an
+     * LLM token unless gates pass). */
+    hu_init_proposer_result_t gov_result = HU_INIT_RESULT_SKIP;
+    hu_error_t gov_err =
+        hu_init_proposer_tick(cfg, ar_cfg, tz_offset_seconds, budget, last_inbound_unix, now_unix,
+                              last_tick_unix_inout, tick_id_inout, &gov_result);
+    if (gov_err != HU_OK)
+        return gov_err;
+    if (gov_result != HU_INIT_RESULT_SKIP) {
+        if (out_result)
+            *out_result = gov_result;
+        return HU_OK;
+    }
+
+    /* Governor passed; no provider available means no LLM call possible. */
+    if (!provider || !provider->vtable || !provider->vtable->chat_with_system || !alloc) {
+        if (out_result)
+            *out_result = HU_INIT_RESULT_SKIP;
+        return HU_OK;
+    }
+
+    /* Build prompt from inputs (NOT from agent's cached context). */
+    static char sys_prompt[1536];
+    static char user_msg[16384];
+    size_t sys_len = strlen(s_system_prompt);
+    size_t sys_copy = sys_len < sizeof(sys_prompt) - 1 ? sys_len : sizeof(sys_prompt) - 1;
+    memcpy(sys_prompt, s_system_prompt, sys_copy);
+    sys_prompt[sys_copy] = '\0';
+    hu_init_proposer_build_propose_user_message_ex(inputs, now_unix, last_inbound_unix, user_msg,
+                                                   sizeof(user_msg));
+
+#if HU_IS_TEST
+    /* Test builds: never make a real network call. Unit-test the pure
+     * helper directly. */
+    (void)agent;
+    if (out_result)
+        *out_result = HU_INIT_RESULT_SKIP;
+    if (out_decision)
+        memset(out_decision, 0, sizeof(*out_decision));
+    return HU_OK;
+#else
+    const char *model =
+        (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
+    char *response = NULL;
+    size_t response_len = 0;
+    hu_error_t lerr = provider->vtable->chat_with_system(
+        provider->ctx, alloc, sys_prompt, strlen(sys_prompt), user_msg, strlen(user_msg), model,
+        strlen(model), 0.2, &response, &response_len);
+    if (lerr != HU_OK || !response || response_len == 0) {
+        hu_log_warn("init_proposer", NULL, "LLM call (ex) failed: err=%d (response_len=%zu)",
+                    (int)lerr, response_len);
+        if (response)
+            alloc->free(alloc->ctx, response, response_len + 1);
+        if (out_result)
+            *out_result = HU_INIT_RESULT_LLM_ERROR;
+        return HU_OK;
+    }
+
+    hu_init_decision_t decision;
+    hu_error_t perr = hu_init_proposer_parse_response(response, response_len, &decision);
+    alloc->free(alloc->ctx, response, response_len + 1);
+    if (perr != HU_OK) {
+        if (out_result)
+            *out_result = HU_INIT_RESULT_PARSE_ERROR;
+        return HU_OK;
+    }
+
+    double threshold = cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85;
+    hu_init_proposer_result_t verdict = hu_init_proposer_evaluate_decision(&decision, threshold);
+    hu_log_info("init_proposer", NULL,
+                "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
+                "draft_len=%zu result=%d",
+                (int)inputs->channel_name_len, inputs->channel_name ? inputs->channel_name : "",
+                decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
+                (int)verdict);
+
+    if (out_result)
+        *out_result = verdict;
+    if (out_decision && verdict == HU_INIT_RESULT_FIRED)
+        memcpy(out_decision, &decision, sizeof(decision));
+    return HU_OK;
+#endif
+}

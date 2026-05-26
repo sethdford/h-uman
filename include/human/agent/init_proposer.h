@@ -266,4 +266,87 @@ hu_error_t hu_init_proposer_tick_with_provider(
     int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
     hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * M3 Dispatch Unification — T1 (2026-05-26)
+ *
+ * Pure-addition extension that lets daemon_proactive's scheduler pass
+ * the rich per-contact context (memory recall, weather, calendar, feeds,
+ * channel + recipient identity) THROUGH init_proposer so the same
+ * propose-or-skip machinery composes both initiative-driven AND
+ * daemon-proactive-driven sends.
+ *
+ * Spec: docs/plans/2026-05-26-m3-dispatch-unification/{requirements,
+ * design,tasks}.md.
+ *
+ * Backwards-compatibility note: existing callers continue to use
+ * `hu_init_proposer_tick_with_provider`. They are unchanged. T1 only
+ * adds the _ex extension; T2-T8 wire callers over to it. */
+
+/* Per-tick compose inputs. Lifetimes are tied to the caller's tick frame;
+ * init_proposer copies what it needs into the prompt and does NOT retain
+ * pointers past return. NULL pointer + 0 len for any source means "this
+ * source is unpopulated for this contact this tick" (skipped cleanly). */
+typedef struct hu_proactive_compose_inputs {
+    /* Identity of the proactive target. */
+    const char *contact_id;
+    size_t contact_id_len;
+    const char *channel_name;
+    size_t channel_name_len;
+
+    /* Pre-built context fragments. The caller (daemon_proactive) is
+     * responsible for running output-safety filters on memory_context
+     * BEFORE populating; init_proposer trusts the bytes as-is. */
+    const char *memory_context;
+    size_t memory_context_len;
+    const char *weather_context;
+    size_t weather_context_len;
+    const char *calendar_context;
+    size_t calendar_context_len;
+    const char *feeds_context;
+    size_t feeds_context_len;
+
+    /* Optional defensive callback: if non-NULL, init_proposer calls it
+     * on memory_context before inclusion and treats a `false` return as
+     * "skip the memory_context source for this tick". Lets us migrate
+     * `hu_daemon_callback_content_is_safe` into the unified pipeline
+     * without coupling init_proposer to that specific predicate.
+     * Receives the same (ptr, len) the caller passed. */
+    bool (*content_is_safe)(const char *content, size_t content_len);
+} hu_proactive_compose_inputs_t;
+
+/* T1 extension to hu_init_proposer_tick_with_provider.
+ *
+ * Identical semantics to the original except:
+ *   - When `inputs` is non-NULL, the propose-or-skip prompt is built
+ *     from the inputs' rich context fragments instead of from the
+ *     agent's cached context strings. This is the path daemon_proactive
+ *     will use once T4 wires it up.
+ *   - When `inputs` is NULL, behaves byte-identically to
+ *     `hu_init_proposer_tick_with_provider` — required for AC-6
+ *     backwards compatibility.
+ *
+ * The function does NOT send. On FIRED it populates *out_decision and
+ * returns; the caller (daemon_proactive scheduler) is responsible for
+ * the channel-vtable send + throttle/budget records. This preserves
+ * the test seam (init_proposer is unit-testable without a channel
+ * mock) AND lets the daemon apply its existing send-cap machinery
+ * uniformly. */
+hu_error_t hu_init_proposer_tick_with_provider_ex(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc,
+    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
+    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
+    hu_init_decision_t *out_decision);
+
+/* Pure helper exposed for testing: render the propose-or-skip USER
+ * message from a compose_inputs struct (no agent dependency, no I/O).
+ * Returns bytes written (excluding NUL); 0 on overflow. The system
+ * prompt is unchanged from the existing
+ * hu_init_proposer_build_propose_prompt path — only the USER message
+ * gets the rich-context shape. */
+size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose_inputs_t *inputs,
+                                                      int64_t now_unix, int64_t last_inbound_unix,
+                                                      char *out, size_t out_cap);
+
 #endif /* HU_AGENT_INIT_PROPOSER_H */

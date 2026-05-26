@@ -3087,6 +3087,7 @@ set(HU_TEST_SOURCES
     tests/test_log_once.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
+    tests/test_init_proposer_compose.c
     tests/test_init_outcome.c
     tests/test_prompt_budget.c
     tests/test_silent_disable_compliance.c

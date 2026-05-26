@@ -1,0 +1,218 @@
+/* tests/test_init_proposer_compose.c — T1 of the M3 dispatch unification
+ * spec (docs/plans/2026-05-26-m3-dispatch-unification/). Pins the pure
+ * compose-inputs USER-message builder so daemon_proactive's rich-context
+ * shape renders cleanly through init_proposer's propose-or-skip prompt.
+ *
+ * The builder is a pure function over (inputs, now_unix, last_inbound,
+ * out, out_cap). No agent dependency, no I/O. */
+
+#include "human/agent/init_proposer.h"
+#include "test_framework.h"
+#include <stdbool.h>
+#include <string.h>
+
+/* ── 1. Empty inputs → only the header + final question ──────────────── */
+
+static void compose_empty_inputs_emits_header_and_question(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    char buf[1024] = {0};
+    size_t n = hu_init_proposer_build_propose_user_message_ex(&inputs, /*now=*/1779840000,
+                                                              /*last_inbound=*/0, buf, sizeof(buf));
+    HU_ASSERT(n > 0);
+    /* Header always present. */
+    HU_ASSERT(strstr(buf, "Context as of unix=1779840000") != NULL);
+    HU_ASSERT(strstr(buf, "last_inbound=0") != NULL);
+    /* Final question line. */
+    HU_ASSERT(strstr(buf, "Should h-uman send Seth a message right now?") != NULL);
+    /* NO content labels — all fields empty. */
+    HU_ASSERT_NULL(strstr(buf, "--- memory ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- weather ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- calendar ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- feeds ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- contact ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- channel ---"));
+}
+
+/* ── 2. All sources populated → all labels + bodies appear ──────────── */
+
+static void compose_all_fields_present_renders_all_labels(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.contact_id = "alice@example.com";
+    inputs.contact_id_len = strlen(inputs.contact_id);
+    inputs.channel_name = "imessage";
+    inputs.channel_name_len = strlen(inputs.channel_name);
+    inputs.memory_context = "alice mentioned she's stressed about work";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+    inputs.weather_context = "60F drizzling rain";
+    inputs.weather_context_len = strlen(inputs.weather_context);
+    inputs.calendar_context = "team standup at 10am";
+    inputs.calendar_context_len = strlen(inputs.calendar_context);
+    inputs.feeds_context = "industry layoffs trending";
+    inputs.feeds_context_len = strlen(inputs.feeds_context);
+
+    char buf[2048] = {0};
+    size_t n = hu_init_proposer_build_propose_user_message_ex(&inputs, /*now=*/1779840000,
+                                                              /*last_inbound=*/1779830000, buf,
+                                                              sizeof(buf));
+    HU_ASSERT(n > 0);
+    /* Identity block. */
+    HU_ASSERT(strstr(buf, "--- channel ---\nimessage") != NULL);
+    HU_ASSERT(strstr(buf, "--- contact ---\nalice@example.com") != NULL);
+    /* All four content fragments. */
+    HU_ASSERT(strstr(buf, "--- memory ---\nalice mentioned she's stressed about work") != NULL);
+    HU_ASSERT(strstr(buf, "--- weather ---\n60F drizzling rain") != NULL);
+    HU_ASSERT(strstr(buf, "--- calendar ---\nteam standup at 10am") != NULL);
+    HU_ASSERT(strstr(buf, "--- feeds ---\nindustry layoffs trending") != NULL);
+    /* Header + question always. */
+    HU_ASSERT(strstr(buf, "last_inbound=1779830000") != NULL);
+    HU_ASSERT(strstr(buf, "Should h-uman send Seth a message right now?") != NULL);
+}
+
+/* ── 3. Partial population → only present sources rendered ─────────── */
+
+static void compose_partial_fields_renders_only_present_labels(void) {
+    /* Memory + calendar populated; weather + feeds absent. */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.memory_context = "MEM";
+    inputs.memory_context_len = 3;
+    inputs.calendar_context = "CAL";
+    inputs.calendar_context_len = 3;
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT(strstr(buf, "--- memory ---") != NULL);
+    HU_ASSERT(strstr(buf, "--- calendar ---") != NULL);
+    HU_ASSERT_NULL(strstr(buf, "--- weather ---"));
+    HU_ASSERT_NULL(strstr(buf, "--- feeds ---"));
+}
+
+/* ── 4. Safety predicate (Risk 3 mitigation) — rejection path ───────── */
+
+static bool always_unsafe(const char *content, size_t len) {
+    (void)content;
+    (void)len;
+    return false;
+}
+
+static void compose_unsafe_memory_filtered_when_predicate_rejects(void) {
+    /* Caller passes a predicate that returns false → memory is silently
+     * dropped from the rendered prompt. Weather/calendar/feeds DO NOT
+     * route through the predicate (per design.md: only memory). */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.memory_context = "I am lonely tonight";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+    inputs.weather_context = "sunny";
+    inputs.weather_context_len = 5;
+    inputs.content_is_safe = always_unsafe;
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT_NULL(strstr(buf, "I am lonely tonight"));
+    HU_ASSERT_NULL(strstr(buf, "--- memory ---"));
+    /* Weather still rendered — predicate only gates memory. */
+    HU_ASSERT(strstr(buf, "--- weather ---\nsunny") != NULL);
+}
+
+/* ── 5. Safety predicate — accept path ──────────────────────────────── */
+
+static bool always_safe(const char *content, size_t len) {
+    (void)content;
+    (void)len;
+    return true;
+}
+
+static void compose_safe_memory_passes_through_when_predicate_accepts(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.memory_context = "alice's birthday is friday";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+    inputs.content_is_safe = always_safe;
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT(strstr(buf, "--- memory ---\nalice's birthday is friday") != NULL);
+}
+
+/* ── 6. NULL safety + zero-cap ──────────────────────────────────────── */
+
+static void compose_returns_zero_for_null_or_zero_cap(void) {
+    char buf[64];
+    /* NULL inputs. */
+    HU_ASSERT_EQ(hu_init_proposer_build_propose_user_message_ex(NULL, 0, 0, buf, sizeof(buf)),
+                 (size_t)0);
+    /* NULL out. */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    HU_ASSERT_EQ(hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, NULL, 16),
+                 (size_t)0);
+    /* Zero cap. */
+    HU_ASSERT_EQ(hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, 0), (size_t)0);
+}
+
+/* ── 7. Tiny buffer truncates safely ────────────────────────────────── */
+
+static void compose_truncates_safely_on_small_buffer(void) {
+    /* 24-byte buffer fits the header start but nothing else. Builder
+     * must NUL-terminate and not write past the buffer. Use a guard
+     * arena to catch overrun. */
+    char wrap[64];
+    memset(wrap, 0xAA, sizeof(wrap));
+    char *buf = wrap + 16;
+    const size_t cap = 24;
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.memory_context = "long enough to not fit";
+    inputs.memory_context_len = 22;
+    size_t n = hu_init_proposer_build_propose_user_message_ex(&inputs, 1779840000, 0, buf, cap);
+    HU_ASSERT(n < cap);
+    HU_ASSERT_EQ(buf[n], '\0');
+    /* Guard bytes around the buffer must be untouched. */
+    for (size_t i = 0; i < 16; i++) {
+        HU_ASSERT_EQ((unsigned char)wrap[i], (unsigned char)0xAA);
+        HU_ASSERT_EQ((unsigned char)wrap[16 + cap + i], (unsigned char)0xAA);
+    }
+}
+
+/* ── 8. Headers ordered before content ──────────────────────────────── */
+
+static void compose_identity_block_renders_before_content(void) {
+    /* Pin the order so the LLM sees WHO first, then context. Saves the
+     * model from getting confused by content that looks like it could
+     * apply to any contact. */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.channel_name = "imessage";
+    inputs.channel_name_len = 8;
+    inputs.contact_id = "alice";
+    inputs.contact_id_len = 5;
+    inputs.memory_context = "BODY";
+    inputs.memory_context_len = 4;
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    char *channel_pos = strstr(buf, "--- channel ---");
+    char *contact_pos = strstr(buf, "--- contact ---");
+    char *memory_pos = strstr(buf, "--- memory ---");
+    HU_ASSERT_NOT_NULL(channel_pos);
+    HU_ASSERT_NOT_NULL(contact_pos);
+    HU_ASSERT_NOT_NULL(memory_pos);
+    HU_ASSERT(channel_pos < contact_pos);
+    HU_ASSERT(contact_pos < memory_pos);
+}
+
+void run_init_proposer_compose_tests(void);
+void run_init_proposer_compose_tests(void) {
+    HU_TEST_SUITE("init_proposer_compose");
+    HU_RUN_TEST(compose_empty_inputs_emits_header_and_question);
+    HU_RUN_TEST(compose_all_fields_present_renders_all_labels);
+    HU_RUN_TEST(compose_partial_fields_renders_only_present_labels);
+    HU_RUN_TEST(compose_unsafe_memory_filtered_when_predicate_rejects);
+    HU_RUN_TEST(compose_safe_memory_passes_through_when_predicate_accepts);
+    HU_RUN_TEST(compose_returns_zero_for_null_or_zero_cap);
+    HU_RUN_TEST(compose_truncates_safely_on_small_buffer);
+    HU_RUN_TEST(compose_identity_block_renders_before_content);
+}
