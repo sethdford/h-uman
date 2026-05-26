@@ -118,17 +118,37 @@ subprocess, no real MLX.
 no-Apple-Silicon. The SSE format is portable; the assertions test the
 C client, not the Python server.
 
-### D6 — `cfg.mlx_local.streaming_enabled` default true
+### D6 — `cfg.mlx_local.streaming_enabled` default FALSE (REVISED T3 2026-05-26)
 
-**Chose**: New config bool defaults to `true`.
+**Chose** (T3 revision): New config bool defaults to `false`. Operator
+opts IN by setting it true once they've verified their mlx-server
+strips thought markers in streaming mode.
 
-**Over**: Default false (opt-in).
+**Over** (T2 original): Default true with operator opt-OUT.
 
-**Because**: The fallback path is correct; opt-in would mean the
-latency win never reaches anyone who doesn't read the changelog.
-Operator can opt OUT via the doctor-visible flag if they need to
-diagnose a streaming-specific regression. Per the silent-config-gated
-rule, the disabled path emits one log line.
+**Because**: The T2 reasoning ("fallback path is correct, opt-in
+hides the latency win") collided with `agent_stream.c`'s pre-existing
+2026-05-25 workaround that unconditionally forces `can_stream = false`
+for any provider named "compatible" (which includes mlx_local). The
+underlying bug: `mlx-server.py`'s `strip_thought_channels` post-
+processor only runs in the non-streaming response shape, so the
+streaming path leaks raw `<|channel>thought` markers as visible
+text. Defaulting to true would have silently re-introduced that bug
+for every operator on every fresh install.
+
+Default-false matches the de-facto behavior the workaround was
+enforcing, lets T3 replace the unconditional workaround with a config
+gate (still safe by default), and gives operators a clean opt-IN
+path once their server can handle streaming. The "disabled by
+default" silent-gate log was inverted in T3 to "enabled by config"
+(positive confirmation) — defaulting-disabled here is INTENTIONAL,
+not a forgotten enable, so the standard silent-config-gated-
+subsystems pattern doesn't apply.
+
+Followup (not in B4): per-service whitelist so other "compatible"
+services (OpenRouter, etc.) that DO support streaming correctly
+aren't blocked by the same gate. Today they're collateral damage of
+the mlx_local-specific fix.
 
 ## Test plan
 

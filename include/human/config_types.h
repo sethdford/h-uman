@@ -113,26 +113,30 @@ typedef struct hu_molora_config {
  * configuration for the production daemon's HTTP-based mlx_local
  * provider when it talks to a streaming mlx-server.
  *
- * `streaming_enabled` (default TRUE) opts INTO the SSE-streaming path
- * for chat completions; falling back to the buffered response shape
- * when set to FALSE. Default true because the fallback path is
- * correct — opt-in would mean the latency win never reaches anyone
- * who doesn't read the changelog. Operators flip to false only when
- * diagnosing a streaming-specific regression.
+ * `streaming_enabled` (default FALSE — revised T3 2026-05-26): opts
+ * INTO the SSE-streaming path for chat completions when true; uses
+ * the buffered response shape when false. The default is FALSE
+ * because mlx-server.py's `strip_thought_channels` postprocessor
+ * currently only runs in the non-streaming response shape, so the
+ * streaming path leaks raw `<|channel>thought` markers as visible
+ * text. agent_stream.c carried an unconditional workaround forcing
+ * this off since 2026-05-25; T3 replaced that workaround with this
+ * gate so operators can opt IN once they've verified their server
+ * strips thought markers in streaming mode (or once a client-side
+ * filter ships in T4+).
  *
- * `first_token_budget_ms` (default 500) is the operator-visible budget
- * for the first SSE event to arrive after POST send. If the actual
- * first-token latency exceeds this, the provider logs warn-once with
- * the measured value so operators can decide whether the server has
- * regressed.
+ * `first_token_budget_ms` (default 500): operator-visible budget for
+ * the first SSE event to arrive after POST send. If the actual first-
+ * token latency exceeds this, the provider logs warn-once with the
+ * measured value so operators can decide whether the server has
+ * regressed. Only takes effect when streaming_enabled is true.
  *
- * When streaming_enabled=false, the daemon emits one info-level log
- * line at startup per ~/.claude/rules/silent-config-gated-subsystems.md
- * — operators must never silently lose the streaming win without
- * seeing the disabled reason. */
+ * When streaming_enabled=true, the daemon emits one info-level log
+ * line at startup confirming the opt-in state — operators should see
+ * positive confirmation of the latency win, not just a silent flip. */
 typedef struct hu_mlx_local_config {
-    bool streaming_enabled;    /* default true */
-    int first_token_budget_ms; /* default 500; <=0 clamps to 500 */
+    bool streaming_enabled;    /* default false (see comment above) */
+    int first_token_budget_ms; /* default 500; <=0 keeps the default */
 } hu_mlx_local_config_t;
 
 typedef struct hu_personalization_config {

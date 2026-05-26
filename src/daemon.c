@@ -3303,21 +3303,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     }
 
     /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
-     * silent-config-gated warning per ~/.claude/rules/silent-config-
-     * gated-subsystems.md. When the operator has explicitly disabled
-     * SSE streaming, surface the fact at startup so they don't later
-     * wonder why the latency win is missing. The T4 mlx_local consumer
-     * will honor this flag; until T4 lands, this warning is purely
-     * informational (production traffic still uses the buffered path
-     * regardless of the flag). */
-    if (agent && config && !config->mlx_local.streaming_enabled) {
-        static atomic_bool warned_mlx_streaming_off = false;
-        hu_log_info_once(&warned_mlx_streaming_off, "human", agent->observer,
-                         "mlx_local: SSE streaming DISABLED by config "
-                         "(mlx_local.streaming_enabled=false). All chat completions will "
-                         "use the buffered-response path. To re-enable streaming, set "
-                         "{\"mlx_local\": {\"streaming_enabled\": true}} in config.json "
-                         "or remove the override (default is true).");
+     * positive-confirmation log when the operator has OPTED IN to SSE
+     * streaming (T3 revision 2026-05-26). Default is false because the
+     * agent_stream.c workaround at the compatible-provider site forces
+     * streaming off — the streaming response shape from mlx-server.py
+     * leaks raw `<|channel>thought` markers since strip_thought_channels
+     * only runs in the non-streaming path. The meaningful state to
+     * surface is "operator chose to flip this on" — a "disabled by
+     * default" log on every fresh install would be pure noise.
+     *
+     * Inverted relative to the silent-config-gated-subsystems.md rule
+     * for this specific case: default-disabled here is INTENTIONAL,
+     * not a forgotten enable. */
+    if (agent && config && config->mlx_local.streaming_enabled) {
+        static atomic_bool noted_mlx_streaming_on = false;
+        hu_log_info_once(&noted_mlx_streaming_on, "human", agent->observer,
+                         "mlx_local: SSE streaming ENABLED by config "
+                         "(mlx_local.streaming_enabled=true). The agent_stream.c "
+                         "workaround that forced compatible/mlx_local streaming OFF is "
+                         "bypassed. If you see raw `<|channel>thought` markers in "
+                         "replies, your mlx-server doesn't strip thought channels in "
+                         "streaming mode — set streaming_enabled=false and file a "
+                         "server-side issue.");
     }
     if (config && config->personalization.enabled && config->personalization.lora_adapter_path &&
         agent && agent->provider.vtable) {

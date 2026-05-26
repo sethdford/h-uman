@@ -340,19 +340,33 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         if (pname && strcmp(pname, "gemini") == 0) {
             can_stream = false; /* TODO(gemini-stream-bypass): fix SSE pipeline */
         }
-        /* WORKAROUND (2026-05-25, extension): The "compatible" provider
-         * (used for MLX local serving Gemma 4) streams raw `<|channel>thought`
-         * markers as visible text chunks, which the daemon accumulates and
-         * returns as the response. mlx-server.py's strip_thought_channels
-         * postprocessor only runs in the NON-streaming path. Bypass streaming
-         * for compatible so the postprocessor (now patched to handle the
-         * markdown-bullet thinking pattern) actually fires.
+        /* M3 B4 T3 (2026-05-26) — operator-gated bypass of the
+         * compatible-provider streaming workaround.
          *
-         * Risk: any other "compatible" service (OpenRouter, etc.) loses
-         * streaming UX. iMessage doesn't have token-by-token UX anyway, so
-         * for the daemon's primary use-case this is neutral. */
+         * Original 2026-05-25 workaround: The "compatible" provider
+         * (used by mlx_local serving Gemma 4) streams raw
+         * `<|channel>thought` markers as visible text because
+         * mlx-server.py's strip_thought_channels postprocessor only
+         * runs in the NON-streaming path. Forcing can_stream=false
+         * for ALL compatible services was the safe-but-broad fix.
+         *
+         * T3 replaces that with a per-provider, operator-gated check:
+         *   - For "compatible" providers, the default `cfg.mlx_local.
+         *     streaming_enabled = false` keeps the safe-off behavior.
+         *   - Operator can opt IN by setting streaming_enabled=true
+         *     in config.json once they've verified their mlx-server
+         *     strips thought markers in streaming mode (or once a
+         *     client-side filter lands in T4+).
+         *   - When agent->config is NULL (cold init / test path), we
+         *     keep the original safe-off behavior to avoid regressions.
+         *
+         * Other "compatible" services (OpenRouter etc.) are still
+         * affected by the default-false — per-service whitelist is
+         * future work (see spec D6 followup). */
         if (pname && strcmp(pname, "compatible") == 0) {
-            can_stream = false; /* TODO(compatible-stream-bypass): per-service whitelist */
+            bool streaming_opt_in = agent->config && agent->config->mlx_local.streaming_enabled;
+            if (!streaming_opt_in)
+                can_stream = false;
         }
     }
 

@@ -1396,14 +1396,18 @@ static void test_config_parse_persona_contacts_non_object_clears(void) {
  *     the established default — the parser guards with `if (budget > 0)`
  * ──────────────────────────────────────────────────────────────────── */
 
-static void test_config_mlx_local_streaming_defaults_true(void) {
+static void test_config_mlx_local_streaming_defaults_false(void) {
     char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
     setenv("HOME", "/nonexistent_human_mlx_local_default_test", 1);
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg = {0};
     HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
-    /* Default per spec D6 — opt-OUT, not opt-in. */
-    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
+    /* Default per spec D6 REVISED (T3 2026-05-26): false. Matches the
+     * de-facto behavior of agent_stream.c's compatible-provider
+     * workaround that forced streaming OFF since 2026-05-25; operator
+     * opts IN once their mlx-server strips thought markers in
+     * streaming mode. */
+    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
     hu_config_deinit(&cfg);
     if (old_home) {
         setenv("HOME", old_home, 1);
@@ -1427,19 +1431,20 @@ static void test_config_mlx_local_first_token_budget_defaults_500(void) {
         unsetenv("HOME");
 }
 
-static void test_config_mlx_local_streaming_disabled_via_json(void) {
-    /* Operator opt-out path: explicit false in JSON wins over the
-     * default-true. After this lands, the daemon emits a one-shot
-     * info log line per silent-config-gated-subsystems.md. */
+static void test_config_mlx_local_streaming_enabled_via_json(void) {
+    /* Operator opt-IN path: explicit true in JSON wins over the
+     * default-false. After this lands, the daemon emits a one-shot
+     * info log line confirming the streaming-on state so operators
+     * see positive confirmation of the latency-win opt-in. */
     char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
-    setenv("HOME", "/nonexistent_human_mlx_local_disable_test", 1);
+    setenv("HOME", "/nonexistent_human_mlx_local_enable_test", 1);
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg = {0};
     HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
     /* Override via parse-json after defaults are seeded. */
-    const char *json = "{\"mlx_local\":{\"streaming_enabled\":false}}";
+    const char *json = "{\"mlx_local\":{\"streaming_enabled\":true}}";
     HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
-    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
+    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
     /* Budget default must be preserved since the JSON didn't touch it. */
     HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 500);
     hu_config_deinit(&cfg);
@@ -1459,9 +1464,9 @@ static void test_config_mlx_local_first_token_budget_override(void) {
     const char *json = "{\"mlx_local\":{\"first_token_budget_ms\":250}}";
     HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
     HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 250);
-    /* streaming_enabled default must survive an override that only sets
-     * the sibling field. */
-    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
+    /* streaming_enabled default (FALSE per T3) must survive an override
+     * that only sets the sibling field. */
+    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
     hu_config_deinit(&cfg);
     if (old_home) {
         setenv("HOME", old_home, 1);
@@ -1627,10 +1632,11 @@ void run_config_extended_tests(void) {
     HU_RUN_TEST(test_config_parse_persona_contacts_empty_object);
     HU_RUN_TEST(test_config_parse_persona_contacts_reload_clears);
     HU_RUN_TEST(test_config_parse_persona_contacts_non_object_clears);
-    /* M3 Bridge B Phase B4 T2 — mlx_local SSE-streaming config gate. */
-    HU_RUN_TEST(test_config_mlx_local_streaming_defaults_true);
+    /* M3 Bridge B Phase B4 T2 — mlx_local SSE-streaming config gate.
+     * Defaults revised T3: streaming_enabled is FALSE by default. */
+    HU_RUN_TEST(test_config_mlx_local_streaming_defaults_false);
     HU_RUN_TEST(test_config_mlx_local_first_token_budget_defaults_500);
-    HU_RUN_TEST(test_config_mlx_local_streaming_disabled_via_json);
+    HU_RUN_TEST(test_config_mlx_local_streaming_enabled_via_json);
     HU_RUN_TEST(test_config_mlx_local_first_token_budget_override);
     HU_RUN_TEST(test_config_mlx_local_negative_budget_keeps_default);
 }

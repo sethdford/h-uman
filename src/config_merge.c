@@ -439,14 +439,22 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->response_guard.naked_opener_enabled = true;
 
     /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
-     * mlx_local streaming defaults. SSE consumption is ON by default
-     * because the fallback to buffered response is correct; opt-in would
-     * mean the latency win never reaches anyone who doesn't read the
-     * changelog. Operator flips to false via
-     * {"mlx_local": {"streaming_enabled": false}} only when diagnosing
-     * a streaming-specific regression. first_token_budget_ms is the
-     * threshold above which the provider logs warn-once. */
-    cfg->mlx_local.streaming_enabled = true;
+     * mlx_local streaming defaults. REVISED 2026-05-26 (T3): default is
+     * FALSE. Earlier T2 spec said default-true on the assumption that
+     * "the buffered fallback path is correct," but in reality the
+     * agent_stream.c workaround (line ~354) has been forcing the
+     * compatible/mlx_local stream path OFF since 2026-05-25 due to a
+     * known thinking-channel marker bug in mlx-server.py
+     * (strip_thought_channels postprocessor only runs in the non-
+     * streaming response shape). Defaulting to true would silently
+     * re-introduce that bug for every operator. Default-false matches
+     * the current de-facto behavior; operators opt IN once they've
+     * verified their mlx-server strips thought markers in streaming
+     * mode (or once a client-side filter ships in T4+).
+     *
+     * first_token_budget_ms (default 500) is the warn-once threshold
+     * for first-token latency once streaming is enabled. */
+    cfg->mlx_local.streaming_enabled = false;
     cfg->mlx_local.first_token_budget_ms = 500;
 }
 
