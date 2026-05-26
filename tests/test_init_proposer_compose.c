@@ -257,46 +257,20 @@ static void guard_outcome_jordan_draft_would_be_rejected(void) {
                  (int)HU_INIT_RESULT_GUARD_REJECT);
 }
 
-/* ── M3 Dispatch T3 — use_unified_dispatch config flag ──────────────── */
+/* ── M3 Dispatch T3+T8b — use_unified_dispatch flag REMOVED ─────────── */
 
 #include "human/config.h"
 
-/* T3 unit tests: structural assertions on the config struct + the
- * struct's place in hu_config_t. The full parse-from-JSON path is
- * tested at integration level (hu_config_load) — see
- * tests/test_config_extended.c family; calling hu_config_parse_json
- * on a memset'd config segfaults because it expects allocator setup
- * from hu_config_load's set_defaults path.
+/* T8b (2026-05-26) — the two struct round-trip tests that pinned the
+ * `use_unified_dispatch` field have been deleted along with the field.
+ * The remaining throttle config fields (`enabled`, `per_contact_daily_max`)
+ * are tested via hu_config_load integration in tests/test_config_extended.c.
  *
- * What these tests pin:
- *   - The struct has a use_unified_dispatch field of type bool.
- *   - The field can be read + written through hu_config_t.
- *   - Setting it to true/false sticks (no silent overrides). */
-
-static void config_use_unified_dispatch_field_round_trips(void) {
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    /* Default zero-init must be false (matches set_defaults intent). */
-    HU_ASSERT_FALSE(cfg.proactive_throttle.use_unified_dispatch);
-    cfg.proactive_throttle.use_unified_dispatch = true;
-    HU_ASSERT_TRUE(cfg.proactive_throttle.use_unified_dispatch);
-    cfg.proactive_throttle.use_unified_dispatch = false;
-    HU_ASSERT_FALSE(cfg.proactive_throttle.use_unified_dispatch);
-}
-
-static void config_use_unified_dispatch_independent_of_other_throttle_fields(void) {
-    /* Pin that setting the flag does not perturb the other throttle
-     * fields. Operators flipping just use_unified_dispatch should not
-     * disturb their per_contact_daily_max or enabled state. */
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.proactive_throttle.enabled = true;
-    cfg.proactive_throttle.per_contact_daily_max = 5;
-    cfg.proactive_throttle.use_unified_dispatch = true;
-    HU_ASSERT_TRUE(cfg.proactive_throttle.enabled);
-    HU_ASSERT_EQ(cfg.proactive_throttle.per_contact_daily_max, 5);
-    HU_ASSERT_TRUE(cfg.proactive_throttle.use_unified_dispatch);
-}
+ * Operators who want to disable proactive sends now use:
+ *   - `initiative.enabled = false`  → kills the initiative subsystem
+ *   - remove `proactive_channel` from a contact → kills per-contact
+ *
+ * Both mechanisms predate T3 and have their own test coverage. */
 
 /* ── M3 Dispatch T8 — legacy path deletion audit ─────────────────────── */
 
@@ -403,9 +377,7 @@ void run_init_proposer_compose_tests(void) {
     HU_RUN_TEST(guard_outcome_reject_downgrades_to_guard_reject);
     HU_RUN_TEST(guard_outcome_unknown_defaults_to_guard_reject);
     HU_RUN_TEST(guard_outcome_jordan_draft_would_be_rejected);
-    /* T3 — use_unified_dispatch config flag. */
-    HU_RUN_TEST(config_use_unified_dispatch_field_round_trips);
-    HU_RUN_TEST(config_use_unified_dispatch_independent_of_other_throttle_fields);
+    /* T3 tests deleted in T8b — `use_unified_dispatch` field removed. */
     /* T4 — daemon-side wire smoke (compose-inputs + tick_with_provider_ex
      * accept the rich-context shape daemon now passes). */
     HU_RUN_TEST(t4_tick_with_provider_ex_accepts_daemon_shape_inputs);

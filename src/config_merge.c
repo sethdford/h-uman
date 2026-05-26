@@ -452,19 +452,11 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * false}} in config.json. */
     cfg->response_guard.naked_opener_enabled = true;
 
-    /* M3 Dispatch T7 (2026-05-26) — proactive_throttle.use_unified_dispatch
-     * defaults to TRUE. Unified dispatch is now the default proactive
-     * composer; init_proposer.tick_with_provider_ex routes G1–G9 detectors
-     * + DPO negative-pair capture + per-channel G9 disable + memory-safety
-     * predicate uniformly across all proactive sends.
-     *
-     * Operators with concerns during the T6 A/B observation window can
-     * opt back to the legacy hu_agent_turn path via:
-     *   {"proactive_throttle": {"use_unified_dispatch": false}}
-     *
-     * T8 (separate commit) will delete the legacy branch entirely, at
-     * which point this flag becomes vestigial and can be removed. */
-    cfg->proactive_throttle.use_unified_dispatch = true;
+    /* M3 Dispatch T8b — `use_unified_dispatch` removed. The flag was
+     * vestigial after T8 deleted the legacy branch; this commit removes
+     * the field from the struct entirely. No default needed. To disable
+     * proactive sends, see `initiative.enabled` or per-contact
+     * `proactive_channel` config. */
 
     /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
      * mlx_local streaming defaults. REVISED 2026-05-26 (T3): default is

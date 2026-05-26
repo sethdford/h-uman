@@ -403,10 +403,12 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
-/* M3 Dispatch T3 (2026-05-26) — proactive_throttle config. Currently
- * just the use_unified_dispatch feature flag; other proactive throttle
- * knobs (per_contact_daily_max) are wired by the throttle subsystem
- * directly. Spec at docs/plans/2026-05-26-m3-dispatch-unification/. */
+/* M3 Dispatch — proactive_throttle config parser. Originally added in T3
+ * to parse the `use_unified_dispatch` rollout flag; T8b removed that
+ * flag. The parser stays for the other knobs (enabled, per_contact_daily_max).
+ * Unknown keys like a stale `use_unified_dispatch` from an operator's old
+ * config.json fall through hu_json_get_bool silently — the daemon won't
+ * see them and behavior is unaffected (the field is gone from the struct). */
 static hu_error_t parse_proactive_throttle(hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
@@ -416,8 +418,6 @@ static hu_error_t parse_proactive_throttle(hu_config_t *cfg, const hu_json_value
                                       cfg->proactive_throttle.per_contact_daily_max);
     if (max > 0)
         cfg->proactive_throttle.per_contact_daily_max = max;
-    cfg->proactive_throttle.use_unified_dispatch =
-        hu_json_get_bool(obj, "use_unified_dispatch", cfg->proactive_throttle.use_unified_dispatch);
     return HU_OK;
 }
 

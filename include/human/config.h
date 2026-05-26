@@ -283,15 +283,14 @@ typedef struct hu_follow_up_watcher_config {
 typedef struct hu_proactive_throttle_config {
     bool enabled;
     int per_contact_daily_max; /* default 1 */
-    /* M3 Dispatch T3 (2026-05-26) — feature flag for the unified
-     * dispatch rollout. When true, daemon_proactive's scheduler loop
-     * routes through hu_init_proposer_tick_with_provider_ex (the
-     * unified composer + guard pipeline). When false (default), uses
-     * the legacy hu_agent_turn-based path. Spec at
-     * docs/plans/2026-05-26-m3-dispatch-unification/. Defaults to false
-     * to enable the 1-week A/B observation period (T6) before flipping
-     * to default-true (T7) and deleting the legacy path (T8). */
-    bool use_unified_dispatch;
+    /* M3 Dispatch T8b (2026-05-26) — `use_unified_dispatch` removed.
+     * The flag was T3's rollout safety switch for unified vs legacy
+     * proactive composition. T7 flipped the default to true; T8 deleted
+     * the legacy branch; this commit (T8b) removes the now-vestigial
+     * flag entirely. To disable proactive sends, operators use
+     * `initiative.enabled = false` (kills the initiative subsystem) or
+     * remove `proactive_channel` from individual contact configs (kills
+     * per-contact). See docs/plans/2026-05-26-m3-dispatch-unification/. */
 } hu_proactive_throttle_config_t;
 
 /* Initiative Layer — see docs/plans/2026-05-25-initiative-layer/.

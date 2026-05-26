@@ -2274,20 +2274,19 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 size_t response_len = 0;
                 hu_error_t err = HU_OK;
 
-                /* M3 Dispatch T8 (2026-05-26) — unified dispatch is now the
-                 * ONLY proactive composer. The legacy hu_agent_turn-based
-                 * branch is removed (it lived behind the `else` of the
-                 * use_unified_dispatch flag until T7 flipped the default
-                 * to true). Operators can still disable proactive sends
-                 * entirely by setting the flag to false in config.json —
-                 * the safety gate below short-circuits cleanly without
-                 * generating a response. The flag itself is now vestigial
-                 * and will be removed in a follow-up commit. See
+                /* M3 Dispatch T8b (2026-05-26) — unified dispatch is the
+                 * ONLY proactive composer. The `use_unified_dispatch` flag
+                 * has been removed; the only remaining safety gate is the
+                 * structural one: config + agent + provider vtable must
+                 * all be ready. When the gate trips it's a startup race
+                 * or genuine misconfiguration, NOT an operator opt-out —
+                 * to disable proactive sends, operators use
+                 * `initiative.enabled=false` or remove `proactive_channel`
+                 * from contact config. See
                  * docs/plans/2026-05-26-m3-dispatch-unification/. */
                 char *unified_mem_ctx = NULL;
                 size_t unified_mem_ctx_len = 0;
-                if (config && config->proactive_throttle.use_unified_dispatch && agent &&
-                    agent->provider.vtable) {
+                if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
                         unified_mem_ctx = hu_daemon_build_callback_context(
                             alloc, agent->memory, cp->contact_id, strlen(cp->contact_id), prompt,
@@ -2333,20 +2332,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     if (unified_mem_ctx)
                         alloc->free(alloc->ctx, unified_mem_ctx, unified_mem_ctx_len + 1);
                 } else {
-                    /* T8: safety gate trip. Either operator disabled unified
-                     * dispatch via config (flag=false), or agent/provider not
-                     * ready (startup race). Log + skip — never fall back to
-                     * the deleted legacy hu_agent_turn path. */
-                    if (config && !config->proactive_throttle.use_unified_dispatch) {
-                        hu_log_info("human", agent ? agent->observer : NULL,
-                                    "proactive to %s skipped: use_unified_dispatch=false (operator "
-                                    "opt-out — set true to re-enable)",
-                                    cp->name ? cp->name : cp->contact_id);
-                    } else {
-                        hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "proactive to %s skipped: agent/provider not ready",
-                                    cp->name ? cp->name : cp->contact_id);
-                    }
+                    /* T8b: safety gate trip — startup race or genuine
+                     * misconfiguration. Never falls back to the deleted
+                     * legacy hu_agent_turn path. */
+                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                "proactive to %s skipped: config/agent/provider not ready",
+                                cp->name ? cp->name : cp->contact_id);
                 }
                 agent->proactive_turn = false;
 
@@ -3691,6 +3682,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         "M3: adapter probe OK (path=%s schema=%u)", mp,
                         (unsigned)hu_m3_frontier_adapter_schema_version(stub));
             hu_m3_frontier_adapter_close(alloc, stub);
+        } else if (pe == HU_ERR_NOT_FOUND) {
+            /* Missing probe file is the common dev/fixture case (e.g. a
+             * /tmp/hu_m3_demo_fixture.bin left from a one-shot demo).
+             * Demote to info so operators don't see a startup WARN for
+             * "this fixture is missing" — which they may not even
+             * remember configuring. A real probe failure (corruption,
+             * permission, format mismatch) still warns below. */
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "M3: adapter probe path not present, skipping (%s)", mp);
         } else {
             hu_log_warn("human", agent ? agent->observer : NULL,
                         "M3: adapter probe failed for %s (%d)", mp, (int)pe);
