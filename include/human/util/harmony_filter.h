@@ -48,6 +48,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/provider.h" /* hu_stream_callback_t, hu_stream_chunk_t */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -97,6 +98,34 @@ hu_error_t hu_harmony_filter_finish(hu_harmony_filter_t *f, char **out, size_t *
  * Operator/test signal — should be near zero during normal flow,
  * non-zero only at intra-marker chunk boundaries. */
 size_t hu_harmony_filter_buffered_bytes(const hu_harmony_filter_t *f);
+
+/* Streaming-callback wrapper. Adapts any hu_stream_callback_t to one
+ * that filters Harmony markers from HU_STREAM_CONTENT deltas before
+ * dispatching to the inner callback. Non-content chunks (TOOL_*,
+ * THINKING) pass through unchanged. Caller drains the filter after
+ * the stream completes (sample below) to flush any held-back tail.
+ *
+ *   hu_harmony_filter_t *filter;
+ *   hu_harmony_filter_init(alloc, &filter);
+ *   hu_harmony_callback_wrap_t wrap = {
+ *       .inner = user_cb, .inner_ctx = user_ctx,
+ *       .filter = filter, .alloc = alloc,
+ *   };
+ *   stream_chat(..., hu_harmony_callback_wrap_fn, &wrap, ...);
+ *   // After stream completes — drain + free
+ *   hu_harmony_filter_free(filter);
+ *
+ * `filter` and `alloc` are BORROWED — caller owns the lifetime. The
+ * wrapper does NOT propagate is_final on filtered chunks; the caller
+ * is expected to emit a final chunk explicitly after draining. */
+typedef struct hu_harmony_callback_wrap {
+    hu_stream_callback_t inner;
+    void *inner_ctx;
+    hu_harmony_filter_t *filter;
+    hu_allocator_t *alloc;
+} hu_harmony_callback_wrap_t;
+
+bool hu_harmony_callback_wrap_fn(void *ctx, const hu_stream_chunk_t *chunk);
 
 #ifdef __cplusplus
 }

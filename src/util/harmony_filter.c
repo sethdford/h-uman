@@ -255,3 +255,40 @@ hu_error_t hu_harmony_filter_finish(hu_harmony_filter_t *f, char **out, size_t *
 size_t hu_harmony_filter_buffered_bytes(const hu_harmony_filter_t *f) {
     return f ? f->len : 0;
 }
+
+bool hu_harmony_callback_wrap_fn(void *ctx, const hu_stream_chunk_t *chunk) {
+    hu_harmony_callback_wrap_t *w = (hu_harmony_callback_wrap_t *)ctx;
+    if (!w || !w->inner)
+        return false;
+    if (!chunk)
+        return w->inner(w->inner_ctx, NULL);
+    /* Non-content chunks (TOOL_*, THINKING) pass through unchanged. */
+    if (chunk->type != HU_STREAM_CONTENT)
+        return w->inner(w->inner_ctx, chunk);
+    /* Zero-length content chunk — forward as-is so downstream still
+     * sees the metadata (is_final, token_count). */
+    if (!chunk->delta || chunk->delta_len == 0)
+        return w->inner(w->inner_ctx, chunk);
+    /* Defensive degrade: missing filter -> passthrough. */
+    if (!w->filter || !w->alloc)
+        return w->inner(w->inner_ctx, chunk);
+    char *filtered = NULL;
+    size_t filtered_len = 0;
+    hu_error_t e =
+        hu_harmony_filter_push(w->filter, chunk->delta, chunk->delta_len, &filtered, &filtered_len);
+    if (e != HU_OK)
+        return w->inner(w->inner_ctx, chunk); /* fail-open passthrough */
+    bool keep_going = true;
+    if (filtered_len > 0) {
+        hu_stream_chunk_t emit = *chunk;
+        emit.delta = filtered;
+        emit.delta_len = filtered_len;
+        /* Don't propagate is_final on filtered chunks — caller drains
+         * the filter and emits a final chunk explicitly. */
+        emit.is_final = false;
+        keep_going = w->inner(w->inner_ctx, &emit);
+    }
+    if (filtered)
+        w->alloc->free(w->alloc->ctx, filtered, filtered_len + 1);
+    return keep_going;
+}

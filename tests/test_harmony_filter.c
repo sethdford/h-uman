@@ -308,6 +308,121 @@ static void test_harmony_filter_zero_byte_push_is_noop(void) {
     hu_harmony_filter_free(f);
 }
 
+/* ──────────────────────────────────────────────────────────────────
+ * Callback wrapper tests — isolate the wrapper from any provider /
+ * SSE / HTTP code. Synthetic recorder callback captures every chunk
+ * the wrapper dispatches.
+ * ────────────────────────────────────────────────────────────────── */
+
+typedef struct chunk_record {
+    hu_stream_chunk_type_t type;
+    char delta_copy[256];
+    size_t delta_len;
+    bool is_final;
+    bool seen_tool_name;
+} chunk_record_t;
+
+typedef struct recorder_ctx {
+    chunk_record_t records[16];
+    size_t count;
+    bool return_value;
+} recorder_ctx_t;
+
+static bool recorder_cb(void *ctx, const hu_stream_chunk_t *chunk) {
+    recorder_ctx_t *r = (recorder_ctx_t *)ctx;
+    if (!chunk || r->count >= 16)
+        return r->return_value;
+    chunk_record_t *rec = &r->records[r->count++];
+    rec->type = chunk->type;
+    rec->delta_len = chunk->delta_len < sizeof(rec->delta_copy) - 1 ? chunk->delta_len
+                                                                    : sizeof(rec->delta_copy) - 1;
+    if (chunk->delta && rec->delta_len > 0)
+        memcpy(rec->delta_copy, chunk->delta, rec->delta_len);
+    rec->delta_copy[rec->delta_len] = '\0';
+    rec->is_final = chunk->is_final;
+    rec->seen_tool_name = (chunk->tool_name != NULL);
+    return r->return_value;
+}
+
+static void test_harmony_wrap_filters_content_delta_with_marker(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+    recorder_ctx_t rec = {.return_value = true};
+    hu_harmony_callback_wrap_t wrap = {
+        .inner = recorder_cb, .inner_ctx = &rec, .filter = f, .alloc = &a};
+
+    const char *delta = "before <|channel|> after — padding text to clear the lookahead window.";
+    hu_stream_chunk_t in = {.type = HU_STREAM_CONTENT, .delta = delta, .delta_len = strlen(delta)};
+    bool keep = hu_harmony_callback_wrap_fn(&wrap, &in);
+    HU_ASSERT_TRUE(keep);
+    HU_ASSERT(rec.count >= 1);
+    HU_ASSERT_EQ(rec.records[0].type, HU_STREAM_CONTENT);
+    HU_ASSERT_NULL(strstr(rec.records[0].delta_copy, "<|channel|>"));
+    HU_ASSERT_NOT_NULL(strstr(rec.records[0].delta_copy, "before"));
+    HU_ASSERT_NOT_NULL(strstr(rec.records[0].delta_copy, "after"));
+
+    hu_harmony_filter_free(f);
+}
+
+static void test_harmony_wrap_passes_through_tool_chunks_unchanged(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+    recorder_ctx_t rec = {.return_value = true};
+    hu_harmony_callback_wrap_t wrap = {
+        .inner = recorder_cb, .inner_ctx = &rec, .filter = f, .alloc = &a};
+
+    hu_stream_chunk_t in = {.type = HU_STREAM_TOOL_START,
+                            .tool_name = "shell",
+                            .tool_name_len = 5,
+                            .tool_call_id = "call_001",
+                            .tool_call_id_len = 8,
+                            .tool_index = 0};
+    bool keep = hu_harmony_callback_wrap_fn(&wrap, &in);
+    HU_ASSERT_TRUE(keep);
+    HU_ASSERT_EQ(rec.count, (size_t)1);
+    HU_ASSERT_EQ(rec.records[0].type, HU_STREAM_TOOL_START);
+    HU_ASSERT_TRUE(rec.records[0].seen_tool_name);
+
+    hu_harmony_filter_free(f);
+}
+
+static void test_harmony_wrap_holds_back_partial_marker_silently(void) {
+    /* When the entire chunk is held back, wrapper MUST NOT fire inner. */
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+    recorder_ctx_t rec = {.return_value = true};
+    hu_harmony_callback_wrap_t wrap = {
+        .inner = recorder_cb, .inner_ctx = &rec, .filter = f, .alloc = &a};
+
+    const char *delta = "<|cha";
+    hu_stream_chunk_t in = {.type = HU_STREAM_CONTENT, .delta = delta, .delta_len = strlen(delta)};
+    bool keep = hu_harmony_callback_wrap_fn(&wrap, &in);
+    HU_ASSERT_TRUE(keep);
+    HU_ASSERT_EQ(rec.count, (size_t)0);
+    HU_ASSERT_EQ(hu_harmony_filter_buffered_bytes(f), (size_t)5);
+
+    hu_harmony_filter_free(f);
+}
+
+static void test_harmony_wrap_inner_stop_signal_propagates(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_harmony_filter_t *f = NULL;
+    HU_ASSERT_EQ(hu_harmony_filter_init(&a, &f), HU_OK);
+    recorder_ctx_t rec = {.return_value = false}; /* signal stop */
+    hu_harmony_callback_wrap_t wrap = {
+        .inner = recorder_cb, .inner_ctx = &rec, .filter = f, .alloc = &a};
+
+    const char *delta = "clean text long enough to push past the lookahead window so it emits.";
+    hu_stream_chunk_t in = {.type = HU_STREAM_CONTENT, .delta = delta, .delta_len = strlen(delta)};
+    bool keep = hu_harmony_callback_wrap_fn(&wrap, &in);
+    HU_ASSERT_FALSE(keep);
+
+    hu_harmony_filter_free(f);
+}
+
 void run_harmony_filter_tests(void);
 void run_harmony_filter_tests(void) {
     HU_TEST_SUITE("harmony_filter");
@@ -322,4 +437,9 @@ void run_harmony_filter_tests(void) {
     HU_RUN_TEST(test_harmony_filter_strips_multiple_markers);
     HU_RUN_TEST(test_harmony_filter_preserves_non_marker_pipe);
     HU_RUN_TEST(test_harmony_filter_zero_byte_push_is_noop);
+    /* T4-part2: callback wrapper. */
+    HU_RUN_TEST(test_harmony_wrap_filters_content_delta_with_marker);
+    HU_RUN_TEST(test_harmony_wrap_passes_through_tool_chunks_unchanged);
+    HU_RUN_TEST(test_harmony_wrap_holds_back_partial_marker_silently);
+    HU_RUN_TEST(test_harmony_wrap_inner_stop_signal_propagates);
 }
