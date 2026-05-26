@@ -342,23 +342,15 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
  * call returned items from every contact, which combined with the
  * proactive prompt being keyed by the recipient's contact_id allowed one
  * contact's feed topic to bleed into another contact's emotional_moments
- * row (see header comment + audit-lora-training-judge.md history).
- *
- * STUB — RED phase: returns empty so the test fails on assertion. GREEN
- * step replaces the body with hu_feed_processor_get_for_contact. */
+ * row (see header for the full incident chain). */
 hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sqlite3 *db,
                                                       const hu_contact_profile_t *cp, size_t limit,
                                                       hu_feed_item_stored_t **out,
                                                       size_t *out_count) {
-    (void)alloc;
-    (void)db;
-    (void)cp;
-    (void)limit;
-    if (!out || !out_count)
+    if (!alloc || !db || !cp || !cp->contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
-    return HU_OK;
+    return hu_feed_processor_get_for_contact(alloc, db, cp->contact_id, strlen(cp->contact_id),
+                                             limit, out, out_count);
 }
 #endif
 
@@ -446,10 +438,14 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     if (memory && agent && agent->persona) {
         sqlite3 *fdb = hu_sqlite_memory_get_db(memory);
         if (fdb) {
-            int64_t since_feed = (int64_t)time(NULL) - (int64_t)172800;
             hu_feed_item_stored_t *stored = NULL;
             size_t scount = 0;
-            if (hu_feed_processor_get_all_recent(alloc, fdb, since_feed, 32, &stored, &scount) ==
+            /* Sprint 59 Phase C: scope to this contact's feed items only.
+             * Previous get_all_recent variant returned items from every
+             * contact, which let one contact's "lonely" feed topic seed
+             * emotional_moments rows for unrelated contacts via the
+             * proactive recipient's session_id (Annie/Mindy/Betty). */
+            if (hu_daemon_proactive_get_contact_feed_items(alloc, fdb, cp, 32, &stored, &scount) ==
                     HU_OK &&
                 stored && scount > 0) {
                 hu_feed_item_t *fitems =
