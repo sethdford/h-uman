@@ -5,6 +5,7 @@
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
 #include "human/doctor/check_reaction_collection_wired.h"
+#include "human/doctor/check_unified_dispatch.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -440,6 +441,14 @@ static hu_doctor_check_result_t run_outbound_stats_check(hu_doctor_check_t *self
     return hu_doctor_check_outbound_stats.run(self, NULL);
 }
 
+/* M3 Dispatch — unified-dispatch health check. Same shape as
+ * outbound_stats: ctx ignored, reads process-wide atomics directly
+ * via hu_guard_reject_stats_snapshot() inside the check body. */
+static hu_doctor_check_result_t run_unified_dispatch_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_unified_dispatch.run(self, NULL);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -464,6 +473,9 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          run_reaction_collection_wired_check, NULL, NULL},
         {"outbound_stats", "Per-stage × per-verdict counters for the outbound pipeline (Sprint 60)",
          run_outbound_stats_check, NULL, NULL},
+        {"unified_dispatch",
+         "M3 unified-dispatch G9 retry-outcome health (rescued/thrashed/starved)",
+         run_unified_dispatch_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},

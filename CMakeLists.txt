@@ -568,6 +568,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_provider.c
     src/doctor/check_outbound_stats.c
     src/doctor/check_reaction_collection_wired.c
+    src/doctor/check_unified_dispatch.c
     src/doctor/exit_code.c
     src/doctor/json_output.c
     src/doctor_fix.c
@@ -3394,6 +3395,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_outbound_corpus_regression.c
     tests/test_outbound_stats.c
     tests/test_doctor_outbound_stats.c
+    tests/test_doctor_unified_dispatch.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
