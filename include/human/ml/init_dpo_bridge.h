@@ -35,10 +35,24 @@
 #include "human/core/error.h"
 #include <stdint.h>
 
-/* Stable source-tag for every row this bridge writes. The read side
- * (or a doctor audit) can `SELECT * FROM dpo_pairs WHERE source = ?`
- * to isolate the init-proposer signal. */
+/* Stable source-tag for every single-sided row this bridge writes. The
+ * read side (or a doctor audit) can `SELECT * FROM dpo_pairs WHERE
+ * source = ?` to isolate the init-proposer signal. */
 #define HU_INIT_DPO_BRIDGE_SOURCE "init_proposer_v1"
+
+/* Stable source-tag for paired rows produced by hu_init_dpo_bridge_pair_singles.
+ * Paired rows carry BOTH chosen and rejected populated → they pass the
+ * 4-byte-minimum read filter at hu_dpo_iterate_pairs and become eligible
+ * for ORPO/DPO training. Distinct tag lets readers filter / audit
+ * separately from single-sided input. */
+#define HU_INIT_DPO_BRIDGE_PAIRED_SOURCE "init_proposer_paired_v1"
+
+/* Sentinel margin value applied to the two single-sided ROWS that fed
+ * a successful pair. The pairing pass uses this to mark already-paired
+ * rows so re-running the pass is idempotent (rows with margin == -1.0
+ * are skipped). Distinct from any real DPO margin (which lives in
+ * [0.0, 1.0]). */
+#define HU_INIT_DPO_BRIDGE_PAIRED_MARGIN_SENTINEL (-1.0)
 
 /* Register the daemon's hu_dpo_collector_t with the bridge. Should be
  * called once at daemon init (after `hu_dpo_collector_create` succeeds).
@@ -84,6 +98,41 @@ struct hu_dpo_collector *hu_init_dpo_bridge_get_collector(void);
  * resolver's cadence (every proposer tick, default 30 min). */
 hu_error_t hu_init_dpo_bridge_record(hu_allocator_t *alloc, hu_init_resolution_t outcome,
                                      const char *draft, const char *target, int64_t resolution_ts);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Pairing pass — convert accumulated single-sided init_proposer rows into
+ * true two-sided preference pairs that the read filter at
+ * hu_dpo_iterate_pairs will surface for ORPO/DPO training.
+ *
+ * Algorithm (idempotent on re-run):
+ *   1. SELECT id, prompt, chosen, rejected, timestamp FROM dpo_pairs
+ *      WHERE source = HU_INIT_DPO_BRIDGE_SOURCE
+ *        AND margin != HU_INIT_DPO_BRIDGE_PAIRED_MARGIN_SENTINEL
+ *      ORDER BY timestamp;
+ *   2. Extract target_handle from each prompt (the bridge prompt format
+ *      is "proactive-proposal: target=<handle> ts=<unix>").
+ *   3. For each (target_handle) bucket, take the most-recent REPLIED row
+ *      (chosen non-empty, rejected empty) and pair it with the
+ *      most-recent IGNORED row (chosen empty, rejected non-empty) where
+ *      the IGNORED ts < REPLIED ts (we want the "they DIDN'T like that
+ *      draft, then they DID like this one" gradient).
+ *   4. INSERT a new row: source=PAIRED_SOURCE, prompt=concat of source
+ *      prompts, chosen=REPLIED draft, rejected=IGNORED draft, margin=1.0,
+ *      timestamp=now.
+ *   5. UPDATE both source rows: SET margin =
+ *      HU_INIT_DPO_BRIDGE_PAIRED_MARGIN_SENTINEL (idempotency mark).
+ *
+ * Returns HU_OK on success (paired_count populated). Returns
+ * HU_ERR_NOT_SUPPORTED if no collector is registered. Returns HU_ERR_IO
+ * on SQLite failure (paired_count reflects rows successfully paired
+ * before the error).
+ *
+ * Safe to call repeatedly. Each call only consumes rows that haven't
+ * been paired yet.
+ *
+ * Cost: O(N) walk over single-sided rows + one INSERT and two UPDATEs
+ * per pair. For ~hundreds of rows the call is sub-second. */
+hu_error_t hu_init_dpo_bridge_pair_singles(hu_allocator_t *alloc, size_t *paired_count);
 
 #endif /* HU_ENABLE_ML */
 

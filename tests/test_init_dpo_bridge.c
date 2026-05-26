@@ -110,6 +110,105 @@ static void test_init_dpo_bridge_no_collector_returns_not_supported(void) {
                  HU_ERR_NOT_SUPPORTED);
 }
 
+#ifdef HU_ENABLE_SQLITE
+static void test_init_dpo_bridge_pair_singles_pairs_replied_with_ignored(void) {
+    /* Two single-sided rows for the same target, IGNORED earlier than
+     * REPLIED. The pairing pass should produce one paired row and
+     * mark both source rows with the sentinel margin. */
+    hu_dpo_collector_t col;
+    mk_collector(&col);
+    hu_init_dpo_bridge_set_collector(&col);
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* T=100: IGNORED draft, target=+1555. */
+    HU_ASSERT_EQ(hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_IGNORED,
+                                           "Want to grab coffee tomorrow?", "+15551234567", 100),
+                 HU_OK);
+    /* T=200: REPLIED draft, same target. */
+    HU_ASSERT_EQ(hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_REPLIED,
+                                           "How did the deploy go yesterday?", "+15551234567", 200),
+                 HU_OK);
+
+    size_t before = 0;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &before), HU_OK);
+    HU_ASSERT_EQ((int)before, 2);
+
+    /* Pair them. */
+    size_t paired = 0;
+    HU_ASSERT_EQ(hu_init_dpo_bridge_pair_singles(&alloc, &paired), HU_OK);
+    HU_ASSERT_EQ((int)paired, 1);
+
+    /* dpo_pairs now has 3 rows: 2 original (with sentinel margin) + 1
+     * paired (with margin=1.0). */
+    size_t after = 0;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &after), HU_OK);
+    HU_ASSERT_EQ((int)after, 3);
+
+    hu_init_dpo_bridge_set_collector(NULL);
+    hu_dpo_collector_deinit(&col);
+}
+
+static void test_init_dpo_bridge_pair_singles_is_idempotent(void) {
+    /* Running the pairing pass a second time on the same state must
+     * produce zero new pairs — the sentinel margin marks already-
+     * processed rows. */
+    hu_dpo_collector_t col;
+    mk_collector(&col);
+    hu_init_dpo_bridge_set_collector(&col);
+    hu_allocator_t alloc = hu_system_allocator();
+
+    HU_ASSERT_EQ(hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_IGNORED, "draft A",
+                                           "+15551234567", 100),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_REPLIED, "draft B",
+                                           "+15551234567", 200),
+                 HU_OK);
+
+    size_t paired_first = 0;
+    HU_ASSERT_EQ(hu_init_dpo_bridge_pair_singles(&alloc, &paired_first), HU_OK);
+    HU_ASSERT_EQ((int)paired_first, 1);
+
+    size_t paired_again = 0;
+    HU_ASSERT_EQ(hu_init_dpo_bridge_pair_singles(&alloc, &paired_again), HU_OK);
+    HU_ASSERT_EQ((int)paired_again, 0);
+
+    hu_init_dpo_bridge_set_collector(NULL);
+    hu_dpo_collector_deinit(&col);
+}
+
+static void test_init_dpo_bridge_pair_singles_does_not_cross_targets(void) {
+    /* IGNORED for target_A + REPLIED for target_B must NOT pair —
+     * each target's gradient is independent. */
+    hu_dpo_collector_t col;
+    mk_collector(&col);
+    hu_init_dpo_bridge_set_collector(&col);
+    hu_allocator_t alloc = hu_system_allocator();
+
+    HU_ASSERT_EQ(
+        hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_IGNORED, "draft for A", "+1AAA", 100),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_init_dpo_bridge_record(&alloc, HU_INIT_RESOLUTION_REPLIED, "draft for B", "+1BBB", 200),
+        HU_OK);
+
+    size_t paired = 0;
+    HU_ASSERT_EQ(hu_init_dpo_bridge_pair_singles(&alloc, &paired), HU_OK);
+    HU_ASSERT_EQ((int)paired, 0);
+
+    hu_init_dpo_bridge_set_collector(NULL);
+    hu_dpo_collector_deinit(&col);
+}
+
+static void test_init_dpo_bridge_pair_singles_no_collector_returns_not_supported(void) {
+    hu_init_dpo_bridge_set_collector(NULL);
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t paired = 999;
+    HU_ASSERT_EQ(hu_init_dpo_bridge_pair_singles(&alloc, &paired), HU_ERR_NOT_SUPPORTED);
+    /* On NOT_SUPPORTED, paired_count must be zeroed (the contract). */
+    HU_ASSERT_EQ((int)paired, 0);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 static void test_init_dpo_bridge_set_collector_round_trips(void) {
     hu_dpo_collector_t col;
     mk_collector(&col);
@@ -129,6 +228,12 @@ void run_init_dpo_bridge_tests(void) {
     HU_RUN_TEST(test_init_dpo_bridge_pending_rejected);
     HU_RUN_TEST(test_init_dpo_bridge_no_collector_returns_not_supported);
     HU_RUN_TEST(test_init_dpo_bridge_set_collector_round_trips);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_init_dpo_bridge_pair_singles_pairs_replied_with_ignored);
+    HU_RUN_TEST(test_init_dpo_bridge_pair_singles_is_idempotent);
+    HU_RUN_TEST(test_init_dpo_bridge_pair_singles_does_not_cross_targets);
+    HU_RUN_TEST(test_init_dpo_bridge_pair_singles_no_collector_returns_not_supported);
+#endif
 }
 
 #else /* HU_ENABLE_ML */
