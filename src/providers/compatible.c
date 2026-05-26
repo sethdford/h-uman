@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> /* T8 — clock_gettime for first-token latency metric */
 
 #if !HU_IS_TEST
 #include "human/core/http.h"
@@ -547,7 +548,52 @@ typedef struct compatible_stream_ctx {
     size_t content_cap;
     compatible_stream_tool_t tools[COMPATIBLE_STREAM_MAX_TOOLS];
     size_t tools_count;
+    /* T6 — caller's stop signal. When the user callback returns false,
+     * subsequent callback fires are suppressed. The HTTP request keeps
+     * running (no clean abort path through hu_http_post_json_stream
+     * yet), but the consumer stops receiving chunks they don't want. */
+    bool stop_requested;
+    /* T8 — first-token latency metric. t0_ns is set BEFORE the HTTP
+     * POST in compatible_stream_chat; first_token_latency_ms is filled
+     * in by compatible_fire_chunk on the first content emission. */
+    uint64_t t0_ns;
+    uint64_t first_token_latency_ms;
+    bool first_chunk_fired;
 } compatible_stream_ctx_t;
+
+/* T8 — wall-clock now in ns via CLOCK_MONOTONIC. Returns 0 if the
+ * clock isn't available (defensive; shouldn't happen on supported
+ * platforms but avoids leaking garbage values). */
+static inline uint64_t compatible_monotonic_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+/* Fire `s->callback` honoring stop_requested. If the callback returns
+ * false (stop), set stop_requested so future fires no-op.
+ *
+ * T8 — on the FIRST content-chunk fire after the HTTP POST, record
+ * the wall-clock delta from t0_ns. The metric goes into
+ * first_token_latency_ms for compatible_stream_chat to inspect after
+ * the call returns. Tool-start/done/thinking chunks are also "first
+ * tokens" from the operator's perspective; we measure the first one
+ * regardless of type because that's when the user-visible UI gets
+ * its first signal that the model is responding. */
+static inline void compatible_fire_chunk(compatible_stream_ctx_t *s,
+                                         const hu_stream_chunk_t *chunk) {
+    if (!s || !s->callback || s->stop_requested)
+        return;
+    if (!s->first_chunk_fired && s->t0_ns > 0) {
+        uint64_t now_ns = compatible_monotonic_ns();
+        if (now_ns > s->t0_ns)
+            s->first_token_latency_ms = (now_ns - s->t0_ns) / 1000000ULL;
+        s->first_chunk_fired = true;
+    }
+    if (!s->callback(s->callback_ctx, chunk))
+        s->stop_requested = true;
+}
 
 static void compatible_append_content(compatible_stream_ctx_t *s, const char *delta,
                                       size_t delta_len);
@@ -593,7 +639,7 @@ static void compatible_extract_stream_delta(compatible_stream_ctx_t *s, const ch
             chunk.type = HU_STREAM_CONTENT;
             chunk.delta = content;
             chunk.delta_len = clen;
-            s->callback(s->callback_ctx, &chunk);
+            compatible_fire_chunk(s, &chunk);
         }
     }
 
@@ -635,7 +681,7 @@ static void compatible_extract_stream_delta(compatible_stream_ctx_t *s, const ch
                 chunk.tool_call_id = t->id;
                 chunk.tool_call_id_len = t->id_len;
                 chunk.tool_index = idx;
-                s->callback(s->callback_ctx, &chunk);
+                compatible_fire_chunk(s, &chunk);
             }
 
             const char *fn_args = fn ? hu_json_get_string(fn, "arguments") : NULL;
@@ -653,7 +699,7 @@ static void compatible_extract_stream_delta(compatible_stream_ctx_t *s, const ch
                     chunk.tool_name = t->name;
                     chunk.tool_name_len = t->name_len;
                     chunk.tool_index = idx;
-                    s->callback(s->callback_ctx, &chunk);
+                    compatible_fire_chunk(s, &chunk);
                 }
             }
         }
@@ -726,7 +772,7 @@ static void compatible_sse_event_cb(const char *event_type, size_t event_type_le
         memset(&chunk, 0, sizeof(chunk));
         chunk.type = HU_STREAM_CONTENT;
         chunk.is_final = true;
-        s->callback(s->callback_ctx, &chunk);
+        compatible_fire_chunk(s, &chunk);
         return;
     }
     compatible_extract_stream_delta(s, data, data_len);
@@ -924,6 +970,14 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
 
     hu_log_info("compatible", NULL, "stream_chat: provider=compatible model=%.*s body_len=%zu",
                 (int)model_len, model, body_len);
+    /* T8 — record the request-start wall clock so compatible_fire_chunk
+     * can measure first-token latency on the first content emission.
+     * MUST be set AFTER any wrapping (sctx.callback may have been
+     * swapped above) but BEFORE the HTTP call. */
+    sctx.t0_ns = compatible_monotonic_ns();
+    sctx.first_chunk_fired = false;
+    sctx.first_token_latency_ms = 0;
+
     /* Serialize against concurrent chat/stream_chat to a single-threaded
      * MLX upstream. See g_compatible_chat_lock declaration. The lock is
      * held for the duration of the stream (covers SSE keep-alive); other
@@ -934,6 +988,19 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
+
+    /* T8 — log warn-once if first-token latency exceeded the soft
+     * budget. Hardcoded to 500 ms (matches cfg.mlx_local.first_token_
+     * budget_ms default per T2 spec D6). Operators see this and can
+     * decide whether the mlx-server has regressed. Skipped when no
+     * first chunk fired (request errored out before any response). */
+    if (sctx.first_chunk_fired && sctx.first_token_latency_ms > 500) {
+        static atomic_bool warned_first_token_slow = false;
+        hu_log_info_once(&warned_first_token_slow, "compatible", NULL,
+                         "stream_chat: first-token latency %llums exceeded "
+                         "500ms soft budget (one-shot warning per process)",
+                         (unsigned long long)sctx.first_token_latency_ms);
+    }
 
     /* T4-part3 — drain held-back filter bytes through the original
      * user callback. Wrapper never propagates is_final on filtered
@@ -948,7 +1015,9 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
             tail_chunk.type = HU_STREAM_CONTENT;
             tail_chunk.delta = drained;
             tail_chunk.delta_len = drained_len;
-            callback(callback_ctx, &tail_chunk);
+            /* T6 — skip drain emission if caller already requested stop. */
+            if (!sctx.stop_requested)
+                callback(callback_ctx, &tail_chunk);
         }
         if (drained)
             alloc->free(alloc->ctx, drained, drained_len + 1);
@@ -997,7 +1066,10 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
                 done_chunk.tool_call_id = t->id;
                 done_chunk.tool_call_id_len = t->id_len;
                 done_chunk.tool_index = (int)ti;
-                callback(callback_ctx, &done_chunk);
+                /* T6 — honor caller's stop signal even for post-stream
+                 * synthetic chunks. */
+                if (!sctx.stop_requested)
+                    callback(callback_ctx, &done_chunk);
             }
         }
         hu_tool_call_t *tcs =
@@ -1026,7 +1098,7 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     COMPATIBLE_STREAM_CLEANUP_TOOLS();
 #undef COMPATIBLE_STREAM_CLEANUP_TOOLS
 
-    {
+    if (!sctx.stop_requested) {
         hu_stream_chunk_t final_chunk;
         memset(&final_chunk, 0, sizeof(final_chunk));
         final_chunk.type = HU_STREAM_CONTENT;
