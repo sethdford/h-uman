@@ -50,6 +50,32 @@ static bool ax_reply_tier1_cmd_r(const char *target, size_t target_len, const ch
     (void)body_len;
     return false; /* Real CGEvent + AX wiring deferred to integration pass */
 }
+
+/* Real impl mirrors ax_perform_tapback_on_row in src/channels/imessage.c:
+ *
+ * 1. ax_open_conversation(target, target_len)
+ * 2. ax_find_message_group(window, parent_text_prefix, 0)
+ * 3. AXUIElementPerformAction(msg_group, kAXShowMenuAction)
+ * 4. Iterate context menu items; match title.startswith("Reply")
+ *    — handles "Reply…" (U+2026 ellipsis), "Reply..." (3 dots), localized
+ * 5. AXUIElementPerformAction(menu_item, kAXPressAction)
+ * 6. Poll for the inline composer (AX text field appearing under parent)
+ * 7. CGEventKeyboardSetUnicodeString for body
+ * 8. Return key synth
+ *
+ * Like Tier 1, stubbed to return false in C2 — real AX wiring is part of
+ * the post-C5 integration pass on a live macOS box. The test-stub contract
+ * is what's exercised in CI. */
+static bool ax_reply_tier2_show_menu(const char *target, size_t target_len, const char *parent_guid,
+                                     size_t parent_guid_len, const char *body, size_t body_len) {
+    (void)target;
+    (void)target_len;
+    (void)parent_guid;
+    (void)parent_guid_len;
+    (void)body;
+    (void)body_len;
+    return false;
+}
 #endif
 
 hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
@@ -77,7 +103,21 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
         return HU_OK;
     }
 
-    /* Tier 2 (AXShowMenu) lands in C2; Tier 3 (flat fallback) lands in C3.
-     * For C1, if Tier 1 fails, propagate NOT_SUPPORTED. */
+    /* Tier 2: AXShowMenu → click "Reply…" menu item. */
+    bool t2_ok = false;
+    if (g_test_tier2) {
+        t2_ok = g_test_tier2(parent_msg_guid, parent_msg_guid_len, body, body_len);
+    } else {
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
+        t2_ok = ax_reply_tier2_show_menu(target, target_len, parent_msg_guid, parent_msg_guid_len,
+                                         body, body_len);
+#endif
+    }
+    if (t2_ok) {
+        snprintf(g_last_tier, sizeof(g_last_tier), "ax_menu");
+        return HU_OK;
+    }
+
+    /* Tier 3 (flat fallback) lands in C3. */
     return HU_ERR_NOT_SUPPORTED;
 }
