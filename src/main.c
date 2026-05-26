@@ -184,6 +184,7 @@ static hu_error_t cmd_version(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_help(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_status(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv);
+hu_error_t cmd_ctl(hu_allocator_t *alloc, int argc, char **argv);
 /* Phase 4c (Gemma throughput program) — print the effective inference
  * config the daemon would use right now. Reads the same getenv slots
  * the factory consumes, so the reported values match what the chat
@@ -531,6 +532,8 @@ static const hu_command_t commands[] = {
     {"status", "Show runtime status", cmd_status},
     {"onboard", "Interactive setup wizard", cmd_onboard},
     {"doctor", "Run system diagnostics", cmd_doctor},
+    {"ctl", "Runtime kill-switch inspector (guard status/disable-g9/enable-g9/list-channels)",
+     cmd_ctl},
     {"inference-status", "Show effective inference throughput config (KV quant, FA, draft model)",
      cmd_inference_status},
 #ifdef HU_HAS_CRON
