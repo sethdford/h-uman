@@ -1589,7 +1589,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 hu_error_t qerr = hu_imessage_find_unreplied_read(
                     cp->contact_id, strlen(cp->contact_id), &fmsg_id, &fread_at_ms);
 #else
-                /* Builds without HU_ENABLE_IMESSAGE can't query chat.db. The
+                /* Builds without HU_HAS_IMESSAGE can't query chat.db. The
                  * loop's outer guard at line 1284 already filters to imessage
                  * channels; we only reach this point when imessage support is
                  * compiled in. Stub-out as NOT_SUPPORTED for the unreachable

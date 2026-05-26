@@ -111,14 +111,14 @@ struct hu_personal_model;
 
 #include "human/core/error.h"
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
                                              const hu_reaction_event_t *event,
                                              const char *custom_emoji,
                                              const char *target_text_preview,
                                              bool is_from_me_target, bool in_group_chat);
 #else
-/* HU_ENABLE_IMESSAGE=OFF stub. Without the iMessage channel compiled in,
+/* HU_HAS_IMESSAGE=OFF stub. Without the iMessage channel compiled in,
  * imessage_ingest.c isn't built — so callers in reaction_handler.c need an
  * inline no-op to satisfy the link contract (per
  * ~/.claude/rules/test-source-gate-symmetry.md). The reaction-handler path

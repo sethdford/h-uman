@@ -1,6 +1,6 @@
 #include "test_framework.h"
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 
 #include "human/channels/imessage.h"
 #include <stdio.h>
@@ -113,7 +113,7 @@ void run_imessage_sticker_tests(void) {
     HU_RUN_TEST(stub_failure_propagates);
 }
 
-#else /* !HU_ENABLE_IMESSAGE — stub runner. */
+#else /* !HU_HAS_IMESSAGE — stub runner. */
 void run_imessage_sticker_tests(void) {
     (void)0;
 }

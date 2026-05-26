@@ -1,6 +1,6 @@
 #include "test_framework.h"
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 
 #include "human/channels/imessage_action.h"
 #include <stdio.h>
@@ -89,7 +89,7 @@ void run_imessage_action_telemetry_tests(void) {
     HU_RUN_TEST(appends_not_truncates);
 }
 
-#else /* !HU_ENABLE_IMESSAGE — stub runner so test_main.c links cleanly. */
+#else /* !HU_HAS_IMESSAGE — stub runner so test_main.c links cleanly. */
 void run_imessage_action_telemetry_tests(void) {
     (void)0;
 }

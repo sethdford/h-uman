@@ -11,7 +11,7 @@
 
 #include "test_framework.h"
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 
 #include "human/channels/imessage_ingest.h"
 #include "human/channels/reaction_event.h"
@@ -743,10 +743,10 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_ingest_audio_tone_classifies_deliberate_speech);
 }
 
-#else /* !HU_ENABLE_IMESSAGE — stub runner so the symbol resolves */
+#else /* !HU_HAS_IMESSAGE — stub runner so the symbol resolves */
 
 void run_imessage_ingest_tests(void) {
     (void)0;
 }
 
-#endif /* HU_ENABLE_IMESSAGE */
+#endif /* HU_HAS_IMESSAGE */

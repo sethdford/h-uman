@@ -10,7 +10,7 @@
  * file lives in the HU_HAS_IMESSAGE block, so variants with
  * HU_HAS_IMESSAGE=OFF would fail to link without this wrap. */
 
-#ifdef HU_ENABLE_IMESSAGE
+#ifdef HU_HAS_IMESSAGE
 
 #include "human/channels/contact_signature.h"
 #include "test_framework.h"
@@ -206,10 +206,10 @@ void run_contact_signature_tests(void) {
     HU_RUN_TEST(test_initiation_ratio_zero_threshold_uses_default);
 }
 
-#else /* HU_ENABLE_IMESSAGE not defined — provide stub so symbol resolves */
+#else /* HU_HAS_IMESSAGE not defined — provide stub so symbol resolves */
 
 void run_contact_signature_tests(void) {
     (void)0;
 }
 
-#endif /* HU_ENABLE_IMESSAGE */
+#endif /* HU_HAS_IMESSAGE */

@@ -1270,7 +1270,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (cfg->channels.imessage.default_target)
             hu_log_error("bootstrap", NULL,
                          "WARNING: iMessage configured in config but binary was built "
-                         "without HU_ENABLE_IMESSAGE — rebuild with -DHU_ENABLE_IMESSAGE=ON");
+                         "without HU_HAS_IMESSAGE — rebuild with -DHU_HAS_IMESSAGE=ON");
 #endif
 
 #if HU_HAS_PWA

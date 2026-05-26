@@ -635,7 +635,7 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
  * Pure mapping from a `last_error_class` STRING (as serialized by the
  * daemon via `hu_imessage_error_class_name` into `imessage.poll_status`)
  * to a user-actionable diag item. Strings instead of the enum so the
- * predicate compiles and links even when HU_ENABLE_IMESSAGE=OFF (the
+ * predicate compiles and links even when HU_HAS_IMESSAGE=OFF (the
  * monitoring `--json` consumer may run on a slimmed binary that still
  * reads the status file).
  *
@@ -795,7 +795,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     (void)stale_after_secs;
     return doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                             "[doctor] iMessage: not built into this binary "
-                            "(HU_ENABLE_IMESSAGE=OFF)");
+                            "(HU_HAS_IMESSAGE=OFF)");
 #else
     /* 1. chat.db readability — the FDA gate.
      *
