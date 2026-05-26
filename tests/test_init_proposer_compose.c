@@ -298,6 +298,44 @@ static void config_use_unified_dispatch_independent_of_other_throttle_fields(voi
     HU_ASSERT_TRUE(cfg.proactive_throttle.use_unified_dispatch);
 }
 
+/* ── M3 Dispatch T8 — legacy path deletion audit ─────────────────────── */
+
+#include <stdio.h>
+
+/* T8 audit: grep src/daemon.c's proactive-send block for hu_agent_turn
+ * and assert ZERO matches. Pins that the legacy composition path is
+ * structurally gone, not just bypassed via the (now-removed) else
+ * branch. Future refactors that accidentally re-add hu_agent_turn to
+ * the proactive block trip this test. */
+static void t8_daemon_proactive_block_has_zero_hu_agent_turn_calls(void) {
+    FILE *f = fopen("src/daemon.c", "r");
+    if (!f) {
+        /* Working directory may not be repo root in CI test harness;
+         * try the abs path as a fallback. */
+        f = fopen("/Users/sethford/Projects/h-uman/src/daemon.c", "r");
+    }
+    HU_ASSERT_NOT_NULL(f);
+
+    /* Scan lines, tracking whether we're inside the proactive-send
+     * block. The block is bounded by the comment "M3 Dispatch T8" on
+     * entry (planted in T8's edit) and the line `agent->proactive_turn
+     * = false;` on exit. Any hu_agent_turn( seen between those markers
+     * is a regression. */
+    char line[2048];
+    bool in_block = false;
+    size_t hits = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (!in_block && strstr(line, "M3 Dispatch T8") != NULL)
+            in_block = true;
+        else if (in_block && strstr(line, "agent->proactive_turn = false") != NULL)
+            in_block = false;
+        else if (in_block && strstr(line, "hu_agent_turn(") != NULL)
+            hits++;
+    }
+    fclose(f);
+    HU_ASSERT_EQ(hits, (size_t)0);
+}
+
 /* ── M3 Dispatch T4 — daemon-side compose-inputs wire smoke ─────────── */
 
 /* T4 wires daemon.c's proactive-send block to construct a
@@ -371,4 +409,7 @@ void run_init_proposer_compose_tests(void) {
     /* T4 — daemon-side wire smoke (compose-inputs + tick_with_provider_ex
      * accept the rich-context shape daemon now passes). */
     HU_RUN_TEST(t4_tick_with_provider_ex_accepts_daemon_shape_inputs);
+    /* T8 — audit that legacy hu_agent_turn is structurally removed from
+     * the proactive-send block. */
+    HU_RUN_TEST(t8_daemon_proactive_block_has_zero_hu_agent_turn_calls);
 }

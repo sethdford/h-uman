@@ -2114,15 +2114,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 size_t response_len = 0;
                 hu_error_t err = HU_OK;
 
-                /* M3 Dispatch T4+T5 (2026-05-26) — unified dispatch branch.
-                 * When `cfg->proactive_throttle.use_unified_dispatch` is true,
-                 * route proactive composition through init_proposer's
-                 * tick_with_provider_ex (T1's compose-inputs path + T2's
-                 * response_guard send-wrap). Memory context plumbed via
-                 * hu_daemon_build_callback_context with the same output-
-                 * safety predicate applied inside init_proposer's prompt
-                 * builder (T5). When false (default during T6 A/B), the
-                 * legacy hu_agent_turn path runs unchanged. */
+                /* M3 Dispatch T8 (2026-05-26) — unified dispatch is now the
+                 * ONLY proactive composer. The legacy hu_agent_turn-based
+                 * branch is removed (it lived behind the `else` of the
+                 * use_unified_dispatch flag until T7 flipped the default
+                 * to true). Operators can still disable proactive sends
+                 * entirely by setting the flag to false in config.json —
+                 * the safety gate below short-circuits cleanly without
+                 * generating a response. The flag itself is now vestigial
+                 * and will be removed in a follow-up commit. See
+                 * docs/plans/2026-05-26-m3-dispatch-unification/. */
                 char *unified_mem_ctx = NULL;
                 size_t unified_mem_ctx_len = 0;
                 if (config && config->proactive_throttle.use_unified_dispatch && agent &&
@@ -2172,7 +2173,20 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     if (unified_mem_ctx)
                         alloc->free(alloc->ctx, unified_mem_ctx, unified_mem_ctx_len + 1);
                 } else {
-                    err = hu_agent_turn(agent, prompt, prompt_len, &response, &response_len);
+                    /* T8: safety gate trip. Either operator disabled unified
+                     * dispatch via config (flag=false), or agent/provider not
+                     * ready (startup race). Log + skip — never fall back to
+                     * the deleted legacy hu_agent_turn path. */
+                    if (config && !config->proactive_throttle.use_unified_dispatch) {
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "proactive to %s skipped: use_unified_dispatch=false (operator "
+                                    "opt-out — set true to re-enable)",
+                                    cp->name ? cp->name : cp->contact_id);
+                    } else {
+                        hu_log_warn("human", agent ? agent->observer : NULL,
+                                    "proactive to %s skipped: agent/provider not ready",
+                                    cp->name ? cp->name : cp->contact_id);
+                    }
                 }
                 agent->proactive_turn = false;
 
