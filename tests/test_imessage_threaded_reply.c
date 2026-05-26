@@ -1,7 +1,10 @@
 #include "human/channels/imessage_reply.h"
 #include "test_framework.h"
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Test counters + stubs. */
 static int tier1_call_count = 0;
@@ -201,6 +204,87 @@ static void tier3_not_called_when_tier1_succeeds(void) {
     hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
 }
 
+/* AC: Telemetry is emitted on Tier 1 success — one JSONL line per call. */
+static void telemetry_emitted_on_tier1_success(void) {
+    /* Use HU_IMESSAGE_ACTION_LOG_DIR env to isolate to tmp. */
+    char tmpdir[] = "/tmp/human-c4-XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    setenv("HU_IMESSAGE_ACTION_LOG_DIR", tmpdir, 1);
+
+    reset_counts();
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, NULL, NULL);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "GUID", 4, "hi", 2), (int)HU_OK);
+
+    /* Verify exactly one JSONL line was written. */
+    char path[512];
+    snprintf(path, sizeof(path), "%s/imessage_action.jsonl", tmpdir);
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    int line_count = 0;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), f)) {
+        line_count++;
+        if (line_count == 1) {
+            /* First line: verify "tier":"cmdR" is present. */
+            HU_ASSERT(strstr(buf, "\"tier\":\"cmdR\"") != NULL);
+        }
+    }
+    fclose(f);
+    HU_ASSERT_EQ(line_count, 1);
+
+    /* Cleanup. */
+    unlink(path);
+    rmdir(tmpdir);
+    unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+}
+
+/* AC: Telemetry tier reflects which fallback fired. */
+static void telemetry_tier_reflects_fallback_used(void) {
+    char tmpdir[] = "/tmp/human-c4-XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    setenv("HU_IMESSAGE_ACTION_LOG_DIR", tmpdir, 1);
+
+    reset_counts();
+    hu_imessage_set_test_reply_stubs(tier1_fails_stub, tier1_fails_stub, flat_send_succeeds_stub);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "GUID", 4, "hi", 2), (int)HU_OK);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/imessage_action.jsonl", tmpdir);
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[1024];
+    HU_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), f));
+    fclose(f);
+    HU_ASSERT(strstr(buf, "\"tier\":\"flat_fallback\"") != NULL);
+
+    unlink(path);
+    rmdir(tmpdir);
+    unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+}
+
+/* AC: Invalid args short-circuit BEFORE telemetry (no log line on error). */
+static void no_telemetry_on_invalid_args(void) {
+    char tmpdir[] = "/tmp/human-c4-XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    setenv("HU_IMESSAGE_ACTION_LOG_DIR", tmpdir, 1);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, NULL, 0, "G", 1, "b", 1),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/imessage_action.jsonl", tmpdir);
+    /* File should not exist (no line written). */
+    FILE *f = fopen(path, "r");
+    HU_ASSERT(f == NULL);
+
+    rmdir(tmpdir);
+    unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
+}
+
 void run_imessage_threaded_reply_tests(void) {
     HU_TEST_SUITE("imessage_threaded_reply");
     HU_RUN_TEST(tier1_cmd_r_succeeds_returns_ok);
@@ -212,4 +296,7 @@ void run_imessage_threaded_reply_tests(void) {
     HU_RUN_TEST(tier3_flat_fallback_when_both_ax_tiers_fail);
     HU_RUN_TEST(tier3_propagates_flat_send_error);
     HU_RUN_TEST(tier3_not_called_when_tier1_succeeds);
+    HU_RUN_TEST(telemetry_emitted_on_tier1_success);
+    HU_RUN_TEST(telemetry_tier_reflects_fallback_used);
+    HU_RUN_TEST(no_telemetry_on_invalid_args);
 }

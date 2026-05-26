@@ -2,6 +2,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_reply.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -3867,6 +3868,8 @@ static const hu_channel_vtable_t imessage_vtable = {
     .load_conversation_history = imessage_load_conversation_history,
     .get_response_constraints = imessage_get_response_constraints,
     .react = imessage_react,
+    .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
+                             size_t))hu_imessage_reply,
     .get_attachment_path = imessage_vt_get_attachment_path,
     .human_active_recently = imessage_vt_human_active_recently,
     .get_latest_attachment_path = imessage_vt_get_latest_attachment_path,
