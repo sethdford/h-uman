@@ -418,6 +418,16 @@ static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *o
     return HU_OK;
 }
 
+/* Sprint 41 follow-up #2 — operator-facing runtime knobs for response_guard.
+ * Currently just the G9 kill switch; future detectors land here. */
+static hu_error_t parse_response_guard(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->response_guard.naked_opener_enabled =
+        hu_json_get_bool(obj, "naked_opener_enabled", cfg->response_guard.naked_opener_enabled);
+    return HU_OK;
+}
+
 static hu_error_t parse_initiative(hu_allocator_t *a, hu_config_t *cfg,
                                    const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -1474,6 +1484,16 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         if (pbe != HU_OK) {
             hu_json_free(a, root);
             return pbe;
+        }
+    }
+
+    /* Sprint 41 follow-up #2 — response_guard runtime knobs (G9 kill switch). */
+    hu_json_value_t *rg_obj = hu_json_object_get(root, "response_guard");
+    if (rg_obj) {
+        hu_error_t rge = parse_response_guard(cfg, rg_obj);
+        if (rge != HU_OK) {
+            hu_json_free(a, root);
+            return rge;
         }
     }
 

@@ -698,12 +698,25 @@ static bool hu_guard_has_persona_identity_echo(const hu_guard_context_t *ctx, co
     return false;
 }
 
-/* Sprint 38 — process-wide REJECT telemetry (G5–G8). */
+/* Sprint 38 — process-wide REJECT telemetry (G5–G9). */
 static atomic_uint_fast64_t s_guard_stat_semantic;
 static atomic_uint_fast64_t s_guard_stat_length;
 static atomic_uint_fast64_t s_guard_stat_director;
 static atomic_uint_fast64_t s_guard_stat_persona_pii;
 static atomic_uint_fast64_t s_guard_stat_persona_identity;
+/* Sprint 41 — G9 naked discourse-marker opener. */
+static atomic_uint_fast64_t s_guard_stat_naked_opener;
+
+/* Sprint 41 follow-up — process-wide G9 kill switch. */
+static atomic_bool s_g9_globally_disabled;
+
+void hu_response_guard_set_naked_opener_globally_disabled(bool disabled) {
+    atomic_store_explicit(&s_g9_globally_disabled, disabled, memory_order_relaxed);
+}
+
+bool hu_response_guard_naked_opener_globally_disabled(void) {
+    return atomic_load_explicit(&s_g9_globally_disabled, memory_order_relaxed);
+}
 
 static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
     if (!report)
@@ -718,6 +731,8 @@ static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
         atomic_fetch_add_explicit(&s_guard_stat_persona_pii, 1, memory_order_relaxed);
     if (report->detected_persona_identity_echo)
         atomic_fetch_add_explicit(&s_guard_stat_persona_identity, 1, memory_order_relaxed);
+    if (report->detected_naked_discourse_opener)
+        atomic_fetch_add_explicit(&s_guard_stat_naked_opener, 1, memory_order_relaxed);
 }
 
 void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
@@ -729,6 +744,8 @@ void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
     out->persona_pii_echo = atomic_load_explicit(&s_guard_stat_persona_pii, memory_order_relaxed);
     out->persona_identity_echo =
         atomic_load_explicit(&s_guard_stat_persona_identity, memory_order_relaxed);
+    out->naked_discourse_opener =
+        atomic_load_explicit(&s_guard_stat_naked_opener, memory_order_relaxed);
 }
 
 void hu_guard_reject_stats_reset(void) {
@@ -737,6 +754,7 @@ void hu_guard_reject_stats_reset(void) {
     atomic_store_explicit(&s_guard_stat_director, 0, memory_order_relaxed);
     atomic_store_explicit(&s_guard_stat_persona_pii, 0, memory_order_relaxed);
     atomic_store_explicit(&s_guard_stat_persona_identity, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_naked_opener, 0, memory_order_relaxed);
 }
 
 bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len) {
@@ -763,6 +781,142 @@ bool hu_response_is_critique_echo(const char *s, size_t len) {
     if (memcmp(s, "needs_retry", 11) == 0)
         return true;
     return false;
+}
+
+/* Sprint 41 (2026-05-26 Jordan incident) — naked discourse-marker opener.
+ *
+ * The discourse markers below ("tbh", "ngl", etc.) function as backchannel
+ * cues in real speech — they presuppose a prior proposition to contrast or
+ * soften ("the food was fine, tbh I expected worse"). When a LoRA adapter
+ * over-fits on raw casual-texting corpus, it learns these markers as
+ * high-probability sentence-openers without learning the discourse
+ * constraint that something prior is required. The model then emits
+ * "tbh morning. you awake yet?" — an unsemantic concatenation that reads
+ * as obviously machine-generated to any human reader.
+ *
+ * The greeting nouns below ("morning", "hey", "yo") are interpersonal
+ * openers and cannot serve as the "prior proposition" a discourse marker
+ * contrasts with. So <MARKER> <GREETING> with no completing clause is
+ * always malformed.
+ *
+ * The check is conservative: we allow marker+greeting when the greeting
+ * is followed by a copula-style verb that turns the greeting into a
+ * subject of a real opinion ("tbh morning IS the worst"). */
+static int g9_ieq(const char *a, const char *b, size_t n) {
+    /* Case-insensitive byte-wise compare. ASCII only — matches Seth's
+     * texting register (no localized markers). */
+    for (size_t i = 0; i < n; i++) {
+        char ca = a[i];
+        char cb = b[i];
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + 32);
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + 32);
+        if (ca != cb)
+            return 0;
+    }
+    return 1;
+}
+
+static int g9_is_word_boundary(char c) {
+    /* Non-alphanumeric chars (including punctuation, whitespace, EOL)
+     * are word boundaries. Matches the substring-classifier-pitfalls
+     * rule's _word_ci convention. */
+    return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'));
+}
+
+bool hu_response_is_naked_discourse_opener(const char *s, size_t len) {
+    if (!s || len == 0)
+        return false;
+
+    /* Skip leading whitespace — some providers emit "\n\n" before the
+     * actual reply, and the rest of the guard runs on `for_repetition_check`
+     * which is pre-whitespace-trimmed by Phase 0 but legacy callers may
+     * pass untrimmed text. */
+    size_t i = 0;
+    while (i < len && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r'))
+        i++;
+    if (i >= len)
+        return false;
+
+    /* Match a discourse marker at the start. Ordered longest-first so
+     * "imho" doesn't get partial-matched as "imo" + "ho". */
+    static const char *marker_list[] = {
+        "deadass", "honestly", "highkey", "lowkey", "frfr", "imho", "lmao",
+        "fwiw",    "tbh",      "ngl",     "imo",    "fr",   "lol",  NULL,
+    };
+    size_t marker_len = 0;
+    for (const char **m = marker_list; *m; m++) {
+        size_t mlen = strlen(*m);
+        if (i + mlen > len)
+            continue;
+        if (g9_ieq(s + i, *m, mlen) && (i + mlen == len || g9_is_word_boundary(s[i + mlen]))) {
+            marker_len = mlen;
+            break;
+        }
+    }
+    if (marker_len == 0)
+        return false;
+
+    /* Skip the marker + any whitespace/comma between marker and greeting. */
+    i += marker_len;
+    while (i < len && (s[i] == ' ' || s[i] == '\t' || s[i] == ',')) {
+        i++;
+    }
+    if (i >= len)
+        return false; /* "tbh" alone — not a naked-opener case */
+
+    /* Match a bare greeting noun at the new position. */
+    static const char *greeting_list[] = {
+        "afternoon", "evening", "morning", "howdy", "hello", "hola",
+        "night",     "sup",     "hey",     "yo",    "hi",    NULL,
+    };
+    size_t greet_len = 0;
+    for (const char **g = greeting_list; *g; g++) {
+        size_t glen = strlen(*g);
+        if (i + glen > len)
+            continue;
+        if (g9_ieq(s + i, *g, glen) && (i + glen == len || g9_is_word_boundary(s[i + glen]))) {
+            greet_len = glen;
+            break;
+        }
+    }
+    if (greet_len == 0)
+        return false; /* marker not followed by a greeting → not this pattern */
+
+    /* If the greeting ends the message, that's the canonical naked case. */
+    size_t after = i + greet_len;
+    if (after >= len)
+        return true;
+
+    /* Punctuation immediately after the greeting (".", "!", "?", ",") +
+     * follow-up content is the production failure shape — "tbh morning.
+     * you awake yet?". REJECT. */
+    if (s[after] == '.' || s[after] == '!' || s[after] == '?' || s[after] == ',')
+        return true;
+
+    /* Otherwise the greeting is followed by whitespace + more text. Skip
+     * the whitespace and look at the next token: if it's a copula-style
+     * verb, the marker is pragmatically valid ("tbh morning IS the worst").
+     * Anything else is a malformed opener ("tbh morning you up?"). */
+    size_t k = after;
+    while (k < len && (s[k] == ' ' || s[k] == '\t'))
+        k++;
+    if (k >= len)
+        return true; /* trailing whitespace only — same as bare greeting */
+
+    static const char *clause_verb_list[] = {
+        "sounded", "sounds", "seemed", "seems", "sucks", "feels", "felt",
+        "is",      "was",    "are",    "were",  "ain't", NULL,
+    };
+    for (const char **v = clause_verb_list; *v; v++) {
+        size_t vlen = strlen(*v);
+        if (k + vlen > len)
+            continue;
+        if (g9_ieq(s + k, *v, vlen) && (k + vlen == len || g9_is_word_boundary(s[k + vlen])))
+            return false; /* valid: "tbh morning is the worst" */
+    }
+    return true; /* no clause verb → naked opener */
 }
 
 void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
@@ -1189,6 +1343,35 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
             hu_guard_record_reject_stats(report);
             return HU_OK;
         }
+    }
+
+    /* Phase 5 (Sprint 41 — 2026-05-26 Jordan incident) — naked
+     * discourse-marker opener (G9). Runs on the cleaned text (post-
+     * Phase 1 strip) and by default for every caller — the failure
+     * mode is intrinsic to the response, not contextual. Two escape
+     * hatches: (1) per-call `ctx->naked_opener_disabled` for channels
+     * that legitimately use short interjections (voice, debug); (2)
+     * process-wide kill switch via
+     * hu_response_guard_set_naked_opener_globally_disabled() for
+     * runtime operator override without recompile.
+     *
+     * The production trigger was a proactive iMessage sent to a real
+     * human contact: "tbh morning. you awake yet?" — pragmatically
+     * incoherent (no proposition for "tbh" to mark) but surface-level
+     * Seth-styled enough to slip past every prior validator. */
+    bool g9_skip_per_call = (ctx && ctx->naked_opener_disabled);
+    bool g9_skip_global = hu_response_guard_naked_opener_globally_disabled();
+    if (!g9_skip_per_call && !g9_skip_global &&
+        hu_response_is_naked_discourse_opener(for_repetition_check, check_len)) {
+        if (cleaned)
+            alloc->free(alloc->ctx, cleaned, effective_len + 1);
+        *out_response = NULL;
+        *out_len = 0;
+        *out_outcome = HU_GUARD_REJECT;
+        if (report)
+            report->detected_naked_discourse_opener = true;
+        hu_guard_record_reject_stats(report);
+        return HU_OK;
     }
 
     if (needs_strip) {

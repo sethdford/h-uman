@@ -1981,6 +1981,264 @@ static void critique_echo_predicate_handles_null_safe(void) {
     HU_ASSERT_FALSE(hu_response_is_critique_echo(NULL, 100));
 }
 
+/* ── Sprint 41 — G9 naked discourse-marker opener ─────────────────────── */
+
+/* The exact production message that prompted this guard. Pure-predicate
+ * level: starts with "tbh", then space, then "morning", then ".", then a
+ * follow-up like "you awake yet?". The discourse marker "tbh" has nothing
+ * to be honest ABOUT — backchannel markers require contrast with a prior
+ * proposition. The LoRA adapter learned "tbh" as a high-probability
+ * sentence-opener from raw Seth corpus and pasted it onto a greeting. */
+static void g9_rejects_production_jordan_tbh_morning_leak(void) {
+    const char *raw = "tbh morning. you awake yet?";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_rejects_ngl_hey_grab_coffee(void) {
+    const char *raw = "ngl hey wanna grab coffee?";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_rejects_imo_morning_alone(void) {
+    /* Marker + greeting with NO trailing clause at all. */
+    const char *raw = "imo morning";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_rejects_honestly_yo_check_in(void) {
+    const char *raw = "honestly yo just checking in";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_rejects_lowkey_sup_short(void) {
+    const char *raw = "lowkey sup?";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+/* Counter-examples: marker followed by a clause-completing copula verb
+ * makes the marker pragmatically legitimate. "tbh morning IS the worst"
+ * means "to be honest, morning is bad" — that's a real opinion. The
+ * predicate must NOT fire on these. */
+static void g9_allows_marker_followed_by_clause_about_morning(void) {
+    const char *raw = "tbh morning is the worst part of the day";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_allows_marker_followed_by_idk(void) {
+    /* "tbh idk" is canonical real-Seth texting — marker + clausal
+     * shorthand. Must not be rejected. */
+    const char *raw = "tbh idk what to do";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_allows_plain_greeting_no_marker(void) {
+    const char *raw = "morning! you awake yet?";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_allows_marker_only_no_greeting(void) {
+    const char *raw = "tbh that was a wild day";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_allows_greeting_inside_message_not_at_start(void) {
+    /* G9 fires only when the marker+greeting is at the START. Embedded
+     * mention is fine. */
+    const char *raw = "yeah I texted them tbh morning was rough";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_allows_morningstar_word_not_morning(void) {
+    /* Word-boundary check: "morningstar" must not match "morning". */
+    const char *raw = "tbh morningstar is a cool name";
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+static void g9_handles_null_safe(void) {
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(NULL, 0));
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener(NULL, 100));
+    HU_ASSERT_FALSE(hu_response_is_naked_discourse_opener("", 0));
+}
+
+static void g9_handles_leading_whitespace(void) {
+    /* Some providers prepend a newline before the response. The predicate
+     * should still trigger after skipping leading whitespace. */
+    const char *raw = "  \n  tbh morning. you awake yet?";
+    HU_ASSERT_TRUE(hu_response_is_naked_discourse_opener(raw, strlen(raw)));
+}
+
+/* End-to-end: the full hu_response_guard_check_ex path REJECTs the
+ * production Jordan message and populates the report flag. */
+static void g9_check_ex_rejects_jordan_case_with_report(void) {
+    const char *raw = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
+    HU_ASSERT_TRUE(report.detected_naked_discourse_opener);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(out_len, (size_t)0);
+}
+
+static void g9_check_ex_increments_reject_stats(void) {
+    hu_guard_reject_stats_reset();
+    hu_guard_reject_stats_t before;
+    hu_guard_reject_stats_snapshot(&before);
+
+    const char *raw = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    (void)hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report);
+
+    hu_guard_reject_stats_t after;
+    hu_guard_reject_stats_snapshot(&after);
+    HU_ASSERT_EQ((after.naked_discourse_opener - before.naked_discourse_opener), (uint64_t)1);
+}
+
+/* ── Sprint 41 follow-up — G9 escape hatches ──────────────────────────── */
+
+static void g9_per_call_disabled_lets_jordan_case_through(void) {
+    const char *raw = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    hu_guard_context_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.naked_opener_disabled = true; /* per-call escape hatch */
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_naked_discourse_opener);
+}
+
+static void g9_global_kill_switch_lets_jordan_case_through(void) {
+    /* Save + restore the global flag so test ordering doesn't matter. */
+    bool was_disabled = hu_response_guard_naked_opener_globally_disabled();
+    hu_response_guard_set_naked_opener_globally_disabled(true);
+
+    const char *raw = "tbh morning. you awake yet?";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_naked_discourse_opener);
+
+    hu_response_guard_set_naked_opener_globally_disabled(was_disabled);
+}
+
+static void g9_global_kill_switch_round_trip(void) {
+    bool initial = hu_response_guard_naked_opener_globally_disabled();
+    hu_response_guard_set_naked_opener_globally_disabled(true);
+    HU_ASSERT_TRUE(hu_response_guard_naked_opener_globally_disabled());
+    hu_response_guard_set_naked_opener_globally_disabled(false);
+    HU_ASSERT_FALSE(hu_response_guard_naked_opener_globally_disabled());
+    hu_response_guard_set_naked_opener_globally_disabled(initial);
+}
+
+/* ── Sprint 41 follow-up — DPO negative-pair JSONL formatter ──────────── */
+
+#include "human/agent/response_guard_dpo.h"
+
+static void dpo_format_emits_well_formed_jsonl_for_jordan_case(void) {
+    char buf[1024];
+    size_t n = hu_response_guard_format_dpo_negative_jsonl(
+        "hey you up?", strlen("hey you up?"), "tbh morning. you awake yet?",
+        strlen("tbh morning. you awake yet?"), "naked_discourse_opener", "imessage",
+        (int64_t)1779800000, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\"prompt\":\"hey you up?\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"chosen\":null") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"rejected\":\"tbh morning. you awake yet?\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_detector\":\"naked_discourse_opener\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_channel\":\"imessage\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_ts_unix\":1779800000") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_source\":\"response_guard\"") != NULL);
+}
+
+static void dpo_format_escapes_quotes_and_newlines(void) {
+    char buf[512];
+    /* Rejected text with embedded quote + newline + backslash — must escape. */
+    const char *rejected = "say \"hi\"\nthen \\bye";
+    size_t n = hu_response_guard_format_dpo_negative_jsonl("hi", 2, rejected, strlen(rejected),
+                                                           "test_detector", "test_channel",
+                                                           (int64_t)1, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\\\"hi\\\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\\\\bye") != NULL);
+    /* The raw embedded newline must NOT appear unescaped. */
+    HU_ASSERT_NULL(strchr(buf, '\n'));
+}
+
+static void dpo_format_emits_null_for_null_strings(void) {
+    char buf[512];
+    size_t n = hu_response_guard_format_dpo_negative_jsonl(NULL, 0, NULL, 0, NULL, NULL,
+                                                           (int64_t)42, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\"prompt\":null") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"rejected\":null") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_detector\":null") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_channel\":null") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"_ts_unix\":42") != NULL);
+}
+
+static void dpo_format_truncates_safely_on_overflow(void) {
+    /* A small buffer cannot fit a full record — formatter must NUL-terminate
+     * and return a length < cap (so the caller can detect truncation by
+     * comparing return against cap-1). Use a guard buffer pattern: place
+     * the under-test buffer in the MIDDLE of a larger memset'd region and
+     * confirm bytes outside `[0..cap)` are untouched. */
+    char wrap[64];
+    memset(wrap, 0xAA, sizeof(wrap));
+    char *buf = wrap + 16; /* 16-byte canary on each side */
+    const size_t cap = 32;
+    size_t n = hu_response_guard_format_dpo_negative_jsonl(
+        "long prompt that overflows the small buffer", 43, "long rejected text that also overflows",
+        38, "naked_discourse_opener", "imessage", (int64_t)1779800000, buf, cap);
+    /* Returned length must fit in cap and NUL-terminate. */
+    HU_ASSERT_TRUE(n < cap);
+    HU_ASSERT_EQ(buf[n], '\0');
+    /* Canary bytes BEFORE and AFTER the buffer must still be 0xAA. */
+    for (size_t i = 0; i < 16; i++) {
+        HU_ASSERT_EQ((unsigned char)wrap[i], (unsigned char)0xAA);
+        HU_ASSERT_EQ((unsigned char)wrap[16 + cap + i], (unsigned char)0xAA);
+    }
+}
+
+static void dpo_format_returns_zero_on_zero_capacity(void) {
+    char buf[8];
+    size_t n = hu_response_guard_format_dpo_negative_jsonl("p", 1, "r", 1, "d", "c", 1, buf, 0);
+    HU_ASSERT_EQ(n, (size_t)0);
+}
+
+static void dpo_log_is_noop_under_hu_is_test(void) {
+    /* In the test build, the writer is a no-op returning HU_OK regardless
+     * of HOME or filesystem state. This pins that contract so prod and
+     * test paths cannot accidentally diverge. */
+    hu_error_t err = hu_response_guard_log_dpo_negative("p", 1, "r", 1, "d", "c", (int64_t)1);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -2103,4 +2361,36 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(critique_echo_predicate_allows_legitimate_response);
     HU_RUN_TEST(critique_echo_predicate_handles_short_input);
     HU_RUN_TEST(critique_echo_predicate_handles_null_safe);
+
+    /* Sprint 41 — G9 naked discourse-marker opener (2026-05-26 Jordan
+     * incident: production sent "tbh morning. you awake yet?" to a real
+     * contact, an unsemantic concatenation produced by the LoRA adapter
+     * that learned discourse markers as high-probability sentence-
+     * openers from raw Seth texting). */
+    HU_RUN_TEST(g9_rejects_production_jordan_tbh_morning_leak);
+    HU_RUN_TEST(g9_rejects_ngl_hey_grab_coffee);
+    HU_RUN_TEST(g9_rejects_imo_morning_alone);
+    HU_RUN_TEST(g9_rejects_honestly_yo_check_in);
+    HU_RUN_TEST(g9_rejects_lowkey_sup_short);
+    HU_RUN_TEST(g9_allows_marker_followed_by_clause_about_morning);
+    HU_RUN_TEST(g9_allows_marker_followed_by_idk);
+    HU_RUN_TEST(g9_allows_plain_greeting_no_marker);
+    HU_RUN_TEST(g9_allows_marker_only_no_greeting);
+    HU_RUN_TEST(g9_allows_greeting_inside_message_not_at_start);
+    HU_RUN_TEST(g9_allows_morningstar_word_not_morning);
+    HU_RUN_TEST(g9_handles_null_safe);
+    HU_RUN_TEST(g9_handles_leading_whitespace);
+    HU_RUN_TEST(g9_check_ex_rejects_jordan_case_with_report);
+    HU_RUN_TEST(g9_check_ex_increments_reject_stats);
+
+    /* Sprint 41 follow-up — G9 escape hatches + DPO logging. */
+    HU_RUN_TEST(g9_per_call_disabled_lets_jordan_case_through);
+    HU_RUN_TEST(g9_global_kill_switch_lets_jordan_case_through);
+    HU_RUN_TEST(g9_global_kill_switch_round_trip);
+    HU_RUN_TEST(dpo_format_emits_well_formed_jsonl_for_jordan_case);
+    HU_RUN_TEST(dpo_format_escapes_quotes_and_newlines);
+    HU_RUN_TEST(dpo_format_emits_null_for_null_strings);
+    HU_RUN_TEST(dpo_format_truncates_safely_on_overflow);
+    HU_RUN_TEST(dpo_format_returns_zero_on_zero_capacity);
+    HU_RUN_TEST(dpo_log_is_noop_under_hu_is_test);
 }

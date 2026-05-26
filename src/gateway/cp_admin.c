@@ -4,6 +4,8 @@
 #include "human/agent.h"
 #include "human/agent/awareness.h"
 #include "human/agent/model_router.h"
+#include "human/agent/prompt_budget.h"
+#include "human/agent/response_guard.h"
 #include "human/bus.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
@@ -12,7 +14,6 @@
 #include "human/cost.h"
 #include "human/gateway/oauth.h"
 #include "human/health.h"
-#include "human/agent/response_guard.h"
 #include "human/ml/fidelity.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/metrics_observer.h"
@@ -1108,6 +1109,64 @@ hu_error_t cp_admin_metrics_snapshot(hu_allocator_t *alloc, hu_app_context_t *ap
         }
     }
 
+    /* prompt_budget: live observation_count + dead_field_count for the
+     * `human doctor` running-agent variant. Sub-object lives under
+     * metrics.snapshot rather than a separate method so it carries the
+     * same risk tier (public-readable aggregate counters) and shares the
+     * existing authz/CORS surface. Threat notes: emits only scalar counts
+     * and stable field-name strings — no user content, no PII, no auth
+     * tokens. Omitted entirely when the budget is not initialized so a
+     * doctor consumer can distinguish "feature off" from "feature on but
+     * zero observations". */
+    if (app && app->agent && app->agent->prompt_budget && app->config) {
+        hu_json_value_t *pb_obj = hu_json_object_new(alloc);
+        if (pb_obj) {
+            const hu_prompt_budget_t *b = app->agent->prompt_budget;
+            const hu_prompt_budget_config_t *pbcfg = &app->config->prompt_budget;
+            size_t obs = hu_prompt_budget_observation_count(b);
+            hu_json_object_set(alloc, pb_obj, "observation_count",
+                               hu_json_number_new(alloc, (double)obs));
+
+            /* Count DEAD fields under the configured thresholds, and list
+             * them so the doctor surface can name them — a bare count
+             * forces the operator to grep logs to find which field is
+             * dead. Allowlisted fields are NOT counted as dead (matches
+             * the trim-time predicate's semantics). */
+            size_t min_bytes =
+                pbcfg->dead_field_min_bytes > 0 ? (size_t)pbcfg->dead_field_min_bytes : 16;
+            size_t min_samples =
+                pbcfg->min_samples_before_tag > 0 ? (size_t)pbcfg->min_samples_before_tag : 100;
+            hu_json_value_t *dead_arr = hu_json_array_new(alloc);
+            size_t dead_count = 0;
+            for (int i = 0; i < HU_PROMPT_FIELD_COUNT; i++) {
+                if (!hu_prompt_budget_field_is_dead(b, (hu_prompt_field_t)i, min_bytes,
+                                                    min_samples))
+                    continue;
+                const char *name = hu_prompt_field_name((hu_prompt_field_t)i);
+                if (!name)
+                    continue;
+                bool allowlisted = false;
+                for (size_t a = 0; a < pbcfg->field_allowlist_count; a++) {
+                    if (pbcfg->field_allowlist[a] && strcmp(pbcfg->field_allowlist[a], name) == 0) {
+                        allowlisted = true;
+                        break;
+                    }
+                }
+                if (allowlisted)
+                    continue;
+                dead_count++;
+                if (dead_arr)
+                    hu_json_array_push(alloc, dead_arr,
+                                       hu_json_string_new(alloc, name, strlen(name)));
+            }
+            hu_json_object_set(alloc, pb_obj, "dead_field_count",
+                               hu_json_number_new(alloc, (double)dead_count));
+            if (dead_arr)
+                hu_json_object_set(alloc, pb_obj, "dead_fields", dead_arr);
+            hu_json_object_set(alloc, obj, "prompt_budget", pb_obj);
+        }
+    }
+
     hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
     hu_json_free(alloc, obj);
     return err;
@@ -1246,8 +1305,8 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
             persona_name_len = p->data.string.len;
         }
     }
-    if (!persona_name && app && app->agent && app->agent->persona &&
-        app->agent->persona->name && app->agent->persona->name_len > 0U) {
+    if (!persona_name && app && app->agent && app->agent->persona && app->agent->persona->name &&
+        app->agent->persona->name_len > 0U) {
         persona_name = app->agent->persona->name;
         persona_name_len = app->agent->persona->name_len;
     }
@@ -1318,9 +1377,9 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
 
     hu_json_object_set(alloc, obj, "persona",
                        hu_json_string_new(alloc, persona_name, persona_name_len));
-    hu_json_object_set(alloc, obj, "fingerprint_source",
-                       hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model",
-                                          synthetic ? 9 : 14));
+    hu_json_object_set(
+        alloc, obj, "fingerprint_source",
+        hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model", synthetic ? 9 : 14));
 
     hu_json_value_t *baseline = hu_json_object_new(alloc);
     if (baseline) {
@@ -1351,8 +1410,7 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
     /* Top-level delta alias: ab.delta when A/B is available, null otherwise (AC-D.3 / AC-D.4) */
     hu_json_value_t *ab_delta = ab ? hu_json_object_get(ab, "delta") : NULL;
     if (ab_delta)
-        hu_json_object_set(alloc, obj, "delta",
-                           hu_json_number_new(alloc, ab_delta->data.number));
+        hu_json_object_set(alloc, obj, "delta", hu_json_number_new(alloc, ab_delta->data.number));
     else
         hu_json_object_set(alloc, obj, "delta", hu_json_null_new(alloc));
 

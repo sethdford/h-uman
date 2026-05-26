@@ -916,6 +916,7 @@ set(HU_CORE_SOURCES
     src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/response_guard.c
+    src/agent/response_guard_dpo.c
     src/agent/response_guard_retry.c
     src/agent/outbound_sanitize.c
     # Sprint 59 — outbound validation pipeline (composable stages).
@@ -1317,6 +1318,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/pacing.c
     src/persona/render.c
     src/persona/examples.c
     src/persona/sampler.c
@@ -3212,6 +3214,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
+    tests/test_imessage_reply_pacing.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
@@ -3329,6 +3332,14 @@ set(HU_TEST_SOURCES
     tests/test_response_guard_retry.c
     # Sprint 59 — outbound validation pipeline (Phase A runner contract).
     tests/test_outbound_pipeline.c
+    # Sprint 59 Phase B — strip stage.
+    tests/test_outbound_strip.c
+    # Sprint 59 Phase B — shape stage (length + sentence structure).
+    tests/test_outbound_shape.c
+    # Sprint 59 Phase B — echo stage (directive-echo detection).
+    tests/test_outbound_echo.c
+    # Sprint 59 Phase B — crosstalk stage (cross-contact bleed + metadata leak).
+    tests/test_outbound_crosstalk.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_agent.c
@@ -3582,6 +3593,15 @@ list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+endif()
+
+# Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident): pin per-contact
+# scope for the proactive feed-aware bring-up context. Test seeds the
+# feed_items table directly via sqlite3 to verify the extracted helper
+# hu_daemon_proactive_get_contact_feed_items returns one contact's items
+# only. Gate on HU_ENABLE_SQLITE — the helper itself is SQLite-gated.
+if(HU_ENABLE_SQLITE)
+    list(APPEND HU_TEST_SOURCES tests/test_daemon_proactive_feed_scope.c)
 endif()
 
 # SOTA capability tests

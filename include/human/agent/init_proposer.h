@@ -43,6 +43,34 @@ typedef enum hu_init_proposer_result {
     HU_INIT_RESULT_NEGATIVE = 9,       /* T3: LLM returned should_propose=false */
 } hu_init_proposer_result_t;
 
+/* Sprint 41 follow-up #2 — single-source-of-truth proactive arbiter.
+ *
+ * Read-only governor check that other proactive subsystems (daemon_proactive,
+ * follow-up watcher, scheduled cron) can call BEFORE generating + sending
+ * any proactive outbound. Wraps the same gate stack `hu_init_proposer_tick`
+ * uses (quiet hours + daily budget + per-contact recency) but does NOT
+ * touch tick state — no watermark bump, no tick-id increment, no logging.
+ *
+ * The interval gate is INTENTIONALLY EXCLUDED — it's specific to
+ * init_proposer's polling cadence and would over-gate callers with their
+ * own scheduling discipline. Callers that want interval-style throttling
+ * should use `hu_proactive_throttle` instead.
+ *
+ * Returns the same result enum as `hu_init_proposer_tick` so log lines
+ * stay schema-compatible across subsystems:
+ *   HU_INIT_RESULT_SKIP          → gates passed, caller MAY proceed
+ *   HU_INIT_RESULT_GATED_QUIET   → autoresponder DND window
+ *   HU_INIT_RESULT_GATED_BUDGET  → daily proactive budget exhausted
+ *   HU_INIT_RESULT_GATED_RECENCY → user texted h-uman within recency_floor
+ *
+ * NULL ar_cfg / budget mean "operator opted out of that gate" — mirrors
+ * what `hu_init_proposer_tick` and the per-gate predicates already do. */
+hu_init_proposer_result_t
+hu_init_proposer_governor_check_only(const struct hu_initiative_config *cfg,
+                                     const struct hu_autoresponder_config *ar_cfg,
+                                     int32_t tz_offset_seconds, struct hu_proactive_budget *budget,
+                                     int64_t last_inbound_unix, int64_t now_unix);
+
 /* Tick entry point.
  *
  * Called once per daemon outer loop. Internally rate-limits to

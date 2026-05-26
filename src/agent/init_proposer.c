@@ -37,6 +37,28 @@ void hu_init_proposer_reset_warn_guards_for_test(void) {
 #endif
 }
 
+hu_init_proposer_result_t
+hu_init_proposer_governor_check_only(const struct hu_initiative_config *cfg,
+                                     const struct hu_autoresponder_config *ar_cfg,
+                                     int32_t tz_offset_seconds, struct hu_proactive_budget *budget,
+                                     int64_t last_inbound_unix, int64_t now_unix) {
+    /* Quiet hours (NULL ar_cfg = operator opted out). */
+    if (ar_cfg && hu_autoresponder_in_dnd_window(ar_cfg, now_unix, tz_offset_seconds))
+        return HU_INIT_RESULT_GATED_QUIET;
+
+    /* Daily proactive budget (NULL budget = operator opted out). */
+    if (budget && !hu_governor_has_budget(budget, (uint64_t)now_unix * 1000ULL))
+        return HU_INIT_RESULT_GATED_BUDGET;
+
+    /* Per-contact recency. NULL cfg means "defaults" (600s floor). */
+    int recency_floor =
+        (cfg && cfg->per_contact_min_seconds > 0) ? cfg->per_contact_min_seconds : 600;
+    if (last_inbound_unix > 0 && now_unix - last_inbound_unix < recency_floor)
+        return HU_INIT_RESULT_GATED_RECENCY;
+
+    return HU_INIT_RESULT_SKIP;
+}
+
 hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
                                  const struct hu_autoresponder_config *ar_cfg,
                                  int32_t tz_offset_seconds, struct hu_proactive_budget *budget,
@@ -78,33 +100,25 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
     (*tick_id_inout)++;
     uint64_t tid = *tick_id_inout;
 
-    /* AC-1 governor: quiet hours. */
-    if (ar_cfg && hu_autoresponder_in_dnd_window(ar_cfg, now_unix, tz_offset_seconds)) {
-        hu_log_info("init_proposer", NULL, "tick id=%llu phase=governor result=GATED_QUIET",
-                    (unsigned long long)tid);
+    /* AC-1/AC-3 governor gates — delegated to the shared arbiter so
+     * daemon_proactive, follow-up watcher, and scheduled cron all
+     * consult the same gate stack. */
+    hu_init_proposer_result_t gov_result = hu_init_proposer_governor_check_only(
+        cfg, ar_cfg, tz_offset_seconds, budget, last_inbound_unix, now_unix);
+    if (gov_result != HU_INIT_RESULT_SKIP) {
+        const char *reason = (gov_result == HU_INIT_RESULT_GATED_QUIET)    ? "GATED_QUIET"
+                             : (gov_result == HU_INIT_RESULT_GATED_BUDGET) ? "GATED_BUDGET"
+                                                                           : "GATED_RECENCY";
+        if (gov_result == HU_INIT_RESULT_GATED_RECENCY) {
+            hu_log_info("init_proposer", NULL,
+                        "tick id=%llu phase=governor result=%s (last_inbound=%llds_ago)",
+                        (unsigned long long)tid, reason, (long long)(now_unix - last_inbound_unix));
+        } else {
+            hu_log_info("init_proposer", NULL, "tick id=%llu phase=governor result=%s",
+                        (unsigned long long)tid, reason);
+        }
         *last_tick_unix_inout = now_unix;
-        *out_result = HU_INIT_RESULT_GATED_QUIET;
-        return HU_OK;
-    }
-
-    /* AC-3 governor: daily proactive budget. */
-    if (budget && !hu_governor_has_budget(budget, (uint64_t)now_unix * 1000ULL)) {
-        hu_log_info("init_proposer", NULL, "tick id=%llu phase=governor result=GATED_BUDGET",
-                    (unsigned long long)tid);
-        *last_tick_unix_inout = now_unix;
-        *out_result = HU_INIT_RESULT_GATED_BUDGET;
-        return HU_OK;
-    }
-
-    /* AC-3 governor: per-contact recency. Default 10 min if the field is 0
-     * (h-uman never proposes if Seth just texted). */
-    int recency_floor = cfg->per_contact_min_seconds > 0 ? cfg->per_contact_min_seconds : 600;
-    if (last_inbound_unix > 0 && now_unix - last_inbound_unix < recency_floor) {
-        hu_log_info("init_proposer", NULL,
-                    "tick id=%llu phase=governor result=GATED_RECENCY (last_inbound=%llds_ago)",
-                    (unsigned long long)tid, (long long)(now_unix - last_inbound_unix));
-        *last_tick_unix_inout = now_unix;
-        *out_result = HU_INIT_RESULT_GATED_RECENCY;
+        *out_result = gov_result;
         return HU_OK;
     }
 

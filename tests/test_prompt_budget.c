@@ -1,10 +1,17 @@
 /* Pure-predicate tests for hu_prompt_budget_t. No live prompt build path
  * — those tests come in a Task-1b slice when the wrapping in prompt.c
- * lands. This file pins the OBSERVER + DECISION logic in isolation. */
+ * lands. This file pins the OBSERVER + DECISION logic in isolation.
+ *
+ * B3 Phase 3 adds two AGENT-level contract tests at the bottom that pin
+ * the daemon-side threading: hu_agent_from_config allocates a long-lived
+ * budget, and hu_agent_turn folds per-call stats into it. */
 
+#include "human/agent.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/core/allocator.h"
+#include "human/core/string.h"
+#include "human/provider.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -421,6 +428,177 @@ static void test_trim_gate_null_budget_never_trims(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * B3 Phase 3 — daemon-side threading contract.
+ *
+ * Pins the AGENT-level wire (separate from the lower-level wire pinned by
+ * test_build_system_stats_feeds_budget_observer_round_trip above):
+ *
+ *   1. hu_agent_from_config allocates a long-lived agent->prompt_budget
+ *      regardless of cfg gate (always-observe policy — observation flows
+ *      so doctor + future trim always have data).
+ *   2. hu_agent_turn flows per-call stats into that budget via the
+ *      agent_turn.c call site, so observation_count advances and at
+ *      least one field reports non-zero bytes.
+ *
+ * Without these pins, the prior B3 commit (d5485023) — which threads
+ * agent->prompt_budget for the trim READ side but passed NULL stats and
+ * never called observe — would re-emerge silently in a refactor and
+ * Phase 2's trim gate would go back to having no data to act on.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* Minimal mock provider — pattern-matched on test_agent_fail_path_regressions
+ * benign_create but local so this file stays self-contained. Returns a fixed
+ * payload from chat / stream_chat so hu_agent_turn completes successfully. */
+typedef struct {
+    int calls;
+    const char *payload;
+    size_t payload_len;
+} pb_mock_ctx_t;
+
+static const char *pb_mock_name(void *ctx) {
+    (void)ctx;
+    return "pb_mock";
+}
+static bool pb_mock_no_native_tools(void *ctx) {
+    (void)ctx;
+    return false;
+}
+static bool pb_mock_streams(void *ctx) {
+    (void)ctx;
+    return true;
+}
+static void pb_mock_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+static hu_error_t pb_mock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
+                               const char *model, size_t model_len, double temperature,
+                               hu_chat_response_t *out) {
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    pb_mock_ctx_t *m = (pb_mock_ctx_t *)ctx;
+    m->calls++;
+    out->content = hu_strndup(alloc, m->payload, m->payload_len);
+    out->content_len = out->content ? m->payload_len : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+static hu_error_t pb_mock_stream_chat(void *ctx, hu_allocator_t *alloc,
+                                      const hu_chat_request_t *request, const char *model,
+                                      size_t model_len, double temperature,
+                                      hu_stream_callback_t callback, void *callback_ctx,
+                                      hu_stream_chat_result_t *out) {
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    (void)callback;
+    (void)callback_ctx;
+    pb_mock_ctx_t *m = (pb_mock_ctx_t *)ctx;
+    m->calls++;
+    out->content = hu_strndup(alloc, m->payload, m->payload_len);
+    out->content_len = out->content ? m->payload_len : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+static const hu_provider_vtable_t pb_mock_vtable = {
+    .chat = pb_mock_chat,
+    .supports_native_tools = pb_mock_no_native_tools,
+    .get_name = pb_mock_name,
+    .deinit = pb_mock_deinit,
+    .supports_streaming = pb_mock_streams,
+    .stream_chat = pb_mock_stream_chat,
+};
+static hu_provider_t pb_mock_create(pb_mock_ctx_t *ctx, const char *payload) {
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->payload = payload;
+    ctx->payload_len = strlen(payload);
+    return (hu_provider_t){.ctx = ctx, .vtable = &pb_mock_vtable};
+}
+
+static void test_agent_from_config_allocates_long_lived_prompt_budget(void) {
+    /* Phase 3 wire (1): agent_from_config allocates the budget
+     * unconditionally. The cfg gate controls trim, not observation. */
+    hu_allocator_t alloc = hu_system_allocator();
+    pb_mock_ctx_t provider_ctx;
+    hu_provider_t provider = pb_mock_create(&provider_ctx, "ok");
+
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "pb_mock", 7, 0.7, "/tmp", 4, 5, 50,
+                                          false /* auto_save */, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Budget pointer must be non-NULL right after construction — the
+     * "always observe" policy depends on this invariant. */
+    HU_ASSERT_NOT_NULL(agent.prompt_budget);
+    /* Brand-new budget has zero observations until a turn runs. */
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(agent.prompt_budget), (size_t)0);
+
+    /* Deinit must free the budget cleanly — ASan in CI catches any leak. */
+    hu_agent_deinit(&agent);
+}
+
+static void test_agent_turn_advances_prompt_budget_observation_count(void) {
+    /* Phase 3 wire (2): the agent_turn.c call site reaches
+     * hu_prompt_budget_observe after a successful prompt build. Run one
+     * turn through hu_agent_turn and watch observation_count advance.
+     *
+     * This is the end-to-end pin — the lower-level builder→budget wire
+     * is already pinned by test_build_system_stats_feeds_budget_observer_
+     * round_trip above. Together they cover (build emits stats) +
+     * (agent owns budget) + (agent_turn folds the two together). */
+    hu_allocator_t alloc = hu_system_allocator();
+    pb_mock_ctx_t provider_ctx;
+    hu_provider_t provider = pb_mock_create(&provider_ctx, "fine, talk to you soon");
+
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "pb_mock", 7, 0.7, "/tmp", 4, 5, 50,
+                                          false /* auto_save */, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(agent.prompt_budget);
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(agent.prompt_budget), (size_t)0);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "hello", 5, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* After one successful turn, observation_count MUST have advanced
+     * past zero — the daemon-side thread is live. */
+    HU_ASSERT(hu_prompt_budget_observation_count(agent.prompt_budget) >= (size_t)1);
+
+    /* Snapshot at least one non-zero field — proves the stats array
+     * carried real bytes through to the accumulator (not just an
+     * observe(NULL) no-op). */
+    hu_prompt_field_stat_t snap[HU_PROMPT_FIELD_COUNT];
+    memset(snap, 0, sizeof(snap));
+    size_t n = hu_prompt_budget_snapshot(agent.prompt_budget, snap, HU_PROMPT_FIELD_COUNT);
+    HU_ASSERT_EQ(n, (size_t)HU_PROMPT_FIELD_COUNT);
+    bool any_nonzero = false;
+    for (size_t i = 0; i < n; i++) {
+        if (snap[i].bytes_contributed > 0) {
+            any_nonzero = true;
+            break;
+        }
+    }
+    HU_ASSERT(any_nonzero);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_prompt_budget_tests(void);
 void run_prompt_budget_tests(void) {
     HU_TEST_SUITE("prompt_budget");
@@ -447,4 +625,7 @@ void run_prompt_budget_tests(void) {
     HU_RUN_TEST(test_trim_gate_skips_dead_fields_when_enabled);
     HU_RUN_TEST(test_trim_gate_disabled_by_default_keeps_dead_fields);
     HU_RUN_TEST(test_trim_gate_null_budget_never_trims);
+    /* Phase 3 — daemon-side threading */
+    HU_RUN_TEST(test_agent_from_config_allocates_long_lived_prompt_budget);
+    HU_RUN_TEST(test_agent_turn_advances_prompt_budget_observation_count);
 }

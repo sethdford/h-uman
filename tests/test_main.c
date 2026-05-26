@@ -295,6 +295,7 @@ void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
 void run_imessage_react_contract_tests(void);
+void run_imessage_reply_pacing_tests(void);
 void run_follow_up_tests(void);
 void run_follow_up_daemon_integration_tests(void);
 void run_daemon_aloop_smoke_tests(void);
@@ -355,6 +356,10 @@ void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_outbound_pipeline_tests(void);
+void run_outbound_strip_tests(void);
+void run_outbound_shape_tests(void);
+void run_outbound_echo_tests(void);
+void run_outbound_crosstalk_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
 void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
@@ -721,6 +726,13 @@ void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+/* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
+ * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
+ * gate here so the forward decl + call site don't reference a missing
+ * symbol in minimal-build / no-sqlite / cross-arm64 variants. */
+#ifdef HU_ENABLE_SQLITE
+void run_daemon_proactive_feed_scope_tests(void);
+#endif
 void run_daemon_trust_tests(void);
 void run_cp_tasks_tests(void);
 void run_cp_canvas_tests(void);
@@ -1131,6 +1143,7 @@ int main(int argc, char **argv) {
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
     run_imessage_react_contract_tests();
+    run_imessage_reply_pacing_tests();
     run_follow_up_tests();
     run_follow_up_daemon_integration_tests();
     run_daemon_aloop_smoke_tests();
@@ -1191,6 +1204,10 @@ int main(int argc, char **argv) {
     run_response_guard_tests();
     run_response_guard_retry_tests();
     run_outbound_pipeline_tests();
+    run_outbound_strip_tests();
+    run_outbound_shape_tests();
+    run_outbound_echo_tests();
+    run_outbound_crosstalk_tests();
     run_multimodal_policy_tests();
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
@@ -1548,6 +1565,9 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+#ifdef HU_ENABLE_SQLITE
+    run_daemon_proactive_feed_scope_tests();
+#endif
     run_daemon_trust_tests();
     run_cp_tasks_tests();
     run_cp_canvas_tests();

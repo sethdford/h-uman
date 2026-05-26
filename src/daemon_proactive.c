@@ -19,6 +19,7 @@
 
 #include "human/daemon_proactive.h"
 #include "human/agent.h"
+#include "human/agent/governor.h"
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_throttle.h"
 #include "human/agent/weather_awareness.h"
@@ -333,6 +334,33 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
     *out_len = pos;
     return result;
 }
+
+#ifdef HU_ENABLE_SQLITE
+/* Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident) — per-contact
+ * feed-item scope. Replaces the previous use of
+ * hu_feed_processor_get_all_recent in the FEED AWARENESS block below; that
+ * call returned items from every contact, which combined with the
+ * proactive prompt being keyed by the recipient's contact_id allowed one
+ * contact's feed topic to bleed into another contact's emotional_moments
+ * row (see header comment + audit-lora-training-judge.md history).
+ *
+ * STUB — RED phase: returns empty so the test fails on assertion. GREEN
+ * step replaces the body with hu_feed_processor_get_for_contact. */
+hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sqlite3 *db,
+                                                      const hu_contact_profile_t *cp, size_t limit,
+                                                      hu_feed_item_stored_t **out,
+                                                      size_t *out_count) {
+    (void)alloc;
+    (void)db;
+    (void)cp;
+    (void)limit;
+    if (!out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    return HU_OK;
+}
+#endif
 
 /* ── Proactive prompt builder ──────────────────────────────────────── */
 
@@ -832,3 +860,40 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
 }
 
 /* Test helpers removed — use hu_proactive_context_reset() and ctx->count directly. */
+
+/* Sprint 41 (2026-05-26 Jordan incident) — quiet-hour gate predicate for
+ * the proactive-send block in daemon.c. Extracted as a pure predicate
+ * (see ~/.claude/rules/security-predicate-extraction.md) so the truth
+ * table can be locked by unit tests without spinning a daemon, and so
+ * the daemon-side wire-up reduces to a single condition + log.
+ *
+ * Contract:
+ *   - Returns true  → daemon MUST skip the proactive send this tick
+ *                     because the recipient is inside an autoresponder
+ *                     DND window.
+ *   - Returns false → no quiet-hour gate (either cfg unset OR window
+ *                     not active OR cfg disabled).
+ *
+ * NULL cfg means "operator has not configured quiet hours" — that is a
+ * config decision, not a daemon bug. Returning false here preserves the
+ * pre-change behavior for operators who deliberately disabled the
+ * autoresponder. */
+bool hu_daemon_proactive_should_skip_for_quiet_hours(const hu_autoresponder_config_t *ar_cfg,
+                                                     int64_t now_unix, int32_t tz_offset_seconds) {
+    /* NULL or operator-disabled cfg: never gate. Mirrors what
+     * daemon_autoresponder_config() already returns NULL for in
+     * production — we re-check here so unit tests and any future
+     * caller cannot pass a disabled cfg by accident and have the
+     * predicate quietly suppress sends. */
+    if (!ar_cfg || !ar_cfg->enabled)
+        return false;
+    return hu_autoresponder_in_dnd_window(ar_cfg, now_unix, tz_offset_seconds);
+}
+
+bool hu_daemon_proactive_should_skip_for_budget(hu_proactive_budget_t *budget, uint64_t now_ms) {
+    /* NULL budget: operator opted out of budget enforcement entirely.
+     * Mirrors init_proposer's NULL-budget semantics at init_proposer.c:91. */
+    if (!budget)
+        return false;
+    return !hu_governor_has_budget(budget, now_ms);
+}

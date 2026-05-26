@@ -1772,6 +1772,11 @@ export class DemoGatewayClient extends EventTarget {
             skill_routes_embedded: 42,
             evolving_outcomes: 60,
           },
+          prompt_budget: {
+            observation_count: 847,
+            dead_field_count: 2,
+            dead_fields: ["weather_awareness", "vision_attention"],
+          },
         };
 
       case "usage.summary":

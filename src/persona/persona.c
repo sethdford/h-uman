@@ -1990,6 +1990,11 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
     }
     out->group_response_rate = (float)hu_json_get_number(root, "group_response_rate", 0.1);
 
+    /* AC-7: reply pacing with jitter for human-shaped latency */
+    out->min_reply_delay_ms = (int32_t)hu_json_get_number(root, "min_reply_delay_ms", 250);
+    out->reply_delay_variance_ms =
+        (int32_t)hu_json_get_number(root, "reply_delay_variance_ms", 600);
+
     /* Phase 5: voice config (defaults applied when block absent) */
     (void)snprintf(out->voice.provider, sizeof(out->voice.provider), "%.31s", "cartesia");
     (void)snprintf(out->voice.model, sizeof(out->voice.model), "%.63s", "sonic-3-2026-01-12");

@@ -16,7 +16,9 @@
 #include "human/agent/pattern_radar.h"
 #include "human/agent/preferences.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/response_guard.h"
+#include "human/agent/response_guard_dpo.h"
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/session_persist.h"
@@ -1151,13 +1153,26 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .personal_model_context_len = personal_model_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            /* B3 Phase 3 — same trim-gate population as agent_turn.c so
+             * streaming turns honor the same operator config. */
+            .prompt_budget_trim_enabled =
+                agent->config ? agent->config->prompt_budget.enabled : false,
+            .prompt_budget_dead_field_min_bytes =
+                agent->config ? agent->config->prompt_budget.dead_field_min_bytes : 0,
+            .prompt_budget_min_samples_before_tag =
+                agent->config ? agent->config->prompt_budget.min_samples_before_tag : 0,
         };
-        /* Sprint 55 B3 — thread the agent's prompt-budget observer so
-         * streaming turns also feed the accumulator. NULL stats out-
-         * array since the budget is the source-of-truth aggregator;
-         * we don't need a per-call snapshot here. */
-        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, agent->prompt_budget, &system_prompt,
-                                     &system_prompt_len);
+        /* B3 Phase 3 — observation half of the wire. Stack stats array
+         * captures per-field bytes; hu_prompt_budget_observe folds them
+         * into the long-lived accumulator. Without this call the trim
+         * gate (which keys off observation_count) stays inert forever. */
+        hu_prompt_field_stat_t prompt_field_stats[HU_PROMPT_FIELD_COUNT] = {0};
+        err = hu_prompt_build_system(agent->alloc, &cfg, prompt_field_stats, agent->prompt_budget,
+                                     &system_prompt, &system_prompt_len);
+        if (err == HU_OK && agent->prompt_budget) {
+            hu_prompt_budget_observe(agent->prompt_budget, prompt_field_stats,
+                                     HU_PROMPT_FIELD_COUNT);
+        }
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
@@ -1555,14 +1570,41 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_log_error("agent_stream", agent->observer,
                                  "response_guard REJECT: stream final (len=%zu, recent_avg=%zu) "
                                  "[semantic=%d length=%d director=%d persona=%d identity=%d "
-                                 "repetition_run=%zu] — retrying once with repair prompt",
+                                 "naked_opener=%d repetition_run=%zu] — retrying once with "
+                                 "repair prompt",
                                  sresp.content_len, guard_ctx.recent_avg_len,
                                  guard_report.detected_semantic_leak ? 1 : 0,
                                  guard_report.detected_length_anomaly ? 1 : 0,
                                  guard_report.detected_director_echo ? 1 : 0,
                                  guard_report.detected_persona_pii_echo ? 1 : 0,
                                  guard_report.detected_persona_identity_echo ? 1 : 0,
+                                 guard_report.detected_naked_discourse_opener ? 1 : 0,
                                  guard_report.max_repetition_run);
+                    /* Sprint 41 follow-up — capture this rejection as a DPO
+                     * negative pair for the next LoRA training pass. No-op
+                     * under HU_IS_TEST. Complements the E1 pair-builder
+                     * below (E1 writes chosen+rejected pairs only when the
+                     * retry succeeds; this captures EVERY rejection). */
+                    {
+                        const char *dpo_det = "unknown";
+                        if (guard_report.detected_naked_discourse_opener)
+                            dpo_det = "naked_discourse_opener";
+                        else if (guard_report.detected_persona_identity_echo)
+                            dpo_det = "persona_identity_echo";
+                        else if (guard_report.detected_persona_pii_echo)
+                            dpo_det = "persona_pii_echo";
+                        else if (guard_report.detected_director_echo)
+                            dpo_det = "director_echo";
+                        else if (guard_report.detected_length_anomaly)
+                            dpo_det = "length_anomaly";
+                        else if (guard_report.detected_semantic_leak)
+                            dpo_det = "semantic_leak";
+                        else if (guard_report.detected_degenerate_repetition)
+                            dpo_det = "degenerate_repetition";
+                        (void)hu_response_guard_log_dpo_negative(
+                            msg, msg_len, sresp.content, sresp.content_len, dpo_det,
+                            agent->active_channel, (int64_t)time(NULL));
+                    }
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
                     /* 2026-05-17: pass persona core_anchor into the slim retry so
@@ -2473,14 +2515,37 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         "agent_stream", agent->observer,
                         "response_guard REJECT: post-stream final (len=%zu, recent_avg=%zu) "
                         "[semantic=%d length=%d director=%d persona=%d identity=%d "
-                        "repetition_run=%zu] — retrying slim path",
+                        "naked_opener=%d repetition_run=%zu] — retrying slim path",
                         final_content_len, guard_ctx.recent_avg_len,
                         guard_report.detected_semantic_leak ? 1 : 0,
                         guard_report.detected_length_anomaly ? 1 : 0,
                         guard_report.detected_director_echo ? 1 : 0,
                         guard_report.detected_persona_pii_echo ? 1 : 0,
                         guard_report.detected_persona_identity_echo ? 1 : 0,
+                        guard_report.detected_naked_discourse_opener ? 1 : 0,
                         guard_report.max_repetition_run);
+                    /* Sprint 41 follow-up — capture rejection as DPO negative
+                     * pair. Complements the E1 pair-builder below. */
+                    {
+                        const char *dpo_det = "unknown";
+                        if (guard_report.detected_naked_discourse_opener)
+                            dpo_det = "naked_discourse_opener";
+                        else if (guard_report.detected_persona_identity_echo)
+                            dpo_det = "persona_identity_echo";
+                        else if (guard_report.detected_persona_pii_echo)
+                            dpo_det = "persona_pii_echo";
+                        else if (guard_report.detected_director_echo)
+                            dpo_det = "director_echo";
+                        else if (guard_report.detected_length_anomaly)
+                            dpo_det = "length_anomaly";
+                        else if (guard_report.detected_semantic_leak)
+                            dpo_det = "semantic_leak";
+                        else if (guard_report.detected_degenerate_repetition)
+                            dpo_det = "degenerate_repetition";
+                        (void)hu_response_guard_log_dpo_negative(
+                            msg, msg_len, final_content, final_content_len, dpo_det,
+                            agent->active_channel, (int64_t)time(NULL));
+                    }
                     /* E1 (2026-05-18): snapshot the REJECTED text before we
                      * free it — we need it for the DPO preference pair if the
                      * retry below succeeds. Small alloc; freed at the end of

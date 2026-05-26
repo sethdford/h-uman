@@ -402,9 +402,39 @@ static void test_tick_with_provider_null_provider_behaves_like_t1_tick(void) {
     HU_ASSERT_EQ(last_tick, (int64_t)1779700000);
 }
 
+/* ── Sprint 41 follow-up #2 — single-source-of-truth arbiter ────────── */
+
+static void arbiter_skip_returns_skip_for_all_null_clear_args(void) {
+    /* NULL cfg + NULL ar_cfg + NULL budget + last_inbound=0 → all gates
+     * are operator-disabled or N/A. Must return SKIP (caller proceeds). */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, /*ar_cfg=*/NULL, /*tz=*/0, /*budget=*/NULL, /*last_inbound=*/0,
+        /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
+}
+
+static void arbiter_skip_returns_gated_recency_when_user_texted_recently(void) {
+    /* Default recency floor 600s. last_inbound 100s ago → GATED. */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, /*ar_cfg=*/NULL, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/1779700000 - 100, /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_GATED_RECENCY);
+}
+
+static void arbiter_skip_returns_skip_when_user_texted_long_ago(void) {
+    /* last_inbound 700s ago → past the 600s floor → SKIP. */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, /*ar_cfg=*/NULL, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/1779700000 - 700, /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
+}
+
 void run_init_proposer_tests(void);
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
+    HU_RUN_TEST(arbiter_skip_returns_skip_for_all_null_clear_args);
+    HU_RUN_TEST(arbiter_skip_returns_gated_recency_when_user_texted_recently);
+    HU_RUN_TEST(arbiter_skip_returns_skip_when_user_texted_long_ago);
     HU_RUN_TEST(test_disabled_config_returns_skip_no_state_change);
     HU_RUN_TEST(test_enabled_all_clear_returns_skip_advances_state);
     HU_RUN_TEST(test_interval_gate_blocks_back_to_back_ticks);

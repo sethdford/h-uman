@@ -56,6 +56,7 @@ int hu_reaction_handler_was_called_this_turn(void);
 #include "human/agent/channel_trust.h"
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/response_guard.h"
+#include "human/agent/response_guard_dpo.h"
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/validators/builtin.h"
@@ -6467,14 +6468,41 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 "agent_turn", agent->observer,
                                 "response_guard REJECT: turn final (len=%zu, recent_avg=%zu) "
                                 "[semantic=%d length=%d director=%d persona=%d identity=%d "
-                                "repetition_run=%zu] - retrying once with repair prompt",
+                                "naked_opener=%d repetition_run=%zu] - retrying once with "
+                                "repair prompt",
                                 final_len, guard_ctx.recent_avg_len,
                                 guard_report.detected_semantic_leak ? 1 : 0,
                                 guard_report.detected_length_anomaly ? 1 : 0,
                                 guard_report.detected_director_echo ? 1 : 0,
                                 guard_report.detected_persona_pii_echo ? 1 : 0,
                                 guard_report.detected_persona_identity_echo ? 1 : 0,
+                                guard_report.detected_naked_discourse_opener ? 1 : 0,
                                 guard_report.max_repetition_run);
+                            /* Sprint 41 follow-up — capture this rejection as a
+                             * DPO negative pair so future LoRA training learns
+                             * not to produce it. No-op under HU_IS_TEST. The
+                             * `detector` slug names the primary detector that
+                             * fired (set to whichever flag tripped); priority
+                             * order matches Phase wire-up so the most specific
+                             * label wins. */
+                            const char *dpo_detector = "unknown";
+                            if (guard_report.detected_naked_discourse_opener)
+                                dpo_detector = "naked_discourse_opener";
+                            else if (guard_report.detected_persona_identity_echo)
+                                dpo_detector = "persona_identity_echo";
+                            else if (guard_report.detected_persona_pii_echo)
+                                dpo_detector = "persona_pii_echo";
+                            else if (guard_report.detected_director_echo)
+                                dpo_detector = "director_echo";
+                            else if (guard_report.detected_length_anomaly)
+                                dpo_detector = "length_anomaly";
+                            else if (guard_report.detected_semantic_leak)
+                                dpo_detector = "semantic_leak";
+                            else if (guard_report.detected_degenerate_repetition)
+                                dpo_detector = "degenerate_repetition";
+                            (void)hu_response_guard_log_dpo_negative(
+                                msg, msg_len, final_content, final_len, dpo_detector,
+                                agent->active_channel, (int64_t)time(NULL));
                             char *retry_content = NULL;
                             size_t retry_len = 0;
                             hu_guard_report_t retry_report;

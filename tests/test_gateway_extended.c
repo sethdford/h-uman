@@ -1,6 +1,8 @@
 /* Gateway edge cases + control protocol + event bridge tests. */
 #include "cp_internal.h"
+#include "human/agent.h"
 #include "human/agent/model_router.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/response_guard.h"
 #include "human/bus.h"
 #include "human/config.h"
@@ -1367,6 +1369,97 @@ static void cp_fidelity_cleanup(const char *dir) {
     unsetenv("HUMAN_FIDELITY_AB_PATH");
 }
 
+/* ── metrics.snapshot prompt_budget sub-object (US — doctor running-agent) ─ */
+
+static void test_cp_admin_metrics_snapshot_omits_prompt_budget_when_no_agent(void) {
+    /* When the gateway is running without an agent (e.g. headless config-only
+     * mode), the prompt_budget sub-object MUST be omitted entirely — so a
+     * doctor consumer can distinguish "feature off" from "feature on but
+     * zero observations". The existing top-level shape (health, metrics)
+     * must remain intact. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+    /* app.agent intentionally NULL. */
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r1\",\"method\":\"metrics.snapshot\"}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_snapshot(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Backward-compat: existing fields still present. */
+    HU_ASSERT_TRUE(strstr(out, "\"health\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"metrics\"") != NULL);
+    /* The new sub-object MUST NOT appear when no agent is wired. */
+    HU_ASSERT_TRUE(strstr(out, "\"prompt_budget\"") == NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+}
+
+static void test_cp_admin_metrics_snapshot_includes_prompt_budget_when_observed(void) {
+    /* When an agent IS wired and its prompt_budget has been observed at
+     * least once, metrics.snapshot exposes the live counters under the
+     * "prompt_budget" key so an external doctor / dashboard can query them
+     * without spawning the agent's own check binary. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    struct hu_agent agent;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&agent, 0, sizeof(agent));
+    /* Configure thresholds so the dead-field predicate has a defined
+     * behavior even with zero allowlisted fields. */
+    cfg.prompt_budget.enabled = true;
+    cfg.prompt_budget.dead_field_min_bytes = 16;
+    cfg.prompt_budget.min_samples_before_tag = 1;
+    app.config = &cfg;
+    app.alloc = &alloc;
+    app.agent = &agent;
+
+    hu_prompt_budget_t *b = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &b), HU_OK);
+    HU_ASSERT_NOT_NULL(b);
+    agent.prompt_budget = b;
+
+    /* Observe one turn. Per-field bytes left at zero so the single
+     * populated field is below the 16-byte threshold and registers as
+     * DEAD (with min_samples=1). Must pass count >= 1 because
+     * hu_prompt_budget_observe returns early on count==0. */
+    hu_prompt_field_stat_t stats[1] = {{.name = "_test_field_0", .bytes_contributed = 0}};
+    hu_prompt_budget_observe(b, stats, 1);
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r1\",\"method\":\"metrics.snapshot\"}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_snapshot(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* The sub-object exists and reports observation_count >= 1. The exact
+     * count is what we observed (1) but we accept >=1 to avoid coupling
+     * the test to internal observation accounting changes. */
+    HU_ASSERT_TRUE(strstr(out, "\"prompt_budget\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"observation_count\":1") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"dead_field_count\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"dead_fields\"") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+    hu_prompt_budget_free(b);
+}
+
 static void test_cp_admin_metrics_fidelity_returns_zero_state_without_persona(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_context_t app;
@@ -1653,6 +1746,8 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_ws_server_is_upgrade_invalid);
     HU_RUN_TEST(test_ws_server_send_null_conn);
     HU_RUN_TEST(test_ws_server_broadcast_empty);
+    HU_RUN_TEST(test_cp_admin_metrics_snapshot_omits_prompt_budget_when_no_agent);
+    HU_RUN_TEST(test_cp_admin_metrics_snapshot_includes_prompt_budget_when_observed);
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_zero_state_without_persona);
 #ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_uses_params_persona);

@@ -431,6 +431,10 @@ typedef struct hu_persona {
     hu_relationship_t relationships[16];
     size_t relationships_count;
 
+    /* Reply pacing parameters (AC-7) — enforce human-like latency */
+    int32_t min_reply_delay_ms;      /* default 250; minimum wall-clock before sending reply */
+    int32_t reply_delay_variance_ms; /* default 600; adds ±variance ms jitter to pacing */
+
     /* Recent activity context (loaded from ~/.human/photos/recent_activity.json) */
     char *recent_activity;
 

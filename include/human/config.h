@@ -305,6 +305,22 @@ typedef struct hu_prompt_budget_config {
                                      HU_PROMPT_BUDGET_ALLOWLIST_MAX) */
 } hu_prompt_budget_config_t;
 
+/* Sprint 41 follow-up #2 — operator-facing runtime knobs for the
+ * response_guard subsystem. The guard itself runs unconditionally; this
+ * config is the kill-switch surface so operators can disable specific
+ * detectors at runtime without recompiling (e.g. operator sees a G9
+ * false-positive burst at 3am and silences the rule until they can
+ * tune marker lists). All fields default to "enabled" so a fresh
+ * config.json keeps the protective defaults. */
+typedef struct hu_response_guard_config {
+    /* G9 — naked discourse-marker opener. Default true. Set to false in
+     * config.json under {"response_guard": {"naked_opener_enabled":
+     * false}} to disable the detector process-wide. The setter
+     * hu_response_guard_set_naked_opener_globally_disabled() applies
+     * !naked_opener_enabled at daemon startup. */
+    bool naked_opener_enabled;
+} hu_response_guard_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -745,6 +761,7 @@ typedef struct hu_config {
     hu_proactive_throttle_config_t proactive_throttle;
     hu_initiative_config_t initiative;
     hu_prompt_budget_config_t prompt_budget;
+    hu_response_guard_config_t response_guard;
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;

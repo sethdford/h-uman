@@ -204,6 +204,86 @@ static void test_emit_handles_null_reason(void) {
     free(out);
 }
 
+/* ── detail_json passthrough (additive v1 extension) ──────────────── */
+
+static void test_emit_includes_detail_when_present(void) {
+    /* detail_json is a pre-encoded JSON value. The emitter must write it
+     * verbatim under "detail" — NOT wrap it in quotes — so consumers can
+     * read .detail.k directly instead of having to JSON.parse a string. */
+    hu_doctor_json_entry_t e = {.name = "prompt_budget",
+                                .verdict = HU_DOCTOR_PASS,
+                                .reason = "enabled",
+                                .detail_json = "{\"enabled\":true,\"observation_count\":null}"};
+    char *out = emit_to_buf(&e, 1, HU_TEST_FIXED_EPOCH, NULL);
+    HU_ASSERT_NOT_NULL(out);
+    /* Raw object literal lands inline under "detail": */
+    HU_ASSERT_TRUE(strstr(out, "\"detail\":{\"enabled\":true,\"observation_count\":null}") != NULL);
+    /* Defense-in-depth: detail must NOT be emitted as a string-wrapped JSON
+     * (that would force consumers to JSON.parse twice). */
+    HU_ASSERT_TRUE(strstr(out, "\"detail\":\"{") == NULL);
+    free(out);
+}
+
+static void test_emit_omits_detail_when_null(void) {
+    /* Pre-existing v1 shape MUST be preserved for checks that don't set
+     * detail_json — otherwise this would be a breaking schema change. */
+    hu_doctor_json_entry_t e = {
+        .name = "install", .verdict = HU_DOCTOR_PASS, .reason = "ok", .detail_json = NULL};
+    char *out = emit_to_buf(&e, 1, HU_TEST_FIXED_EPOCH, NULL);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"detail\"") == NULL);
+    free(out);
+}
+
+static void test_emit_omits_detail_when_empty_string(void) {
+    /* Empty-string detail is treated as "not set" — checks that compute
+     * a result-dependent detail and end up with nothing to report should
+     * not surface an empty value to consumers. */
+    hu_doctor_json_entry_t e = {
+        .name = "install", .verdict = HU_DOCTOR_PASS, .reason = "ok", .detail_json = ""};
+    char *out = emit_to_buf(&e, 1, HU_TEST_FIXED_EPOCH, NULL);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"detail\"") == NULL);
+    free(out);
+}
+
+static void test_emit_detail_appears_after_reason_inside_check_object(void) {
+    /* Pin the field order so consumers that stream-parse can rely on it.
+     * Order: name, verdict, reason, detail (when present). */
+    hu_doctor_json_entry_t e = {
+        .name = "pb", .verdict = HU_DOCTOR_PASS, .reason = "ok", .detail_json = "{\"k\":1}"};
+    char *out = emit_to_buf(&e, 1, HU_TEST_FIXED_EPOCH, NULL);
+    HU_ASSERT_NOT_NULL(out);
+    const char *reason = strstr(out, "\"reason\":");
+    const char *detail = strstr(out, "\"detail\":");
+    HU_ASSERT_NOT_NULL(reason);
+    HU_ASSERT_NOT_NULL(detail);
+    HU_ASSERT_TRUE(detail > reason);
+    free(out);
+}
+
+static void test_emit_mixed_checks_some_with_detail_some_without(void) {
+    /* Realistic shape: aggregate of registry results where only some
+     * checks supply detail. The emitter must handle the heterogeneous
+     * array without leaking a stray "detail":null or trailing comma. */
+    hu_doctor_json_entry_t entries[] = {
+        {.name = "a", .verdict = HU_DOCTOR_PASS, .reason = "", .detail_json = NULL},
+        {.name = "b", .verdict = HU_DOCTOR_PASS, .reason = "", .detail_json = "{\"x\":1}"},
+        {.name = "c", .verdict = HU_DOCTOR_PASS, .reason = "", .detail_json = NULL},
+    };
+    char *out = emit_to_buf(entries, 3, HU_TEST_FIXED_EPOCH, NULL);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"name\":\"a\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"name\":\"b\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"name\":\"c\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"detail\":{\"x\":1}") != NULL);
+    /* Exactly ONE "detail" key in the whole output (only b sets it). */
+    const char *first = strstr(out, "\"detail\"");
+    HU_ASSERT_NOT_NULL(first);
+    HU_ASSERT_TRUE(strstr(first + 1, "\"detail\"") == NULL);
+    free(out);
+}
+
 /* ── output discipline ────────────────────────────────────────────── */
 
 static void test_emit_ends_with_newline(void) {
@@ -240,6 +320,12 @@ void run_doctor_json_output_tests(void) {
     HU_RUN_TEST(test_emit_escapes_quote_in_reason);
     HU_RUN_TEST(test_emit_escapes_backslash_in_reason);
     HU_RUN_TEST(test_emit_handles_null_reason);
+
+    HU_RUN_TEST(test_emit_includes_detail_when_present);
+    HU_RUN_TEST(test_emit_omits_detail_when_null);
+    HU_RUN_TEST(test_emit_omits_detail_when_empty_string);
+    HU_RUN_TEST(test_emit_detail_appears_after_reason_inside_check_object);
+    HU_RUN_TEST(test_emit_mixed_checks_some_with_detail_some_without);
 
     HU_RUN_TEST(test_emit_ends_with_newline);
 }

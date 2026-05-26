@@ -77,7 +77,12 @@ typedef struct hu_doctor_json_entry {
     const char *name;        /* stable kebab-case check identifier */
     int verdict;             /* hu_doctor_verdict_t value */
     const char *reason;      /* human-readable; "" or NULL → empty */
-    const char *detail_json; /* optional structured detail; unused in v1 emitter */
+    const char *detail_json; /* optional structured detail (pre-encoded JSON value).
+                                When non-NULL and non-empty, the v1 emitter writes it
+                                verbatim under the "detail" key on the check object —
+                                so checks supply a JSON object/array literal like
+                                "{\"k\":\"v\"}", not a quoted string. Omitted when
+                                NULL/empty. */
 } hu_doctor_json_entry_t;
 
 hu_error_t hu_doctor_emit_json_v1(const hu_doctor_json_entry_t *entries, size_t count,

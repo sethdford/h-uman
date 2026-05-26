@@ -2097,20 +2097,30 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         hu_protective_is_boundary(agent->memory, cp->contact_id,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
-                    /* Sprint 41 (2026-05-26 Jordan incident) — quiet-hour gate.
-                     * Mirrors what init_proposer already enforces. The previous
-                     * proactive-send path consulted only rate-limit + per-contact
-                     * recency throttles, so "do not disturb 22:00-08:00" was
-                     * silently ignored. The predicate returns false when the
-                     * autoresponder is disabled or unconfigured — operators who
-                     * deliberately disabled DND keep the prior behavior. */
-                    if (!skip && hu_daemon_proactive_should_skip_for_quiet_hours(
-                                     daemon_autoresponder_config(), (int64_t)now,
-                                     /*tz_offset_seconds=*/0)) {
-                        hu_log_info("human", agent ? agent->observer : NULL,
-                                    "proactive check-in to %s skipped: autoresponder quiet hours",
-                                    cp->name ? cp->name : cp->contact_id);
-                        skip = true;
+                    /* Sprint 41 follow-up #2 — single-source-of-truth proactive
+                     * arbiter. Replaces the two explicit predicates (quiet hours
+                     * + daily budget) with one call to the same gate stack
+                     * init_proposer.tick uses. Daemon-side recency stays handled
+                     * by FU-1 below (different semantic — outbound vs inbound),
+                     * so we pass last_inbound_unix=0 to disable the arbiter's
+                     * inbound-recency gate. cfg=NULL is intentional: daemon
+                     * doesn't have an initiative_config in scope and the
+                     * arbiter's NULL-safe defaults apply. */
+                    if (!skip) {
+                        hu_init_proposer_result_t gate = hu_init_proposer_governor_check_only(
+                            /*cfg=*/NULL, daemon_autoresponder_config(),
+                            /*tz_offset_seconds=*/0, &gov_budget,
+                            /*last_inbound_unix=*/0, (int64_t)now);
+                        if (gate != HU_INIT_RESULT_SKIP) {
+                            const char *why =
+                                (gate == HU_INIT_RESULT_GATED_QUIET) ? "autoresponder quiet hours"
+                                : (gate == HU_INIT_RESULT_GATED_BUDGET) ? "daily budget exhausted"
+                                                                        : "governor gated";
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "proactive check-in to %s skipped: %s",
+                                        cp->name ? cp->name : cp->contact_id, why);
+                            skip = true;
+                        }
                     }
                     /* FU-1: defer proactive check-in if reactive turn fired recently. */
                     if (!skip && hu_daemon_proactive_should_defer(

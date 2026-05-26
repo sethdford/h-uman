@@ -18,6 +18,7 @@
 #include "human/agent/episodic.h"
 #include "human/agent/outcomes.h"
 #include "human/agent/registry.h"
+#include "human/agent/response_guard.h"
 #include "human/agent/spawn.h"
 #include "human/bootstrap.h"
 #include "human/bus.h"
@@ -1627,6 +1628,15 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 #endif
 
         svc_app_ctx.config = app_ctx.cfg;
+        /* Sprint 41 follow-up #2 — apply response_guard runtime knobs from
+         * config to the process-wide atomics. naked_opener_enabled defaults
+         * to true (set in config_merge.c:set_defaults), so an absent
+         * "response_guard" block keeps G9 active. Operators silence G9 via
+         * {"response_guard": {"naked_opener_enabled": false}}. */
+        if (app_ctx.cfg) {
+            hu_response_guard_set_naked_opener_globally_disabled(
+                !app_ctx.cfg->response_guard.naked_opener_enabled);
+        }
         svc_app_ctx.alloc = alloc;
         svc_app_ctx.tools = app_ctx.tools;
         svc_app_ctx.tools_count = app_ctx.tools_count;

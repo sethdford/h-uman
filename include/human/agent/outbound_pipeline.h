@@ -163,6 +163,35 @@ hu_outbound_verdict_t hu_outbound_verdict_rewrite(const char *reason, char *repl
 /* Human-readable stage name → enum (for logging / configs). NULL if unknown. */
 const char *hu_outbound_path_name(hu_outbound_path_t path);
 
+/* ----------------------------------------------------------------- */
+/* Crosstalk stage — exposed for testing and production wiring       */
+/* ----------------------------------------------------------------- */
+
+/* Pure Jaccard predicate over char-5-gram sets. Lowercases and
+ * strips punctuation before n-gramming. Returns score in [0,1]. */
+double hu_outbound_crosstalk_jaccard_5gram(hu_allocator_t *alloc, const char *a, size_t a_len,
+                                           const char *b, size_t b_len);
+
+/* Callback type for cross-contact corpus lookup. Implementations
+ * MUST allocate `out_texts` (array of `out_count` heap strings) via
+ * the provided allocator, and each string is NUL-terminated. The
+ * stage frees both the strings and the array via the same allocator.
+ *
+ * Return 0 on success, -1 on error.
+ *
+ * Production wires this to a SQLite query over the `messages` table
+ * filtered to contact_id != exclude_contact_id AND ts > now - 7d.
+ * Tests inject a static fake corpus. */
+typedef int (*hu_outbound_crosstalk_lookup_fn_t)(void *userdata, hu_allocator_t *alloc,
+                                                 const char *exclude_contact_id,
+                                                 size_t exclude_contact_id_len, char ***out_texts,
+                                                 size_t *out_count);
+
+/* Register the lookup callback. NULL clears it (then crosstalk
+ * cross-contact check is a no-op; metadata-pattern check still runs).
+ * Process-wide, not per-pipeline. */
+void hu_outbound_crosstalk_set_lookup(hu_outbound_crosstalk_lookup_fn_t fn, void *userdata);
+
 #ifdef __cplusplus
 }
 #endif

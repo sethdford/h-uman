@@ -6,8 +6,11 @@
  * a FILE *. The function is callable from tests (via fmemopen) without
  * needing the full doctor binary.
  *
- * Schema v1 is LOCKED. Future changes ship as v2 via explicit opt-in
- * to prevent silent breakage. Per docs/guides/doctor.md.
+ * Schema v1 is LOCKED for BREAKING changes — renames, type swaps, and
+ * removals ship as v2 via explicit opt-in to prevent silent consumer
+ * breakage. ADDITIVE changes (new optional fields, omitted when null)
+ * stay in v1 because every reasonable JSON consumer ignores unknown
+ * keys. Per docs/guides/doctor.md.
  *
  * Phase 1 scope: emitter + 14 contract tests + docs.
  * Phase 2 (deferred): --json CLI flag wired in cmd_doctor() to invoke
@@ -139,6 +142,14 @@ hu_error_t hu_doctor_emit_json_v1(const hu_doctor_json_entry_t *entries, size_t 
         fputs(verdict_to_string((hu_doctor_verdict_t)entries[i].verdict), out);
         fputs("\",\"reason\":", out);
         emit_escaped_string(out, entries[i].reason ? entries[i].reason : "");
+        /* Optional `detail` field — emitted as RAW JSON (not quoted) because
+         * detail_json is by-contract a pre-encoded JSON value (object/array)
+         * produced by the check. Omitted when NULL or empty so the v1 shape
+         * is unchanged for checks that don't set it. */
+        if (entries[i].detail_json && entries[i].detail_json[0] != '\0') {
+            fputs(",\"detail\":", out);
+            fputs(entries[i].detail_json, out);
+        }
         fputc('}', out);
     }
     fputs("],\"aggregate\":\"", out);

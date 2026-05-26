@@ -1,4 +1,6 @@
 #include "human/agent.h"
+#include "human/agent/governor.h"
+#include "human/autoresponder.h"
 #include "human/context/self_awareness.h"
 #include "human/core/string.h"
 #include "human/daemon_proactive.h"
@@ -560,6 +562,104 @@ static void test_p6_5_proactive_prompt_includes_absolute_rules(void) {
     hu_persona_deinit(&alloc, &persona);
 }
 
+/* ── Sprint 41 — quiet-hour gate for proactive sends ─────────────────── */
+
+/* Compose a daily DND window in local minutes. days_mask=0x7F = every day. */
+static hu_autoresponder_config_t make_dnd_cfg(int16_t start_min, int16_t end_min,
+                                              uint8_t days_mask) {
+    hu_autoresponder_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = true;
+    cfg.dnd_schedule[0].start_minute_of_day = start_min;
+    cfg.dnd_schedule[0].end_minute_of_day = end_min;
+    cfg.dnd_schedule[0].days_of_week_mask = days_mask;
+    cfg.schedule_count = 1;
+    return cfg;
+}
+
+/* Helper: pick a Unix timestamp anchored at a known local wall-clock
+ * minute-of-day on a known day. Uses 2026-05-26 (Tuesday) as the date
+ * floor, then adds the requested minute count. tz_offset=0 below means
+ * we want now_unix to land at the LOCAL minute we name. */
+static int64_t unix_at_local_minute(int hour, int minute) {
+    /* 2026-05-26 00:00 UTC = 1779840000. Add hour*3600 + minute*60. */
+    return (int64_t)1779840000 + (int64_t)hour * 3600 + (int64_t)minute * 60;
+}
+
+static void quiet_hours_skip_returns_false_when_cfg_is_null(void) {
+    HU_ASSERT_FALSE(
+        hu_daemon_proactive_should_skip_for_quiet_hours(NULL, unix_at_local_minute(3, 0), 0));
+}
+
+static void quiet_hours_skip_fires_inside_overnight_window(void) {
+    /* DND 22:00 → 07:00, every day. 03:00 must fire. */
+    hu_autoresponder_config_t cfg = make_dnd_cfg(22 * 60, 7 * 60, HU_DOW_MASK_DAILY);
+    HU_ASSERT_TRUE(
+        hu_daemon_proactive_should_skip_for_quiet_hours(&cfg, unix_at_local_minute(3, 0), 0));
+}
+
+static void quiet_hours_skip_holds_off_during_working_hours(void) {
+    /* Same DND 22:00 → 07:00. 10:00 must NOT fire. */
+    hu_autoresponder_config_t cfg = make_dnd_cfg(22 * 60, 7 * 60, HU_DOW_MASK_DAILY);
+    HU_ASSERT_FALSE(
+        hu_daemon_proactive_should_skip_for_quiet_hours(&cfg, unix_at_local_minute(10, 0), 0));
+}
+
+static void quiet_hours_skip_fires_at_exact_start_of_window(void) {
+    /* Boundary: 22:00 is the FIRST minute inside the window. */
+    hu_autoresponder_config_t cfg = make_dnd_cfg(22 * 60, 7 * 60, HU_DOW_MASK_DAILY);
+    HU_ASSERT_TRUE(
+        hu_daemon_proactive_should_skip_for_quiet_hours(&cfg, unix_at_local_minute(22, 0), 0));
+}
+
+static void quiet_hours_skip_returns_false_when_cfg_disabled(void) {
+    /* enabled=false → autoresponder code path returns false; we mirror. */
+    hu_autoresponder_config_t cfg = make_dnd_cfg(22 * 60, 7 * 60, HU_DOW_MASK_DAILY);
+    cfg.enabled = false;
+    HU_ASSERT_FALSE(
+        hu_daemon_proactive_should_skip_for_quiet_hours(&cfg, unix_at_local_minute(3, 0), 0));
+}
+
+/* ── Sprint 41 follow-up — daily-budget gate ──────────────────────────── */
+
+static void budget_skip_returns_false_for_null_budget(void) {
+    HU_ASSERT_FALSE(hu_daemon_proactive_should_skip_for_budget(NULL, 1000ULL));
+}
+
+/* governor.c::has_budget gates on BOTH daily_max AND weekly_max — both
+ * must be > 0 for a budget to exist. relationship_multiplier MUST be
+ * > 0 too (effective_daily_max multiplies by it); 1.0 = friend tier
+ * per governor.h:12 docs. */
+static hu_proactive_budget_config_t make_budget_cfg(uint8_t daily_max) {
+    hu_proactive_budget_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.daily_max = daily_max;
+    cfg.weekly_max = (uint8_t)(daily_max * 5);
+    cfg.relationship_multiplier = 1.0;
+    cfg.cool_off_hours = 0;
+    return cfg;
+}
+
+static void budget_skip_returns_false_when_budget_remains(void) {
+    hu_proactive_budget_t budget;
+    memset(&budget, 0, sizeof(budget));
+    hu_proactive_budget_config_t cfg = make_budget_cfg(5);
+    hu_governor_init(&cfg, &budget);
+    HU_ASSERT_FALSE(hu_daemon_proactive_should_skip_for_budget(&budget, 1000ULL));
+}
+
+static void budget_skip_fires_when_daily_max_exhausted(void) {
+    hu_proactive_budget_t budget;
+    memset(&budget, 0, sizeof(budget));
+    hu_proactive_budget_config_t cfg = make_budget_cfg(2);
+    hu_governor_init(&cfg, &budget);
+    /* Spend both budget slots. */
+    HU_ASSERT_EQ(hu_governor_record_sent(&budget, 1000ULL), HU_OK);
+    HU_ASSERT_EQ(hu_governor_record_sent(&budget, 1100ULL), HU_OK);
+    /* Third send must be gated. */
+    HU_ASSERT_TRUE(hu_daemon_proactive_should_skip_for_budget(&budget, 1200ULL));
+}
+
 /* P6-5 sanity: the shared helper produces the same key substrings. */
 static void test_p6_5_absolute_rules_helper_emits_key_rules(void) {
     char buf[2048];
@@ -624,4 +724,18 @@ void run_daemon_proactive_tests(void) {
     /* P6-5: shared absolute-rules block in proactive prompts */
     HU_RUN_TEST(test_p6_5_proactive_prompt_includes_absolute_rules);
     HU_RUN_TEST(test_p6_5_absolute_rules_helper_emits_key_rules);
+
+    /* Sprint 41 — quiet-hour gate (Jordan incident 2026-05-26).
+     * Pure-predicate truth-table coverage of the autoresponder DND
+     * window check the daemon now consults before any proactive send. */
+    HU_RUN_TEST(quiet_hours_skip_returns_false_when_cfg_is_null);
+    HU_RUN_TEST(quiet_hours_skip_fires_inside_overnight_window);
+    HU_RUN_TEST(quiet_hours_skip_holds_off_during_working_hours);
+    HU_RUN_TEST(quiet_hours_skip_fires_at_exact_start_of_window);
+    HU_RUN_TEST(quiet_hours_skip_returns_false_when_cfg_disabled);
+
+    /* Sprint 41 follow-up — daily-budget gate parity with init_proposer. */
+    HU_RUN_TEST(budget_skip_returns_false_for_null_budget);
+    HU_RUN_TEST(budget_skip_returns_false_when_budget_remains);
+    HU_RUN_TEST(budget_skip_fires_when_daily_max_exhausted);
 }

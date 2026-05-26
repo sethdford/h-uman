@@ -94,6 +94,20 @@ typedef struct {
      * `"i'm a Chief Architect at Pure Health Solutions"` that G7
      * cannot catch (no name in third-person construct). */
     bool detected_persona_identity_echo;
+    /* Sprint 41 (2026-05-26 Jordan incident) — naked discourse-marker
+     * opener. Set when the response STARTS with a discourse-marker
+     * filler ("tbh", "ngl", "imo", "honestly", "fr", "lowkey", ...)
+     * directly followed by a bare greeting noun ("morning", "hey",
+     * "yo", ...) with no completing clause. The pattern fires
+     * because LoRA adapters trained on Seth's raw texting corpus
+     * learn discourse markers as high-probability sentence openers
+     * ("tbh that's annoying", "ngl idk") and then paste them onto
+     * proactive greetings where they make zero pragmatic sense
+     * ("tbh morning. you awake yet?" → "to-be-honest morning" is
+     * not how humans speak — backchannel markers require something
+     * to be honest ABOUT). See `hu_response_is_naked_discourse_opener`
+     * for the exact predicate. */
+    bool detected_naked_discourse_opener;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
@@ -160,6 +174,17 @@ typedef struct {
      * persona_biography_len < 25 disables this source. */
     const char *persona_biography;
     size_t persona_biography_len;
+
+    /* Sprint 41 follow-up — per-call escape hatch for G9 (naked
+     * discourse-marker opener). Set to true when the calling channel
+     * has legitimate short interjections that should bypass G9 (e.g.
+     * a voice channel where "tbh morning" might be a valid backchannel
+     * + greeting separated by a pause-token the text guard cannot see).
+     * Default false → G9 runs. There is also a process-wide kill-switch
+     * via `hu_response_guard_set_naked_opener_globally_disabled` for
+     * operators who want to disable G9 across all channels without
+     * touching every call site. */
+    bool naked_opener_disabled;
 } hu_guard_context_t;
 
 /* Sprint 38 — cumulative REJECT counts by detector (process-wide).
@@ -172,6 +197,8 @@ typedef struct {
     uint64_t director_echo;
     uint64_t persona_pii_echo;
     uint64_t persona_identity_echo;
+    /* Sprint 41 — naked discourse-marker opener (G9). */
+    uint64_t naked_discourse_opener;
 } hu_guard_reject_stats_t;
 
 void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
@@ -202,6 +229,46 @@ bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
  * Pure predicate — easy to unit-test (see tests/test_response_guard.c).
  * Returns true iff the response is a critique echo. */
 bool hu_response_is_critique_echo(const char *s, size_t len);
+
+/* Sprint 41 (2026-05-26 Jordan incident) — naked discourse-marker opener.
+ *
+ * Returns true if `s[0..len)` STARTS with one of a small set of discourse-
+ * marker fillers (tbh, ngl, imo, imho, fwiw, fr, frfr, honestly, lowkey,
+ * highkey, lmao, lol, deadass) directly followed by a bare greeting noun
+ * (morning, evening, afternoon, night, hey, hi, hello, sup, yo, hola,
+ * howdy) with no completing clause. This catches the production class:
+ *
+ *   "tbh morning. you awake yet?"     -> REJECT (filler + greeting + EOS-ish)
+ *   "ngl hey wanna grab coffee?"      -> REJECT (filler + greeting + EOS-ish)
+ *
+ * It does NOT fire when the greeting is followed by a copula-style verb
+ * making the marker pragmatically valid:
+ *
+ *   "tbh morning is the worst"        -> OK ("to be honest, morning IS X")
+ *   "tbh hey was a fun show"          -> OK
+ *
+ * Nor when the message contains no discourse marker:
+ *
+ *   "morning! you awake yet?"         -> OK (no naked marker)
+ *
+ * Pure predicate — easy to unit-test. Used as Phase 5 (G9) inside
+ * hu_response_guard_check_ex. */
+bool hu_response_is_naked_discourse_opener(const char *s, size_t len);
+
+/* Sprint 41 follow-up — process-wide kill switch for G9. When set to true,
+ * G9 is skipped for ALL callers regardless of per-call context. Use to
+ * disable the detector at runtime without recompiling (e.g. operator
+ * sees a false-positive burst at 3am and wants to silence the rule until
+ * morning). Default false — G9 runs.
+ *
+ * Set via config wire-up at daemon startup (planned follow-up) or via
+ * `human ctl response-guard-disable g9` (planned CLI follow-up). The
+ * setter is intentionally simple to keep the kill-switch reachable.
+ *
+ * Thread-safe: atomic bool. */
+void hu_response_guard_set_naked_opener_globally_disabled(bool disabled);
+bool hu_response_guard_naked_opener_globally_disabled(void);
+
 void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
                                   size_t contact_key_len, size_t candidate_count, size_t best_idx,
                                   int best_quality, size_t response_len, const char *response,

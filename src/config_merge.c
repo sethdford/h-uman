@@ -432,6 +432,11 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         set_defaults_rollback(cfg, a);
         return;
     }
+
+    /* Sprint 41 follow-up #2 — response_guard defaults. G9 ON by default;
+     * operator opts out via {"response_guard": {"naked_opener_enabled":
+     * false}} in config.json. */
+    cfg->response_guard.naked_opener_enabled = true;
 }
 
 static void sync_autonomy_level_from_string(hu_config_t *cfg) {
