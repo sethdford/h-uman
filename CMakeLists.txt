@@ -3094,6 +3094,7 @@ set(HU_TEST_SOURCES
     tests/test_reflection_consumer.c
     tests/test_reflection_quorum.c
     tests/test_personal_model_reflection_slice.c
+    tests/test_reflection_e2e.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c
