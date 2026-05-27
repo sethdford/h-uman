@@ -1,6 +1,6 @@
 # Eval Suites Manifest
 
-Version: **2026-05-10d** (bump on any task add/remove/reword or judge profile change)
+Version: **2026-05-26a** (bump on any task add/remove/reword or judge profile change)
 
 ## Suites
 
@@ -19,7 +19,7 @@ Version: **2026-05-10d** (bump on any task add/remove/reword or judge profile ch
 | `reasoning.json` | 10 | Reasoning depth | (contains) | 1.0 |
 | `reasoning_basic.json` | 10 | Basic reasoning | `llm_judge` | 1.1 |
 | `social.json` | 8 | Social intelligence | (contains) | 1.0 |
-| `tier1_naturalness.json` | 12 | Tier-1 channel register: Telegram, Discord, Slack, iMessage | `human_likeness` | 1.0 |
+| `tier1_naturalness.json` | 24 | Tier-1 channel register + emoji density + formality + length: Telegram, Discord, Slack, iMessage | `human_likeness` | 1.1 |
 | `tool_capability.json` | 8 | Tool discipline / no fabrication | `tool_capability` | 1.0 |
 | `tool_use.json` | 8 | Tool selection | (contains) | 1.0 |
 | `tool_use_basic.json` | 5 | Basic tool selection | `llm_judge` | 1.0 |
@@ -32,7 +32,7 @@ Version: **2026-05-10d** (bump on any task add/remove/reword or judge profile ch
 | `inner_thoughts.json` | 6 | Thought accumulation, surfacing, suppression, contact isolation | `llm_judge` | 1.0 |
 | `anti_sycophancy.json` | 8 | Opinion maintenance, graceful disagreement, evidence-based change | `llm_judge` | 1.0 |
 
-**Total**: 25 suites, 237 tasks
+**Total**: 25 suites, 249 tasks
 
 Human-facing HuLa documentation (config, CLI, ethics, traces): [`docs/guides/hula.md`](../docs/guides/hula.md).
 
@@ -107,6 +107,7 @@ multi-item packs from `$HU_EVAL_DATA_DIR/longmemeval.json`. A committed
 - **2026-05-10c**: Documented W16 LongMemEval example corpus path
   (`longmemeval/longmemeval.json` + README); not a new `human eval run` task suite.
 - **2026-05-10a**: Added `tier1_naturalness.json` (12 tasks, 3 per Tier-1 channel — Telegram DM/supergroup/link-grounding, Discord server/thread/DM, Slack thread/DM/`@channel` etiquette, iMessage tapback/family-group/no-vision honesty). Judge: `human_likeness`. Anchors the M6 mission's "Tier 1 score 8/10+ on naturalness eval" so that channel-aware register switching is exercised, not only iMessage-style DMs.
+- **2026-05-26a** (M6-B): Doubled `tier1_naturalness.json` coverage to 24 tasks (6 per Tier-1 channel) by adding emoji-density, formality-register, and length-expectation scenarios per channel. Hits the spec target of 5-10 per channel. New IDs: `tg-004..006`, `dc-004..006`, `sl-004..006`, `im-004..006`. Each new category probes a per-channel native affordance: Slack tolerates low emoji + exec-visibility formality + async-shaped length; Discord tolerates higher emoji + mod-voice shift + thread-help length; Telegram is between Slack and Discord on emoji + has explicit business-register channel admin DMs + voice-note-text length deltas; iMessage uses sparse emoji even in intimate threads + has first-time-contact register + has logistics-decisive length.
 - **2026-04-18a**: Added `imessage_humanness.json` (8 tasks — friend ping, group brevity, link ack, logistics, thanks, direct yes/no, no false shared memory, vent empathy). Judge: `human_likeness`.
 - **2026-04-03b**: Added 4 Phase 2 feature eval suites: `humor_engine.json` (8 tasks — timing, audience adaptation, strategy, failed recovery, grief sensitivity, persona consistency, callbacks), `temporal_reasoning.json` (6 tasks — season awareness, birthday/anniversary surfacing, life transitions, year-boundary edge cases), `inner_thoughts.json` (6 tasks — accumulation, relevant surfacing, suppression, contact isolation, staleness, natural phrasing), `anti_sycophancy.json` (8 tasks — opinion maintenance, multi-turn pressure, graceful disagreement, evidence-based change, contrarian budget, opinion evolution, topic independence).
 - **2026-04-03a**: Added 3 new suites from adversarial assessment: `companion_safety.json` (12 tasks — SHIELD 5 dimensions, farewell manipulation, crisis escalation, vulnerable users, disclosure), `trust_repair.json` (10 tasks — memory hallucination, fabricated shared experiences, error recovery, trust erosion, divergence), `longitudinal.json` (9 tasks — multi-session consistency, attachment trajectory, sycophancy resistance, humor recovery, proactive timing). Research: SHIELD arXiv:2510.15891, EmoAgent arXiv:2504.09689, Emotional Manipulation arXiv:2508.19258, Invisible Failures arXiv:2603.15423, LLMs Get Lost arXiv:2505.06120.

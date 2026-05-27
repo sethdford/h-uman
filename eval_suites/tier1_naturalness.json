@@ -123,6 +123,126 @@
       "prompt": "[iMessage] Them (sends a screenshot, no caption — you have NO image vision context). Then: \"see what I mean?\"\nYou (one short reply):",
       "expected": "Pass if the reply is honest about not being able to see the screenshot and asks a short, friendly clarifying question. Fail if it pretends to describe what's in the image, agrees vaguely as if it saw it, or refuses with a long disclaimer.",
       "rubric": "5=Honest one-line ask; 1=Fake-sees image or stiff refusal"
+    },
+    {
+      "id": "tg-004",
+      "category": "telegram_emoji_density",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram DM, friend just shared a small win] Them: \"got the job!! 🎉\"\nYou (one warm message, Telegram allows emoji):",
+      "expected": "Pass if one short congratulatory message with 0-2 well-placed emoji that fit the moment (Telegram tolerates emoji more than Slack but less than Discord). Fail if zero warmth-signals, or an avalanche of 5+ emoji, or formal 'Congratulations!' opener.",
+      "rubric": "5=Right emoji density for Telegram DM; 1=None or floods"
+    },
+    {
+      "id": "tg-005",
+      "category": "telegram_formality_business_register",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram, channel = 'company-announcements' admin DM to staff] Them: \"please confirm receipt of the new policy doc\"\nYou (reply):",
+      "expected": "Pass if a brief, professional acknowledgement — slightly more formal than a friend DM but still chat-tone (e.g. 'Confirmed, thanks for sending'). Fail if it stays in close-friend casual ('yo got it 👍') or swings to email-style ('Dear sir, I confirm receipt of...').",
+      "rubric": "5=Reads register correctly; 1=Wrong end of casual/formal spectrum"
+    },
+    {
+      "id": "tg-006",
+      "category": "telegram_length_voice_note_text",
+      "difficulty": 2,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram DM, friend] Them sent voice note (90 sec, transcript: 'long story but basically I'm thinking of quitting my job and going freelance — what do you think, am I crazy?')\nYou (text reply):",
+      "expected": "Pass if a substantive but conversational reply (3-6 sentences, not bullets) that engages with the actual question and asks a follow-up. Fail if a one-liner that dismisses the weight of the question, or a 12-bullet pros/cons list, or sidesteps the actual ask.",
+      "rubric": "5=Right depth for a real life question over text; 1=Too brief or treats like an essay prompt"
+    },
+    {
+      "id": "dc-004",
+      "category": "discord_emoji_density_server",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord #general, small server, casual hour] Someone: \"first big tournament win today 🏆\"\nYou (one server-chat congrats):",
+      "expected": "Pass if a brief reaction that fits Discord server energy — emoji and/or 'lets gooo' style is appropriate (Discord tolerates higher emoji density than Slack). Fail if a corporate 'Congratulations on your achievement' or, conversely, an emoji-only spam reply with no words.",
+      "rubric": "5=Discord-native energy with appropriate emoji; 1=Corporate or emoji-spam"
+    },
+    {
+      "id": "dc-005",
+      "category": "discord_formality_mod_voice",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord, you are acting as a server mod, #rules-and-bot-commands] New member: \"hey i think i just got muted by the bot, what did i do\"\nYou (reply in channel as mod):",
+      "expected": "Pass if a calm, helpful explanation that shifts to a slightly-more-formal mod register without being stiff — explains the likely cause and points at the right channel/process. Fail if it stays in joke-mode peer voice, OR goes full corporate ToS lecture.",
+      "rubric": "5=Mod register: kind but informative; 1=Buddy voice or ToS lecture"
+    },
+    {
+      "id": "dc-006",
+      "category": "discord_length_thread_help",
+      "difficulty": 2,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord help thread] OP: \"why does my docker container exit immediately when I run it?\"\nYou (thread reply):",
+      "expected": "Pass if a focused diagnostic reply that asks for one or two specific things (the run command + the exit code or last log line) before guessing — short but substantive. Fail if a paragraph of every possible cause (overwhelming), or a one-word 'logs?' (under-helpful).",
+      "rubric": "5=Right scope for Discord thread help; 1=Either drowns or under-helps"
+    },
+    {
+      "id": "sl-004",
+      "category": "slack_emoji_density_low",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack DM, coworker] Them: \"just shipped the migration 🚀\"\nYou (one short ack):",
+      "expected": "Pass if a brief celebratory ack that uses 0-1 emoji (Slack tolerates :tada: or 🎉 but reads cringe with multiple). 'nice, congrats' or 'huge, nice work :tada:' both fit. Fail if 3+ emoji, OR cold 'Acknowledged.', OR over-praising paragraph.",
+      "rubric": "5=Calibrated Slack DM ack; 1=Emoji flood or sterile"
+    },
+    {
+      "id": "sl-005",
+      "category": "slack_formality_exec_visibility",
+      "difficulty": 3,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack #leadership thread, VP+ in the room] VP: \"can someone summarize where we are on the Q4 reliability work?\"\nYou (thread reply, you have context):",
+      "expected": "Pass if a tight, structured status (3-5 sentences max OR a small handful of bullets — Slack-friendly) that opens with the headline and ends with the ask/next-step. Tone is professional but human. Fail if casual filler ('lol', 'tbh'), or a wall of paragraph prose, or hedges that obscure the actual status.",
+      "rubric": "5=Reads like a senior engineer's exec-channel reply; 1=Casual or sprawling"
+    },
+    {
+      "id": "sl-006",
+      "category": "slack_length_async_pr_review",
+      "difficulty": 3,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack DM from teammate in different timezone] Them: \"left some review comments on your PR — biggest one is the lock ordering question, but most are nits. ok if I approve once you address?\"\nYou (async reply, they're offline):",
+      "expected": "Pass if a brief reply that addresses both points (yes to the lock-ordering question or commits to a thread, and 'yes please' on conditional approval) and respects async — no calendar back-and-forth. Fail if it asks to jump on a call, or sprawls into per-comment responses inline, or doesn't address the conditional-approval ask.",
+      "rubric": "5=Async-shaped Slack reply; 1=Synchronous-thinking or omits a point"
+    },
+    {
+      "id": "im-004",
+      "category": "imessage_emoji_density_intimate",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, partner/close family] Them: \"thinking of you today ❤️\"\nYou (one warm reply):",
+      "expected": "Pass if a short warm reply with at most 1 emoji or no emoji (intimate iMessage threads typically use sparse emoji — heart, smile — not Discord-grade density). 'thinking of you too 🤍' or 'love you' both fit. Fail if multi-emoji string ('❤️❤️❤️🥰💕'), or sterile 'Likewise.', or a long emotional speech for a short ping.",
+      "rubric": "5=Intimate iMessage register; 1=Emoji flood or cold"
+    },
+    {
+      "id": "im-005",
+      "category": "imessage_formality_first_time_contact",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, unknown number — first contact ever] Them: \"hey is this still your number? this is Maya from the housewarming\"\nYou (reply):",
+      "expected": "Pass if a warm, slightly-cautious reply that confirms the number and shows context-awareness (e.g. 'yes! Maya — great to hear from you, how are you?'). Slightly more measured than a close-friend reply but still iMessage-casual. Fail if formal ('Hello, yes this is the correct number for [name]') or over-familiar ('MAYA!!! omg').",
+      "rubric": "5=Warm but appropriately new-contact register; 1=Formal or over-familiar"
+    },
+    {
+      "id": "im-006",
+      "category": "imessage_length_logistics_back_and_forth",
+      "difficulty": 2,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, friend planning dinner] Them: \"7 or 8? and that thai place or the new ramen one?\"\nYou (one message):",
+      "expected": "Pass if a single short message that answers both — the iMessage logistics register is short and decisive (e.g. '8, ramen — heard it's good'). Fail if a multi-paragraph deliberation, or asks 4 clarifying questions back, or only answers one of the two questions.",
+      "rubric": "5=Decisive iMessage logistics; 1=Vague or splits across messages"
     }
   ]
 }
