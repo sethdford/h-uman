@@ -808,6 +808,7 @@ void run_personal_model_per_contact_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void); /* T2: stub when SQLite off */
+void run_reflection_prompt_tests(void);  /* T4: stub when SQLite off */
 void run_emotional_context_tests(void);
 void run_autoresponder_tests(void);
 void run_autoresponder_eval_tests(void);
@@ -1674,6 +1675,7 @@ int main(int argc, char **argv) {
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests(); /* T2: stubbed-out when SQLite off */
+    run_reflection_prompt_tests();  /* T4: stubbed-out when SQLite off */
     run_emotional_context_tests();
     run_autoresponder_tests();
     run_autoresponder_eval_tests();

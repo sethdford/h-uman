@@ -242,6 +242,63 @@ hu_error_t hu_reflection_storage_upsert(struct sqlite3 *db, const char *run_id,
  * Returns 0 if no completed runs exist yet. */
 uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db);
 
+/* ── Prompt + input assembly (T4) ─────────────────────────────────
+ *
+ * The reflection LLM is a one-shot batch call:
+ *   system: hu_reflection_system_prompt()  (immutable template)
+ *   user:   the assembled transcript that hu_reflection_build_input
+ *           produces
+ *
+ * The data side (where do turns come from?) is INTENTIONALLY pluggable
+ * via the iter callback. This module never imports daemon headers —
+ * the daemon-wiring layer (T9) will supply an iter that reads from
+ * whatever turn ledger we settle on. Tests pass synthetic turns. */
+
+/* One conversation turn passed to the prompt builder. All pointers
+ * are caller-owned and only need to outlive the iter callback's
+ * return — the builder copies what it needs into the output buffer
+ * before calling iter again. */
+typedef struct hu_reflection_turn {
+    const char *turn_id; /* opaque stable id the model can cite back */
+    const char *channel; /* e.g. "imessage", "telegram"; max 31 chars used */
+    const char *sender;  /* "user", "assistant", or a contact name */
+    const char *content; /* the message text — may be multi-line */
+    uint64_t ts_ms;      /* ms since epoch */
+} hu_reflection_turn_t;
+
+/* Iter callback: write the next turn into *out and return true; on
+ * end-of-stream return false (the contents of *out are then ignored).
+ * The callback OWNS the storage backing out's char pointers for the
+ * duration of the call's return; the builder copies before re-calling. */
+typedef bool (*hu_reflection_turn_iter_fn)(void *ctx, hu_reflection_turn_t *out_turn);
+
+/* Build the user-message body for the reflection LLM call. The builder
+ * formats each turn as:
+ *
+ *   [id=<turn_id>] [channel=<channel>] [ts=<iso8601>] <sender>: <content>
+ *
+ * one line per turn, oldest-first. If the assembled body exceeds
+ * `max_chars`, the OLDEST turns are dropped until it fits (the spec's
+ * "drop oldest then re-emit" strategy — the most recent context is
+ * the most signal-rich for pattern detection). `max_chars` of 0
+ * means no cap.
+ *
+ * `*out_buf` is malloc'd; caller frees with free().
+ * `*out_turn_count` is the number of turns actually included (may be
+ * less than the iter produced if truncation kicked in).
+ *
+ * Empty iter (no turns) is valid: returns HU_OK with *out_buf = "" and
+ * *out_turn_count = 0.
+ *
+ * Returns HU_ERR_INVALID_ARGUMENT if iter_fn / out_buf / out_turn_count
+ * is NULL. Returns HU_ERR_OUT_OF_MEMORY if heap exhausted. */
+hu_error_t hu_reflection_build_input(hu_reflection_turn_iter_fn iter_fn, void *iter_ctx,
+                                     size_t max_chars, char **out_buf, int *out_turn_count);
+
+/* Returns the static system prompt text the reflection provider call
+ * uses. Always non-NULL. Lifetime: process-static (string literal). */
+const char *hu_reflection_system_prompt(void);
+
 #ifdef __cplusplus
 }
 #endif

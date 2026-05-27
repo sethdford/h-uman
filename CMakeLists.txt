@@ -1516,6 +1516,10 @@ if(HU_ENABLE_SQLITE)
         # gating the whole set here keeps the dependency graph honest.
         src/reflection/schema.c
         src/reflection/storage.c
+        # T4: prompt + transcript assembly. Has no direct SQLite syms but
+        # lives inside the gated module so the dep graph stays "all of
+        # src/reflection/ is one feature."
+        src/reflection/prompt.c
     )
 endif()
 
@@ -3072,6 +3076,7 @@ set(HU_TEST_SOURCES
     # .claude/rules/test-source-gate-symmetry.md.
     tests/test_reflection_schema.c
     tests/test_reflection_storage.c
+    tests/test_reflection_prompt.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c
