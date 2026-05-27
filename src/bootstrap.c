@@ -940,6 +940,13 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             bi->cfg.agent.persona ? strlen(bi->cfg.agent.persona) : 0, &ctx_cfg);
         if (err != HU_OK)
             goto fail;
+        /* 2026-05 Chip F — mirror of cli.c. Borrow the loaded cfg so per-turn
+         * paths (agent_turn.c, agent_stream.c, media_gif.c, media_video.c)
+         * can read runtime config fields. Without this, the daemon's actual
+         * prompt_budget.enabled / media_gen.* config is dark in production.
+         * `bi->cfg` outlives `bi->agent` (both live on the bootstrap-info
+         * struct); agent.config is a borrowed pointer, not owned. */
+        bi->agent.config = &bi->cfg;
         hu_metacognition_apply_config(&bi->agent.infra.metacognition, &bi->cfg.agent.metacognition);
 
         /* US-13: wire provider-degradation fallback_model from parsed config.
