@@ -1,9 +1,15 @@
 # Session Handoff Pack — 2026-05-27
 
-Bootstrap prompts for the three pending sub-projects from the 2026-05-26
-planning session. Each prompt is self-contained: paste into a fresh Claude
+Bootstrap prompts for the four sub-projects from the 2026-05-26 + 2026-05-27
+planning sessions. Each prompt is self-contained: paste into a fresh Claude
 Code session and the session has everything it needs to start without
-re-reading 100 turns of brainstorming history.
+re-reading 100+ turns of brainstorming history.
+
+UPDATE 2026-05-27: voice-via-Cartesia brainstorm was completed in the
+same session as the original planning (after the user pushed past the
+recommended stop-point); Prompt 4 is now an execute prompt rather than
+a brainstorm prompt. Cross-channel synthesis (Prompt 3) remains a
+brainstorm prompt — that one is still gated on reflection-loop landing.
 
 ## Why a handoff pack
 
@@ -228,71 +234,92 @@ superpowers:writing-plans to generate the tasks.md.
 
 ---
 
-## Prompt 4 — Brainstorm voice via Cartesia (#4)
+## Prompt 4 — Execute voice via Cartesia
 
-Independent of everything else. Cartesia API specifics and telephony
-provider choice are the main external dependencies — the brainstorm
-should surface those questions to you, not invent answers.
+The brainstorm landed during the 2026-05-27 session — spec and tasks
+already exist at `docs/plans/2026-05-27-voice-cartesia/`. This is now an
+execute prompt, not a brainstorm prompt.
+
+Independent of reflection-loop and calibrated-uncertainty execution
+(touches different files). Has real prerequisites that must be met
+before sprint kickoff.
 
 ```
-Brainstorm sub-project #4 (voice via Cartesia) using the
-superpowers:brainstorming skill.
+Execute the voice-via-Cartesia implementation plan at
+docs/plans/2026-05-27-voice-cartesia/tasks.md via the
+superpowers:subagent-driven-development skill.
 
-Mission context:
-The user has a Cartesia.ai account; voice cloning is empirically SOTA.
-Cartesia's Sonic model is a sub-quadratic SSM applied to audio
-(founded by the Mamba authors Albert Gu and Karan Goel) and gets ~90ms
-first-byte latency with constant-memory streaming. For h-uman's "always
-available, knows your voice, responds in your voice" thesis, it's the
-right tool.
+Current state:
+- Spec at docs/plans/2026-05-27-voice-cartesia/design.md (approved)
+- Plan at docs/plans/2026-05-27-voice-cartesia/tasks.md (10 tasks)
+- Substantial existing infrastructure: src/tts/cartesia*.c (TTS +
+  streaming + emotion_map + voice_clone), src/channels/twilio.c (SMS),
+  src/channels/voice_channel.c (3 modes, none Cartesia yet),
+  include/human/channels/voice_channel.h, src/voice.c (Whisper STT
+  default + Cartesia STT optional), include/human/tts/cartesia.h
 
-This sub-project adds voice as a channel: inbound phone calls picked
-up by h-uman, with the agent responding in a cloned voice. The
-"visceral superhuman moment" — a spouse picks up, a friend picks up,
-and now h-uman picks up too, remembering everything from the last call.
+PREREQUISITES — VERIFY BEFORE STARTING:
+- Twilio account_sid + auth_token available
+- Twilio phone number purchased; webhook URL configurable
+- Cartesia API key valid for TTS + STT
+- Seth's reference audio recorded in Cartesia UI; voice_id UUID copied
+- Public-reachable HTTPS endpoint configured (ngrok / Cloudflare Tunnel
+  / Tailscale Funnel) — the daemon must be reachable from Twilio's cloud
+- Confirmed model_router has a "voice" or "reflexive" tier passing
+  thinkingConfig.thinkingBudget=0 (per CLAUDE.md Gemini 3.x gotcha).
+  If not present, ADD it before starting Task 6 — biggest sleeper risk.
+- Web-search verified: sonic-3-2026-01-12 is currently Cartesia's
+  active model_id (or update to whatever is current at sprint start)
 
-Starting context to read:
-- ~/.claude/CLAUDE.md (M1 thesis on persona depth, channel vtable
-  architecture)
-- src/channels/ directory (existing channel implementations — voice
-  will follow the hu_channel_t vtable pattern)
-- docs/plans/2026-05-26-calibrated-uncertainty/design.md (the
-  hedge_phrases persona overlay extension — voice will consume those
-  same banks for spoken hedges)
-- src/persona/ (persona overlay schema for per-channel customization)
+If any prerequisite fails, STOP and report. Do not start execution.
 
-Key design questions the brainstorm should resolve:
-1. Telephony provider: Twilio? SignalWire? Direct iMessage voice (which
-   doesn't exist as a real telephony surface — iMessage is text)? Cost
-   per minute matters for the "ship to users" mission (M4).
-2. STT choice: Whisper local? Cartesia's STT if they have one? Cloud
-   Whisper via OpenAI API?
-3. When voice channel is created vs when an existing text channel
-   handles the same conversation. Does an iMessage thread bleed into a
-   voice call session?
-4. Cartesia voice cloning workflow: does the user record a 30s
-   reference once and that's it, or is there per-channel persona
-   variation?
-5. Conversation pickup: does h-uman literally answer the phone? Or
-   queue and call back? Voicemail transcription?
-6. How does the persona overlay's hedge_phrases bank (landing in the
-   calibrated-uncertainty sprint) translate to SPOKEN hedges? Spoken
-   "I'm pretty sure — " has different cadence than the text version.
-7. Latency budget: phone-call UX demands <500ms response. Does the
-   existing agent loop fit that, or does voice need a separate
-   "reflexive" tier of the model router?
+Execute in waves:
 
-Out of scope:
-- General multi-modal beyond voice (vision, etc.)
-- Outbound calls placed by h-uman (only handling inbound for Phase 1)
-- Voice biometric authentication
+WAVE 1 (parallel, pure unit modules, no h-uman deps):
+- Task 1: μ-law/PCM codec + resample
+- Task 2: Silence-based VAD
 
-Produce a spec at docs/plans/<date>-voice-cartesia/{design.md,tasks.md}.
-Apply brainstorming flow rigorously. Ask the user (not yourself) for
-external choices like telephony provider and STT.
+WAVE 2 (parallel after Wave 1, independent):
+- Task 3: Twilio Voice webhook (TwiML response)
+- Task 4: WebSocket server foundation (RECON FIRST: check existing
+  websocket/wss infra in src/ before deciding extend vs add new)
 
-Terminal step is invoking superpowers:writing-plans for the
-implementation plan.
+WAVE 3 (sequential, builds on Waves 1+2):
+- Task 5: Per-call session state + TTS streaming integration
+- Task 6: End-to-end pump loop (THE critical task — agent integration
+  here is where Gemini 3.x thinking-budget gotcha bites)
+
+WAVE 4 (parallel-safe, smaller surface):
+- Task 7: Config plumbing for twilio_voice block
+- Task 8: Wire CARTESIA mode + register voice_twilio channel + HTTP routes
+- Task 9: voice_calls SQLite table + logging
+
+WAVE 5 (closes the sprint):
+- Task 10: Acceptance + manual smoke (REQUIRES real phone call against
+  Twilio number — cannot be fully automated)
+
+Constraints same as Prompts 1+2 (worktrees off main, critic review
+between waves, no TeamDelete until merged, gate symmetry check, full
+test suite). Additionally:
+- Heap-allocate hu_voice_call_t per ~/.claude/rules/asan-pthread-stack-
+  aliasing-darwin.md (cross-thread session state must not be stack-local)
+- After Task 8, daemon will respond to /twilio/voice but won't have
+  real callers — that's expected; Task 10's manual smoke is the only
+  way to validate end-to-end
+
+Acceptance criteria from design.md:
+AC-1: Calling configured Twilio number rings -> h-uman answers within 2s
+AC-2: Caller speaks -> STT transcription in agent input within 500ms of silence
+AC-3: Agent responds -> first TTS byte to caller within 500ms p50 over 10 calls
+AC-4: Cloned voice subjectively matches reference (listen test)
+AC-5: Caller hangs up -> voice_calls row finalized with end_reason + turn_count
+AC-6: With twilio_voice.enabled=false, /twilio/voice returns 404 + one-shot log
+AC-7: All unit + integration tests pass with mock providers, 0 ASan, gate symmetry
+
+Sprint 2 (Scope C: voice cloning CLI, per-overlay voice_ids, concurrent
+calls, outbound, voicemail) is out of scope here; gets its own plan.
+
+Start with Wave 1.
 ```
 
 ---
@@ -304,7 +331,7 @@ implementation plan.
 | 1 | Prompt 1 (reflection-loop execution) | Highest leverage — unblocks #2 cross-channel and is foundation for the "knows you" thesis |
 | 2 | Prompt 2 (calibrated-uncertainty execution) | Can start in parallel with #1's later waves (file overlap only at consumer.c integration); locks in trust UX |
 | 3 | Prompt 3 (cross-channel brainstorm) | Spec only; gated on reflection landing |
-| 4 | Prompt 4 (voice brainstorm) | Independent; can happen anytime; needs user input on external choices |
+| 4 | Prompt 4 (voice execution) | Independent of #1/#2 (different files). Has external prerequisites — check before starting. |
 
 ## Notes for the supervising user (you)
 
