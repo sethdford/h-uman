@@ -1520,6 +1520,12 @@ if(HU_ENABLE_SQLITE)
         # lives inside the gated module so the dep graph stays "all of
         # src/reflection/ is one feature."
         src/reflection/prompt.c
+        # T5: orchestration (pure gate + I/O wrapper). Drives T1+T2+T4
+        # through the provider vtable.
+        src/reflection/reflection.c
+        # T6: consumer queries — system-prompt slice, unsurfaced candidates,
+        # mark_surfaced + retire mutators. Read-side counterpart to T2.
+        src/reflection/consumer.c
     )
 endif()
 
@@ -3078,6 +3084,8 @@ set(HU_TEST_SOURCES
     tests/test_reflection_schema.c
     tests/test_reflection_storage.c
     tests/test_reflection_prompt.c
+    tests/test_reflection_orchestration.c
+    tests/test_reflection_consumer.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c
