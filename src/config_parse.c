@@ -407,6 +407,44 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
+/* Reflection loop config parser (T3, docs/plans/2026-05-26-reflection-loop).
+ * Mirrors parse_learning's shape: optional fields with type-checked reads,
+ * defaults already populated by config_merge so missing keys leave them
+ * intact. String fields use a bounded snprintf to stay inside the fixed
+ * buffer sizes from hu_reflection_loop_config_t. */
+static hu_error_t parse_reflection(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->reflection_loop.enabled = hu_json_get_bool(obj, "enabled", cfg->reflection_loop.enabled);
+    cfg->reflection_loop.local_shadow_mode =
+        hu_json_get_bool(obj, "local_shadow_mode", cfg->reflection_loop.local_shadow_mode);
+    /* Hours fields: only override when positive — keep defaults otherwise.
+     * Clamp pathologically large values to 24*30 (720h, one month) since
+     * anything higher means "effectively never" and we'd rather operators
+     * use `enabled=false` than encode "monthly" via numeric overflow. */
+    int mi = (int)hu_json_get_number(obj, "min_interval_hours",
+                                     (double)cfg->reflection_loop.min_interval_hours);
+    if (mi > 0 && mi <= 720)
+        cfg->reflection_loop.min_interval_hours = mi;
+    int idle = (int)hu_json_get_number(obj, "idle_threshold_hours",
+                                       (double)cfg->reflection_loop.idle_threshold_hours);
+    if (idle > 0 && idle <= 720)
+        cfg->reflection_loop.idle_threshold_hours = idle;
+    int daily = (int)hu_json_get_number(obj, "daily_floor_hours",
+                                        (double)cfg->reflection_loop.daily_floor_hours);
+    if (daily > 0 && daily <= 720)
+        cfg->reflection_loop.daily_floor_hours = daily;
+    const char *provider = hu_json_get_string(obj, "provider");
+    if (provider && *provider)
+        snprintf(cfg->reflection_loop.provider, sizeof cfg->reflection_loop.provider, "%s",
+                 provider);
+    const char *local_provider = hu_json_get_string(obj, "local_provider");
+    if (local_provider && *local_provider)
+        snprintf(cfg->reflection_loop.local_provider, sizeof cfg->reflection_loop.local_provider,
+                 "%s", local_provider);
+    return HU_OK;
+}
+
 /* M3 Dispatch — proactive_throttle config parser. Originally added in T3
  * to parse the `use_unified_dispatch` rollout flag; T8b removed that
  * flag. The parser stays for the other knobs (enabled, per_contact_daily_max).
@@ -1450,6 +1488,23 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     if (cfg->learning.dpo_pair_training_threshold == 0)
         cfg->learning.dpo_pair_training_threshold = HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
 
+    /* T3 (M2 reflection-loop): same default-init shape as learning above —
+     * callers memset before parse, so zero looks like "operator disabled".
+     * Set defaults BEFORE parse_reflection runs so partial blocks merge
+     * against them rather than zero-out. Also seed string fields. */
+    if (cfg->reflection_loop.min_interval_hours == 0)
+        cfg->reflection_loop.min_interval_hours = HU_REFLECTION_DEFAULT_MIN_INTERVAL_HOURS;
+    if (cfg->reflection_loop.idle_threshold_hours == 0)
+        cfg->reflection_loop.idle_threshold_hours = HU_REFLECTION_DEFAULT_IDLE_THRESHOLD_HOURS;
+    if (cfg->reflection_loop.daily_floor_hours == 0)
+        cfg->reflection_loop.daily_floor_hours = HU_REFLECTION_DEFAULT_DAILY_FLOOR_HOURS;
+    if (cfg->reflection_loop.provider[0] == 0)
+        snprintf(cfg->reflection_loop.provider, sizeof cfg->reflection_loop.provider, "%s",
+                 HU_REFLECTION_DEFAULT_PROVIDER);
+    if (cfg->reflection_loop.local_provider[0] == 0)
+        snprintf(cfg->reflection_loop.local_provider, sizeof cfg->reflection_loop.local_provider,
+                 "%s", HU_REFLECTION_DEFAULT_LOCAL_PROVIDER);
+
     const char *workspace = hu_json_get_string(root, "workspace");
     if (workspace && strstr(workspace, "..")) {
         workspace = NULL; /* Reject path traversal */
@@ -1597,6 +1652,13 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         parse_inference(a, cfg, inference_obj);
 
     /* Spec 2026-05-19 — `learning` block (DPO pair-count trigger). */
+    /* Reflection loop (M2) — parsed before learning since neither
+     * depends on the other but reflection is the newer subsystem and
+     * lives next to learning conceptually. */
+    hu_json_value_t *reflection_obj = hu_json_object_get(root, "reflection");
+    if (reflection_obj)
+        parse_reflection(cfg, reflection_obj);
+
     hu_json_value_t *learning_obj = hu_json_object_get(root, "learning");
     if (learning_obj)
         parse_learning(cfg, learning_obj);

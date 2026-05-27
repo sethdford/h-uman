@@ -476,6 +476,19 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * for first-token latency once streaming is enabled. */
     cfg->mlx_local.streaming_enabled = false;
     cfg->mlx_local.first_token_budget_ms = 500;
+
+    /* Reflection loop defaults (M2, T3). Default disabled — operator
+     * opts in. The 12h/2h/24h cadence matches the spec's "rare but
+     * meaningful" cost target on cloud Gemini 3.5 Flash. */
+    cfg->reflection_loop.enabled = false;
+    cfg->reflection_loop.local_shadow_mode = false;
+    cfg->reflection_loop.min_interval_hours = HU_REFLECTION_DEFAULT_MIN_INTERVAL_HOURS;
+    cfg->reflection_loop.idle_threshold_hours = HU_REFLECTION_DEFAULT_IDLE_THRESHOLD_HOURS;
+    cfg->reflection_loop.daily_floor_hours = HU_REFLECTION_DEFAULT_DAILY_FLOOR_HOURS;
+    snprintf(cfg->reflection_loop.provider, sizeof cfg->reflection_loop.provider, "%s",
+             HU_REFLECTION_DEFAULT_PROVIDER);
+    snprintf(cfg->reflection_loop.local_provider, sizeof cfg->reflection_loop.local_provider, "%s",
+             HU_REFLECTION_DEFAULT_LOCAL_PROVIDER);
 }
 
 static void sync_autonomy_level_from_string(hu_config_t *cfg) {

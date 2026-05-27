@@ -194,6 +194,39 @@ typedef struct hu_learning_config {
 
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100
 
+/* Reflection loop config (M2 closure, 2026-05-26-reflection-loop spec T3).
+ *
+ * Periodic batch task that distills accumulated conversations into
+ * typed, queryable patterns. Default disabled — operator opts in via
+ * `{"reflection": {"enabled": true}}` in config.json. When enabled,
+ * the daemon emits one info-level log line on first tick (per
+ * silent-config-gated-subsystems.md).
+ *
+ * Trigger semantics (all three gates must pass for an idle-driven
+ * run; `daily_floor_hours` bypass overrides idle):
+ *   - At least `min_interval_hours` since last completed run.
+ *   - At least `idle_threshold_hours` since last user activity.
+ *   - OR: `daily_floor_hours` since last run (force-run, ignores idle).
+ *
+ * `local_shadow_mode` (Sprint 2): when true, every cloud reflection
+ * also fires a local-Gemma reflection in shadow, and the eval harness
+ * compares outputs. Default false — Sprint 2 work item. */
+typedef struct hu_reflection_loop_config {
+    bool enabled;
+    bool local_shadow_mode;
+    int min_interval_hours;
+    int idle_threshold_hours;
+    int daily_floor_hours;
+    char provider[64];       /* default "gemini-3.5-flash" (per CLAUDE.md M3 row) */
+    char local_provider[64]; /* default "gemma-4-31b-local"; only used when shadow_mode */
+} hu_reflection_loop_config_t;
+
+#define HU_REFLECTION_DEFAULT_MIN_INTERVAL_HOURS   12
+#define HU_REFLECTION_DEFAULT_IDLE_THRESHOLD_HOURS 2
+#define HU_REFLECTION_DEFAULT_DAILY_FLOOR_HOURS    24
+#define HU_REFLECTION_DEFAULT_PROVIDER             "gemini-3.5-flash"
+#define HU_REFLECTION_DEFAULT_LOCAL_PROVIDER       "gemma-4-31b-local"
+
 /* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).
  *
  * When `best_of_n >= 2` AND the active provider is `llamacpp`, the agent's

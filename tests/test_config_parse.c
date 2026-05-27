@@ -1311,6 +1311,91 @@ static void test_config_parse_learning_nightly_lora_explicit_false(void) {
     HU_ASSERT_TRUE(!cfg_local.learning.nightly_lora_enabled);
 }
 
+/* REFL-T3 (2026-05-26): reflection block parsing contracts.
+ *
+ * Four tests cover the block-level invariants: defaults apply when the
+ * key is missing entirely; partial blocks merge against defaults rather
+ * than zero-resetting unspecified fields; provider override survives
+ * round-trip into the buffer; and pathological hours (≤0 or >720) are
+ * silently rejected to keep the defaults stable rather than encoding
+ * nonsense into runtime state. */
+
+static void test_config_parse_reflection_defaults_when_block_absent(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, "{}", 2), HU_OK);
+    /* Defaults from config_merge: disabled, 12h interval, 2h idle, 24h floor. */
+    HU_ASSERT_TRUE(!cfg_local.reflection_loop.enabled);
+    HU_ASSERT_TRUE(!cfg_local.reflection_loop.local_shadow_mode);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 12);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
+    HU_ASSERT_STR_EQ(cfg_local.reflection_loop.provider, "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg_local.reflection_loop.local_provider, "gemma-4-31b-local");
+}
+
+static void test_config_parse_reflection_partial_block_keeps_other_defaults(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    /* Only set enabled — the other fields must retain their defaults. */
+    const char *json = "{\"reflection\":{\"enabled\":true}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_TRUE(cfg_local.reflection_loop.enabled);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 12);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
+    HU_ASSERT_STR_EQ(cfg_local.reflection_loop.provider, "gemini-3.5-flash");
+}
+
+static void test_config_parse_reflection_provider_override(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"reflection\":{\"enabled\":true,\"provider\":\"gemini-3.1-pro-preview\","
+                       "\"min_interval_hours\":6,\"daily_floor_hours\":48}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_TRUE(cfg_local.reflection_loop.enabled);
+    HU_ASSERT_STR_EQ(cfg_local.reflection_loop.provider, "gemini-3.1-pro-preview");
+    HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 6);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 48);
+    /* idle_threshold_hours unspecified → stays at default 2 */
+    HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
+}
+
+static void test_config_parse_reflection_clamps_pathological_hours(void) {
+    /* Hours fields are int-bounded by (>0 && <=720). The parser must
+     * SILENTLY KEEP the defaults rather than encoding nonsense (-1 or
+     * 1000000). This catches typo'd or hostile config values. */
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"reflection\":{\"min_interval_hours\":-5,\"idle_threshold_hours\":0,"
+                       "\"daily_floor_hours\":1000000}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    /* All three should stay at default. */
+    HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 12);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
+    HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
+}
+
 static void test_config_parse_learning_default_does_not_serialize(void) {
     /* Default threshold (100) should NOT emit the `learning` block —
      * keep the canonical default config terse, same pattern as
@@ -1621,4 +1706,9 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_learning_nightly_lora_default_is_false);
     HU_RUN_TEST(test_config_parse_learning_nightly_lora_explicit_true);
     HU_RUN_TEST(test_config_parse_learning_nightly_lora_explicit_false);
+    /* REFL-T3: reflection block (docs/plans/2026-05-26-reflection-loop) */
+    HU_RUN_TEST(test_config_parse_reflection_defaults_when_block_absent);
+    HU_RUN_TEST(test_config_parse_reflection_partial_block_keeps_other_defaults);
+    HU_RUN_TEST(test_config_parse_reflection_provider_override);
+    HU_RUN_TEST(test_config_parse_reflection_clamps_pathological_hours);
 }
