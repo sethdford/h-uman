@@ -80,12 +80,26 @@ const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len) {
     if (!persona || !channel || persona->overlays_count == 0 || !persona->overlays)
         return NULL;
+    /* M6-A (2026-05-26): case-insensitive lookup per `.claude/rules/persona.md`
+     * and src/persona/CLAUDE.md contract ("Overlay lookup is by channel
+     * name — must be case-insensitive"). The prior `memcmp` was case-
+     * SENSITIVE, which silently bypassed the entire overlay if a user
+     * wrote "Slack" instead of "slack" in their persona JSON — every
+     * caller (channels/{slack,telegram,discord}.c, daemon.c, agent_stream.c)
+     * passes lowercase channel names by convention, so any uppercase
+     * stored overlay was effectively dead.
+     *
+     * Why strncasecmp not strcasecmp: persona->channel is null-terminated
+     * (validated by strlen above) but `channel` may not be (callers pass
+     * a length-bounded slice from agent state). strncasecmp is the
+     * right C-stdlib primitive for [haystack:0..len] vs [needle:0..len]
+     * comparison with case folding. */
     for (size_t i = 0; i < persona->overlays_count; i++) {
         const hu_persona_overlay_t *ov = &persona->overlays[i];
         if (!ov->channel)
             continue;
         size_t ov_len = strlen(ov->channel);
-        if (ov_len == channel_len && memcmp(ov->channel, channel, channel_len) == 0)
+        if (ov_len == channel_len && strncasecmp(ov->channel, channel, channel_len) == 0)
             return ov;
     }
     return NULL;

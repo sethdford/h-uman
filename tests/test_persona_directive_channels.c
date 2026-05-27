@@ -222,6 +222,68 @@ static void persona_directive_starter_persona_loads_tier2_overlays(void) {
     hu_persona_deinit(&alloc, &persona);
 }
 
+/* M6-A (2026-05-26): pin case-insensitive overlay lookup contract.
+ *
+ * Bug history: prior to commit M6-A, `hu_persona_find_overlay` used
+ * `memcmp` for channel-name comparison — case-SENSITIVE — despite
+ * both `src/persona/CLAUDE.md` and `.claude/rules/persona.md` stating
+ * that lookup MUST be case-insensitive. Every Tier-1 caller passes
+ * lowercase channel names (`"slack"`, `"telegram"`, etc.) by
+ * convention, so a persona JSON file with `"Slack"` would silently
+ * have its entire overlay bypassed.
+ *
+ * These three contracts pin the case-insensitive behavior: same
+ * overlay returned regardless of how the caller capitalizes the
+ * channel name. Without the fix, the SLACK test fails; with it, all
+ * three pass and `hu_persona_find_overlay` returns the same pointer
+ * for any case-equivalent lookup. */
+
+static const hu_persona_overlay_t *
+load_starter_and_find(hu_allocator_t *alloc, hu_persona_t *persona, const char *channel) {
+    memset(persona, 0, sizeof(*persona));
+    size_t starter_len = 0;
+    const char *starter_json = hu_starter_persona_get(&starter_len);
+    HU_ASSERT_EQ(hu_persona_load_json(alloc, starter_json, starter_len, persona), HU_OK);
+    return hu_persona_find_overlay(persona, channel, strlen(channel));
+}
+
+static void persona_overlay_lookup_case_insensitive_uppercase_first_letter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    /* Lowercase baseline — the canonical lookup that callers use. */
+    const hu_persona_overlay_t *lower = load_starter_and_find(&alloc, &persona, "slack");
+    HU_ASSERT_NOT_NULL(lower);
+    /* Uppercase first letter — what a hand-edited persona JSON might emit. */
+    const hu_persona_overlay_t *upper = hu_persona_find_overlay(&persona, "Slack", 5);
+    HU_ASSERT_NOT_NULL(upper);
+    /* Same pointer — both look up the same overlay row. */
+    HU_ASSERT_EQ((const void *)lower, (const void *)upper);
+    hu_persona_deinit(&alloc, &persona);
+}
+
+static void persona_overlay_lookup_case_insensitive_all_uppercase(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    const hu_persona_overlay_t *lower = load_starter_and_find(&alloc, &persona, "telegram");
+    HU_ASSERT_NOT_NULL(lower);
+    const hu_persona_overlay_t *upper = hu_persona_find_overlay(&persona, "TELEGRAM", 8);
+    HU_ASSERT_NOT_NULL(upper);
+    HU_ASSERT_EQ((const void *)lower, (const void *)upper);
+    hu_persona_deinit(&alloc, &persona);
+}
+
+static void persona_overlay_lookup_case_insensitive_mixed_case(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    const hu_persona_overlay_t *lower = load_starter_and_find(&alloc, &persona, "discord");
+    HU_ASSERT_NOT_NULL(lower);
+    /* "DiScOrD" — the worst-case typo a user could plausibly introduce. */
+    const hu_persona_overlay_t *mixed = hu_persona_find_overlay(&persona, "DiScOrD", 7);
+    HU_ASSERT_NOT_NULL(mixed);
+    HU_ASSERT_EQ((const void *)lower, (const void *)mixed);
+    hu_persona_deinit(&alloc, &persona);
+}
+
 void run_persona_directive_channels_tests(void) {
     HU_TEST_SUITE("persona_directive_channels");
     HU_RUN_TEST(persona_directive_starter_persona_loads_four_tier1_overlays);
@@ -232,4 +294,8 @@ void run_persona_directive_channels_tests(void) {
     HU_RUN_TEST(persona_directive_telegram_overlay_fires_casual_or_short);
     HU_RUN_TEST(persona_directive_tier1_batch_yields_zero_null_overlay);
     HU_RUN_TEST(persona_directive_starter_persona_loads_tier2_overlays);
+    /* M6-A: case-insensitive overlay lookup contract */
+    HU_RUN_TEST(persona_overlay_lookup_case_insensitive_uppercase_first_letter);
+    HU_RUN_TEST(persona_overlay_lookup_case_insensitive_all_uppercase);
+    HU_RUN_TEST(persona_overlay_lookup_case_insensitive_mixed_case);
 }
