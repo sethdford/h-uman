@@ -5,6 +5,7 @@
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
 #include "human/doctor/check_reaction_collection_wired.h"
+#include "human/doctor/check_reflection_loop.h"
 #include "human/doctor/check_unified_dispatch.h"
 #include <stdlib.h>
 #include <string.h>
@@ -449,6 +450,19 @@ static hu_doctor_check_result_t run_unified_dispatch_check(hu_doctor_check_t *se
     return hu_doctor_check_unified_dispatch.run(self, NULL);
 }
 
+/* T12 — M2 reflection-loop health check. Reads cfg from the adapter
+ * ctx; db is NULL in the doctor CLI path (no daemon) → check returns
+ * NA "no db available". Tests call the underlying vtable directly
+ * with a fully-populated ctx. */
+static hu_doctor_check_result_t run_reflection_loop_check(hu_doctor_check_t *self, void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_reflection_loop_ctx_t rctx = {
+        .cfg = uctx ? (const struct hu_config *)uctx->cfg : NULL,
+        .db = NULL, /* doctor CLI has no db handle; check returns NA */
+    };
+    return hu_doctor_check_reflection_loop.run(self, &rctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -476,6 +490,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
         {"unified_dispatch",
          "M3 unified-dispatch G9 retry-outcome health (rescued/thrashed/starved)",
          run_unified_dispatch_check, NULL, NULL},
+        {"reflection_loop", "M2 reflection-loop health (enabled/cold-start/healthy/broken/stale)",
+         run_reflection_loop_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},
