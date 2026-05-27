@@ -4410,8 +4410,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  *
                  * BLOCKING CAVEAT: subprocess training holds this loop
                  * for up to 30 min. The 4 AM slot is chosen to minimize
-                 * user impact. Opt-in via env var HU_NIGHTLY_LORA_ENABLED=1
-                 * until the daemon-config plumbing lands as a follow-up.
+                 * user impact. Opt-in via `cfg.learning.nightly_lora_enabled`
+                 * (preferred) or env var HU_NIGHTLY_LORA_ENABLED=1
+                 * (legacy fallback, deprecated; one-shot warn fires when
+                 * the env path is used to nudge operators toward config).
                  *
                  * Last-run tracking is in-memory only for this slice —
                  * after a daemon restart we'll re-run the next 4 AM
@@ -4427,8 +4429,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #else
                     struct tm *lt_nightly = localtime_r(&t, &tm_nightly);
 #endif
-                    const char *nightly_enabled = getenv("HU_NIGHTLY_LORA_ENABLED");
-                    bool gate_on = nightly_enabled && nightly_enabled[0] == '1';
+                    /* M3 trivia closure (2026-05-26) — config-first gate
+                     * with env-var legacy fallback. Config wins; env is
+                     * only consulted when config didn't enable. */
+                    bool gate_on = config && config->learning.nightly_lora_enabled;
+                    if (!gate_on) {
+                        const char *nightly_enabled = getenv("HU_NIGHTLY_LORA_ENABLED");
+                        if (nightly_enabled && nightly_enabled[0] == '1') {
+                            gate_on = true;
+                            static atomic_bool warned_env_legacy = false;
+                            hu_log_info_once(&warned_env_legacy, "lora-nightly",
+                                             agent ? agent->observer : NULL,
+                                             "HU_NIGHTLY_LORA_ENABLED env var is deprecated; "
+                                             "set learning.nightly_lora_enabled=true in "
+                                             "config.json instead. Env path still honored for "
+                                             "backwards compatibility.");
+                        }
+                    }
                     if (lt_nightly && gate_on) {
                         if (lt_nightly->tm_hour == 4 && lt_nightly->tm_min == 0 &&
                             !lora_nightly_done_today) {

@@ -11,20 +11,31 @@ static const struct eval_suite_expect_row {
     const char *file;
     size_t expect_tasks;
 } k_eval_suite_expect[] = {
-    {"adversarial.json", 10},       {"adversarial_turing.json", 30},
+    {"adversarial.json", 10},
+    {"adversarial_turing.json", 30},
     {"anti_sycophancy.json", 8},
-    {"capability_edges.json", 10},  {"coding_basic.json", 5},
-    {"companion_safety.json", 12},  {"fidelity.json", 18},
-    {"hula_orchestration.json", 4}, {"human_likeness.json", 8},
-    {"humor_engine.json", 8},       {"imessage_humanness.json", 8},
-    {"inner_thoughts.json", 6},    {"intelligence.json", 10},
+    {"capability_edges.json", 10},
+    {"coding_basic.json", 5},
+    {"companion_safety.json", 12},
+    {"fidelity.json", 18},
+    {"hula_orchestration.json", 4},
+    {"human_likeness.json", 8},
+    {"humor_engine.json", 8},
+    {"imessage_humanness.json", 8},
+    {"inner_thoughts.json", 6},
+    {"intelligence.json", 10},
     {"longitudinal.json", 9},
-    {"memory.json", 8},             {"multi_turn.json", 6},
-    {"reasoning.json", 10},         {"reasoning_basic.json", 10},
-    {"social.json", 8},             {"temporal_reasoning.json", 6},
-    {"tier1_naturalness.json", 12},
-    {"tool_capability.json", 8},    {"tool_use.json", 8},
-    {"tool_use_basic.json", 5},     {"trust_repair.json", 10},
+    {"memory.json", 8},
+    {"multi_turn.json", 6},
+    {"reasoning.json", 10},
+    {"reasoning_basic.json", 10},
+    {"social.json", 8},
+    {"temporal_reasoning.json", 6},
+    {"tier1_naturalness.json", 24}, /* M6-B 2026-05-26: doubled 12→24 (6/channel) */
+    {"tool_capability.json", 8},
+    {"tool_use.json", 8},
+    {"tool_use_basic.json", 5},
+    {"trust_repair.json", 10},
 };
 
 static void test_eval_load(void) {

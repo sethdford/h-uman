@@ -182,6 +182,14 @@ typedef struct hu_learning_config {
      * first-enabled paths per
      * ~/.claude/rules/silent-config-gated-subsystems.md. */
     bool m3_frontier_auto_training;
+    /* M3 trivia closure (2026-05-26) — promotes HU_NIGHTLY_LORA_ENABLED env
+     * var (src/daemon.c:4430) to a first-class config field. When false,
+     * the 04:00 nightly LoRA training run is skipped. The env var is still
+     * honored as a backwards-compatible fallback (config wins when set);
+     * the daemon emits a one-shot warn if the env path was used. Default
+     * false — opt-in like m3_frontier_auto_training, since the run blocks
+     * the daemon loop for up to 30 min. */
+    bool nightly_lora_enabled;
 } hu_learning_config_t;
 
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100

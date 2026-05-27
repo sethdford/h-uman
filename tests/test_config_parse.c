@@ -1260,6 +1260,57 @@ static void test_config_parse_learning_threshold_roundtrip(void) {
     hu_arena_destroy(arena2);
 }
 
+/* M3-trivia (2026-05-26): nightly_lora_enabled config plumbing contracts.
+ *
+ * The HU_NIGHTLY_LORA_ENABLED env var was the original opt-in for the
+ * 04:00 nightly LoRA training run (src/daemon.c:4430). Promoting it to
+ * a first-class config field so operators don't have to set
+ * environment variables on a daemon they didn't directly launch.
+ *
+ * Three contracts pin the wire end-to-end:
+ *   - Default false (opt-in like other long-running training paths)
+ *   - Explicit true in JSON parses to cfg.learning.nightly_lora_enabled
+ *   - Explicit false in JSON also parses (operator's "no, really, off") */
+
+static void test_config_parse_learning_nightly_lora_default_is_false(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    /* Empty JSON — no learning block. Default must be false. */
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, "{}", 2), HU_OK);
+    HU_ASSERT_TRUE(!cfg_local.learning.nightly_lora_enabled);
+}
+
+static void test_config_parse_learning_nightly_lora_explicit_true(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"nightly_lora_enabled\":true}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_TRUE(cfg_local.learning.nightly_lora_enabled);
+}
+
+static void test_config_parse_learning_nightly_lora_explicit_false(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"nightly_lora_enabled\":false}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_TRUE(!cfg_local.learning.nightly_lora_enabled);
+}
+
 static void test_config_parse_learning_default_does_not_serialize(void) {
     /* Default threshold (100) should NOT emit the `learning` block —
      * keep the canonical default config terse, same pattern as
@@ -1565,4 +1616,9 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_learning_threshold_negative_clamped_to_zero);
     HU_RUN_TEST(test_config_parse_learning_threshold_roundtrip);
     HU_RUN_TEST(test_config_parse_learning_default_does_not_serialize);
+    /* M3-trivia: nightly_lora_enabled config plumbing (replaces
+     * HU_NIGHTLY_LORA_ENABLED env var as the canonical opt-in). */
+    HU_RUN_TEST(test_config_parse_learning_nightly_lora_default_is_false);
+    HU_RUN_TEST(test_config_parse_learning_nightly_lora_explicit_true);
+    HU_RUN_TEST(test_config_parse_learning_nightly_lora_explicit_false);
 }

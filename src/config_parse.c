@@ -400,6 +400,10 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
      * first tick whether enabled or disabled. */
     cfg->learning.m3_frontier_auto_training =
         hu_json_get_bool(obj, "m3_frontier_auto_training", cfg->learning.m3_frontier_auto_training);
+    /* M3 trivia closure (2026-05-26) — config-first plumbing for the
+     * HU_NIGHTLY_LORA_ENABLED env var. See daemon.c:4430. */
+    cfg->learning.nightly_lora_enabled =
+        hu_json_get_bool(obj, "nightly_lora_enabled", cfg->learning.nightly_lora_enabled);
     return HU_OK;
 }
 
