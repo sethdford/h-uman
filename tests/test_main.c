@@ -388,6 +388,8 @@ void run_outbound_e2e_sota_proof_tests(void);
 void run_burst_egress_tests(void);
 /* Sprint 60 — E2E proof that pipeline.c stats wiring fires on real runs. */
 void run_outbound_stats_e2e_tests(void);
+/* Sprint 60 — pipeline P50/P95/P99 latency budget. */
+void run_outbound_pipeline_perf_tests(void);
 #endif
 void run_outbound_persona_tests(void);
 /* Sprint 60 — persona stage ML wiring (shape-classifier upgrade). */
@@ -1274,6 +1276,7 @@ int main(int argc, char **argv) {
     run_outbound_e2e_sota_proof_tests();
     run_burst_egress_tests();
     run_outbound_stats_e2e_tests();
+    run_outbound_pipeline_perf_tests();
 #endif
     run_outbound_persona_tests();
     run_outbound_persona_classifier_tests();

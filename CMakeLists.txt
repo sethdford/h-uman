@@ -3681,6 +3681,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_crosstalk_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_e2e_sota_proof.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_stats_e2e.c)
+    list(APPEND HU_TEST_SOURCES tests/test_outbound_pipeline_perf.c)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
 endif()
 
