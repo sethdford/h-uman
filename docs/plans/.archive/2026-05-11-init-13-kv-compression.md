@@ -93,7 +93,7 @@ Compress the W10 neural KV-cache **4–8× at <1% token-distribution quality los
 
 Two upstream constraints make this the right slot:
 
-1. **W10 ADR ([`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md))** parks provider short-circuit until a versioned blob envelope and a safety contract exist. Today `neural_kv_cache.blob` is the empty string and `agent_turn.c` logs *"W10 KV prior row (no provider skip)"*. This initiative is the blob envelope + safety contract.
+1. **W10 ADR ([`adr/2026-05-10-w10-kv-replay-deferred.md`](../adr/2026-05-10-w10-kv-replay-deferred.md))** parks provider short-circuit until a versioned blob envelope and a safety contract exist. Today `neural_kv_cache.blob` is the empty string and `agent_turn.c` logs *"W10 KV prior row (no provider skip)"*. This initiative is the blob envelope + safety contract.
 2. **Track B (6-mo SOTA roadmap)** spec-decode prep (`B2`/`B3`) needs cache reuse across speculator + target. A 4–8× shrink lets the same RSS budget hold both caches and unlocks the persona-aligned draft milestone (A3) without bumping the 6 MB peak-RSS budget in `CLAUDE.md`.
 
 Per the SOTA program proof bar (D0–D7), this doc is the gate; the implementation sprint executes it.
@@ -411,8 +411,8 @@ Quality-loss numbers below are from published arXiv abstracts/tables; cited so t
 
 Plus repo-local prior art:
 
-- ADR: [`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md) — the explicit "defer until envelope + safety" contract this initiative resolves.
-- W10 plan: [`2026-05-10-w10-neural-memory.md`](2026-05-10-w10-neural-memory.md) — `hu_kv_cache_*` API definition.
+- ADR: [`adr/2026-05-10-w10-kv-replay-deferred.md`](../adr/2026-05-10-w10-kv-replay-deferred.md) — the explicit "defer until envelope + safety" contract this initiative resolves.
+- W10 plan: [`2026-05-10-w10-neural-memory.md`](../2026-05-10-w10-neural-memory.md) — `hu_kv_cache_*` API definition.
 - Master follow-through Track A1.1: "Define versioned blob envelope (magic, version, codec id, payload). Document endianness and max size." — this doc executes that line.
 
 ---

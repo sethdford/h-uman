@@ -6,7 +6,7 @@
 **Design:** [design.md](design.md)
 **Status:** Draft for review
 
-Tasks are ordered by dependency. Each task lists the AC(s) it satisfies, the files it touches, the verification command, and an estimated size. Per [agent-task-sizing.md](.claude/rules/agent-task-sizing.md): no task exceeds ~8 mechanical sites; multi-file tasks have explicit per-file pointers.
+Tasks are ordered by dependency. Each task lists the AC(s) it satisfies, the files it touches, the verification command, and an estimated size. Per `~/.claude/rules/agent-task-sizing.md`: no task exceeds ~8 mechanical sites; multi-file tasks have explicit per-file pointers.
 
 ## Phase A — Pure predicate + config (no AX, no I/O)
 
@@ -65,7 +65,7 @@ Tasks are ordered by dependency. Each task lists the AC(s) it satisfies, the fil
 ### T-A5: New config keys + parser + one-shot disabled-warn
 - **AC:** supports AC-4, AC-7, AC-9 (config gate)
 - **Files:** `src/config_parse.c` (add `iMessage.action_surface_v2.*`), `src/config.c` (defaults), `include/human/config.h` (struct fields)
-- **Per [silent-config-gated-subsystems.md](.claude/rules/silent-config-gated-subsystems.md):** emit one-shot disabled-warn log at first invocation
+- **Per [silent-config-gated-subsystems.md](../../../.claude/rules/silent-config-gated-subsystems.md):** emit one-shot disabled-warn log at first invocation
 - **Verify:** new test `tests/test_config_action_surface.c` parses both defaults and overrides; logs assert
 - **Size:** ~120 LOC across 3 files + ~80 LOC test
 - **Depends on:** none
@@ -77,7 +77,7 @@ Tasks are ordered by dependency. Each task lists the AC(s) it satisfies, the fil
 - **AC:** AC-4, AC-5, AC-6 (vtable surface)
 - **Files:** `include/human/channel.h` (vtable + struct)
 - **Stub:** all 42 other channel impls return `HU_ERR_NOT_SUPPORTED` for the 3 new slots
-- **Per [agent-task-sizing.md](.claude/rules/agent-task-sizing.md):** 42 sites × 3 slots = 126 mechanical edits → use a script (`scripts/wire-channel-stubs.sh`), NOT an agent
+- **Per `~/.claude/rules/agent-task-sizing.md`:** 42 sites × 3 slots = 126 mechanical edits → use a script (`scripts/wire-channel-stubs.sh`), NOT an agent
 - **Verify:** `cmake --build build` clean; `./build/human_tests` no regression
 - **Size:** vtable change ~30 LOC, script ~50 LOC, mechanical stubs ~252 LOC across 42 files
 - **Depends on:** none

@@ -226,7 +226,7 @@ struct hu_channel_vtable_t {
 };
 ```
 
-The 42 other channels get a one-line stub returning `HU_ERR_NOT_SUPPORTED` for each new slot. Per [agent-task-sizing.md](.claude/rules/agent-task-sizing.md), wiring those stubs is a script-friendly mechanical edit, not an agent task.
+The 42 other channels get a one-line stub returning `HU_ERR_NOT_SUPPORTED` for each new slot. Per `~/.claude/rules/agent-task-sizing.md`, wiring those stubs is a script-friendly mechanical edit, not an agent task.
 
 ## §3. Reply send path — 3-tier escalation
 
@@ -258,7 +258,7 @@ The 42 other channels get a one-line stub returning `HU_ERR_NOT_SUPPORTED` for e
 ```
 
 Parent identification: we already have `reply_to_guid` on inbound messages
-(see [imessage.h:388](../../include/human/channels/imessage.h)). The caller of `reply()` passes the inbound's own guid as `parent_msg_guid`; we use it both to locate the AX row (cross-referenced via chat.db lookup of `text` for prefix matching, since AX rows don't directly expose guid) AND as the value chat.db will store in the outbound row's `reply_to_guid` once Messages.app processes the AX click.
+(see [imessage.h:388](../../../include/human/channels/imessage.h)). The caller of `reply()` passes the inbound's own guid as `parent_msg_guid`; we use it both to locate the AX row (cross-referenced via chat.db lookup of `text` for prefix matching, since AX rows don't directly expose guid) AND as the value chat.db will store in the outbound row's `reply_to_guid` once Messages.app processes the AX click.
 
 ## §4. Custom-emoji tapback (extend react)
 
@@ -287,7 +287,7 @@ If a custom emoji isn't in the visible sub-picker row AND isn't in `CLASSIC_MAP`
 
 ## §5. Sticker pipeline (MVP)
 
-**The honest constraint:** Apple's native sticker pipeline uses `IMSticker` from the private `IMSharedUtilities` framework, routed through the same `IMCore` daemon connection we already discovered is locked down on macOS 26+ ([imessage.c:3637](../../src/channels/imessage.c)). We cannot send a true balloon-bundle sticker without an entitlement we won't get.
+**The honest constraint:** Apple's native sticker pipeline uses `IMSticker` from the private `IMSharedUtilities` framework, routed through the same `IMCore` daemon connection we already discovered is locked down on macOS 26+ ([imessage.c:3637](../../../src/channels/imessage.c)). We cannot send a true balloon-bundle sticker without an entitlement we won't get.
 
 **MVP that works today:** sticker files live in `~/.human/stickers/` as PNG/HEIC with tagged filenames like `casual-happy_001.png`, `formal-acknowledgment_002.png`. The persona picker `hu_persona_pick_sticker` returns a path; the send goes through `imsg send --to X --file <path>`. Recipients see a small image attachment.
 
@@ -374,7 +374,7 @@ New keys in `~/.human/config.json`:
 }
 ```
 
-Per [silent-config-gated-subsystems.md](.claude/rules/silent-config-gated-subsystems.md): on first invocation when disabled, emit `hu_log_info_once("imessage", NULL, "action_surface_v2 disabled by config (iMessage.action_surface_v2.enabled=false); set to true to enable threaded replies / custom tapbacks / stickers")`.
+Per [silent-config-gated-subsystems.md](../../../.claude/rules/silent-config-gated-subsystems.md): on first invocation when disabled, emit `hu_log_info_once("imessage", NULL, "action_surface_v2 disabled by config (iMessage.action_surface_v2.enabled=false); set to true to enable threaded replies / custom tapbacks / stickers")`.
 
 ## §9. Tests — file layout
 
@@ -388,9 +388,9 @@ tests/test_imessage_action_telemetry.c     # JSONL line shape
 tests/fixtures/imessage_action/            # 100 synthetic fact-tuples (AC-2)
 ```
 
-Per [test-source-gate-symmetry.md](.claude/rules/test-source-gate-symmetry.md): all new tests are wrapped in `#ifdef HU_ENABLE_IMESSAGE` or use the stub-runner pattern; CMakeLists symmetry must be maintained.
+Per [test-source-gate-symmetry.md](../../../.claude/rules/test-source-gate-symmetry.md): all new tests are wrapped in `#ifdef HU_ENABLE_IMESSAGE` or use the stub-runner pattern; CMakeLists symmetry must be maintained.
 
-Per [test-references-production-symbol.md](.claude/rules/test-references-production-symbol.md): each test file references at least one `hu_imessage_*` symbol so the check-test-references hook passes.
+Per [test-references-production-symbol.md](../../../.claude/rules/test-references-production-symbol.md): each test file references at least one `hu_imessage_*` symbol so the check-test-references hook passes.
 
 ## §10. Build / CI considerations
 

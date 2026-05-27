@@ -8,11 +8,15 @@
 
 #ifdef __APPLE__
 #include <sys/stat.h>
-#endif
 
-/* Static buffers for reason strings to return as borrowed pointers */
+/* Static buffers for reason strings to return as borrowed pointers.
+ * Apple-only — the readable-check returns HU_DOCTOR_NA on non-Apple
+ * platforms before ever touching these. Gating the declarations
+ * matches that scope and prevents -Werror=unused-variable on Linux
+ * CI runners. */
 static char s_reason_missing[256];
 static char s_reason_permission[512];
+#endif
 
 /**
  * hu_doctor_check_chatdb_readable — Check if ~/Library/Messages/chat.db is readable
