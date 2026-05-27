@@ -116,3 +116,9 @@ void hu_outbound_crosstalk_unregister_sqlite(void) {
 }
 
 #endif /* HU_ENABLE_SQLITE */
+
+/* ISO C forbids empty translation units (-Werror=pedantic). When
+ * HU_ENABLE_SQLITE is OFF, the entire body above compiles away. A
+ * single typedef keeps the TU non-empty under every CMake variant
+ * without introducing any linkage symbols. */
+typedef int hu_crosstalk_sqlite_tu_marker_t;
