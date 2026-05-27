@@ -1515,6 +1515,7 @@ if(HU_ENABLE_SQLITE)
         # reflection module — storage, query helpers — depends on SQLite, so
         # gating the whole set here keeps the dependency graph honest.
         src/reflection/schema.c
+        src/reflection/storage.c
     )
 endif()
 
@@ -3070,6 +3071,7 @@ set(HU_TEST_SOURCES
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
     tests/test_reflection_schema.c
+    tests/test_reflection_storage.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c

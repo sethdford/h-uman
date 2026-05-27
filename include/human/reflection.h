@@ -183,6 +183,65 @@ bool hu_reflection_pattern_has_quorum(struct sqlite3 *db, const char *pattern_id
  * across releases (changing breaks existing pattern IDs). */
 const char *hu_reflection_pattern_type_str(hu_reflection_pattern_type_t type);
 
+/* Compute the stable pattern id for a (type, subject, observation)
+ * triple into `out_id` (must have capacity ≥ 17 — 16 hex + NUL).
+ * First 16 hex chars of SHA-256("type_str|subject|observation[:128]").
+ * Same input → same id across processes, machines, releases. Storage
+ * uses this id as the UPSERT key; changing the canonicalization rule
+ * would break every existing reflection_patterns row. */
+void hu_reflection_compute_id(hu_reflection_pattern_type_t type, const char *subject,
+                              const char *observation, char *out_id, size_t id_cap);
+
+/* ── Storage (T2) ─────────────────────────────────────────────────
+ *
+ * Two-table SQLite schema:
+ *   reflection_runs(run_id, provider, started_at_ms, completed_at_ms,
+ *                   input_turns, output_tokens, status, error_message,
+ *                   json_dump_path, prose_summary,
+ *                   low_confidence_dropped_count)
+ *   reflection_patterns(id, type, subject, observation, confidence,
+ *                       evidence_json, channels_json,
+ *                       first_seen_run_id, last_seen_run_id,
+ *                       observation_count, created_at_ms,
+ *                       last_observed_at_ms, expires_at_ms,
+ *                       surfaced_to_user, retired, retired_at_ms)
+ *
+ * All functions take `struct sqlite3 *` (forward-declared above) so
+ * callers don't need to drag in <sqlite3.h> unless they call these.
+ * UPSERT semantics: same pattern id re-derived in a later run bumps
+ * observation_count and takes MAX(old_confidence, new_confidence). */
+
+/* Create tables + indexes if missing. Idempotent. */
+hu_error_t hu_reflection_storage_migrate(struct sqlite3 *db);
+
+/* Insert a new in-progress run row. status='in_progress',
+ * completed_at_ms=NULL until hu_reflection_storage_complete_run is
+ * called. */
+hu_error_t hu_reflection_storage_insert_run(struct sqlite3 *db, const char *run_id,
+                                            const char *provider, uint64_t started_at_ms,
+                                            int input_turns);
+
+/* Mark a run complete. `status` is one of: "ok", "schema_invalid",
+ * "provider_error", "abandoned". `prose_summary`, `json_dump_path`,
+ * `error_message` may be NULL. */
+hu_error_t hu_reflection_storage_complete_run(struct sqlite3 *db, const char *run_id,
+                                              const char *status, int output_tokens,
+                                              const char *prose_summary, const char *json_dump_path,
+                                              const char *error_message,
+                                              int low_confidence_dropped_count);
+
+/* UPSERT a pattern. If pattern->confidence < 0.5, returns HU_OK
+ * without inserting (caller may bump low_confidence_dropped_count
+ * via complete_run). Otherwise inserts new row OR bumps existing
+ * row's observation_count and takes MAX confidence. */
+hu_error_t hu_reflection_storage_upsert(struct sqlite3 *db, const char *run_id,
+                                        const hu_reflection_pattern_t *pattern);
+
+/* Returns MAX(completed_at_ms) across rows WHERE status='ok'. Used
+ * by the tick gate to decide whether the min_interval has elapsed.
+ * Returns 0 if no completed runs exist yet. */
+uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db);
+
 #ifdef __cplusplus
 }
 #endif

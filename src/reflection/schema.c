@@ -79,10 +79,26 @@ static int parse_pattern_type(const char *s, hu_reflection_pattern_type_t *out) 
     return -1;
 }
 
-/* ── Stable id: first 16 hex of SHA-256(type|subject|observation[:128]) ── */
+/* ── Stable id: first 16 hex of SHA-256(type|subject|observation[:128]) ──
+ *
+ * Made PUBLIC at T2 (was static compute_pattern_id at T1) so the
+ * storage tests can derive pattern IDs without first round-tripping
+ * through hu_reflection_parse. The canonicalization rule is locked:
+ * changing the input format breaks every existing reflection_patterns
+ * row's UPSERT key. */
 
-static void compute_pattern_id(hu_reflection_pattern_type_t type, const char *subject,
-                               const char *observation, char out_id[64]) {
+void hu_reflection_compute_id(hu_reflection_pattern_type_t type, const char *subject,
+                              const char *observation, char *out_id, size_t id_cap) {
+    if (!out_id || id_cap == 0)
+        return;
+    if (id_cap < 17) {
+        /* Defensive: emit empty string when buffer is too small for
+         * 16 hex + NUL, so callers that strlen()==16 fail loudly
+         * rather than read past the buffer. */
+        out_id[0] = '\0';
+        return;
+    }
+
     /* Input: type_str + "|" + subject + "|" + observation[:128].
      * The 128-byte cap on observation keeps the hash input stable
      * even when the LLM emits slightly different prose phrasings of
@@ -301,7 +317,7 @@ hu_error_t hu_reflection_parse(const char *json, hu_reflection_pattern_t **out_p
          * truncation copy_field above), so observation truncation by
          * 511 doesn't affect the id (which only looks at first 128
          * chars). */
-        compute_pattern_id(p->type, p->subject, p->observation, p->id);
+        hu_reflection_compute_id(p->type, p->subject, p->observation, p->id, sizeof(p->id));
 
         valid_count++;
     }
