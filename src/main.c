@@ -1691,7 +1691,13 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
                          HU_BUS_MESSAGE_RECEIVED);
 
         if (pthread_create(&gw_tid, NULL, svc_gateway_thread, &gw_tctx) == 0) {
-            hu_log_info("human", NULL, "gateway listening on %s:%u", gw_tctx.host, gw_tctx.port);
+            /* 2026-05-27 — was previously "gateway listening on..." which
+             * fired here BEFORE the thread did bind/listen, misleading
+             * operators when the gateway then failed to bind. The real
+             * "gateway bound and listening" log now fires inside
+             * hu_gateway_run after successful bind+listen. */
+            hu_log_info("human", NULL, "gateway thread spawned (target %s:%u)", gw_tctx.host,
+                        gw_tctx.port);
         } else {
             hu_log_error("human", NULL, "failed to start gateway thread");
             gw_tid = 0;

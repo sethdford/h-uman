@@ -1604,6 +1604,7 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
+        hu_log_error("gateway", NULL, "socket() failed: %s", strerror(errno));
         hu_health_mark_error("gateway", "socket failed");
         err = HU_ERR_IO;
         goto cleanup;
@@ -1611,6 +1612,7 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
 
     int opt = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        hu_log_error("gateway", NULL, "setsockopt SO_REUSEADDR failed: %s", strerror(errno));
         hu_health_mark_error("gateway", "setsockopt SO_REUSEADDR failed");
         err = HU_ERR_IO;
         goto cleanup;
@@ -1630,30 +1632,48 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
 
     {
         int bind_ok = 0;
+        int last_bind_errno = 0;
         for (int attempt = 0; attempt < 5; attempt++) {
             if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
                 bind_ok = 1;
                 break;
             }
-            int bind_errno = errno;
+            last_bind_errno = errno;
             {
                 char bind_msg[128];
-                snprintf(bind_msg, sizeof(bind_msg), "bind failed: %s (attempt %d/5)",
-                         strerror(bind_errno), attempt + 1);
+                snprintf(bind_msg, sizeof(bind_msg), "bind %s:%u failed: %s (attempt %d/5)",
+                         cfg.host, (unsigned)cfg.port, strerror(last_bind_errno), attempt + 1);
                 hu_health_mark_error("gateway", bind_msg);
+                /* 2026-05-27 — also log to stderr/daemon-log so operators see
+                 * the actual errno. Previously this was silent except via
+                 * the health endpoint (which is itself unreachable when the
+                 * gateway never starts). */
+                hu_log_warn("gateway", NULL, "%s", bind_msg);
             }
-            if (bind_errno == EADDRINUSE && attempt < 4) {
-                usleep(500000);
+            if (last_bind_errno == EADDRINUSE && attempt < 4) {
+                /* Backoff longer than 500ms — TIME_WAIT can hold the port
+                 * for tens of seconds on Darwin even with SO_REUSEADDR. */
+                useconds_t backoff_us = (useconds_t)(1000000u << attempt); /* 1,2,4,8s */
+                if (backoff_us > 8000000u)
+                    backoff_us = 8000000u;
+                usleep(backoff_us);
                 close(fd);
                 fd = socket(AF_INET, SOCK_STREAM, 0);
-                if (fd < 0)
+                if (fd < 0) {
+                    hu_log_error("gateway", NULL, "socket() retry failed: %s", strerror(errno));
                     break;
+                }
                 setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
                 continue;
             }
             break;
         }
         if (!bind_ok) {
+            hu_log_error("gateway", NULL,
+                         "gateway bind %s:%u failed permanently after 5 attempts (%s) — "
+                         "is another instance running on this port?",
+                         cfg.host, (unsigned)cfg.port,
+                         last_bind_errno ? strerror(last_bind_errno) : "unknown");
             hu_health_mark_error("gateway", "bind failed after 5 attempts");
             err = HU_ERR_IO;
             goto cleanup;
@@ -1661,6 +1681,7 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
     }
 
     if (listen(fd, 64) < 0) {
+        hu_log_error("gateway", NULL, "listen() failed: %s", strerror(errno));
         hu_health_mark_error("gateway", "listen failed");
         err = HU_ERR_IO;
         goto cleanup;
@@ -1670,11 +1691,20 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
     {
         int flags = fcntl(fd, F_GETFL, 0);
         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+            hu_log_error("gateway", NULL, "fcntl O_NONBLOCK failed: %s", strerror(errno));
             hu_health_mark_error("gateway", "fcntl non-blocking failed");
             err = HU_ERR_IO;
             goto cleanup;
         }
     }
+
+    /* 2026-05-27 — log the actual successful listen here, INSIDE the gateway
+     * thread, so operators can trust the message. The pre-existing log in
+     * main.c::1694 ("gateway listening on...") fires when pthread_create
+     * succeeds — BEFORE bind/listen, so it's misleading when the gateway
+     * fails to bind. */
+    hu_log_info("gateway", NULL, "gateway bound and listening on %s:%u (fd=%d)", cfg.host,
+                (unsigned)cfg.port, fd);
 
     gw->listen_fd = fd;
     gw->running = true;
