@@ -72,10 +72,39 @@ bool hu_doctor_ws_event_matches_filter(const char *event_name, const char *filte
  * cfg->max_reconnect_attempts, returns HU_OK on clean exit (Ctrl+C) or
  * HU_ERR_IO on reconnect-failed.
  *
- * Not implemented yet — T2-T6. T1 ships the pure helpers above and the
+ * Not implemented yet — T3-T6. T1 + T2 ship the pure helpers and the
  * stub returns HU_ERR_NOT_SUPPORTED.
  */
 hu_error_t hu_doctor_ws_watch(hu_allocator_t *alloc, const hu_doctor_ws_config_t *cfg);
+
+/* ── T2 RFC 6455 handshake helpers (testable, pure where possible) ──── */
+
+/* Compute the Sec-WebSocket-Accept value the SERVER would return for a
+ * given client_key, per RFC 6455 §4.2.2. SHA-1(client_key + WS_MAGIC)
+ * then base64. Used to verify the server's handshake response.
+ *
+ * `out` must be at least 29 bytes (28 base64 chars + NUL). */
+bool hu_doctor_ws__compute_accept_key(const char *client_key, char *out, size_t out_size);
+
+/* Generate a 24-char base64-encoded client_key from 16 random bytes.
+ * Under HU_IS_TEST returns a DETERMINISTIC fixed key
+ * ("dGVzdC1rZXktMTIzNDU2Nw==") so handshake bytes are reproducible.
+ * Real runs use /dev/urandom.
+ *
+ * `out` must be at least 25 bytes. */
+bool hu_doctor_ws__generate_client_key(char *out, size_t out_size);
+
+/* Format the HTTP/1.1 GET upgrade request bytes into `buf`. Returns
+ * number of bytes written, or 0 on overflow / NULL inputs. Pure. */
+size_t hu_doctor_ws__format_upgrade_request(char *buf, size_t buf_size, const char *host,
+                                            uint16_t port, const char *path,
+                                            const char *client_key);
+
+/* Parse the server's handshake response. Returns true iff status line
+ * is "HTTP/1.1 101 ..." AND Sec-WebSocket-Accept matches expected_accept
+ * exactly. Pure. */
+bool hu_doctor_ws__verify_handshake_response(const char *resp, size_t resp_len,
+                                             const char *expected_accept);
 
 #ifdef __cplusplus
 }

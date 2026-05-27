@@ -133,14 +133,166 @@ static void test_config_default_has_sane_values(void) {
     HU_ASSERT_TRUE(c.quiet_stdout == false);
 }
 
-static void test_watch_returns_not_supported_until_t2_lands(void) {
-    /* T1 ships the stub; T2-T6 will implement the socket loop. Until
-     * then, hu_doctor_ws_watch returns HU_ERR_NOT_SUPPORTED so callers
-     * can detect the gap explicitly rather than hanging on a half-built
-     * loop. */
+static void test_watch_returns_not_supported_until_t3_lands(void) {
+    /* T1+T2 ship pure helpers; T3-T6 will implement the socket loop.
+     * Until then, hu_doctor_ws_watch returns HU_ERR_NOT_SUPPORTED so
+     * callers can detect the gap explicitly rather than hanging on a
+     * half-built loop. */
     hu_allocator_t alloc = hu_system_allocator();
     hu_doctor_ws_config_t c = hu_doctor_ws_config_default();
     HU_ASSERT_EQ(hu_doctor_ws_watch(&alloc, &c), HU_ERR_NOT_SUPPORTED);
+}
+
+/* ── T2: RFC 6455 handshake helpers ─────────────────────────────────── */
+
+/* RFC 6455 §1.3 worked example: client_key "dGhlIHNhbXBsZSBub25jZQ==" must
+ * produce Sec-WebSocket-Accept "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=". This is the
+ * canonical reference vector — if our SHA-1 + base64 chain matches this,
+ * the implementation is RFC-compliant. */
+static void test_compute_accept_key_rfc6455_reference_vector(void) {
+    char out[64];
+    HU_ASSERT_TRUE(hu_doctor_ws__compute_accept_key("dGhlIHNhbXBsZSBub25jZQ==", out, sizeof(out)));
+    HU_ASSERT_STR_EQ(out, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+}
+
+static void test_compute_accept_key_rejects_small_output_buffer(void) {
+    char out[28]; /* 28 chars not enough — need 29 (+NUL) */
+    HU_ASSERT_TRUE(!hu_doctor_ws__compute_accept_key("dGhlIHNhbXBsZSBub25jZQ==", out, sizeof(out)));
+}
+
+static void test_compute_accept_key_rejects_null_key(void) {
+    char out[64];
+    HU_ASSERT_TRUE(!hu_doctor_ws__compute_accept_key(NULL, out, sizeof(out)));
+}
+
+static void test_generate_client_key_is_deterministic_under_test(void) {
+    /* Under HU_IS_TEST the generator uses a fixed 16-byte seed
+     * ("test-key-1234567"). Reproducible output lets test fixtures pin
+     * the exact handshake bytes. */
+    char a[32];
+    char b[32];
+    HU_ASSERT_TRUE(hu_doctor_ws__generate_client_key(a, sizeof(a)));
+    HU_ASSERT_TRUE(hu_doctor_ws__generate_client_key(b, sizeof(b)));
+    HU_ASSERT_STR_EQ(a, b);
+    /* The base64 of "test-key-1234567" (16 bytes) is exactly 24 chars
+     * ending in "==". Pin the exact value so any change to the test
+     * seed surfaces. */
+    HU_ASSERT_STR_EQ(a, "dGVzdC1rZXktMTIzNDU2Nw==");
+}
+
+static void test_generate_client_key_rejects_small_buffer(void) {
+    char small[24]; /* 24 chars not enough — need 25 (+NUL) */
+    HU_ASSERT_TRUE(!hu_doctor_ws__generate_client_key(small, sizeof(small)));
+}
+
+static void test_format_upgrade_request_emits_valid_http(void) {
+    char buf[1024];
+    size_t n = hu_doctor_ws__format_upgrade_request(buf, sizeof(buf), "127.0.0.1", 3006, "/ws",
+                                                    "dGVzdC1rZXktMTIzNDU2Nw==");
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "GET /ws HTTP/1.1\r\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Host: 127.0.0.1:3006\r\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Upgrade: websocket\r\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Connection: Upgrade\r\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Sec-WebSocket-Key: dGVzdC1rZXktMTIzNDU2Nw==\r\n") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Sec-WebSocket-Version: 13\r\n") != NULL);
+    /* Must end with blank line (CRLF CRLF) to terminate the request. */
+    HU_ASSERT_TRUE(strstr(buf, "\r\n\r\n") != NULL);
+}
+
+static void test_format_upgrade_request_returns_zero_on_overflow(void) {
+    char tiny[16];
+    size_t n =
+        hu_doctor_ws__format_upgrade_request(tiny, sizeof(tiny), "127.0.0.1", 3006, "/ws", "key");
+    HU_ASSERT_EQ((int)n, 0);
+}
+
+static void test_format_upgrade_request_returns_zero_on_null_inputs(void) {
+    char buf[256];
+    HU_ASSERT_EQ(
+        (int)hu_doctor_ws__format_upgrade_request(buf, sizeof(buf), NULL, 3006, "/ws", "key"), 0);
+    HU_ASSERT_EQ(
+        (int)hu_doctor_ws__format_upgrade_request(buf, sizeof(buf), "127.0.0.1", 3006, NULL, "key"),
+        0);
+    HU_ASSERT_EQ(
+        (int)hu_doctor_ws__format_upgrade_request(buf, sizeof(buf), "127.0.0.1", 3006, "/ws", NULL),
+        0);
+}
+
+static void test_verify_handshake_response_accepts_valid(void) {
+    const char *resp = "HTTP/1.1 101 Switching Protocols\r\n"
+                       "Upgrade: websocket\r\n"
+                       "Connection: Upgrade\r\n"
+                       "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                       "\r\n";
+    HU_ASSERT_TRUE(hu_doctor_ws__verify_handshake_response(resp, strlen(resp),
+                                                           "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
+
+static void test_verify_handshake_response_rejects_wrong_status_line(void) {
+    const char *resp = "HTTP/1.1 200 OK\r\n"
+                       "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                       "\r\n";
+    HU_ASSERT_TRUE(!hu_doctor_ws__verify_handshake_response(resp, strlen(resp),
+                                                            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
+
+static void test_verify_handshake_response_rejects_wrong_accept(void) {
+    const char *resp = "HTTP/1.1 101 Switching Protocols\r\n"
+                       "Sec-WebSocket-Accept: WRONGWRONGWRONGWRONGWRONGWRO=\r\n"
+                       "\r\n";
+    HU_ASSERT_TRUE(!hu_doctor_ws__verify_handshake_response(resp, strlen(resp),
+                                                            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
+
+static void test_verify_handshake_response_rejects_missing_accept(void) {
+    const char *resp = "HTTP/1.1 101 Switching Protocols\r\n"
+                       "Upgrade: websocket\r\n"
+                       "\r\n";
+    HU_ASSERT_TRUE(!hu_doctor_ws__verify_handshake_response(resp, strlen(resp),
+                                                            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
+
+static void test_verify_handshake_response_case_insensitive_header_name(void) {
+    /* RFC 7230 §3.2 — header names are case-insensitive. */
+    const char *resp = "HTTP/1.1 101 Switching Protocols\r\n"
+                       "SEC-WEBSOCKET-ACCEPT: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                       "\r\n";
+    HU_ASSERT_TRUE(hu_doctor_ws__verify_handshake_response(resp, strlen(resp),
+                                                           "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
+
+/* End-to-end contract: client generates key → computes expected accept →
+ * server (simulated) would echo same accept → verify passes. This is the
+ * full handshake roundtrip without sockets. */
+static void test_handshake_end_to_end_roundtrip_without_sockets(void) {
+    char client_key[32];
+    HU_ASSERT_TRUE(hu_doctor_ws__generate_client_key(client_key, sizeof(client_key)));
+
+    char expected_accept[64];
+    HU_ASSERT_TRUE(
+        hu_doctor_ws__compute_accept_key(client_key, expected_accept, sizeof(expected_accept)));
+
+    /* Simulate the server using the same compute (server-side helpers in
+     * ws_server.c use the identical algorithm — pinned by T7 contract
+     * test). */
+    char server_accept[64];
+    HU_ASSERT_TRUE(
+        hu_doctor_ws__compute_accept_key(client_key, server_accept, sizeof(server_accept)));
+    HU_ASSERT_STR_EQ(expected_accept, server_accept);
+
+    /* Format the server's response as it would arrive on the wire */
+    char resp[512];
+    int n = snprintf(resp, sizeof(resp),
+                     "HTTP/1.1 101 Switching Protocols\r\n"
+                     "Upgrade: websocket\r\n"
+                     "Connection: Upgrade\r\n"
+                     "Sec-WebSocket-Accept: %s\r\n"
+                     "\r\n",
+                     server_accept);
+    HU_ASSERT_TRUE(n > 0 && (size_t)n < sizeof(resp));
+
+    HU_ASSERT_TRUE(hu_doctor_ws__verify_handshake_response(resp, (size_t)n, expected_accept));
 }
 
 void run_doctor_ws_consumer_tests(void) {
@@ -163,5 +315,20 @@ void run_doctor_ws_consumer_tests(void) {
     HU_RUN_TEST(test_format_event_line_collapses_payload_whitespace);
     HU_RUN_TEST(test_format_event_line_truncates_long_payload);
     HU_RUN_TEST(test_config_default_has_sane_values);
-    HU_RUN_TEST(test_watch_returns_not_supported_until_t2_lands);
+    HU_RUN_TEST(test_watch_returns_not_supported_until_t3_lands);
+    /* T2 — handshake helpers */
+    HU_RUN_TEST(test_compute_accept_key_rfc6455_reference_vector);
+    HU_RUN_TEST(test_compute_accept_key_rejects_small_output_buffer);
+    HU_RUN_TEST(test_compute_accept_key_rejects_null_key);
+    HU_RUN_TEST(test_generate_client_key_is_deterministic_under_test);
+    HU_RUN_TEST(test_generate_client_key_rejects_small_buffer);
+    HU_RUN_TEST(test_format_upgrade_request_emits_valid_http);
+    HU_RUN_TEST(test_format_upgrade_request_returns_zero_on_overflow);
+    HU_RUN_TEST(test_format_upgrade_request_returns_zero_on_null_inputs);
+    HU_RUN_TEST(test_verify_handshake_response_accepts_valid);
+    HU_RUN_TEST(test_verify_handshake_response_rejects_wrong_status_line);
+    HU_RUN_TEST(test_verify_handshake_response_rejects_wrong_accept);
+    HU_RUN_TEST(test_verify_handshake_response_rejects_missing_accept);
+    HU_RUN_TEST(test_verify_handshake_response_case_insensitive_header_name);
+    HU_RUN_TEST(test_handshake_end_to_end_roundtrip_without_sockets);
 }
