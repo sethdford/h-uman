@@ -108,6 +108,11 @@
 #include "human/daemon_reaction_poll.h"
 #endif
 
+/* T9: M2 reflection-loop daemon adapter. Always linked; body is
+ * internally gated on HU_ENABLE_SQLITE so it stubs out cleanly in
+ * the minimal variant. */
+#include "human/daemon_reflection_tick.h"
+
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
  * regardless of HU_ENABLE_RL_FULL. Previously grouped inside the RL_FULL
@@ -14401,6 +14406,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 &config->initiative, ar_cfg_init, /*tz_offset_seconds=*/0, &gov_budget, agent,
                 agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
                 &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
+
+            /* T9 M2 reflection-loop tick. Gates internally (config +
+             * interval + idle), so this call is cheap when the
+             * operator hasn't opted in. Phase 1 stub iter returns 0
+             * turns → NO_INPUT — wire-up is verifiable, production
+             * turn source lands in T10 follow-up. */
+            uint64_t now_ms_refl = (uint64_t)now_unix_init * 1000ULL;
+            hu_daemon_tick_reflection_loop(config, agent, alloc, now_ms_refl,
+                                           /*last_user_activity_ms=*/0);
 
             /* T8 v0.1 — persist non-gated decisions to JSONL so a future
              * tuner / dashboard can see what the LLM actually proposed.

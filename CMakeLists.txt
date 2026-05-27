@@ -1256,6 +1256,11 @@ list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
 list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 
+# T9: daemon adapter for the M2 reflection loop. Body internally
+# gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
+# the unconditional list and links cleanly in the minimal variant.
+list(APPEND HU_CORE_SOURCES src/daemon_reflection_tick.c)
+
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
