@@ -114,16 +114,12 @@ typedef struct hu_reflection_pattern {
     uint64_t retired_at_ms;
 } hu_reflection_pattern_t;
 
-/* Tick — called from daemon main loop every iteration. Cheap (sub-
- * millisecond). Gates internally on cfg->reflection.enabled,
- * min_interval_hours, and idle/daily-floor conditions. */
-hu_error_t hu_reflection_tick(struct hu_daemon *d);
-
-/* Force a reflection run. Used by tests and manual operator
- * triggers. `force=true` bypasses the min_interval gate (useful for
- * "I want the latest patterns NOW after a long conversation"); the
- * config-enabled check still applies. */
-hu_error_t hu_reflection_run(struct hu_daemon *d, bool force);
+/* T5 ships the orchestration API further down (look for the
+ * "Orchestration (T5)" section). The original sketch here passed
+ * `struct hu_daemon *d` directly into tick/run; we replaced that
+ * with the inputs-struct shape so the reflection module never
+ * imports daemon.h — see hu_reflection_run_inputs_t. T9 (daemon
+ * wiring) is where the daemon→inputs assembly lives. */
 
 /* Parse a reflection model's JSON output into a heap-allocated array
  * of patterns + a prose summary. Pure — no I/O, no provider call.
@@ -298,6 +294,64 @@ hu_error_t hu_reflection_build_input(hu_reflection_turn_iter_fn iter_fn, void *i
 /* Returns the static system prompt text the reflection provider call
  * uses. Always non-NULL. Lifetime: process-static (string literal). */
 const char *hu_reflection_system_prompt(void);
+
+/* ── Orchestration (T5) ─────────────────────────────────────────── */
+
+struct hu_provider;
+struct hu_allocator;
+struct hu_reflection_loop_config;
+
+typedef enum hu_reflection_gate_result {
+    HU_REFLECTION_GATE_DISABLED,
+    HU_REFLECTION_GATE_INTERVAL,
+    HU_REFLECTION_GATE_NOT_IDLE,
+    HU_REFLECTION_GATE_RUN_IDLE,
+    HU_REFLECTION_GATE_RUN_FORCED,
+} hu_reflection_gate_result_t;
+
+/* Pure gate. cfg==NULL or cfg->enabled==false → DISABLED. force=true
+ * bypasses interval/idle but NOT disabled. last_completed_ms==0 means
+ * "no prior run yet". last_user_activity_ms==0 means "infinitely
+ * idle" so a fresh daemon's first reflection still fires. */
+hu_reflection_gate_result_t hu_reflection_should_run(const struct hu_reflection_loop_config *cfg,
+                                                     uint64_t last_completed_ms,
+                                                     uint64_t last_user_activity_ms,
+                                                     uint64_t now_ms, bool force);
+
+typedef struct hu_reflection_run_inputs {
+    struct sqlite3 *db;
+    const struct hu_reflection_loop_config *cfg;
+    struct hu_provider *provider;
+    struct hu_allocator *alloc;
+    hu_reflection_turn_iter_fn iter_fn;
+    void *iter_ctx;
+    uint64_t last_user_activity_ms;
+    uint64_t now_ms;
+    size_t max_input_chars; /* 0 = default 100K */
+} hu_reflection_run_inputs_t;
+
+typedef enum hu_reflection_run_status {
+    HU_REFLECTION_RUN_OK,
+    HU_REFLECTION_RUN_GATED,
+    HU_REFLECTION_RUN_NO_INPUT,
+    HU_REFLECTION_RUN_PROVIDER_ERROR,
+    HU_REFLECTION_RUN_SCHEMA_INVALID,
+    HU_REFLECTION_RUN_STORAGE_ERROR,
+} hu_reflection_run_status_t;
+
+/* Run one reflection cycle. force=true bypasses interval/idle but
+ * respects the disabled gate. Out-params written even on early exits;
+ * out_status is always set. Returns HU_ERR_INVALID_ARGUMENT only on
+ * NULL inputs/db/cfg/provider/alloc/iter_fn. Other failure modes are
+ * reported via *out_status with HU_OK return. */
+hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool force,
+                             hu_reflection_run_status_t *out_status, int *out_patterns_kept,
+                             int *out_patterns_dropped);
+
+/* Test-only hook: reset the one-shot "subsystem disabled/enabled"
+ * log guards so multiple test cases can each verify the first-firing
+ * log line without leaking state. */
+void hu_reflection_reset_warn_guards_for_test(void);
 
 #ifdef __cplusplus
 }
