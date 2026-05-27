@@ -124,11 +124,16 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
         return HU_OK;
     }
 
-    /* T1 stub: every clean tick returns SKIP. T2 adds context bundle
-     * assembly; T3 adds the LLM call + decision gate; T4 wires delivery. */
-    hu_log_info("init_proposer", NULL,
-                "tick id=%llu phase=propose result=SKIP (T1 stub; LLM call lands in T3)",
-                (unsigned long long)tid);
+    /* Governor passed → SKIP means "no gating fired" for the wrapper to
+     * promote to a real T3+ LLM call. We DON'T log here because the
+     * wrapper (hu_init_proposer_tick_with_provider) logs the actual
+     * outcome (FIRED / NEGATIVE / LOW_CONFIDENCE / PARSE_ERROR) after
+     * the LLM round-trip. Until 2026-05 this site logged "T1 stub; LLM
+     * call lands in T3" — historically accurate when T3 didn't exist,
+     * but misleading now that the wrapper always promotes past this
+     * point. The unused `tid` is kept in the signature for caller
+     * compatibility. */
+    (void)tid;
     *last_tick_unix_inout = now_unix;
     *out_result = HU_INIT_RESULT_SKIP;
     return HU_OK;
@@ -486,6 +491,53 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
                                               out_response, out_response_len);
 }
 
+/* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated
+ * responses. Even with gemini-3.5-flash + json_object mode, the model
+ * occasionally returns a partial response that's missing the closing
+ * `}`. find_first_json_object correctly fails, but if we can SEE the
+ * model's intent in the partial text, we should honor it rather than
+ * silently parsing-error. Today we only recognize `"should_propose":
+ * false` since the safe-default is SKIP — a partial `true` with no
+ * confidence + draft would FAIL the FIRED gate anyway, so there's no
+ * value in trying to extract `true` from a truncated stream.
+ *
+ * Returns true iff a partial-but-confident SKIP decision was extracted. */
+static bool try_partial_skip_parse(const char *response, size_t response_len,
+                                   hu_init_decision_t *out) {
+    if (!response || response_len < 20)
+        return false;
+    /* Look for `"should_propose":\s*false` allowing arbitrary whitespace
+     * after the colon. Substring search is fine — the field name is
+     * sufficiently unique that false-positives are vanishingly rare in
+     * an LLM-generated response. */
+    const char *key = "\"should_propose\"";
+    size_t klen = strlen(key);
+    if (klen > response_len)
+        return false;
+    for (size_t i = 0; i + klen < response_len; i++) {
+        if (memcmp(response + i, key, klen) != 0)
+            continue;
+        size_t p = i + klen;
+        /* Skip `:` and any whitespace. */
+        while (p < response_len && (response[p] == ':' || response[p] == ' ' ||
+                                    response[p] == '\t' || response[p] == '\n'))
+            p++;
+        if (p + 5 <= response_len && memcmp(response + p, "false", 5) == 0) {
+            memset(out, 0, sizeof(*out));
+            out->should_propose = false;
+            out->confidence = 0.0;
+            snprintf(out->skip_reason, sizeof(out->skip_reason),
+                     "(partial-parse) model returned should_propose=false in "
+                     "truncated response");
+            out->skip_reason_len = strlen(out->skip_reason);
+            return true;
+        }
+        /* Found the key but it's `true` or other — let main parser deal. */
+        return false;
+    }
+    return false;
+}
+
 hu_error_t hu_init_proposer_parse_response(const char *response, size_t response_len,
                                            hu_init_decision_t *out) {
     if (!response || !out)
@@ -494,8 +546,16 @@ hu_error_t hu_init_proposer_parse_response(const char *response, size_t response
 
     size_t js_start = 0, js_end = 0;
     find_first_json_object(response, response_len, &js_start, &js_end);
-    if (js_end == 0 || js_end <= js_start)
+    if (js_end == 0 || js_end <= js_start) {
+        /* Main parse failed (no complete JSON object). Try the
+         * partial-skip fallback: if the model clearly said "no propose"
+         * in a truncated response, honor that as a SKIP rather than
+         * surfacing a parse error. Reduces operator log noise from the
+         * gemini-3.5-flash truncation cases observed 2026-05-26. */
+        if (try_partial_skip_parse(response, response_len, out))
+            return HU_OK;
         return HU_ERR_JSON_PARSE;
+    }
 
     /* Use a temporary system allocator for the parse — the JSON tree is
      * freed before return; only the decision struct survives. */

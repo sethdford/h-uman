@@ -159,6 +159,13 @@ typedef struct hu_prompt_config {
     bool prompt_budget_trim_enabled;
     int prompt_budget_dead_field_min_bytes;   /* default 16 if 0 */
     int prompt_budget_min_samples_before_tag; /* default 100 if 0 */
+    /* 2026-05 audit follow-up — suppress the "trim gate disabled" one-shot
+     * diagnostic when invoked from the static-cache path (hu_prompt_build_
+     * static). The static cache is built at agent_from_config time before
+     * any turn observations exist, so the warning fires misleadingly there
+     * even when the operator's config has the trim enabled. Per-turn paths
+     * leave this false and the diagnostic still fires correctly. */
+    bool suppress_prompt_budget_diagnostic;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc.

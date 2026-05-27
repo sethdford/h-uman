@@ -159,20 +159,22 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
      * exact "wired but starved" pattern that hit gov_budget earlier
      * this session. Patterns match commit 48372778 (LoRA diagnostic)
      * + ~/.claude/rules/silent-config-gated-subsystems.md. */
-    if (!config->prompt_budget_trim_enabled) {
-        static atomic_bool s_prompt_budget_disabled_warn = false;
-        hu_log_info_once(&s_prompt_budget_disabled_warn, "prompt_budget", NULL,
-                         "prompt_budget: trim gate disabled by config "
-                         "(prompt_budget_trim_enabled=false). Set prompt_budget.enabled=true "
-                         "in config.json to enable per-field DEAD-field trimming. "
-                         "Cost is ~5us/turn for the bookkeeping.");
-    } else if (budget == NULL) {
-        static atomic_bool s_prompt_budget_starved_warn = false;
-        hu_log_info_once(&s_prompt_budget_starved_warn, "prompt_budget", NULL,
-                         "prompt_budget: trim gate enabled in config but caller didn't "
-                         "thread the budget singleton (budget arg is NULL). The trim is "
-                         "a no-op. Caller MUST pass the global hu_prompt_budget_t* to "
-                         "hu_prompt_build_system for trimming to actually fire.");
+    if (!config->suppress_prompt_budget_diagnostic) {
+        if (!config->prompt_budget_trim_enabled) {
+            static atomic_bool s_prompt_budget_disabled_warn = false;
+            hu_log_info_once(&s_prompt_budget_disabled_warn, "prompt_budget", NULL,
+                             "prompt_budget: trim gate disabled by config "
+                             "(prompt_budget_trim_enabled=false). Set prompt_budget.enabled=true "
+                             "in config.json to enable per-field DEAD-field trimming. "
+                             "Cost is ~5us/turn for the bookkeeping.");
+        } else if (budget == NULL) {
+            static atomic_bool s_prompt_budget_starved_warn = false;
+            hu_log_info_once(&s_prompt_budget_starved_warn, "prompt_budget", NULL,
+                             "prompt_budget: trim gate enabled in config but caller didn't "
+                             "thread the budget singleton (budget arg is NULL). The trim is "
+                             "a no-op. Caller MUST pass the global hu_prompt_budget_t* to "
+                             "hu_prompt_build_system for trimming to actually fire.");
+        }
     }
 
     /* Initialize prompt data (tone hints, etc.) */
@@ -1357,6 +1359,15 @@ hu_error_t hu_prompt_build_static(hu_allocator_t *alloc, const hu_prompt_config_
     hu_prompt_config_t no_mem = *config;
     no_mem.memory_context = NULL;
     no_mem.memory_context_len = 0;
+    /* Suppress the prompt_budget trim-gate diagnostic during static
+     * builds — the cached static portion has no observations yet (it's
+     * built once at agent_from_config time, before any turn has run),
+     * so trim could never fire here even with trim_enabled=true. Firing
+     * the "trim disabled" warning at this site misleads operators into
+     * thinking their config didn't land. The per-turn paths
+     * (agent_turn.c, agent_stream.c) still emit the warning correctly
+     * when the actual turn-time cfg has trim disabled. */
+    no_mem.suppress_prompt_budget_diagnostic = true;
     /* NULL stats — internal recursion through the static-only path; the
      * caller of hu_prompt_build_with_cache already passes NULL. */
     return hu_prompt_build_system(alloc, &no_mem, NULL, NULL, out, out_len);

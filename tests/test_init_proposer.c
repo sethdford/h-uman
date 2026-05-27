@@ -340,6 +340,34 @@ static void test_parse_response_strips_bare_triple_backtick_fence(void) {
     HU_ASSERT(d.confidence > 0.85);
 }
 
+static void test_parse_response_partial_skip_fallback_recovers_truncated_false(void) {
+    /* 2026-05-26 issue-sweep — when gemini-3.5-flash truncates mid-response
+     * but the model clearly said "should_propose:false", the partial-skip
+     * fallback should extract the SKIP intent rather than fail-parse. This
+     * reduces operator log noise from `err=42` lines that have no actionable
+     * meaning (the safe default IS skip). */
+    const char *truncated_fenced = "```json\n{\n  \"should_propose\": false,\n  \"confidence\":";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(truncated_fenced, strlen(truncated_fenced), &d),
+                 HU_OK);
+    HU_ASSERT_EQ((int)d.should_propose, 0);
+    HU_ASSERT_EQ((int)(d.confidence * 100), 0); /* truncated → 0 confidence */
+    /* Reason populated so a debug log line can show the partial-parse path. */
+    HU_ASSERT(d.skip_reason_len > 0);
+}
+
+static void test_parse_response_partial_true_still_fails_parse(void) {
+    /* Partial "should_propose":true should NOT trigger the fallback —
+     * without confidence + draft, a FIRED decision would be malformed,
+     * and the safe default is to surface the parse error so the operator
+     * sees a real failure (vs a silent "model intended yes but couldn't
+     * follow through"). Per the fallback's comment. */
+    const char *partial_true = "```json\n{\n  \"should_propose\": true,\n  \"confidence\":";
+    hu_init_decision_t d;
+    HU_ASSERT_EQ(hu_init_proposer_parse_response(partial_true, strlen(partial_true), &d),
+                 HU_ERR_JSON_PARSE);
+}
+
 static void test_parse_response_truncates_oversize_draft_to_buffer(void) {
     /* Draft longer than HU_INIT_DRAFT_MAX must be truncated, not overflow. */
     char json[HU_INIT_DRAFT_MAX + 128];
@@ -479,6 +507,8 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_parse_response_null_args_return_invalid);
     HU_RUN_TEST(test_parse_response_strips_markdown_code_fence);
     HU_RUN_TEST(test_parse_response_strips_bare_triple_backtick_fence);
+    HU_RUN_TEST(test_parse_response_partial_skip_fallback_recovers_truncated_false);
+    HU_RUN_TEST(test_parse_response_partial_true_still_fails_parse);
     HU_RUN_TEST(test_parse_response_truncates_oversize_draft_to_buffer);
     HU_RUN_TEST(test_evaluate_high_confidence_propose_returns_fired);
     HU_RUN_TEST(test_evaluate_low_confidence_propose_returns_low_confidence);
