@@ -60,6 +60,11 @@ Sprint 2 (US-10..US-13 in spec): shadow mode + eval — separate work item, defe
 
 ## Task 1: Public header + schema parser + stable id
 
+**STATUS: DONE 2026-05-27** — commit `7ed1d482` on `origin/main`.
+17 tests pass, 0 ASan errors, header verified standalone-compilable,
+all steps below collapsed into a single landing because the schema
+walker, stable-id hashing, and tests were all ready at once.
+
 **Files:**
 - Create: `include/human/reflection.h`
 - Create: `src/reflection/schema.c`
@@ -67,7 +72,7 @@ Sprint 2 (US-10..US-13 in spec): shadow mode + eval — separate work item, defe
 - Modify: `tests/test_main.c` (register runner)
 - Modify: `CMakeLists.txt` (add sources behind `HU_ENABLE_SQLITE`)
 
-- [ ] **Step 1.1: Write the public header**
+- [x] **Step 1.1: Write the public header**
 
 Create `include/human/reflection.h` with the full struct and API from the spec's "Components → include/human/reflection.h" section. Reproduce the entire struct definition and function prototypes verbatim from [design.md](./design.md#includehumanreflectionh).
 
@@ -77,7 +82,7 @@ cc -std=c11 -Wall -Wextra -Wpedantic -Iinclude -c -x c include/human/reflection.
 ```
 Expected: clean compile, no warnings.
 
-- [ ] **Step 1.2: Write the failing schema test (malformed JSON rejected)**
+- [x] **Step 1.2: Write the failing schema test (malformed JSON rejected)**
 
 Add to `tests/test_reflection_schema.c`:
 
@@ -118,14 +123,14 @@ void run_reflection_schema_tests(void);
 #endif
 ```
 
-- [ ] **Step 1.3: Run to verify it fails**
+- [x] **Step 1.3: Run to verify it fails**
 
 ```
 cmake --build --preset dev --target human_tests 2>&1 | tail -20
 ```
 Expected: undefined reference to `hu_reflection_parse` — confirms test wired correctly.
 
-- [ ] **Step 1.4: Implement minimal `hu_reflection_parse` to reject malformed**
+- [x] **Step 1.4: Implement minimal `hu_reflection_parse` to reject malformed**
 
 In `src/reflection/schema.c`:
 
@@ -159,14 +164,14 @@ hu_error_t hu_reflection_parse(
 }
 ```
 
-- [ ] **Step 1.5: Run to verify malformed-JSON test passes**
+- [x] **Step 1.5: Run to verify malformed-JSON test passes**
 
 ```
 ./build/human_tests --filter=schema_rejects_malformed_json
 ```
 Expected: PASS.
 
-- [ ] **Step 1.6: Add tests for required-field validation and confidence range**
+- [x] **Step 1.6: Add tests for required-field validation and confidence range**
 
 Append to `tests/test_reflection_schema.c`:
 
@@ -215,13 +220,13 @@ static void test_schema_accepts_valid_pattern(void) {
 
 Register them in `run_reflection_schema_tests()`.
 
-- [ ] **Step 1.7: Implement full schema walking**
+- [x] **Step 1.7: Implement full schema walking**
 
 Replace the TODO in `src/reflection/schema.c` with a full walker: iterate `patterns` array, parse `type` enum via string match against the 6 type names, validate `confidence` in [0,1], copy bounded fields with `strncpy` + manual null-terminate, parse `evidence_ids` and `channels` arrays up to 8 each (truncate with warning if more), compute stable id (see step 1.8).
 
 Allocate `out_patterns` as `calloc(count, sizeof(hu_reflection_pattern_t))`. Copy `summary` to `*out_prose_summary` (caller frees).
 
-- [ ] **Step 1.8: Stable id hash test + implementation**
+- [x] **Step 1.8: Stable id hash test + implementation**
 
 Test:
 ```c
@@ -246,7 +251,7 @@ static void test_stable_id_differs_on_subject(void) {
 
 Add `hu_reflection_compute_id` to header. Implement in schema.c using existing SHA-256 (search `grep -n "hu_sha256\|HU_SHA256" include/human/`); take SHA-256 of `type_str + "\0" + subject + "\0" + observation[0..128]`, hex-encode first 16 bytes (32 hex chars + null), write to `out_id`.
 
-- [ ] **Step 1.9: Confidence-floor flag test + implementation**
+- [x] **Step 1.9: Confidence-floor flag test + implementation**
 
 Test:
 ```c
@@ -266,7 +271,7 @@ static void test_schema_keeps_low_confidence_for_storage_drop(void) {
 ```
 (Confirms parse keeps low-confidence patterns; storage layer in Task 2 drops them.)
 
-- [ ] **Step 1.10: Run all schema tests + commit**
+- [x] **Step 1.10: Run all schema tests + commit**
 
 ```
 ./build/human_tests --suite=reflection_schema
@@ -285,13 +290,19 @@ git commit -m "feat(reflection): public header + schema parser with stable id"
 
 ## Task 2: SQLite storage layer (migrations, UPSERT, queries)
 
+**STATUS: DONE 2026-05-27** — commit `5b805657` on `origin/main`.
+4 tests pin AC-T2.1..2.4, full suite 12721/12721 green, 0 ASan.
+hu_reflection_compute_id promoted to public API as part of this
+task so storage tests can derive stable IDs from struct fields
+without round-tripping through hu_reflection_parse.
+
 **Files:**
 - Create: `src/reflection/storage.c`
 - Create: `tests/test_reflection_storage.c`
 - Modify: `tests/test_main.c`
 - Modify: `CMakeLists.txt`
 
-- [ ] **Step 2.1: Write failing migration test**
+- [x] **Step 2.1: Write failing migration test**
 
 `tests/test_reflection_storage.c`:
 
@@ -327,14 +338,14 @@ void run_reflection_storage_tests(void) {
 }
 ```
 
-- [ ] **Step 2.2: Run to verify it fails**
+- [x] **Step 2.2: Run to verify it fails**
 
 ```
 cmake --build --preset dev --target human_tests 2>&1 | tail -10
 ```
 Expected: undefined reference to `hu_reflection_storage_migrate`.
 
-- [ ] **Step 2.3: Implement migrations**
+- [x] **Step 2.3: Implement migrations**
 
 `src/reflection/storage.c`:
 
@@ -402,14 +413,14 @@ Add prototype to `include/human/reflection.h`:
 hu_error_t hu_reflection_storage_migrate(sqlite3 *db);
 ```
 
-- [ ] **Step 2.4: Verify migration test passes**
+- [x] **Step 2.4: Verify migration test passes**
 
 ```
 ./build/human_tests --filter=storage_migrates
 ```
 Expected: PASS, 0 ASan.
 
-- [ ] **Step 2.5: Add UPSERT semantics test**
+- [x] **Step 2.5: Add UPSERT semantics test**
 
 ```c
 static void test_storage_upsert_bumps_observation_count(void) {
@@ -458,7 +469,7 @@ static void test_storage_upsert_bumps_observation_count(void) {
 }
 ```
 
-- [ ] **Step 2.6: Implement insert_run + UPSERT**
+- [x] **Step 2.6: Implement insert_run + UPSERT**
 
 In `storage.c`:
 - `hu_reflection_storage_insert_run(db, run_id, provider, started_at, input_turns)` — INSERT with status='in_progress', completed_at_ms=NULL
@@ -470,13 +481,13 @@ In `storage.c`:
 
 Add prototypes to `include/human/reflection.h`.
 
-- [ ] **Step 2.7: Verify UPSERT test passes**
+- [x] **Step 2.7: Verify UPSERT test passes**
 
 ```
 ./build/human_tests --filter=upsert_bumps
 ```
 
-- [ ] **Step 2.8: Add confidence-floor drop test**
+- [x] **Step 2.8: Add confidence-floor drop test**
 
 ```c
 static void test_storage_drops_low_confidence(void) {
@@ -508,7 +519,7 @@ static void test_storage_drops_low_confidence(void) {
 
 Run + verify pass.
 
-- [ ] **Step 2.9: Commit**
+- [x] **Step 2.9: Commit**
 
 ```
 git add src/reflection/storage.c tests/test_reflection_storage.c \
@@ -520,12 +531,24 @@ git commit -m "feat(reflection): SQLite storage layer with UPSERT + confidence f
 
 ## Task 3: Config plumbing (`hu_reflection_config_t`)
 
+**STATUS: DONE 2026-05-27** — commit `65fbc894` on `origin/main`.
+Struct renamed from spec's `hu_reflection_config_t` to
+`hu_reflection_loop_config_t` and the hu_config_t field from
+`reflection` to `reflection_loop` because `hu_reflection_config_t`
+already exists (used by src/intelligence/reflection.c, the older
+skillforge-layer reflection — unrelated subsystem). The JSON key
+stays `"reflection"` since that's the operator-facing contract.
+Tests live in tests/test_config_parse.c (not test_config_extended.c)
+matching where the rest of the parse_* tests live. 4 new tests cover
+defaults / partial-block merge / overrides / pathological-input
+clamping at (0, 720] hours.
+
 **Files:**
 - Modify: `include/human/config.h`
 - Modify: `src/config_parse.c`
 - Create/Modify: `tests/test_config_extended.c` (already in git status modified — extend it)
 
-- [ ] **Step 3.1: Add struct to config.h**
+- [x] **Step 3.1: Add struct to config.h**
 
 In `include/human/config.h`, find the root config struct (likely `hu_config_t`) and add:
 
@@ -543,7 +566,7 @@ typedef struct hu_reflection_config_t {
 
 Add field `hu_reflection_config_t reflection;` to the root config struct. Initialize defaults in the existing config-init function (search `grep -n "hu_config_init\|hu_config_defaults" src/config*.c`).
 
-- [ ] **Step 3.2: Write failing parse test**
+- [x] **Step 3.2: Write failing parse test**
 
 In `tests/test_config_extended.c`:
 
@@ -565,13 +588,13 @@ static void test_config_parses_reflection_block(void) {
 }
 ```
 
-- [ ] **Step 3.3: Implement parser**
+- [x] **Step 3.3: Implement parser**
 
 In `src/config_parse.c`, find where other config blocks are parsed (e.g., the reaction_collection block per the silent-config-gated-subsystems rule reference). Add a `parse_reflection_block` mirror that:
 - Optional fields with type-checked reads
 - Unknown subkeys emit the same "unknown key: 'reflection.X' (ignored)" warning as other subsystems
 
-- [ ] **Step 3.4: Run + commit**
+- [x] **Step 3.4: Run + commit**
 
 ```
 ./build/human_tests --filter=config_parses_reflection
