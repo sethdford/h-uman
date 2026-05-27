@@ -1321,20 +1321,39 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
         }
     }
 
-    /* Flagged-rate line — only meaningful with at least one extracted claim;
-     * the rate is undefined for zero-claim runs. */
-    if (m.total_claims_extracted > 0) {
+    /* Flagged-rate line — only meaningful with enough samples that the rate
+     * is statistically informative. With 1-2 claims a 100% rate is just
+     * single-data-point noise and emitting "HIGH 100%" panics operators
+     * unnecessarily. 5 is a reasonable floor — above it the rate carries
+     * signal; below it we report the raw counts and let the operator judge.
+     *
+     * 2026-05-27 — added the min-sample floor after a fresh-daemon doctor
+     * fired "verifier flagged-rate: HIGH (100.0%)" with only 1 claim
+     * extracted. */
+    enum { VERIFIER_RATE_MIN_SAMPLES = 5 };
+    if (m.total_claims_extracted >= VERIFIER_RATE_MIN_SAMPLES) {
         double rate = hu_verifier_metrics_flagged_rate(&m);
         if (flagged_warn_rate > 0.0 && rate >= flagged_warn_rate) {
             char *msg =
                 hu_sprintf(alloc,
-                           "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
-                           "memory may be under-populated or the model is hallucinating",
-                           rate * 100.0, flagged_warn_rate * 100.0);
+                           "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%, "
+                           "n=%llu claims) — memory may be under-populated or the model is "
+                           "hallucinating",
+                           rate * 100.0, flagged_warn_rate * 100.0,
+                           (unsigned long long)m.total_claims_extracted);
             if (msg) {
                 (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
             }
+        }
+    } else if (m.total_claims_extracted > 0) {
+        char *msg = hu_sprintf(
+            alloc,
+            "[doctor] verifier flagged-rate: too few samples (n=%llu < %d) — rate not informative",
+            (unsigned long long)m.total_claims_extracted, (int)VERIFIER_RATE_MIN_SAMPLES);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     }
 

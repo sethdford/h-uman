@@ -110,14 +110,18 @@ static void test_verifier_metrics_save_then_load_roundtrip(void) {
 }
 
 static void test_verifier_metrics_flagged_rate_zero_when_no_claims(void) {
-    hu_verifier_metrics_t m = {.total_runs = 1, .total_claims_extracted = 0,
-                                .total_claims_flagged = 0, .last_update_epoch = 0};
+    hu_verifier_metrics_t m = {.total_runs = 1,
+                               .total_claims_extracted = 0,
+                               .total_claims_flagged = 0,
+                               .last_update_epoch = 0};
     HU_ASSERT_TRUE(hu_verifier_metrics_flagged_rate(&m) == 0.0);
 }
 
 static void test_verifier_metrics_flagged_rate_division(void) {
-    hu_verifier_metrics_t m = {.total_runs = 0, .total_claims_extracted = 200,
-                                .total_claims_flagged = 50, .last_update_epoch = 0};
+    hu_verifier_metrics_t m = {.total_runs = 0,
+                               .total_claims_extracted = 200,
+                               .total_claims_flagged = 50,
+                               .last_update_epoch = 0};
     HU_ASSERT_TRUE(hu_verifier_metrics_flagged_rate(&m) == 0.25);
 }
 
@@ -153,8 +157,7 @@ static void test_doctor_check_verifier_no_file(void) {
     tmp_home_setup(&th);
     hu_allocator_t alloc = hu_system_allocator();
     size_t cap = 8;
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
     HU_ASSERT_NOT_NULL(items);
     size_t count = 0;
     HU_ASSERT_EQ(
@@ -178,14 +181,15 @@ static void test_doctor_check_verifier_no_file(void) {
 static void test_doctor_check_verifier_fresh_low_flagged_rate(void) {
     tmp_home_t th;
     tmp_home_setup(&th);
-    hu_verifier_metrics_t m = {.total_runs = 100, .total_claims_extracted = 500,
-                                .total_claims_flagged = 5, .last_update_epoch = 0};
+    hu_verifier_metrics_t m = {.total_runs = 100,
+                               .total_claims_extracted = 500,
+                               .total_claims_flagged = 5,
+                               .last_update_epoch = 0};
     HU_ASSERT_EQ(hu_verifier_metrics_save(&m), HU_OK);
 
     hu_allocator_t alloc = hu_system_allocator();
     size_t cap = 8;
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
     HU_ASSERT_NOT_NULL(items);
     size_t count = 0;
     HU_ASSERT_EQ(
@@ -213,14 +217,15 @@ static void test_doctor_check_verifier_fresh_low_flagged_rate(void) {
 static void test_doctor_check_verifier_high_flagged_rate(void) {
     tmp_home_t th;
     tmp_home_setup(&th);
-    hu_verifier_metrics_t m = {.total_runs = 100, .total_claims_extracted = 500,
-                                .total_claims_flagged = 100, .last_update_epoch = 0};
+    hu_verifier_metrics_t m = {.total_runs = 100,
+                               .total_claims_extracted = 500,
+                               .total_claims_flagged = 100,
+                               .last_update_epoch = 0};
     HU_ASSERT_EQ(hu_verifier_metrics_save(&m), HU_OK);
 
     hu_allocator_t alloc = hu_system_allocator();
     size_t cap = 8;
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
     HU_ASSERT_NOT_NULL(items);
     size_t count = 0;
     HU_ASSERT_EQ(
@@ -241,25 +246,65 @@ static void test_doctor_check_verifier_high_flagged_rate(void) {
     tmp_home_teardown(&th);
 }
 
+/* 2026-05-27 — regression pin: with only 1 claim, the flagged-rate is
+ * statistical noise (100% from 1 sample is meaningless). Doctor must NOT
+ * emit a WARN — instead, an OK line saying "too few samples". Surfaced
+ * during gateway diagnostic sweep when a fresh daemon's first turn fired
+ * "verifier flagged-rate: HIGH (100.0%)" with n=1. */
+static void test_doctor_check_verifier_one_claim_low_samples_no_warn(void) {
+    tmp_home_t th;
+    tmp_home_setup(&th);
+    hu_verifier_metrics_t m = {.total_runs = 1,
+                               .total_claims_extracted = 1,
+                               .total_claims_flagged = 1,
+                               .last_update_epoch = 0};
+    HU_ASSERT_EQ(hu_verifier_metrics_save(&m), HU_OK);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t cap = 8;
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
+    HU_ASSERT_NOT_NULL(items);
+    size_t count = 0;
+    HU_ASSERT_EQ(
+        hu_doctor_check_verifier(&alloc, (int64_t)time(NULL), 300, 0.10, &items, &count, &cap),
+        HU_OK);
+    /* counts + fresh heartbeat + "too few samples" line. NO WARN. */
+    HU_ASSERT_EQ(count, (size_t)3);
+    for (size_t i = 0; i < count; i++) {
+        HU_ASSERT_TRUE(items[i].severity != HU_DIAG_WARN);
+    }
+    HU_ASSERT_TRUE(strstr(items[2].message, "too few samples") != NULL);
+    HU_ASSERT_TRUE(strstr(items[2].message, "n=1") != NULL);
+    for (size_t i = 0; i < count; i++) {
+        if (items[i].category)
+            alloc.free(alloc.ctx, (void *)items[i].category, strlen(items[i].category) + 1);
+        if (items[i].message)
+            alloc.free(alloc.ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+    }
+    alloc.free(alloc.ctx, items, cap * sizeof(hu_diag_item_t));
+    tmp_home_teardown(&th);
+}
+
 /* Doctor wire — when last_update_epoch is older than the staleness threshold,
  * heartbeat WARNs. This is the "daemon offline / wedged" path. */
 static void test_doctor_check_verifier_stale_heartbeat(void) {
     tmp_home_t th;
     tmp_home_setup(&th);
-    hu_verifier_metrics_t m = {.total_runs = 1, .total_claims_extracted = 0,
-                                .total_claims_flagged = 0, .last_update_epoch = 0};
+    hu_verifier_metrics_t m = {.total_runs = 1,
+                               .total_claims_extracted = 0,
+                               .total_claims_flagged = 0,
+                               .last_update_epoch = 0};
     HU_ASSERT_EQ(hu_verifier_metrics_save(&m), HU_OK);
 
     hu_allocator_t alloc = hu_system_allocator();
     size_t cap = 8;
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * cap);
     HU_ASSERT_NOT_NULL(items);
     size_t count = 0;
     /* Pretend now is 1000s in the future relative to the just-saved file. */
     int64_t pseudo_now = (int64_t)time(NULL) + 1000;
-    HU_ASSERT_EQ(
-        hu_doctor_check_verifier(&alloc, pseudo_now, 300, 0.10, &items, &count, &cap), HU_OK);
+    HU_ASSERT_EQ(hu_doctor_check_verifier(&alloc, pseudo_now, 300, 0.10, &items, &count, &cap),
+                 HU_OK);
     /* counts + STALE heartbeat. No flagged WARN (zero claims extracted). */
     HU_ASSERT_EQ(count, (size_t)2);
     HU_ASSERT_EQ(items[1].severity, HU_DIAG_WARN);
@@ -286,5 +331,6 @@ void run_verifier_metrics_tests(void) {
     HU_RUN_TEST(test_doctor_check_verifier_no_file);
     HU_RUN_TEST(test_doctor_check_verifier_fresh_low_flagged_rate);
     HU_RUN_TEST(test_doctor_check_verifier_high_flagged_rate);
+    HU_RUN_TEST(test_doctor_check_verifier_one_claim_low_samples_no_warn);
     HU_RUN_TEST(test_doctor_check_verifier_stale_heartbeat);
 }
