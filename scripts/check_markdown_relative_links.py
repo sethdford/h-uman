@@ -123,6 +123,19 @@ def check_path(raw: str, parent: Path) -> str | None:
     path_part = raw.split("#", 1)[0]
     if not path_part:
         return None
+    # Strip source-line/column anchors like "src/foo.c:42" or "foo.c:42:7"
+    # — common markdown convention for pointing at a specific code site.
+    # Without this strip, the checker treats the entire "path:line" string
+    # as a literal filename and reports "missing" on every line-anchored
+    # source-code reference in the repo's plan docs.
+    if ":" in path_part:
+        head = path_part.split(":", 1)[0]
+        # Only strip when what follows the colon is a line/column number
+        # (digits, optionally :col-digits). Anything else stays as-is so
+        # we don't accidentally accept URLs that genuinely contain colons.
+        rest = path_part[len(head) + 1 :]
+        if rest and all(seg.isdigit() for seg in rest.split(":") if seg):
+            path_part = head
     target = (parent / path_part).resolve()
     try:
         target.relative_to(ROOT)

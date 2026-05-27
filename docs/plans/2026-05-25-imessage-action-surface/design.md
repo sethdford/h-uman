@@ -258,7 +258,7 @@ The 42 other channels get a one-line stub returning `HU_ERR_NOT_SUPPORTED` for e
 ```
 
 Parent identification: we already have `reply_to_guid` on inbound messages
-(see [imessage.h:388](../../include/human/channels/imessage.h)). The caller of `reply()` passes the inbound's own guid as `parent_msg_guid`; we use it both to locate the AX row (cross-referenced via chat.db lookup of `text` for prefix matching, since AX rows don't directly expose guid) AND as the value chat.db will store in the outbound row's `reply_to_guid` once Messages.app processes the AX click.
+(see [imessage.h:388](../../../include/human/channels/imessage.h)). The caller of `reply()` passes the inbound's own guid as `parent_msg_guid`; we use it both to locate the AX row (cross-referenced via chat.db lookup of `text` for prefix matching, since AX rows don't directly expose guid) AND as the value chat.db will store in the outbound row's `reply_to_guid` once Messages.app processes the AX click.
 
 ## §4. Custom-emoji tapback (extend react)
 
@@ -287,7 +287,7 @@ If a custom emoji isn't in the visible sub-picker row AND isn't in `CLASSIC_MAP`
 
 ## §5. Sticker pipeline (MVP)
 
-**The honest constraint:** Apple's native sticker pipeline uses `IMSticker` from the private `IMSharedUtilities` framework, routed through the same `IMCore` daemon connection we already discovered is locked down on macOS 26+ ([imessage.c:3637](../../src/channels/imessage.c)). We cannot send a true balloon-bundle sticker without an entitlement we won't get.
+**The honest constraint:** Apple's native sticker pipeline uses `IMSticker` from the private `IMSharedUtilities` framework, routed through the same `IMCore` daemon connection we already discovered is locked down on macOS 26+ ([imessage.c:3637](../../../src/channels/imessage.c)). We cannot send a true balloon-bundle sticker without an entitlement we won't get.
 
 **MVP that works today:** sticker files live in `~/.human/stickers/` as PNG/HEIC with tagged filenames like `casual-happy_001.png`, `formal-acknowledgment_002.png`. The persona picker `hu_persona_pick_sticker` returns a path; the send goes through `imsg send --to X --file <path>`. Recipients see a small image attachment.
 

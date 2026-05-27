@@ -55,7 +55,7 @@ The deeper ask is **human-likeness, not rules-based behavior**. When to thread, 
 ## Non-goals
 
 - ❌ **NOT** implementing Forward or Delete in this sprint. Forward has chat-ID-misdirection leak risk; Delete is destructive and Apple only allows it within a 2-minute window. Both deserve their own spec with explicit guardrails.
-- ❌ **NOT** sending true balloon-bundle stickers via private `IMSticker` API. The IMCore daemon-connection wall on macOS 26+ makes this infeasible now (see [imessage.c:3637 `imcore_init`](../../src/channels/imessage.c)). Sticker MVP sends as a file attachment with a "(sent sticker)" downgrade path documented in design.
+- ❌ **NOT** sending true balloon-bundle stickers via private `IMSticker` API. The IMCore daemon-connection wall on macOS 26+ makes this infeasible now (see [imessage.c:3637 `imcore_init`](../../../src/channels/imessage.c)). Sticker MVP sends as a file attachment with a "(sent sticker)" downgrade path documented in design.
 - ❌ **NOT** rewriting the existing tapback chain (`ax_perform_tapback_on_row` etc.) — extend it, don't replace it.
 - ❌ **NOT** adding LLM-in-the-loop decision for reply-style. The predicate is pure C math + a seeded RNG, sampled per turn. Adding a Gemini call for "should I thread?" defeats the latency budget and the cost story.
 - ❌ **NOT** changing chat.db directly. All outbound paths go through `imsg send` or AX automation of the running Messages.app.

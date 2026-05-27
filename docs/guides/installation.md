@@ -138,7 +138,7 @@ If you're a developer or want to build the latest unreleased code:
    cd h-uman
    ```
 
-2. Build using CMake (see [BUILDING.md](../../BUILDING.md) for full details):
+2. Build using CMake (see `CMakePresets.json` and the root `CLAUDE.md` Build & Test section for full details):
    ```bash
    cmake --preset dev
    cmake --build --preset dev
@@ -158,7 +158,7 @@ If you're a developer or want to build the latest unreleased code:
    cp -r build/Release/Human.app /Applications/
    ```
 
-See [BUILDING.md](../../BUILDING.md) for advanced build options (TUI, minimal binary, no-SQLite, profiling).
+See `CMakePresets.json` and the root `CLAUDE.md` Build & Test section for advanced build options (TUI, minimal binary, no-SQLite, profiling).
 
 ---
 
