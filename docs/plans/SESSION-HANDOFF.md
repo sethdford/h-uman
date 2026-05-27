@@ -5,11 +5,13 @@ planning sessions. Each prompt is self-contained: paste into a fresh Claude
 Code session and the session has everything it needs to start without
 re-reading 100+ turns of brainstorming history.
 
-UPDATE 2026-05-27: voice-via-Cartesia brainstorm was completed in the
-same session as the original planning (after the user pushed past the
-recommended stop-point); Prompt 4 is now an execute prompt rather than
-a brainstorm prompt. Cross-channel synthesis (Prompt 3) remains a
-brainstorm prompt — that one is still gated on reflection-loop landing.
+UPDATE 2026-05-27 (later): both voice-via-Cartesia AND cross-channel
+synthesis brainstorms were completed in the original session (after the
+user pushed past TWO recommended stop-points). Prompts 3 AND 4 are now
+execute prompts. The only remaining "to brainstorm" item is whatever
+the user dreams up next — every #1-#5 sub-project from the original
+"5 highest-leverage moves" planning is now spec-complete and ready for
+execution.
 
 ## Why a handoff pack
 
@@ -168,68 +170,93 @@ Start with Wave 0 (Task 1, sequentially, MUST land before anything else).
 
 ---
 
-## Prompt 3 — Brainstorm cross-channel synthesis (#2)
+## Prompt 3 — Execute cross-channel synthesis
 
-Use this AFTER reflection-loop sprint lands (this sub-project depends on
-hu_reflection_pattern_t existing in production code). Brainstorm only —
-the session should produce a spec, not implementation.
+The brainstorm landed during the 2026-05-27 session (the user pushed
+past a second recommended stop-point). Spec and tasks exist at
+`docs/plans/2026-05-27-cross-channel-synthesis/`. This is now an
+execute prompt.
+
+Recommended execution order: AFTER reflection-loop's Task 7 lands
+(`src/reflection/consumer.c` exists in production). The cross-channel
+spec's Task 5 reads from the `reflection_patterns` table that reflection
+ships. The spec includes graceful degradation if the table is absent
+(Task 5 has a `has_reflection` probe), but the integration is most
+meaningful once reflection is live.
 
 ```
-Brainstorm sub-project #2 (cross-channel synthesis) using the
-superpowers:brainstorming skill.
+Execute the cross-channel synthesis implementation plan at
+docs/plans/2026-05-27-cross-channel-synthesis/tasks.md via the
+superpowers:subagent-driven-development skill.
 
-Mission context (from CLAUDE.md M2 — Personal Model):
-The agent has 31 messaging channels but treats each as isolated. When
-something happens on iMessage, the Telegram agent should know. A human
-friend doesn't work that way — they remember what you told them
-yesterday regardless of which medium you used.
+Current state:
+- Spec at docs/plans/2026-05-27-cross-channel-synthesis/design.md (approved)
+- Plan at docs/plans/2026-05-27-cross-channel-synthesis/tasks.md (8 tasks)
+- Existing infrastructure being EXTENDED:
+  * src/memory/cross_graph.c + identity_resolver (4-tier confidence
+    cross-channel identity unification)
+  * src/daemon.c:6525-6815 (existing cross_channel_ctx production path)
+  * hu_contact_profile_t.relationship_type field
+  * src/daemon.c:561 cross_channel_format_when (extracted to public
+    in Task 6)
+- The trust property landing in Task 4: family fact MUST NEVER reach
+  coworker turn. AC-1 is the highest-priority test in this sprint.
 
-The architecture supports this trivially (hu_personal_model_t is global)
-but the SYNTHESIS layer doesn't exist: when should one channel bring up
-something that originated in another? When should it stay quiet?
-That's the "more better than human" capability — h-uman knows what you
-said on iMessage when you're texting on Telegram.
+CRITICAL ORDERING — per tests-that-pin-bugs.md discipline:
+- Task 1 MUST be first. It commits FAILING tests (the trust property
+  negative-contract) before any implementation lands. The tests must
+  fail until Tasks 2-4 implement the predicate + filter. If implementation
+  lands before the test, the test might accidentally codify the
+  implementation's mistakes.
+- Tasks 2-4 then make those tests turn green sequentially:
+  - Task 2: persona schema + safe defaults + parser
+  - Task 3: pure ACL predicate
+  - Task 4: filter stage (Task 1 tests pass HERE)
 
-Pre-requisite state (verify before starting):
-- ls docs/plans/2026-05-26-reflection-loop/results/  (acceptance results exist)
-- grep -rn "hu_reflection_pattern_t" src/reflection/storage.c  (struct shipped)
-- ls src/reflection/consumer.c  (slice consumer landed)
+Execute in waves:
 
-If any of these are missing, this brainstorm is blocked — reflection-loop
-needs to land first.
+WAVE 0 (sequential, MUST be first):
+- Task 1: Write trust-property tests FIRST (they fail until Task 4)
 
-Starting context to read:
-- docs/plans/2026-05-26-reflection-loop/design.md (sibling spec — defines
-  the pattern struct cross-channel will consume)
-- ~/.claude/CLAUDE.md (M2 mission, persona overlay architecture)
-- src/persona/overlay.c (Tier-1 channel overlays — formality/length differ)
+WAVE 1 (sequential because each builds on the prior):
+- Task 2: Persona ACL schema + parser
+- Task 3: Pure predicate
+- Task 4: Filter stage (Wave 0 tests turn green)
 
-Key design questions the brainstorm should resolve:
-1. What event triggers cross-channel synthesis? (new fact extraction on
-   channel A → check whether channel B should reference it? Periodic
-   sweep? Per-turn enrichment?)
-2. What's the "should I bring this up?" judge? (heuristic? small LLM
-   call per turn? reuse init_proposer's governor?)
-3. Privacy/UX surface: which channels CAN share context vs which are
-   walled off (Slack work vs iMessage family)?
-4. How does the persona overlay drive cross-channel speech? ("As you
-   mentioned earlier on iMessage..." is one shape; "Hey, I noticed..."
-   is another)
-5. How do we detect when cross-channel context is unwelcome? (reaction-
-   based feedback loop like reflection's retire-on-contradiction)
+WAVE 2 (parallel after Wave 1):
+- Task 5: Collect stage (reads facts + reflection patterns)
+- Task 6: Format stage + extract format_when helper
 
-Out of scope:
-- Voice integration (#4 — separate sub-project)
-- Calibrated uncertainty wiring (already specced)
-- New cross-channel storage tables (use existing hu_personal_model_t)
+WAVE 3:
+- Task 7: Daemon integration (replace inline cross_channel_ctx)
 
-Produce a spec at docs/plans/<date>-cross-channel-synthesis/{design.md,
-tasks.md} following the pattern of the two existing 2026-05-26 specs.
-Apply brainstorming flow rigorously (one clarifying question at a time,
-present design sections with approval, self-review before commit).
+WAVE 4:
+- Task 8: Acceptance + manual smoke
 
-The terminal step per the brainstorming skill is to invoke
-superpowers:writing-plans to generate the tasks.md.
+PREREQUISITES — VERIFY BEFORE STARTING:
+- Reflection-loop's Task 7 has landed (src/reflection/consumer.c
+  exists). Without it, Task 5's reflection-pattern reading is dormant
+  (only reads from personal_model facts), which is acceptable but
+  loses half the value. Strongly recommend reflection-loop first.
+
+Constraints same as Prompts 1+2+4 (worktrees off main, critic review
+between waves, no TeamDelete until merged, gate symmetry check, full
+test suite, touch-source before rebuilding production binary).
+
+Acceptance criteria from design.md:
+AC-1 (TRUST PROPERTY): family fact never reaches coworker turn
+AC-2: reflection patterns with channel_count>1 surface when ACL allows
+AC-3: persona ACL override widens/narrows defaults
+AC-4: missing acl field uses safe defaults
+AC-5: malformed acl json falls back safely (no crash, no fail-open)
+AC-6: predicate testable without DB/allocator/persona-load
+AC-7: graceful degradation when reflection table absent
+AC-8: all 15+ tests pass, 0 ASan, gate symmetry clean
+
+Sprint 2 (Scope C: synthesis judge + surface tracking + retire-on-
+contradiction + dunbar_layer integration) is out of scope here.
+
+Start with Wave 0.
 ```
 
 ---
@@ -330,7 +357,7 @@ Start with Wave 1.
 |---|---|---|
 | 1 | Prompt 1 (reflection-loop execution) | Highest leverage — unblocks #2 cross-channel and is foundation for the "knows you" thesis |
 | 2 | Prompt 2 (calibrated-uncertainty execution) | Can start in parallel with #1's later waves (file overlap only at consumer.c integration); locks in trust UX |
-| 3 | Prompt 3 (cross-channel brainstorm) | Spec only; gated on reflection landing |
+| 3 | Prompt 3 (cross-channel execution) | Sequence after reflection-loop's Task 7 lands; otherwise reflection-pattern integration sits dormant but spec degrades gracefully |
 | 4 | Prompt 4 (voice execution) | Independent of #1/#2 (different files). Has external prerequisites — check before starting. |
 
 ## Notes for the supervising user (you)
