@@ -23,3 +23,7 @@
 {"prompt": "yeah thats fair", "channel": "imessage", "context": "concession"}
 {"prompt": "just saw your message sorry was busy", "channel": "imessage", "context": "delayed-response"}
 {"prompt": "remind me again what we decided", "channel": "imessage", "context": "memory"}
+{"prompt": "But I need money now. That\u2019s the thing I need a job asap \ud83d\ude2d\ud83d\ude2d", "channel": "imessage", "context": "general", "source": "chatdb_sampled_2026_05_27"}
+{"prompt": "And I really don\u2019t wanna ask for help rn when you just have been telling me you\u2019re tight on money. <NAME>", "channel": "imessage", "context": "acknowledgment", "source": "chatdb_sampled_2026_05_27"}
+{"prompt": "I just hate asking for money and support and that\u2019s all need rn since I\u2019m not working. I hate feeling stressed and not knowing when I\u2019ll have a steady pay coming in.  , a real estate sale would\u2019ve been so helpful rn. I wish I knew you were selling your home is all. But past is past now.", "channel": "imessage", "context": "acknowledgment", "source": "chatdb_sampled_2026_05_27"}
+{"prompt": "Ik they pay well", "channel": "imessage", "context": "acknowledgment", "source": "chatdb_sampled_2026_05_27"}
