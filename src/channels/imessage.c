@@ -3918,7 +3918,18 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
         }
     }
 
-    hu_log_info("imessage", NULL, "all typing tiers failed (IMCore/AX/imsg)");
+    /* Rate-limit to one log per daemon lifetime — typing indicator is
+     * cosmetic; doesn't break send/receive. Per-turn spam masks real
+     * issues. The first failure tells the operator typing is unavailable
+     * on this OS+config; subsequent identical failures add no signal.
+     * macOS 26+ commonly hits this because IMCore daemon connection is
+     * gated (covered by the separate "expected on macOS 26+" boot log)
+     * and AX permission for the iMessage app may not be granted. */
+    static atomic_bool s_warned_typing_all_failed = false;
+    hu_log_info_once(&s_warned_typing_all_failed, "imessage", NULL,
+                     "all typing tiers failed (IMCore/AX/imsg) — typing indicators "
+                     "disabled this session. Send/receive continues normally. "
+                     "Grant Accessibility access to the human binary to enable AX tier.");
     return HU_ERR_NOT_SUPPORTED;
 #endif
 }

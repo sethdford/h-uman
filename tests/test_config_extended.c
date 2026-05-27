@@ -1200,6 +1200,67 @@ static void test_config_parse_fallback_providers_single(void) {
     free_config(cfg);
 }
 
+/* Chip C (2026-05 audit follow-up) — parser pins for the new
+ * reliability.model_fallbacks JSON shape. These tests cover the
+ * silent-failure scenarios the chip targets: missing key, well-formed
+ * single entry, multi-entry, and malformed entries dropped gracefully. */
+
+static void test_config_parse_model_fallbacks_absent_is_zero(void) {
+    hu_config_t *cfg = make_config_with_arena();
+    const char *j = "{\"reliability\":{\"primary_provider\":\"mlx_local\"}}";
+    hu_config_parse_json(cfg, j, strlen(j));
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks_len, 0u);
+    HU_ASSERT_NULL(cfg->reliability.model_fallbacks);
+    free_config(cfg);
+}
+
+static void test_config_parse_model_fallbacks_single_entry(void) {
+    hu_config_t *cfg = make_config_with_arena();
+    const char *j = "{\"reliability\":{\"model_fallbacks\":["
+                    "{\"model\":\"gemma-4-31b-it-4bit\",\"fallbacks\":[\"gemini-3.5-flash\"]}"
+                    "]}}";
+    hu_config_parse_json(cfg, j, strlen(j));
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks_len, 1u);
+    HU_ASSERT_NOT_NULL(cfg->reliability.model_fallbacks);
+    HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].model, "gemma-4-31b-it-4bit");
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks[0].fallback_models_len, 1u);
+    HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].fallback_models[0], "gemini-3.5-flash");
+    free_config(cfg);
+}
+
+static void test_config_parse_model_fallbacks_multi_fallback(void) {
+    hu_config_t *cfg = make_config_with_arena();
+    /* One source model, multiple cloud fallbacks tried in order. */
+    const char *j = "{\"reliability\":{\"model_fallbacks\":["
+                    "{\"model\":\"gemma-4-31b-it-4bit\","
+                    "\"fallbacks\":[\"gemini-3.5-flash\",\"gemini-3.1-pro-preview\"]}"
+                    "]}}";
+    hu_config_parse_json(cfg, j, strlen(j));
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks_len, 1u);
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks[0].fallback_models_len, 2u);
+    HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].fallback_models[0], "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].fallback_models[1],
+                     "gemini-3.1-pro-preview");
+    free_config(cfg);
+}
+
+static void test_config_parse_model_fallbacks_drops_malformed_entries(void) {
+    /* Entries missing `model`, missing `fallbacks`, or with empty
+     * `fallbacks` arrays MUST be dropped (not aborted) so a single typo
+     * doesn't blow up the entire reliability chain. The well-formed
+     * entry survives. */
+    hu_config_t *cfg = make_config_with_arena();
+    const char *j = "{\"reliability\":{\"model_fallbacks\":["
+                    "{\"fallbacks\":[\"gemini-3.5-flash\"]}," /* no model — drop */
+                    "{\"model\":\"orphan-model\"},"           /* no fallbacks — drop */
+                    "{\"model\":\"empty\",\"fallbacks\":[]}," /* empty array — drop */
+                    "{\"model\":\"good\",\"fallbacks\":[\"gemini-3.5-flash\"]}"
+                    "]}}";
+    hu_config_parse_json(cfg, j, strlen(j));
+    HU_ASSERT_EQ(cfg->reliability.model_fallbacks_len, 1u);
+    HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].model, "good");
+}
+
 static void test_config_parse_diagnostics_log_receipts(void) {
     hu_config_t *cfg = make_config_with_arena();
     const char *j = "{\"diagnostics\":{\"log_message_receipts\":true}}";
@@ -1613,6 +1674,10 @@ void run_config_extended_tests(void) {
     HU_RUN_TEST(test_config_parse_gateway_host);
     HU_RUN_TEST(test_config_parse_single_provider);
     HU_RUN_TEST(test_config_parse_fallback_providers_single);
+    HU_RUN_TEST(test_config_parse_model_fallbacks_absent_is_zero);
+    HU_RUN_TEST(test_config_parse_model_fallbacks_single_entry);
+    HU_RUN_TEST(test_config_parse_model_fallbacks_multi_fallback);
+    HU_RUN_TEST(test_config_parse_model_fallbacks_drops_malformed_entries);
     HU_RUN_TEST(test_config_parse_diagnostics_log_receipts);
     HU_RUN_TEST(test_config_parse_diagnostics_log_llm_io);
     HU_RUN_TEST(test_config_parse_agent_session_idle);

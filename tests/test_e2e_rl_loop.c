@@ -64,8 +64,16 @@ static hu_error_t e2e_mock_chat_with_system(void *ctx, hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     e2e_mock_provider_ctx_t *m = (e2e_mock_provider_ctx_t *)ctx;
     float sig = e2e_policy_signature(m->policy);
+    /* 2026-05 Chip E fix — the prior format `(unsigned)(sig * 1e6)` rounded
+     * the signature into a 1e-6 bucket. The DPO step bumps lm_head cells
+     * by ~±0.001 each, but many cells cancel (~revert in the sign-based
+     * step's else branch), so the net signature delta is often < 1e-6 →
+     * before/after rounded to the same uint bucket → tests flaked.
+     * Use `%.9e` (9-significant-digit scientific) so any nonzero delta
+     * produces a different byte sequence. Pinned by
+     * test_e2e_closed_loop_dpo_shows_measurable_response_change. */
     char buf[128];
-    int n = snprintf(buf, sizeof(buf), "e2e_sig_%u", (unsigned)(sig * 1000000.f));
+    int n = snprintf(buf, sizeof(buf), "e2e_sig_%.9e", (double)sig);
     if (n <= 0)
         return HU_ERR_PROVIDER_RESPONSE;
     size_t len = (size_t)n;
