@@ -3086,6 +3086,7 @@ set(HU_TEST_SOURCES
     tests/test_reflection_prompt.c
     tests/test_reflection_orchestration.c
     tests/test_reflection_consumer.c
+    tests/test_reflection_quorum.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c

@@ -123,6 +123,19 @@ if [ -n "$staged_gate_inputs" ] && [ -x "scripts/check-test-source-gate-symmetry
     fi
 fi
 
+# Reflection-loop Phase 1 contract: hu_reflection_pattern_has_quorum must
+# NOT be used to gate hu_personal_model_* mutations. Phase 2 work; see
+# docs/plans/2026-05-26-reflection-loop/tasks.md Task 11.
+staged_reflection_inputs=$(git diff --cached --name-only --diff-filter=ACM -- 'src/**/*.c' 'src/*.c')
+if [ -n "$staged_reflection_inputs" ] && [ -x "scripts/check-reflection-quorum-not-wired.sh" ]; then
+    if ! bash scripts/check-reflection-quorum-not-wired.sh; then
+        echo ""
+        echo "Pre-commit blocked: reflection quorum predicate wired to belief mutation."
+        echo "Phase 2 work — see docs/plans/2026-05-26-reflection-loop/design.md."
+        exit 1
+    fi
+fi
+
 # tests-that-pin-bugs antipattern check — recurred 3 times in Sprint 49
 # (US-C1.1, US-C1.2, US-C1.4) where an assertion was gated on whether
 # the input-under-test exists, so the test silently PASSED when the

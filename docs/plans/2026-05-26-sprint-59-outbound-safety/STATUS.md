@@ -179,9 +179,33 @@ content → SEND) and degraded-mode contract (no SQLite lookup → SEND).
    the check's PASS verdict, JSON shape, totals correctness, null-arg
    handling, overflow-returns-zero behavior, and metadata stability.
 
+5. **Pipeline performance microbench** — DONE. Established perf
+   characterization for the outbound pipeline as a regression guard.
+   `tests/test_outbound_pipeline_perf.c` runs the full
+   `HU_OUTBOUND_PATH_PROACTIVE` pipeline against a 50-contact
+   SQLite crosstalk corpus, 100 warm-up iterations then 1000
+   measured iterations sorted to extract P50/P95/P99 via index.
+
+   Live measurement (ASan-instrumented dev build):
+     P50 = 0.212 ms
+     P95 = 0.238 ms
+     P99 = 0.280 ms
+     Budget = 5 ms (~18× headroom)
+
+   The 5 ms budget is tight enough to catch a 10× regression
+   (sync I/O, N+1 SQLite query, classifier going from O(1) to
+   O(corpus)) while leaving room for 2–3× noise on a loaded CI
+   runner. Production binaries run without ASan and will be ~3×
+   faster than what this gate sees, so the ceiling is strict by
+   construction.
+
+   The test file comment explicitly says: "if a future PR trips
+   this, inspect WHY P99 climbed, not raise the budget" —
+   turning the constant from a heuristic into a stated policy.
+
 ## What's still open (remaining Sprint 60 candidates)
 
-5. **Reactive-path consolidation** — Q-5 user decision was "not in
+6. **Reactive-path consolidation** — Q-5 user decision was "not in
    Sprint 59". After 2 weeks of production data on the new pipeline,
    evaluate whether to displace `response_guard.c`.
 

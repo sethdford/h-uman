@@ -297,3 +297,38 @@ uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {
     sqlite3_finalize(st);
     return out;
 }
+
+/* ── Phase 2 quorum predicate (T11) ────────────────────────────── */
+
+/* Returns true iff `pattern_id` has been observed in ≥ 3 distinct
+ * runs with confidence > 0.7. Phase 1 callers MUST treat this as
+ * TELEMETRY ONLY — mutation against hu_personal_model_t on the
+ * basis of quorum is Phase 2 work, gated by
+ * scripts/check-reflection-quorum-not-wired.sh.
+ *
+ * Phase 1 approximation: storage keeps only MAX(confidence) per
+ * pattern, not per-run confidence. For the strict "≥3 distinct runs
+ * each > 0.7" check Phase 2 will want a separate observations
+ * (pattern_id, run_id, confidence) table. For now we use the looser
+ * "observation_count >= 3 AND MAX confidence > 0.7" — documented in
+ * design.md "Open questions" and revisited before Phase 2 wires
+ * belief updates. */
+bool hu_reflection_pattern_has_quorum(struct sqlite3 *db, const char *pattern_id) {
+    if (!db || !pattern_id)
+        return false;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT observation_count, confidence FROM reflection_patterns "
+                           "WHERE id = ? AND retired = 0",
+                           -1, &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, pattern_id, -1, SQLITE_STATIC);
+    bool has = false;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        int obs_count = sqlite3_column_int(st, 0);
+        double conf = sqlite3_column_double(st, 1);
+        has = (obs_count >= 3 && conf > 0.7);
+    }
+    sqlite3_finalize(st);
+    return has;
+}
