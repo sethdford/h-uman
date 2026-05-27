@@ -31,29 +31,32 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Per-iteration latency budget. The pipeline should comfortably run
- * in single-digit ms even on this old M-series machine; we set the
- * budget at 50ms to leave headroom for ASan instrumentation. If a
- * future PR pushes us past 50ms P99 on a realistic-corpus query,
- * something regressed badly. */
-#define HU_PIPELINE_PERF_P99_BUDGET_NS (50 * 1000 * 1000) /* 50ms */
+/* Per-iteration latency budget — 5ms P99 against a 50-contact
+ * crosstalk corpus, ASan-instrumented dev build.
+ *
+ * Observed steady-state P99 is ~0.25ms, so 5ms gives ~20× headroom
+ * — enough to absorb 2–3× noise on a loaded CI runner while still
+ * catching a 10× regression (e.g. a future stage adding synchronous
+ * I/O, an N+1 SQLite query, or a classifier going from O(1) to
+ * O(corpus size)). Production binaries run without ASan and will be
+ * ~3× faster than what this gate sees, so this is a strict ceiling
+ * by construction.
+ *
+ * If a future PR trips this, the right response is to inspect WHY
+ * P99 climbed, not to raise the budget. */
+#define HU_PIPELINE_PERF_P99_BUDGET_NS (5 * 1000 * 1000) /* 5ms */
 
-/* TODO: Daisy to choose — warm-up + measurement counts.
+/* Warm-up + measurement counts.
  *
- * Three reasonable patterns:
- *   (A) N=1000 single phase. Simple, all samples in stats.
- *       First iter includes cold-cache cost (sqlite prepare, cache
- *       lines). P99 will be skewed high by ~5–10 early samples.
- *   (B) N=100 warm-up + N=1000 measurement. Cleaner P99 because
- *       cold-start is excluded. Doubles total runtime to ~3s.
- *   (C) N=10000 single phase. Massive sample size dilutes cold-
- *       start noise to <0.1%. ~10× longer runtime; test takes ~20s.
+ * 100 warm-up iterations let SQLite's page cache and prepared
+ * statements settle; the first 1–5 iterations are 5–10× slower
+ * than steady state and would otherwise dominate P99.
  *
- * The decision matters because the wrong choice either reports
- * misleadingly high P99 (option A on a cold start) or makes the
- * test annoyingly slow (option C). */
-#define HU_PIPELINE_PERF_WARMUP_N 100    /* warm sqlite cache + prepared statements */
-#define HU_PIPELINE_PERF_MEASURE_N 1000   /* stable P99 with 1000-sample window */
+ * 1000 measured iterations is enough samples for a stable P99
+ * (P99 = sample[989] out of 1000) without making the test
+ * annoyingly slow (~3s total wall time on dev hardware). */
+#define HU_PIPELINE_PERF_WARMUP_N  100
+#define HU_PIPELINE_PERF_MEASURE_N 1000
 
 static int compare_u64(const void *a, const void *b) {
     uint64_t ua = *(const uint64_t *)a;
@@ -101,8 +104,7 @@ static void seed_db(sqlite3 *db, int n_contacts) {
 
 /* The actual measurement loop. Returns 0 on success; sets *out_p50_ns,
  * *out_p95_ns, *out_p99_ns from the sorted measurement-phase samples. */
-static int run_perf_measurement(uint64_t *out_p50_ns, uint64_t *out_p95_ns,
-                                uint64_t *out_p99_ns) {
+static int run_perf_measurement(uint64_t *out_p50_ns, uint64_t *out_p95_ns, uint64_t *out_p99_ns) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = NULL;
     unlink(perf_db_path());
@@ -197,8 +199,7 @@ static void test_pipeline_p99_under_budget(void) {
     if (HU_PIPELINE_PERF_MEASURE_N == 0) {
         /* Test is dormant until the user contributes the warm-up/
          * measurement-N decision. Mark with a non-fatal note. */
-        fprintf(stderr,
-                "  [SKIP] pipeline perf — WARMUP_N + MEASURE_N awaiting contribution\n");
+        fprintf(stderr, "  [SKIP] pipeline perf — WARMUP_N + MEASURE_N awaiting contribution\n");
         return;
     }
     uint64_t p50 = 0, p95 = 0, p99 = 0;
@@ -207,8 +208,8 @@ static void test_pipeline_p99_under_budget(void) {
 
     /* Print so operators reading test output see the actual numbers,
      * not just pass/fail. */
-    fprintf(stderr, "  pipeline P50=%.3f ms  P95=%.3f ms  P99=%.3f ms (budget %d ms)\n",
-            p50 / 1e6, p95 / 1e6, p99 / 1e6, HU_PIPELINE_PERF_P99_BUDGET_NS / 1000000);
+    fprintf(stderr, "  pipeline P50=%.3f ms  P95=%.3f ms  P99=%.3f ms (budget %d ms)\n", p50 / 1e6,
+            p95 / 1e6, p99 / 1e6, HU_PIPELINE_PERF_P99_BUDGET_NS / 1000000);
 
     HU_ASSERT_TRUE(p99 < HU_PIPELINE_PERF_P99_BUDGET_NS);
 }
