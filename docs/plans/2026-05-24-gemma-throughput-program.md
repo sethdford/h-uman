@@ -343,7 +343,7 @@ Month 4  ┃ Phase 7 decision (gated on mlx-lm continuous batching)
 
 Phases 1, 2, 3a are independent and parallelizable across two
 implementers in worktree isolation per
-[~/.claude/rules/agent-team-os.md](~/.claude/rules/agent-team-os.md).
+`~/.claude/rules/agent-team-os.md`.
 Phase 3b depends on Phase 1 (KV quant frees enough RSS to load the
 draft model alongside the target).
 
@@ -352,7 +352,7 @@ draft model alongside the target).
 Every phase exits through `/verify` returning `RESULT_verifier=PASS`
 against the bench harness output **and** the sanity-gate quality
 score, not just the test suite. Per
-[~/.claude/rules/quality-gates.md](~/.claude/rules/quality-gates.md):
+`~/.claude/rules/quality-gates.md`:
 "tests pass" is not "behavior verified." For each phase:
 
 1. Run the relevant suite (e.g. `test_llamacpp_kvcache.c` for Phase 2).
@@ -376,7 +376,7 @@ on 2026-05-24 (Apple proprietary APIs, 2025-2026 inference papers,
 OSS landscape, practitioner social signal). Cross-stream triangulation
 identified KV quantization, persona-prefix caching, and cross-model
 speculative decoding as the three high-confidence Tier-1 levers. Per
-[~/.claude/rules/audit-verify-before-allege.md](~/.claude/rules/audit-verify-before-allege.md),
+`~/.claude/rules/audit-verify-before-allege.md`,
 every "today's state" claim in the "Honest status" table was verified
 by reading the cited file:line directly, not inferred from research
 agent reports. Specific numeric speedup targets are taken from the
