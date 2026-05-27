@@ -2453,50 +2453,63 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
 
-        /* Fact extraction with intra-batch dedup */
+        /* Fact extraction with intra-batch dedup.
+         *
+         * 2026-05-26 issue-sweep — heap-allocated rather than stack. See the
+         * matching block in agent_turn.c around line 7670 for the full
+         * rationale: ASan stack-use-after-scope on a 24KB stack array
+         * captured cross-thread. Heap alloc extends the lifetime to the
+         * explicit free, eliminating the intra-function UAS window. */
         if (agent->memory && agent->memory->vtable && agent->memory->vtable->store) {
-            hu_heuristic_fact_t stored_facts[16];
-            size_t stored_count = 0;
-            const char *fsrcs[] = {msg, final_content};
-            size_t fsrc_lens[] = {msg_len, final_content_len};
-            for (size_t fsi = 0; fsi < 2; fsi++) {
-                if (!fsrcs[fsi] || fsrc_lens[fsi] == 0)
-                    continue;
-                hu_fact_extract_result_t fact_res;
-                memset(&fact_res, 0, sizeof(fact_res));
-                if (hu_fact_extract(fsrcs[fsi], fsrc_lens[fsi], &fact_res) == HU_OK &&
-                    fact_res.fact_count > 0) {
-                    if (stored_count > 0)
-                        hu_fact_dedup(&fact_res, stored_facts, stored_count);
-                    for (size_t fi = 0; fi < fact_res.fact_count; fi++) {
-                        if (fact_res.facts[fi].confidence < HU_FACT_CONFIDENCE_MIN)
-                            continue;
-                        bool dup = false;
-                        for (size_t si = 0; si < stored_count && !dup; si++) {
-                            if (strcmp(fact_res.facts[fi].subject, stored_facts[si].subject) == 0 &&
-                                strcmp(fact_res.facts[fi].predicate, stored_facts[si].predicate) ==
-                                    0)
-                                dup = true;
+            hu_heuristic_fact_t *stored_facts = (hu_heuristic_fact_t *)agent->alloc->alloc(
+                agent->alloc->ctx, 16 * sizeof(hu_heuristic_fact_t));
+            if (stored_facts) {
+                memset(stored_facts, 0, 16 * sizeof(hu_heuristic_fact_t));
+                size_t stored_count = 0;
+                const char *fsrcs[] = {msg, final_content};
+                size_t fsrc_lens[] = {msg_len, final_content_len};
+                for (size_t fsi = 0; fsi < 2; fsi++) {
+                    if (!fsrcs[fsi] || fsrc_lens[fsi] == 0)
+                        continue;
+                    hu_fact_extract_result_t fact_res;
+                    memset(&fact_res, 0, sizeof(fact_res));
+                    if (hu_fact_extract(fsrcs[fsi], fsrc_lens[fsi], &fact_res) == HU_OK &&
+                        fact_res.fact_count > 0) {
+                        if (stored_count > 0)
+                            hu_fact_dedup(&fact_res, stored_facts, stored_count);
+                        for (size_t fi = 0; fi < fact_res.fact_count; fi++) {
+                            if (fact_res.facts[fi].confidence < HU_FACT_CONFIDENCE_MIN)
+                                continue;
+                            bool dup = false;
+                            for (size_t si = 0; si < stored_count && !dup; si++) {
+                                if (strcmp(fact_res.facts[fi].subject, stored_facts[si].subject) ==
+                                        0 &&
+                                    strcmp(fact_res.facts[fi].predicate,
+                                           stored_facts[si].predicate) == 0)
+                                    dup = true;
+                            }
+                            if (dup)
+                                continue;
+                            char *fk = NULL, *fv = NULL;
+                            size_t fk_len = 0, fv_len = 0;
+                            if (hu_fact_format_for_store(agent->alloc, &fact_res.facts[fi], &fk,
+                                                         &fk_len, &fv, &fv_len) == HU_OK &&
+                                fk && fv) {
+                                (void)agent->memory->vtable->store(
+                                    agent->memory->ctx, fk, fk_len, fv, fv_len, NULL,
+                                    agent->memory_session_id, agent->memory_session_id_len);
+                                if (stored_count < 16)
+                                    stored_facts[stored_count++] = fact_res.facts[fi];
+                            }
+                            if (fk)
+                                agent->alloc->free(agent->alloc->ctx, fk, fk_len + 1);
+                            if (fv)
+                                agent->alloc->free(agent->alloc->ctx, fv, fv_len + 1);
                         }
-                        if (dup)
-                            continue;
-                        char *fk = NULL, *fv = NULL;
-                        size_t fk_len = 0, fv_len = 0;
-                        if (hu_fact_format_for_store(agent->alloc, &fact_res.facts[fi], &fk,
-                                                     &fk_len, &fv, &fv_len) == HU_OK &&
-                            fk && fv) {
-                            (void)agent->memory->vtable->store(
-                                agent->memory->ctx, fk, fk_len, fv, fv_len, NULL,
-                                agent->memory_session_id, agent->memory_session_id_len);
-                            if (stored_count < 16)
-                                stored_facts[stored_count++] = fact_res.facts[fi];
-                        }
-                        if (fk)
-                            agent->alloc->free(agent->alloc->ctx, fk, fk_len + 1);
-                        if (fv)
-                            agent->alloc->free(agent->alloc->ctx, fv, fv_len + 1);
                     }
                 }
+                agent->alloc->free(agent->alloc->ctx, stored_facts,
+                                   16 * sizeof(hu_heuristic_fact_t));
             }
         }
     }

@@ -1224,26 +1224,46 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 #endif
 
 #if HU_CLI_ASYNC
-        agent_turn_ctx_t tctx;
-        memset(&tctx, 0, sizeof(tctx));
-        tctx.agent = &agent;
-        tctx.msg = line;
-        tctx.msg_len = line_len;
+        /* Heap-allocate the thread-context. Two reasons:
+         *  1. Defense against the ASan stack-use-after-scope false positive on
+         *     macOS arm64 + pthread: when T1 exits hu_agent_turn (whose frame
+         *     is ~485 KB), pthread's lazy stack mmap-release leaves f8 poison
+         *     in shadow memory. T0's later READ of tctx->done in the spinner
+         *     loop can resolve into that stale-poisoned region and trip ASan
+         *     even though the underlying memory is valid. Heap storage lives
+         *     outside the contested pthread-stack range and ASan tracks it
+         *     via the heap allocator hooks.
+         *  2. Defense-in-depth against any genuine T0/T1 stack-region overlap
+         *     that the platform allocator might produce in future macOS revs.
+         * Cost is negligible: one alloc + one free per CLI turn.
+         * Pinned by Chip G investigation, 2026-05-26 trusting-tharp session. */
+        agent_turn_ctx_t *tctx = (agent_turn_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*tctx));
+        if (!tctx) {
+            hu_log_error("error", NULL, "failed to allocate agent turn context");
+            if (line_owned)
+                alloc->free(alloc->ctx, line, line_len + 1);
+            continue;
+        }
+        memset(tctx, 0, sizeof(*tctx));
+        tctx->agent = &agent;
+        tctx->msg = line;
+        tctx->msg_len = line_len;
 
         pthread_t tid;
-        if (pthread_create(&tid, NULL, agent_turn_thread, &tctx) != 0) {
+        if (pthread_create(&tid, NULL, agent_turn_thread, tctx) != 0) {
             hu_log_error("error", NULL, "failed to start agent thread");
+            alloc->free(alloc->ctx, tctx, sizeof(*tctx));
             if (line_owned)
                 alloc->free(alloc->ctx, line, line_len + 1);
             continue;
         }
 
-        run_spinner_loop(&tctx, use_ansi);
+        run_spinner_loop(tctx, use_ansi);
 
         if (g_cancel && g_active_agent)
             g_active_agent->cancel_requested = 1;
 
-        if (g_cancel && !tctx.done) {
+        if (g_cancel && !tctx->done) {
             if (use_ansi)
                 printf(HU_ANSI_CLEAR_LINE HU_ANSI_SHOW_CURSOR HU_COLOR_WARNING
                        "Cancelled." HU_COLOR_RESET "\n");
@@ -1252,7 +1272,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         }
 
         pthread_join(tid, NULL);
-        err = tctx.err;
+        err = tctx->err;
         if (single_message_mode)
             single_message_exit = err;
 
@@ -1263,14 +1283,15 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
                 printf("Turn cancelled by user.\n");
         } else if (err != HU_OK) {
             hu_log_error("error", NULL, "%s", hu_error_string(err));
-        } else if (tctx.response && tctx.response_len > 0) {
+        } else if (tctx->response && tctx->response_len > 0) {
             if (!cli_stream_started) {
-                fwrite(tctx.response, 1, tctx.response_len, stdout);
+                fwrite(tctx->response, 1, tctx->response_len, stdout);
             }
             fputc('\n', stdout);
             fflush(stdout);
-            alloc->free(alloc->ctx, tctx.response, tctx.response_len + 1);
+            alloc->free(alloc->ctx, tctx->response, tctx->response_len + 1);
         }
+        alloc->free(alloc->ctx, tctx, sizeof(*tctx));
 #else
         char *response = NULL;
         size_t response_len = 0;
