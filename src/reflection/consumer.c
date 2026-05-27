@@ -218,8 +218,7 @@ hu_error_t hu_reflection_query_for_system_prompt(struct sqlite3 *db, const char 
 
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, k_sql, -1, &st, NULL) != SQLITE_OK) {
-        hu_log_error("reflection", NULL, "query_for_system_prompt prepare: %s",
-                     sqlite3_errmsg(db));
+        hu_log_error("reflection", NULL, "query_for_system_prompt prepare: %s", sqlite3_errmsg(db));
         return HU_ERR_MEMORY_BACKEND;
     }
 
@@ -320,9 +319,8 @@ void hu_reflection_mark_surfaced(struct sqlite3 *db, const char *pattern_id) {
     if (!db || !pattern_id)
         return;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db,
-                           "UPDATE reflection_patterns SET surfaced_to_user = 1 WHERE id = ?", -1,
-                           &st, NULL) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "UPDATE reflection_patterns SET surfaced_to_user = 1 WHERE id = ?",
+                           -1, &st, NULL) != SQLITE_OK) {
         hu_log_error("reflection", NULL, "mark_surfaced prepare: %s", sqlite3_errmsg(db));
         return;
     }
@@ -348,4 +346,34 @@ void hu_reflection_retire(struct sqlite3 *db, const char *pattern_id) {
     sqlite3_bind_text(st, 2, pattern_id, -1, SQLITE_STATIC);
     sqlite3_step(st);
     sqlite3_finalize(st);
+}
+
+/* T7 helper: pull the most recent successful run's prose summary.
+ * Returns a malloc'd string (caller frees) or NULL if no completed run
+ * exists yet. NULL is the normal Phase 1 state on a fresh daemon — the
+ * caller treats NULL the same as empty. */
+char *hu_reflection_latest_prose_summary(struct sqlite3 *db) {
+    if (!db)
+        return NULL;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT prose_summary FROM reflection_runs "
+                           "WHERE status='ok' AND prose_summary IS NOT NULL "
+                           "ORDER BY completed_at_ms DESC LIMIT 1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return NULL;
+    char *out = NULL;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *text = sqlite3_column_text(st, 0);
+        if (text) {
+            size_t n = (size_t)sqlite3_column_bytes(st, 0);
+            out = (char *)malloc(n + 1);
+            if (out) {
+                memcpy(out, text, n);
+                out[n] = '\0';
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    return out;
 }

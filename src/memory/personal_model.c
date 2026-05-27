@@ -9,6 +9,7 @@
 #include "human/persona/social_insights.h"
 #include "human/persona/style_adapter.h"
 #include "human/platform.h"
+#include "human/reflection.h" /* T7 — reflection slice for build_prompt_with_reflection */
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -888,6 +889,88 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
 
     return n;
 }
+
+/* ── T7: reflection slice appendage ──────────────────────────────
+ *
+ * Phase 1 of docs/plans/2026-05-26-reflection-loop. Wraps
+ * `_build_prompt_with_overlay` and tacks on a "Recent observations"
+ * section pulled from the reflection_patterns SQLite table.
+ *
+ * Side effect: every pattern we surface here gets marked via
+ * hu_reflection_mark_surfaced so the same observation doesn't reach
+ * the model on EVERY turn. This is a coarse-but-correct heuristic
+ * for Phase 1: if the slice appears in a system prompt, we assume
+ * the model can see it; init_proposer's separate path then becomes
+ * the second-chance "should I actually mention this?" signal for
+ * surfaced-but-unused patterns.
+ *
+ * Compiled to a thin wrapper when HU_ENABLE_SQLITE is off: just
+ * calls through to `_with_overlay`. */
+
+#ifdef HU_ENABLE_SQLITE
+size_t hu_personal_model_build_prompt_with_reflection(const hu_personal_model_t *model,
+                                                      const struct hu_persona_overlay *overlay,
+                                                      struct sqlite3 *db, const char *channel,
+                                                      int max_patterns, char *buf, size_t cap) {
+    size_t n = hu_personal_model_build_prompt_with_overlay(model, overlay, buf, cap);
+    if (!buf || cap == 0 || n >= cap - 1)
+        return n;
+
+    /* No db or no channel → behave as the overlay-only wrapper. */
+    if (!db || !channel || !*channel || max_patterns <= 0)
+        return n;
+
+    hu_reflection_pattern_t *patterns = NULL;
+    int count = 0;
+    if (hu_reflection_query_for_system_prompt(db, channel, max_patterns, &patterns, &count) !=
+            HU_OK ||
+        count == 0) {
+        free(patterns); /* may be NULL — free(NULL) is fine */
+        /* Even with no patterns, the latest prose summary (if any) is
+         * worth surfacing — it's a digest of the most recent run. */
+        char *summary = hu_reflection_latest_prose_summary(db);
+        if (summary && *summary) {
+            append_fmt(buf, cap, &n, "\nLatest reflection: %s\n", summary);
+        }
+        free(summary);
+        return n;
+    }
+
+    append_fmt(buf, cap, &n, "\nRecent observations about Seth (from reflection):\n");
+    for (int i = 0; i < count; i++) {
+        append_fmt(buf, cap, &n, "- %s (confidence %.2f)\n", patterns[i].observation,
+                   patterns[i].confidence);
+    }
+
+    /* Latest run's prose summary — gives the model a 2-3 sentence
+     * digest of the most recent reflection run alongside the bullets. */
+    char *summary = hu_reflection_latest_prose_summary(db);
+    if (summary && *summary) {
+        append_fmt(buf, cap, &n, "Latest reflection summary: %s\n", summary);
+    }
+    free(summary);
+
+    /* Mark each surfaced pattern as surfaced so it doesn't return on
+     * the next turn. The query already filtered out already-surfaced
+     * rows, so this is idempotent across multiple build_prompt calls
+     * within the same turn (no double-counting). */
+    for (int i = 0; i < count; i++) {
+        hu_reflection_mark_surfaced(db, patterns[i].id);
+    }
+    free(patterns);
+    return n;
+}
+#else  /* !HU_ENABLE_SQLITE */
+size_t hu_personal_model_build_prompt_with_reflection(const hu_personal_model_t *model,
+                                                      const struct hu_persona_overlay *overlay,
+                                                      struct sqlite3 *db, const char *channel,
+                                                      int max_patterns, char *buf, size_t cap) {
+    (void)db;
+    (void)channel;
+    (void)max_patterns;
+    return hu_personal_model_build_prompt_with_overlay(model, overlay, buf, cap);
+}
+#endif /* HU_ENABLE_SQLITE */
 
 static bool ci_haystack_contains(const char *hay, const char *needle, size_t needle_len) {
     if (!hay || !needle || needle_len == 0)

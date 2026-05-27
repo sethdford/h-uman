@@ -167,6 +167,13 @@ void hu_reflection_mark_surfaced(struct sqlite3 *db, const char *pattern_id);
  * run — the storage UPSERT preserves the retired flag. */
 void hu_reflection_retire(struct sqlite3 *db, const char *pattern_id);
 
+/* Returns the prose_summary of the most recent successful reflection
+ * run, malloc'd (caller frees) or NULL if no completed run exists yet
+ * (the normal Phase 1 state on a fresh daemon). Used by T7's system-
+ * prompt slice to give the agent a 2-3 sentence "latest reflection"
+ * line alongside the per-pattern bullets. */
+char *hu_reflection_latest_prose_summary(struct sqlite3 *db);
+
 /* Quorum predicate for Phase 2 (belief updates). Returns true iff
  * `pattern_id` has been observed in ≥ 3 distinct runs with
  * confidence > 0.7 in each. Phase 1 callers may use this for

@@ -199,6 +199,31 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                                                    const struct hu_persona_overlay *overlay,
                                                    char *buf, size_t cap);
 
+/* T7 of docs/plans/2026-05-26-reflection-loop. Same output as
+ * `_build_prompt_with_overlay`, plus a "Recent observations" slice
+ * appended at the tail, scoped to the active channel via
+ * hu_reflection_query_for_system_prompt(db, channel, ...).
+ *
+ * The slice contains up to `max_patterns` non-retired, non-already-
+ * surfaced patterns ≥ 0.5 confidence, plus the latest run's prose
+ * summary (when available). Each surfaced pattern is marked via
+ * hu_reflection_mark_surfaced so the same observation doesn't reach
+ * the model on every turn — patterns surface once, then become
+ * candidates for init_proposer's separate "should I mention this?"
+ * path until retired or expired.
+ *
+ * `db == NULL` or `channel == NULL`: behaves exactly like
+ * `_build_prompt_with_overlay` (no reflection slice appended). This
+ * is the safe default for callers that don't have SQLite available.
+ *
+ * Forward-declared struct sqlite3 keeps callers from dragging in
+ * sqlite3.h. */
+struct sqlite3;
+size_t hu_personal_model_build_prompt_with_reflection(const hu_personal_model_t *model,
+                                                      const struct hu_persona_overlay *overlay,
+                                                      struct sqlite3 *db, const char *channel,
+                                                      int max_patterns, char *buf, size_t cap);
+
 /* Sprint B.8 wire — set the identity graph used by the prompt builder
  * to surface cross-handle merge candidates ("IDENTITY: \"alice@new\"
  * may be same person as Alice"). Caller retains ownership; passing

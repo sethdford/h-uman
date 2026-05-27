@@ -571,6 +571,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_unified_dispatch.c
     src/doctor/exit_code.c
     src/doctor/json_output.c
+    src/doctor/ws_consumer.c
     src/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
@@ -3092,6 +3093,7 @@ set(HU_TEST_SOURCES
     tests/test_reflection_orchestration.c
     tests/test_reflection_consumer.c
     tests/test_reflection_quorum.c
+    tests/test_personal_model_reflection_slice.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c
@@ -3397,6 +3399,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
+    tests/test_doctor_ws_consumer.c
     tests/test_output_validator.c
     tests/test_chain_failure_paths.c
     tests/test_agent_fail_path_regressions.c
