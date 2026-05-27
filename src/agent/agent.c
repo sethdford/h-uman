@@ -72,6 +72,9 @@
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
+#ifdef HU_ENABLE_ML
+#include "human/ml/init_dpo_bridge.h"
+#endif
 #include "human/ml/m3_contact_routes.h"
 #include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/m3_id_map.h"
@@ -1055,6 +1058,14 @@ hu_error_t hu_agent_from_config(
             if (sota_sub != HU_OK)
                 hu_log_warn("agent", NULL, "DPO init tables failed: %s", hu_error_string(sota_sub));
         }
+#ifdef HU_ENABLE_ML
+        /* Register the collector with the init→dpo bridge so resolved
+         * proactive proposals (REPLIED/IGNORED) land as single-sided
+         * dpo_pairs rows. Bridge borrows the pointer — deinit at
+         * shutdown nulls it via _set_collector(NULL) below. See
+         * docs/plans/2026-05-25-doctor-prompt-budget-initiative/. */
+        hu_init_dpo_bridge_set_collector(&out->sota.dpo_collector);
+#endif
     }
     out->sota.sota_initialized = true;
 
@@ -1783,6 +1794,12 @@ void hu_agent_deinit(hu_agent_t *agent) {
     if (agent->sota.sota_initialized) {
         hu_adaptive_rag_deinit(&agent->sota.adaptive_rag);
         hu_tier_manager_deinit(&agent->sota.tier_manager);
+#ifdef HU_ENABLE_ML
+        /* Clear the bridge's borrow BEFORE deiniting the collector —
+         * if the bridge fires after deinit but before NULL, it would
+         * write to a freed sqlite handle. Order matters. */
+        hu_init_dpo_bridge_set_collector(NULL);
+#endif
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }

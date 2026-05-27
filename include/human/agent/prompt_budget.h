@@ -103,4 +103,63 @@ bool hu_prompt_budget_field_is_dead(const hu_prompt_budget_t *b, hu_prompt_field
 size_t hu_prompt_budget_snapshot(const hu_prompt_budget_t *b, hu_prompt_field_stat_t *out_array,
                                  size_t array_cap);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Snapshot persistence — bridges the in-memory accumulator (daemon-side)
+ * to a separate-process reader (doctor CLI).
+ *
+ * Daemon flushes ~/.human/prompt_budget.snapshot.json every 60s. Doctor
+ * (running as a separate process) loads it to surface per-field stats.
+ *
+ * Write is atomic via tmp + fwrite + fflush + fsync + rename — mirrors
+ * hu_personal_model_save. Reader is safe to call concurrently with the
+ * writer; readers either see the prior file or the new file, never a
+ * torn one.
+ *
+ * See docs/plans/2026-05-25-doctor-prompt-budget-initiative/.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* Extended per-field stat — carries the accumulator-level counters
+ * (samples, non_empty_count) that the basic snapshot type doesn't. */
+typedef struct hu_prompt_budget_field_stat_ext {
+    const char *name;         /* borrowed static string; do not free */
+    uint64_t mean_bytes;      /* total_bytes / observation_count */
+    uint64_t samples;         /* per-field observation count */
+    uint64_t non_empty_count; /* observations where bytes_contributed > 0 */
+} hu_prompt_budget_field_stat_ext_t;
+
+/* Resolve $HOME/.human/prompt_budget.snapshot.json into out_buf.
+ * Returns bytes written (excluding NUL), or 0 on failure. */
+size_t hu_prompt_budget_snapshot_path(char *out_buf, size_t out_cap);
+
+/* Test-only path override (no-op outside HU_IS_TEST). */
+void hu_prompt_budget_snapshot_set_path_for_test(const char *path);
+
+/* Atomic JSON write to the snapshot path. Returns HU_OK on success,
+ * HU_ERR_INVALID_ARGUMENT on NULL budget or unresolvable path,
+ * HU_ERR_IO on filesystem failure (tmp file is unlinked). */
+hu_error_t hu_prompt_budget_save_snapshot(const hu_prompt_budget_t *b);
+
+/* Loaded snapshot — the `fields` array is allocated via the `alloc`
+ * passed to _load_snapshot and must be freed via _snapshot_load_free.
+ * mtime_unix is st_mtime of the file at load time. */
+typedef struct hu_prompt_budget_snapshot_load {
+    hu_allocator_t *alloc;
+    hu_prompt_budget_field_stat_ext_t *fields;
+    size_t field_count;
+    uint64_t observation_count;
+    int64_t mtime_unix;
+} hu_prompt_budget_snapshot_load_t;
+
+/* Load the snapshot at the configured path. Returns:
+ *   HU_OK on success (`out` is populated, caller frees via _free).
+ *   HU_ERR_NOT_FOUND if the file is missing (ENOENT).
+ *   HU_ERR_IO on other filesystem errors.
+ *   HU_ERR_PARSE if the file is malformed.
+ *   HU_ERR_OUT_OF_MEMORY on alloc failure. */
+hu_error_t hu_prompt_budget_load_snapshot(hu_allocator_t *alloc,
+                                          hu_prompt_budget_snapshot_load_t *out);
+
+/* Free resources allocated by _load_snapshot. Safe on zero-init struct. */
+void hu_prompt_budget_snapshot_load_free(hu_prompt_budget_snapshot_load_t *load);
+
 #endif /* HU_AGENT_PROMPT_BUDGET_H */

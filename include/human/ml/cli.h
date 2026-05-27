@@ -9,6 +9,17 @@ hu_error_t hu_ml_cli_experiment(hu_allocator_t *alloc, int argc, const char **ar
 hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv);
+
+/* `human ml pair-init-singles` — converts accumulated single-sided
+ * init_proposer_v1 rows in dpo_pairs into trainable two-sided
+ * preference rows under init_proposer_paired_v1. Opens ~/.human/memory.db
+ * read-write, registers the collector with the bridge, calls
+ * hu_init_dpo_bridge_pair_singles, prints the paired count, and
+ * cleans up. Safe to invoke against a live daemon's memory.db —
+ * SQLite's per-connection locking handles concurrent access. Honors
+ * HU_MEMORY_DB_PATH env override for tests. */
+hu_error_t hu_ml_cli_pair_init_singles(hu_allocator_t *alloc, int argc, const char **argv);
+
 /* Sprint 7 US-7.2 — mine DPO preference pairs from chat.db correction
  * triples and (optionally) export to JSONL for the finetune-gemma.py DPO
  * pass. See `human/ml/dpo_miner.h`. */

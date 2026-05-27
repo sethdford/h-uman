@@ -38,6 +38,7 @@
 #include "human/eval/leaderboard.h"
 #endif
 #include "human/agent/action_directives.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/training_runner_shared.h"
 #include "human/agent/verifier_metrics.h"
@@ -3891,6 +3892,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         };
                         (void)hu_verifier_metrics_save(&snap);
                         last_verifier_flush_ms = now_vf_ms;
+                    }
+                    /* prompt_budget snapshot flush — operator visibility for
+                     * the B3 Phase 1 accumulator. Mirrors verifier's 60s
+                     * cadence but uses the atomic Personal Model write
+                     * discipline (verifier's own write is non-atomic — a
+                     * documented weakness; we don't propagate it here).
+                     * See docs/plans/2026-05-25-doctor-prompt-budget-initiative/. */
+                    static int64_t last_pb_flush_ms = 0;
+                    if (last_pb_flush_ms == 0)
+                        last_pb_flush_ms = now_vf_ms;
+                    if (agent->prompt_budget && now_vf_ms - last_pb_flush_ms >= 60000) {
+                        (void)hu_prompt_budget_save_snapshot(agent->prompt_budget);
+                        last_pb_flush_ms = now_vf_ms;
                     }
                 }
                 /* Periodic memory consolidation */

@@ -245,6 +245,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
             "  prepare                 Tokenize data for training\n"
             "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
             "  dpo-train               Run DPO preference training step\n"
+            "  pair-init-singles       Convert single-sided init_proposer rows to pairs\n"
             "  dpo-judge               Score preference pairs with an LLM judge (legacy)\n"
             "  kto-train               Train a KTO trainer on one-sided preference signals\n"
             "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
@@ -272,6 +273,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_status(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "dpo-train") == 0)
         return hu_ml_cli_dpo_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "pair-init-singles") == 0)
+        return hu_ml_cli_pair_init_singles(alloc, argc - 2, (const char **)(argv + 2));
     /* Phase 2 Task 8: explicit verb for the legacy provider-scored
      * "judge step" path. `dpo-train` itself now routes through
      * hu_ml_cli_dpo_real (Phase 2 real-DPO trainer); legacy semantics

@@ -11,6 +11,9 @@
 #include "human/core/allocator.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#ifdef HU_ENABLE_ML
+#include "human/ml/init_dpo_bridge.h"
+#endif
 #include <errno.h>
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -595,6 +598,10 @@ typedef struct pending_proposal {
     int64_t proposal_ts;
     char target[64];
     bool dry_run;
+    /* Captured at parse time so the resolver can hand it to the DPO
+     * bridge without re-reading the JSONL. Bounded at 1024 — drafts are
+     * typically <500 chars; longer is truncated. */
+    char draft[1024];
 } pending_proposal_t;
 
 #define HU_INIT_RESOLVE_MAX_PENDING 256
@@ -650,6 +657,19 @@ static void pair_visitor(void *ctx, const char *line, size_t line_len) {
             size_t copy = tlen < sizeof(p->target) - 1 ? tlen : sizeof(p->target) - 1;
             memcpy(p->target, target, copy);
             p->target[copy] = '\0';
+            /* Capture the draft for the DPO bridge. Optional in the
+             * JSONL schema (LOW_CONFIDENCE records have it too); only
+             * present on FIRED rows here by virtue of the verdict
+             * filter above. */
+            const char *draft = hu_json_get_string(root, "draft");
+            if (draft) {
+                size_t dlen = strlen(draft);
+                size_t dcopy = dlen < sizeof(p->draft) - 1 ? dlen : sizeof(p->draft) - 1;
+                memcpy(p->draft, draft, dcopy);
+                p->draft[dcopy] = '\0';
+            } else {
+                p->draft[0] = '\0';
+            }
         }
     }
     hu_json_free(&alloc, root);
@@ -758,10 +778,77 @@ hu_error_t hu_init_outcome_resolve_pending(hu_allocator_t *alloc, int64_t now_un
         if (hu_init_outcome_append_resolution(alloc, now_unix, p->proposal_ts, p->target, verdict,
                                               reply_at) == HU_OK) {
             written++;
+            /* DPO bridge — close the M2 learning loop. Resolution line
+             * is the authoritative record (already appended above); the
+             * dpo row is derived signal. Bridge failure does NOT cause
+             * us to retry or skip subsequent proposals — per design
+             * D9, losing a single derived signal is acceptable. */
+#ifdef HU_ENABLE_ML
+            {
+                static atomic_bool s_warned_bridge_unavailable = false;
+                static atomic_bool s_warned_bridge_failure = false;
+                hu_error_t bridge_err =
+                    hu_init_dpo_bridge_record(alloc, verdict, p->draft, p->target, now_unix);
+                if (bridge_err == HU_ERR_NOT_SUPPORTED) {
+                    hu_log_info_once(&s_warned_bridge_unavailable, "init_outcome", NULL,
+                                     "init_outcome → dpo bridge inactive (no dpo_collector "
+                                     "registered); resolution lines still appended to JSONL");
+                } else if (bridge_err != HU_OK) {
+                    hu_log_warn_once(&s_warned_bridge_failure, "init_outcome", NULL,
+                                     "init_outcome → dpo bridge record failed (signal lost; "
+                                     "JSONL is still authoritative)");
+                }
+            }
+#else
+            {
+                static atomic_bool s_warned_ml_disabled = false;
+                hu_log_info_once(&s_warned_ml_disabled, "init_outcome", NULL,
+                                 "init_outcome → dpo bridge unavailable (HU_ENABLE_ML not "
+                                 "compiled in); JSONL still records the outcome");
+            }
+#endif
         }
     }
     if (out_resolutions_written)
         *out_resolutions_written = written;
+
+    /* Auto-pair tick — when enough new resolutions have accumulated
+     * since the last pairing pass, run the pairing converter. The
+     * counter is module-static so the threshold is enforced ACROSS
+     * resolver invocations (not just within one call). Pure predicate
+     * + thin caller per .claude/rules/security-predicate-extraction.md. */
+#ifdef HU_ENABLE_ML
+    if (written > 0) {
+        static size_t s_resolutions_since_last_pair = 0;
+        static atomic_bool s_warned_pair_disabled = false;
+        static atomic_bool s_warned_pair_failed = false;
+        s_resolutions_since_last_pair += written;
+        if (hu_init_dpo_bridge_should_pair_now(s_resolutions_since_last_pair,
+                                               HU_INIT_DPO_BRIDGE_AUTO_PAIR_DEFAULT_N)) {
+            size_t paired = 0;
+            hu_error_t perr = hu_init_dpo_bridge_pair_singles(alloc, &paired);
+            if (perr == HU_OK) {
+                hu_log_info("init_outcome", NULL,
+                            "init_outcome auto-pair: %zu pairs produced (after %zu resolutions)",
+                            paired, s_resolutions_since_last_pair);
+                s_resolutions_since_last_pair = 0;
+            } else if (perr == HU_ERR_NOT_SUPPORTED) {
+                hu_log_info_once(&s_warned_pair_disabled, "init_outcome", NULL,
+                                 "init_outcome auto-pair skipped — no dpo_collector "
+                                 "registered (HU_ENABLE_SQLITE may be off, or daemon "
+                                 "didn't register one)");
+                /* Don't reset the counter — once collector lands, the
+                 * accumulated count fires the pass immediately. */
+            } else {
+                hu_log_warn_once(&s_warned_pair_failed, "init_outcome", NULL,
+                                 "init_outcome auto-pair failed (signal lost; "
+                                 "single-sided rows remain in dpo_pairs as audit trail)");
+                s_resolutions_since_last_pair = 0; /* avoid infinite retry */
+            }
+        }
+    }
+#endif
+
     return HU_OK;
 }
 
