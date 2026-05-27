@@ -624,9 +624,29 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         .multi_agent = cfg.agent.multi_agent,
         .compaction_use_structured = cfg.agent.compaction_use_structured,
     };
-    hu_agent_t agent;
+    /* 2026-05-27 — heap-allocate the agent struct so its address is NOT on
+     * T0's stack. The cross-thread pattern (T0's pthread_create passes
+     * agent_p into tctx; T1's agent_turn_thread reads agent_p->X through
+     * that pointer; hu_agent_free_turn_context inside hu_agent_turn writes
+     * back to agent_p->humanness_ctx_buf) trips the SAME ASan stack-buffer-
+     * overflow false positive that the tctx fix (Chip G, commit 3dd1d13c)
+     * addressed for loop-scope locals. Heap storage has its own shadow-
+     * region lifecycle keyed to malloc/free, dodging pthread-stack mmap
+     * reuse on Darwin arm64.
+     *
+     * See .claude/rules/asan-pthread-stack-aliasing-darwin.md — this is the
+     * "function-scope" follow-up that completes the Chip G investigation.
+     * Free-on-exit is done at every return path below; if you add a new
+     * return after this allocation, free agent_p first or you leak. */
+    hu_agent_t *agent_p = (hu_agent_t *)alloc->alloc(alloc->ctx, sizeof(*agent_p));
+    if (!agent_p) {
+        hu_log_error("human", NULL, "agent storage alloc failed");
+        hu_config_deinit(&cfg);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(agent_p, 0, sizeof(*agent_p));
     err = hu_agent_from_config(
-        &agent, alloc, provider, tools, tools_count, memory.vtable ? &memory : NULL,
+        agent_p, alloc, provider, tools, tools_count, memory.vtable ? &memory : NULL,
         session_store.vtable ? &session_store : NULL, &observer, NULL, model, strlen(model),
         prov_name, prov_name_len, temp, ws, strlen(ws), max_iters, max_hist, cfg.memory.auto_save,
         2, NULL, 0, cfg.agent.persona, cfg.agent.persona ? strlen(cfg.agent.persona) : 0, &ctx_cfg);
@@ -661,25 +681,26 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         hu_channel_voice_destroy(&cli_voice_ch);
 #endif
         hu_config_deinit(&cfg);
+        alloc->free(alloc->ctx, agent_p, sizeof(*agent_p));
         return err;
     }
     /* 2026-05 Chip F — borrow the loaded cfg so per-turn paths (agent_turn.c,
      * agent_stream.c, media_gif.c, media_video.c) can read runtime config
      * fields like prompt_budget.enabled and media_gen.vertex_project. Without
-     * this assignment, the per-turn ternary `agent->config ? ... : false`
+     * this assignment, the per-turn ternary `(*agent_p)->config ? ... : false`
      * evaluates to false even when the operator has explicitly enabled the
      * feature in config.json — discovered during Chip D as the deeper bug
      * behind the misleading prompt_budget boot warning. `cfg` outlives
-     * `agent` (cfg lives in this function's stack frame which encloses the
-     * agent's lifetime; agent.config is a borrowed pointer, not owned). */
-    agent.config = &cfg;
-    hu_metacognition_apply_config(&agent.infra.metacognition, &cfg.agent.metacognition);
+     * `(*agent_p)` (cfg lives in this function's stack frame which encloses the
+     * (*agent_p)'s lifetime; agent_p->config is a borrowed pointer, not owned). */
+    agent_p->config = &cfg;
+    hu_metacognition_apply_config(&agent_p->infra.metacognition, &cfg.agent.metacognition);
     hu_voice_config_t voice_cfg = {0};
     (void)hu_voice_config_from_settings(&cfg, &voice_cfg);
     if (voice_cfg.tts_provider || voice_cfg.local_tts_endpoint || voice_cfg.api_key ||
         voice_cfg.cartesia_api_key || voice_cfg.openai_api_key ||
         (cfg.voice.mode && cfg.voice.mode[0])) {
-        hu_agent_set_voice_config(&agent, &voice_cfg);
+        hu_agent_set_voice_config(agent_p, &voice_cfg);
     }
 #ifdef HU_HAS_VOICE_CHANNEL
     if (cfg.voice.mode && cfg.voice.mode[0]) {
@@ -702,20 +723,20 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             (void)hu_channel_voice_create(alloc, &vcfg, &cli_voice_ch);
     }
 #endif
-    agent.agent_pool = cli_agent_pool;
-    hu_agent_set_mailbox(&agent, cli_mailbox);
-    agent.policy_engine = NULL;
+    agent_p->agent_pool = cli_agent_pool;
+    hu_agent_set_mailbox(agent_p, cli_mailbox);
+    agent_p->policy_engine = NULL;
 
     if (cfg.security.audit.enabled) {
         hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
         acfg.enabled = true;
         acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
         acfg.max_size_mb = cfg.security.audit.max_size_mb > 0 ? cfg.security.audit.max_size_mb : 10;
-        agent.audit_logger = hu_audit_logger_create(alloc, &acfg, ws);
+        agent_p->audit_logger = hu_audit_logger_create(alloc, &acfg, ws);
     }
 
     if (cfg.policy.enabled) {
-        agent.policy_engine = hu_policy_engine_create(alloc);
+        agent_p->policy_engine = hu_policy_engine_create(alloc);
     }
 
     if (cfg.agent.default_profile) {
@@ -723,20 +744,20 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             hu_agent_profile_by_name(cfg.agent.default_profile, strlen(cfg.agent.default_profile));
         if (prof) {
             if (prof->preferred_model && prof->preferred_model[0] && !parsed_args.model_override) {
-                char *old = agent.model_name;
-                size_t old_len = agent.model_name_len;
-                agent.model_name =
+                char *old = agent_p->model_name;
+                size_t old_len = agent_p->model_name_len;
+                agent_p->model_name =
                     hu_strndup(alloc, prof->preferred_model, strlen(prof->preferred_model));
-                agent.model_name_len = strlen(prof->preferred_model);
+                agent_p->model_name_len = strlen(prof->preferred_model);
                 if (old)
                     alloc->free(alloc->ctx, old, old_len + 1);
             }
             if (prof->temperature > 0)
-                agent.temperature = prof->temperature;
+                agent_p->temperature = prof->temperature;
             if (prof->max_iterations > 0)
-                agent.max_tool_iterations = prof->max_iterations;
+                agent_p->max_tool_iterations = prof->max_iterations;
             if (prof->max_history > 0)
-                agent.max_history_messages = prof->max_history;
+                agent_p->max_history_messages = prof->max_history;
         }
     }
 
@@ -756,12 +777,12 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         };
         if (hu_otel_observer_create(alloc, &otel_cfg, &otel_observer) == HU_OK &&
             otel_observer.vtable) {
-            agent.observer = &otel_observer;
+            agent_p->observer = &otel_observer;
         }
     }
 #endif
 
-    hu_agent_set_retrieval_engine(&agent, &retrieval_engine);
+    hu_agent_set_retrieval_engine(agent_p, &retrieval_engine);
 #ifdef HU_ENABLE_SQLITE
     {
         const char *home = getenv("HOME");
@@ -774,21 +795,21 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     }
     if (cli_graph) {
         hu_retrieval_set_graph(&retrieval_engine, cli_graph);
-        hu_error_t ge = hu_agent_bind_sqlite_graph(&agent, cli_graph, alloc);
+        hu_error_t ge = hu_agent_bind_sqlite_graph(agent_p, cli_graph, alloc);
         if (ge != HU_OK)
             hu_log_warn("human", NULL, "CLI graph bind: %s", hu_error_string(ge));
     }
 #endif
     if (cli_awareness.bus)
-        hu_agent_set_awareness(&agent, (struct hu_awareness *)&cli_awareness);
+        hu_agent_set_awareness(agent_p, (struct hu_awareness *)&cli_awareness);
 
     hu_outcome_tracker_t cli_outcomes;
     hu_outcome_tracker_init(&cli_outcomes, true);
-    hu_agent_set_outcomes(&agent, &cli_outcomes);
-    agent.scheduler = (struct hu_cron_scheduler *)cron;
+    hu_agent_set_outcomes(agent_p, &cli_outcomes);
+    agent_p->scheduler = (struct hu_cron_scheduler *)cron;
 
     if (parsed_args.message && parsed_args.message[0])
-        agent.lean_prompt = true;
+        agent_p->lean_prompt = true;
 
     /* Session persistence: load prior conversation if --session was given,
      * or generate a session ID so auto_save works for new sessions. */
@@ -801,36 +822,37 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             snprintf(sessions_dir, sizeof(sessions_dir), ".human/sessions");
         if (parsed_args.session_id && parsed_args.session_id[0]) {
             size_t sid_len = strlen(parsed_args.session_id);
-            if (sid_len < sizeof(agent.session_id)) {
-                memcpy(agent.session_id, parsed_args.session_id, sid_len);
-                agent.session_id[sid_len] = '\0';
+            if (sid_len < sizeof(agent_p->session_id)) {
+                memcpy(agent_p->session_id, parsed_args.session_id, sid_len);
+                agent_p->session_id[sid_len] = '\0';
                 hu_error_t lerr =
-                    hu_session_persist_load(alloc, &agent, sessions_dir, parsed_args.session_id);
+                    hu_session_persist_load(alloc, agent_p, sessions_dir, parsed_args.session_id);
                 if (lerr == HU_OK)
                     hu_log_info("human", NULL, "resumed session: %s", parsed_args.session_id);
                 else
                     hu_log_info("human", NULL, "new session: %s", parsed_args.session_id);
             }
-        } else if (agent.auto_save) {
+        } else if (agent_p->auto_save) {
             /* Generate a default session ID from timestamp so auto_save works */
             time_t now = time(NULL);
-            int sn = snprintf(agent.session_id, sizeof(agent.session_id), "cli-%ld", (long)now);
-            if (sn <= 0 || (size_t)sn >= sizeof(agent.session_id))
-                agent.session_id[0] = '\0';
+            int sn =
+                snprintf(agent_p->session_id, sizeof(agent_p->session_id), "cli-%ld", (long)now);
+            if (sn <= 0 || (size_t)sn >= sizeof(agent_p->session_id))
+                agent_p->session_id[0] = '\0';
         }
     }
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */
     if (parsed_args.use_tui) {
         hu_tui_state_t tui_state;
-        err = hu_tui_init(&tui_state, alloc, &agent, prov_name, model, tools_count);
+        err = hu_tui_init(&tui_state, alloc, agent_p, prov_name, model, tools_count);
         if (err == HU_OK) {
             err = hu_tui_run(&tui_state);
             hu_tui_deinit(&tui_state);
         } else {
             hu_log_error("human", &observer, "TUI not available: %s", hu_error_string(err));
         }
-        hu_agent_deinit(&agent);
+        hu_agent_deinit(agent_p);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
@@ -854,8 +876,8 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         if (otel_observer.vtable && otel_observer.vtable->deinit)
             otel_observer.vtable->deinit(otel_observer.ctx);
 #endif
-        if (agent.policy_engine)
-            hu_policy_engine_destroy(agent.policy_engine);
+        if (agent_p->policy_engine)
+            hu_policy_engine_destroy(agent_p->policy_engine);
         if (cli_mailbox)
             hu_mailbox_destroy(cli_mailbox);
         if (cli_agent_pool)
@@ -870,6 +892,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         hu_channel_voice_destroy(&cli_voice_ch);
 #endif
         hu_config_deinit(&cfg);
+        alloc->free(alloc->ctx, agent_p, sizeof(*agent_p));
         return err;
     }
 
@@ -879,8 +902,8 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
                               : "Analyze the provided context and report findings.";
         const char *chan =
             parsed_args.channel && parsed_args.channel[0] ? parsed_args.channel : "cli";
-        agent.active_channel = chan;
-        agent.active_channel_len = strlen(chan);
+        agent_p->active_channel = chan;
+        agent_p->active_channel_len = strlen(chan);
 
         const char *effective_prompt = parsed_args.prompt;
         char *enriched_prompt = NULL;
@@ -952,7 +975,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 
         char *response = NULL;
         size_t response_len = 0;
-        err = hu_agent_run_single(&agent, effective_prompt, strlen(effective_prompt), msg,
+        err = hu_agent_run_single(agent_p, effective_prompt, strlen(effective_prompt), msg,
                                   strlen(msg), &response, &response_len);
         if (err == HU_OK && response && response_len > 0) {
             fwrite(response, 1, response_len, stdout);
@@ -1019,7 +1042,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         }
         if (enriched_prompt)
             alloc->free(alloc->ctx, enriched_prompt, enriched_len + 1);
-        hu_agent_deinit(&agent);
+        hu_agent_deinit(agent_p);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
@@ -1043,8 +1066,8 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         if (otel_observer.vtable && otel_observer.vtable->deinit)
             otel_observer.vtable->deinit(otel_observer.ctx);
 #endif
-        if (agent.policy_engine)
-            hu_policy_engine_destroy(agent.policy_engine);
+        if (agent_p->policy_engine)
+            hu_policy_engine_destroy(agent_p->policy_engine);
         if (cli_mailbox)
             hu_mailbox_destroy(cli_mailbox);
         if (cli_agent_pool)
@@ -1061,11 +1084,12 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         hu_channel_voice_destroy(&cli_voice_ch);
 #endif
         hu_config_deinit(&cfg);
+        alloc->free(alloc->ctx, agent_p, sizeof(*agent_p));
         return err;
     }
 
     /* Install SIGINT handler */
-    g_active_agent = &agent;
+    g_active_agent = agent_p;
     struct sigaction sa, old_sa, old_hup;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigint_handler;
@@ -1102,7 +1126,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             g_reload_requested = 0;
             char *summary = NULL;
             size_t summary_len = 0;
-            hu_error_t reload_err = hu_agent_reload_config(&agent, &summary, &summary_len);
+            hu_error_t reload_err = hu_agent_reload_config(agent_p, &summary, &summary_len);
             if (reload_err == HU_OK && summary) {
                 hu_log_info("human", &observer, "config reloaded via SIGHUP");
                 hu_log_info("human", &observer, "%s", summary);
@@ -1136,7 +1160,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             break;
         }
 
-        char *slash = hu_agent_handle_slash_command(&agent, line, line_len);
+        char *slash = hu_agent_handle_slash_command(agent_p, line, line_len);
         if (slash) {
             printf("%s\n", slash);
             alloc->free(alloc->ctx, slash, strlen(slash) + 1);
@@ -1146,7 +1170,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         }
 
         g_cancel = 0;
-        agent.cancel_requested = 0;
+        agent_p->cancel_requested = 0;
         cli_stream_started = 0;
 
         /* Adaptive model routing for CLI (Gemini slot names only for Google family providers) */
@@ -1176,7 +1200,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             }
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
             if (cfg.agent.mr_on_device_enabled) {
-                mr_cfg.on_device_available = hu_apple_probe(agent.alloc, NULL, 0);
+                mr_cfg.on_device_available = hu_apple_probe(agent_p->alloc, NULL, 0);
             }
 #endif
             time_t now_rt = time(NULL);
@@ -1200,26 +1224,27 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
                     jm_len = strlen(cfg.agent.mr_judge_model);
                 }
                 sel = hu_model_route_with_judge(&mr_cfg, line, line_len, NULL, 0, hour,
-                                                agent.history_count, &agent.provider, jm, jm_len,
-                                                agent.alloc, &cli_judge_cache);
+                                                agent_p->history_count, &agent_p->provider, jm,
+                                                jm_len, agent_p->alloc, &cli_judge_cache);
             } else {
-                sel = hu_model_route(&mr_cfg, line, line_len, NULL, 0, hour, agent.history_count);
+                sel =
+                    hu_model_route(&mr_cfg, line, line_len, NULL, 0, hour, agent_p->history_count);
             }
-            agent.turn_model = sel.model;
-            agent.turn_model_len = sel.model_len;
-            agent.turn_temperature = sel.temperature;
-            agent.turn_thinking_budget = sel.thinking_budget;
-            agent.turn_tier = (int)sel.tier;
+            agent_p->turn_model = sel.model;
+            agent_p->turn_model_len = sel.model_len;
+            agent_p->turn_temperature = sel.temperature;
+            agent_p->turn_thinking_budget = sel.thinking_budget;
+            agent_p->turn_tier = (int)sel.tier;
         } else {
-            agent.turn_model = agent.model_name;
-            agent.turn_model_len = agent.model_name_len;
-            agent.turn_temperature = agent.temperature;
-            agent.turn_thinking_budget = 0;
+            agent_p->turn_model = agent_p->model_name;
+            agent_p->turn_model_len = agent_p->model_name_len;
+            agent_p->turn_temperature = agent_p->temperature;
+            agent_p->turn_thinking_budget = 0;
             /* Still compute tier for tool gating even with non-Gemini providers */
             hu_model_router_config_t mr_cfg_nongem = hu_model_router_default_config();
             hu_model_selection_t sel_nongem =
-                hu_model_route(&mr_cfg_nongem, line, line_len, NULL, 0, -1, agent.history_count);
-            agent.turn_tier = (int)sel_nongem.tier;
+                hu_model_route(&mr_cfg_nongem, line, line_len, NULL, 0, -1, agent_p->history_count);
+            agent_p->turn_tier = (int)sel_nongem.tier;
         }
 #endif
 
@@ -1245,7 +1270,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             continue;
         }
         memset(tctx, 0, sizeof(*tctx));
-        tctx->agent = &agent;
+        tctx->agent = agent_p;
         tctx->msg = line;
         tctx->msg_len = line_len;
 
@@ -1295,12 +1320,12 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 #else
         char *response = NULL;
         size_t response_len = 0;
-        agent.active_channel = "cli";
-        agent.active_channel_len = 3;
+        agent_p->active_channel = "cli";
+        agent_p->active_channel_len = 3;
         if (use_ansi)
             printf("Thinking...\r");
         fflush(stdout);
-        err = hu_agent_turn_stream(&agent, line, line_len, cli_stream_token, NULL, &response,
+        err = hu_agent_turn_stream(agent_p, line, line_len, cli_stream_token, NULL, &response,
                                    &response_len);
         if (single_message_mode)
             single_message_exit = err;
@@ -1332,7 +1357,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 #ifndef _WIN32
     sigaction(SIGHUP, &old_hup, NULL);
 #endif
-    hu_agent_deinit(&agent);
+    hu_agent_deinit(agent_p);
     if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
         retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
@@ -1356,8 +1381,8 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     if (otel_observer.vtable && otel_observer.vtable->deinit)
         otel_observer.vtable->deinit(otel_observer.ctx);
 #endif
-    if (agent.policy_engine)
-        hu_policy_engine_destroy(agent.policy_engine);
+    if (agent_p->policy_engine)
+        hu_policy_engine_destroy(agent_p->policy_engine);
     if (cli_mailbox)
         hu_mailbox_destroy(cli_mailbox);
     if (cli_agent_pool)
@@ -1374,6 +1399,10 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     hu_channel_voice_destroy(&cli_voice_ch);
 #endif
     hu_config_deinit(&cfg);
+    /* Single free site for both return paths — hoisted before the
+     * conditional so we don't leak on the single_message_exit branch
+     * and don't duplicate. */
+    alloc->free(alloc->ctx, agent_p, sizeof(*agent_p));
     if (single_message_mode && single_message_exit != HU_OK)
         return single_message_exit;
     return HU_OK;
