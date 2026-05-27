@@ -428,9 +428,9 @@ static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
     /* Try inner provider first (fail-fast: no partial-stream replay) */
     if (r->inner.vtable && r->inner.vtable->stream_chat) {
-        hu_error_t err = r->inner.vtable->stream_chat(r->inner.ctx, alloc, request, model,
-                                                       model_len, temperature, callback,
-                                                       callback_ctx, out);
+        hu_error_t err =
+            r->inner.vtable->stream_chat(r->inner.ctx, alloc, request, model, model_len,
+                                         temperature, callback, callback_ctx, out);
         if (err == HU_OK)
             return HU_OK;
     }
@@ -438,9 +438,8 @@ static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
     for (size_t e = 0; e < r->extras_count; e++) {
         hu_provider_t *ep = &r->extras[e].provider;
         if (ep->vtable && ep->vtable->stream_chat) {
-            hu_error_t err = ep->vtable->stream_chat(ep->ctx, alloc, request, model,
-                                                      model_len, temperature, callback,
-                                                      callback_ctx, out);
+            hu_error_t err = ep->vtable->stream_chat(ep->ctx, alloc, request, model, model_len,
+                                                     temperature, callback, callback_ctx, out);
             if (err == HU_OK)
                 return HU_OK;
         }
@@ -506,12 +505,36 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* 2026-05-27 — extend the trailing-space deep-copy to include each
+     * model_fallback entry's INNER `fallbacks` array. Previously only the
+     * outer hu_reliable_model_fallback_entry_t array was memcpy'd, leaving
+     * .fallbacks as a shallow borrowed pointer back into the caller's
+     * heap. from_config.c::hu_provider_create_from_config frees that heap
+     * immediately after this function returns, so the next chat call hit
+     * a heap-use-after-free in model_chain() (reliable.c:135).
+     *
+     * Caught by ASan when the freshly-installed dev-preset binary booted
+     * as the daemon and aborted on the first hierarchical_chat call. The
+     * non-ASan production binary had been silently tolerating the UAF
+     * for hours because the freed bytes still held valid data.
+     *
+     * Lifetime contract: the `.model` strings inside both the outer and
+     * inner arrays still point at caller-owned (config-owned) memory,
+     * which outlives the reliable provider in normal use. Only the array
+     * STORAGE needs to be owned here. */
     size_t ctx_size = sizeof(hu_reliable_ctx_t);
     if (extras_count > 0) {
         ctx_size += extras_count * sizeof(hu_reliable_provider_entry_t);
     }
+    size_t total_inner_fallbacks = 0;
     if (model_fallbacks_count > 0) {
         ctx_size += model_fallbacks_count * sizeof(hu_reliable_model_fallback_entry_t);
+        if (model_fallbacks) {
+            for (size_t i = 0; i < model_fallbacks_count; i++) {
+                total_inner_fallbacks += model_fallbacks[i].fallbacks_count;
+            }
+            ctx_size += total_inner_fallbacks * sizeof(hu_reliable_fallback_model_t);
+        }
     }
 
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)alloc->alloc(alloc->ctx, ctx_size);
@@ -536,6 +559,28 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
         memcpy(r->model_fallbacks, model_fallbacks,
                model_fallbacks_count * sizeof(hu_reliable_model_fallback_entry_t));
         r->model_fallbacks_count = model_fallbacks_count;
+
+        /* Re-anchor each entry's .fallbacks pointer into the trailing region
+         * of the same allocation, then memcpy the inner array there. After
+         * this loop, no .fallbacks pointer references caller heap — the
+         * reliable ctx owns its own copies, and from_config.c is free to
+         * release its original arrays. */
+        char *inner_cursor = (char *)r->model_fallbacks +
+                             model_fallbacks_count * sizeof(hu_reliable_model_fallback_entry_t);
+        for (size_t i = 0; i < model_fallbacks_count; i++) {
+            const hu_reliable_fallback_model_t *src = model_fallbacks[i].fallbacks;
+            size_t n = model_fallbacks[i].fallbacks_count;
+            if (n > 0 && src) {
+                size_t bytes = n * sizeof(hu_reliable_fallback_model_t);
+                memcpy(inner_cursor, src, bytes);
+                r->model_fallbacks[i].fallbacks =
+                    (const hu_reliable_fallback_model_t *)inner_cursor;
+                inner_cursor += bytes;
+            } else {
+                r->model_fallbacks[i].fallbacks = NULL;
+                r->model_fallbacks[i].fallbacks_count = 0;
+            }
+        }
     }
 
     out->ctx = r;

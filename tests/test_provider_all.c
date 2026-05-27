@@ -2421,6 +2421,71 @@ static void test_reliable_create_with_model_fallbacks(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+/* 2026-05-27 — regression pin for the model_fallback heap-use-after-free
+ * caught by ASan during daemon boot. from_config.c::hu_provider_create_
+ * from_config calls build_model_fallback_chain() which heap-allocates the
+ * inner `fallbacks` array, then frees it immediately after passing through
+ * hu_reliable_create_ex(). Previously the reliable provider memcpy'd only
+ * the OUTER entry array and left .fallbacks dangling. The next chat call
+ * tripped model_chain() (reliable.c:118-122) reading freed heap.
+ *
+ * This test mirrors the from_config.c pattern: heap-allocate the inner
+ * array, create the reliable provider, then immediately free + poison
+ * the source. Under ASan, any subsequent read through the borrowed
+ * pointer trips heap-use-after-free. The chat_with_system call walks
+ * the model_fallbacks chain before reaching the inner provider, so it
+ * exercises the deep-copy path even if the inner network call fails. */
+static void test_reliable_create_ex_deep_copies_inner_fallback_arrays(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    hu_provider_t inner;
+    hu_openai_create(&alloc, "key", 3, NULL, 0, &inner);
+
+    /* Heap-allocate the inner array, matching from_config.c. */
+    const size_t inner_bytes = 2 * sizeof(hu_reliable_fallback_model_t);
+    hu_reliable_fallback_model_t *gpt_fallbacks =
+        (hu_reliable_fallback_model_t *)alloc.alloc(alloc.ctx, inner_bytes);
+    HU_ASSERT_NOT_NULL(gpt_fallbacks);
+    gpt_fallbacks[0].model = "gpt-3.5-turbo";
+    gpt_fallbacks[0].model_len = 13;
+    gpt_fallbacks[1].model = "gpt-3";
+    gpt_fallbacks[1].model_len = 5;
+
+    hu_reliable_model_fallback_entry_t model_fallbacks[1] = {{
+        .model = "gpt-4",
+        .model_len = 5,
+        .fallbacks = gpt_fallbacks,
+        .fallbacks_count = 2,
+    }};
+
+    hu_provider_t prov;
+    hu_error_t err =
+        hu_reliable_create_ex(&alloc, inner, 0, 50, NULL, 0, model_fallbacks, 1, &prov);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Critical: poison + release the source array right after create, the
+     * way from_config.c does. If hu_reliable_create_ex hadn't deep-copied
+     * the inner array, the next chat call would deref freed memory. */
+    memset(gpt_fallbacks, 0xAB, inner_bytes);
+    alloc.free(alloc.ctx, gpt_fallbacks, inner_bytes);
+
+    /* Exercise the model_chain walk via chat_with_system. The inner OpenAI
+     * provider will fail in test mode (no real network), but model_chain
+     * runs in the reliable wrapper FIRST — reading the deep-copied inner
+     * array. We don't care about the result, only that ASan doesn't fire. */
+    char *resp = NULL;
+    size_t resp_len = 0;
+    if (prov.vtable && prov.vtable->chat_with_system) {
+        (void)prov.vtable->chat_with_system(prov.ctx, &alloc, "sys", 3, "msg", 3, "gpt-4", 5, 0.0,
+                                            &resp, &resp_len);
+    }
+    if (resp)
+        alloc.free(alloc.ctx, resp, resp_len + 1);
+
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 static void test_reliable_chat_with_extras_primary_succeeds(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_provider_t primary;
@@ -3518,6 +3583,7 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_reliable_chat_passthrough);
     HU_RUN_TEST(test_reliable_create_with_extras);
     HU_RUN_TEST(test_reliable_create_with_model_fallbacks);
+    HU_RUN_TEST(test_reliable_create_ex_deep_copies_inner_fallback_arrays);
     HU_RUN_TEST(test_reliable_chat_with_extras_primary_succeeds);
     HU_RUN_TEST(test_reliable_warmup_calls_all);
     HU_RUN_TEST(test_reliable_supports_vision_from_gemini);
