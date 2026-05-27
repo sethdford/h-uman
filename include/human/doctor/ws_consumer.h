@@ -106,6 +106,54 @@ size_t hu_doctor_ws__format_upgrade_request(char *buf, size_t buf_size, const ch
 bool hu_doctor_ws__verify_handshake_response(const char *resp, size_t resp_len,
                                              const char *expected_accept);
 
+/* ── T3 RFC 6455 frame parser (pure) ─────────────────────────────────── */
+
+typedef enum hu_doctor_ws_opcode {
+    HU_DOCTOR_WS_OP_CONT = 0x0,
+    HU_DOCTOR_WS_OP_TEXT = 0x1,
+    HU_DOCTOR_WS_OP_BIN = 0x2,
+    HU_DOCTOR_WS_OP_CLOSE = 0x8,
+    HU_DOCTOR_WS_OP_PING = 0x9,
+    HU_DOCTOR_WS_OP_PONG = 0xA
+} hu_doctor_ws_opcode_t;
+
+/* Maximum payload size we accept from server, to prevent OOM on hostile
+ * input. 1 MB is plenty for event broadcasts; the gateway typically sends
+ * frames < 8 KB. */
+#define HU_DOCTOR_WS_MAX_PAYLOAD (1u * 1024u * 1024u)
+
+/* Parse one WebSocket frame from `buf`. Returns:
+ *   HU_OK + *out_consumed > 0   — full frame parsed; *out_consumed bytes
+ *                                  processed. *out_payload points INTO buf
+ *                                  (zero-copy) for *out_payload_len bytes.
+ *                                  *out_opcode is the WebSocket opcode.
+ *   HU_OK + *out_consumed == 0  — frame is INCOMPLETE; caller should read
+ *                                  more bytes and call again with the
+ *                                  extended buffer. All other outs are
+ *                                  0/NULL — caller must NOT consume any
+ *                                  bytes.
+ *   HU_ERR_PARSE                — malformed frame: reserved bits set,
+ *                                  mask bit set on inbound (server MUST
+ *                                  NOT mask per RFC §5.1), unknown opcode,
+ *                                  or payload exceeds HU_DOCTOR_WS_MAX_PAYLOAD.
+ *
+ * Pure; no I/O. Choosing HU_OK + consumed==0 over a separate error code
+ * keeps the API single-return-value-checkable while still letting callers
+ * distinguish "need more data" from "malformed". */
+hu_error_t hu_doctor_ws__parse_frame(const uint8_t *buf, size_t buf_len,
+                                     hu_doctor_ws_opcode_t *out_opcode, const uint8_t **out_payload,
+                                     size_t *out_payload_len, size_t *out_consumed);
+
+/* Format a PONG frame in response to PING. Pure. Returns number of
+ * bytes written (always between 2 and 14 for client→server pongs of
+ * length 0-125, since masking adds 4 bytes), or 0 on overflow. */
+size_t hu_doctor_ws__format_pong(uint8_t *buf, size_t buf_size, const uint8_t *payload,
+                                 size_t payload_len);
+
+/* Format a CLOSE frame (clean shutdown). Pure. Same return semantics as
+ * format_pong. */
+size_t hu_doctor_ws__format_close(uint8_t *buf, size_t buf_size, uint16_t status_code);
+
 #ifdef __cplusplus
 }
 #endif

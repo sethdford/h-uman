@@ -429,9 +429,181 @@ char *hu_doctor_ws_format_event_line(hu_allocator_t *alloc, const char *event_na
     return out;
 }
 
+/* ── T3 RFC 6455 frame parser ──────────────────────────────────────────
+ *
+ * Per RFC 6455 §5.2, a frame header is:
+ *   byte 0: FIN(1) RSV(3) opcode(4)
+ *   byte 1: MASK(1) payload_len_7(7)
+ *   bytes 2-3: extended payload len (if payload_len_7 == 126)
+ *   bytes 2-9: extended payload len (if payload_len_7 == 127)
+ *   next 4 bytes: masking key (only if MASK bit set)
+ *   then: payload
+ *
+ * Server-to-client frames MUST NOT be masked (§5.1). We REJECT masked
+ * frames as malformed input — defensive against misbehaving servers
+ * and middleboxes.
+ *
+ * We do NOT unmask in this parser because we only accept unmasked
+ * frames. Client-to-server frames we send (pong/close) DO mask, but
+ * we mask at write time, not parse time.
+ */
+
+hu_error_t hu_doctor_ws__parse_frame(const uint8_t *buf, size_t buf_len,
+                                     hu_doctor_ws_opcode_t *out_opcode, const uint8_t **out_payload,
+                                     size_t *out_payload_len, size_t *out_consumed) {
+    /* Initialize outs defensively so partial-error paths leave caller
+     * with consistent state. */
+    if (out_opcode)
+        *out_opcode = (hu_doctor_ws_opcode_t)0;
+    if (out_payload)
+        *out_payload = NULL;
+    if (out_payload_len)
+        *out_payload_len = 0;
+    if (out_consumed)
+        *out_consumed = 0;
+
+    if (!buf || buf_len < 2)
+        return HU_OK;
+    /* incomplete — caller reads more then retries */ /* need at least 2 bytes for header */
+
+    uint8_t b0 = buf[0];
+    uint8_t b1 = buf[1];
+
+    /* RSV1/2/3 must be 0 unless extensions are negotiated. We don't
+     * negotiate any. Be strict — reject reserved bits set. */
+    if ((b0 & 0x70) != 0)
+        return HU_ERR_PARSE;
+
+    uint8_t opcode = b0 & 0x0F;
+    bool masked = (b1 & 0x80) != 0;
+    if (masked)
+        return HU_ERR_PARSE; /* server MUST NOT mask */
+
+    uint64_t payload_len = b1 & 0x7F;
+    size_t header_len = 2;
+
+    if (payload_len == 126) {
+        if (buf_len < 4)
+            return HU_OK; /* incomplete — caller reads more then retries */
+        payload_len = ((uint64_t)buf[2] << 8) | (uint64_t)buf[3];
+        header_len = 4;
+    } else if (payload_len == 127) {
+        if (buf_len < 10)
+            return HU_OK; /* incomplete — caller reads more then retries */
+        payload_len = 0;
+        for (int i = 0; i < 8; i++)
+            payload_len = (payload_len << 8) | buf[2 + i];
+        header_len = 10;
+        /* RFC §5.2: top bit of 8-byte length MUST be 0. */
+        if (buf[2] & 0x80)
+            return HU_ERR_PARSE;
+    }
+
+    if (payload_len > HU_DOCTOR_WS_MAX_PAYLOAD)
+        return HU_ERR_PARSE;
+
+    if (buf_len < header_len + payload_len)
+        return HU_OK; /* incomplete — caller reads more then retries */
+
+    /* Validate opcode — accept the 6 we know about; reject the rest. */
+    switch (opcode) {
+    case HU_DOCTOR_WS_OP_CONT:
+    case HU_DOCTOR_WS_OP_TEXT:
+    case HU_DOCTOR_WS_OP_BIN:
+    case HU_DOCTOR_WS_OP_CLOSE:
+    case HU_DOCTOR_WS_OP_PING:
+    case HU_DOCTOR_WS_OP_PONG:
+        break;
+    default:
+        return HU_ERR_PARSE;
+    }
+
+    if (out_opcode)
+        *out_opcode = (hu_doctor_ws_opcode_t)opcode;
+    if (out_payload)
+        *out_payload = (payload_len > 0) ? buf + header_len : NULL;
+    if (out_payload_len)
+        *out_payload_len = (size_t)payload_len;
+    if (out_consumed)
+        *out_consumed = header_len + (size_t)payload_len;
+    return HU_OK;
+}
+
+/* Write a 4-byte mask key + mask the payload in-place. Client frames MUST
+ * be masked per RFC §5.3. */
+static void ws_mask_payload(uint8_t *payload, size_t payload_len, const uint8_t key[4]) {
+    for (size_t i = 0; i < payload_len; i++)
+        payload[i] ^= key[i % 4];
+}
+
+/* Generate a 4-byte mask key. Random under normal builds; deterministic
+ * (0x00 0x00 0x00 0x00 — a "no-op" mask) under HU_IS_TEST so test
+ * fixtures can compare client-emitted bytes byte-for-byte. The zero
+ * mask is legal per the RFC; it just means the payload bytes on the
+ * wire == the payload bytes pre-mask. */
+static void ws_make_mask_key(uint8_t out[4]) {
+#if HU_IS_TEST
+    memset(out, 0, 4);
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) {
+        /* fall back to a weak source so we still send a frame, even
+         * if it's not crypto-strong. The mask exists for anti-cache-
+         * poisoning, not encryption. */
+        for (int i = 0; i < 4; i++)
+            out[i] = (uint8_t)(rand() & 0xFF);
+        return;
+    }
+    if (read(fd, out, 4) != 4)
+        memset(out, 0, 4);
+    close(fd);
+#endif
+}
+
+/* Common frame-write helper. Writes:
+ *   header (2 bytes for payload_len < 126; +2 or +8 for larger)
+ *   mask key (4 bytes)
+ *   masked payload (payload_len bytes)
+ *
+ * Client-side max payload here is 125 (1-byte length) — we never send
+ * frames bigger than control frames or a short close-code, so don't
+ * bother with extended-length encoding on the write path.
+ *
+ * Returns total bytes written, or 0 on overflow. */
+static size_t ws_format_client_frame(uint8_t *buf, size_t buf_size, uint8_t opcode,
+                                     const uint8_t *payload, size_t payload_len) {
+    if (!buf || payload_len > 125)
+        return 0;
+    size_t needed = 2 + 4 + payload_len; /* hdr + mask + payload */
+    if (buf_size < needed)
+        return 0;
+    buf[0] = (uint8_t)(0x80 | (opcode & 0x0F));      /* FIN=1 + opcode */
+    buf[1] = (uint8_t)(0x80 | (payload_len & 0x7F)); /* MASK=1 + len */
+    uint8_t key[4];
+    ws_make_mask_key(key);
+    memcpy(buf + 2, key, 4);
+    if (payload && payload_len > 0)
+        memcpy(buf + 6, payload, payload_len);
+    ws_mask_payload(buf + 6, payload_len, key);
+    return 6 + payload_len;
+}
+
+size_t hu_doctor_ws__format_pong(uint8_t *buf, size_t buf_size, const uint8_t *payload,
+                                 size_t payload_len) {
+    return ws_format_client_frame(buf, buf_size, (uint8_t)HU_DOCTOR_WS_OP_PONG, payload,
+                                  payload_len);
+}
+
+size_t hu_doctor_ws__format_close(uint8_t *buf, size_t buf_size, uint16_t status_code) {
+    uint8_t payload[2];
+    payload[0] = (uint8_t)(status_code >> 8);
+    payload[1] = (uint8_t)(status_code & 0xFF);
+    return ws_format_client_frame(buf, buf_size, (uint8_t)HU_DOCTOR_WS_OP_CLOSE, payload, 2);
+}
+
 hu_error_t hu_doctor_ws_watch(hu_allocator_t *alloc, const hu_doctor_ws_config_t *cfg) {
     (void)alloc;
     (void)cfg;
-    /* T2-T6 — see docs/plans/2026-05-27-doctor-ws-consumer/tasks.md */
+    /* T4-T6 — see docs/plans/2026-05-27-doctor-ws-consumer/tasks.md */
     return HU_ERR_NOT_SUPPORTED;
 }
