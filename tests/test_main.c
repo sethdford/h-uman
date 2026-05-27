@@ -802,6 +802,9 @@ void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
+#ifdef HU_ENABLE_SQLITE
+void run_reflection_schema_tests(void);
+#endif
 void run_emotional_context_tests(void);
 void run_autoresponder_tests(void);
 void run_autoresponder_eval_tests(void);
@@ -1663,6 +1666,9 @@ int main(int argc, char **argv) {
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
+#ifdef HU_ENABLE_SQLITE
+    run_reflection_schema_tests();
+#endif
     run_emotional_context_tests();
     run_autoresponder_tests();
     run_autoresponder_eval_tests();

@@ -1510,6 +1510,11 @@ if(HU_ENABLE_SQLITE)
         src/intelligence/weakness.c
         src/intelligence/weakness_analyzer.c
         src/intelligence/distiller.c
+        # Reflection Loop (M2 closure): docs/plans/2026-05-26-reflection-loop.
+        # schema.c is pure (JSON + SHA-256, no SQLite syms) but the broader
+        # reflection module — storage, query helpers — depends on SQLite, so
+        # gating the whole set here keeps the dependency graph honest.
+        src/reflection/schema.c
     )
 endif()
 
@@ -3061,6 +3066,10 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
+    # Reflection Loop schema/parse tests. File uses internal-#ifdef-wrap-
+    # with-stub-runner so it stays unconditional per
+    # .claude/rules/test-source-gate-symmetry.md.
+    tests/test_reflection_schema.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
     tests/test_autoresponder_eval.c
