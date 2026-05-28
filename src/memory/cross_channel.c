@@ -114,6 +114,10 @@ hu_error_t hu_cross_channel_collect(hu_allocator_t *alloc, sqlite3 *db, const ch
     *out_items = NULL;
     *out_count = 0;
 
+    /* now_ms is reserved for reflection-pattern recency weighting (Scope C);
+     * the Phase-1 collect stage doesn't consume it yet. */
+    (void)now_ms;
+
     if (!current_channel || !current_channel[0])
         return HU_OK; /* No current channel specified; return empty */
 

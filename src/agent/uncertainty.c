@@ -5,6 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Task 5: temporal-aware MEDIUM hedges — selected when a grounded fact's
+ * confidence has materially decayed with age (signals.has_temporal_decay).
+ * Declared above hu_uncertainty_evaluate so the evaluator can route to it;
+ * the non-temporal default banks live with hu_uncertainty_pick_hedge below. */
+static const char *const k_default_hedges_medium_temporal[] = {
+    "I think — though it's been a while — ",
+    "Going from older memory: ", "Pretty sure, but the info's a bit stale — "};
+
 hu_error_t hu_uncertainty_evaluate(hu_allocator_t *alloc, const hu_uncertainty_signals_t *signals,
                                    hu_uncertainty_result_t *result) {
     if (!alloc || !signals || !result)
@@ -86,11 +94,21 @@ hu_error_t hu_uncertainty_evaluate(hu_allocator_t *alloc, const hu_uncertainty_s
         result->hedge_prefix = NULL;
         result->hedge_prefix_len = 0;
         break;
-    case HU_CONFIDENCE_MEDIUM:
+    case HU_CONFIDENCE_MEDIUM: {
         result->recommendation = "hedge";
-        result->hedge_prefix = hu_strndup(alloc, "Based on what I know, ", 23);
-        result->hedge_prefix_len = result->hedge_prefix ? 23 : 0;
+        /* Task 5: when the fact's confidence has decayed with age, surface the
+         * staleness with a temporal hedge; otherwise a generic MEDIUM hedge. */
+        const char *hedge = "Based on what I know, ";
+        if (signals->has_temporal_decay) {
+            size_t n = sizeof(k_default_hedges_medium_temporal) /
+                       sizeof(k_default_hedges_medium_temporal[0]);
+            hedge = k_default_hedges_medium_temporal[(size_t)rand() % n];
+        }
+        size_t hlen = strlen(hedge);
+        result->hedge_prefix = hu_strndup(alloc, hedge, hlen);
+        result->hedge_prefix_len = result->hedge_prefix ? hlen : 0;
         break;
+    }
     case HU_CONFIDENCE_LOW:
         result->recommendation = "clarify";
         result->hedge_prefix = NULL;
@@ -333,9 +351,6 @@ bool hu_uncertainty_strip_verbalized(char *response, size_t *response_len, doubl
 static const char *const k_default_hedges_high[] = {""};
 static const char *const k_default_hedges_medium[] = {"I'm pretty sure — ",
                                                       "Best read I have: ", "Going from memory, "};
-static const char *const k_default_hedges_medium_temporal[] = {
-    "I think — though it's been a while — ",
-    "Going from older memory: ", "Pretty sure, but the info's a bit stale — "};
 static const char *const k_default_hedges_low[] = {"I'm not certain, but ", "Could be off here — ",
                                                    "Worth double-checking, but "};
 static const char *const k_default_hedges_very_low[] = {"I don't think I know this well enough — ",
