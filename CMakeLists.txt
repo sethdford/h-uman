@@ -989,6 +989,18 @@ set(HU_CORE_SOURCES
     # rationale as the runner: subprocess + file I/O, no learner dep.
     src/ml/lora_ema.c
     src/ml/cli_adapter_rollback.c
+    # MLX-server admin HTTP client. Called UNCONDITIONALLY from core TUs
+    # (src/daemon.c personalization path, src/agent/agent.c adapter swap,
+    # src/daemon.c mlx-local health probe). Self-gates on HU_ENABLE_CURL
+    # (NOT_SUPPORTED stub when off); no learner dependency (http + json
+    # only). MUST link in HU_ENABLE_ML=OFF builds — previously gated under
+    # if(HU_ENABLE_ML) which broke build-and-test / minimal-build /
+    # feature-flags / cross-arm64 with undefined-reference on
+    # hu_mlx_admin_swap_adapter + hu_mlx_admin_swap_result_free. The
+    # matching test (tests/test_mlx_admin.c) stays HU_ENABLE_ML-gated and
+    # run_mlx_admin_tests() is #ifdef HU_ENABLE_ML in test_main.c, so the
+    # always-present symbols are a strict superset — no gate-symmetry break.
+    src/ml/mlx_admin.c
     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
     # are W13 learning-loop callers — they reference symbols defined only
     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
@@ -1301,11 +1313,15 @@ list(APPEND HU_CORE_SOURCES
     src/ml/lora_export.c
     src/ml/lora_subprocess.c
     # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
-    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
-    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
-    # minimal-build, design-tokens, completions, docs, static-analysis and
-    # ~30 other CI jobs across every open PR with an undefined-reference
-    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
+    # it is an ML-only caller of hu_mlx_admin_swap_adapter, so gating it
+    # here is correct. (mlx_admin.c itself is now UNCONDITIONAL core — see
+    # the always-compiled block above — because core TUs daemon.c/agent.c
+    # call it too; only the ML-specific callers like lora_nightly live in
+    # this block.) Keeping lora_nightly in HU_CORE_SOURCES had broken
+    # local-check, minimal-build, design-tokens, completions, docs,
+    # static-analysis and ~30 other CI jobs across every open PR with an
+    # undefined-reference linker error on Ubuntu (its OTHER ML deps).
+    # Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1611,7 +1627,16 @@ if(HU_ENABLE_ML)
         src/ml/m3_rewrite_capture.c
         src/ml/init_dpo_bridge.c
         src/ml/lora_nightly.c
-        src/ml/mlx_admin.c
+        # NOTE: src/ml/mlx_admin.c moved to the unconditional core sources
+        # block (alongside lora_ema.c / cli_adapter_rollback.c). It is
+        # called UNCONDITIONALLY from core TUs (src/daemon.c, src/agent/
+        # agent.c) that cannot be moved into this HU_ENABLE_ML block, so
+        # gating it here produced undefined-reference link errors in every
+        # HU_ENABLE_ML=OFF variant (build-and-test, minimal-build,
+        # feature-flags, cross-arm64). mlx_admin.c self-gates on
+        # HU_ENABLE_CURL (NOT_SUPPORTED stub when off) and depends only on
+        # http + json (core), so it must link regardless of HU_ENABLE_ML.
+        # Same rationale as PR #115 (lora_ema.c / cli_adapter_rollback.c).
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
         # RL architecture rework — main moved to a shared-config-struct
