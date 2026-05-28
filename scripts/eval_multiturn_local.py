@@ -72,3 +72,10 @@ def latency_ok(series_ms, ceiling_ms, max_growth):
         "series_ms": series_ms,
     }
     return ok, detail
+
+
+def retention_rate(anchor_results):
+    """Fraction of anchors the judge marked retained. Empty → 0.0."""
+    if not anchor_results:
+        return 0.0
+    return sum(1 for r in anchor_results if r) / len(anchor_results)

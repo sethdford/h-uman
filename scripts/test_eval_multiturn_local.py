@@ -83,6 +83,27 @@ def test_latency_ok_fails_on_growth():
     print("✓ latency_ok_fails_on_growth")
 
 
+def test_retention_rate_all_retained():
+    assert mt.retention_rate([True, True, True, True]) == 1.0
+    print("✓ retention_rate_all_retained")
+
+
+def test_retention_rate_none_retained():
+    assert mt.retention_rate([False, False, False]) == 0.0
+    print("✓ retention_rate_none_retained")
+
+
+def test_retention_rate_partial():
+    rate = mt.retention_rate([True, True, False, True])  # 3/4
+    assert abs(rate - 0.75) < 1e-9, f"expected 0.75, got {rate}"
+    print("✓ retention_rate_partial")
+
+
+def test_retention_rate_empty_is_zero():
+    assert mt.retention_rate([]) == 0.0
+    print("✓ retention_rate_empty_is_zero")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
