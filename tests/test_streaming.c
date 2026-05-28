@@ -227,6 +227,57 @@ static void test_sse_parser_incomplete_data_buffered(void) {
     hu_provider_sse_parser_deinit(&p);
 }
 
+/* Regression (2026-05-28): a complete data line arriving in one feed and its
+ * terminating blank line arriving in the NEXT feed must still fire ONE event
+ * carrying the data. HTTP/2 (Vertex) chunk framing routinely splits a "data:"
+ * line and its "\n\n" terminator across libcurl write-callback boundaries.
+ * Previously the parser advanced its consumed watermark past the data line
+ * before the event was terminated, dropping the data and firing an empty
+ * event (Gemini response_len=0 bug). */
+static void test_sse_parser_event_boundary_split_across_feeds(void) {
+    sse_event_count = 0;
+    sse_last_data[0] = '\0';
+    sse_last_data_len = 0;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_sse_parser_t p;
+    HU_ASSERT_EQ(hu_provider_sse_parser_init(&p, &alloc), HU_OK);
+
+    /* Feed 1: complete data line, no terminator yet — no event fires. */
+    HU_ASSERT_EQ(hu_provider_sse_parser_feed(&p, "data: HELLO\n", 12, sse_event_cb, NULL), HU_OK);
+    HU_ASSERT_EQ(sse_event_count, 0);
+
+    /* Feed 2: the blank-line terminator — event fires WITH the buffered data. */
+    HU_ASSERT_EQ(hu_provider_sse_parser_feed(&p, "\n", 1, sse_event_cb, NULL), HU_OK);
+    HU_ASSERT_EQ(sse_event_count, 1);
+    HU_ASSERT_STR_EQ(sse_last_data, "HELLO");
+    HU_ASSERT_EQ(sse_last_data_len, (size_t)5);
+
+    hu_provider_sse_parser_deinit(&p);
+}
+
+/* Regression (2026-05-28): CRLF variant of the cross-feed split. Data line
+ * ends "...\r\n" in feed 1, blank "\r\n" terminator arrives in feed 2. */
+static void test_sse_parser_event_boundary_split_crlf(void) {
+    sse_event_count = 0;
+    sse_last_data[0] = '\0';
+    sse_last_data_len = 0;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_sse_parser_t p;
+    HU_ASSERT_EQ(hu_provider_sse_parser_init(&p, &alloc), HU_OK);
+
+    HU_ASSERT_EQ(hu_provider_sse_parser_feed(&p, "data: WORLD\r\n", 13, sse_event_cb, NULL), HU_OK);
+    HU_ASSERT_EQ(sse_event_count, 0);
+
+    HU_ASSERT_EQ(hu_provider_sse_parser_feed(&p, "\r\n", 2, sse_event_cb, NULL), HU_OK);
+    HU_ASSERT_EQ(sse_event_count, 1);
+    HU_ASSERT_STR_EQ(sse_last_data, "WORLD");
+    HU_ASSERT_EQ(sse_last_data_len, (size_t)5);
+
+    hu_provider_sse_parser_deinit(&p);
+}
+
 /* Edge case: missing event type — defaults to "message" */
 static void test_sse_parser_missing_event_type_defaults_message(void) {
     sse_event_count = 0;
@@ -671,6 +722,8 @@ void run_streaming_tests(void) {
     HU_RUN_TEST(test_sse_parser_data_with_spaces);
     HU_RUN_TEST(test_sse_parser_done_signal);
     HU_RUN_TEST(test_sse_parser_incomplete_data_buffered);
+    HU_RUN_TEST(test_sse_parser_event_boundary_split_across_feeds);
+    HU_RUN_TEST(test_sse_parser_event_boundary_split_crlf);
     HU_RUN_TEST(test_sse_parser_missing_event_type_defaults_message);
     HU_RUN_TEST(test_sse_parser_empty_data_field);
     HU_RUN_TEST(test_sse_parser_feed_null_bytes_len_zero_ok);

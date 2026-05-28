@@ -321,25 +321,38 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                       agent->provider.vtable->supports_streaming(agent->provider.ctx) &&
                       agent->provider.vtable->stream_chat;
 
-    /* WORKAROUND (2026-05-25): The Gemini streaming path silently returns
-     * empty content. Verified empirically: Vertex's :streamGenerateContent
-     * endpoint DOES return proper TEXT chunks ("Hey!", " What's up?") for
-     * the same prompt that h-uman's gemini_stream_chat → SSE parser gives
-     * back response_len=0. The bug is between hu_http_post_json_stream and
-     * gemini_process_sse_json (chunks aren't being piped or aren't being
-     * parsed). The non-streaming path through gemini_chat works fine
-     * (proven via the classifier, director, and judge calls).
+    /* ROOT-CAUSED + FIXED (2026-05-28): The Gemini streaming response_len=0
+     * symptom was a cross-feed event-assembly bug in the SHARED provider SSE
+     * parser (hu_provider_sse_parser_feed, src/providers/sse.c). Vertex's
+     * :streamGenerateContent endpoint frames over HTTP/2 and routinely splits
+     * a "data:" line and its terminating "\n\n" across separate libcurl
+     * write-callback (feed) calls. The parser's consumed-watermark advanced
+     * past a data line BEFORE the event was terminated, so the data was
+     * dropped from the retained buffer and the event fired empty. Fixed by
+     * advancing the watermark only at the blank-line terminator. Pinned by
+     * tests/test_streaming.c::test_sse_parser_event_boundary_split_{across_feeds,crlf}.
      *
-     * Until that streaming pipeline is debugged, force non-stream for Gemini
-     * so reactive replies actually deliver. iMessage has no token-by-token UX
-     * (AX types the whole reply after agent_turn returns), so no regression.
+     * The C-side gemini.c stream path (gemini_process_sse_json, the feed
+     * write-callback, content_buf→out transfer) was always correct — the bug
+     * was entirely in the shared parser, which is why the non-streaming path
+     * was unaffected.
      *
-     * Fix tracked at: docs/plans/2026-05-24-reactive-imessage-recovery/
+     * The bypass below is RETAINED as a conservative default pending a live
+     * Apple-Silicon/Vertex smoke test (cannot be run in the unit-test env;
+     * "verify, don't assert"). iMessage has no token-by-token UX (AX types
+     * the whole reply after agent_turn returns), so leaving it off is a no-op
+     * for the current consumer. To RE-ENABLE Gemini streaming after a live
+     * smoke test confirms token chunks deliver end-to-end, delete the
+     * `can_stream = false;` line below.
+     *
+     * Context: docs/plans/2026-05-24-reactive-imessage-recovery/
      * Search for "TODO(gemini-stream-bypass)" to find this site later. */
     if (can_stream && agent->provider.vtable->get_name) {
         const char *pname = agent->provider.vtable->get_name(agent->provider.ctx);
         if (pname && strcmp(pname, "gemini") == 0) {
-            can_stream = false; /* TODO(gemini-stream-bypass): fix SSE pipeline */
+            /* TODO(gemini-stream-bypass): SSE parser root cause fixed
+             * 2026-05-28; remove this line after a live Vertex smoke test. */
+            can_stream = false;
         }
         /* M3 B4 T3 (2026-05-26) — operator-gated bypass of the
          * compatible-provider streaming workaround.

@@ -177,7 +177,15 @@ hu_error_t hu_provider_sse_parser_feed(hu_provider_sse_parser_t *p, const char *
         line_start = line_end + 1;
         if (line_start - 1 < p_end && *(line_end) == '\r' && line_end[1] == '\n')
             line_start++;
-        consumed_up_to = line_start;
+        /* NOTE: do NOT advance consumed_up_to here. Event-assembly state
+         * (data/has_data/event_type, lines 95-102) is function-local and
+         * rebuilt on every feed; the parser relies on RE-PARSING the retained
+         * buffer from the start. consumed_up_to must only advance past a fully
+         * terminated event (the blank-line handler above). If we advanced it
+         * per-line, a "data:" line whose terminating blank line arrives in the
+         * NEXT feed would be dropped from the buffer before the event fires,
+         * producing an empty event (the Gemini SSE response_len=0 bug, fixed
+         * 2026-05-28; pinned by test_sse_parser_event_boundary_split_*). */
     }
 
     size_t keep = (size_t)(consumed_up_to - buf);
