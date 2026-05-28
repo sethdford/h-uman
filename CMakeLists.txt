@@ -1534,6 +1534,10 @@ if(HU_ENABLE_SQLITE)
         # T6: consumer queries — system-prompt slice, unsurfaced candidates,
         # mark_surfaced + retire mutators. Read-side counterpart to T2.
         src/reflection/consumer.c
+        # T9-followup: production SQLite turn source — streams the canonical
+        # `messages` ledger into the reflection iter contract, replacing the
+        # daemon's stub_turn_iter. Daemon-free; reads only sqlite3*.
+        src/reflection/turn_source.c
     )
 endif()
 
@@ -3099,6 +3103,7 @@ set(HU_TEST_SOURCES
     tests/test_reflection_prompt.c
     tests/test_reflection_orchestration.c
     tests/test_reflection_consumer.c
+    tests/test_reflection_turn_source.c
     tests/test_reflection_quorum.c
     tests/test_personal_model_reflection_slice.c
     tests/test_reflection_retire_on_contradiction.c
