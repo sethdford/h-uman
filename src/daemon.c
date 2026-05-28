@@ -9810,9 +9810,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * because a turn-1 inbound saying "as you know I prefer X"
                      * has no prior beliefs yet but DOES have an unmet expectation
                      * worth flagging. */
-                    hu_tom_persisted_expectation_t *unmet_exps = NULL;
                     size_t unmet_count = 0;
 #ifdef HU_ENABLE_SQLITE
+                    hu_tom_persisted_expectation_t *unmet_exps = NULL;
                     if (tom_idx != (size_t)-1 && agent && agent->memory) {
                         sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
                         if (tom_db) {
@@ -9827,10 +9827,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (tom_has_content) {
                         char *tom_ctx = NULL;
                         size_t tom_ctx_len = 0;
-                        if (hu_tom_build_context_with_expectations(&tom_states[tom_idx], unmet_exps,
+                        hu_error_t tom_ctx_rc =
+#ifdef HU_ENABLE_SQLITE
+                            hu_tom_build_context_with_expectations(&tom_states[tom_idx], unmet_exps,
                                                                    unmet_count, alloc, &tom_ctx,
-                                                                   &tom_ctx_len) == HU_OK &&
-                            tom_ctx && tom_ctx_len > 0) {
+                                                                   &tom_ctx_len);
+#else
+                            /* No SQLite → no persisted expectations; fall back to
+                             * the plain belief-only context builder. */
+                            hu_tom_build_context(&tom_states[tom_idx], alloc, &tom_ctx,
+                                                 &tom_ctx_len);
+#endif
+                        if (tom_ctx_rc == HU_OK && tom_ctx && tom_ctx_len > 0) {
                             if (convo_ctx) {
                                 size_t total = convo_ctx_len + tom_ctx_len + 2;
                                 char *merged = (char *)alloc->alloc(alloc->ctx, total);

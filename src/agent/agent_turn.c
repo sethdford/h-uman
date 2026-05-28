@@ -3564,6 +3564,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
              * with no SQLite memory backend (or reflection disabled) keep the
              * existing behavior. */
             size_t pm_n = 0;
+#ifdef HU_ENABLE_SQLITE
             if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
                 agent->active_channel && agent->active_channel_len > 0) {
                 sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
@@ -3574,7 +3575,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 pm_n = hu_personal_model_build_prompt_with_reflection(
                     &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
                     /*max_patterns=*/5, personal_model_buf, 8192);
-            } else {
+            } else
+#endif
+            {
                 pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
                                                       8192);
             }

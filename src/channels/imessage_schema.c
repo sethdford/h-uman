@@ -35,6 +35,13 @@
 
 /* ---------- known column set --------------------------------------------- */
 
+/* The schema-classification helpers below (known-column set, column vector,
+ * fingerprint, per-column classifier) are referenced only from the SQLite
+ * probe path (hu_imessage_schema_probe's #else branch). In builds without
+ * HU_ENABLE_SQLITE the probe short-circuits to HU_ERR_NOT_SUPPORTED, so
+ * these would be unused (-Werror=unused-function/-variable). Gate them. */
+#if defined(HU_ENABLE_SQLITE)
+
 /* Columns we explicitly recognize as part of the canonical `message` table
  * across the macOS versions we support. A column present in chat.db but NOT
  * in this list goes into unknown_columns[] as a drift canary entry.
@@ -228,6 +235,8 @@ static void classify_column(hu_imessage_schema_caps_t *caps, const char *name) {
         }
     }
 }
+
+#endif /* HU_ENABLE_SQLITE — schema-classification helpers */
 
 /* ---------- cache -------------------------------------------------------- */
 

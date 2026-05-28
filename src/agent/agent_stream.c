@@ -1042,8 +1042,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     const char *personal_model_ctx = NULL;
     size_t personal_model_ctx_len = 0;
     if (hu_personal_model_has_content(&agent->personal_model)) {
-        /* T7 mirror of agent_turn.c: reflection-loop slice append. */
+        /* T7 mirror of agent_turn.c: reflection-loop slice append. The
+         * reflection slice needs the SQLite db handle; in builds without
+         * HU_ENABLE_SQLITE there is no db, so fall through to the plain
+         * prompt path (matching every other sqlite-gated block in this
+         * file). */
         size_t pm_n = 0;
+#ifdef HU_ENABLE_SQLITE
         if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
             agent->active_channel && agent->active_channel_len > 0) {
             sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
@@ -1054,7 +1059,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             pm_n = hu_personal_model_build_prompt_with_reflection(
                 &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
                 /*max_patterns=*/5, personal_model_buf, sizeof(personal_model_buf));
-        } else {
+        } else
+#endif
+        {
             pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
                                                   sizeof(personal_model_buf));
         }
