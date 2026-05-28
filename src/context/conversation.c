@@ -1405,6 +1405,12 @@ static void compute_their_avg_len(const hu_channel_history_entry_t *entries, siz
         *out_recent_avg = recent_chars / recent_n;
 }
 
+/* Substantive-context floor for the brevity too-short penalty. When their
+ * recent messages average below this, the conversation is terse banter and a
+ * one-word reply is natural — keep full brevity marks. At/above this, their
+ * messages carry real content and a clipped fragment is an under-match. */
+#define HU_QUALITY_SUBSTANTIVE_REF_LEN 20u
+
 hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t response_len,
                                                     const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars) {
@@ -1419,9 +1425,16 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
     if (ref_len < 10)
         ref_len = 10;
 
-    /* Brevity (0-25): ratio of response to their average length */
+    /* Brevity (0-25): reward MATCHING their energy, not minimizing length.
+     * Two-signal too-short penalty: under-matching is as much a mismatch as
+     * over-matching, but only fires when their recent messages are
+     * substantive (ref_len >= floor) AND the reply is far below their energy
+     * (ratio < 0.2). A terse reply to terse banter keeps full marks. Without
+     * this, the A/B scorer prefers a clipped fragment over a natural reply. */
     double ratio = (double)response_len / (double)ref_len;
-    if (ratio <= 1.5)
+    if (ref_len >= HU_QUALITY_SUBSTANTIVE_REF_LEN && ratio < 0.2)
+        score.brevity = 10;
+    else if (ratio <= 1.5)
         score.brevity = 25;
     else if (ratio <= 3.0)
         score.brevity = 20;

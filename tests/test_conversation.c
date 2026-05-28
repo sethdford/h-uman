@@ -1516,6 +1516,34 @@ static void quality_rewards_length_match(void) {
     HU_ASSERT_TRUE(score.brevity >= 20);
 }
 
+/* A clipped fragment must NOT out-score a natural reply when their messages
+ * are substantive. Before the too-short brevity band, the fragment won the
+ * A/B selection on brevity alone (the "best=2 quality=78 len=3" symptom). */
+static void quality_natural_reply_beats_fragment_when_substantive(void) {
+    hu_channel_history_entry_t entries[] = {
+        make_entry(false, "yo you heading out to the show tonight or what", "12:00"),
+        make_entry(false, "going out with a bang?!", "12:01"),
+    };
+    /* their recent avg ~35 chars → substantive (>= 20). */
+    hu_quality_score_t fragment = hu_conversation_evaluate_quality("lol", 3, entries, 2, 300);
+    hu_quality_score_t natural = hu_conversation_evaluate_quality(
+        "haha you know it, gonna be a good one", 37, entries, 2, 300);
+    /* fragment is under-matched → docked brevity; natural matches their energy. */
+    HU_ASSERT_TRUE(fragment.brevity < natural.brevity);
+    HU_ASSERT_TRUE(natural.total > fragment.total);
+}
+
+/* Terse-to-terse banter must keep full brevity marks — the two-signal gate
+ * exempts short replies when their messages are themselves short. */
+static void quality_terse_reply_to_terse_banter_keeps_full_brevity(void) {
+    hu_channel_history_entry_t entries[] = {
+        make_entry(false, "ok", "12:00"),
+        make_entry(false, "lol", "12:01"),
+    };
+    hu_quality_score_t score = hu_conversation_evaluate_quality("k", 1, entries, 2, 300);
+    HU_ASSERT_EQ(score.brevity, 25);
+}
+
 static void calibrate_rapid_fire_momentum(void) {
     hu_channel_history_entry_t entries[] = {
         make_entry(false, "hey", "10:00"),
@@ -4463,6 +4491,8 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(quality_needs_revision_at_5x_ratio);
     HU_RUN_TEST(quality_penalizes_length_mismatch);
     HU_RUN_TEST(quality_rewards_length_match);
+    HU_RUN_TEST(quality_natural_reply_beats_fragment_when_substantive);
+    HU_RUN_TEST(quality_terse_reply_to_terse_banter_keeps_full_brevity);
 
     /* Typo correction fragment */
     HU_RUN_TEST(correction_detects_typo);
