@@ -154,6 +154,32 @@ size_t hu_doctor_ws__format_pong(uint8_t *buf, size_t buf_size, const uint8_t *p
  * format_pong. */
 size_t hu_doctor_ws__format_close(uint8_t *buf, size_t buf_size, uint16_t status_code);
 
+/* ── T4 watch loop ──────────────────────────────────────────────────── */
+
+/* Perform the WS handshake on an ALREADY-CONNECTED fd. Sends the upgrade
+ * request, reads the response, verifies Sec-WebSocket-Accept. Returns
+ * HU_OK on a valid 101 with matching accept, or HU_ERR_PARSE / HU_ERR_IO.
+ *
+ * Split from watch() so tests can drive it on a socketpair() fd. */
+hu_error_t hu_doctor_ws__handshake_on_fd(int fd, const char *host, uint16_t port, const char *path);
+
+/* Run the event-read loop on an ALREADY-HANDSHAKEN fd. Reads frames,
+ * auto-replies to PING with PONG, prints filtered events to stdout, logs
+ * raw events as JSONL to cfg->log_path (or skipped if NULL). Returns:
+ *   HU_OK on clean CLOSE or signal
+ *   HU_ERR_IO on read error / unexpected disconnect
+ *   HU_ERR_PARSE if the server sends malformed frames
+ *
+ * Returns immediately if the cancel flag is set before entry. Split from
+ * watch() so tests can drive it on a socketpair() fd with injected
+ * fixtures. */
+hu_error_t hu_doctor_ws__run_event_loop_on_fd(int fd, hu_allocator_t *alloc,
+                                              const hu_doctor_ws_config_t *cfg);
+
+/* Module-internal: set the cancel flag to true. SIGINT handler calls
+ * this; tests call it to make run_event_loop_on_fd exit cleanly mid-frame. */
+void hu_doctor_ws__set_cancel(bool cancel);
+
 #ifdef __cplusplus
 }
 #endif
