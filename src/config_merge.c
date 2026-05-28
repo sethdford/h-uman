@@ -414,14 +414,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->personalization.m3_adapter_probe_path = NULL;
     cfg->personalization.m3_adapter_disabled = false;
     cfg->personalization.force_local_mlx = false; /* opt-in; preserves cloud-default */
-    /* US-7.8 — MoLoRA static per-channel router. Disabled by default;
-     * entries owned (parser-strdup, freed by hu_config_deinit). */
-    cfg->personalization.molora.enabled = false;
-    cfg->personalization.molora.count = 0;
-    for (size_t mi = 0; mi < HU_MOLORA_CONFIG_MAX_CHANNELS; mi++) {
-        cfg->personalization.molora.entries[mi].channel[0] = '\0';
-        cfg->personalization.molora.entries[mi].adapter_path = NULL;
-    }
     /* US-7.7 — best-of-N at inference. Defaults: disabled (n=1), no cap. */
     cfg->inference.best_of_n = 1;
     cfg->inference.best_of_n_cost_cap_ms = 0;

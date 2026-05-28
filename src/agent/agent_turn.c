@@ -7,10 +7,6 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
-#ifdef HU_ENABLE_MOLORA
-#include "human/ml/molora.h"
-#include "human/provider.h"
-#endif
 
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
@@ -5147,51 +5143,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             resp = degrade_result.response;
             degrade_strategy = degrade_result.strategy_used;
         } else {
-#ifdef HU_ENABLE_MOLORA
-            /* US-7.8 — MoLoRA static per-channel router. Hooks the agent's
-             * single chat-dispatch site BEFORE best-of-N so all N candidates
-             * draw from the channel-correct adapter. Lazy swap: only loads
-             * when the router-selected path differs from the provider's
-             * currently-active adapter. Failures log a warning and proceed
-             * with whatever adapter was previously active (or no adapter)
-             * — never blocks the turn. */
-            if (agent->molora_router.enabled && agent->provider.vtable) {
-                const char *molora_path = hu_molora_router_select(
-                    &agent->molora_router, agent->active_channel, agent->active_channel_len);
-                if (molora_path && molora_path[0]) {
-                    const char *cur_id = hu_provider_active_adapter(&agent->provider);
-                    /* Derive the adapter id from the path basename (same
-                     * convention as the daemon bootstrap at daemon.c:2543). */
-                    const char *base = strrchr(molora_path, '/');
-                    base = base ? base + 1 : molora_path;
-                    /* Skip the swap when the active adapter id already matches
-                     * the basename — intra-channel turns pay zero swap cost. */
-                    if (!cur_id || strcmp(cur_id, base) != 0) {
-                        hu_error_t mle =
-                            hu_provider_load_adapter(&agent->provider, agent->alloc, molora_path,
-                                                     strlen(molora_path), base, strlen(base));
-                        if (mle == HU_ERR_NOT_SUPPORTED) {
-                            /* Cloud provider — no-op; turn proceeds. Silenced
-                             * because it would fire every turn on cloud
-                             * providers (US-7.3 doctor warning handles the
-                             * once-per-startup operator notification). */
-                            (void)mle;
-                        } else if (mle != HU_OK) {
-                            hu_log_warn("agent_turn", agent->observer,
-                                        "molora: load_adapter('%s') failed: %d", molora_path,
-                                        (int)mle);
-                        }
-                    }
-                }
-            }
-#endif /* HU_ENABLE_MOLORA */
             /* US-7.7 — Best-of-N at inference. Gate: cfg->inference.best_of_n >= 2
              * AND active provider is "llamacpp" AND persona fingerprint exists
              * (style.sample_count > 0; cold-start agents skip best-of-N since
-             * every candidate would score -1.0). MoLoRA adapter selection
-             * (US-7.8, when enabled) fires BEFORE this decorator: the router
-             * picks the adapter, then best-of-N samples N completions against
-             * it. Single chat-dispatch site. */
+             * every candidate would score -1.0). Single chat-dispatch site. */
             /* US-7.7 cold-start instrumentation (audit 2026-05-25): when
              * inference.best_of_n is configured (>=2) but the persona has
              * zero style samples, the gate below silently skips best-of-N

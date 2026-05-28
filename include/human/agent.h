@@ -51,9 +51,6 @@
 #include "human/agent/growth_narrative.h"
 #include "human/agent/process_reward.h"
 #include "human/agent/reflection.h"
-#ifdef HU_ENABLE_MOLORA
-#include "human/ml/molora.h"
-#endif
 #include "human/cognition/attachment.h"
 #include "human/cognition/dual_process.h"
 #include "human/cognition/emotional.h"
@@ -534,13 +531,6 @@ struct hu_agent {
     /* Set by channel before turn; used for per-channel persona overlays. Not owned. */
     const char *active_channel;
     size_t active_channel_len;
-
-#ifdef HU_ENABLE_MOLORA
-    /* US-7.8 — MoLoRA static per-channel router. Initialized from
-     * config.personalization.molora at daemon bootstrap; never reallocated.
-     * Disabled when zero-initialized — the agent-turn hook is a no-op. */
-    hu_molora_router_t molora_router;
-#endif
 
     /* Set by cron dispatch before turn; used for per-automation cost tracking. 0 = interactive. */
     uint64_t active_job_id;

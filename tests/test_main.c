@@ -853,7 +853,6 @@ void run_contact_send_recency_tests(void);
 #ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
 #endif
-void run_molora_router_tests(void);
 void run_sprint3_hybrid_recall_tests(void);
 /* PR #115: 3 declarations + calls removed — see CMakeLists.txt comment
  * at line ~2970. These tests were ghost-registered (declared in
@@ -1730,7 +1729,6 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
 #endif
-    run_molora_router_tests();
     run_sprint3_hybrid_recall_tests();
     /* PR #115: removed 3 ghost-test calls (see declaration block above):
      * run_config_identity_links_tests, run_memory_session_scoping_tests,

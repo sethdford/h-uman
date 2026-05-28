@@ -17,9 +17,6 @@
  *     cancellation introduced by this story).
  *   - The clock seam (`hu_best_of_n_clock_fn_t`) keeps tests deterministic
  *     without paying a virtual-dispatch cost in production.
- *   - MoLoRA adapter selection (US-7.8, when enabled) fires BEFORE this
- *     decorator: the router picks the adapter; we then sample N candidates
- *     against it.
  */
 
 #include "human/agent/best_of_n.h"

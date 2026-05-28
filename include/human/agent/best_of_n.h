@@ -17,10 +17,6 @@
  *     `inference.best_of_n` + style fidelity) compose multiplicatively
  *     instead of fighting each other.
  *
- * MoLoRA adapter selection (US-7.8, when enabled) fires before best-of-N
- * sampling: the router picks an adapter, then this decorator samples N
- * completions against that adapter.
- *
  * Eligibility (gated at the call site in src/agent/agent_turn.c):
  *   - cfg->inference.best_of_n >= 2
  *   - provider->vtable->get_name() returns "llamacpp"

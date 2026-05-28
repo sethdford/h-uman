@@ -176,8 +176,19 @@ def has_internal_guard(test_path: str, flags: set[str],
     else_re = re.compile(r"^\s*#\s*else\b")
     elif_re = re.compile(r"^\s*#\s*elif\b")
     endif_re = re.compile(r"^\s*#\s*endif\b")
-    flag_re = re.compile(r"\bHU_ENABLE_[A-Z_]+\b")
+    # Recognize BOTH the CMake option name (HU_ENABLE_X) and the
+    # C-visible compile-define (HU_HAS_X) the build emits for it
+    # (`if(HU_ENABLE_DISCORD) target_compile_definitions(... HU_HAS_DISCORD=1)`).
+    # Source under src/ is gated by HU_ENABLE_X in CMakeLists, but a test
+    # CAN ONLY guard its body with the HU_HAS_X macro that's actually
+    # passed to the C preprocessor — so both must count as the same gate.
+    flag_re = re.compile(r"\bHU_(?:ENABLE|HAS)_[A-Z_]+\b")
     not_re = re.compile(r"\bNOT\b|!\s*defined\b")
+
+    def _norm(tokens: list[str]) -> set[str]:
+        """Normalize HU_HAS_X → HU_ENABLE_X so guard flags match the
+        HU_ENABLE_* required-flag set parsed from CMakeLists.txt."""
+        return {t.replace("HU_HAS_", "HU_ENABLE_", 1) for t in tokens}
 
     # Compute, per line, the set of active HU_ENABLE_* flags.
     stack: list[set[str]] = []
@@ -198,7 +209,7 @@ def has_internal_guard(test_path: str, flags: set[str],
             if kind == "ifndef" or not_re.search(raw):
                 stack.append(set())
             else:
-                stack.append(set(flag_re.findall(expr)))
+                stack.append(_norm(flag_re.findall(expr)))
             active_per_line.append(set().union(*stack) if stack else set())
             continue
         active_per_line.append(set().union(*stack) if stack else set())

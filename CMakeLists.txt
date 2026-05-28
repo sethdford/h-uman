@@ -3770,7 +3770,6 @@ list(APPEND HU_TEST_SOURCES
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /
     # static-analysis / no-ML builds.
-    tests/test_molora_router.c
     tests/test_contact_send_recency.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are
