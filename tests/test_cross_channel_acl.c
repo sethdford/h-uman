@@ -107,12 +107,190 @@ static void test_acl_deny_unknown_blocks_null_relationship(void) {
     hu_persona_free(&persona);
 }
 
+/* Additional allowed pairs (AC-3/AC-4 positive cases) */
+static void test_acl_friend_fact_reaches_family_turn(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[] = {{
+        .source_type = HU_XCHAN_FACT,
+        .item_id = "fact_005",
+        .text = (char *)"friend recommended a restaurant",
+        .text_len = strlen("friend recommended a restaurant"),
+        .origin_channel = "discord",
+        .origin_contact_id = "contact_friend",
+        .origin_relationship_type = "friend",
+        .observed_at_ms = 5000,
+        .confidence = 0.92,
+    }};
+    size_t count = 1;
+
+    /* friend origin + family turn → friend in family's allow_list? No, denied */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "family", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
+static void test_acl_close_friend_fact_reaches_family_turn(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[] = {{
+        .source_type = HU_XCHAN_FACT,
+        .item_id = "fact_006",
+        .text = (char *)"close friend is getting married",
+        .text_len = strlen("close friend is getting married"),
+        .origin_channel = "imessage",
+        .origin_contact_id = "contact_close_friend",
+        .origin_relationship_type = "close_friend",
+        .observed_at_ms = 6000,
+        .confidence = 0.85,
+    }};
+    size_t count = 1;
+
+    /* close_friend origin + family turn → close_friend in family's allow_list? Yes */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "family", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 1);
+    hu_persona_free(&persona);
+}
+
+/* Sensitive denied pairs (AC-2: privacy-violating combinations) */
+static void test_acl_family_fact_never_reaches_work_turn(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[] = {{
+        .source_type = HU_XCHAN_FACT,
+        .item_id = "fact_007",
+        .text = (char *)"health issue discussed with partner",
+        .text_len = strlen("health issue discussed with partner"),
+        .origin_channel = "imessage",
+        .origin_contact_id = "contact_family",
+        .origin_relationship_type = "family",
+        .observed_at_ms = 7000,
+        .confidence = 0.98,
+    }};
+    size_t count = 1;
+
+    /* family origin + work turn → MUST be denied */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "work", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
+static void test_acl_partner_fact_never_reaches_acquaintance_turn(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[] = {{
+        .source_type = HU_XCHAN_FACT,
+        .item_id = "fact_008",
+        .text = (char *)"partner and I planning a trip",
+        .text_len = strlen("partner and I planning a trip"),
+        .origin_channel = "telegram",
+        .origin_contact_id = "contact_partner",
+        .origin_relationship_type = "partner",
+        .observed_at_ms = 8000,
+        .confidence = 0.96,
+    }};
+    size_t count = 1;
+
+    /* partner origin + acquaintance turn → MUST be denied */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "acquaintance", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
+/* Filter boundary cases */
+static void test_acl_filter_empty_items_array(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[1];
+    size_t count = 0;
+
+    /* empty array → count stays 0, no crash */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "family", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
+static void test_acl_filter_all_items_filtered(void) {
+    hu_persona_t persona = {0};
+    hu_persona_load_defaults(&persona);
+
+    hu_cross_channel_item_t items[] = {
+        {
+            .source_type = HU_XCHAN_FACT,
+            .item_id = "fact_009",
+            .text = (char *)"family secret",
+            .text_len = strlen("family secret"),
+            .origin_channel = "imessage",
+            .origin_contact_id = "contact_family",
+            .origin_relationship_type = "family",
+            .observed_at_ms = 9000,
+            .confidence = 0.9,
+        },
+        {
+            .source_type = HU_XCHAN_FACT,
+            .item_id = "fact_010",
+            .text = (char *)"partner secret",
+            .text_len = strlen("partner secret"),
+            .origin_channel = "imessage",
+            .origin_contact_id = "contact_partner",
+            .origin_relationship_type = "partner",
+            .observed_at_ms = 9001,
+            .confidence = 0.92,
+        },
+    };
+    size_t count = 2;
+
+    /* both items denied for coworker turn → count becomes 0 */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "coworker", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
+/* Malformed/empty ACL case (AC-5: fail-closed) */
+static void test_acl_empty_acl_denies_everything(void) {
+    hu_persona_t persona = {0};
+    memset(&persona, 0, sizeof(persona));
+    /* Manually construct an empty ACL (no rules) */
+    persona.cross_channel_acl.rule_count = 0;
+    persona.cross_channel_acl.rules = NULL;
+
+    hu_cross_channel_item_t items[] = {{
+        .source_type = HU_XCHAN_FACT,
+        .item_id = "fact_011",
+        .text = (char *)"any fact",
+        .text_len = strlen("any fact"),
+        .origin_channel = "slack",
+        .origin_contact_id = "contact_any",
+        .origin_relationship_type = "acquaintance",
+        .observed_at_ms = 10000,
+        .confidence = 0.8,
+    }};
+    size_t count = 1;
+
+    /* empty ACL → deny everything (AC-5: fail-closed) */
+    HU_ASSERT_EQ(hu_cross_channel_filter(&persona, "coworker", items, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_persona_free(&persona);
+}
+
 void run_cross_channel_acl_tests(void) {
     HU_TEST_SUITE("cross_channel_acl");
     HU_RUN_TEST(test_family_fact_never_reaches_coworker_turn);
     HU_RUN_TEST(test_partner_fact_never_reaches_coworker_turn);
     HU_RUN_TEST(test_acl_same_relationship_always_allowed);
     HU_RUN_TEST(test_acl_deny_unknown_blocks_null_relationship);
+    HU_RUN_TEST(test_acl_friend_fact_reaches_family_turn);
+    HU_RUN_TEST(test_acl_close_friend_fact_reaches_family_turn);
+    HU_RUN_TEST(test_acl_family_fact_never_reaches_work_turn);
+    HU_RUN_TEST(test_acl_partner_fact_never_reaches_acquaintance_turn);
+    HU_RUN_TEST(test_acl_filter_empty_items_array);
+    HU_RUN_TEST(test_acl_filter_all_items_filtered);
+    HU_RUN_TEST(test_acl_empty_acl_denies_everything);
 }
 
 #else
