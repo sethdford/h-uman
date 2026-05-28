@@ -478,12 +478,16 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
                                                  int64_t message_id, const char *emoji_utf8,
                                                  size_t emoji_utf8_len);
 
-/** Public: send a sticker file as an iMessage attachment via the imsg CLI.
+/** Capability probe for native iMessage sticker send.
+ * macOS exposes NO automation API to send a native sticker/Memoji balloon, so
+ * the imessage vtable sets .send_sticker = NULL and this function is unreachable
+ * in production (it always returns HU_ERR_NOT_SUPPORTED there). Retained as a
+ * tested probe; see docs/investigations/imessage-sticker-memoji-feasibility.md.
+ * To send an expressive image, use the regular attachment path (vtable->send).
  * sticker_path is an absolute filesystem path to the sticker image file.
- * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null/empty args,
- * HU_ERR_NOT_FOUND if the sticker file doesn't exist, HU_ERR_NOT_SUPPORTED
- * if the underlying send fails (imsg unavailable, permissions, etc.).
- * Signature matches vtable->send_sticker slot exactly. */
+ * Returns HU_OK only via a test stub; HU_ERR_INVALID_ARGUMENT for null/empty
+ * args; HU_ERR_NOT_FOUND if the file doesn't exist; HU_ERR_NOT_SUPPORTED in
+ * production. Signature matches the vtable->send_sticker slot exactly. */
 hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target_len,
                                     const char *sticker_path, size_t sticker_path_len);
 

@@ -4280,7 +4280,12 @@ static const hu_channel_vtable_t imessage_vtable = {
     .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
                              size_t))hu_imessage_reply,
     .react_emoji = hu_imessage_react_emoji_with_fallback,
-    .send_sticker = hu_imessage_send_sticker,
+    /* send_sticker is intentionally NULL: macOS exposes no automation API to
+     * send a native sticker/Memoji balloon (AppleScript/JXA/imsg/BlueBubbles
+     * all lack it — see docs/investigations/imessage-sticker-memoji-feasibility.md).
+     * Per the vtable contract, NULL == channel does not support sticker send.
+     * Expressive images are sent via the regular .send attachment path instead. */
+    .send_sticker = NULL,
     .get_attachment_path = imessage_vt_get_attachment_path,
     .human_active_recently = imessage_vt_human_active_recently,
     .get_latest_attachment_path = imessage_vt_get_latest_attachment_path,
