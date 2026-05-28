@@ -595,7 +595,12 @@ void hu_persona_load_defaults(hu_persona_t *out) {
 
     /* Use the system allocator */
     hu_allocator_t alloc = hu_system_allocator();
-    populate_safe_default_acl(&alloc, &out->cross_channel_acl);
+    hu_error_t err = populate_safe_default_acl(&alloc, &out->cross_channel_acl);
+    if (err != HU_OK) {
+        /* On failure, zero the ACL struct and set rule_count = 0
+         * so deinit/filter are safe. Fail-closed: zero rules → deny everything. */
+        memset(&out->cross_channel_acl, 0, sizeof(out->cross_channel_acl));
+    }
 }
 
 void hu_persona_free(hu_persona_t *persona) {
