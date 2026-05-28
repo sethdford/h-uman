@@ -254,6 +254,54 @@ static void test_thumbs_down_is_channel_scoped(void) {
     sqlite3_close(db);
 }
 
+/* ── AC-6: same-channel blast radius is INTENDED, and consuming the
+ *    lineage prevents a later thumbs_down from re-retiring. ──────────
+ *
+ * Attribution is channel-scoped + recency-windowed, not msg_ref-precise
+ * (see the schema comment in storage.c). A consequence: two patterns
+ * surfaced from different turns in the same channel within the window are
+ * BOTH retired by a single thumbs_down. This test pins that as the
+ * intended contract — if a future change makes attribution precise, this
+ * test should be updated deliberately, not silently broken. It also pins
+ * that a second thumbs_down does NOT re-retire (the lineage was consumed,
+ * and the retired=0 guard would block it regardless). */
+
+static void test_same_channel_thumbs_down_retires_all_in_window(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_reflection_storage_migrate(db);
+    insert_pattern(db, "pA", "pattern from turn A", "[\"imessage\"]");
+    insert_pattern(db, "pB", "pattern from turn B", "[\"imessage\"]");
+
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    /* Two distinct turns, both inside the contradiction window. */
+    hu_reflection_note_surfaced(db, "pA", "imessage", now_ms - 60000); /* 1 min ago */
+    hu_reflection_note_surfaced(db, "pB", "imessage", now_ms - 1000);  /* 1 sec ago */
+    HU_ASSERT_EQ(surfacing_row_count(db, "imessage"), 2);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_reflection_db(db);
+    hu_reaction_event_t e = make_reaction("imessage", HU_REACTION_NEGATIVE, HU_REACTION_DISLIKE);
+    (void)hu_reaction_handler_handle_event(&e);
+
+    /* Documented blast radius: BOTH in-window patterns retire. */
+    HU_ASSERT_EQ(pattern_is_retired(db, "pA"), 1);
+    HU_ASSERT_EQ(pattern_is_retired(db, "pB"), 1);
+    /* Lineage consumed. */
+    HU_ASSERT_EQ(surfacing_row_count(db, "imessage"), 0);
+
+    /* A second thumbs_down has nothing left to retire (count == 0) and
+     * cannot re-retire the already-retired patterns. */
+    int retired_again = hu_reflection_retire_contradicted(
+        db, "imessage", HU_REFLECTION_CONTRADICTION_WINDOW_MS, now_ms);
+    HU_ASSERT_EQ(retired_again, 0);
+    HU_ASSERT_EQ(pattern_is_retired(db, "pA"), 1);
+    HU_ASSERT_EQ(pattern_is_retired(db, "pB"), 1);
+
+    hu_reaction_handler_reset_for_test();
+    sqlite3_close(db);
+}
+
 void run_reflection_retire_on_contradiction_tests(void) {
     HU_TEST_SUITE("reflection_retire_on_contradiction");
     HU_RUN_TEST(test_thumbs_down_retires_surfaced_pattern);
@@ -262,6 +310,7 @@ void run_reflection_retire_on_contradiction_tests(void) {
     HU_RUN_TEST(test_note_surfaced_idempotent);
     HU_RUN_TEST(test_positive_reaction_does_not_retire);
     HU_RUN_TEST(test_thumbs_down_is_channel_scoped);
+    HU_RUN_TEST(test_same_channel_thumbs_down_retires_all_in_window);
 }
 
 #else /* !HU_ENABLE_SQLITE */

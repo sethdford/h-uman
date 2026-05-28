@@ -405,7 +405,11 @@ int hu_reflection_retire_contradicted(struct sqlite3 *db, const char *channel, u
     if (sqlite3_prepare_v2(db, "DELETE FROM reflection_surfacings WHERE channel = ?", -1, &st,
                            NULL) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
-        sqlite3_step(st);
+        /* A failed consume leaves harmless orphan surfacing rows (the
+         * retired=0 guard on the UPDATE above blocks any re-retire), but log
+         * it so a persistent I/O fault is visible to operators. */
+        if (sqlite3_step(st) != SQLITE_DONE)
+            hu_log_error("reflection", NULL, "retire_contradicted delete: %s", sqlite3_errmsg(db));
         sqlite3_finalize(st);
     }
     return retired;
