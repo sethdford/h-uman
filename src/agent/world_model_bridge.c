@@ -728,49 +728,30 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         }
     }
 
-    /* Surface either the rewritten draft (HEDGED/REWRITTEN) or the
-     * deterministic refusal template (ABSTAINED) through `out_modified`.
-     * The agent loop's replacement path treats both as "swap the response
-     * with this string" — semantically distinct (a hedge is the same
-     * answer with a caveat; a refusal is a different answer entirely)
-     * but mechanically the same buffer transfer. We unify them here so
-     * `agent_turn.c` doesn't need a third branch.
+    /* Surface a HEDGED/REWRITTEN rewrite through `out_modified` so the agent
+     * loop can swap the response. Those outcomes mean the verifier found
+     * contradicting evidence and produced a better draft — we DO want to send
+     * the rewrite.
      *
-     * Heuristic backend leaves `resp.refusal_text` empty on ABSTAINED;
-     * we render the deterministic UNKNOWN_FACT template in that case so
-     * the user always sees an honest "I don't know" instead of the
-     * unverified draft. */
-    if (out_modified && out_modified_len) {
-        const char *src = NULL;
-        size_t src_len = 0;
-        if (resp.outcome == HU_SELF_RAG_ABSTAINED) {
-            char tmpl[256];
-            if (resp.refusal_text[0] != '\0') {
-                src = resp.refusal_text;
-                src_len = strnlen(resp.refusal_text, sizeof(resp.refusal_text));
-            } else {
-                hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, tmpl, sizeof(tmpl));
-                src = tmpl;
-                src_len = strnlen(tmpl, sizeof(tmpl));
-            }
-            if (src_len > 0) {
-                char *copy = (char *)alloc->alloc(alloc->ctx, src_len + 1);
-                if (copy) {
-                    memcpy(copy, src, src_len);
-                    copy[src_len] = '\0';
-                    *out_modified = copy;
-                    *out_modified_len = src_len;
-                }
-            }
-        } else if (resp.draft_modified) {
-            src_len = strnlen(resp.modified_draft, sizeof(resp.modified_draft));
-            char *copy = (char *)alloc->alloc(alloc->ctx, src_len + 1);
-            if (copy) {
-                memcpy(copy, resp.modified_draft, src_len);
-                copy[src_len] = '\0';
-                *out_modified = copy;
-                *out_modified_len = src_len;
-            }
+     * ABSTAINED is deliberately PASSED THROUGH (out_modified stays NULL).
+     * A score-based abstention means "no memory backs this draft" — for
+     * casual banter (the common case on a chat channel) that is expected, and
+     * substituting the canned "I don't have memory backing this. Want to tell
+     * me?" template makes the assistant sound robotic and non-human. The
+     * verifier still ran; its outcome and counters are reported to the caller
+     * (telemetry preserved). Genuine policy refusals are a separate path
+     * (agent_stream.c, gated by HU_REFUSAL_POLICY) and never reach here, so
+     * passing ABSTAINED through does not weaken intentional self-redaction.
+     * (Dermot humanness recovery, AC-1 / AC-2 / AC-3.) */
+    if (out_modified && out_modified_len && resp.outcome != HU_SELF_RAG_ABSTAINED &&
+        resp.draft_modified) {
+        size_t src_len = strnlen(resp.modified_draft, sizeof(resp.modified_draft));
+        char *copy = (char *)alloc->alloc(alloc->ctx, src_len + 1);
+        if (copy) {
+            memcpy(copy, resp.modified_draft, src_len);
+            copy[src_len] = '\0';
+            *out_modified = copy;
+            *out_modified_len = src_len;
         }
     }
     hu_self_rag_close(&r);

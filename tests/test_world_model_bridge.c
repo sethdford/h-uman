@@ -5,8 +5,8 @@
  * goals/negatives/topics, and that an empty world model returns NULL/0
  * (so callers cleanly skip injection). */
 
-#include "human/agent/world_model_bridge.h"
 #include "human/agent/self_rag.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/personal_model.h"
@@ -75,8 +75,8 @@ static void bridge_render_empty_world_model_returns_null(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_empty", 8, 1700000000000LL, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_empty", 8, 1700000000000LL, &txt, &tlen, NULL,
+                                          0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     /* Empty world model -> NULL/0 so callers skip injection. */
     HU_ASSERT(txt == NULL);
@@ -98,7 +98,7 @@ static void bridge_render_optional_tom_scenario_merges_into_output(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_tom_sc", 9, 1700000000000LL, &txt, &tlen, p,
-                                            strlen(p), q, strlen(q), c, strlen(c), NULL, NULL),
+                                          strlen(p), q, strlen(q), c, strlen(c), NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_GT(tlen, (size_t)0);
@@ -136,7 +136,7 @@ static void bridge_render_with_negative_memory_includes_avoid_section(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_neg", 6, 1700000000000LL + 1000, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -161,19 +161,19 @@ static void bridge_render_rejects_invalid_args(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(NULL, A(), "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL, NULL),
+                                          NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, NULL, "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL, NULL),
+                                          NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), NULL, 0, 0, &txt, &tlen, NULL, 0, NULL, 0, NULL,
-                                            0, NULL, NULL),
+                                          0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 0, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL, NULL),
+                                          NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 6, 0, NULL, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL, NULL),
+                                          NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     cleanup(g, f);
 }
@@ -242,8 +242,8 @@ static void bridge_render_with_personal_model_includes_style(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_pm", 5, 1700000000000LL, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, &pm, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_pm", 5, 1700000000000LL, &txt, &tlen, NULL, 0,
+                                          NULL, 0, NULL, 0, &pm, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_GT(tlen, (size_t)0);
@@ -265,7 +265,7 @@ static void w11_off_mode_is_noop(void) {
     hu_w11_outcome_t outc = HU_W11_OUTCOME_HEDGED;
     size_t total = 99, flagged = 99;
     HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u", 1, "anything", 8, 0, /*OFF*/
-                                         0, &outc, &total, &flagged, NULL, NULL),
+                                        0, &outc, &total, &flagged, NULL, NULL),
                  HU_OK);
     HU_ASSERT_EQ((int)outc, (int)HU_W11_OUTCOME_SUPPORTED);
     HU_ASSERT_EQ(total, 0);
@@ -282,9 +282,9 @@ static void w11_telemetry_extracts_claims_without_modifying(void) {
     char *modified = NULL;
     size_t modified_len = 0;
     /* Pass NULL for out_modified to assert no modification path runs. */
-    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u_w11_t", 7,
-                                         "Paris is the capital of France.", 32, 1, /*TELEMETRY*/
-                                         0, &outc, &total, &flagged, NULL, NULL),
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u_w11_t", 7, "Paris is the capital of France.", 32,
+                                        1, /*TELEMETRY*/
+                                        0, &outc, &total, &flagged, NULL, NULL),
                  HU_OK);
     /* Telemetry never modifies. */
     HU_ASSERT(modified == NULL);
@@ -294,46 +294,42 @@ static void w11_telemetry_extracts_claims_without_modifying(void) {
     cleanup(g, f);
 }
 
-/* P0 #1 — when the heuristic verifier ABSTAINS (>=50% of extracted
- * claims are unsupported), the bridge MUST surface the deterministic
- * refusal template through out_modified so the agent loop can swap
- * the user-visible response. Previously this was dropped on the
- * floor (see TODO note in world_model_bridge.c) and the user saw
- * the unverified draft. */
-static void w11_abstain_emits_refusal_text_through_bridge(void) {
+/* Dermot humanness recovery, AC-1 — when the verifier ABSTAINS on a
+ * score-based abstention (no memory backs the draft), the bridge MUST
+ * pass the original draft through (out_modified stays NULL) instead of
+ * substituting the canned "I don't have memory backing this" template.
+ * The verifier still ran: the ABSTAINED outcome and claim counters are
+ * reported for telemetry. Genuine policy refusals are a separate path
+ * (agent_stream.c, HU_REFUSAL_POLICY) and never reach this bridge.
+ *
+ * This test previously PINNED the old substitution behavior (asserted
+ * modified != NULL and the refusal replaced "Paris"/"Earth"). It now
+ * pins the corrected pass-through contract. */
+static void w11_abstain_passes_draft_through_bridge(void) {
     hu_graph_t *g = NULL;
     hu_w7_facade_t *f = NULL;
     open_graph_and_facade(&g, &f);
 
     /* Empty graph + fact-shaped draft → every claim is unsupported →
-     * heuristic backend ABSTAINS and renders UNKNOWN_FACT template. */
+     * backend ABSTAINS (score-based). */
     const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
     hu_w11_outcome_t outc = HU_W11_OUTCOME_SUPPORTED;
     size_t total = 0, flagged = 0;
     char *modified = NULL;
     size_t modified_len = 0;
 
-    HU_ASSERT_EQ(
-        hu_w11_self_rag_verify(f, A(), "u_abstain", 9, draft, strlen(draft),
-                               2 /* SOFT */, 0, &outc, &total, &flagged,
-                               &modified, &modified_len),
-        HU_OK);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u_abstain", 9, draft, strlen(draft), 2 /* SOFT */,
+                                        0, &outc, &total, &flagged, &modified, &modified_len),
+                 HU_OK);
 
+    /* Verifier still ran and reported the abstention (telemetry preserved). */
     HU_ASSERT_EQ(outc, HU_W11_OUTCOME_ABSTAINED);
-    HU_ASSERT_NOT_NULL(modified);
-    HU_ASSERT_GT(modified_len, (size_t)0);
+    HU_ASSERT_GT(total, (size_t)0);
 
-    /* The refusal template MUST be the canonical UNKNOWN_FACT string —
-     * tests + channel renderer share this source of truth. */
-    char expected[256];
-    hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, expected, sizeof(expected));
-    HU_ASSERT_EQ(strcmp(modified, expected), 0);
+    /* Pass-through: NO substitution. The caller keeps its own draft. */
+    HU_ASSERT(modified == NULL);
+    HU_ASSERT_EQ(modified_len, (size_t)0);
 
-    /* The refusal MUST replace the draft, not concatenate with it. */
-    HU_ASSERT(strstr(modified, "Paris") == NULL);
-    HU_ASSERT(strstr(modified, "Earth") == NULL);
-
-    A()->free(A()->ctx, modified, modified_len + 1);
     cleanup(g, f);
 }
 
@@ -350,11 +346,9 @@ static void w11_telemetry_does_not_render_refusal(void) {
     const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
     hu_w11_outcome_t outc = HU_W11_OUTCOME_SUPPORTED;
     /* Pass NULL for the modified-out pair → telemetry-only path. */
-    HU_ASSERT_EQ(
-        hu_w11_self_rag_verify(f, A(), "u_abstain_t", 11, draft, strlen(draft),
-                               1 /* TELEMETRY */, 0, &outc, NULL, NULL, NULL,
-                               NULL),
-        HU_OK);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u_abstain_t", 11, draft, strlen(draft),
+                                        1 /* TELEMETRY */, 0, &outc, NULL, NULL, NULL, NULL),
+                 HU_OK);
     HU_ASSERT_EQ(outc, HU_W11_OUTCOME_ABSTAINED);
     cleanup(g, f);
 }
@@ -363,18 +357,18 @@ static void w11_rejects_invalid_args(void) {
     hu_graph_t *g = NULL;
     hu_w7_facade_t *f = NULL;
     open_graph_and_facade(&g, &f);
-    HU_ASSERT_EQ(hu_w11_self_rag_verify(NULL, A(), "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
-                                         NULL),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, NULL, "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
-                                         NULL),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), NULL, 0, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
-                                         NULL),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u", 1, NULL, 0, 1, 0, NULL, NULL, NULL, NULL,
-                                         NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(NULL, A(), "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(f, NULL, "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(f, A(), NULL, 0, "x", 1, 1, 0, NULL, NULL, NULL, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(f, A(), "u", 1, NULL, 0, 1, 0, NULL, NULL, NULL, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
     cleanup(g, f);
 }
 
@@ -544,8 +538,8 @@ static void bridge_render_with_persona_ctx_emits_interaction_style(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
-                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -572,8 +566,8 @@ static void bridge_render_without_persona_ctx_omits_interaction_style(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
-                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -608,8 +602,8 @@ static void bridge_render_with_persona_no_overlay_falls_back_to_identity_only(vo
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
-                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -642,8 +636,8 @@ static void bridge_render_with_persona_ctx_null_persona_skips_merge(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
-                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -681,8 +675,7 @@ static const hu_tool_vtable_t story_f1_fake_vtable = {
     .name = story_f1_fake_tool_name,
 };
 
-static void story_f1_make_tool(hu_tool_t *out, story_f1_fake_tool_ctx_t *ctx,
-                               const char *name) {
+static void story_f1_make_tool(hu_tool_t *out, story_f1_fake_tool_ctx_t *ctx, const char *name) {
     ctx->name = name;
     out->ctx = ctx;
     out->vtable = &story_f1_fake_vtable;
@@ -717,9 +710,8 @@ static void bridge_render_with_self_capabilities_emits_section(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -766,9 +758,8 @@ static void bridge_render_without_tools_omits_capabilities_section(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -819,9 +810,8 @@ static void bridge_render_capabilities_dedups_and_caps_at_six(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -847,7 +837,8 @@ static void bridge_render_capabilities_dedups_and_caps_at_six(void) {
     HU_ASSERT_NOT_NULL(line_end);
     int shell_count = 0;
     for (const char *p = body; p < line_end; p++) {
-        if (strncmp(p, "shell", 5) == 0) shell_count++;
+        if (strncmp(p, "shell", 5) == 0)
+            shell_count++;
     }
     HU_ASSERT_EQ(shell_count, 1);
 
@@ -872,10 +863,9 @@ static void bridge_render_capabilities_dedups_and_caps_at_six(void) {
 /* Helper: open graph + w7 facade (existing pattern). Returns a fresh
  * contact_id seeded with two entities. */
 static void story_c_seed_two_entities(hu_graph_t *g, const char *cid, size_t cid_len,
-                                       int64_t *out_a, int64_t *out_b) {
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, cid, cid_len, "alice", 5, HU_ENTITY_PERSON, NULL, out_a),
-        HU_OK);
+                                      int64_t *out_a, int64_t *out_b) {
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, cid_len, "alice", 5, HU_ENTITY_PERSON, NULL, out_a),
+                 HU_OK);
     HU_ASSERT_EQ(
         hu_graph_upsert_entity(g, cid, cid_len, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, out_b),
         HU_OK);
@@ -889,28 +879,26 @@ static void bridge_render_with_recent_changes_emits_section(void) {
     const char *cid = "ut_storyc_yes";
     int64_t alice = 0, acme = 0, globex = 0;
     story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, cid, strlen(cid), "globex", 6,
-                                HU_ENTITY_ORGANIZATION, NULL, &globex),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), "globex", 6, HU_ENTITY_ORGANIZATION,
+                                        NULL, &globex),
+                 HU_OK);
 
     /* Insert relation A (alice works_at acme), then B (alice works_at globex)
      * with a later event_start. The bitemporal conflict resolver should
      * supersede A with B, leaving A retracted and B carrying
      * supersedes_id = A.id. Both feed wm->recent_changes. */
-    HU_ASSERT_EQ(
-        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                     1735689600000LL, 0, 1.0f, "ctx-a", 5, "imessage", 8),
-        HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, globex, HU_REL_WORKS_AT, 1.0f,
-                                     1735776000000LL, 0, 1.0f, "ctx-b", 5, "imessage", 8),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT,
+                                             1.0f, 1735689600000LL, 0, 1.0f, "ctx-a", 5, "imessage",
+                                             8),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, globex, HU_REL_WORKS_AT,
+                                             1.0f, 1735776000000LL, 0, 1.0f, "ctx-b", 5, "imessage",
+                                             8),
+                 HU_OK);
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1735776100000LL, &txt, &tlen,
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1735776100000LL, &txt, &tlen,
                                           NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
@@ -934,15 +922,14 @@ static void bridge_render_with_no_recent_changes_omits_section(void) {
     const char *cid = "ut_storyc_no";
     int64_t alice = 0, acme = 0;
     story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                     1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT,
+                                             1.0f, 1735689600000LL, 0, 1.0f, "ctx", 3, "imessage",
+                                             8),
+                 HU_OK);
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1735689700000LL, &txt, &tlen,
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1735689700000LL, &txt, &tlen,
                                           NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
@@ -972,22 +959,19 @@ static void bridge_render_recent_changes_caps_at_five(void) {
         char org_name[16];
         snprintf(org_name, sizeof(org_name), "org%d", i);
         int64_t org = 0;
-        HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), org_name,
-                                              strlen(org_name), HU_ENTITY_ORGANIZATION,
-                                              NULL, &org),
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), org_name, strlen(org_name),
+                                            HU_ENTITY_ORGANIZATION, NULL, &org),
                      HU_OK);
         int64_t event_start = 1735689600000LL + (int64_t)i * 86400000LL;
-        HU_ASSERT_EQ(
-            hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, org, HU_REL_WORKS_AT,
-                                         1.0f, event_start, 0, 1.0f, "c", 1, "imessage", 8),
-            HU_OK);
+        HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, org, HU_REL_WORKS_AT,
+                                                 1.0f, event_start, 0, 1.0f, "c", 1, "imessage", 8),
+                     HU_OK);
     }
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1735776100000LL + 700000000LL, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1735776100000LL + 700000000LL,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -1033,9 +1017,12 @@ static void story_d_open_all(hu_graph_t **g, hu_memory_facade_t **m, hu_w7_facad
 }
 
 static void story_d_cleanup_all(hu_graph_t *g, hu_memory_facade_t *m, hu_w7_facade_t *f) {
-    if (f) hu_w7_facade_close(f, A());
-    if (m) hu_memory_facade_close(m, A());
-    if (g) hu_graph_close(g, A());
+    if (f)
+        hu_w7_facade_close(f, A());
+    if (m)
+        hu_memory_facade_close(m, A());
+    if (g)
+        hu_graph_close(g, A());
 }
 
 static void bridge_render_with_hyperedges_emits_multi_entity_section(void) {
@@ -1050,8 +1037,7 @@ static void bridge_render_with_hyperedges_emits_multi_entity_section(void) {
         hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
         HU_OK);
     HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, cid, strlen(cid), "bob", 3, HU_ENTITY_PERSON, NULL, &bob),
-        HU_OK);
+        hu_graph_upsert_entity(g, cid, strlen(cid), "bob", 3, HU_ENTITY_PERSON, NULL, &bob), HU_OK);
     HU_ASSERT_EQ(
         hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
         HU_OK);
@@ -1079,8 +1065,7 @@ static void bridge_render_with_hyperedges_emits_multi_entity_section(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL, &txt, &tlen,
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL, &txt, &tlen,
                                           NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
@@ -1110,15 +1095,14 @@ static void bridge_render_with_no_hyperedges_omits_section(void) {
     HU_ASSERT_EQ(
         hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
         HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                     1700000000000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT,
+                                             1.0f, 1700000000000LL, 0, 1.0f, "ctx", 3, "imessage",
+                                             8),
+                 HU_OK);
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000001000LL, &txt, &tlen,
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000001000LL, &txt, &tlen,
                                           NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
@@ -1164,8 +1148,7 @@ static void bridge_render_hyperedge_member_not_in_entities_renders_id_fallback(v
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000001000LL, &txt, &tlen,
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000001000LL, &txt, &tlen,
                                           NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
@@ -1229,12 +1212,10 @@ static void bridge_render_with_self_model_emits_section(void) {
      * self_model.focused_topics (top-3 ';'-joined). */
     int64_t a = 0, b = 0;
     HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, cid, strlen(cid), "tea-house", 9, HU_ENTITY_PLACE,
-                                NULL, &a),
+        hu_graph_upsert_entity(g, cid, strlen(cid), "tea-house", 9, HU_ENTITY_PLACE, NULL, &a),
         HU_OK);
     HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, cid, strlen(cid), "ringo-bell", 10, HU_ENTITY_PERSON,
-                                NULL, &b),
+        hu_graph_upsert_entity(g, cid, strlen(cid), "ringo-bell", 10, HU_ENTITY_PERSON, NULL, &b),
         HU_OK);
     /* Give the snapshot a render-trigger so we reach the merge step. */
     story_b_seed_negative(g, cid, strlen(cid));
@@ -1251,9 +1232,8 @@ static void bridge_render_with_self_model_emits_section(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -1282,9 +1262,8 @@ static void bridge_render_with_empty_self_model_omits_section(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -1320,9 +1299,8 @@ static void bridge_render_self_confidence_bucket_high_vs_medium(void) {
 
         char *txt = NULL;
         size_t tlen = 0;
-        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                              1700000000000LL + 1000, &txt, &tlen,
-                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                              &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                      HU_OK);
         HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: high"));
         HU_ASSERT(strstr(txt, "Self-confidence: medium") == NULL);
@@ -1349,9 +1327,8 @@ static void bridge_render_self_confidence_bucket_high_vs_medium(void) {
 
         char *txt = NULL;
         size_t tlen = 0;
-        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                              1700000000000LL + 1000, &txt, &tlen,
-                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                              &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                      HU_OK);
         HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: medium"));
         HU_ASSERT(strstr(txt, "Self-confidence: high") == NULL);
@@ -1387,9 +1364,8 @@ static void bridge_render_self_model_partial_fields_renders_only_present(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -1412,15 +1388,14 @@ static void bridge_render_self_model_partial_fields_renders_only_present(void) {
 #include <sqlite3.h>
 
 static void story_f2_ensure_emotional_residue_table_(struct sqlite3 *db) {
-    static const char *kCreate =
-        "CREATE TABLE IF NOT EXISTS emotional_residue("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "episode_id INTEGER,"
-        "contact_id TEXT NOT NULL,"
-        "valence REAL NOT NULL,"
-        "intensity REAL NOT NULL,"
-        "decay_rate REAL DEFAULT 0.1,"
-        "created_at INTEGER NOT NULL)";
+    static const char *kCreate = "CREATE TABLE IF NOT EXISTS emotional_residue("
+                                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                 "episode_id INTEGER,"
+                                 "contact_id TEXT NOT NULL,"
+                                 "valence REAL NOT NULL,"
+                                 "intensity REAL NOT NULL,"
+                                 "decay_rate REAL DEFAULT 0.1,"
+                                 "created_at INTEGER NOT NULL)";
     sqlite3_stmt *stmt = NULL;
     HU_ASSERT_EQ(sqlite3_prepare_v2(db, kCreate, -1, &stmt, NULL), 0);
     HU_ASSERT_EQ(sqlite3_step(stmt), 101);
@@ -1450,9 +1425,8 @@ static void bridge_render_self_model_f2_recent_tools_emits_line(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
@@ -1476,8 +1450,7 @@ static void bridge_render_self_model_f2_emotional_register_emits_line(void) {
     HU_ASSERT_NOT_NULL(db);
     story_f2_ensure_emotional_residue_table_(db);
     int64_t rid = 0;
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, cid, strlen(cid), -0.9, 0.9, 0.05, &rid),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, cid, strlen(cid), -0.9, 0.9, 0.05, &rid), HU_OK);
 
     hu_persona_t persona;
     hu_persona_overlay_t overlay;
@@ -1490,9 +1463,8 @@ static void bridge_render_self_model_f2_emotional_register_emits_line(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
@@ -1513,9 +1485,8 @@ static void bridge_render_self_model_f2_omit_when_no_f2_signal(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(strstr(txt, "Tools I've used recently:") == NULL);
@@ -1551,9 +1522,8 @@ static void bridge_render_self_model_f2_partial_tools_only(void) {
 
     char *txt = NULL;
     size_t tlen = 0;
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
-                                          1700000000000LL + 1000, &txt, &tlen,
-                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000, &txt,
+                                          &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_NOT_NULL(strstr(txt, "Tools I've used recently:"));
@@ -1564,7 +1534,6 @@ static void bridge_render_self_model_f2_partial_tools_only(void) {
     A()->free(A()->ctx, txt, tlen + 1);
     cleanup(g, f);
 }
-
 
 #endif /* HU_ENABLE_SQLITE */
 
@@ -1581,7 +1550,7 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_with_personal_model_includes_style);
     HU_RUN_TEST(w11_off_mode_is_noop);
     HU_RUN_TEST(w11_telemetry_extracts_claims_without_modifying);
-    HU_RUN_TEST(w11_abstain_emits_refusal_text_through_bridge);
+    HU_RUN_TEST(w11_abstain_passes_draft_through_bridge);
     HU_RUN_TEST(w11_telemetry_does_not_render_refusal);
     HU_RUN_TEST(w11_rejects_invalid_args);
     HU_RUN_TEST(w14_scheduler_open_close_clean);

@@ -1606,9 +1606,17 @@ hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t 
     if (outcome == HU_W11_OUTCOME_ABSTAINED)
         agent->self_rag_abstentions++;
 
-    if (can_swap && modified && modified_len > 0) {
-        if (outcome == HU_W11_OUTCOME_ABSTAINED)
-            agent->self_rag_refusals_rendered++;
+    /* Defense-in-depth (Dermot humanness recovery, AC-1): never swap the
+     * outbound on a score-based ABSTAINED. The bridge already passes those
+     * through (modified == NULL), but if a future backend regresses and hands
+     * back a refusal template, we drop it here rather than send a canned
+     * "I don't have memory backing this" reply. HEDGED/REWRITTEN drafts are
+     * legitimate content rewrites and ARE swapped — but they are not refusals,
+     * so `self_rag_refusals_rendered` is NOT bumped here. Post-fix the only
+     * path that renders a refusal into the outbound is the policy-refusal path
+     * (agent_stream.c), so the divergence between abstentions and
+     * refusals_rendered is a useful operator signal. */
+    if (can_swap && modified && modified_len > 0 && outcome != HU_W11_OUTCOME_ABSTAINED) {
         *swapped_out = modified;
         if (swapped_len_out)
             *swapped_len_out = modified_len;

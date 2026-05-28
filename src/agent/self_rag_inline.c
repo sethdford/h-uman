@@ -522,8 +522,12 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc, const hu_self
                 has_negative_mem ? HU_REFUSAL_NEGATIVE_MEMORY_MATCH : HU_REFUSAL_LOW_CONFIDENCE;
             hu_self_rag_render_refusal(reason, resp->refusal_text, sizeof(resp->refusal_text));
             resp->outcome = HU_SELF_RAG_ABSTAINED;
-            snprintf(resp->modified_draft, sizeof(resp->modified_draft), "%s", resp->refusal_text);
-            resp->draft_modified = true;
+            /* Score-based abstention is PASSED THROUGH: leave modified_draft
+             * empty and draft_modified false so no consumer swaps the canned
+             * refusal template into the outbound. The outcome + refusal_text
+             * are still reported for telemetry. Policy refusals (the `refused`
+             * branch above) keep substituting. (Dermot humanness recovery,
+             * AC-1.) */
             return HU_OK;
         }
     }
