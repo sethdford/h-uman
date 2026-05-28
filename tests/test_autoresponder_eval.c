@@ -7,9 +7,11 @@
  * Output: JSON per-contact breakdown.
  */
 
-#include "human/persona/eval_rubric.h"
-
 #include "test_framework.h"
+
+#ifdef HU_ENABLE_SQLITE
+
+#include "human/persona/eval_rubric.h"
 
 #include <sqlite3.h>
 #include <stdio.h>
@@ -454,3 +456,11 @@ void run_autoresponder_eval_tests(void) {
     /* Integration test */
     HU_RUN_TEST(test_autoresponder_eval_framework_valid);
 }
+
+#else /* !HU_ENABLE_SQLITE — stub runner so the symbol resolves at link time. */
+
+void run_autoresponder_eval_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_SQLITE */
