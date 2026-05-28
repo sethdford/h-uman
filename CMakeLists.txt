@@ -3770,7 +3770,11 @@ list(APPEND HU_TEST_SOURCES
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /
     # static-analysis / no-ML builds.
-    tests/test_molora_router.c
+    # NOTE: tests/test_molora_router.c (old Sprint-7 ml/molora router) was
+    # removed when its source (src/ml/molora.c, include/human/ml/molora.h)
+    # was deleted. The successor design lives in src/agent/molora_dispatcher.c
+    # on the molora-daemon-wiring track; this de-registration unblocks the
+    # configure step (the file no longer exists on disk).
     tests/test_contact_send_recency.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are
