@@ -20,14 +20,14 @@ Canonical reference for every iMessage platform capability, our implementation s
 | **Classic tapback (send)** | Very high (70%+ of users) | JXA + AX automation | Implemented (fragile) | High | Requires AX permission, varies by macOS version. `HU_IMESSAGE_TAPBACK_ENABLED` opt-in. |
 | **Classic tapback (read)** | Very high | chat.db types 2000-2005 | Implemented | — | `hu_imessage_build_tapback_context()` |
 | **Custom emoji reaction (read)** | Growing (iOS 17+) | chat.db type 2006 | **Implemented** (this overhaul) | — | Added in this overhaul, aggregated in tapback context |
-| **Custom emoji reaction (send)** | Growing | imsg CLI or private API | **Blocked** | Medium | imsg CLI accepts emoji directly as `--reaction` value (e.g., `-r 🎉`); requires vtable extension to carry emoji string through `react()` |
+| **Custom emoji reaction (send)** | Growing | imsg CLI `--reaction` or AX sub-picker | **Implemented** | Medium | `hu_imessage_react_emoji_with_fallback` (vtable `react_emoji`), wired in dispatcher at `daemon.c:1061`/`:1085`. imsg CLI emoji `--reaction` preferred; AX emoji sub-picker fallback; nearest-classic-tapback last resort. |
 | **Proactive image generation** | High | DALL-E 3 + iMessage attachment | **Implemented** | — | 2% trigger, LLM prompt → DALL-E → download → send as attachment |
 | **Read receipts (read)** | ~77% of users enable | chat.db date_read column | Implemented | — | `hu_imessage_build_read_receipt_context()` |
 | **Read receipts (send)** | — | No public API | Not possible | — | Apple controls this per-contact |
 | **Typing indicator (send)** | High (humanizing) | System Events AX automation | **Implemented** (AX-based) | — | System Events AX automation: focus Messages.app input field + keystroke to trigger real '...' bubble. No private entitlements needed. Requires Accessibility permission. |
 | **Typing indicator (read)** | — | No public API | Not possible | — | Ephemeral, not stored in chat.db |
 | **Inline reply (read)** | Moderate | chat.db thread_originator_guid | Implemented | — | `hu_imessage_lookup_message_by_guid()` |
-| **Inline reply (send)** | Moderate | No public API | Not possible | — | Neither AppleScript nor imsg support this |
+| **Inline reply (send)** | Moderate | AX automation (3-tier) | **Implemented** (fragile) | High | `hu_imessage_reply` (vtable `reply`), wired in dispatcher at `daemon.c:1022`. 3-tier: Cmd-R via CGEvent → AX Show Menu→"Reply" → flat-send fallback (one-shot WARN). Real AX workers compile only under `HU_IMESSAGE_TAPBACK_ENABLED`; requires Accessibility permission, else degrades to flat send. |
 | **Edit message (send)** | 1 in 50 messages | Not feasible (see investigation) | Not implemented | — | See `imessage-edit-feasibility.md`. IMCore private API only. |
 | **Unsend message** | 1 in 50 messages | Partially feasible (AX automation) | Not implemented | Low | See `imessage-unsend-feasibility.md`. 2-minute window, fragile. |
 | **Abandoned typing** | Humanizing pattern | Not feasible (see investigation) | Not implemented | — | See `imessage-abandoned-typing-feasibility.md` |
@@ -37,7 +37,7 @@ Canonical reference for every iMessage platform capability, our implementation s
 | **Message effects (read)** | Common | chat.db expressive_send_style_id | **Implemented** (this overhaul) | — | Detects all 13 bubble/screen effects (Slam, Loud, Gentle, Invisible Ink, Confetti, Echo, Fireworks, Happy Birthday, Heart, Lasers, Shooting Star, Sparkles, Spotlight) and shows `[Sent with <effect>]` prefix in content. |
 | **Message effects (send)** | Common | No public API | Not possible | — | Neither AppleScript nor imsg CLI supports sending effects. imessage-rs and Advanced iMessage Kit do via private API (requires SIP disabled). |
 | **Sticker/Memoji (read)** | 1B+ Memoji weekly, 40% created | chat.db balloon_bundle_id | **Implemented** (this overhaul) | — | Detects stickers, Memoji, and iMessage apps via `balloon_bundle_id` in poll output. Shows [Sticker], [Memoji], or [iMessage App] in content. |
-| **Sticker/Memoji (send)** | — | No public API | Not possible | — | No AppleScript/CLI path |
+| **Sticker/Memoji (send)** | — | No public API | Not possible | — | No AppleScript/JXA/imsg/BlueBubbles path (verified, see `imessage-sticker-memoji-feasibility.md`). Vtable `send_sticker` is explicitly **NULL**; `hu_imessage_send_sticker` is a tested probe that returns `HU_ERR_NOT_SUPPORTED`. Expressive images go via the regular `.send` attachment path (renders as an image bubble, not a native sticker). |
 | **Group chat (send)** | High | AppleScript (via chat name) | Implemented | — | Works with group chat identifiers |
 | **Group chat (poll)** | High | chat.db | Implemented | — | Polls from all chats |
 | **Contact allow-list** | — | Internal | Implemented | — | `allow_from` filter in create() |
@@ -50,7 +50,7 @@ Canonical reference for every iMessage platform capability, our implementation s
 
 | Tool | Tapback Send | Typing | Edit | Unsend | Inline Reply | Speed | API Type |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Our implementation** | imsg react (preferred) or JXA+AX | Yes (AX) | No | No | No | <1s send (imsg) | imsg CLI + AppleScript fallback |
+| **Our implementation** | imsg react (preferred) or JXA+AX; arbitrary emoji via `react_emoji` | Yes (AX) | No | No | Yes (AX 3-tier, fragile) | <1s send (imsg) | imsg CLI + AppleScript/AX fallback |
 | **imsg v0.5.0** | Yes (`react` cmd) | Broken (macOS 26) | No | No | No | <1s send | AppleScript + Swift |
 | **imsg-bridge** | Via imsg | Broken | No | No | No | ~1.2s avg | REST wrapper around imsg |
 | **BlueBubbles** | Yes | Yes | Yes (private API) | Yes (private API) | Yes | ~2s | Private IMCore |
