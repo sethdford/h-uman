@@ -27,6 +27,7 @@
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
 #ifdef HU_ENABLE_SQLITE
@@ -10454,6 +10455,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
 
+                /* T4 (AC-2): hoisted out of the routing block below so the post-turn
+                 * local->cloud fallback (further down, outside the HU_IS_TEST guard)
+                 * can read the routing config and the selected tier. The producer
+                 * block populates them only under #ifndef HU_IS_TEST; in test builds
+                 * they stay zeroed, so mlx_local_model==NULL => used_local==false =>
+                 * the fallback branch is never entered. */
+                hu_model_router_config_t mr_cfg = {0};
+                hu_model_selection_t sel = {0};
+
                 /* Adaptive model selection: route to optimal model + thinking budget
                  * based on message content, relationship, and time of day */
 #ifndef HU_IS_TEST
@@ -10464,7 +10474,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         strlen(config->agent.s3_local_model);
                 }
                 {
-                    hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+                    mr_cfg = hu_model_router_default_config();
                     if (config && config->agent.mr_reflexive_model) {
                         mr_cfg.reflexive_model = config->agent.mr_reflexive_model;
                         mr_cfg.reflexive_model_len = strlen(config->agent.mr_reflexive_model);
@@ -10498,16 +10508,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * this adds at most one HTTP round-trip per minute to the
                      * route path. On unhealthy/unreachable, mlx_local_healthy
                      * stays false and routing falls back to cloud Gemini. */
-                    if (config && config->agent.mr_mlx_local_enabled &&
+                    /* AC-1: route by the tri-state mlx_local_routing policy (default
+                     * AUTO). Anything but OFF, with a configured local model, is a
+                     * candidate; the health probe (adapter file present + MLX server
+                     * reachable) sets mlx_local_healthy, and the router applies the
+                     * AUTO/FORCE policy. Cloud-only users (no mr_mlx_local_model) skip
+                     * this block entirely, so the AUTO default never regresses them. */
+                    if (config && config->agent.mlx_local_routing != HU_MLX_LOCAL_ROUTING_OFF &&
                         config->agent.mr_mlx_local_model) {
-                        const char *mlx_url = hu_config_get_provider_base_url(config, "mlx_local");
-                        if (mlx_url && mlx_url[0]) {
-                            mr_cfg.mlx_local_enabled = true;
-                            mr_cfg.mlx_local_model = config->agent.mr_mlx_local_model;
-                            mr_cfg.mlx_local_model_len = strlen(config->agent.mr_mlx_local_model);
-                            mr_cfg.mlx_local_healthy =
-                                hu_mlx_admin_probe_health(agent->alloc, mlx_url, strlen(mlx_url));
-                        }
+                        mr_cfg.mlx_local_routing = config->agent.mlx_local_routing;
+                        mr_cfg.mlx_local_enabled = true;
+                        mr_cfg.mlx_local_model = config->agent.mr_mlx_local_model;
+                        mr_cfg.mlx_local_model_len = strlen(config->agent.mr_mlx_local_model);
+                        hu_model_router_health_probe(agent->alloc, config, &mr_cfg);
                     }
 #endif
                     const char *rel = NULL;
@@ -10520,7 +10533,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             rel_len = strlen(cp_mr->relationship);
                         }
                     }
-                    hu_model_selection_t sel;
                     if (config && config->agent.mr_judge_enabled && !llm_decides) {
                         static hu_route_cache_t judge_cache;
                         static bool judge_cache_inited = false;
@@ -11009,6 +11021,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 
                 bool retried = false;
+                bool local_fallback_done = false; /* T4 (AC-2): one local→cloud retry per turn */
                 char *turing_rejected_resp = NULL;
                 size_t turing_rejected_len = 0;
                 hu_log_info("human", agent ? agent->observer : NULL,
@@ -11131,6 +11144,41 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "agent turn result: err=%s response_len=%zu for %.*s",
                                 hu_error_string(err), response_len,
                                 (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    /* T4 (AC-2): if the local-voice model errored or returned empty,
+                     * fall back to the tier's cloud model exactly once so a downed or
+                     * slow MLX server never silences the turn. Uses its own flag (not
+                     * `retried`) so it does not consume the quality/guard retry budget;
+                     * the do{}while loop re-runs the turn with the swapped model. */
+                    {
+                        bool used_local = mr_cfg.mlx_local_model && agent->turn_model &&
+                                          agent->turn_model_len == mr_cfg.mlx_local_model_len &&
+                                          strncmp(agent->turn_model, mr_cfg.mlx_local_model,
+                                                  mr_cfg.mlx_local_model_len) == 0;
+                        if (!local_fallback_done && used_local &&
+                            (err != HU_OK || !response || response_len == 0)) {
+                            local_fallback_done = true;
+                            size_t fb_len = 0;
+                            const char *fb =
+                                hu_model_route_cloud_fallback(&mr_cfg, sel.tier, &fb_len);
+                            if (fb && fb_len > 0) {
+                                hu_log_warn(
+                                    "human", agent ? agent->observer : NULL,
+                                    "local-voice path failed (err=%s len=%zu) for %.*s — falling "
+                                    "back to cloud model %.*s",
+                                    hu_error_string(err), response_len,
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key, (int)fb_len, fb);
+                                agent->turn_model = fb;
+                                agent->turn_model_len = fb_len;
+                                if (response) {
+                                    agent->alloc->free(agent->alloc->ctx, response,
+                                                       response_len + 1);
+                                    response = NULL;
+                                    response_len = 0;
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     /* L4 multimodal shadow-logging (2026-05-19).
                      *
                      * Run the predicate against the inbound message; log

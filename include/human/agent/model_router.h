@@ -58,10 +58,18 @@ typedef struct hu_model_router_config {
      * 31B trades base reasoning for voice — see lora-scale-default-or-die). The
      * router is a pure function: the caller probes the server (hu_mlx_local_probe)
      * and sets mlx_local_healthy before routing, mirroring on_device_available. */
-    bool mlx_local_enabled;      /* operator opt-in; default false */
+    bool mlx_local_enabled;      /* legacy operator opt-in; default false. Kept for
+                                  * back-compat: when set without an explicit routing
+                                  * mode it is treated as AUTO by the router. */
     bool mlx_local_healthy;      /* caller-set probe result; false = fall back to cloud */
     const char *mlx_local_model; /* local adapter identifier the mlx provider knows */
     size_t mlx_local_model_len;
+    /* Tri-state routing policy (hu_mlx_local_routing_t: 0=OFF, 1=AUTO, 2=FORCE).
+     * OFF never routes local; AUTO routes local for REFLEXIVE/CONVERSATIONAL when
+     * mlx_local_healthy; FORCE routes local for those tiers regardless of health
+     * (the turn-level cloud fallback handles a downed server). Stored as int to
+     * keep this header free of the config_types.h include. */
+    int mlx_local_routing;
 } hu_model_router_config_t;
 
 /* Analyze message content and context to select the optimal model + thinking budget.
@@ -73,6 +81,13 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const c
 
 /* Initialize config with sensible Gemini defaults */
 hu_model_router_config_t hu_model_router_default_config(void);
+
+/* Cloud fallback model for a tier (AC-2). When a local-voice turn fails or
+ * returns empty, the caller retries on the cloud model for that tier. Returns
+ * the configured model (reflexive/conversational/analytical/deep) and writes its
+ * length to *out_len (may be NULL). Returns NULL only for a NULL cfg. */
+const char *hu_model_route_cloud_fallback(const hu_model_router_config_t *cfg,
+                                          hu_cognitive_tier_t tier, size_t *out_len);
 
 /* Check whether the on-device model is sufficient for a given tier.
  * Currently returns true only for REFLEXIVE (short acks, simple greetings).

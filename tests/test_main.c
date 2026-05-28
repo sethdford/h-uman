@@ -268,6 +268,7 @@ void run_doctor_check_provider_tests(void);
 void run_doctor_exit_codes_tests(void);
 void run_doctor_json_output_tests(void);
 void run_doctor_reaction_collection_wired_tests(void);
+void run_doctor_local_voice_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
 void run_cron_session_tools_tests(void);
@@ -1181,6 +1182,7 @@ int main(int argc, char **argv) {
     run_doctor_exit_codes_tests();
     run_doctor_json_output_tests();
     run_doctor_reaction_collection_wired_tests();
+    run_doctor_local_voice_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();
     run_cron_session_tools_tests();

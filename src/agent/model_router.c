@@ -1,4 +1,5 @@
 #include "human/agent/model_router.h"
+#include "human/config_types.h" /* hu_mlx_local_routing_t enum constants */
 #include "human/provider.h"
 #include <ctype.h>
 #include <pthread.h>
@@ -145,6 +146,36 @@ hu_model_router_config_t hu_model_router_default_config(void) {
     return cfg;
 }
 
+const char *hu_model_route_cloud_fallback(const hu_model_router_config_t *cfg,
+                                          hu_cognitive_tier_t tier, size_t *out_len) {
+    const char *model = NULL;
+    size_t len = 0;
+    if (cfg) {
+        switch (tier) {
+        case HU_TIER_REFLEXIVE:
+            model = cfg->reflexive_model;
+            len = cfg->reflexive_model_len;
+            break;
+        case HU_TIER_ANALYTICAL:
+            model = cfg->analytical_model;
+            len = cfg->analytical_model_len;
+            break;
+        case HU_TIER_DEEP:
+            model = cfg->deep_model;
+            len = cfg->deep_model_len;
+            break;
+        case HU_TIER_CONVERSATIONAL:
+        default:
+            model = cfg->conversational_model;
+            len = cfg->conversational_model_len;
+            break;
+        }
+    }
+    if (out_len)
+        *out_len = model ? len : 0;
+    return model;
+}
+
 bool hu_model_router_on_device_suitable(hu_cognitive_tier_t tier) {
     return tier == HU_TIER_REFLEXIVE;
 }
@@ -225,8 +256,17 @@ static void maybe_override_to_on_device(hu_model_selection_t *sel,
  * intended path). force_on_device still governs ANALYTICAL/DEEP. */
 static void maybe_override_to_mlx_local(hu_model_selection_t *sel,
                                         const hu_model_router_config_t *cfg) {
-    if (!cfg->mlx_local_enabled || !cfg->mlx_local_healthy || !cfg->mlx_local_model ||
-        cfg->mlx_local_model_len == 0)
+    if (!cfg->mlx_local_model || cfg->mlx_local_model_len == 0)
+        return;
+    /* Tri-state routing policy (AC-1). Back-compat: a caller that set the legacy
+     * mlx_local_enabled flag but left routing at the zero value (OFF) is treated
+     * as AUTO, preserving the prior "route local when healthy" behavior. */
+    int mode = cfg->mlx_local_routing;
+    if (mode == HU_MLX_LOCAL_ROUTING_OFF && cfg->mlx_local_enabled)
+        mode = HU_MLX_LOCAL_ROUTING_AUTO;
+    bool route_local = (mode == HU_MLX_LOCAL_ROUTING_FORCE) ||
+                       (mode == HU_MLX_LOCAL_ROUTING_AUTO && cfg->mlx_local_healthy);
+    if (!route_local)
         return;
     if (sel->tier == HU_TIER_REFLEXIVE || sel->tier == HU_TIER_CONVERSATIONAL) {
         sel->model = cfg->mlx_local_model;

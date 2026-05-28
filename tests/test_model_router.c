@@ -1,4 +1,5 @@
 #include "human/agent/model_router.h"
+#include "human/config_types.h" /* HU_MLX_LOCAL_ROUTING_* */
 #include "human/core/allocator.h"
 #include "human/provider.h"
 #include "test_framework.h"
@@ -32,6 +33,85 @@ static void default_models_are_not_deprecated(void) {
     HU_ASSERT(strstr(cfg.analytical_model, "gemini-3-flash-preview") == NULL);
     /* deep tier stays on the canonical pro-preview id (not the discontinued one) */
     HU_ASSERT(strstr(cfg.deep_model, "gemini-3-pro-preview") == NULL);
+}
+
+/* ── AC-1: mlx_local tri-state routing ─────────────────────────────────── */
+
+static const char *const seth_local = "seth-local-lora";
+
+static hu_model_router_config_t make_mlx_cfg(int routing, bool healthy) {
+    hu_model_router_config_t c = hu_model_router_default_config();
+    c.mlx_local_model = seth_local;
+    c.mlx_local_model_len = strlen(seth_local);
+    c.mlx_local_routing = routing;
+    c.mlx_local_healthy = healthy;
+    return c;
+}
+
+static void mlx_routing_auto_healthy_routes_local(void) {
+    cfg = make_mlx_cfg(HU_MLX_LOCAL_ROUTING_AUTO, true);
+    hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+    HU_ASSERT_STR_EQ(sel.model, seth_local);
+}
+
+static void mlx_routing_auto_unhealthy_stays_cloud(void) {
+    cfg = make_mlx_cfg(HU_MLX_LOCAL_ROUTING_AUTO, false);
+    hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
+    HU_ASSERT(strcmp(sel.model, seth_local) != 0); /* cloud fallback */
+}
+
+static void mlx_routing_off_never_local(void) {
+    cfg = make_mlx_cfg(HU_MLX_LOCAL_ROUTING_OFF, true);
+    hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
+    HU_ASSERT(strcmp(sel.model, seth_local) != 0);
+}
+
+static void mlx_routing_force_routes_local_even_unhealthy(void) {
+    cfg = make_mlx_cfg(HU_MLX_LOCAL_ROUTING_FORCE, false);
+    hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
+    HU_ASSERT_STR_EQ(sel.model, seth_local);
+}
+
+static void mlx_routing_analytical_stays_cloud(void) {
+    cfg = make_mlx_cfg(HU_MLX_LOCAL_ROUTING_FORCE, true);
+    /* Deep/emotional message routes ANALYTICAL+; local 31B trades reasoning for
+     * voice, so those tiers stay on the cloud model even under FORCE. */
+    const char *msg =
+        "I don't know what to do. Mom passed away last night and I'm terrified of what comes next";
+    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "family", 6, 2, 5);
+    HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
+    HU_ASSERT(strcmp(sel.model, seth_local) != 0);
+}
+
+static void mlx_routing_legacy_enabled_acts_as_auto(void) {
+    cfg = hu_model_router_default_config();
+    cfg.mlx_local_model = seth_local;
+    cfg.mlx_local_model_len = strlen(seth_local);
+    cfg.mlx_local_enabled = true; /* legacy flag, routing left at 0 (OFF) */
+    cfg.mlx_local_healthy = true;
+    hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
+    HU_ASSERT_STR_EQ(sel.model, seth_local);
+}
+
+static void cloud_fallback_maps_each_tier(void) {
+    cfg = hu_model_router_default_config();
+    size_t len = 0;
+    const char *conv = hu_model_route_cloud_fallback(&cfg, HU_TIER_CONVERSATIONAL, &len);
+    HU_ASSERT_STR_EQ(conv, cfg.conversational_model);
+    HU_ASSERT_EQ(len, cfg.conversational_model_len);
+    HU_ASSERT_STR_EQ(hu_model_route_cloud_fallback(&cfg, HU_TIER_REFLEXIVE, NULL),
+                     cfg.reflexive_model);
+    HU_ASSERT_STR_EQ(hu_model_route_cloud_fallback(&cfg, HU_TIER_ANALYTICAL, NULL),
+                     cfg.analytical_model);
+    HU_ASSERT_STR_EQ(hu_model_route_cloud_fallback(&cfg, HU_TIER_DEEP, NULL), cfg.deep_model);
+}
+
+static void cloud_fallback_null_cfg_is_safe(void) {
+    size_t len = 7;
+    const char *m = hu_model_route_cloud_fallback(NULL, HU_TIER_CONVERSATIONAL, &len);
+    HU_ASSERT(m == NULL);
+    HU_ASSERT_EQ(len, (size_t)0);
 }
 
 static void short_message_routes_reflexive(void) {
@@ -635,6 +715,14 @@ void run_model_router_tests(void) {
 
     HU_RUN_TEST(default_config_has_all_models);
     HU_RUN_TEST(default_models_are_not_deprecated);
+    HU_RUN_TEST(mlx_routing_auto_healthy_routes_local);
+    HU_RUN_TEST(mlx_routing_auto_unhealthy_stays_cloud);
+    HU_RUN_TEST(mlx_routing_off_never_local);
+    HU_RUN_TEST(mlx_routing_force_routes_local_even_unhealthy);
+    HU_RUN_TEST(mlx_routing_analytical_stays_cloud);
+    HU_RUN_TEST(mlx_routing_legacy_enabled_acts_as_auto);
+    HU_RUN_TEST(cloud_fallback_maps_each_tier);
+    HU_RUN_TEST(cloud_fallback_null_cfg_is_safe);
     HU_RUN_TEST(short_message_routes_reflexive);
     HU_RUN_TEST(simple_ack_routes_reflexive);
     HU_RUN_TEST(normal_question_routes_higher);
