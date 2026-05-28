@@ -81,6 +81,48 @@ def cache_key(adapter_path: str | None, fixture_sha: str, probeset_sha: str) -> 
     return f"{adapter_path or 'base'}::{fixture_sha}::{probeset_sha}"
 
 
+def _demo_answer_for_probe(check: dict) -> str:
+    """Best-effort correct answer derived from a probe's check spec, for the
+    no-model --demo path. Deterministic checker types get a real answer; regex
+    types fall through to empty (those probes fail in the demo — illustrative
+    numbers only)."""
+    t = check.get("type")
+    if t == "numeric_equals":
+        return str(check["value"])
+    if t == "json_equals":
+        return json.dumps(check["value"])
+    if t == "exact":
+        return str(check["value"])
+    if t == "json_keys":
+        return json.dumps({k: (True if k == "active" else "x") for k in check["keys"]})
+    return ""
+
+
+def make_demo_generate_fn(probes: list):
+    """A deterministic, no-model generate_fn for --demo. Answers probes from
+    their check specs; for fidelity prompts, the base model sounds more 'AI'
+    (lower shape score) and the adapter sounds casual (higher) so the demo
+    shows a rising curve. Numbers are illustrative, not measured."""
+    probe_ans = {p["prompt"]: _demo_answer_for_probe(p["check"]) for p in probes}
+
+    def fn(model_id, prompt, adapter_path):
+        if prompt in probe_ans:
+            return probe_ans[prompt]
+        if adapter_path:
+            return "haha yeah for sure, what's the move tonight"
+        return "Certainly! I can help with that."
+
+    return fn
+
+
+# Built-in 2-generation manifest for --demo when --manifest is omitted.
+DEMO_MANIFEST = [
+    {"gen": 0, "label": "base", "adapter_path": None, "train_pairs": 0, "ts": None},
+    {"gen": 1, "label": "demo-adapter", "adapter_path": "/demo/adapter",
+     "train_pairs": 500, "ts": None},
+]
+
+
 def measure_generation(
     gen: dict,
     prompts: list,
@@ -182,14 +224,18 @@ def _load_manifest(path: Path) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Longitudinal personalization trajectory harness")
-    ap.add_argument("--manifest", type=Path, required=True,
-                    help="JSON manifest of ordered generations")
+    ap.add_argument("--manifest", type=Path,
+                    help="JSON manifest of ordered generations (optional under --demo)")
     ap.add_argument("--model-id", default=DEFAULT_MODEL)
     ap.add_argument("--held-out-fixture", type=Path, default=DEFAULT_FIXTURE)
     ap.add_argument("--cache-json", type=Path,
                     help="Per-generation measurement cache (read+write)")
     ap.add_argument("--output-json", type=Path, help="Write trajectory.json here")
     ap.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
+    ap.add_argument("--demo", action="store_true",
+                    help="no-model smoke: deterministic stub inference + a built-in 2-gen "
+                         "manifest if --manifest is omitted. Exercises the full pipeline "
+                         "end-to-end (AC-5) without mlx_lm; numbers are illustrative only.")
     args = ap.parse_args()
 
     args.log_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +260,13 @@ def main() -> int:
     probes = load_probes()
     fixture_sha = _sha256_file(args.held_out_fixture)
     probeset_sha = probes_sha256()
-    manifest_gens = _load_manifest(args.manifest)
+
+    if not args.manifest and not args.demo:
+        print("error: --manifest is required (or pass --demo for a no-model smoke)",
+              file=sys.stderr)
+        return 2
+    manifest_gens = _load_manifest(args.manifest) if args.manifest else DEMO_MANIFEST
+    generate_fn = make_demo_generate_fn(probes) if args.demo else default_generate_fn
 
     cache = {}
     if args.cache_json and args.cache_json.exists():
@@ -225,7 +277,7 @@ def main() -> int:
 
     trajectory, cache = run_trajectory(
         manifest_gens, prompts, probes, fixture_sha, probeset_sha,
-        args.model_id, default_generate_fn, cache=cache,
+        args.model_id, generate_fn, cache=cache,
     )
 
     print(f"\n=== TRAJECTORY ({len(trajectory['generations'])} gens) ===", flush=True)

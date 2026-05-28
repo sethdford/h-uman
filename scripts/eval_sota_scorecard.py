@@ -172,9 +172,59 @@ def render_table(summaries, markdown=False):
                       f"{bs['shape_mean']:>5.3f} {ci} {100*bs['non_null_pct']:>8.1f}%")
 
 
+def render_trajectory_lines(trajectory: dict, markdown: bool = False) -> list:
+    """Render the longitudinal personalization-trajectory section from a
+    trajectory.json dict (Dermot SOTA spec T7 / AC-6).
+
+    Pure: takes a dict, returns lines, touches no DB — so it's testable without
+    ~/.human/memory.db. main() prints the joined lines when --trajectory-json
+    is supplied.
+    """
+    gens = trajectory.get("generations", [])
+    verdict = trajectory.get("verdict", "UNKNOWN")
+    gate = trajectory.get("gate", {}) or {}
+    lines: list = []
+
+    if markdown:
+        lines.append("\n## Personalization trajectory (on-device continual learning)\n")
+        lines.append(f"**Verdict: {verdict}**\n")
+        lines.append("| gen | label | fidelity (95% CI) | base-capability | train-pairs |")
+        lines.append("|-----|-------|-------------------|-----------------|-------------|")
+        for g in gens:
+            ci = g.get("fidelity_ci") or [None, None]
+            ci_str = (f"[{ci[0]:.3f}, {ci[1]:.3f}]"
+                      if ci[0] is not None and ci[1] is not None else "—")
+            lines.append(
+                f"| {g.get('gen')} | {g.get('label','')} | "
+                f"{g.get('fidelity_mean', 0):.3f} {ci_str} | "
+                f"{g.get('base_capability', 0):.3f} | {g.get('train_pairs', 0)} |"
+            )
+    else:
+        lines.append("\nPersonalization trajectory (on-device continual learning)")
+        lines.append("-" * 60)
+        lines.append(f"VERDICT: {verdict}")
+        lines.append(f"{'gen':>4} {'label':<14} {'fidelity':>9} {'base_cap':>9} {'pairs':>7}")
+        for g in gens:
+            lines.append(
+                f"{g.get('gen', 0):>4} {str(g.get('label',''))[:14]:<14} "
+                f"{g.get('fidelity_mean', 0):>9.3f} {g.get('base_capability', 0):>9.3f} "
+                f"{g.get('train_pairs', 0):>7}"
+            )
+
+    if verdict != "PASS" and gate.get("failing_axis"):
+        lines.append(
+            f"\nFAILING AXIS: {gate['failing_axis']} at gen {gate.get('failing_gen')}"
+        )
+    for d in gate.get("details", []):
+        lines.append(f"  - {d}")
+    return lines
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--markdown", action="store_true", help="render as markdown table")
+    p.add_argument("--trajectory-json", type=str,
+                   help="path to trajectory.json; appends a personalization-trajectory section")
     args = p.parse_args()
 
     con = sqlite3.connect(DB_PATH)
@@ -203,6 +253,16 @@ def main():
         for suite, delta, pre_m, post_m in impressive:
             relative = (delta / max(pre_m, 0.001)) * 100 if pre_m > 0 else float("inf")
             print(f"  {suite}: mean shape-score {pre_m:.3f} → {post_m:.3f} (+{delta:.3f}, {relative:+.0f}% relative)")
+
+    # Longitudinal personalization trajectory section (Dermot SOTA spec T7).
+    if args.trajectory_json:
+        tpath = Path(args.trajectory_json)
+        if tpath.exists():
+            trajectory = json.loads(tpath.read_text())
+            for line in render_trajectory_lines(trajectory, markdown=args.markdown):
+                print(line)
+        else:
+            print(f"\n[trajectory] no file at {tpath} — run eval_personalization_trajectory.py first")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+{"prompt": "did you ever hear back about that thing?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "can you grab milk on the way back?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "sorry totally spaced on that, my bad", "channel": "imessage", "context": "apology", "source": "synthetic_pii_free"}
+{"prompt": "i'm leaning towards the blue one, thoughts?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "yo you see the game last night?", "channel": "imessage", "context": "greeting", "source": "synthetic_pii_free"}
+{"prompt": "you around this weekend?", "channel": "imessage", "context": "greeting", "source": "synthetic_pii_free"}
+{"prompt": "thanks for covering earlier, owe you one", "channel": "imessage", "context": "gratitude", "source": "synthetic_pii_free"}
+{"prompt": "appreciate you, seriously", "channel": "imessage", "context": "gratitude", "source": "synthetic_pii_free"}
+{"prompt": "ok that's hilarious, i can't", "channel": "imessage", "context": "acknowledgment", "source": "synthetic_pii_free"}
+{"prompt": "that meeting could've been an email lol", "channel": "imessage", "context": "emoji-reaction", "source": "synthetic_pii_free"}
+{"prompt": "they pushed the launch again, classic", "channel": "imessage", "context": "general", "source": "synthetic_pii_free"}
+{"prompt": "you free for a quick call?", "channel": "imessage", "context": "greeting", "source": "synthetic_pii_free"}
+{"prompt": "wanna do dinner thursday instead?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "wanna grab food later?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "good morning, coffee first or gym first?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "ugh today was so long, how was yours?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "kiddo finally slept through the night", "channel": "imessage", "context": "acknowledgment", "source": "synthetic_pii_free"}
+{"prompt": "running a bit late, start without me", "channel": "imessage", "context": "general", "source": "synthetic_pii_free"}
+{"prompt": "feeling kinda off today honestly", "channel": "imessage", "context": "acknowledgment", "source": "synthetic_pii_free"}
+{"prompt": "how'd the dentist go?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "lol no way, send a pic", "channel": "imessage", "context": "emoji-reaction", "source": "synthetic_pii_free"}
+{"prompt": "remind me to email them in the morning", "channel": "imessage", "context": "general", "source": "synthetic_pii_free"}
+{"prompt": "miss you, call when you get a sec", "channel": "imessage", "context": "emotion", "source": "synthetic_pii_free"}
+{"prompt": "did the package show up yet?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}
+{"prompt": "what time are we thinking tomorrow?", "channel": "imessage", "context": "question", "source": "synthetic_pii_free"}

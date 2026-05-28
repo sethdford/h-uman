@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-05-28T17:53:23.967760",
+  "model_id": "mlx-community/gemma-4-31b-it-4bit",
+  "fixture_sha": "e1278caf5227162227e718de11ab450a4cb26574a04f6f28904d5d43b82f0305",
+  "probeset_sha": "e467640fa113c022ea8d4d112070d67baec51746a509e53682a07c4bf5645b77",
+  "generations": [
+    {
+      "gen": 0,
+      "label": "base",
+      "adapter_path": null,
+      "train_pairs": 0,
+      "ts": null,
+      "fidelity_mean": 0.85,
+      "fidelity_ci": [
+        0.85,
+        0.85
+      ],
+      "base_capability": 0.4667,
+      "cached": false
+    },
+    {
+      "gen": 1,
+      "label": "demo-adapter",
+      "adapter_path": "/demo/adapter",
+      "train_pairs": 500,
+      "ts": null,
+      "fidelity_mean": 1.0,
+      "fidelity_ci": [
+        1.0,
+        1.0
+      ],
+      "base_capability": 0.4667,
+      "cached": false
+    }
+  ],
+  "gate": {
+    "verdict": "PASS",
+    "failing_axis": null,
+    "failing_gen": null,
+    "details": [
+      "base_capability preserved at all 2 gens (floor 0.417)",
+      "curve non-decreasing within 1 stderr (running max 1.000)",
+      "final gen 1 fidelity 1.000 >= floor 0.800"
+    ]
+  },
+  "verdict": "PASS",
+  "exit_code": 0
+}

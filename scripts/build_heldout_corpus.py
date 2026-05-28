@@ -84,6 +84,74 @@ def redact(text: str) -> str:
     return text.strip()
 
 
+# Invented, PII-free banter for the SHAREABLE synthetic held-out fixture
+# (Dermot SOTA spec T8 / AC-5). Every entry is deliberately constructed to
+# trigger NONE of the redaction patterns above: no two-capitalized-word name
+# sequences, no long digit runs, no URLs. The is_pii_free() check below proves
+# this property mechanically so the synthetic corpus can ship publicly while the
+# real curve stays on real, on-device held-out data.
+SYNTHETIC_POOL = [
+    "you around this weekend?",
+    "haha that's wild, what happened next?",
+    "wanna grab food later?",
+    "did you ever hear back about that thing?",
+    "ugh today was so long, how was yours?",
+    "yo you see the game last night?",
+    "running a bit late, start without me",
+    "thanks for covering earlier, owe you one",
+    "what time are we thinking tomorrow?",
+    "lol no way, send a pic",
+    "can you grab milk on the way back?",
+    "feeling kinda off today honestly",
+    "just landed, heading to the hotel now",
+    "you still up for hiking sat?",
+    "that meeting could've been an email lol",
+    "miss you, call when you get a sec",
+    "did the package show up yet?",
+    "i'm leaning towards the blue one, thoughts?",
+    "sorry totally spaced on that, my bad",
+    "good morning, coffee first or gym first?",
+    "they pushed the launch again, classic",
+    "wanna do dinner thursday instead?",
+    "how'd the dentist go?",
+    "kiddo finally slept through the night",
+    "traffic is brutal, gonna be like twenty late",
+    "you free for a quick call?",
+    "appreciate you, seriously",
+    "what's the move tonight?",
+    "remind me to email them in the morning",
+    "ok that's hilarious, i can't",
+]
+
+
+def is_pii_free(text: str) -> bool:
+    """A prompt is PII-free iff applying the redactor changes nothing — i.e. no
+    PHONE/URL/NAME pattern is present. Reuses the SAME patterns the real
+    sampler redacts with, so the synthetic corpus is held to the production
+    privacy bar."""
+    return redact(text) == text.strip()
+
+
+def generate_synthetic_prompts(n: int, seed: int = 0) -> list:
+    """Return up to n deterministically-shuffled PII-free synthetic prompt
+    dicts. Capped at the pool size (no invented PII-risk beyond the vetted
+    pool). Each is asserted PII-free before being yielded."""
+    import random
+
+    pool = list(SYNTHETIC_POOL)
+    random.Random(seed).shuffle(pool)
+    out = []
+    for text in pool[: min(n, len(pool))]:
+        assert is_pii_free(text), f"synthetic pool entry not PII-free: {text!r}"
+        out.append({
+            "prompt": text,
+            "channel": "imessage",
+            "context": classify_context(text),
+            "source": "synthetic_pii_free",
+        })
+    return out
+
+
 def classify_context(prompt: str) -> str:
     """Cheap heuristic — matches the existing corpus' context vocabulary."""
     low = prompt.lower().strip()
@@ -229,7 +297,33 @@ def main():
                     help="how many new prompts to sample (default 10)")
     ap.add_argument("--append", action="store_true",
                     help="append sampled prompts to the corpus file instead of printing them")
+    ap.add_argument("--synthetic", type=int, metavar="N",
+                    help="emit N PII-free SYNTHETIC prompts (no chat.db needed) for the "
+                         "shareable reproducibility fixture; see SOTA spec T8")
+    ap.add_argument("--out", type=Path,
+                    help="write output JSONL here instead of stdout (used with --synthetic)")
     args = ap.parse_args()
+
+    # Synthetic path: fully self-contained, never reads chat.db — this is the
+    # shareable reproducibility fixture (AC-5).
+    if args.synthetic is not None:
+        if args.synthetic < 1 or args.synthetic > len(SYNTHETIC_POOL):
+            print(f"error: --synthetic must be 1..{len(SYNTHETIC_POOL)}", file=sys.stderr)
+            sys.exit(2)
+        synth = generate_synthetic_prompts(args.synthetic)
+        # Defense in depth: refuse to emit if anything is not PII-free.
+        bad = [d["prompt"] for d in synth if not is_pii_free(d["prompt"])]
+        if bad:
+            print(f"error: synthetic prompts failed PII check: {bad}", file=sys.stderr)
+            sys.exit(1)
+        lines = "\n".join(json.dumps(d) for d in synth) + "\n"
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(lines)
+            print(f"# wrote {len(synth)} PII-free synthetic prompts to {args.out}", file=sys.stderr)
+        else:
+            sys.stdout.write(lines)
+        return
 
     if args.sample < 1 or args.sample > 200:
         print("error: --sample must be 1..200", file=sys.stderr)
