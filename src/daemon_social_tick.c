@@ -18,9 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h> /* mkdir */
+#include <sys/types.h>
 #include <unistd.h> /* fsync */
 
-#define HU_SOCIAL_TICK_DEFAULT_INTERVAL_SEC (6 * 60 * 60)
+#define HU_SOCIAL_TICK_DEFAULT_INTERVAL_SEC (6LL * 60 * 60)
 #define HU_SOCIAL_TICK_DEFAULT_TOP_N        16
 #define HU_SOCIAL_TICK_GAP_MIN_HISTORY      10U
 #define HU_SOCIAL_TICK_GAP_MIN_DAYS         14
@@ -47,8 +49,42 @@ static const char *default_db_path(void) {
     return home_path;
 }
 
-/* Atomic file write: tmp + fsync + rename. Same discipline as
- * personal_model_save / identity_resolver_save. */
+/* Best-effort `mkdir -p` for the parent of `path`.
+ *
+ * Walks the path string from the front, calling `mkdir(0700)` at every '/'
+ * boundary so the social-state snapshot can land cleanly on first run even
+ * when `~/.human/` does not exist yet (fresh install, or the daemon's first
+ * 6-hour tick firing before any other subsystem created the directory).
+ * Mirrors `hu_pm_ensure_parent_dir` in personal_model.c — the comment below
+ * claimed "same discipline as personal_model_save" but the mkdir step was
+ * missing, which surfaced as HU_ERR_IO on clean-HOME CI runners. 0700 mode:
+ * social state is device-local user data; only the owner should read it.
+ * EEXIST and intermediate failures are swallowed — the subsequent `fopen`
+ * surfaces any real failure as HU_ERR_IO. */
+static void ensure_parent_dir(const char *path) {
+    if (!path || !*path)
+        return;
+    const char *last_slash = strrchr(path, '/');
+    if (!last_slash || last_slash == path)
+        return;
+    size_t parent_len = (size_t)(last_slash - path);
+    char buf[576];
+    if (parent_len + 1 >= sizeof(buf))
+        return;
+    memcpy(buf, path, parent_len);
+    buf[parent_len] = '\0';
+    for (size_t i = 1; i < parent_len; i++) {
+        if (buf[i] == '/') {
+            buf[i] = '\0';
+            (void)mkdir(buf, 0700);
+            buf[i] = '/';
+        }
+    }
+    (void)mkdir(buf, 0700);
+}
+
+/* Atomic file write: mkdir -p parent + tmp + fsync + rename. Same discipline
+ * as personal_model_save / identity_resolver_save. */
 static hu_error_t write_atomic(const char *path, const char *content, size_t len) {
     if (!path || !content)
         return HU_ERR_INVALID_ARGUMENT;
@@ -56,6 +92,8 @@ static hu_error_t write_atomic(const char *path, const char *content, size_t len
     int n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof(tmp_path))
         return HU_ERR_INVALID_ARGUMENT;
+
+    ensure_parent_dir(path);
 
     FILE *f = fopen(tmp_path, "wb");
     if (!f)
