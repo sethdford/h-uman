@@ -131,6 +131,60 @@ def test_voice_drift_ok_hard_ai_late_fails():
     print("✓ voice_drift_ok_hard_ai_late_fails")
 
 
+def test_scenario_verdict_all_axes_pass():
+    sv = mt.scenario_verdict(
+        name="casual_catchup",
+        retention=0.90, voice_pass=True, voice_detail={"first": 0.8, "last": 0.79},
+        latency_pass=True, latency_detail={"growth": 0.05, "ceiling_violations": []},
+    )
+    assert sv["passed"] is True
+    assert sv["retention"]["passed"] is True
+    assert sv["scenario"] == "casual_catchup"
+    print("✓ scenario_verdict_all_axes_pass")
+
+
+def test_scenario_verdict_retention_below_min_fails_axis():
+    sv = mt.scenario_verdict(
+        name="debate_opinions",
+        retention=0.80, voice_pass=True, voice_detail={},
+        latency_pass=True, latency_detail={},
+    )
+    assert sv["retention"]["passed"] is False  # 0.80 < RETENTION_RATE_MIN 0.85
+    assert sv["passed"] is False
+    print("✓ scenario_verdict_retention_below_min_fails_axis")
+
+
+def test_run_verdict_five_of_six_passes():
+    svs = [{"scenario": f"s{i}", "passed": (i != 5),
+            "retention": {"rate": 0.9}} for i in range(6)]  # 5 pass, 1 fail, none below floor
+    rv = mt.run_verdict(svs)
+    assert rv["scenarios_passed"] == 5
+    assert rv["run_passed"] is True
+    assert rv["hard_floor_veto"] is False
+    print("✓ run_verdict_five_of_six_passes")
+
+
+def test_run_verdict_hard_floor_veto():
+    svs = [{"scenario": f"s{i}", "passed": True,
+            "retention": {"rate": 0.9}} for i in range(6)]
+    svs[0]["retention"]["rate"] = 0.60  # below RETENTION_HARD_FLOOR 0.70
+    rv = mt.run_verdict(svs)
+    assert rv["hard_floor_veto"] is True
+    assert rv["run_passed"] is False, "hard floor must veto even when 5/6 pass"
+    print("✓ run_verdict_hard_floor_veto")
+
+
+def test_write_verdict_roundtrip():
+    verdict = {"run_passed": True, "scenarios": []}
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "verdict.json"
+        mt.write_verdict(verdict, p)
+        loaded = json.loads(p.read_text())
+        assert loaded["run_passed"] is True
+        assert "generated_at" in loaded
+    print("✓ write_verdict_roundtrip")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

@@ -28,6 +28,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# --- Thresholds (calibration seeds — Task 9 locks the real numbers) ---
+RETENTION_RATE_MIN     = 0.85
+RETENTION_HARD_FLOOR   = 0.70
+VOICE_DRIFT_TOL        = 0.10
+LATENCY_CEILING_MS     = 8000.0
+LATENCY_MAX_GROWTH     = 0.20
+RUN_PASS_MIN_SCENARIOS = 5
+
 
 def _thirds(series):
     """Split a list into (first_third, last_third) by index."""
@@ -95,3 +103,45 @@ def voice_drift_ok(first_third_norm, last_third_norm, tol, any_hard_ai):
     if any_hard_ai:
         return False
     return last_third_norm >= (first_third_norm - tol)
+
+
+def scenario_verdict(name, retention, voice_pass, voice_detail, latency_pass, latency_detail):
+    """Assemble a single scenario's per-axis verdict. All three axes must pass."""
+    retention_pass = retention >= RETENTION_RATE_MIN
+    passed = retention_pass and voice_pass and latency_pass
+    return {
+        "scenario": name,
+        "retention": {"rate": retention, "min": RETENTION_RATE_MIN, "passed": retention_pass},
+        "voice": {"passed": voice_pass, **voice_detail},
+        "latency": {"passed": latency_pass, **latency_detail},
+        "passed": passed,
+    }
+
+
+def run_verdict(scenario_verdicts):
+    """Aggregate scenario verdicts into the run-level verdict.
+
+    Run passes when ≥ RUN_PASS_MIN_SCENARIOS scenarios pass AND no scenario
+    fell below RETENTION_HARD_FLOOR (a catastrophic-retention veto).
+    """
+    passed_count = sum(1 for sv in scenario_verdicts if sv["passed"])
+    hard_floor_veto = any(
+        sv["retention"]["rate"] < RETENTION_HARD_FLOOR for sv in scenario_verdicts)
+    run_passed = (passed_count >= RUN_PASS_MIN_SCENARIOS) and not hard_floor_veto
+    return {
+        "scenarios": scenario_verdicts,
+        "scenarios_passed": passed_count,
+        "scenarios_total": len(scenario_verdicts),
+        "min_to_pass": RUN_PASS_MIN_SCENARIOS,
+        "hard_floor_veto": hard_floor_veto,
+        "run_passed": run_passed,
+    }
+
+
+def write_verdict(verdict, path):
+    """Write the verdict JSON, stamping generated_at. Creates parent dirs."""
+    out = dict(verdict)
+    out.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=2))
