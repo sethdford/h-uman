@@ -1,5 +1,6 @@
 #include "human/agent/uncertainty.h"
 #include "human/core/allocator.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -229,6 +230,133 @@ static void test_strip_verbalized_out_of_range_negative(void) {
     HU_ASSERT_EQ(len, strlen(response)); /* response unchanged */
 }
 
+/* Task 4: Persona overlay hedge phrase banks (tests 10-14) */
+static void test_default_hedges_present_for_all_four_levels(void) {
+    srand(42);
+    HU_ASSERT_STR_EQ(hu_uncertainty_pick_hedge(HU_CONFIDENCE_HIGH, NULL), "");
+    HU_ASSERT_NOT_NULL(hu_uncertainty_pick_hedge(HU_CONFIDENCE_MEDIUM, NULL));
+    HU_ASSERT_NOT_NULL(hu_uncertainty_pick_hedge(HU_CONFIDENCE_LOW, NULL));
+    HU_ASSERT_NOT_NULL(hu_uncertainty_pick_hedge(HU_CONFIDENCE_VERY_LOW, NULL));
+}
+
+static void test_persona_overlay_overrides_defaults(void) {
+    hu_persona_overlay_t overlay = {0};
+    static const char *custom[] = {"pretty sure tho — "};
+    overlay.hedge_phrases[HU_CONFIDENCE_MEDIUM] = (char **)custom;
+    overlay.hedge_phrase_counts[HU_CONFIDENCE_MEDIUM] = 1;
+    srand(42);
+    const char *picked = hu_uncertainty_pick_hedge(HU_CONFIDENCE_MEDIUM, &overlay);
+    HU_ASSERT_STR_EQ(picked, "pretty sure tho — ");
+}
+
+static void test_persona_overlay_empty_array_falls_back_to_default(void) {
+    hu_persona_overlay_t overlay = {0};
+    srand(42);
+    const char *picked = hu_uncertainty_pick_hedge(HU_CONFIDENCE_MEDIUM, &overlay);
+    HU_ASSERT_NOT_NULL(picked);
+}
+
+static void test_hedge_selection_deterministic_with_seed(void) {
+    srand(42);
+    const char *first = hu_uncertainty_pick_hedge(HU_CONFIDENCE_LOW, NULL);
+    srand(42);
+    const char *second = hu_uncertainty_pick_hedge(HU_CONFIDENCE_LOW, NULL);
+    HU_ASSERT_STR_EQ(first, second);
+}
+
+static void test_temporal_hedge_used_when_decay_material(void) {
+    hu_uncertainty_signals_t signals = {0};
+    signals.fact_count = 3;
+    signals.grounded_confidence = 0.65;
+    signals.has_temporal_decay = true;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_uncertainty_result_t result = {0};
+    HU_ASSERT_EQ(hu_uncertainty_evaluate(&alloc, &signals, &result), HU_OK);
+    HU_ASSERT_EQ(result.level, HU_CONFIDENCE_MEDIUM);
+    HU_ASSERT_NOT_NULL(result.hedge_prefix);
+    hu_uncertainty_result_free(&alloc, &result);
+}
+
+/* Task 6: ECE-ready logging (tests 15-17, gated on HU_ENABLE_SQLITE) */
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+
+static void test_uncertainty_log_inserts_row(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    HU_ASSERT_EQ(hu_uncertainty_storage_migrate(db), HU_OK);
+
+    hu_uncertainty_log_entry_t entry = {
+        .turn_id = "turn_001",
+        .channel = "imessage",
+        .query_text = "did she say Thursday?",
+        .response_text = "She said Thursday.",
+        .stated_confidence = 0.65,
+        .level = HU_CONFIDENCE_MEDIUM,
+        .hedge_phrase_used = "I'm pretty sure — ",
+        .signals_json = "{\"fact_count\":2,\"grounded_confidence\":0.7}",
+        .created_at_ms = 1000,
+    };
+    HU_ASSERT_EQ(hu_uncertainty_log(db, &entry), HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM uncertainty_evaluations", -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 0), 1);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+
+static void test_uncertainty_log_outcome_starts_null(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_uncertainty_storage_migrate(db);
+    hu_uncertainty_log_entry_t entry = {
+        .turn_id = "t1",
+        .channel = "imessage",
+        .stated_confidence = 0.5,
+        .level = HU_CONFIDENCE_MEDIUM,
+        .signals_json = "{}",
+        .created_at_ms = 1000,
+    };
+    hu_uncertainty_log(db, &entry);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db, "SELECT outcome_label FROM uncertainty_evaluations LIMIT 1", -1, &st,
+                       NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_type(st, 0), SQLITE_NULL);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+
+static void test_uncertainty_log_outcome_can_be_backfilled(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_uncertainty_storage_migrate(db);
+    hu_uncertainty_log_entry_t entry = {
+        .turn_id = "t1",
+        .channel = "imessage",
+        .stated_confidence = 0.5,
+        .level = HU_CONFIDENCE_MEDIUM,
+        .signals_json = "{}",
+        .created_at_ms = 1000,
+    };
+    hu_uncertainty_log(db, &entry);
+    HU_ASSERT_EQ(hu_uncertainty_set_outcome(db, "t1", "correct", "user_reaction", 2000), HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT outcome_label, outcome_source FROM uncertainty_evaluations LIMIT 1",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 0), "correct");
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 1), "user_reaction");
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+#endif
+
 void run_uncertainty_tests(void) {
     HU_TEST_SUITE("uncertainty");
     HU_RUN_TEST(test_score_unchanged_with_no_real_signals);
@@ -247,4 +375,14 @@ void run_uncertainty_tests(void) {
     HU_RUN_TEST(test_strip_verbalized_whitespace_before_bracket);
     HU_RUN_TEST(test_strip_verbalized_out_of_range_high);
     HU_RUN_TEST(test_strip_verbalized_out_of_range_negative);
+    HU_RUN_TEST(test_default_hedges_present_for_all_four_levels);
+    HU_RUN_TEST(test_persona_overlay_overrides_defaults);
+    HU_RUN_TEST(test_persona_overlay_empty_array_falls_back_to_default);
+    HU_RUN_TEST(test_hedge_selection_deterministic_with_seed);
+    HU_RUN_TEST(test_temporal_hedge_used_when_decay_material);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_uncertainty_log_inserts_row);
+    HU_RUN_TEST(test_uncertainty_log_outcome_starts_null);
+    HU_RUN_TEST(test_uncertainty_log_outcome_can_be_backfilled);
+#endif
 }

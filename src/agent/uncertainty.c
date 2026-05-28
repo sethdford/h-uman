@@ -1,5 +1,6 @@
 #include "human/agent/uncertainty.h"
 #include "human/core/string.h"
+#include "human/persona.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -327,3 +328,152 @@ bool hu_uncertainty_strip_verbalized(char *response, size_t *response_len, doubl
         *out_conf = parsed;
     return true;
 }
+
+/* Task 4: Default hedge phrase banks per confidence level */
+static const char *const k_default_hedges_high[] = {""};
+static const char *const k_default_hedges_medium[] = {"I'm pretty sure — ",
+                                                      "Best read I have: ", "Going from memory, "};
+static const char *const k_default_hedges_medium_temporal[] = {
+    "I think — though it's been a while — ",
+    "Going from older memory: ", "Pretty sure, but the info's a bit stale — "};
+static const char *const k_default_hedges_low[] = {"I'm not certain, but ", "Could be off here — ",
+                                                   "Worth double-checking, but "};
+static const char *const k_default_hedges_very_low[] = {"I don't think I know this well enough — ",
+                                                        "Honestly, I'm guessing — ",
+                                                        "Not confident on this: "};
+
+static const struct {
+    const char *const *phrases;
+    size_t count;
+} k_default_banks[4] = {
+    {k_default_hedges_high, 1},
+    {k_default_hedges_medium, 3},
+    {k_default_hedges_low, 3},
+    {k_default_hedges_very_low, 3},
+};
+
+const char *hu_uncertainty_pick_hedge(hu_confidence_level_t level,
+                                      const struct hu_persona_overlay *overlay) {
+    if (level < 0 || level >= 4)
+        return "";
+
+    if (overlay && overlay->hedge_phrases[level] && overlay->hedge_phrase_counts[level] > 0) {
+        size_t idx = (size_t)rand() % overlay->hedge_phrase_counts[level];
+        return overlay->hedge_phrases[level][idx];
+    }
+
+    size_t idx = (size_t)rand() % k_default_banks[level].count;
+    return k_default_banks[level].phrases[idx];
+}
+
+#ifdef HU_ENABLE_SQLITE
+
+#include <sqlite3.h>
+#include <stdio.h>
+
+static const char *const k_uncertainty_migrations =
+    "CREATE TABLE IF NOT EXISTS uncertainty_evaluations ("
+    "    eval_id TEXT PRIMARY KEY,"
+    "    turn_id TEXT NOT NULL,"
+    "    channel TEXT NOT NULL,"
+    "    query_text TEXT,"
+    "    response_text TEXT,"
+    "    stated_confidence REAL NOT NULL,"
+    "    confidence_level TEXT NOT NULL,"
+    "    hedge_phrase_used TEXT,"
+    "    signals_json TEXT NOT NULL,"
+    "    outcome_label TEXT,"
+    "    outcome_source TEXT,"
+    "    outcome_recorded_at_ms INTEGER,"
+    "    created_at_ms INTEGER NOT NULL"
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_uncertainty_recent"
+    "  ON uncertainty_evaluations(created_at_ms DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_uncertainty_unlabeled"
+    "  ON uncertainty_evaluations(outcome_label, created_at_ms DESC)"
+    "  WHERE outcome_label IS NULL;";
+
+hu_error_t hu_uncertainty_storage_migrate(sqlite3 *db) {
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char *errmsg = NULL;
+    int rc = sqlite3_exec(db, k_uncertainty_migrations, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        if (errmsg)
+            sqlite3_free(errmsg);
+        return HU_ERR_IO;
+    }
+    return HU_OK;
+}
+
+hu_error_t hu_uncertainty_log(sqlite3 *db, const hu_uncertainty_log_entry_t *entry) {
+    if (!db || !entry)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char eval_id[128];
+    snprintf(eval_id, sizeof(eval_id), "%lld_%s", (long long)entry->created_at_ms,
+             entry->turn_id ? entry->turn_id : "unknown");
+
+    const char *level_str = hu_confidence_level_str(entry->level);
+
+    static const char *const insert_sql =
+        "INSERT INTO uncertainty_evaluations("
+        "  eval_id, turn_id, channel, query_text, response_text,"
+        "  stated_confidence, confidence_level, hedge_phrase_used,"
+        "  signals_json, created_at_ms"
+        ") VALUES (?,?,?,?,?,?,?,?,?,?);";
+
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, insert_sql, -1, &st, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(st, 1, eval_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, entry->turn_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, entry->channel, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 4, entry->query_text, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 5, entry->response_text, -1, SQLITE_STATIC);
+    sqlite3_bind_double(st, 6, entry->stated_confidence);
+    sqlite3_bind_text(st, 7, level_str, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 8, entry->hedge_phrase_used, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 9, entry->signals_json, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 10, entry->created_at_ms);
+
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    return HU_OK;
+}
+
+hu_error_t hu_uncertainty_set_outcome(sqlite3 *db, const char *turn_id, const char *label,
+                                      const char *source, int64_t recorded_at_ms) {
+    if (!db || !turn_id || !label || !source)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    static const char *const update_sql =
+        "UPDATE uncertainty_evaluations"
+        " SET outcome_label=?, outcome_source=?, outcome_recorded_at_ms=?"
+        " WHERE turn_id=?;";
+
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, update_sql, -1, &st, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(st, 1, label, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, source, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, recorded_at_ms);
+    sqlite3_bind_text(st, 4, turn_id, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    return HU_OK;
+}
+
+#endif

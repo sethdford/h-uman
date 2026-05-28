@@ -38,6 +38,9 @@ typedef struct hu_persona_overlay {
     char *vulnerability_tier;
     float affect_mirror_ceiling; /* 0.0-1.0; caps emotional intensity mirroring. 0 = use default */
     uint8_t leave_on_read_pct;   /* 0-100; probability of leave-on-read. 0 = use default (10%) */
+    /* Phase 1 uncertainty: per-confidence-level hedge phrase banks */
+    char **hedge_phrases[4]; /* [HIGH, MEDIUM, LOW, VERY_LOW] */
+    size_t hedge_phrase_counts[4];
 } hu_persona_overlay_t;
 
 typedef struct hu_persona_example {
