@@ -22,6 +22,7 @@ import json
 import statistics
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -145,3 +146,40 @@ def write_verdict(verdict, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2))
+
+
+class BackendUnreachable(RuntimeError):
+    """Raised when the local mlx-server cannot be reached. Never fall back to cloud."""
+
+
+class LocalBackend:
+    """Talks to the local mlx-server's OpenAI-compatible endpoint.
+
+    Sends the FULL accumulated history each turn (mirrors compatible.c — no
+    server-side caching), which is what makes the latency growth signal real.
+    """
+    def __init__(self, url, model="default", temperature=0.9, timeout=120):
+        self.url = url.rstrip("/")
+        self.model = model
+        self.temperature = temperature
+        self.timeout = timeout
+
+    def chat(self, messages):
+        """POST messages, return (content, latency_ms). Raises BackendUnreachable."""
+        body = json.dumps({
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.url}/v1/chat/completions", data=body,
+            headers={"Content-Type": "application/json"})
+        t0 = time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read())
+        except (OSError, urllib.error.URLError) as e:
+            raise BackendUnreachable(f"{self.url}: {e}") from e
+        latency_ms = (time.time() - t0) * 1000.0
+        content = data["choices"][0]["message"]["content"]
+        return content, latency_ms

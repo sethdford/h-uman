@@ -185,6 +185,58 @@ def test_write_verdict_roundtrip():
     print("✓ write_verdict_roundtrip")
 
 
+class _FakeResp:
+    def __init__(self, payload):
+        self._b = json.dumps(payload).encode()
+    def read(self):
+        return self._b
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def test_localbackend_chat_returns_content_and_latency():
+    backend = mt.LocalBackend("http://127.0.0.1:8741")
+    payload = {"choices": [{"message": {"content": "yo what's good"}}]}
+    with mock.patch.object(mt.urllib.request, "urlopen", return_value=_FakeResp(payload)):
+        content, latency_ms = backend.chat([{"role": "user", "content": "hey"}])
+    assert content == "yo what's good"
+    assert latency_ms >= 0.0
+    print("✓ localbackend_chat_returns_content_and_latency")
+
+
+def test_localbackend_sends_full_history():
+    backend = mt.LocalBackend("http://127.0.0.1:8741")
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["body"] = json.loads(req.data)
+        return _FakeResp({"choices": [{"message": {"content": "ok"}}]})
+
+    history = [
+        {"role": "user", "content": "turn1"},
+        {"role": "assistant", "content": "reply1"},
+        {"role": "user", "content": "turn2"},
+    ]
+    with mock.patch.object(mt.urllib.request, "urlopen", side_effect=fake_urlopen):
+        backend.chat(history)
+    assert captured["body"]["messages"] == history, "must send full accumulated history"
+    print("✓ localbackend_sends_full_history")
+
+
+def test_localbackend_unreachable_raises_backend_unreachable():
+    backend = mt.LocalBackend("http://127.0.0.1:8741")
+    with mock.patch.object(mt.urllib.request, "urlopen",
+                           side_effect=OSError("connection refused")):
+        try:
+            backend.chat([{"role": "user", "content": "hey"}])
+            assert False, "expected BackendUnreachable"
+        except mt.BackendUnreachable:
+            pass
+    print("✓ localbackend_unreachable_raises_backend_unreachable")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
