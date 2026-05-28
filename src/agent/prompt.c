@@ -1356,11 +1356,17 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             goto fail;
     }
 
-    /* Task 3: Append verbalized confidence tagging addendum on factual queries */
-    err = append(alloc, &buf, &len, &cap, k_verbalized_confidence_addendum,
-                 strlen(k_verbalized_confidence_addendum));
-    if (err != HU_OK)
-        goto fail;
+    /* Task 3: Append verbalized confidence tagging addendum ONLY on factual
+     * queries. The caller (agent_turn.c) classifies the query and sets
+     * config->is_factual_query; it defaults false, so casual/non-factual
+     * turns don't get the [conf=0.X] instruction (which would otherwise
+     * prompt spurious confidence tags the parser then has to strip). */
+    if (config->is_factual_query) {
+        err = append(alloc, &buf, &len, &cap, k_verbalized_confidence_addendum,
+                     strlen(k_verbalized_confidence_addendum));
+        if (err != HU_OK)
+            goto fail;
+    }
 
     *out = buf;
     *out_len = len;

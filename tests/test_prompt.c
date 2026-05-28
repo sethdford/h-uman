@@ -257,6 +257,42 @@ static void test_memory_loader_with_entries(void) {
 }
 #endif
 
+/* Calibrated-uncertainty Task 3: the [conf=0.X] confidence-tagging addendum
+ * must be appended ONLY when the caller flags the query as factual. */
+static void test_prompt_addendum_present_on_factual_query(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .is_factual_query = true,
+    };
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "CONFIDENCE TAGGING") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_prompt_addendum_absent_on_nonfactual_query(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .is_factual_query = false, /* default — casual turn */
+    };
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "CONFIDENCE TAGGING") == NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
@@ -265,6 +301,8 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);
+    HU_RUN_TEST(test_prompt_addendum_present_on_factual_query);
+    HU_RUN_TEST(test_prompt_addendum_absent_on_nonfactual_query);
     HU_RUN_TEST(test_memory_loader_empty_backend);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_memory_loader_with_entries);
