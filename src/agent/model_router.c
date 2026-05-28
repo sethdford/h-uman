@@ -212,6 +212,28 @@ static void maybe_override_to_on_device(hu_model_selection_t *sel,
     }
 }
 
+/* Override sel->model to the Seth-voice mlx_local LoRA for the REFLEXIVE and
+ * CONVERSATIONAL tiers when the operator has enabled it AND the local server
+ * probed healthy. ANALYTICAL and DEEP are intentionally left on the cloud
+ * model (Dermot AC-7: local 31B trades base reasoning for voice — see
+ * lora-scale-default-or-die.md). The router stays pure: mlx_local_healthy is
+ * supplied by the caller after probing, not measured here.
+ *
+ * Precedence: called AFTER maybe_override_to_on_device so that, in the
+ * unusual case where BOTH force_on_device and mlx_local are configured, the
+ * Seth-voice LoRA wins for its two tiers (it is the more specific, product-
+ * intended path). force_on_device still governs ANALYTICAL/DEEP. */
+static void maybe_override_to_mlx_local(hu_model_selection_t *sel,
+                                        const hu_model_router_config_t *cfg) {
+    if (!cfg->mlx_local_enabled || !cfg->mlx_local_healthy || !cfg->mlx_local_model ||
+        cfg->mlx_local_model_len == 0)
+        return;
+    if (sel->tier == HU_TIER_REFLEXIVE || sel->tier == HU_TIER_CONVERSATIONAL) {
+        sel->model = cfg->mlx_local_model;
+        sel->model_len = cfg->mlx_local_model_len;
+    }
+}
+
 static void apply_tier_to_selection(hu_model_selection_t *sel, const hu_model_router_config_t *cfg,
                                     int score) {
     if (score <= 0) {
@@ -248,6 +270,8 @@ static void apply_tier_to_selection(hu_model_selection_t *sel, const hu_model_ro
      * cloud model selection for CONVERSATIONAL/ANALYTICAL/DEEP tiers
      * too. REFLEXIVE already picks on-device above when available. */
     maybe_override_to_on_device(sel, cfg);
+    /* Seth-voice LoRA override for REFLEXIVE/CONVERSATIONAL (Dermot C2). */
+    maybe_override_to_mlx_local(sel, cfg);
 }
 
 static void apply_tier_override(hu_model_selection_t *sel, const hu_model_router_config_t *cfg,
@@ -289,6 +313,8 @@ static void apply_tier_override(hu_model_selection_t *sel, const hu_model_router
     }
     /* "All contacts through on-device" policy override (see helper). */
     maybe_override_to_on_device(sel, cfg);
+    /* Seth-voice LoRA override for REFLEXIVE/CONVERSATIONAL (Dermot C2). */
+    maybe_override_to_mlx_local(sel, cfg);
 }
 
 hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const char *msg,

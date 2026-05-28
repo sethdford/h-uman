@@ -49,6 +49,19 @@ typedef struct hu_model_router_config {
                                              * tier-graduated behavior (REFLEXIVE only). */
     hu_cognitive_tier_t conversation_floor; /* minimum tier for conversational channels;
                                              * 0 (HU_TIER_REFLEXIVE) = no floor (default) */
+    /* Seth-voice mlx_local LoRA routing (2026-05-27 Dermot humanness recovery,
+     * C2). Distinct from on_device_model (the tiny apple-foundationmodel): this
+     * names the locally-served 31B LoRA adapter (e.g. via mlx-server.py) that
+     * carries the personalized voice. When mlx_local_enabled AND
+     * mlx_local_healthy are both true, REFLEXIVE and CONVERSATIONAL tiers route
+     * to mlx_local_model; ANALYTICAL and DEEP stay on the cloud model (local
+     * 31B trades base reasoning for voice — see lora-scale-default-or-die). The
+     * router is a pure function: the caller probes the server (hu_mlx_local_probe)
+     * and sets mlx_local_healthy before routing, mirroring on_device_available. */
+    bool mlx_local_enabled;      /* operator opt-in; default false */
+    bool mlx_local_healthy;      /* caller-set probe result; false = fall back to cloud */
+    const char *mlx_local_model; /* local adapter identifier the mlx provider knows */
+    size_t mlx_local_model_len;
 } hu_model_router_config_t;
 
 /* Analyze message content and context to select the optimal model + thinking budget.

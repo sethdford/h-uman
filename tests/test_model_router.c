@@ -1,7 +1,7 @@
-#include "test_framework.h"
 #include "human/agent/model_router.h"
-#include "human/provider.h"
 #include "human/core/allocator.h"
+#include "human/provider.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -42,7 +42,8 @@ static void normal_question_routes_higher(void) {
 
 static void emotional_heavy_routes_deep(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "I don't know what to do. Mom passed away last night and I'm terrified of what comes next";
+    const char *msg =
+        "I don't know what to do. Mom passed away last night and I'm terrified of what comes next";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "family", 6, 2, 5);
     HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
     HU_ASSERT(sel.thinking_budget >= 4096);
@@ -58,7 +59,8 @@ static void family_gets_upgraded(void) {
 
 static void advice_question_gets_analytical(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "should i take the job offer or stay where i am? what do you think about the trade-offs";
+    const char *msg =
+        "should i take the job offer or stay where i am? what do you think about the trade-offs";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "sister", 6, 20, 3);
     HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
     HU_ASSERT(sel.thinking_budget >= 4096);
@@ -87,7 +89,8 @@ static void null_cfg_returns_default(void) {
 
 static void frustrated_message_not_reflexive(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "ugh this budget is not working at all, the numbers are broken and i'm so frustrated with it";
+    const char *msg = "ugh this budget is not working at all, the numbers are broken and i'm so "
+                      "frustrated with it";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "family", 6, 10, 3);
     HU_ASSERT(sel.tier > HU_TIER_REFLEXIVE);
     HU_ASSERT(sel.thinking_budget > 0);
@@ -97,8 +100,8 @@ static void thinking_budget_scales_with_tier(void) {
     cfg = hu_model_router_default_config();
     hu_model_selection_t reflexive = hu_model_route(&cfg, "ok", 2, NULL, 0, 12, 0);
     hu_model_selection_t deep = hu_model_route(
-        &cfg, "I don't know what to do, I'm terrified and need help deciding about the divorce",
-        80, "family", 6, 2, 5);
+        &cfg, "I don't know what to do, I'm terrified and need help deciding about the divorce", 80,
+        "family", 6, 2, 5);
     HU_ASSERT(deep.thinking_budget > reflexive.thinking_budget);
 }
 
@@ -364,8 +367,8 @@ static void route_populates_global_log(void) {
 
 static void route_with_judge_null_provider_falls_through(void) {
     hu_model_router_config_t c = hu_model_router_default_config();
-    hu_model_selection_t sel = hu_model_route_with_judge(&c, "hello", 5, NULL, 0, 12, 0,
-                                                         NULL, NULL, 0, NULL, NULL);
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "hello", 5, NULL, 0, 12, 0, NULL, NULL, 0, NULL, NULL);
     HU_ASSERT(sel.source == HU_ROUTE_HEURISTIC);
 }
 
@@ -377,9 +380,9 @@ static void route_with_judge_test_mode_returns_fallback(void) {
     hu_route_cache_t cache;
     hu_route_cache_init(&cache);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "explain quantum computing", 25, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "explain quantum computing", 25, NULL, 0, 12, 0, &dummy,
+                                  "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_FALLBACK);
     HU_ASSERT(sel.model != NULL);
     HU_ASSERT(sel.model_len > 0);
@@ -396,9 +399,8 @@ static void route_with_judge_cache_hit_returns_cached(void) {
     int64_t now = (int64_t)time(NULL);
     hu_route_cache_put(&cache, "cached message", 14, now, HU_TIER_DEEP);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "cached message", 14, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel = hu_model_route_with_judge(&c, "cached message", 14, NULL, 0, 12, 0,
+                                                         &dummy, "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_CACHED);
     HU_ASSERT(sel.tier == HU_TIER_DEEP);
 }
@@ -501,12 +503,82 @@ static void judge_cached_reflexive_uses_on_device(void) {
     int64_t now = (int64_t)time(NULL);
     hu_route_cache_put(&cache, "ok sounds good", 14, now, HU_TIER_REFLEXIVE);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "ok sounds good", 14, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel = hu_model_route_with_judge(&c, "ok sounds good", 14, NULL, 0, 12, 0,
+                                                         &dummy, "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_CACHED);
     HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
     HU_ASSERT_STR_EQ(sel.model, c.on_device_model);
+}
+
+/* ── Seth-voice mlx_local routing (Dermot humanness recovery C2) ──────── */
+
+/* Helper: a config with the Seth-voice LoRA enabled + a sentinel model name
+ * distinct from every Gemini default, so equality checks are unambiguous. */
+static hu_model_router_config_t mlx_cfg(bool enabled, bool healthy) {
+    hu_model_router_config_t c = hu_model_router_default_config();
+    c.mlx_local_enabled = enabled;
+    c.mlx_local_healthy = healthy;
+    c.mlx_local_model = "seth-lora-test";
+    c.mlx_local_model_len = 14;
+    return c;
+}
+
+/* Default config must leave mlx_local opt-in OFF and model unset. */
+static void mlx_local_default_config_disabled(void) {
+    hu_model_router_config_t c = hu_model_router_default_config();
+    HU_ASSERT_FALSE(c.mlx_local_enabled);
+    HU_ASSERT_FALSE(c.mlx_local_healthy);
+    HU_ASSERT(c.mlx_local_model == NULL);
+    HU_ASSERT_EQ(c.mlx_local_model_len, (size_t)0);
+}
+
+/* AC-6: REFLEXIVE routes to the local LoRA when enabled + healthy. */
+static void mlx_local_reflexive_routes_when_enabled_and_healthy(void) {
+    hu_model_router_config_t c = mlx_cfg(true, true);
+    hu_model_selection_t sel = hu_model_route(&c, "ok", 2, NULL, 0, 14, 0);
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+    HU_ASSERT_STR_EQ(sel.model, "seth-lora-test");
+}
+
+/* AC-5: CONVERSATIONAL routes to the local LoRA when enabled + healthy. */
+static void mlx_local_conversational_routes_when_enabled_and_healthy(void) {
+    hu_model_router_config_t c = mlx_cfg(true, true);
+    const char *msg = "hey what are you up to today? want to grab lunch or something";
+    hu_model_selection_t sel = hu_model_route(&c, msg, strlen(msg), NULL, 0, 12, 2);
+    HU_ASSERT(sel.tier == HU_TIER_CONVERSATIONAL);
+    HU_ASSERT_STR_EQ(sel.model, "seth-lora-test");
+}
+
+/* AC-7: ANALYTICAL / DEEP stay on the cloud model even when local is healthy.
+ * The invariant is "never the local model" — those tiers must reach a cloud
+ * Gemini model regardless of mlx_local config. */
+static void mlx_local_analytical_deep_stay_cloud(void) {
+    hu_model_router_config_t c = mlx_cfg(true, true);
+    const char *msg = "I've been agonizing over whether to leave my career because I'm "
+                      "terrified what it means for my family's future, and I genuinely "
+                      "cannot work out how to weigh the risk against the reward here";
+    hu_model_selection_t sel = hu_model_route(&c, msg, strlen(msg), "family", 6, 2, 8);
+    HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
+    HU_ASSERT(strcmp(sel.model, "seth-lora-test") != 0);
+    /* It must be one of the configured cloud tiers. */
+    HU_ASSERT(strcmp(sel.model, c.analytical_model) == 0 || strcmp(sel.model, c.deep_model) == 0);
+}
+
+/* AC-8: enabled but probe UNHEALTHY → fall back to the cloud model, no local. */
+static void mlx_local_unhealthy_falls_back_to_cloud(void) {
+    hu_model_router_config_t c = mlx_cfg(true, false);
+    hu_model_selection_t sel = hu_model_route(&c, "ok", 2, NULL, 0, 14, 0);
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+    HU_ASSERT_STR_EQ(sel.model, c.reflexive_model);
+    HU_ASSERT(strcmp(sel.model, "seth-lora-test") != 0);
+}
+
+/* Disabled (even if a stale healthy=true lingers) → always cloud. */
+static void mlx_local_disabled_uses_cloud(void) {
+    hu_model_router_config_t c = mlx_cfg(false, true);
+    hu_model_selection_t sel = hu_model_route(&c, "ok", 2, NULL, 0, 14, 0);
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+    HU_ASSERT_STR_EQ(sel.model, c.reflexive_model);
 }
 
 static void conversation_floor_prevents_reflexive(void) {
@@ -536,9 +608,9 @@ static void conversation_floor_applies_to_judge_fallback(void) {
     hu_model_router_config_t c = hu_model_router_default_config();
     c.conversation_floor = HU_TIER_CONVERSATIONAL;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_provider_t dummy = { .vtable = NULL, .ctx = NULL };
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "ok", 2, NULL, 0, 10, 0, &dummy, "test", 4, &alloc, NULL);
+    hu_provider_t dummy = {.vtable = NULL, .ctx = NULL};
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "ok", 2, NULL, 0, 10, 0, &dummy, "test", 4, &alloc, NULL);
     HU_ASSERT(sel.tier >= HU_TIER_CONVERSATIONAL);
 }
 
@@ -617,6 +689,14 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(reflexive_uses_custom_on_device_model);
     HU_RUN_TEST(conversational_never_uses_on_device);
     HU_RUN_TEST(judge_cached_reflexive_uses_on_device);
+
+    /* Seth-voice mlx_local routing (Dermot C2) */
+    HU_RUN_TEST(mlx_local_default_config_disabled);
+    HU_RUN_TEST(mlx_local_reflexive_routes_when_enabled_and_healthy);
+    HU_RUN_TEST(mlx_local_conversational_routes_when_enabled_and_healthy);
+    HU_RUN_TEST(mlx_local_analytical_deep_stay_cloud);
+    HU_RUN_TEST(mlx_local_unhealthy_falls_back_to_cloud);
+    HU_RUN_TEST(mlx_local_disabled_uses_cloud);
 
     /* Conversation floor */
     HU_RUN_TEST(conversation_floor_prevents_reflexive);
