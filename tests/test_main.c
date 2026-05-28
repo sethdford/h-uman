@@ -808,6 +808,7 @@ void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
+void run_cross_channel_acl_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void);                 /* T2: stub when SQLite off */
@@ -1685,6 +1686,7 @@ int main(int argc, char **argv) {
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
+    run_cross_channel_acl_tests();
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests();                 /* T2: stubbed-out when SQLite off */

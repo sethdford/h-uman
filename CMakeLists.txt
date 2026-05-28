@@ -3085,6 +3085,10 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
+    # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-
+    # with-stub-runner so it stays unconditional per
+    # .claude/rules/test-source-gate-symmetry.md.
+    tests/test_cross_channel_acl.c
     # Reflection Loop schema/parse tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
