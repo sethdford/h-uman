@@ -237,6 +237,36 @@ def test_localbackend_unreachable_raises_backend_unreachable():
     print("✓ localbackend_unreachable_raises_backend_unreachable")
 
 
+def test_judge_anchor_retention_parses_true():
+    with mock.patch.object(mt, "call_gemini", return_value='{"retained": true}'):
+        out = mt.judge_anchor_retention("the dog is named Biscuit",
+                                        "what about the dog",
+                                        "Biscuit's doing great, total menace")
+    assert out is True
+    print("✓ judge_anchor_retention_parses_true")
+
+
+def test_judge_anchor_retention_parses_false():
+    with mock.patch.object(mt, "call_gemini", return_value='```json\n{"retained": false}\n```'):
+        out = mt.judge_anchor_retention("flying to Denver Friday",
+                                        "what should I pack",
+                                        "pack for anything, who knows")
+    assert out is False
+    print("✓ judge_anchor_retention_parses_false")
+
+
+def test_judge_available_true_when_token_present():
+    with mock.patch.object(mt, "_get_adc_token", return_value="tok"):
+        assert mt.judge_available() is True
+    print("✓ judge_available_true_when_token_present")
+
+
+def test_judge_available_false_when_no_token():
+    with mock.patch.object(mt, "_get_adc_token", return_value=None):
+        assert mt.judge_available() is False
+    print("✓ judge_available_false_when_no_token")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

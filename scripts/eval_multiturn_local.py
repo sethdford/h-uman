@@ -29,6 +29,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from eval_multiturn import (  # noqa: E402  (after sys.path.insert)
+    call_gemini, _get_adc_token, evaluate_conversation, EVAL_DIMENSIONS,
+)
+
 # --- Thresholds (calibration seeds — Task 9 locks the real numbers) ---
 RETENTION_RATE_MIN     = 0.85
 RETENTION_HARD_FLOOR   = 0.70
@@ -183,3 +187,41 @@ class LocalBackend:
         latency_ms = (time.time() - t0) * 1000.0
         content = data["choices"][0]["message"]["content"]
         return content, latency_ms
+
+
+def judge_available():
+    """True when ADC credentials are present (judge can run)."""
+    return _get_adc_token() is not None
+
+
+def judge_anchor_retention(anchor_fact, probe_user, probe_response):
+    """Ask the judge whether the probe-turn reply stayed consistent with an
+    earlier-established fact. Returns bool. Raises on judge/ADC failure."""
+    prompt = f"""A fact was established earlier in a text conversation:
+  FACT: {anchor_fact}
+
+Later, the friend said:
+  FRIEND: {probe_user}
+And the person ("Seth") replied:
+  SETH: {probe_response}
+
+Did Seth's reply remain CONSISTENT with the earlier fact (either by correctly
+referencing it, or at minimum not contradicting it)? A reply that forgets or
+contradicts the fact is NOT retained.
+
+Return JSON: {{"retained": true|false, "why": "..."}}"""
+    raw = call_gemini(prompt).strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+    return bool(json.loads(raw)["retained"])
+
+
+def judge_voice_window(scenario_name, exchanges_window):
+    """Score a window of (user, ai) exchanges. Returns (overall_score_1_10, verdict).
+
+    Reuses eval_multiturn.evaluate_conversation. Returns (0.0, 'AI') on judge error.
+    """
+    result = evaluate_conversation(scenario_name, exchanges_window)
+    if not result:
+        return 0.0, "AI"
+    return result.get("overall_score", 0.0), result.get("overall_verdict", "AI")
