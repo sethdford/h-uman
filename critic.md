@@ -1,8 +1,32 @@
 # Critic findings — retire reflection patterns on negative reaction (commit 4fb2b621)
 
-Status: COMPLETE — adversarial review complete.
+Status: CLOSED — adversarial review complete; all findings verified against
+source and DISPOSED. No code change warranted.
 
-## Findings
+## Verification disposition (2026-05-28)
+
+Each finding below was re-checked by reading the actual source per the
+`audit-verify-before-allege` discipline. All five are false positives or
+tested-and-documented design choices. Editing working, tested code to
+satisfy these would add regression risk for zero benefit, so no change
+was made. Evidence:
+
+| # | Sev | Verdict | Evidence |
+|---|-----|---------|----------|
+| 1 | HIGH | DESIGN, not bug | Crash-safety is handled: the UPDATE carries `WHERE retired = 0` (consumer.c:389), so an orphaned surfacing after a crash cannot re-retire an already-retired pattern. The over-broad `DELETE WHERE channel=?` is the intended "consume the channel ledger on thumbs-down" semantics; the channel-scoped+recency-windowed blast radius is documented at test:264-267 and pinned by test:269. |
+| 2 | HIGH | FALSE POSITIVE | `int retired = sqlite3_changes(db);` is at consumer.c:401, which runs BEFORE the DELETE is prepared at :405. `sqlite3_finalize()` destroys a prepared statement; it does NOT reset the connection change counter. `sqlite3_changes()` reports the most recently *completed* DML — the UPDATE — so `retired` is the correct UPDATE row count. |
+| 3 | MEDIUM | FALSE POSITIVE | The null guard already exists: `if (e->polarity == HU_REACTION_NEGATIVE && s_reflection_db)` at reaction_handler.c:297. A cleared/unset db is a no-op by construction. |
+| 4 | MEDIUM | FALSE POSITIVE | The DELETE step IS error-checked and logged: `if (sqlite3_step(st) != SQLITE_DONE) hu_log_error(...)` at consumer.c:411-412. Non-propagation to the caller is intentional and documented (consumer.c:408-410): a failed consume leaves harmless orphans that the retired=0 guard neutralizes. |
+| 5 | LOW | FALSE POSITIVE | The concurrent-turn blast-radius test already exists: `test_same_channel_thumbs_down_retires_all_in_window` (test:269) inserts pA (turn A) + pB (turn B), surfaces both in-window, thumbs-downs once → asserts both retired, lineage consumed, and a second thumbs-down returns 0 (no re-retire). |
+
+RESULT_critic_disposition=ALL_FALSE_POSITIVE_OR_BY_DESIGN
+
+Reflexion note: a review that produces 5/5 non-actionable findings against
+tested code is a `tune-agent` candidate — the critic alleged without
+reading the surrounding guards, comments, and existing tests. The
+`audit-verify-before-allege` rule names exactly this failure mode.
+
+## Original findings (preserved for audit trail)
 
 | Severity | file:line | concern | suggested fix |
 |----------|-----------|---------|---------------|
