@@ -104,6 +104,33 @@ def test_retention_rate_empty_is_zero():
     print("✓ retention_rate_empty_is_zero")
 
 
+def test_voice_normalize_divides_by_ten():
+    assert mt.voice_normalize(8.0) == 0.8
+    assert mt.voice_normalize(10) == 1.0
+    print("✓ voice_normalize_divides_by_ten")
+
+
+def test_voice_drift_ok_stable_passes():
+    # first-third 0.8, last-third 0.78 → drop 0.02 ≤ tol 0.10
+    ok = mt.voice_drift_ok(0.8, 0.78, tol=0.10, any_hard_ai=False)
+    assert ok is True
+    print("✓ voice_drift_ok_stable_passes")
+
+
+def test_voice_drift_ok_big_drop_fails():
+    # drop 0.30 > tol 0.10
+    ok = mt.voice_drift_ok(0.8, 0.5, tol=0.10, any_hard_ai=False)
+    assert ok is False
+    print("✓ voice_drift_ok_big_drop_fails")
+
+
+def test_voice_drift_ok_hard_ai_late_fails():
+    # small drop, but a late turn flipped to hard AI verdict
+    ok = mt.voice_drift_ok(0.8, 0.79, tol=0.10, any_hard_ai=True)
+    assert ok is False
+    print("✓ voice_drift_ok_hard_ai_late_fails")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

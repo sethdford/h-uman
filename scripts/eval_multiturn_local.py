@@ -79,3 +79,19 @@ def retention_rate(anchor_results):
     if not anchor_results:
         return 0.0
     return sum(1 for r in anchor_results if r) / len(anchor_results)
+
+
+def voice_normalize(overall_score_1_to_10):
+    """Normalize a judge overall_score (1–10) to [0,1]."""
+    return float(overall_score_1_to_10) / 10.0
+
+
+def voice_drift_ok(first_third_norm, last_third_norm, tol, any_hard_ai):
+    """Voice axis passes when late-conversation voice has not decayed.
+
+    Fails if the last-third normalized score dropped more than `tol` below the
+    first-third, OR any late turn flipped to a hard AI verdict.
+    """
+    if any_hard_ai:
+        return False
+    return last_third_norm >= (first_third_norm - tol)
