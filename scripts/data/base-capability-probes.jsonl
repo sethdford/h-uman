@@ -1,0 +1,15 @@
+{"id": "json_extract_city", "prompt": "Return ONLY valid JSON with keys \"name\" and \"city\" for: Ada lives in Dublin. No prose.", "check": {"type": "json_keys", "keys": ["name", "city"]}}
+{"id": "json_array_numbers", "prompt": "Return ONLY a JSON array of the numbers 3, 1, 2 sorted ascending. No prose.", "check": {"type": "json_equals", "value": [1, 2, 3]}}
+{"id": "translate_fr_thanks", "prompt": "Translate to French, output only the translation: Thank you.", "check": {"type": "regex_i", "pattern": "merci"}}
+{"id": "translate_es_house", "prompt": "Translate to Spanish, output only the translation: the house", "check": {"type": "regex_i", "pattern": "casa"}}
+{"id": "arith_sum", "prompt": "What is 17 + 25? Reply with only the number.", "check": {"type": "numeric_equals", "value": 42}}
+{"id": "arith_mult", "prompt": "What is 12 * 12? Reply with only the number.", "check": {"type": "numeric_equals", "value": 144}}
+{"id": "sort_words", "prompt": "Sort these words alphabetically, comma-separated, no prose: banana, apple, cherry", "check": {"type": "regex_i", "pattern": "apple\\s*,\\s*banana\\s*,\\s*cherry"}}
+{"id": "one_word_capital", "prompt": "What is the capital of Japan? Answer in exactly one word.", "check": {"type": "regex_i", "pattern": "^\\W*tokyo\\W*$"}}
+{"id": "yes_no_boolean", "prompt": "Is 10 greater than 5? Answer only yes or no.", "check": {"type": "regex_i", "pattern": "^\\W*yes\\W*$"}}
+{"id": "extract_email", "prompt": "Extract only the email address from: contact me at sam@example.com please.", "check": {"type": "regex_i", "pattern": "sam@example\\.com"}}
+{"id": "count_words", "prompt": "How many words are in the phrase \"the quick brown fox\"? Reply with only the number.", "check": {"type": "numeric_equals", "value": 4}}
+{"id": "uppercase_word", "prompt": "Output the word \"hello\" in all uppercase, nothing else.", "check": {"type": "regex", "pattern": "HELLO"}}
+{"id": "json_bool_field", "prompt": "Return ONLY valid JSON with a boolean key \"active\" set to true. No prose.", "check": {"type": "json_keys", "keys": ["active"]}}
+{"id": "last_of_list", "prompt": "What is the last item in this list: red, green, blue? One word only.", "check": {"type": "regex_i", "pattern": "^\\W*blue\\W*$"}}
+{"id": "subtract", "prompt": "What is 100 minus 37? Reply with only the number.", "check": {"type": "numeric_equals", "value": 63}}

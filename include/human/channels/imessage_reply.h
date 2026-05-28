@@ -43,4 +43,28 @@ void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
  * one of: "cmdR" | "ax_menu" | "flat_fallback" | "" (none). */
 const char *hu_imessage_test_last_reply_tier(void);
 
+#if HU_IS_TEST
+/* Test-only — reset / read the one-shot Tier-3 degradation WARN counter.
+ * The count is 0 before any flat-fallback WARN fires and 1 afterward,
+ * regardless of how many times the fallback is taken. */
+void hu_imessage_test_reset_reply_warn(void);
+int hu_imessage_test_reply_warn_count(void);
+#endif
+
+/* Production AX threaded-reply workers (implemented in imessage.c, where the
+ * static AX helpers + chat.db access live). Only present in non-test macOS
+ * builds with TAPBACK wiring compiled in; the test build stays on the stub
+ * path so these are neither declared nor linked there.
+ *   Tier 1: Cmd-R on the focused parent row → inline composer → type → send.
+ *   Tier 2: AXShowMenu → click "Reply" → inline composer → type → send.
+ * Each returns true on success; false to fall through to the next tier. */
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+bool hu_imessage_ax_reply_tier1_cmd_r(const char *target, size_t target_len,
+                                      const char *parent_guid, size_t parent_guid_len,
+                                      const char *body, size_t body_len);
+bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
+                                          const char *parent_guid, size_t parent_guid_len,
+                                          const char *body, size_t body_len);
+#endif
+
 #endif

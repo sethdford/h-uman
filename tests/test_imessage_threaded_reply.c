@@ -285,6 +285,49 @@ static void no_telemetry_on_invalid_args(void) {
     unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
 }
 
+/* AC (T15): the Tier-3 "AX unavailable" degradation WARN fires exactly
+ * once per process even when the fallback is taken many times — so a busy
+ * reply path doesn't spam the log. */
+static void flat_fallback_warn_emitted_once_across_repeated_failures(void) {
+    reset_counts();
+    hu_imessage_test_reset_reply_warn();
+    HU_ASSERT_EQ(hu_imessage_test_reply_warn_count(), 0);
+
+    hu_imessage_set_test_reply_stubs(tier1_fails_stub, tier2_fails_stub, flat_send_succeeds_stub);
+    for (int i = 0; i < 3; i++) {
+        hu_error_t err =
+            hu_imessage_reply(NULL, "+15555551212", 12, "ABC-PARENT-GUID", 15, "Hey", 3);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "flat_fallback");
+    }
+    /* Fallback taken 3 times, WARN emitted exactly once. */
+    HU_ASSERT_EQ(flat_send_call_count, 3);
+    HU_ASSERT_EQ(hu_imessage_test_reply_warn_count(), 1);
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+}
+
+/* AC (T15): the reset hook clears the one-shot guard so the WARN can fire
+ * again — keeps test isolation intact across suites. */
+static void flat_fallback_warn_reset_hook_clears_counter(void) {
+    reset_counts();
+    hu_imessage_test_reset_reply_warn();
+    hu_imessage_set_test_reply_stubs(tier1_fails_stub, tier2_fails_stub, flat_send_succeeds_stub);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "G", 1, "hi", 2), (int)HU_OK);
+    HU_ASSERT_EQ(hu_imessage_test_reply_warn_count(), 1);
+
+    hu_imessage_test_reset_reply_warn();
+    HU_ASSERT_EQ(hu_imessage_test_reply_warn_count(), 0);
+
+    /* After reset, the next fallback re-emits exactly one WARN. */
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "G", 1, "hi", 2), (int)HU_OK);
+    HU_ASSERT_EQ(hu_imessage_test_reply_warn_count(), 1);
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_test_reset_reply_warn();
+}
+
 void run_imessage_threaded_reply_tests(void) {
     HU_TEST_SUITE("imessage_threaded_reply");
     HU_RUN_TEST(tier1_cmd_r_succeeds_returns_ok);
@@ -299,4 +342,6 @@ void run_imessage_threaded_reply_tests(void) {
     HU_RUN_TEST(telemetry_emitted_on_tier1_success);
     HU_RUN_TEST(telemetry_tier_reflects_fallback_used);
     HU_RUN_TEST(no_telemetry_on_invalid_args);
+    HU_RUN_TEST(flat_fallback_warn_emitted_once_across_repeated_failures);
+    HU_RUN_TEST(flat_fallback_warn_reset_hook_clears_counter);
 }

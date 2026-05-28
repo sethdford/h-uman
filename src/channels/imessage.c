@@ -3626,6 +3626,278 @@ static bool ax_react_emoji_subpicker(const char *target, size_t target_len, int6
     (void)emoji_utf8;
     return false; /* Real AX wiring deferred to integration pass */
 }
+
+/* ── C3: real threaded-reply AX wiring ──────────────────────────────────
+ * Drives Messages.app to send a NATIVE inline (threaded) reply instead of
+ * a free-floating new message. Two tiers exposed to imessage_reply.c:
+ *   Tier 1  Cmd-R on the focused parent row → inline composer → type → send
+ *   Tier 2  AXShowMenu on the parent row → click "Reply" item → composer
+ * Both resolve the parent message text from chat.db (via its guid) so the
+ * AX walker can locate the matching transcript row.
+ *
+ * These are RAW UI automation — the public iMessage API has no inline-reply
+ * verb (see docs/investigations/imessage-capability-matrix.md). They are
+ * therefore best-effort: any failure returns false and the caller falls
+ * through to the next tier (and ultimately flat-send). */
+
+/* HID virtual key codes (HIToolbox/Events.h values; ApplicationServices
+ * doesn't pull in Carbon, so define the two we need locally). */
+#define HU_VK_ANSI_R 0x0F
+#define HU_VK_RETURN 0x24
+
+/* Resolve a message guid to the first <=cap-1 chars of its display text, for
+ * use as an AX transcript-row match prefix. Reads chat.db READONLY; falls
+ * back to the attributedBody binary plist when the plain `text` column is
+ * NULL (modern Messages stores rich text there). */
+static hu_error_t parent_guid_to_text_prefix(const char *guid, size_t guid_len, char *out,
+                                             size_t cap) {
+    if (!guid || guid_len == 0 || !out || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    out[0] = '\0';
+#ifdef HU_ENABLE_SQLITE
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_NOT_FOUND;
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return HU_ERR_NOT_FOUND;
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return HU_ERR_NOT_FOUND;
+    const char *sql = "SELECT text, attributedBody FROM message WHERE guid = ?1 LIMIT 1";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_NOT_FOUND;
+    }
+    sqlite3_bind_text(stmt, 1, guid, (int)guid_len, NULL);
+    hu_error_t rc = HU_ERR_NOT_FOUND;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *txt = sqlite3_column_text(stmt, 0);
+        if (txt && txt[0]) {
+            size_t copy = strlen((const char *)txt);
+            if (copy >= cap)
+                copy = cap - 1;
+            memcpy(out, txt, copy);
+            out[copy] = '\0';
+            rc = HU_OK;
+        } else {
+            const void *blob = sqlite3_column_blob(stmt, 1);
+            int blob_len = sqlite3_column_bytes(stmt, 1);
+            if (blob && blob_len > 0) {
+                char tmp[256] = {0};
+                size_t got = hu_imessage_extract_attributed_body(
+                    (const unsigned char *)blob, (size_t)blob_len, tmp, sizeof(tmp));
+                if (got > 0) {
+                    size_t copy = got;
+                    if (copy >= cap)
+                        copy = cap - 1;
+                    memcpy(out, tmp, copy);
+                    out[copy] = '\0';
+                    rc = HU_OK;
+                }
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return rc;
+#else
+    (void)guid;
+    (void)guid_len;
+    (void)out;
+    (void)cap;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
+/* Post a single key-down/key-up pair with the given modifier flags. */
+static void ax_post_key(CGKeyCode kc, CGEventFlags flags) {
+    CGEventRef down = CGEventCreateKeyboardEvent(NULL, kc, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(NULL, kc, false);
+    if (down) {
+        CGEventSetFlags(down, flags);
+        CGEventPost(kCGHIDEventTap, down);
+        CFRelease(down);
+    }
+    if (up) {
+        CGEventSetFlags(up, flags);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(up);
+    }
+}
+
+/* Open the conversation and locate the transcript row matching `prefix`.
+ * Returns a retained AXUIElementRef (caller releases) or NULL. */
+static AXUIElementRef ax_find_reply_row(const char *target, size_t target_len, const char *prefix) {
+    ax_open_conversation(target, target_len);
+    AXUIElementRef row = NULL;
+    for (int attempt = 0; attempt < 6 && !row; attempt++) {
+        if (attempt > 0) {
+            usleep(250000);
+            if (attempt == 3) {
+                pid_t pid = ax_messages_pid();
+                if (pid > 0)
+                    ax_activate_messages(pid);
+            }
+        }
+        AXUIElementRef window = ax_get_messages_window();
+        if (!window)
+            continue;
+        row = ax_find_message_group(window, prefix, 0);
+        CFRelease(window);
+    }
+    return row;
+}
+
+/* Poll for the (inline reply) compose field, set its value to body, then
+ * synthesize Return to send. Returns true on a successful value-set. */
+static bool ax_inject_body_and_return(const char *body, size_t body_len) {
+    if (!body || body_len == 0)
+        return false;
+    CFStringRef cf = CFStringCreateWithBytes(NULL, (const UInt8 *)body, (CFIndex)body_len,
+                                             kCFStringEncodingUTF8, false);
+    if (!cf)
+        return false;
+    AXUIElementRef field = NULL;
+    for (int attempt = 0; attempt < 8 && !field; attempt++) {
+        if (attempt > 0)
+            usleep(200000);
+        AXUIElementRef window = ax_get_messages_window();
+        if (!window)
+            continue;
+        field = ax_find_compose_field_recurse(window, 0);
+        CFRelease(window);
+    }
+    if (!field) {
+        CFRelease(cf);
+        hu_log_info("imessage", NULL, "AX reply: compose field not found for body injection");
+        return false;
+    }
+    AXUIElementSetAttributeValue(field, kAXFocusedAttribute, kCFBooleanTrue);
+    AXError set_err = AXUIElementSetAttributeValue(field, kAXValueAttribute, cf);
+    CFRelease(field);
+    CFRelease(cf);
+    if (set_err != kAXErrorSuccess) {
+        hu_log_info("imessage", NULL, "AX reply: set compose value failed (%d)", (int)set_err);
+        return false;
+    }
+    usleep(120000); /* let the field settle before Return */
+    ax_post_key((CGKeyCode)HU_VK_RETURN, 0);
+    return true;
+}
+
+/* After AXShowMenu on `row`, find the popup AXMenu and click the "Reply"
+ * item (matches "Reply", "Reply…" U+2026, and "Reply..." three-dot). */
+static bool ax_click_menu_item_reply(AXUIElementRef row) {
+    if (AXUIElementPerformAction(row, CFSTR("AXShowMenu")) != kAXErrorSuccess)
+        return false;
+    AXUIElementRef menu = NULL;
+    for (int attempt = 0; attempt < 8 && !menu; attempt++) {
+        usleep(150000);
+        CFArrayRef children = NULL;
+        if (AXUIElementCopyAttributeValue(row, kAXChildrenAttribute, (CFTypeRef *)&children) ==
+                kAXErrorSuccess &&
+            children) {
+            CFIndex cn = CFArrayGetCount(children);
+            for (CFIndex i = 0; i < cn && !menu; i++) {
+                AXUIElementRef ch = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+                CFStringRef role = NULL;
+                if (AXUIElementCopyAttributeValue(ch, kAXRoleAttribute, (CFTypeRef *)&role) ==
+                        kAXErrorSuccess &&
+                    role) {
+                    if (CFStringCompare(role, CFSTR("AXMenu"), 0) == kCFCompareEqualTo) {
+                        CFRetain(ch);
+                        menu = ch;
+                    }
+                    CFRelease(role);
+                }
+            }
+            CFRelease(children);
+        }
+    }
+    if (!menu)
+        return false;
+    bool clicked = false;
+    CFArrayRef items = NULL;
+    if (AXUIElementCopyAttributeValue(menu, kAXChildrenAttribute, (CFTypeRef *)&items) ==
+            kAXErrorSuccess &&
+        items) {
+        CFIndex in = CFArrayGetCount(items);
+        for (CFIndex i = 0; i < in && !clicked; i++) {
+            AXUIElementRef item = (AXUIElementRef)CFArrayGetValueAtIndex(items, i);
+            CFStringRef title = NULL;
+            if (AXUIElementCopyAttributeValue(item, kAXTitleAttribute, (CFTypeRef *)&title) ==
+                    kAXErrorSuccess &&
+                title) {
+                char tbuf[128] = {0};
+                CFStringGetCString(title, tbuf, (CFIndex)sizeof(tbuf), kCFStringEncodingUTF8);
+                CFRelease(title);
+                if (strncmp(tbuf, "Reply", 5) == 0)
+                    clicked = (AXUIElementPerformAction(item, kAXPressAction) == kAXErrorSuccess);
+            }
+        }
+        CFRelease(items);
+    }
+    CFRelease(menu);
+    return clicked;
+}
+
+bool hu_imessage_ax_reply_tier1_cmd_r(const char *target, size_t target_len,
+                                      const char *parent_guid, size_t parent_guid_len,
+                                      const char *body, size_t body_len) {
+    if (!target || target_len == 0 || !body || body_len == 0)
+        return false;
+    char prefix[33] = {0};
+    if (parent_guid_to_text_prefix(parent_guid, parent_guid_len, prefix, sizeof(prefix)) != HU_OK ||
+        prefix[0] == '\0')
+        return false;
+    AXUIElementRef row = ax_find_reply_row(target, target_len, prefix);
+    if (!row) {
+        hu_log_info("imessage", NULL, "AX reply tier1: parent row not found (prefix=%.20s)",
+                    prefix);
+        return false;
+    }
+    /* Focus the parent row so Cmd-R targets the right message. Best-effort:
+     * SwiftUI rows may not be focusable; failures are ignored. */
+    AXUIElementSetAttributeValue(row, kAXFocusedAttribute, kCFBooleanTrue);
+    AXUIElementPerformAction(row, CFSTR("AXRaise"));
+    CFRelease(row);
+    usleep(120000);
+    ax_post_key((CGKeyCode)HU_VK_ANSI_R, kCGEventFlagMaskCommand);
+    usleep(200000); /* inline reply composer appears */
+    bool ok = ax_inject_body_and_return(body, body_len);
+    hu_log_info("imessage", NULL, "AX reply tier1 (cmdR): %s", ok ? "sent" : "failed");
+    return ok;
+}
+
+bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
+                                          const char *parent_guid, size_t parent_guid_len,
+                                          const char *body, size_t body_len) {
+    if (!target || target_len == 0 || !body || body_len == 0)
+        return false;
+    char prefix[33] = {0};
+    if (parent_guid_to_text_prefix(parent_guid, parent_guid_len, prefix, sizeof(prefix)) != HU_OK ||
+        prefix[0] == '\0')
+        return false;
+    AXUIElementRef row = ax_find_reply_row(target, target_len, prefix);
+    if (!row) {
+        hu_log_info("imessage", NULL, "AX reply tier2: parent row not found (prefix=%.20s)",
+                    prefix);
+        return false;
+    }
+    bool menu_ok = ax_click_menu_item_reply(row);
+    CFRelease(row);
+    if (!menu_ok) {
+        hu_log_info("imessage", NULL, "AX reply tier2: Reply menu item not found");
+        return false;
+    }
+    usleep(200000);
+    bool ok = ax_inject_body_and_return(body, body_len);
+    hu_log_info("imessage", NULL, "AX reply tier2 (ax_menu): %s", ok ? "sent" : "failed");
+    return ok;
+}
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */
 
 /* ── IMCore private framework bridge ────────────────────────────────── */

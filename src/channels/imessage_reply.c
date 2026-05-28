@@ -25,6 +25,22 @@ const char *hu_imessage_test_last_reply_tier(void) {
     return g_last_tier;
 }
 
+/* One-shot guard for the Tier-3 degradation WARN: a busy reply path that
+ * keeps falling through to flat-send should log the "AX unavailable"
+ * explanation exactly once per process, not on every message. Increments
+ * only on the single emitted line so the test can assert "exactly one WARN
+ * across N failures". */
+static int g_flat_fallback_warn_emitted = 0;
+
+#if HU_IS_TEST
+void hu_imessage_test_reset_reply_warn(void) {
+    g_flat_fallback_warn_emitted = 0;
+}
+int hu_imessage_test_reply_warn_count(void) {
+    return g_flat_fallback_warn_emitted;
+}
+#endif
+
 /* Emit one telemetry line for the completed reply. Best-effort:
  * telemetry failure never blocks the reply. */
 static void emit_telemetry(const char *tier_used, int send_result, int64_t elapsed_ms,
@@ -48,65 +64,13 @@ static void emit_telemetry(const char *tier_used, int send_result, int64_t elaps
     (void)hu_imessage_action_log_jsonl(&log);
 }
 
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
-/* Real native impl. Mirrors ax_perform_tapback_on_row pattern in
- * src/channels/imessage.c. Real impl details:
- *
- * 1. ax_open_conversation(target, target_len)  // existing helper
- * 2. ax_find_message_group(window, parent_text_prefix, 0)  // existing
- *    — needs parent_text_prefix: a guid-to-text-prefix lookup OR pass
- *      the body's first 20 chars as a heuristic prefix
- * 3. AXUIElementPerformAction(msg_group, kAXRaiseAction)  // focus
- * 4. CGEventCreateKeyboardEvent for Cmd+R press + release
- * 5. Poll for AX text-field appearing under the parent row
- * 6. CGEventKeyboardSetUnicodeString for the body text
- * 7. Return key synth
- *
- * IMPORTANT for C1: stub this with `return false;` for now — the real
- * AX wiring requires testing on a live macOS box which is out-of-scope
- * for the unit test budget. Real impl lands in a follow-up integration
- * pass after C5 (when the full path is wired end-to-end).
- *
- * This is INTENTIONAL — Tier 1 falls through to Tier 2/3 until real
- * macOS testing happens. The contract (hu_imessage_reply returns proper
- * tier escalation results) is testable today via the stub mechanism. */
-static bool ax_reply_tier1_cmd_r(const char *target, size_t target_len, const char *parent_guid,
-                                 size_t parent_guid_len, const char *body, size_t body_len) {
-    (void)target;
-    (void)target_len;
-    (void)parent_guid;
-    (void)parent_guid_len;
-    (void)body;
-    (void)body_len;
-    return false; /* Real CGEvent + AX wiring deferred to integration pass */
-}
-
-/* Real impl mirrors ax_perform_tapback_on_row in src/channels/imessage.c:
- *
- * 1. ax_open_conversation(target, target_len)
- * 2. ax_find_message_group(window, parent_text_prefix, 0)
- * 3. AXUIElementPerformAction(msg_group, kAXShowMenuAction)
- * 4. Iterate context menu items; match title.startswith("Reply")
- *    — handles "Reply…" (U+2026 ellipsis), "Reply..." (3 dots), localized
- * 5. AXUIElementPerformAction(menu_item, kAXPressAction)
- * 6. Poll for the inline composer (AX text field appearing under parent)
- * 7. CGEventKeyboardSetUnicodeString for body
- * 8. Return key synth
- *
- * Like Tier 1, stubbed to return false in C2 — real AX wiring is part of
- * the post-C5 integration pass on a live macOS box. The test-stub contract
- * is what's exercised in CI. */
-static bool ax_reply_tier2_show_menu(const char *target, size_t target_len, const char *parent_guid,
-                                     size_t parent_guid_len, const char *body, size_t body_len) {
-    (void)target;
-    (void)target_len;
-    (void)parent_guid;
-    (void)parent_guid_len;
-    (void)body;
-    (void)body_len;
-    return false;
-}
-#endif
+/* The real Tier 1 / Tier 2 AX workers live in src/channels/imessage.c
+ * (hu_imessage_ax_reply_tier1_cmd_r / hu_imessage_ax_reply_tier2_show_menu),
+ * alongside the static AX helpers and chat.db access they depend on. They
+ * are declared in imessage_reply.h under the same
+ * (__APPLE__ && HU_IMESSAGE_TAPBACK_ENABLED && !HU_IS_TEST) guard. In test
+ * builds those symbols don't exist, so the tier-escalation logic below is
+ * exercised purely through the g_test_tier1 / g_test_tier2 stubs. */
 
 hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                              const char *parent_msg_guid, size_t parent_msg_guid_len,
@@ -126,9 +90,9 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     if (g_test_tier1) {
         t1_ok = g_test_tier1(parent_msg_guid, parent_msg_guid_len, body, body_len);
     } else {
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
-        t1_ok = ax_reply_tier1_cmd_r(target, target_len, parent_msg_guid, parent_msg_guid_len, body,
-                                     body_len);
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+        t1_ok = hu_imessage_ax_reply_tier1_cmd_r(target, target_len, parent_msg_guid,
+                                                 parent_msg_guid_len, body, body_len);
 #endif
     }
     if (t1_ok) {
@@ -143,9 +107,9 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     if (g_test_tier2) {
         t2_ok = g_test_tier2(parent_msg_guid, parent_msg_guid_len, body, body_len);
     } else {
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED)
-        t2_ok = ax_reply_tier2_show_menu(target, target_len, parent_msg_guid, parent_msg_guid_len,
-                                         body, body_len);
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+        t2_ok = hu_imessage_ax_reply_tier2_show_menu(target, target_len, parent_msg_guid,
+                                                     parent_msg_guid_len, body, body_len);
 #endif
     }
     if (t2_ok) {
@@ -156,11 +120,15 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     }
 
     /* Tier 3: flat-send fallback. Log WARN explaining the degradation
-     * (per silent-config-gated-subsystems.md visibility discipline). */
-    hu_log_warn("imessage", NULL,
-                "threaded reply degraded to flat-send (parent_guid=%.*s reason=ax_unavailable)",
-                (int)(parent_msg_guid_len > 40 ? 40 : parent_msg_guid_len),
-                parent_msg_guid ? parent_msg_guid : "(null)");
+     * (per silent-config-gated-subsystems.md visibility discipline), but
+     * only once per process to avoid spamming the log on every message. */
+    if (g_flat_fallback_warn_emitted == 0) {
+        hu_log_warn("imessage", NULL,
+                    "threaded reply degraded to flat-send (parent_guid=%.*s reason=ax_unavailable)",
+                    (int)(parent_msg_guid_len > 40 ? 40 : parent_msg_guid_len),
+                    parent_msg_guid ? parent_msg_guid : "(null)");
+        g_flat_fallback_warn_emitted = 1;
+    }
 
     hu_error_t err = HU_ERR_NOT_SUPPORTED;
     if (g_test_flat_send) {
