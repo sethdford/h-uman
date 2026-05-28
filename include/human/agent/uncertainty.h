@@ -62,4 +62,9 @@ hu_confidence_level_t hu_confidence_level_from_score(double score);
 
 const char *hu_confidence_level_str(hu_confidence_level_t level);
 
+/* Strip and parse tail-anchored [conf=0.X] tag from response.
+ * Modifies response in place by truncating at tag start; updates *response_len.
+ * Returns true if tag was found and parsed, false otherwise. */
+bool hu_uncertainty_strip_verbalized(char *response, size_t *response_len, double *out_conf);
+
 #endif

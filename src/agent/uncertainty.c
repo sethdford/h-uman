@@ -1,6 +1,7 @@
 #include "human/agent/uncertainty.h"
 #include "human/core/string.h"
 #include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
 
 hu_error_t hu_uncertainty_evaluate(hu_allocator_t *alloc, const hu_uncertainty_signals_t *signals,
@@ -244,46 +245,6 @@ hu_error_t hu_uncertainty_extract_signals(const char *response, size_t response_
         signals->response_length_ratio = 0.5;
     }
 
-    /* Verbalized confidence extraction: detect explicit confidence markers
-     * and map them to [0.0, 1.0] confidence values */
-    struct {
-        const char *phrase;
-        double confidence;
-    } confidence_phrases[] = {
-        /* High confidence (0.9+) */
-        {"i'm certain", 0.95},
-        {"i'm sure", 0.93},
-        {"definitely", 0.90},
-        {"absolutely", 0.92},
-        {"without doubt", 0.94},
-
-        /* Medium-high confidence (0.7-0.85) */
-        {"i'm fairly confident", 0.80},
-        {"i believe", 0.75},
-        {"i think", 0.70},
-        {"i'm reasonably sure", 0.78},
-
-        /* Medium confidence (0.4-0.6) */
-        {"i'm somewhat uncertain", 0.45},
-        {"somewhat unclear", 0.50},
-        {"fairly uncertain", 0.40},
-
-        /* Low confidence (0.1-0.3) */
-        {"i'm not sure", 0.30},
-        {"unsure", 0.28},
-        {"uncertain", 0.25},
-        {"i'm doubtful", 0.20},
-        {"very uncertain", 0.15},
-    };
-
-    for (size_t i = 0; i < sizeof(confidence_phrases) / sizeof(confidence_phrases[0]); i++) {
-        if (contains_phrase_ci(response, response_len, confidence_phrases[i].phrase)) {
-            signals->has_verbalized = true;
-            signals->verbalized_confidence = confidence_phrases[i].confidence;
-            break; /* Use the first match */
-        }
-    }
-
     return HU_OK;
 }
 
@@ -310,4 +271,55 @@ const char *hu_confidence_level_str(hu_confidence_level_t level) {
     default:
         return "unknown";
     }
+}
+
+/* Tail-anchored [conf=0.X] parser. Modifies response in place by
+ * truncating at tag start; updates *response_len. Per
+ * substring-classifier-pitfalls.md, requires bracket boundaries. */
+bool hu_uncertainty_strip_verbalized(char *response, size_t *response_len, double *out_conf) {
+    if (!response || !response_len || *response_len < 10)
+        return false;
+
+    size_t end = *response_len;
+    while (end > 0 && isspace((unsigned char)response[end - 1]))
+        end--;
+    if (end == 0 || response[end - 1] != ']')
+        return false;
+
+    size_t cap = (end > 32) ? end - 32 : 0;
+    size_t open_pos = end;
+    for (size_t i = end; i > cap; i--) {
+        if (response[i - 1] == '[') {
+            open_pos = i - 1;
+            break;
+        }
+    }
+    if (open_pos >= end)
+        return false;
+
+    if (end - open_pos < 8)
+        return false;
+    if (strncmp(response + open_pos, "[conf=", 6) != 0)
+        return false;
+
+    char buf[16];
+    size_t num_len = end - 1 - (open_pos + 6);
+    if (num_len == 0 || num_len >= sizeof(buf))
+        return false;
+    memcpy(buf, response + open_pos + 6, num_len);
+    buf[num_len] = '\0';
+
+    char *endptr = NULL;
+    double parsed = strtod(buf, &endptr);
+    if (endptr == buf)
+        return false;
+    if (parsed < 0.0 || parsed > 1.0)
+        return false;
+
+    while (open_pos > 0 && isspace((unsigned char)response[open_pos - 1]))
+        open_pos--;
+    *response_len = open_pos;
+    if (out_conf)
+        *out_conf = parsed;
+    return true;
 }
