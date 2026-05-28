@@ -177,8 +177,20 @@ static bool contains_code_fence(const char *s, size_t s_len) {
     return false;
 }
 
-hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape_channel_t channel,
-                             hu_shape_result_t *out) {
+/* Helper: case-insensitive comparison for "close" relationship stage. */
+static bool is_relationship_close(const char *stage, size_t stage_len) {
+    if (!stage || stage_len != 5)
+        return false;
+    return strncasecmp(stage, "close", 5) == 0;
+}
+
+/* Implementation shared by hu_shape_classify and hu_shape_classify_ex.
+ * Task 11 (AC-10): when relationship_stage=="close" and learned_length_cap>0,
+ * allow responses up to learned_length_cap (overriding universal channel cap). */
+static hu_error_t shape_classify_impl(const char *response, size_t response_len,
+                                      hu_shape_channel_t channel, const char *relationship_stage,
+                                      size_t relationship_stage_len, size_t learned_length_cap,
+                                      hu_shape_result_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     out->score = 0.0;
@@ -214,12 +226,25 @@ hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape
 
     const char *r = response + start;
 
-    /* Length checks (channel-specific) */
+    /* Length checks (channel-specific).
+     * Task 11 (AC-10): for "close" contacts with a learned cap, allow up to
+     * the learned cap instead of the universal channel cap. */
     bool way_too_long = false;
-    if (trimmed_len > rules->way_too_long) {
+    size_t effective_too_long = rules->too_long;
+    size_t effective_way_too_long = rules->way_too_long;
+
+    if (is_relationship_close(relationship_stage, relationship_stage_len) &&
+        learned_length_cap > 0) {
+        /* Close contact with learned cap: use learned cap as the length bound
+         * instead of the universal channel cap. */
+        effective_too_long = learned_length_cap;
+        effective_way_too_long = learned_length_cap * 2; /* generous margin */
+    }
+
+    if (trimmed_len > effective_way_too_long) {
         out->fail_flags |= HU_SHAPE_FAIL_WAY_TOO_LONG;
         way_too_long = true;
-    } else if (trimmed_len > rules->too_long) {
+    } else if (trimmed_len > effective_too_long) {
         out->fail_flags |= HU_SHAPE_FAIL_TOO_LONG;
     }
 
@@ -346,4 +371,21 @@ hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape
      * pass logic. We track it for future weighting changes. */
     (void)fatal_opener;
     return HU_OK;
+}
+
+/* Public wrapper: classify with universal channel rules only (no learned cap). */
+hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape_channel_t channel,
+                             hu_shape_result_t *out) {
+    return shape_classify_impl(response, response_len, channel, NULL, 0, 0, out);
+}
+
+/* Public wrapper: extended variant with relationship_stage and learned_length_cap.
+ * Task 11 (AC-10): when relationship_stage=="close" and learned_length_cap>0,
+ * allows responses up to learned_length_cap instead of universal channel cap. */
+hu_error_t hu_shape_classify_ex(const char *response, size_t response_len,
+                                hu_shape_channel_t channel, const char *relationship_stage,
+                                size_t relationship_stage_len, size_t learned_length_cap,
+                                hu_shape_result_t *out) {
+    return shape_classify_impl(response, response_len, channel, relationship_stage,
+                               relationship_stage_len, learned_length_cap, out);
 }

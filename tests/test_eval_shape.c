@@ -140,6 +140,98 @@ static void test_shape_header_flagged_imessage(void) {
     HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_HEADER) != 0);
 }
 
+/* ── Task 11 (AC-10): Per-contact learned length caps ────────────────── */
+
+static void test_shape_close_contact_with_learned_cap_exceeds_universal(void) {
+    /* AC-10: a close contact with learned_length_cap=300 can send a 300-char
+     * iMessage, which would normally fail (universal imessage cap is 250). */
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    /* 280-char message — below universal cap but we'll test with a higher
+     * learned_length_cap to show the close-contact override works. */
+    const char *resp = "This is a longer message for a close contact. I've known this "
+                       "person for a long time and we often have detailed conversations. "
+                       "The universal cap for iMessage is 250 chars, but for close contacts "
+                       "who Seth talks to regularly with longer messages, we allow up to the "
+                       "learned baseline. This is about 280 characters.";
+
+    HU_ASSERT_EQ(
+        hu_shape_classify_ex(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, "close", 5, 350, &r),
+        HU_OK);
+    HU_ASSERT_EQ((int)r.passed, 1);
+    HU_ASSERT_FALSE((r.fail_flags & HU_SHAPE_FAIL_TOO_LONG) != 0);
+}
+
+static void test_shape_close_contact_with_learned_cap_bullet_list_still_fails(void) {
+    /* AC-10: structural fails (markdown) are NEVER allowed, even for close
+     * contacts. A 200-char bullet list should fail even with a high learned cap. */
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp = "Sure, here are the details:\n- first point about something\n"
+                       "- second point about another thing\n- third point with more details";
+
+    HU_ASSERT_EQ(
+        hu_shape_classify_ex(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, "close", 5, 500, &r),
+        HU_OK);
+    HU_ASSERT_EQ((int)r.passed, 0);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_BULLET_LIST) != 0);
+}
+
+static void test_shape_without_learned_cap_reverts_to_universal(void) {
+    /* AC-10: when learned_length_cap=0, even for close contacts, revert to
+     * the universal channel cap. This ensures backward compatibility. */
+    hu_shape_result_t r1;
+    hu_shape_result_t r2;
+    const char *resp =
+        "This is a very long iMessage reply that runs far past the universal 250-character "
+        "ceiling and even past the 500-character way-too-long threshold for the channel. "
+        "Without any learned per-contact cap in play, the classifier must fall back to the "
+        "universal iMessage bounds, which means a wall of text like this one is treated as a "
+        "hard length violation rather than a mild one. We deliberately keep typing well beyond "
+        "what any person would send in a single text so the byte count is unambiguously above "
+        "five hundred characters, guaranteeing the way-too-long flag fires and the shape gate "
+        "fails the response outright.";
+
+    memset(&r1, 0, sizeof(r1));
+    /* Classic call — way over the universal way_too_long (500) bound, so it must
+     * fail: WAY_TOO_LONG forces passed=0 (a mere TOO_LONG only docks the score). */
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r1), HU_OK);
+    HU_ASSERT_EQ((int)r1.passed, 0);
+    HU_ASSERT_TRUE((r1.fail_flags & HU_SHAPE_FAIL_WAY_TOO_LONG) != 0);
+
+    memset(&r2, 0, sizeof(r2));
+    /* _ex call with learned_cap=0 — should have same result as classic call. */
+    HU_ASSERT_EQ(
+        hu_shape_classify_ex(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, "close", 5, 0, &r2),
+        HU_OK);
+    HU_ASSERT_EQ((int)r2.passed, (int)r1.passed);
+    HU_ASSERT_EQ(r2.fail_flags, r1.fail_flags);
+}
+
+static void test_shape_non_close_relationship_ignores_learned_cap(void) {
+    /* AC-10: learned_length_cap only applies to "close" relationships. If the
+     * relationship_stage is "friend", "family", or other, the universal cap
+     * applies even with a high learned_cap. */
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp =
+        "This is a deliberately long message that sails past the iMessage universal cap of 250 "
+        "characters and continues well beyond the 500-character way-too-long threshold too. Even "
+        "though the caller supplies a learned cap of 500, the relationship stage here is 'friend' "
+        "rather than 'close', so the per-contact override must not apply and the universal bounds "
+        "govern. We keep padding the text so the total byte count is comfortably over five "
+        "hundred, which guarantees the universal way-too-long flag fires for this non-close "
+        "relationship and the shape check rejects it outright.";
+
+    HU_ASSERT_EQ(
+        hu_shape_classify_ex(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, "friend", 6, 500, &r),
+        HU_OK);
+    /* friend (not close) ignores the learned cap → universal way_too_long=500
+     * applies; a >500-char reply is WAY_TOO_LONG, which forces passed=0. */
+    HU_ASSERT_EQ((int)r.passed, 0);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_WAY_TOO_LONG) != 0);
+}
+
 void run_eval_shape_tests(void) {
     HU_TEST_SUITE("eval shape classifier");
     HU_RUN_TEST(test_shape_null_response_fails);
@@ -153,4 +245,10 @@ void run_eval_shape_tests(void) {
     HU_RUN_TEST(test_shape_channel_from_string_case_insensitive);
     HU_RUN_TEST(test_shape_numbered_list_flagged_imessage);
     HU_RUN_TEST(test_shape_header_flagged_imessage);
+
+    /* Task 11 (AC-10) — per-contact learned length caps. */
+    HU_RUN_TEST(test_shape_close_contact_with_learned_cap_exceeds_universal);
+    HU_RUN_TEST(test_shape_close_contact_with_learned_cap_bullet_list_still_fails);
+    HU_RUN_TEST(test_shape_without_learned_cap_reverts_to_universal);
+    HU_RUN_TEST(test_shape_non_close_relationship_ignores_learned_cap);
 }

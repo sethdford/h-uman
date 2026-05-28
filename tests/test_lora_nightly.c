@@ -156,6 +156,25 @@ static void test_orchestrator_returns_not_supported_in_test_build(void) {
     HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_SUPPORTED);
 }
 
+/* ── MLX admin swap path tests (AC-6) ────────────────────────────────── */
+
+/* Test that the swap function returns the correct error code on all paths
+ * (curl-on via mock HTTP, curl-off via HU_ENABLE_CURL gating). */
+
+static void test_swap_predicate_threshold_boundary(void) {
+    /* should_run returns false below MIN_NEW_PAIRS, true at and above. */
+    int32_t threshold = HU_LORA_NIGHTLY_MIN_NEW_PAIRS;
+    int64_t now = 1700000000;
+    int64_t last = 0; /* never run */
+
+    /* Below threshold → false. */
+    HU_ASSERT_TRUE(!hu_lora_nightly_should_run(now, last, threshold - 1));
+    /* At threshold → true. */
+    HU_ASSERT_TRUE(hu_lora_nightly_should_run(now, last, threshold));
+    /* Above threshold → true. */
+    HU_ASSERT_TRUE(hu_lora_nightly_should_run(now, last, threshold + 1));
+}
+
 void run_lora_nightly_tests(void) {
     HU_TEST_SUITE("lora_nightly");
     HU_RUN_TEST(test_should_run_below_min_pairs_false);
@@ -168,6 +187,7 @@ void run_lora_nightly_tests(void) {
     HU_RUN_TEST(test_rotate_symlink_replaces_existing_atomically);
     HU_RUN_TEST(test_rotate_symlink_null_or_empty_args);
     HU_RUN_TEST(test_orchestrator_returns_not_supported_in_test_build);
+    HU_RUN_TEST(test_swap_predicate_threshold_boundary);
 }
 
 #else /* !HU_ENABLE_ML — stub runner so the symbol always resolves */

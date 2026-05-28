@@ -18,6 +18,22 @@ static void default_config_has_all_models(void) {
     HU_ASSERT(cfg.conversational_model_len > 0);
 }
 
+static void default_models_are_not_deprecated(void) {
+    /* CLAUDE.md "AI Model Versions": gemini-3-flash-preview is superseded by
+     * gemini-3.5-flash; gemini-3-pro-preview is discontinued. The router's
+     * default config must not hand out a deprecated model id. */
+    cfg = hu_model_router_default_config();
+    HU_ASSERT_STR_EQ(cfg.conversational_model, "gemini-3.5-flash");
+    HU_ASSERT_EQ(cfg.conversational_model_len, strlen(cfg.conversational_model));
+    HU_ASSERT_STR_EQ(cfg.analytical_model, "gemini-3.5-flash");
+    HU_ASSERT_EQ(cfg.analytical_model_len, strlen(cfg.analytical_model));
+    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-flash-preview") == NULL);
+    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-pro-preview") == NULL);
+    HU_ASSERT(strstr(cfg.analytical_model, "gemini-3-flash-preview") == NULL);
+    /* deep tier stays on the canonical pro-preview id (not the discontinued one) */
+    HU_ASSERT(strstr(cfg.deep_model, "gemini-3-pro-preview") == NULL);
+}
+
 static void short_message_routes_reflexive(void) {
     cfg = hu_model_router_default_config();
     hu_model_selection_t sel = hu_model_route(&cfg, "lol", 3, NULL, 0, 14, 0);
@@ -618,6 +634,7 @@ void run_model_router_tests(void) {
     HU_TEST_SUITE("Model Router");
 
     HU_RUN_TEST(default_config_has_all_models);
+    HU_RUN_TEST(default_models_are_not_deprecated);
     HU_RUN_TEST(short_message_routes_reflexive);
     HU_RUN_TEST(simple_ack_routes_reflexive);
     HU_RUN_TEST(normal_question_routes_higher);

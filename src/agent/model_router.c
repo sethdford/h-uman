@@ -133,10 +133,10 @@ hu_model_router_config_t hu_model_router_default_config(void) {
     memset(&cfg, 0, sizeof(cfg));
     cfg.reflexive_model = "gemini-3.1-flash-lite-preview";
     cfg.reflexive_model_len = 29;
-    cfg.conversational_model = "gemini-3-flash-preview";
-    cfg.conversational_model_len = 22;
-    cfg.analytical_model = "gemini-3-flash-preview";
-    cfg.analytical_model_len = 22;
+    cfg.conversational_model = "gemini-3.5-flash";
+    cfg.conversational_model_len = 16;
+    cfg.analytical_model = "gemini-3.5-flash";
+    cfg.analytical_model_len = 16;
     cfg.deep_model = "gemini-3.1-pro-preview";
     cfg.deep_model_len = 22;
     cfg.on_device_model = "apple-foundationmodel";
@@ -325,7 +325,7 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const c
     sel.source = HU_ROUTE_HEURISTIC;
 
     if (!cfg || !msg || msg_len == 0) {
-        sel.model = cfg ? cfg->conversational_model : "gemini-3-flash-preview";
+        sel.model = cfg ? cfg->conversational_model : "gemini-3.5-flash";
         sel.model_len = cfg ? cfg->conversational_model_len : 22;
         sel.tier = HU_TIER_CONVERSATIONAL;
         return sel;

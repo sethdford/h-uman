@@ -185,6 +185,7 @@ void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
+void run_uncertainty_tests(void);
 void run_tool_search_tests(void);
 void run_persona_tests(void);
 void run_circadian_tests(void);
@@ -194,6 +195,7 @@ void run_style_clone_tests(void);
 void run_life_sim_tests(void);
 void run_persona_mood_tests(void);
 void run_persona_feedback_tests(void);
+void run_persona_examples_style_tests(void);
 void run_persona_filler_roundtrip_tests(void);
 void run_persona_cli_tests(void);
 void run_persona_sticker_tests(void);
@@ -241,6 +243,7 @@ void run_config_extended_tests(void);
 void run_config_getters_tests(void);
 void run_config_validation_tests(void);
 void run_config_action_surface_tests(void);
+void run_config_seth_voice_defaults_tests(void);
 void run_json_extended_tests(void);
 void run_security_extended_tests(void);
 void run_security_pipeline_tests(void);
@@ -479,6 +482,7 @@ void run_governor_tests(void);
 void run_activation_steering_tests(void);
 void run_relationship_dynamics_tests(void);
 void run_model_router_tests(void);
+void run_model_router_health_tests(void);
 void run_humanness_context_tests(void);
 void run_turing_score_tests(void);
 void run_adversarial_turing_tests(void);
@@ -814,6 +818,7 @@ void run_reflection_storage_tests(void);                 /* T2: stub when SQLite
 void run_reflection_prompt_tests(void);                  /* T4: stub when SQLite off */
 void run_reflection_orchestration_tests(void);           /* T5: stub when SQLite off */
 void run_reflection_consumer_tests(void);                /* T6: stub when SQLite off */
+void run_reflection_turn_source_tests(void);             /* T9fu: stub when SQLite off */
 void run_personal_model_reflection_slice_tests(void);    /* T7: stub when SQLite off */
 void run_reflection_retire_on_contradiction_tests(void); /* T8: stub when SQLite off */
 void run_reflection_quorum_tests(void);                  /* T11: stub when SQLite off */
@@ -1094,6 +1099,7 @@ int main(int argc, char **argv) {
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
+    run_uncertainty_tests();
     run_tool_search_tests();
     run_persona_tests();
     run_circadian_tests();
@@ -1103,6 +1109,7 @@ int main(int argc, char **argv) {
     run_life_sim_tests();
     run_persona_mood_tests();
     run_persona_feedback_tests();
+    run_persona_examples_style_tests();
     run_persona_filler_roundtrip_tests();
     run_persona_cli_tests();
     run_persona_sticker_tests();
@@ -1149,6 +1156,7 @@ int main(int argc, char **argv) {
     run_config_getters_tests();
     run_config_validation_tests();
     run_config_action_surface_tests();
+    run_config_seth_voice_defaults_tests();
     run_json_extended_tests();
     run_security_extended_tests();
     run_security_pipeline_tests();
@@ -1372,6 +1380,7 @@ int main(int argc, char **argv) {
     run_activation_steering_tests();
     run_relationship_dynamics_tests();
     run_model_router_tests();
+    run_model_router_health_tests();
     run_humanness_context_tests();
     run_turing_score_tests();
     run_adversarial_turing_tests();
@@ -1690,6 +1699,7 @@ int main(int argc, char **argv) {
     run_reflection_prompt_tests();                  /* T4: stubbed-out when SQLite off */
     run_reflection_orchestration_tests();           /* T5: stubbed-out when SQLite off */
     run_reflection_consumer_tests();                /* T6: stubbed-out when SQLite off */
+    run_reflection_turn_source_tests();             /* T9fu: stubbed-out when SQLite off */
     run_reflection_quorum_tests();                  /* T11: stubbed-out when SQLite off */
     run_personal_model_reflection_slice_tests();    /* T7: stubbed-out when SQLite off */
     run_reflection_retire_on_contradiction_tests(); /* T8: stubbed-out when SQLite off */

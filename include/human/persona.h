@@ -7,6 +7,7 @@
 
 #include "human/agent/output_validator_chain.h"
 #include "human/core/error.h"
+#include "human/memory/personal_model.h"
 #include "human/persona/circadian.h"
 #include "human/persona/relationship.h"
 
@@ -549,7 +550,7 @@ hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *bu
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
                                       const hu_persona_example_t **out, size_t *out_count,
-                                      size_t max_examples);
+                                      size_t max_examples, const hu_communication_style_t *style);
 
 /* M3 Bridge A.0 — export the persona's example banks to JSONL in the
  * Alpaca shape ({"instruction": ..., "input": ..., "output": ...}).

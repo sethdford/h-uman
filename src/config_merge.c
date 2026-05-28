@@ -481,6 +481,22 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
              HU_REFLECTION_DEFAULT_PROVIDER);
     snprintf(cfg->reflection_loop.local_provider, sizeof cfg->reflection_loop.local_provider, "%s",
              HU_REFLECTION_DEFAULT_LOCAL_PROVIDER);
+
+    /* AC-1: Seth-voice local routing tri-state. Default is AUTO: use local
+     * when it's healthy (adapter present + MLX server reachable), else cloud.
+     * Users can override to OFF (never local) or FORCE (strict local). */
+    cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_AUTO;
+
+    /* AC-4: Reaction collection for DPO pair generation. Default enabled
+     * in a fresh config so real user feedback (tapbacks, edits) flows
+     * through the training loop without explicit config. */
+    cfg->reaction_collection.enabled = true;
+}
+
+void hu_config_apply_defaults(hu_config_t *cfg, hu_allocator_t *a) {
+    if (!cfg || !a)
+        return;
+    set_defaults(cfg, a);
 }
 
 static void sync_autonomy_level_from_string(hu_config_t *cfg) {

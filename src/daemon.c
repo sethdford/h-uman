@@ -4456,23 +4456,50 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             !lora_nightly_done_today) {
                             hu_lora_nightly_config_t lcfg;
                             if (hu_lora_nightly_config_init_defaults(&lcfg)) {
-                                size_t pair_count = 0;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "lora-nightly: starting at 04:00 (may block up to "
-                                            "30m)");
-                                hu_error_t lr =
-                                    hu_lora_nightly_run(alloc, &lcfg, (int64_t)t, &pair_count);
-                                if (lr == HU_OK) {
-                                    lora_last_run_unix = (int64_t)t;
+                                /* Count new DPO pairs since last run (predicate gate). */
+                                int32_t new_pairs_since = 0;
+                                sqlite3 *db = agent && agent->memory
+                                                  ? hu_sqlite_memory_get_db(agent->memory)
+                                                  : NULL;
+                                if (db) {
+                                    const char *count_sql = "SELECT COUNT(*) FROM dpo_pairs";
+                                    sqlite3_stmt *stmt = NULL;
+                                    if (sqlite3_prepare_v2(db, count_sql, -1, &stmt, NULL) ==
+                                        SQLITE_OK) {
+                                        if (sqlite3_step(stmt) == SQLITE_ROW) {
+                                            new_pairs_since = (int32_t)sqlite3_column_int(stmt, 0);
+                                        }
+                                        sqlite3_finalize(stmt);
+                                    }
+                                }
+                                /* Check if we should run: ≥20 pairs AND (never run OR ≥24h since
+                                 * last). */
+                                if (hu_lora_nightly_should_run((int64_t)t, lora_last_run_unix,
+                                                               new_pairs_since)) {
+                                    size_t pair_count = 0;
                                     hu_log_info("human", agent ? agent->observer : NULL,
-                                                "lora-nightly: ok (%zu pairs exported)",
-                                                pair_count);
-                                } else if (lr == HU_ERR_NOT_FOUND) {
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "lora-nightly: skipped (no new pairs)");
+                                                "lora-nightly: starting at 04:00 (may block up to "
+                                                "30m)");
+                                    hu_error_t lr =
+                                        hu_lora_nightly_run(alloc, &lcfg, (int64_t)t, &pair_count);
+                                    if (lr == HU_OK) {
+                                        lora_last_run_unix = (int64_t)t;
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "lora-nightly: ok (%zu pairs exported)",
+                                                    pair_count);
+                                    } else if (lr == HU_ERR_NOT_FOUND) {
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "lora-nightly: skipped (no new pairs)");
+                                    } else {
+                                        hu_log_warn("human", agent ? agent->observer : NULL,
+                                                    "lora-nightly: failed (err=%d)", (int)lr);
+                                    }
                                 } else {
-                                    hu_log_warn("human", agent ? agent->observer : NULL,
-                                                "lora-nightly: failed (err=%d)", (int)lr);
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: skipped predicate (pairs=%d, "
+                                                "last_run=%lld, now=%lld)",
+                                                (int)new_pairs_since, (long long)lora_last_run_unix,
+                                                (long long)t);
                                 }
                             }
                             lora_nightly_done_today = true;

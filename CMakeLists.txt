@@ -723,6 +723,7 @@ set(HU_CORE_SOURCES
     src/agent/swarm.c
     src/agent/agent_profile.c
     src/agent/model_router.c
+    src/agent/model_router_health.c
     src/agent/registry.c
     src/agent/undo.c
     src/agent/cli.c
@@ -1533,6 +1534,10 @@ if(HU_ENABLE_SQLITE)
         # T6: consumer queries — system-prompt slice, unsurfaced candidates,
         # mark_surfaced + retire mutators. Read-side counterpart to T2.
         src/reflection/consumer.c
+        # T9-followup: production SQLite turn source — streams the canonical
+        # `messages` ledger into the reflection iter contract, replacing the
+        # daemon's stub_turn_iter. Daemon-free; reads only sqlite3*.
+        src/reflection/turn_source.c
     )
 endif()
 
@@ -3093,6 +3098,7 @@ set(HU_TEST_SOURCES
     tests/test_reflection_prompt.c
     tests/test_reflection_orchestration.c
     tests/test_reflection_consumer.c
+    tests/test_reflection_turn_source.c
     tests/test_reflection_quorum.c
     tests/test_personal_model_reflection_slice.c
     tests/test_reflection_retire_on_contradiction.c
@@ -3263,6 +3269,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_prompt.c
+    tests/test_uncertainty.c
     tests/test_tool_search.c
     tests/test_vector.c
     tests/test_vector_full.c
@@ -3303,6 +3310,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
     tests/test_config_getters.c
+    tests/test_config_seth_voice_defaults.c
     tests/test_config_validation.c
     tests/test_config_action_surface.c
     tests/test_json_extended.c
@@ -3575,6 +3583,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_sota_humanness.c
     tests/test_distiller.c
     tests/test_model_router.c
+    tests/test_model_router_health.c
     tests/test_humanness_context.c
     tests/test_plan_executor.c
     tests/test_planner_mcts_wiring.c
@@ -3593,7 +3602,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)

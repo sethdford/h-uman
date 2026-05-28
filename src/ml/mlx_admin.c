@@ -178,7 +178,10 @@ static void record_swap_outcome(const char *adapter_path, size_t adapter_path_le
  * the admin layer is a NOT_SUPPORTED stub — matching the M3 dispatcher
  * safety contract. The daemon falls through gracefully and the
  * personalization loop simply doesn't close until a curl-enabled
- * binary is in use. */
+ * binary is in use. Operator gets one clear log line on first swap
+ * attempt explaining why the loop is inactive. */
+static atomic_bool g_warned_curl_disabled = false;
+
 hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url,
                                      size_t base_url_len, const char *adapter_path,
                                      size_t adapter_path_len, hu_mlx_admin_swap_result_t *result) {
@@ -190,6 +193,9 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
     /* NOT_SUPPORTED counts as a transport-class failure — operator
      * still needs to know the personalization loop is silently
      * inactive. Per silent-config-gated-subsystems.md. */
+    hu_log_info_once(&g_warned_curl_disabled, "mlx_admin", NULL,
+                     "lora swap skipped: build lacks libcurl (HU_ENABLE_CURL=OFF) — "
+                     "rebuild with cmake --preset release to enable on-device personalization");
     record_swap_outcome(adapter_path, adapter_path_len, HU_ERR_NOT_SUPPORTED, 0, 0);
     return HU_ERR_NOT_SUPPORTED;
 }

@@ -346,6 +346,51 @@ typedef bool (*hu_reflection_turn_iter_fn)(void *ctx, hu_reflection_turn_t *out_
 hu_error_t hu_reflection_build_input(hu_reflection_turn_iter_fn iter_fn, void *iter_ctx,
                                      size_t max_chars, char **out_buf, int *out_turn_count);
 
+/* ── SQLite turn source (T9-followup) ───────────────────────────── */
+
+struct hu_allocator;
+
+/* Production turn source: reads the canonical `messages` conversation
+ * ledger (written by the memory engine's save_message path) and adapts
+ * each row to the reflection iter contract. It reads only
+ * `struct sqlite3 *` — no daemon/agent coupling — so it lives in the
+ * daemon-free reflection module and is unit-testable against an
+ * in-memory db.
+ *
+ * Selects the `max_turns` MOST-RECENT rows from `messages`, presented
+ * OLDEST-FIRST (the order hu_reflection_build_input wants; it drops the
+ * oldest on overflow so the freshest context survives truncation).
+ * Field mapping:
+ *   turn_id <- "msg-<id>"          (synthesized from the rowid)
+ *   channel <- session_id          (messages has no channel column)
+ *   sender  <- role                ("user" / "assistant")
+ *   content <- content             (plaintext — save_message stores it raw)
+ *   ts_ms   <- created_at -> epoch-ms (0 when NULL / unparseable)
+ *
+ * max_turns <= 0 falls back to HU_REFLECTION_TURN_SOURCE_DEFAULT_MAX. */
+typedef struct hu_reflection_sqlite_turn_source hu_reflection_sqlite_turn_source_t;
+
+#define HU_REFLECTION_TURN_SOURCE_DEFAULT_MAX 200
+
+/* Prepares the cursor. *out_src is heap-allocated via `alloc` and must
+ * be released with hu_reflection_sqlite_turn_source_dispose. Returns
+ * HU_ERR_INVALID_ARGUMENT on NULL out_src/db/alloc, HU_ERR_OUT_OF_MEMORY
+ * on heap exhaustion, or HU_ERR_MEMORY_BACKEND when the cursor can't be
+ * prepared (e.g. the `messages` table doesn't exist yet). */
+hu_error_t hu_reflection_sqlite_turn_source_init(hu_reflection_sqlite_turn_source_t **out_src,
+                                                 struct sqlite3 *db, struct hu_allocator *alloc,
+                                                 int max_turns);
+
+/* Matches hu_reflection_turn_iter_fn — pass as iter_fn with the source
+ * as iter_ctx. Returns false at end-of-stream, on a NULL ctx/out_turn,
+ * or on a step error. The char pointers written into *out_turn stay
+ * valid only until the NEXT call (the builder copies before re-calling,
+ * per the iter contract). */
+bool hu_reflection_sqlite_turn_iter(void *ctx, hu_reflection_turn_t *out_turn);
+
+/* Frees the source and finalizes its cursor. NULL is a no-op. */
+void hu_reflection_sqlite_turn_source_dispose(hu_reflection_sqlite_turn_source_t *src);
+
 /* Returns the static system prompt text the reflection provider call
  * uses. Always non-NULL. Lifetime: process-static (string literal). */
 const char *hu_reflection_system_prompt(void);
