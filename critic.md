@@ -1,30 +1,46 @@
 # Critic findings — retire reflection patterns on negative reaction (commit 4fb2b621)
 
-Status: CLOSED — adversarial review complete; all findings verified against
-source and DISPOSED. No code change warranted.
+Status: CLOSED — findings verified against the COMMITTED blob and disposed.
+3 false-positive/by-design, 2 genuine low-severity (both fixed in df663986).
 
-## Verification disposition (2026-05-28)
+## CORRECTION (2026-05-28, supersedes the first disposition)
 
-Each finding below was re-checked by reading the actual source per the
-`audit-verify-before-allege` discipline. All five are false positives or
-tested-and-documented design choices. Editing working, tested code to
-satisfy these would add regression risk for zero benefit, so no change
-was made. Evidence:
+The first disposition of this file (commit d64d7660) wrongly tagged
+findings #4 and #5 as FALSE POSITIVE. Root cause: that review read the
+WORKING-TREE files, but a parallel agent had already made — and not yet
+committed — the exact hardening edits for #4 and #5. Reviewing the dirty
+working tree instead of `git show 4fb2b621:<path>` showed someone else's
+uncommitted fixes and made the genuine findings look pre-handled.
+
+Re-checked against the committed blob `4fb2b621`:
+- #4 DELETE-unchecked: VALID. In 4fb2b621 the consume DELETE was a bare
+  `sqlite3_step(st);` with no error check. Low-severity (orphans are
+  harmless under the retired=0 guard), but real. Fixed in df663986.
+- #5 missing blast-radius test: VALID. `test_same_channel_thumbs_down_
+  retires_all_in_window` did NOT exist in 4fb2b621 (`grep -c` = 0). Added
+  in df663986 as AC-6, pinning the channel-scoped blast radius as intended.
+
+## Verification disposition (corrected)
 
 | # | Sev | Verdict | Evidence |
 |---|-----|---------|----------|
-| 1 | HIGH | DESIGN, not bug | Crash-safety is handled: the UPDATE carries `WHERE retired = 0` (consumer.c:389), so an orphaned surfacing after a crash cannot re-retire an already-retired pattern. The over-broad `DELETE WHERE channel=?` is the intended "consume the channel ledger on thumbs-down" semantics; the channel-scoped+recency-windowed blast radius is documented at test:264-267 and pinned by test:269. |
+| 1 | HIGH | DESIGN, not bug | Crash-safety is handled: the UPDATE carries `WHERE retired = 0` (consumer.c:389), so an orphaned surfacing after a crash cannot re-retire an already-retired pattern. The over-broad `DELETE WHERE channel=?` is the intended "consume the channel ledger on thumbs-down" semantics; blast radius documented + pinned (df663986 AC-6). |
 | 2 | HIGH | FALSE POSITIVE | `int retired = sqlite3_changes(db);` is at consumer.c:401, which runs BEFORE the DELETE is prepared at :405. `sqlite3_finalize()` destroys a prepared statement; it does NOT reset the connection change counter. `sqlite3_changes()` reports the most recently *completed* DML — the UPDATE — so `retired` is the correct UPDATE row count. |
-| 3 | MEDIUM | FALSE POSITIVE | The null guard already exists: `if (e->polarity == HU_REACTION_NEGATIVE && s_reflection_db)` at reaction_handler.c:297. A cleared/unset db is a no-op by construction. |
-| 4 | MEDIUM | FALSE POSITIVE | The DELETE step IS error-checked and logged: `if (sqlite3_step(st) != SQLITE_DONE) hu_log_error(...)` at consumer.c:411-412. Non-propagation to the caller is intentional and documented (consumer.c:408-410): a failed consume leaves harmless orphans that the retired=0 guard neutralizes. |
-| 5 | LOW | FALSE POSITIVE | The concurrent-turn blast-radius test already exists: `test_same_channel_thumbs_down_retires_all_in_window` (test:269) inserts pA (turn A) + pB (turn B), surfaces both in-window, thumbs-downs once → asserts both retired, lineage consumed, and a second thumbs-down returns 0 (no re-retire). |
+| 3 | MEDIUM | FALSE POSITIVE | The null guard already exists in 4fb2b621: `if (e->polarity == HU_REACTION_NEGATIVE && s_reflection_db)` at reaction_handler.c:297. A cleared/unset db is a no-op by construction. |
+| 4 | MEDIUM→LOW | VALID, fixed | 4fb2b621 had a bare `sqlite3_step(st)` for the consume DELETE. df663986 added the `!= SQLITE_DONE` check + `hu_log_error`. Severity is LOW not MEDIUM: orphans are neutralized by the retired=0 guard, so the only impact is operator visibility of a persistent I/O fault. |
+| 5 | LOW | VALID, fixed | The blast-radius test did not exist in 4fb2b621. df663986 added `test_same_channel_thumbs_down_retires_all_in_window` (pA + pB surfaced in-window → one thumbs-down retires both, lineage consumed, second thumbs-down returns 0). |
 
-RESULT_critic_disposition=ALL_FALSE_POSITIVE_OR_BY_DESIGN
+RESULT_critic_disposition=2_HIGH_FALSE_POSITIVE_1_MEDIUM_FALSE_POSITIVE_2_LOW_VALID_FIXED
 
-Reflexion note: a review that produces 5/5 non-actionable findings against
-tested code is a `tune-agent` candidate — the critic alleged without
-reading the surrounding guards, comments, and existing tests. The
-`audit-verify-before-allege` rule names exactly this failure mode.
+Reflexion notes:
+1. The critic's two HIGH findings were both false positives (it alleged
+   without reading the surrounding guard + the sqlite3_changes ordering) —
+   a `tune-agent` candidate per `audit-verify-before-allege`. But it was
+   RIGHT about the two low-severity gaps.
+2. My own first disposition erred by reviewing the working tree while a
+   parallel agent held uncommitted edits. Lesson: to review commit X,
+   read `git show X:path`, never the live working-tree file, whenever
+   concurrent agents may have dirty state.
 
 ## Original findings (preserved for audit trail)
 
