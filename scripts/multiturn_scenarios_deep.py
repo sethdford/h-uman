@@ -53,7 +53,7 @@ DEEP_SCENARIOS = [
         "anchors": [
             {"turn": 3,  "fact": "big project deadline is next Thursday",  "probe_turn": 22},
             {"turn": 6,  "fact": "the boss is named Richard and gave the assignment",  "probe_turn": 18},
-            {"turn": 9,  "fact": "there's a presentation component to the project",  "probe_turn": 24},
+            {"turn": 8,  "fact": "there's a presentation component to the project",  "probe_turn": 24},
             {"turn": 12, "fact": "the user hasn't slept well all week",  "probe_turn": 26},
         ],
         "turns": [
@@ -82,7 +82,7 @@ DEEP_SCENARIOS = [
             "maybe thats the thing — its actually doable if I break it down",  # 23
             "ok wait, so the presentation is like half of it or nah",   # 24  (probe: presentation)
             "that actually helps, makes me prioritize better",          # 25
-            "yeah okay i'm feeling way less stressed now that I've actually thought about it",  # 26  (probe: slept well)
+            "yeah okay i'm feeling way less stressed now that i've actually thought about it, and maybe i'll actually sleep tonight for once",  # 26  (probe: slept well)
             "thanks for getting me to chill out about this",            # 27
             "yeah you're right, I can do this",                         # 28
             "lol ok im actually gonna get some sleep tonight",          # 29
@@ -94,8 +94,8 @@ DEEP_SCENARIOS = [
         "description": "Friendly disagreement escalates with each side presenting new points, staying civil",
         "anchors": [
             {"turn": 1,  "fact": "the user thinks remote work is overrated",  "probe_turn": 16},
-            {"turn": 4,  "fact": "the user thinks people slack off at home",  "probe_turn": 20},
-            {"turn": 10, "fact": "the user is contrasting office vs home productivity",  "probe_turn": 23},
+            {"turn": 4,  "fact": "the user thinks people without office structure are on youtube/distracted all day",  "probe_turn": 20},
+            {"turn": 10, "fact": "the user says people could use commute time for actual work instead of sitting in traffic",  "probe_turn": 23},
         ],
         "turns": [
             "hot take: remote work is overrated",                       # 1
@@ -133,7 +133,7 @@ DEEP_SCENARIOS = [
         "description": "Playful roasting between friends with running jokes and callbacks",
         "anchors": [
             {"turn": 1,  "fact": "the user just ran a 5k",  "probe_turn": 19},
-            {"turn": 3,  "fact": "the user jokingly called the friend 'grandpa'",  "probe_turn": 25},
+            {"turn": 4,  "fact": "the user jokingly called the friend 'grandpa'",  "probe_turn": 25},
             {"turn": 6,  "fact": "the friend said they used to run marathons",  "probe_turn": 22},
         ],
         "turns": [
@@ -171,9 +171,9 @@ DEEP_SCENARIOS = [
         "name": "news_reaction_chain",
         "description": "Reacting to escalating career milestone news with widening implications",
         "anchors": [
-            {"turn": 1,  "fact": "the user got a promotion",  "probe_turn": 18},
+            {"turn": 2,  "fact": "the user got a promotion",  "probe_turn": 18},
             {"turn": 3,  "fact": "the user will be leading a team",  "probe_turn": 24},
-            {"turn": 5,  "fact": "the user is getting a salary bump",  "probe_turn": 21},
+            {"turn": 5,  "fact": "the user is getting a raise",  "probe_turn": 21},
         ],
         "turns": [
             "dude guess what",                                          # 1
@@ -195,8 +195,8 @@ DEEP_SCENARIOS = [
             "yeah like making it actually fun to work there",           # 17
             "remember when I told you about the promotion?",            # 18  (probe: promotion)
             "feels surreal that it's actually happening",               # 19
-            "like the salary bump is gonna change things for me too",   # 20
-            "like I can finally move to a better place",                # 21  (probe: salary bump)
+            "like the raise is gonna change things for me too",         # 20
+            "with the raise i can finally move to a better place",     # 21  (probe: raise)
             "stop right there but also yay for you",                    # 22
             "lol I know but also this team leadership thing",           # 23
             "like I'm really gonna be leading a team",                  # 24  (probe: leading team)
@@ -234,7 +234,7 @@ DEEP_SCENARIOS = [
             "okay so if the job I hate pays 40% more can I just do it",  # 16  (probe: hate the work)
             "like for two years then bounce",                           # 17
             "since I currently love my work that's the tradeoff",       # 18
-            "like is loving your job more important than money",        # 19  (probe: love current work)
+            "like is loving the work i'm doing now more important than the money",  # 19  (probe: love current work)
             "because after two years I could move on with more money",  # 20
             "yeah actually 40% more is like real money",                # 21
             "like that could change my whole situation",                # 22
