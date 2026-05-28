@@ -267,6 +267,78 @@ def test_judge_available_false_when_no_token():
     print("✓ judge_available_false_when_no_token")
 
 
+def _tiny_scenario():
+    return {
+        "name": "tiny",
+        "description": "tiny test scenario",
+        "anchors": [{"turn": 1, "fact": "user likes tea", "probe_turn": 3}],
+        "turns": ["hi", "how are you", "what do I like to drink", "cool", "bye", "later"],
+    }
+
+
+def test_run_scenario_collects_latency_and_transcript():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("r%d" % i, 100.0 + i) for i in range(6)]
+    sv = mt.run_scenario(_tiny_scenario(), backend, judge_on=False)
+    assert len(sv["latency"]["series_ms"]) == 6, "one latency sample per turn"
+    # judge_on=False → retention/voice marked skipped, latency still computed
+    assert sv["voice"]["passed"] in (True, None)
+    print("✓ run_scenario_collects_latency_and_transcript")
+
+
+def test_run_scenario_retention_uses_anchor_probe():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("r%d" % i, 100.0) for i in range(6)]
+    with mock.patch.object(mt, "judge_anchor_retention", return_value=True) as jar, \
+         mock.patch.object(mt, "judge_voice_window", return_value=(8.0, "HUMAN")):
+        sv = mt.run_scenario(_tiny_scenario(), backend, judge_on=True)
+    assert jar.called, "retention judge must be invoked at probe turns"
+    assert sv["retention"]["rate"] == 1.0
+    print("✓ run_scenario_retention_uses_anchor_probe")
+
+
+def test_main_writes_verdict_and_returns_exit_code():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 100.0)] * 200  # plenty for all scenarios
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=True), \
+             mock.patch.object(mt, "judge_anchor_retention", return_value=True), \
+             mock.patch.object(mt, "judge_voice_window", return_value=(9.0, "HUMAN")):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        verdict = json.loads(out.read_text())
+        assert "run_passed" in verdict and "scenarios" in verdict
+        assert code in (0, 1)
+    print("✓ main_writes_verdict_and_returns_exit_code")
+
+
+def test_main_deferred_when_backend_unreachable():
+    backend = mock.Mock()
+    backend.chat.side_effect = mt.BackendUnreachable("refused")
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=True):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        assert code == 2, "unreachable backend → DEFERRED exit 2"
+    print("✓ main_deferred_when_backend_unreachable")
+
+
+def test_main_skipped_when_judge_unavailable():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 100.0)] * 200
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=False):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        verdict = json.loads(out.read_text())
+        assert code == 3, "judge unavailable → SKIPPED exit 3"
+        assert verdict["judge"] == "SKIPPED"
+    print("✓ main_skipped_when_judge_unavailable")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

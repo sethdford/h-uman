@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from eval_multiturn import (  # noqa: E402  (after sys.path.insert)
     call_gemini, _get_adc_token, evaluate_conversation, EVAL_DIMENSIONS,
 )
+import multiturn_scenarios_deep
 
 # --- Thresholds (calibration seeds — Task 9 locks the real numbers) ---
 RETENTION_RATE_MIN     = 0.85
@@ -225,3 +226,91 @@ def judge_voice_window(scenario_name, exchanges_window):
     if not result:
         return 0.0, "AI"
     return result.get("overall_score", 0.0), result.get("overall_verdict", "AI")
+
+
+def run_scenario(scenario, backend, judge_on):
+    """Drive one deep conversation, time each turn, score the three axes.
+
+    Returns a scenario_verdict dict. When judge_on is False, retention/voice
+    are marked skipped (passed=None) and only latency is gated.
+    """
+    messages = []
+    exchanges = []          # (user, ai) per turn
+    latency_series = []
+    responses_by_turn = {}  # 1-indexed turn -> ai response
+
+    for ti, user_msg in enumerate(scenario["turns"], start=1):
+        messages.append({"role": "user", "content": user_msg})
+        content, latency_ms = backend.chat(messages)   # may raise BackendUnreachable
+        messages.append({"role": "assistant", "content": content})
+        exchanges.append((user_msg, content))
+        latency_series.append(latency_ms)
+        responses_by_turn[ti] = content
+
+    lat_ok, lat_detail = latency_ok(latency_series, LATENCY_CEILING_MS, LATENCY_MAX_GROWTH)
+
+    if not judge_on:
+        sv = scenario_verdict(
+            name=scenario["name"], retention=0.0, voice_pass=None,
+            voice_detail={"skipped": True}, latency_pass=lat_ok, latency_detail=lat_detail)
+        sv["retention"]["skipped"] = True
+        sv["passed"] = lat_ok  # only latency gates when judge is off
+        return sv
+
+    # Retention: judge each anchor at its probe turn.
+    anchor_results = []
+    for a in scenario["anchors"]:
+        probe_user = scenario["turns"][a["probe_turn"] - 1]
+        probe_resp = responses_by_turn[a["probe_turn"]]
+        anchor_results.append(judge_anchor_retention(a["fact"], probe_user, probe_resp))
+    rate = retention_rate(anchor_results)
+
+    # Voice drift: judge first-third and last-third windows.
+    first_ex, last_ex = _thirds(exchanges)
+    first_score, _ = judge_voice_window(scenario["name"], first_ex)
+    last_score, last_verdict = judge_voice_window(scenario["name"], last_ex)
+    v_ok = voice_drift_ok(voice_normalize(first_score), voice_normalize(last_score),
+                          VOICE_DRIFT_TOL, any_hard_ai=(last_verdict == "AI"))
+
+    return scenario_verdict(
+        name=scenario["name"], retention=rate, voice_pass=v_ok,
+        voice_detail={"first_third_score": first_score, "last_third_score": last_score,
+                      "last_third_verdict": last_verdict},
+        latency_pass=lat_ok, latency_detail=lat_detail)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Sustained multi-turn coherence eval (on-device)")
+    ap.add_argument("--server-url", default="http://127.0.0.1:8741")
+    ap.add_argument("--output-json",
+                    default=str(Path.home() / ".human" / "logs" / "eval-multiturn-local.json"))
+    args = ap.parse_args(argv)
+
+    backend = LocalBackend(args.server_url)
+    judge_on = judge_available()
+
+    scenario_verdicts = []
+    try:
+        for scenario in multiturn_scenarios_deep.DEEP_SCENARIOS:
+            scenario_verdicts.append(run_scenario(scenario, backend, judge_on=judge_on))
+    except BackendUnreachable as e:
+        write_verdict({"run_passed": False, "backend": "UNREACHABLE", "error": str(e),
+                       "scenarios": scenario_verdicts}, args.output_json)
+        print(f"DEFERRED: mlx-server unreachable: {e}")
+        return 2
+
+    verdict = run_verdict(scenario_verdicts)
+    verdict["judge"] = "OK" if judge_on else "SKIPPED"
+    write_verdict(verdict, args.output_json)
+
+    print(f"Run verdict: {'PASS' if verdict['run_passed'] else 'FAIL'} "
+          f"({verdict['scenarios_passed']}/{verdict['scenarios_total']} scenarios) "
+          f"judge={verdict['judge']}")
+
+    if not judge_on:
+        return 3  # SKIPPED — latency ran, qualitative axes did not
+    return 0 if verdict["run_passed"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
