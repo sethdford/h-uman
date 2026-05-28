@@ -121,6 +121,29 @@ static void test_verbalized_high_does_not_over_inflate(void) {
     hu_uncertainty_result_free(&alloc, &result);
 }
 
+static void test_extract_verbalized_low_confidence(void) {
+    hu_uncertainty_signals_t signals = {0};
+    const char *response = "I'm not sure about this, but here's my best guess.";
+    hu_uncertainty_extract_signals(response, strlen(response), NULL, 0, 0, 0, &signals);
+    HU_ASSERT_TRUE(signals.has_verbalized);
+    HU_ASSERT_TRUE(signals.verbalized_confidence > 0.25 && signals.verbalized_confidence < 0.35);
+}
+
+static void test_extract_verbalized_high_confidence(void) {
+    hu_uncertainty_signals_t signals = {0};
+    const char *response = "I'm certain this is correct. The evidence is clear.";
+    hu_uncertainty_extract_signals(response, strlen(response), NULL, 0, 0, 0, &signals);
+    HU_ASSERT_TRUE(signals.has_verbalized);
+    HU_ASSERT_TRUE(signals.verbalized_confidence > 0.93 && signals.verbalized_confidence < 0.97);
+}
+
+static void test_extract_verbalized_not_detected_without_markers(void) {
+    hu_uncertainty_signals_t signals = {0};
+    const char *response = "Here's the answer. It works like this.";
+    hu_uncertainty_extract_signals(response, strlen(response), NULL, 0, 0, 0, &signals);
+    HU_ASSERT_FALSE(signals.has_verbalized);
+}
+
 void run_uncertainty_tests(void) {
     HU_TEST_SUITE("uncertainty");
     HU_RUN_TEST(test_score_unchanged_with_no_real_signals);
@@ -130,4 +153,7 @@ void run_uncertainty_tests(void) {
     HU_RUN_TEST(test_contradiction_penalty_applies);
     HU_RUN_TEST(test_verbalized_low_pulls_score_down);
     HU_RUN_TEST(test_verbalized_high_does_not_over_inflate);
+    HU_RUN_TEST(test_extract_verbalized_low_confidence);
+    HU_RUN_TEST(test_extract_verbalized_high_confidence);
+    HU_RUN_TEST(test_extract_verbalized_not_detected_without_markers);
 }
