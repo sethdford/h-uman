@@ -39,6 +39,9 @@ typedef struct hu_persona_overlay {
     char *vulnerability_tier;
     float affect_mirror_ceiling; /* 0.0-1.0; caps emotional intensity mirroring. 0 = use default */
     uint8_t leave_on_read_pct;   /* 0-100; probability of leave-on-read. 0 = use default (10%) */
+    /* Phase 1 uncertainty: per-confidence-level hedge phrase banks */
+    char **hedge_phrases[4]; /* [HIGH, MEDIUM, LOW, VERY_LOW] */
+    size_t hedge_phrase_counts[4];
 } hu_persona_overlay_t;
 
 typedef struct hu_persona_example {
@@ -345,6 +348,19 @@ typedef struct hu_inner_world {
     size_t secret_self_count;
 } hu_inner_world_t;
 
+/* Cross-channel ACL: controls which relationship types can access facts from which origins */
+typedef struct hu_xchan_acl_rule {
+    char relationship_type[32]; /* "coworker", "family", etc */
+    char **allow_list;          /* allowed relationship_types */
+    size_t allow_count;
+} hu_xchan_acl_rule_t;
+
+typedef struct hu_xchan_acl {
+    char default_policy[32]; /* "deny_unknown" | "allow_unknown" */
+    hu_xchan_acl_rule_t *rules;
+    size_t rule_count;
+} hu_xchan_acl_t;
+
 typedef struct hu_persona {
     char *name;
     size_t name_len;
@@ -471,6 +487,12 @@ typedef struct hu_persona {
      * true in the persona JSON.  Pinned by the 2026-05-16 incident — see
      * docs/research/2026-05-16-proactive-audit/findings.md (P1-1). */
     bool proactive_master_enabled;
+
+    /* Cross-channel ACL for privacy gating. Controls which relationship types
+     * can access facts/patterns sourced from which origins. Safe defaults
+     * ship in code; user can override per-persona via JSON.
+     * AC-1: family facts MUST NEVER reach coworker turns. */
+    hu_xchan_acl_t cross_channel_acl;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).
@@ -498,6 +520,12 @@ hu_error_t hu_persona_examples_bank_from_array(hu_allocator_t *alloc, const char
                                                hu_persona_example_bank_t *out);
 
 void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona);
+
+/* Convenience alias for hu_persona_deinit (for test code symmetry) */
+void hu_persona_free(hu_persona_t *persona);
+
+/* Load a persona stub with safe-default ACL only (for tests) */
+void hu_persona_load_defaults(hu_persona_t *out);
 
 /* Returns true iff proactive messaging is GLOBALLY enabled for this persona.
  * Safe to call with persona == NULL (returns false).  Wraps the

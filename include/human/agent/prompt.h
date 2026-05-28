@@ -166,6 +166,12 @@ typedef struct hu_prompt_config {
      * even when the operator's config has the trim enabled. Per-turn paths
      * leave this false and the diagnostic still fires correctly. */
     bool suppress_prompt_budget_diagnostic;
+    /* Calibrated-uncertainty (Task 3): when true, hu_prompt_build_system
+     * appends the verbalized confidence-tagging addendum ([conf=0.X]) so the
+     * model self-reports confidence on factual claims. Defaults false; the
+     * caller (agent_turn.c) sets it from query classification. Leaving it
+     * false suppresses the addendum on casual/non-factual turns. */
+    bool is_factual_query;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc.

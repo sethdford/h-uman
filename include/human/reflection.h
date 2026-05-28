@@ -229,6 +229,11 @@ void hu_reflection_check_failure_rate(struct sqlite3 *db, uint64_t now_ms, bool 
  * (mutation is Phase 2's contract). */
 bool hu_reflection_pattern_has_quorum(struct sqlite3 *db, const char *pattern_id);
 
+/* Compute effective confidence applying 90-day exponential half-life decay
+ * to a pattern's stored confidence. Used by uncertainty evaluation to detect
+ * temporal decay (stored vs effective confidence gap > 0.15). */
+double hu_reflection_pattern_effective_confidence(const hu_reflection_pattern_t *p, int64_t now_ms);
+
 /* Convert the enum to the lower-snake-case string used in the
  * stable-id hash AND in the JSON schema's "type" field. Stable
  * across releases (changing breaks existing pattern IDs). */

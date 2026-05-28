@@ -27,6 +27,7 @@
 
 #include "human/core/log.h"
 
+#include <math.h>
 #include <sqlite3.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -402,4 +403,40 @@ bool hu_reflection_pattern_has_quorum(struct sqlite3 *db, const char *pattern_id
     }
     sqlite3_finalize(st);
     return has;
+}
+
+/* Task 5: Temporal decay calculation for patterns.
+ * Applies 90-day exponential half-life: confidence * 2^(-age_days/90) */
+double hu_reflection_pattern_effective_confidence(const hu_reflection_pattern_t *p,
+                                                  int64_t now_ms) {
+    if (!p)
+        return 0.0;
+    if (p->confidence <= 0.0)
+        return 0.0;
+    if (p->confidence > 1.0)
+        return 1.0;
+
+    /* Half-life: 90 days in milliseconds */
+    static const double HALF_LIFE_MS = 90.0 * 86400.0 * 1000.0;
+
+    /* Age in milliseconds; clamp to non-negative */
+    double age_ms = (double)(now_ms - (int64_t)p->last_observed_at_ms);
+    if (age_ms < 0.0)
+        age_ms = 0.0;
+
+    /* Number of half-lives; cap at 10 to avoid denormalization */
+    double half_lives = age_ms / HALF_LIFE_MS;
+    if (half_lives > 10.0)
+        half_lives = 10.0;
+
+    /* Decay: 0.5^half_lives */
+    double decay = pow(0.5, half_lives);
+    double effective = p->confidence * decay;
+
+    if (effective < 0.0)
+        effective = 0.0;
+    if (effective > 1.0)
+        effective = 1.0;
+
+    return effective;
 }
