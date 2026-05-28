@@ -3090,6 +3090,7 @@ set(HU_TEST_SOURCES
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
     tests/test_cross_channel_acl.c
+    tests/test_cross_channel_pipeline.c
     # Reflection Loop schema/parse tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
