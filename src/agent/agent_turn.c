@@ -317,6 +317,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/swarm.h"
 #include "human/persona/circadian.h"
 #include "human/persona/relationship.h"
+#include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/skillforge.h"
 #ifdef HU_HAS_SKILLS
 #include "human/cognition/skill_routing.h"
@@ -3556,8 +3557,27 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         const char *personal_model_ctx = NULL;
         size_t personal_model_ctx_len = 0;
         if (personal_model_buf && hu_personal_model_has_content(&agent->personal_model)) {
-            size_t pm_n =
-                hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf, 8192);
+            /* T7 of docs/plans/2026-05-26-reflection-loop: when the reflection
+             * loop is enabled in config, the per-channel slice is appended via
+             * _build_prompt_with_reflection (db + channel + max_patterns).
+             * Otherwise we fall back to the plain _build_prompt path so callers
+             * with no SQLite memory backend (or reflection disabled) keep the
+             * existing behavior. */
+            size_t pm_n = 0;
+            if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
+                agent->active_channel && agent->active_channel_len > 0) {
+                sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
+                const hu_persona_overlay_t *refl_overlay =
+                    agent->persona ? hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                             agent->active_channel_len)
+                                   : NULL;
+                pm_n = hu_personal_model_build_prompt_with_reflection(
+                    &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
+                    /*max_patterns=*/5, personal_model_buf, 8192);
+            } else {
+                pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
+                                                      8192);
+            }
             if (pm_n > 0) {
                 personal_model_ctx = personal_model_buf;
                 personal_model_ctx_len = pm_n;

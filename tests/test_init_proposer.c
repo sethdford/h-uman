@@ -6,12 +6,21 @@
  * .claude/rules/security-predicate-extraction.md — the tick is structured
  * as a pure decision so the truth table can be locked here. */
 
+#include "human/agent.h"
 #include "human/agent/governor.h"
 #include "human/agent/init_proposer.h"
 #include "human/autoresponder.h"
 #include "human/config.h"
+#include "human/memory.h"
+#include "human/reflection.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
 
 /* T1 default config: disabled (AC-7 kill switch is off by default). */
 static void make_default_cfg(hu_initiative_config_t *cfg) {
@@ -185,6 +194,140 @@ static void test_format_summary_tiny_buffer_truncates_safely(void) {
 static void test_assemble_context_null_out_returns_invalid(void) {
     HU_ASSERT_EQ(hu_init_proposer_assemble_context(NULL, 0, 0, NULL), HU_ERR_INVALID_ARGUMENT);
 }
+
+#ifdef HU_ENABLE_SQLITE
+/* T8 — reflection unsurfaced patterns populate HU_INIT_FIELD_REFLECTION. */
+static void test_assemble_context_pulls_reflection_patterns_from_memory_db(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    /* Seed: migrate schema + insert one high-conf unsurfaced pattern. */
+    hu_reflection_storage_migrate(db);
+    /* Insert a run row first — patterns FK-reference run_id, and the
+     * sqlite memory engine enables PRAGMA foreign_keys. */
+    sqlite3_stmt *run_st = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO reflection_runs (run_id, provider, started_at_ms, "
+                       "completed_at_ms, input_turns, status) "
+                       "VALUES ('r1', 'mock', 1000, 2000, 5, 'ok')",
+                       -1, &run_st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(run_st), SQLITE_DONE);
+    sqlite3_finalize(run_st);
+
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO reflection_patterns (id, type, subject, observation, "
+                       "confidence, evidence_json, channels_json, first_seen_run_id, "
+                       "last_seen_run_id, observation_count, created_at_ms, "
+                       "last_observed_at_ms, expires_at_ms, surfaced_to_user, retired) "
+                       "VALUES ('pX', 'preference', 'Seth', 'Seth prefers ambient mornings', "
+                       "0.82, '[]', '[\"imessage\"]', 'r1', 'r1', 1, ?, ?, ?, 0, 0)",
+                       -1, &st, NULL);
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)(now_ms + 30ULL * 86400000ULL));
+    int step_rc = sqlite3_step(st);
+    HU_ASSERT_EQ(step_rc, SQLITE_DONE);
+    sqlite3_finalize(st);
+
+    /* Sanity: confirm the row is queryable via the consumer API the way
+     * assemble_context will hit it. If THIS doesn't find the row, the
+     * problem is in the insert/query, not in our wiring. */
+    hu_reflection_pattern_t *direct = NULL;
+    int direct_n = 0;
+    HU_ASSERT_EQ(hu_reflection_query_unsurfaced(db, 0.6, &direct, &direct_n), HU_OK);
+    HU_ASSERT(direct_n > 0);
+    free(direct);
+
+    /* Minimal agent: only the memory field matters for this code path.
+     * memset-zero is safe — assemble_context only reads agent->memory and
+     * the cached context strings (which are NULL, treated as empty). */
+    struct hu_agent agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.memory = &mem;
+
+    hu_init_context_bundle_t bundle;
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 1779700000, 0, &bundle), HU_OK);
+
+    /* Reflection slot should be populated. */
+    HU_ASSERT(bundle.bytes[HU_INIT_FIELD_REFLECTION] > 0);
+    HU_ASSERT_NOT_NULL(bundle.content[HU_INIT_FIELD_REFLECTION]);
+    HU_ASSERT(strstr(bundle.content[HU_INIT_FIELD_REFLECTION], "ambient mornings") != NULL);
+    HU_ASSERT(strstr(bundle.content[HU_INIT_FIELD_REFLECTION], "pX") != NULL);
+
+    /* total_bytes should include the reflection field. */
+    HU_ASSERT(bundle.total_bytes >= bundle.bytes[HU_INIT_FIELD_REFLECTION]);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* T8 — empty patterns table → reflection slot left zero, no crash. */
+static void test_assemble_context_no_patterns_leaves_reflection_slot_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    hu_reflection_storage_migrate(db);
+
+    struct hu_agent agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.memory = &mem;
+
+    hu_init_context_bundle_t bundle;
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 1779700000, 0, &bundle), HU_OK);
+
+    HU_ASSERT_EQ(bundle.bytes[HU_INIT_FIELD_REFLECTION], (size_t)0);
+    HU_ASSERT(bundle.content[HU_INIT_FIELD_REFLECTION] == NULL);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* T8 — low-confidence patterns are excluded (query_unsurfaced gates at 0.6). */
+static void test_assemble_context_excludes_low_confidence_patterns(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    hu_reflection_storage_migrate(db);
+    /* Seed reflection_runs row (FK target). */
+    sqlite3_stmt *run_st = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO reflection_runs (run_id, provider, started_at_ms, "
+                       "completed_at_ms, input_turns, status) "
+                       "VALUES ('r1', 'mock', 1000, 2000, 5, 'ok')",
+                       -1, &run_st, NULL);
+    sqlite3_step(run_st);
+    sqlite3_finalize(run_st);
+
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO reflection_patterns (id, type, subject, observation, "
+                       "confidence, evidence_json, channels_json, first_seen_run_id, "
+                       "last_seen_run_id, observation_count, created_at_ms, "
+                       "last_observed_at_ms, expires_at_ms, surfaced_to_user, retired) "
+                       "VALUES ('pLow', 'preference', 'Seth', 'low-conf noise', 0.55, "
+                       "'[]', '[\"imessage\"]', 'r1', 'r1', 1, ?, ?, ?, 0, 0)",
+                       -1, &st, NULL);
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)(now_ms + 30ULL * 86400000ULL));
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    struct hu_agent agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.memory = &mem;
+
+    hu_init_context_bundle_t bundle;
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 1779700000, 0, &bundle), HU_OK);
+    HU_ASSERT_EQ(bundle.bytes[HU_INIT_FIELD_REFLECTION], (size_t)0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+#endif /* HU_ENABLE_SQLITE */
 
 static void test_assemble_context_null_agent_returns_empty_bundle(void) {
     hu_init_context_bundle_t bundle;
@@ -495,6 +638,11 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_format_summary_tiny_buffer_truncates_safely);
     HU_RUN_TEST(test_assemble_context_null_out_returns_invalid);
     HU_RUN_TEST(test_assemble_context_null_agent_returns_empty_bundle);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_assemble_context_pulls_reflection_patterns_from_memory_db);
+    HU_RUN_TEST(test_assemble_context_no_patterns_leaves_reflection_slot_empty);
+    HU_RUN_TEST(test_assemble_context_excludes_low_confidence_patterns);
+#endif
     /* T3 — prompt build / parse / evaluate */
     HU_RUN_TEST(test_build_prompt_includes_role_and_json_contract);
     HU_RUN_TEST(test_build_prompt_skips_empty_fields_includes_populated_ones);

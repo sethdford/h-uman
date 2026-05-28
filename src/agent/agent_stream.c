@@ -60,6 +60,7 @@
 #include "human/persona/humor.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/tool.h"
@@ -1041,8 +1042,22 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     const char *personal_model_ctx = NULL;
     size_t personal_model_ctx_len = 0;
     if (hu_personal_model_has_content(&agent->personal_model)) {
-        size_t pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
-                                                     sizeof(personal_model_buf));
+        /* T7 mirror of agent_turn.c: reflection-loop slice append. */
+        size_t pm_n = 0;
+        if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
+            agent->active_channel && agent->active_channel_len > 0) {
+            sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
+            const hu_persona_overlay_t *refl_overlay =
+                agent->persona ? hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                         agent->active_channel_len)
+                               : NULL;
+            pm_n = hu_personal_model_build_prompt_with_reflection(
+                &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
+                /*max_patterns=*/5, personal_model_buf, sizeof(personal_model_buf));
+        } else {
+            pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
+                                                  sizeof(personal_model_buf));
+        }
         if (pm_n > 0) {
             personal_model_ctx = personal_model_buf;
             personal_model_ctx_len = pm_n;

@@ -18,7 +18,9 @@
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/memory.h"
 #include "human/provider.h"
+#include "human/reflection.h" /* T8: pull unsurfaced patterns into bundle */
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -160,6 +162,7 @@ static const char *const s_field_names[HU_INIT_FIELD_COUNT] = {
     [HU_INIT_FIELD_AWARENESS] = "awareness",
     [HU_INIT_FIELD_INSTRUCTION] = "instruction",
     [HU_INIT_FIELD_STM] = "stm",
+    [HU_INIT_FIELD_REFLECTION] = "reflection",
 };
 
 hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64_t now_unix,
@@ -188,6 +191,49 @@ hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64
      * agent-cached location. For now those slots stay zero — that's
      * meaningful telemetry by itself (the proposer can see what's
      * unwired). */
+
+    /* T8 of docs/plans/2026-05-26-reflection-loop: pull unsurfaced
+     * reflection patterns into the inline reflection_buf when the agent
+     * has a SQLite memory backend. The query is cheap (single indexed
+     * scan capped at 8 rows) so we do it unconditionally — gating is
+     * the daemon's responsibility, not the proposer's. */
+#ifdef HU_ENABLE_SQLITE
+    if (agent->memory) {
+        struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+        if (db) {
+            hu_reflection_pattern_t *patterns = NULL;
+            int n = 0;
+            if (hu_reflection_query_unsurfaced(db, /*min_confidence=*/0.6, &patterns, &n) ==
+                    HU_OK &&
+                n > 0 && patterns) {
+                /* Internal cap so we don't blow the inline buffer or pull
+                 * too many candidates into one proposer tick. */
+                if (n > 8)
+                    n = 8;
+                size_t pos = 0;
+                for (int i = 0; i < n && pos + 1 < sizeof out->reflection_buf; i++) {
+                    int w = snprintf(out->reflection_buf + pos, sizeof out->reflection_buf - pos,
+                                     "- %s (id=%s, confidence %.2f)\n", patterns[i].observation,
+                                     patterns[i].id, patterns[i].confidence);
+                    if (w <= 0)
+                        break;
+                    if ((size_t)w >= sizeof out->reflection_buf - pos) {
+                        /* Truncated mid-row — leave buffer NUL-terminated
+                         * by snprintf and stop appending. */
+                        pos = sizeof out->reflection_buf - 1;
+                        break;
+                    }
+                    pos += (size_t)w;
+                }
+                if (pos > 0) {
+                    out->content[HU_INIT_FIELD_REFLECTION] = out->reflection_buf;
+                    out->bytes[HU_INIT_FIELD_REFLECTION] = pos;
+                }
+            }
+            free(patterns); /* free(NULL) is fine */
+        }
+    }
+#endif
 
     for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT; i++) {
         out->total_bytes += out->bytes[i];

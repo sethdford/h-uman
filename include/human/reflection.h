@@ -174,6 +174,29 @@ void hu_reflection_retire(struct sqlite3 *db, const char *pattern_id);
  * line alongside the per-pattern bullets. */
 char *hu_reflection_latest_prose_summary(struct sqlite3 *db);
 
+/* T12 of docs/plans/2026-05-26-reflection-loop. Returns the count of
+ * reflection_runs rows with started_at_ms >= since_ms. The failure-
+ * rate watchdog (`hu_reflection_check_failure_rate`) uses this for
+ * its denominator. Returns 0 on NULL db or on any sqlite error
+ * (failure-rate watchdog is best-effort observability — never blocks
+ * a tick). */
+int hu_reflection_storage_count_runs_since(struct sqlite3 *db, uint64_t since_ms);
+
+/* T12. Returns the count of reflection_runs rows with started_at_ms
+ * >= since_ms AND status != 'ok'. Numerator for the failure-rate
+ * watchdog. */
+int hu_reflection_storage_count_failed_runs_since(struct sqlite3 *db, uint64_t since_ms);
+
+/* T12. One-shot operator-visible warning when reflection failure rate
+ * exceeds 50% over the last 24h (with a 4-run minimum to avoid
+ * tripping on small-sample noise). Idempotent across a process —
+ * fires at most once per daemon lifetime, even if the rate worsens.
+ *
+ * Should be called from the daemon tick AFTER each completed run so
+ * the denominator captures the just-finished run too. Cheap when
+ * disabled — `enabled=false` short-circuits before the SQL count. */
+void hu_reflection_check_failure_rate(struct sqlite3 *db, uint64_t now_ms, bool enabled);
+
 /* Quorum predicate for Phase 2 (belief updates). Returns true iff
  * `pattern_id` has been observed in ≥ 3 distinct runs with
  * confidence > 0.7 in each. Phase 1 callers may use this for

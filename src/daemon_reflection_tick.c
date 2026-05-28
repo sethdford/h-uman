@@ -168,6 +168,12 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
          * would dominate the daemon log. */
         break;
     }
+
+    /* T12 of docs/plans/2026-05-26-reflection-loop: failure-rate
+     * watchdog. Fires at most once per process if > 50% of runs over
+     * the last 24h failed. Cheap when the rate is healthy (single
+     * SELECT COUNT) and idempotent past the first warning. */
+    hu_reflection_check_failure_rate(db, now_ms, cfg->reflection_loop.enabled);
 }
 
 #else /* !HU_ENABLE_SQLITE */

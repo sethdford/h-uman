@@ -139,12 +139,23 @@ typedef enum hu_init_field {
     HU_INIT_FIELD_AWARENESS,
     HU_INIT_FIELD_INSTRUCTION,
     HU_INIT_FIELD_STM,
+    /* T8 of docs/plans/2026-05-26-reflection-loop. Unsurfaced reflection
+     * patterns (confidence >= 0.6, retired=0, surfaced_to_user=0)
+     * formatted as bullet lines. Populated by `assemble_context` from
+     * the agent's SQLite memory backend when reflection is enabled. */
+    HU_INIT_FIELD_REFLECTION,
     HU_INIT_FIELD_COUNT, /* sentinel */
 } hu_init_field_t;
 
 /* Lightweight bundle: pointers + byte counts into agent-owned strings.
- * The bundle itself owns nothing — caller must not free pointers. Lifetime
- * is tied to the calling agent_turn (don't store between ticks). */
+ * Most fields BORROW pointers — caller must not free them. Lifetime is
+ * tied to the calling agent_turn (don't store between ticks).
+ *
+ * Exception (T8): HU_INIT_FIELD_REFLECTION's content[] pointer aliases
+ * the inline `reflection_buf` below — owned by the bundle itself, so
+ * stack-allocated bundles get a self-contained reflection slice without
+ * a separate allocation. Don't free content[REFLECTION] either. */
+#define HU_INIT_REFLECTION_BUF_MAX 1024
 typedef struct hu_init_context_bundle {
     /* Per-source content pointers (any may be NULL if the field is empty). */
     const char *content[HU_INIT_FIELD_COUNT];
@@ -153,6 +164,10 @@ typedef struct hu_init_context_bundle {
     /* Per-tick metadata. */
     int64_t now_unix;
     int64_t last_inbound_unix; /* 0 if never */
+    /* T8: inline storage for the reflection slice. Sized for ~10 short
+     * observations worth of bullets — beyond that the proposer drops
+     * the overflow. */
+    char reflection_buf[HU_INIT_REFLECTION_BUF_MAX];
 } hu_init_context_bundle_t;
 
 /* Forward-declared so we don't pull include/human/agent.h into this header

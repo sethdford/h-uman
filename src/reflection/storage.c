@@ -28,6 +28,7 @@
 #include "human/core/log.h"
 
 #include <sqlite3.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -282,6 +283,58 @@ hu_error_t hu_reflection_storage_upsert(struct sqlite3 *db, const char *run_id,
         return HU_ERR_MEMORY_BACKEND;
     }
     return HU_OK;
+}
+
+/* T12: run-count helpers for the failure-rate watchdog. Best-effort —
+ * on any SQL error, return 0 (denominator < 4 short-circuits the
+ * warning, so a broken count never trips a false alarm). */
+int hu_reflection_storage_count_runs_since(struct sqlite3 *db, uint64_t since_ms) {
+    if (!db)
+        return 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM reflection_runs WHERE started_at_ms >= ?", -1,
+                           &st, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)since_ms);
+    int out = 0;
+    if (sqlite3_step(st) == SQLITE_ROW)
+        out = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return out;
+}
+
+int hu_reflection_storage_count_failed_runs_since(struct sqlite3 *db, uint64_t since_ms) {
+    if (!db)
+        return 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT COUNT(*) FROM reflection_runs "
+                           "WHERE started_at_ms >= ? AND status != 'ok'",
+                           -1, &st, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)since_ms);
+    int out = 0;
+    if (sqlite3_step(st) == SQLITE_ROW)
+        out = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return out;
+}
+
+void hu_reflection_check_failure_rate(struct sqlite3 *db, uint64_t now_ms, bool enabled) {
+    static atomic_bool warned = false;
+    if (!enabled || !db)
+        return;
+    uint64_t since_ms = now_ms > 86400000ULL ? now_ms - 86400000ULL : 0;
+    int total = hu_reflection_storage_count_runs_since(db, since_ms);
+    if (total < 4) /* small-sample noise floor */
+        return;
+    int failed = hu_reflection_storage_count_failed_runs_since(db, since_ms);
+    if (failed * 2 > total) { /* >50% */
+        hu_log_warn_once(&warned, "reflection", NULL,
+                         "reflection failure rate > 50%% over last 24h (%d/%d failed) "
+                         "— check ~/.human/reflections/ json dumps for cause",
+                         failed, total);
+    }
 }
 
 uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {

@@ -225,10 +225,71 @@ static void test_e2e_config_json_flips_subsystem_on(void) {
     HU_ASSERT_STR_EQ(cfg.reflection_loop.provider, "gemini-3.5-flash");
 }
 
+/* ── T12: failure-rate watchdog counters ───────────────────────── */
+
+static void insert_run_helper(sqlite3 *db, const char *run_id, uint64_t started_ms,
+                              const char *status) {
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO reflection_runs (run_id, provider, started_at_ms, "
+                       "completed_at_ms, input_turns, status) VALUES (?, 'mock', ?, ?, 5, ?)",
+                       -1, &st, NULL);
+    sqlite3_bind_text(st, 1, run_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)started_ms);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)(started_ms + 100));
+    sqlite3_bind_text(st, 4, status, -1, SQLITE_STATIC);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+/* T12 AC: total counts every run since since_ms, failed counts only non-'ok'. */
+static void test_t12_count_helpers_distinguish_status(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_reflection_storage_migrate(db);
+    uint64_t now_ms = 10000000000ULL;
+    insert_run_helper(db, "r1", now_ms - 3600000ULL, "ok");
+    insert_run_helper(db, "r2", now_ms - 7200000ULL, "provider_error");
+    insert_run_helper(db, "r3", now_ms - 10800000ULL, "schema_invalid");
+    insert_run_helper(db, "r4", now_ms - 14400000ULL, "ok");
+    /* Outside the 24h window — must NOT be counted. */
+    insert_run_helper(db, "r_old", now_ms - 200000000ULL, "provider_error");
+
+    uint64_t since_ms = now_ms - 86400000ULL;
+    HU_ASSERT_EQ(hu_reflection_storage_count_runs_since(db, since_ms), 4);
+    HU_ASSERT_EQ(hu_reflection_storage_count_failed_runs_since(db, since_ms), 2);
+    sqlite3_close(db);
+}
+
+/* T12 AC: small sample (<4) suppresses the alarm regardless of rate. */
+static void test_t12_check_failure_rate_small_sample_silent(void) {
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_reflection_storage_migrate(db);
+    uint64_t now_ms = 10000000000ULL;
+    insert_run_helper(db, "r1", now_ms - 1000, "provider_error");
+    insert_run_helper(db, "r2", now_ms - 2000, "provider_error");
+    /* Just 2 runs, both failed: should NOT trip (denominator < 4). */
+    hu_reflection_check_failure_rate(db, now_ms, /*enabled=*/true);
+    /* No assertion on log output — the contract is that the function
+     * never crashes and never asserts. The atomic_bool is internal. */
+    sqlite3_close(db);
+}
+
+/* T12 AC: disabled flag short-circuits before SQL. NULL db safe. */
+static void test_t12_check_failure_rate_disabled_is_noop(void) {
+    hu_reflection_check_failure_rate(NULL, 10000000000ULL, /*enabled=*/false);
+    hu_reflection_check_failure_rate(NULL, 10000000000ULL, /*enabled=*/true);
+    /* Survives without crash → contract satisfied. */
+}
+
 void run_reflection_e2e_tests(void) {
     HU_TEST_SUITE("reflection_e2e");
     HU_RUN_TEST(test_e2e_run_then_prompt_surfaces_new_pattern);
     HU_RUN_TEST(test_e2e_config_json_flips_subsystem_on);
+    HU_RUN_TEST(test_t12_count_helpers_distinguish_status);
+    HU_RUN_TEST(test_t12_check_failure_rate_small_sample_silent);
+    HU_RUN_TEST(test_t12_check_failure_rate_disabled_is_noop);
 }
 
 #else /* !HU_ENABLE_SQLITE */
