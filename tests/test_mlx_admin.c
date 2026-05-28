@@ -126,6 +126,44 @@ static void current_free_zero_initialized_is_safe(void) {
     hu_mlx_admin_current_adapter_free(&alloc, &c);
 }
 
+/* ── Health probe (Dermot C2) ───────────────────────────────────────── */
+
+/* The test override forces the probe result without any network, in both
+ * curl and non-curl builds. Always clear it afterward so later tests (and
+ * the daemon path under HU_IS_TEST) see real behavior. */
+static void probe_health_test_override_true_returns_true(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_admin_set_test_health(true);
+    HU_ASSERT_TRUE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
+    hu_mlx_admin_clear_test_health();
+}
+
+static void probe_health_test_override_false_returns_false(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_admin_set_test_health(false);
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
+    hu_mlx_admin_clear_test_health();
+}
+
+/* With the override cleared, NULL/empty inputs are conservatively unhealthy
+ * (→ caller routes to cloud) rather than crashing. */
+static void probe_health_null_args_return_false(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_admin_clear_test_health();
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(NULL, "http://127.0.0.1:9/v1", 21));
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, NULL, 0));
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, "x", 0));
+}
+
+/* No override, real call to an unreachable port: must report unhealthy
+ * (curl build → transport failure → false; non-curl build → false stub). */
+static void probe_health_unreachable_server_returns_false(void) {
+    hu_allocator_t alloc = A();
+    hu_mlx_admin_clear_test_health(); /* also clears the 60s cache */
+    HU_ASSERT_FALSE(hu_mlx_admin_probe_health(&alloc, "http://127.0.0.1:9/v1", 21));
+    hu_mlx_admin_clear_test_health();
+}
+
 /* ── Suite runner ─────────────────────────────────────────────────── */
 
 void run_mlx_admin_tests(void);
@@ -140,4 +178,8 @@ void run_mlx_admin_tests(void) {
     HU_RUN_TEST(current_unreachable_server_returns_io_or_not_supported);
     HU_RUN_TEST(swap_result_free_zero_initialized_is_safe);
     HU_RUN_TEST(current_free_zero_initialized_is_safe);
+    HU_RUN_TEST(probe_health_test_override_true_returns_true);
+    HU_RUN_TEST(probe_health_test_override_false_returns_false);
+    HU_RUN_TEST(probe_health_null_args_return_false);
+    HU_RUN_TEST(probe_health_unreachable_server_returns_false);
 }

@@ -10475,6 +10475,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         mr_cfg.on_device_available = hu_apple_probe(agent->alloc, NULL, 0);
                     }
 #endif
+#ifdef HU_ENABLE_ML
+                    /* Dermot C2: route REFLEXIVE/CONVERSATIONAL to the Seth-voice
+                     * mlx_local LoRA when the operator opted in AND the local
+                     * server probes healthy. The probe result is 60s-cached, so
+                     * this adds at most one HTTP round-trip per minute to the
+                     * route path. On unhealthy/unreachable, mlx_local_healthy
+                     * stays false and routing falls back to cloud Gemini. */
+                    if (config && config->agent.mr_mlx_local_enabled &&
+                        config->agent.mr_mlx_local_model) {
+                        const char *mlx_url = hu_config_get_provider_base_url(config, "mlx_local");
+                        if (mlx_url && mlx_url[0]) {
+                            mr_cfg.mlx_local_enabled = true;
+                            mr_cfg.mlx_local_model = config->agent.mr_mlx_local_model;
+                            mr_cfg.mlx_local_model_len = strlen(config->agent.mr_mlx_local_model);
+                            mr_cfg.mlx_local_healthy =
+                                hu_mlx_admin_probe_health(agent->alloc, mlx_url, strlen(mlx_url));
+                        }
+                    }
+#endif
                     const char *rel = NULL;
                     size_t rel_len = 0;
                     if (agent->persona) {

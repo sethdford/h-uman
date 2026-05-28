@@ -387,6 +387,18 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         }
         cfg->agent.mr_on_device_enabled =
             hu_json_get_bool(mr_obj, "on_device_enabled", cfg->agent.mr_on_device_enabled);
+        /* Dermot C2: Seth-voice mlx_local LoRA routing. Opt-in; default
+         * false so the config edit is explicit. mlx_local_model names the
+         * adapter the local mlx server serves. */
+        cfg->agent.mr_mlx_local_enabled =
+            hu_json_get_bool(mr_obj, "mlx_local_enabled", cfg->agent.mr_mlx_local_enabled);
+        const char *mr_mlx_local = hu_json_get_string(mr_obj, "mlx_local_model");
+        if (mr_mlx_local) {
+            if (cfg->agent.mr_mlx_local_model)
+                a->free(a->ctx, cfg->agent.mr_mlx_local_model,
+                        strlen(cfg->agent.mr_mlx_local_model) + 1);
+            cfg->agent.mr_mlx_local_model = hu_strdup(a, mr_mlx_local);
+        }
         /* US-13: provider-degradation fallback model. Parsed under
          * agent.model_router because conceptually the model_router
          * decides what model to use; degradation is the routing

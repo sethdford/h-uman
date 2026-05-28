@@ -166,6 +166,11 @@ typedef struct hu_agent_config {
     char *mr_on_device_model; /* model router: on-device model name (default: apple-foundationmodel)
                                */
     bool mr_on_device_enabled; /* model router: enable on-device routing (default: true on macOS) */
+    bool mr_mlx_local_enabled; /* model router: route REFLEXIVE/CONVERSATIONAL to the Seth-voice
+                                * mlx_local LoRA when the local server probes healthy (Dermot C2).
+                                * Default false (opt-in). ANALYTICAL/DEEP always stay cloud. */
+    char *mr_mlx_local_model;  /* model router: local adapter identifier the mlx provider serves
+                                * (e.g. "seth-lora-v4-repair-..."); NULL = feature inert */
     char *fallback_model;      /* Provider-degradation fallback model name. When the primary
                                 * default_model fails (HU_ERR_NETWORK / HU_ERR_TIMEOUT / etc),
                                 * hu_provider_degrade_chat retries with this model on the SAME

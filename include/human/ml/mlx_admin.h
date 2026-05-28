@@ -24,6 +24,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -157,6 +158,32 @@ const char *hu_mlx_admin_swap_failure_label(hu_mlx_swap_failure_reason_t reason)
  * test can re-arm the first-failure landmark. Production code MUST NOT
  * call this; it exists to make the once-guard testable. */
 void hu_mlx_admin_reset_observability_for_test(void);
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Local-MLX health probe (2026-05-27 Dermot humanness recovery C2).
+ *
+ * Lets the model router gate Seth-voice mlx_local routing on the local
+ * server actually being reachable. GETs <base_url>/adapters/current (the
+ * same v1 root the swap infra targets) and treats HTTP 200 as healthy.
+ * The result is cached for 60s so the hot per-turn route path issues at
+ * most one HTTP round-trip per minute.
+ *
+ * Returns false (→ caller routes to cloud) on any error, NULL args, or in
+ * a non-curl build. The router stays pure: it consumes the bool this
+ * returns via cfg.mlx_local_healthy; it never calls this itself.
+ *
+ * TIMEOUT CAVEAT: hu_http_get uses the default (~30s) timeout — there is
+ * no bounded-timeout GET helper yet. A dead server therefore stalls the
+ * FIRST probe of each 60s window up to that bound. mlx_local routing is
+ * operator opt-in (the operator is running the server), so this is
+ * acceptable for v1; adding a bounded-timeout GET is a tracked follow-up. */
+bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len);
+
+/* Test-only: force the probe result without touching the network, and
+ * clear the override (also clears the 60s cache). Honored in both curl
+ * and non-curl builds. Mirrors hu_mlx_admin_reset_observability_for_test. */
+void hu_mlx_admin_set_test_health(bool healthy);
+void hu_mlx_admin_clear_test_health(void);
 
 #ifdef __cplusplus
 }

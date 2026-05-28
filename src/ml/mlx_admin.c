@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ─────────────────────────────────────────────────────────────────────
  * Spec 1 Task 5 (AC-M3-3): swap-failure observability — counters,
@@ -100,6 +101,31 @@ void hu_mlx_admin_reset_observability_for_test(void) {
     for (unsigned i = 0; i < (unsigned)HU_MLX_SWAP_FAILURE__COUNT; i++)
         atomic_store(&g_swap_failure_counters[i], 0);
     atomic_store(&g_warned_swap_failure_first_seen, false);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Local-MLX health probe (Dermot humanness recovery C2). Lets the model
+ * router gate Seth-voice mlx_local routing on the server actually being
+ * reachable. The probe result is cached for 60s so the hot turn path
+ * doesn't issue an HTTP round-trip every reply. The test override is
+ * honored in BOTH curl and non-curl builds so router/daemon tests run
+ * identically regardless of build flags. Cache state is only consulted
+ * by the curl-backed probe below. */
+static bool g_health_override_set = false;
+static bool g_health_override_val = false;
+static int64_t g_health_cache_ms = 0;
+static bool g_health_cache_val = false;
+
+void hu_mlx_admin_set_test_health(bool healthy) {
+    g_health_override_set = true;
+    g_health_override_val = healthy;
+}
+
+void hu_mlx_admin_clear_test_health(void) {
+    g_health_override_set = false;
+    g_health_override_val = false;
+    g_health_cache_ms = 0;
+    g_health_cache_val = false;
 }
 
 /* Record one swap-attempt outcome. Increments the per-reason counter
@@ -187,6 +213,17 @@ void hu_mlx_admin_current_adapter_free(hu_allocator_t *alloc,
                                        hu_mlx_admin_current_adapter_t *current) {
     (void)alloc;
     (void)current;
+}
+
+bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
+    (void)alloc;
+    (void)base_url;
+    (void)base_url_len;
+    /* Test override still applies (lets tests force healthy=true even in a
+     * curl-less build); otherwise no transport → never healthy → cloud. */
+    if (g_health_override_set)
+        return g_health_override_val;
+    return false;
 }
 
 #else /* HU_ENABLE_CURL */
@@ -360,6 +397,35 @@ void hu_mlx_admin_current_adapter_free(hu_allocator_t *alloc,
         current->adapter_path = NULL;
         current->adapter_path_len = 0;
     }
+}
+
+bool hu_mlx_admin_probe_health(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
+    if (g_health_override_set)
+        return g_health_override_val;
+    if (!alloc || !base_url || base_url_len == 0)
+        return false;
+
+    int64_t now_ms = (int64_t)time(NULL) * 1000;
+    if (g_health_cache_ms != 0 && now_ms - g_health_cache_ms < 60000)
+        return g_health_cache_val;
+
+    /* Reuse the known-good /adapters/current endpoint (the swap infra
+     * targets the same v1 root) rather than assuming a /health route the
+     * server may not expose. HTTP 200 == server up + serving. */
+    char *url = join_url(alloc, base_url, base_url_len, "adapters/current");
+    if (!url)
+        return false; /* transient OOM — don't poison the cache */
+
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_get(alloc, url, /*auth_header=*/NULL, &resp);
+    alloc->free(alloc->ctx, url, strlen(url) + 1);
+    bool healthy = (err == HU_OK && resp.status_code == 200);
+    if (resp.owned && resp.body)
+        hu_http_response_free(alloc, &resp);
+
+    g_health_cache_ms = now_ms;
+    g_health_cache_val = healthy;
+    return healthy;
 }
 
 #endif /* HU_ENABLE_CURL */
