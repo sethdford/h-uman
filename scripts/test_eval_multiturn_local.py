@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).parent))
 
 import multiturn_scenarios_deep as deep
+import eval_multiturn_local as mt
 
 
 def test_six_deep_scenarios_present():
@@ -42,6 +43,44 @@ def test_anchors_reference_valid_turn_indices():
                 f"{s['name']}: probe_turn {a['probe_turn']} must come after fact turn {a['turn']}")
             assert a["fact"].strip(), f"{s['name']}: empty anchor fact"
     print("✓ anchors_reference_valid_turn_indices")
+
+
+def test_latency_ceiling_violations_flags_over_ceiling():
+    series = [100.0, 200.0, 9000.0, 300.0, 12000.0]
+    over = mt.latency_ceiling_violations(series, ceiling_ms=8000.0)
+    assert over == [2, 4], f"expected indices [2,4], got {over}"
+    print("✓ latency_ceiling_violations_flags_over_ceiling")
+
+
+def test_latency_growth_flat_series_near_zero():
+    series = [500.0] * 30
+    g = mt.latency_growth(series)
+    assert abs(g) < 1e-6, f"flat series should have ~0 growth, got {g}"
+    print("✓ latency_growth_flat_series_near_zero")
+
+
+def test_latency_growth_climbing_series_positive():
+    # first third ~100, last third ~200 → growth ~1.0 (100%)
+    series = [100.0] * 10 + [150.0] * 10 + [200.0] * 10
+    g = mt.latency_growth(series)
+    assert 0.9 < g < 1.1, f"expected ~1.0 growth, got {g}"
+    print("✓ latency_growth_climbing_series_positive")
+
+
+def test_latency_ok_passes_flat_under_ceiling():
+    series = [400.0] * 24
+    ok, detail = mt.latency_ok(series, ceiling_ms=8000.0, max_growth=0.20)
+    assert ok is True, f"flat under-ceiling series should pass: {detail}"
+    assert detail["ceiling_violations"] == []
+    print("✓ latency_ok_passes_flat_under_ceiling")
+
+
+def test_latency_ok_fails_on_growth():
+    series = [100.0] * 12 + [500.0] * 12  # 400% growth
+    ok, detail = mt.latency_ok(series, ceiling_ms=8000.0, max_growth=0.20)
+    assert ok is False, "steeply climbing series should fail growth gate"
+    assert detail["growth"] > 0.20
+    print("✓ latency_ok_fails_on_growth")
 
 
 def main():
