@@ -23,7 +23,7 @@ This thesis was stress-tested. Here's what survived and what didn't.
 
 **Gemini already personalizes.** Google launched "Personal Intelligence" — connecting Gmail, Photos, Search, YouTube for personalized responses. They even have an "Import Memory" feature to poach users from other AIs. **Our "knows you" claim must be about WHERE data lives and WHO controls it, not WHETHER personalization exists.**
 
-**OpenClaw already has persona plugins.** Multiple Personas (SOUL.md, PERSONALITY.md, MEMORY.md), personality-dynamics (mode switching, weekly auto-evolution), open-persona (meta-skill for persona packs). 6.2K stars. **Our persona depth is real (27 C modules vs markdown templates), but the moat is narrower than we claimed.**
+**OpenClaw already has persona plugins.** Multiple Personas (SOUL.md, PERSONALITY.md, MEMORY.md), personality-dynamics (mode switching, weekly auto-evolution), open-persona (meta-skill for persona packs). 6.2K stars. **Our persona depth is real (41 C modules vs markdown templates), but the moat is narrower than we claimed.**
 
 ### What We're Not Competing On (Table Stakes)
 
@@ -37,7 +37,7 @@ This thesis was stress-tested. Here's what survived and what didn't.
 
 ### What Actually Makes Us Better (Honest Moats)
 
-1. **Persona as compiled architecture, not markdown templates.** 27 C modules with runtime integration (circadian timing, somatic markers, emotional cognition, humor bridging) vs OpenClaw's SOUL.md text files. The difference: our persona *changes how the agent behaves at the code level* — timing, tool selection, tone adaptation, proactive messaging. Theirs is a system prompt wrapper.
+1. **Persona as compiled architecture, not markdown templates.** 41 C modules with runtime integration (circadian timing, somatic markers, emotional cognition, humor bridging) vs OpenClaw's SOUL.md text files. The difference: our persona *changes how the agent behaves at the code level* — timing, tool selection, tone adaptation, proactive messaging. Theirs is a system prompt wrapper.
 2. **Privacy by architecture, not by settings.** Data never leaves the device as a structural property. No "opt-in to privacy" toggle. Gemini's Personal Intelligence processes your data in Google's cloud (their privacy doc confirms this). We can't match their data breadth (Gmail/Photos/YouTube), but we own the trust story.
 3. **On-device personalization pipeline (partial — see honest status below).** MLX LoRA fine-tuning on Apple Silicon is proven at 1B-7B models. Our ML subsystem has the training loop. **Gap:** our LoRA path currently trains a reference GPT, not the frontier model users chat with. Bridging this gap (via ggml/MLX integration) is the real technical challenge.
 4. **HuLa IR.** Typed tool-orchestration with compiler and emergence. Genuinely novel. **Gap:** tightly coupled to internal agent; not yet a platform.
@@ -49,7 +49,7 @@ Every mission below includes an honest difficulty assessment from code-level red
 
 | # | Mission | Honest Difficulty | Success Metric |
 |---|---------|------------------|----------------|
-| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays AND Tier-1 example banks (telegram / discord / imessage / slack — 12 neutral examples shipped in `hu_starter_persona_json`, Sprint 2b Story A', commit 71de40e6, pinned by `persona_directive_starter_persona_ships_tier1_example_banks` + `persona_directive_tier1_overlay_bank_coherence`). `human onboard` exists (`src/onboard.c`) and is auto-suggested on first run when no config exists. 11,900+ tests passing. Remaining: A/B validation. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅; Tier-1 example banks ✅ |
+| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays AND Tier-1 example banks (telegram / discord / imessage / slack — 12 neutral examples shipped in `hu_starter_persona_json`, Sprint 2b Story A', commit 71de40e6, pinned by `persona_directive_starter_persona_ships_tier1_example_banks` + `persona_directive_tier1_overlay_bank_coherence`). `human onboard` exists (`src/onboard.c`) and is auto-suggested on first run when no config exists. 12,800+ tests passing. Remaining: A/B validation. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅; Tier-1 example banks ✅ |
 | **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Per-turn save call site landed in commit 3ee98ef9 (`feat(agent,memory): per-turn personal-model save for crash safety`); the underlying `hu_personal_model_save` was made **actually atomic** in Phase 0 (May 2026) via `tmp + fwrite + fflush + fsync + rename`, pinned by `tests/test_personal_model_atomic_save.c::test_personal_model_save_preserves_prior_state_when_tmp_blocked` — a deterministic adversary test that pre-blocks the `<path>.tmp` slot with a directory and confirms the prior file's contents survive a failed save. Fact extraction has been upgraded to **typed propositional/prescriptive triples** via `hu_fact_extract` (`include/human/memory/fact_extract.h`): subject/predicate/object + confidence + per-fact provenance + trust tier + 90-day exponential half-life decay (`hu_heuristic_fact_effective_confidence`). Wired into `hu_personal_model_ingest` (`src/memory/personal_model.c:957`). Learned-style adaptation still lives only in the prompt summary, not in a model checkpoint — bridging that requires the M3 frontier-bridge to land. | Measurable adaptation in tone/timing after 50 conversations |
 | **M3** | **Private Learning** — On-device ML personalization | **Bridge B production-streaming COMPLETE (2026-05-26).** All B4 acceptance criteria shipped: T0 namespace rename (commit 8e0f7d30), T2 config plumbing (`cfg->mlx_local.streaming_enabled` default false + `first_token_budget_ms` 500), T3 capability gate at `src/agent/agent_stream.c:366` (operator opt-in per "compatible" provider), T4 SSE consumption via `hu_provider_sse_parser_init` at `src/providers/compatible.c:1018` with harmony-filter callback wrap, T5 UTF-8 boundary safety via new `hu_mlx_utf8_carry_emit` helper (commit a5cd637d) — stitches multi-byte codepoints across SSE event boundaries so consumers never see partial bytes (5 pinned contracts in `tests/test_mlx_stream_utf8.c`), T6 cancellation via `stop_requested` field, T7 buffered fallback when server doesn't speak SSE (`compatible_stream_chat:1067`, one-shot `warned_buffered_fallback` log), T8 first-token-latency metric on `compatible_stream_ctx_t::first_token_latency_ms`. Earlier wins still in place: US-8 dynamic learning loop (commit 416e6c29) fires `training_loop.py` on DPO pair-count threshold → `hu_mlx_admin_swap_adapter` hot-loads the new adapter without daemon restart (cloud-provider safety regression guard at commit 028f4544); v4-repair adapter empirically lifted persona fidelity 0.586 → 0.856 (+27pp, commit 9ab9b86e). **Remaining trivia** (M3 mission delta essentially zero): (a) `HU_NIGHTLY_LORA_ENABLED` env → `cfg.learning.nightly_lora` config plumbing, (b) live Apple-Silicon re-validation of post-train swap with current adapter (the test mock already pins the wire). The reference HUML GPT path (`lora-persona` CLI) remains for offline experimentation but is no longer the primary M3 inference target. | LoRA adapter that measurably improves persona fidelity on inference (✅ achieved 2026-05-25: +27pp); Bridge B production-streaming complete (✅ 2026-05-26: T0-T8 shipped) |
 | **M4** | **Ship to Users** — 100 DAU | **Medium.** `human onboard` exists (interactive setup wizard). First-run code path checks for missing config and points the user at the wizard. Persona defaults still need to be richer per channel; config still assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
@@ -60,7 +60,7 @@ Every mission below includes an honest difficulty assessment from code-level red
 
 | Dimension | human | Gemini Agent | Claude Cowork | OpenClaw |
 |-----------|-------|-------------|---------------|----------|
-| Persona depth | **Deep** (27 compiled modules) | Basic (Personal Intelligence) | None | **Growing** (SOUL.md plugins, personality-dynamics) |
+| Persona depth | **Deep** (41 compiled modules) | Basic (Personal Intelligence) | None | **Growing** (SOUL.md plugins, personality-dynamics) |
 | Personalization | Memory stack with typed propositional/prescriptive fact extraction + half-life decay | **Google apps data** (Gmail, Photos, YouTube) | Chat memory | SOUL.md + MEMORY.md |
 | On-device learning | Reference only (CPU, toy GPT) | No | No | No |
 | Privacy architecture | **Structural** (local-first) | Cloud (Google infra) | Cloud (Anthropic) | Self-hosted (Node.js) |
@@ -79,7 +79,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (11,900+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (12,800+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -160,7 +160,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 10,600+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 12,800+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -185,9 +185,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~710 files, ~270K lines)                                |
+| `src/`                            | All C source (~1,034 files, ~421K lines)                              |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 603 test files, 10,900+ tests                                         |
+| `tests/`                          | 743 test files, 12,800+ tests                                        |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |
