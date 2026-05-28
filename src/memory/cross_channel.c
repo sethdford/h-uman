@@ -24,7 +24,8 @@
 hu_xchan_acl_decision_t hu_cross_channel_acl_check(const hu_persona_t *persona,
                                                    const char *origin_relationship_type,
                                                    const char *turn_relationship_type) {
-    /* Null checks: fail closed */
+    /* Null checks: fail closed. NULL relationships deny regardless of default_policy.
+     * This is a deliberate fail-closed choice: unknown source/target → deny. */
     if (!persona || !origin_relationship_type || !turn_relationship_type)
         return HU_XCHAN_ACL_DENY;
 
@@ -43,7 +44,11 @@ hu_xchan_acl_decision_t hu_cross_channel_acl_check(const hu_persona_t *persona,
         }
     }
 
-    /* No rule for this origin relationship type → deny (unknown, fail closed) */
+    /* No rule for this origin relationship type → consult default_policy
+     * (operators can override fail-closed behavior via AC-3/AC-4 config).
+     * But default is deny_unknown for safety. */
+    if (acl->default_policy[0] != '\0' && strcmp(acl->default_policy, "allow_unknown") == 0)
+        return HU_XCHAN_ACL_ALLOW;
     return HU_XCHAN_ACL_DENY;
 }
 
