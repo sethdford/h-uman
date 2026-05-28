@@ -24,7 +24,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -34,10 +34,33 @@ from eval_multiturn import (  # noqa: E402  (after sys.path.insert)
 )
 import multiturn_scenarios_deep
 
-# --- Thresholds (calibration seeds — Task 9 locks the real numbers) ---
+# --- Thresholds (LOCKED 2026-05-28 against the first live calibration run) ---
+# Calibration run: 6 deep scenarios (28–30 turns each) vs the local
+# gemma-4-31b-it-4bit mlx-server. Verdict artifact:
+#   docs/superpowers/specs/results/2026-05-28-multiturn-local-verdict.json
+#
+# RETENTION (0.85 / 0.70): well-calibrated and discriminating. The model held
+#   context across 28–30 turns — 5/6 scenarios scored 1.00; only banter_humor
+#   missed a single anchor (0.67). Thresholds KEPT: they pass the strong
+#   scenarios and flag the genuine miss without being arbitrary.
 RETENTION_RATE_MIN     = 0.85
 RETENTION_HARD_FLOOR   = 0.70
+# VOICE (drift 0.10 + no-hard-AI): KEPT, but the first run exposed a HARNESS
+#   fidelity gap, not a model failure — run_scenario sends only user turns with
+#   NO persona system prompt, so the raw mlx-server replies as a generic
+#   assistant and the judge (correctly) flips every late window to a hard "AI"
+#   verdict. The drift comparison itself mostly passed (e.g. casual 1→3,
+#   debate 3→3). Fixing this requires injecting the production persona system
+#   prompt each turn (tracked as a follow-up); the threshold is sound once the
+#   harness reproduces production prompt assembly.
 VOICE_DRIFT_TOL        = 0.10
+# LATENCY (8000 ms ceiling + 20% growth): KEPT as a defensible conversational
+#   product bar (a text-reply assistant should answer well under 8 s). The
+#   model fails it for real, not by mis-seeding: measured turn-1 ≈ 10.5 s,
+#   median ≈ 13 s, max ≈ 58–78 s, every scenario 22–30 ceiling violations.
+#   This is the PREDICTED full-history-resend cliff (no server-side KV-cache).
+#   The ceiling is intentionally NOT inflated to force-pass — the failure is
+#   the evidence that drives KV-cache / compaction remediation (Task 10).
 LATENCY_CEILING_MS     = 8000.0
 LATENCY_MAX_GROWTH     = 0.20
 RUN_PASS_MIN_SCENARIOS = 5
@@ -147,7 +170,7 @@ def run_verdict(scenario_verdicts):
 def write_verdict(verdict, path):
     """Write the verdict JSON, stamping generated_at. Creates parent dirs."""
     out = dict(verdict)
-    out.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
+    out.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2))
