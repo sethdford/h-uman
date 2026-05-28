@@ -954,8 +954,12 @@ size_t hu_personal_model_build_prompt_with_reflection(const hu_personal_model_t 
      * the next turn. The query already filtered out already-surfaced
      * rows, so this is idempotent across multiple build_prompt calls
      * within the same turn (no double-counting). */
+    uint64_t surfaced_now_ms = (uint64_t)time(NULL) * 1000;
     for (int i = 0; i < count; i++) {
         hu_reflection_mark_surfaced(db, patterns[i].id);
+        /* T8: record per-channel lineage so a thumbs_down on this turn
+         * can attribute the contradiction back to these patterns. */
+        hu_reflection_note_surfaced(db, patterns[i].id, channel, surfaced_now_ms);
     }
     free(patterns);
     return n;

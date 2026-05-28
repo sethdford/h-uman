@@ -3054,6 +3054,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     if (agent && agent->memory) {
         sqlite3 *crosstalk_db = hu_sqlite_memory_get_db(agent->memory);
         hu_outbound_crosstalk_register_sqlite(crosstalk_db);
+        /* T8 (reflection retire-on-contradiction): wire the same SQLite
+         * handle into the reaction handler so a thumbs_down retires the
+         * reflection patterns that shaped the thumbed-down turn. Cleared
+         * with the personal-model teardown below. */
+        hu_reaction_handler_set_reflection_db(crosstalk_db);
     }
 #endif
 
@@ -14558,6 +14563,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * freed sqlite3 *. Idempotent — safe if registration didn't fire
      * (e.g. agent->memory was non-SQLite). */
     hu_outbound_crosstalk_unregister_sqlite();
+    /* T8 teardown: clear the reaction handler's reflection-db borrow
+     * before the SQLite memory closes so a late reaction never touches
+     * a freed handle. */
+    hu_reaction_handler_set_reflection_db(NULL);
 #endif
     /* Sprint A.7 teardown: detach the identity graph borrow. The static
      * storage itself is process-lifetime; this just ensures the reaction

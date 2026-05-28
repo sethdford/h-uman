@@ -348,6 +348,69 @@ void hu_reflection_retire(struct sqlite3 *db, const char *pattern_id) {
     sqlite3_finalize(st);
 }
 
+/* ── retire-on-contradiction (T8) ──────────────────────────────────
+ *
+ * Two functions implement the lineage half of retire-on-contradiction.
+ * hu_reflection_note_surfaced records (pattern, channel, time) when a
+ * pattern lands in a system prompt. hu_reflection_retire_contradicted
+ * looks up the recent surfacings for a channel and retires them when
+ * the user thumbs-downs that turn.
+ *
+ * Attribution is channel-scoped + recency-windowed rather than msg_ref-
+ * precise — see the schema comment in storage.c for why. */
+
+void hu_reflection_note_surfaced(struct sqlite3 *db, const char *pattern_id, const char *channel,
+                                 uint64_t surfaced_at_ms) {
+    if (!db || !pattern_id || !channel)
+        return;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT OR REPLACE INTO reflection_surfacings "
+                           "(pattern_id, channel, surfaced_at_ms) VALUES (?, ?, ?)",
+                           -1, &st, NULL) != SQLITE_OK) {
+        hu_log_error("reflection", NULL, "note_surfaced prepare: %s", sqlite3_errmsg(db));
+        return;
+    }
+    sqlite3_bind_text(st, 1, pattern_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)surfaced_at_ms);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+int hu_reflection_retire_contradicted(struct sqlite3 *db, const char *channel, uint64_t window_ms,
+                                      uint64_t now_ms) {
+    if (!db || !channel)
+        return 0;
+    uint64_t window_start = (now_ms > window_ms) ? (now_ms - window_ms) : 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "UPDATE reflection_patterns SET retired = 1, retired_at_ms = ? "
+                           "WHERE retired = 0 AND id IN ("
+                           "  SELECT pattern_id FROM reflection_surfacings "
+                           "  WHERE channel = ? AND surfaced_at_ms >= ?)",
+                           -1, &st, NULL) != SQLITE_OK) {
+        hu_log_error("reflection", NULL, "retire_contradicted prepare: %s", sqlite3_errmsg(db));
+        return 0;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)now_ms);
+    sqlite3_bind_text(st, 2, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)window_start);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    int retired = sqlite3_changes(db);
+
+    /* Consume this channel's surfacings so a later, unrelated thumbs_down
+     * doesn't re-retire stale attributions. */
+    if (sqlite3_prepare_v2(db, "DELETE FROM reflection_surfacings WHERE channel = ?", -1, &st,
+                           NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    return retired;
+}
+
 /* T7 helper: pull the most recent successful run's prose summary.
  * Returns a malloc'd string (caller frees) or NULL if no completed run
  * exists yet. NULL is the normal Phase 1 state on a fresh daemon — the

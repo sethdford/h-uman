@@ -19,9 +19,11 @@
 #include "human/memory/identity_resolver.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
+#include "human/reflection.h" /* T8: retire-on-contradiction */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
 #define HU_RXN_LOOKUP_USES_SQLITE 1
@@ -67,6 +69,12 @@ static hu_personal_model_t *s_personal_model = NULL;
  * canonical name. */
 static const hu_identity_graph_t *s_identity_graph = NULL;
 
+/* T8 (reflection retire-on-contradiction): optional reflection-DB wire.
+ * NULL == no retire-on-contradiction; non-NULL == a NEGATIVE reaction
+ * retires patterns surfaced in that channel within the contradiction
+ * window. Daemon owns the handle and sets it at init. */
+static struct sqlite3 *s_reflection_db = NULL;
+
 /* Per-turn signal flag (NOT thread-safe; daemon is single-threaded event loop —
  * see header comment on hu_reaction_handler_clear_turn for the full safety
  * argument. If the daemon ever gains concurrent turn dispatch, move this onto
@@ -83,6 +91,9 @@ void hu_reaction_handler_set_personal_model(hu_personal_model_t *m) {
 
 void hu_reaction_handler_set_identity_graph(const hu_identity_graph_t *graph) {
     s_identity_graph = graph;
+}
+void hu_reaction_handler_set_reflection_db(struct sqlite3 *db) {
+    s_reflection_db = db;
 }
 void hu_reaction_handler_clear_turn(void) {
     s_called_this_turn = 0;
@@ -276,6 +287,20 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     if (e->is_removal)
         return HU_OK; /* drop removals; we only record adds */
 
+#ifdef HU_ENABLE_SQLITE
+    /* T8: a thumbs_down (NEGATIVE polarity) is a contradiction signal.
+     * Retire the reflection patterns that shaped the thumbed-down turn's
+     * system prompt — i.e. those surfaced in this channel within the
+     * contradiction window. Fires regardless of lookup_hit: contradiction
+     * is about which patterns the turn was built from, not about whether
+     * the reaction maps to one of our outbound DPO-tracked messages. */
+    if (e->polarity == HU_REACTION_NEGATIVE && s_reflection_db) {
+        (void)hu_reflection_retire_contradicted(s_reflection_db, e->channel_id,
+                                                HU_REFLECTION_CONTRADICTION_WINDOW_MS,
+                                                (uint64_t)time(NULL) * 1000);
+    }
+#endif
+
     char prompt_buf[2048];
     char response_buf[4096];
     prompt_buf[0] = '\0';
@@ -433,5 +458,6 @@ void hu_reaction_handler_reset_for_test(void) {
     s_collector = NULL;
     s_personal_model = NULL;
     s_identity_graph = NULL;
+    s_reflection_db = NULL;
 }
 #endif

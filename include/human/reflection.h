@@ -167,6 +167,31 @@ void hu_reflection_mark_surfaced(struct sqlite3 *db, const char *pattern_id);
  * run — the storage UPSERT preserves the retired flag. */
 void hu_reflection_retire(struct sqlite3 *db, const char *pattern_id);
 
+/* T8 (retire-on-contradiction): time window after a pattern is surfaced
+ * during which a thumbs_down in the same channel is attributed to that
+ * pattern. 10 minutes — generous enough to cover the user reading the
+ * reply and reacting, tight enough to avoid retiring patterns from an
+ * unrelated later turn. */
+#define HU_REFLECTION_CONTRADICTION_WINDOW_MS (10UL * 60UL * 1000UL)
+
+/* T8. Record that `pattern_id` was surfaced in `channel`'s system prompt
+ * at `surfaced_at_ms`. Side-effecting; idempotent (INSERT OR REPLACE on
+ * the (pattern_id, channel) key — a re-surface refreshes the timestamp).
+ * Called from the personal-model build loop alongside mark_surfaced.
+ * No-op on NULL db/pattern_id/channel. */
+void hu_reflection_note_surfaced(struct sqlite3 *db, const char *pattern_id, const char *channel,
+                                 uint64_t surfaced_at_ms);
+
+/* T8. Retire every non-retired pattern surfaced in `channel` within the
+ * last `window_ms` (relative to `now_ms`). Invoked when the user thumbs-
+ * down a turn: the patterns that shaped that turn's system prompt are
+ * treated as contradicted. Consumes the channel's surfacings afterward
+ * (so a second thumbs_down on an unrelated later turn doesn't re-retire
+ * stale attributions). Returns the number of patterns retired. No-op
+ * returning 0 on NULL db/channel. */
+int hu_reflection_retire_contradicted(struct sqlite3 *db, const char *channel, uint64_t window_ms,
+                                      uint64_t now_ms);
+
 /* Returns the prose_summary of the most recent successful reflection
  * run, malloc'd (caller frees) or NULL if no completed run exists yet
  * (the normal Phase 1 state on a fresh daemon). Used by T7's system-

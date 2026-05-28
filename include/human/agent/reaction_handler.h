@@ -31,6 +31,7 @@
 /* Forward declaration — keeps the full memory subsystem header out of
  * any channel/agent TU that only needs the setter signature. */
 struct hu_personal_model;
+struct sqlite3;
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +66,15 @@ void hu_reaction_handler_set_personal_model(struct hu_personal_model *model);
  * already pinned at that level. */
 #include "human/memory/identity_resolver.h"
 void hu_reaction_handler_set_identity_graph(const hu_identity_graph_t *graph);
+
+/* T8 (reflection retire-on-contradiction): optional reflection-DB wire.
+ * When non-NULL, a NEGATIVE reaction (thumbs_down) retires every
+ * reflection pattern surfaced in that event's channel within the last
+ * HU_REFLECTION_CONTRADICTION_WINDOW_MS — the patterns that shaped the
+ * thumbed-down turn are treated as contradicted. The daemon owns the
+ * SQLite handle (same memory-backend db as reflection storage) and
+ * wires it at init; pass NULL at shutdown to clear. */
+void hu_reaction_handler_set_reflection_db(struct sqlite3 *db);
 
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
 

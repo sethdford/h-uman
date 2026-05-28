@@ -72,7 +72,25 @@ static const char *const k_migrate_sql =
     "CREATE INDEX IF NOT EXISTS idx_patterns_recent "
     "  ON reflection_patterns(last_observed_at_ms DESC);"
     "CREATE INDEX IF NOT EXISTS idx_patterns_unsurfaced "
-    "  ON reflection_patterns(surfaced_to_user, retired, confidence DESC);";
+    "  ON reflection_patterns(surfaced_to_user, retired, confidence DESC);"
+    /* T8 (retire-on-contradiction): per-channel attribution of which
+     * patterns were surfaced in a recent system prompt. A thumbs_down
+     * on a turn looks up the patterns surfaced in that channel within
+     * HU_REFLECTION_CONTRADICTION_WINDOW_MS and retires them. Channel-
+     * scoped + recency-windowed rather than msg_ref-precise: precise
+     * attribution needs a two-phase commit (surface time has no msg_ref
+     * yet) — out of scope for Phase 1. Known imprecision: rapid back-to-
+     * back turns in the same channel within the window retire patterns
+     * from both. Acceptable; msg_ref-precise attribution is the future
+     * enhancement. */
+    "CREATE TABLE IF NOT EXISTS reflection_surfacings ("
+    "  pattern_id TEXT NOT NULL,"
+    "  channel TEXT NOT NULL,"
+    "  surfaced_at_ms INTEGER NOT NULL,"
+    "  PRIMARY KEY (pattern_id, channel)"
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_surfacings_recent "
+    "  ON reflection_surfacings(channel, surfaced_at_ms DESC);";
 
 hu_error_t hu_reflection_storage_migrate(struct sqlite3 *db) {
     if (!db)
