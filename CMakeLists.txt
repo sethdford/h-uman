@@ -3263,6 +3263,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_prompt.c
+    tests/test_uncertainty.c
     tests/test_tool_search.c
     tests/test_vector.c
     tests/test_vector_full.c

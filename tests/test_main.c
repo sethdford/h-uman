@@ -191,6 +191,7 @@ void run_circadian_tests(void);
 void run_relationship_tests(void);
 void run_replay_tests(void);
 void run_style_clone_tests(void);
+void run_uncertainty_tests(void);
 void run_life_sim_tests(void);
 void run_persona_mood_tests(void);
 void run_persona_feedback_tests(void);
@@ -1101,6 +1102,7 @@ int main(int argc, char **argv) {
     run_relationship_tests();
     run_replay_tests();
     run_style_clone_tests();
+    run_uncertainty_tests();
     run_life_sim_tests();
     run_persona_mood_tests();
     run_persona_feedback_tests();
