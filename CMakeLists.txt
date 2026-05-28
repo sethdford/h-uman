@@ -917,6 +917,7 @@ set(HU_CORE_SOURCES
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
+    src/memory/cross_channel.c
     src/memory/erasure.c
     src/memory/neural_memory.c
     src/agent/self_rag.c
