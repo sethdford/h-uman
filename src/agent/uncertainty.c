@@ -40,16 +40,20 @@ hu_error_t hu_uncertainty_evaluate(hu_allocator_t *alloc, const hu_uncertainty_s
      * Formulation: min(fact_count / 3.0, 1.0) ensures smooth transition */
     double evidence_weight = (signals->fact_count >= 3) ? 1.0 : (signals->fact_count / 3.0);
 
-    /* Real-signal score: grounded_confidence with contradiction penalty */
+    /* Real-signal score: grounded_confidence (no penalty here — applied post-blend) */
     double real_signal_score = signals->grounded_confidence;
-    if (signals->contradiction_present)
-        real_signal_score -= 0.15; /* 15pp penalty for contradictions */
     if (real_signal_score < 0.0)
         real_signal_score = 0.0;
+    if (real_signal_score > 1.0)
+        real_signal_score = 1.0;
 
     /* Soft blend: interpolate between heuristic and real signal scores */
     double blended_score =
         (1.0 - evidence_weight) * heuristic_score + evidence_weight * real_signal_score;
+
+    /* Contradiction penalty applies AFTER blend, regardless of evidence weight */
+    if (signals->contradiction_present)
+        blended_score -= 0.15;
 
     /* Verbalized confidence gating: asymmetric rule
      * - Trust low claims: if model says confidence is lower, apply it

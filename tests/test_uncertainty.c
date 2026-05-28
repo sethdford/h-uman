@@ -88,8 +88,29 @@ static void test_contradiction_penalty_applies(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_uncertainty_result_t result = {0};
     HU_ASSERT_EQ(hu_uncertainty_evaluate(&alloc, &signals, &result), HU_OK);
-    /* 0.85 - 0.15 = 0.70 */
+    /* fact_count=3 → evidence_weight=1.0 → blended=0.85 → 0.85-0.15=0.70 */
     HU_ASSERT_TRUE(result.confidence > 0.69 && result.confidence < 0.71);
+    hu_uncertainty_result_free(&alloc, &result);
+}
+
+static void test_contradiction_penalty_with_low_evidence_weight(void) {
+    /* fact_count=1, grounded_confidence=0.9, contradiction_present=true
+     * evidence_weight = 1/3 ≈ 0.333
+     * heuristic_score = 0 (all defaults suppressed)
+     * blended before penalty: (1-1/3)*0 + (1/3)*0.9 = 0.3
+     * after penalty: 0.3 - 0.15 = 0.15
+     * Expected: 0.15 ± 0.01
+     */
+    hu_uncertainty_signals_t signals = {0};
+    signals.fact_count = 1;
+    signals.grounded_confidence = 0.9;
+    signals.contradiction_present = true;
+    signals.has_hedging_language = true; /* suppress !hedging bonus */
+    signals.is_factual_query = true;     /* suppress !factual bonus */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_uncertainty_result_t result = {0};
+    HU_ASSERT_EQ(hu_uncertainty_evaluate(&alloc, &signals, &result), HU_OK);
+    HU_ASSERT_TRUE(result.confidence > 0.14 && result.confidence < 0.16);
     hu_uncertainty_result_free(&alloc, &result);
 }
 
@@ -142,6 +163,72 @@ static void test_strip_verbalized_no_tag_returns_no_match(void) {
     HU_ASSERT_EQ(len, strlen("Plain answer with no tag."));
 }
 
+static void test_strip_verbalized_malformed_no_closing_bracket(void) {
+    /* [conf= without ] within 32-char lookback → returns false */
+    char response[] = "Thursday is likely. [conf=0.7";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_FALSE(found);
+    HU_ASSERT_EQ(len, strlen(response)); /* response unchanged */
+}
+
+static void test_strip_verbalized_boundary_zero(void) {
+    /* [conf=0.0] is valid (lower bound) */
+    char response[] = "Low confidence. [conf=0.0]";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_TRUE(found);
+    HU_ASSERT_TRUE(parsed_conf > -0.01 && parsed_conf < 0.01);
+    response[len] = '\0';
+    HU_ASSERT_STR_EQ(response, "Low confidence.");
+}
+
+static void test_strip_verbalized_boundary_one(void) {
+    /* [conf=1.0] is valid (upper bound) */
+    char response[] = "Completely certain. [conf=1.0]";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_TRUE(found);
+    HU_ASSERT_TRUE(parsed_conf > 0.99 && parsed_conf < 1.01);
+    response[len] = '\0';
+    HU_ASSERT_STR_EQ(response, "Completely certain.");
+}
+
+static void test_strip_verbalized_whitespace_before_bracket(void) {
+    /* Extra space before [ → still works (whitespace stripped) */
+    char response[] = "Thursday.  [conf=0.7]";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_TRUE(found);
+    HU_ASSERT_TRUE(parsed_conf > 0.69 && parsed_conf < 0.71);
+    response[len] = '\0';
+    HU_ASSERT_STR_EQ(response, "Thursday.");
+}
+
+static void test_strip_verbalized_out_of_range_high(void) {
+    /* [conf=1.5] is out of range [0, 1] → returns false */
+    char response[] = "Over-confident. [conf=1.5]";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_FALSE(found);
+    HU_ASSERT_EQ(len, strlen(response)); /* response unchanged */
+}
+
+static void test_strip_verbalized_out_of_range_negative(void) {
+    /* [conf=-0.1] is out of range [0, 1] → returns false */
+    char response[] = "Invalid. [conf=-0.1]";
+    size_t len = strlen(response);
+    double parsed_conf = -1.0;
+    bool found = hu_uncertainty_strip_verbalized(response, &len, &parsed_conf);
+    HU_ASSERT_FALSE(found);
+    HU_ASSERT_EQ(len, strlen(response)); /* response unchanged */
+}
+
 void run_uncertainty_tests(void) {
     HU_TEST_SUITE("uncertainty");
     HU_RUN_TEST(test_score_unchanged_with_no_real_signals);
@@ -149,8 +236,15 @@ void run_uncertainty_tests(void) {
     HU_RUN_TEST(test_score_blend_at_three_facts);
     HU_RUN_TEST(test_grounded_confidence_uses_effective_decay);
     HU_RUN_TEST(test_contradiction_penalty_applies);
+    HU_RUN_TEST(test_contradiction_penalty_with_low_evidence_weight);
     HU_RUN_TEST(test_verbalized_low_pulls_score_down);
     HU_RUN_TEST(test_verbalized_high_does_not_over_inflate);
     HU_RUN_TEST(test_strip_verbalized_tag_at_response_tail);
     HU_RUN_TEST(test_strip_verbalized_no_tag_returns_no_match);
+    HU_RUN_TEST(test_strip_verbalized_malformed_no_closing_bracket);
+    HU_RUN_TEST(test_strip_verbalized_boundary_zero);
+    HU_RUN_TEST(test_strip_verbalized_boundary_one);
+    HU_RUN_TEST(test_strip_verbalized_whitespace_before_bracket);
+    HU_RUN_TEST(test_strip_verbalized_out_of_range_high);
+    HU_RUN_TEST(test_strip_verbalized_out_of_range_negative);
 }
