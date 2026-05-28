@@ -871,10 +871,20 @@ static void guard_length_mult_for_channel_compact_vs_default(void) {
                  HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT);
 }
 
-/* G5 — compact channels (6×) reject 7× avg; default channels (8×) pass. */
+/* G5 — compact channels (6×) reject 7× avg; default channels (8×) pass.
+ *
+ * NOTE: the response here is 400 chars — ABOVE HU_GUARD_LENGTH_ANOMALY_FLOOR
+ * (320). The floor was added 2026-05-28 to stop G5 punishing normal-length
+ * replies when the recipient's rolling average collapses (the Dermot
+ * death-spiral). To still exercise the 6× vs 8× distinction, this test uses
+ * recent_avg=60 so 6× = 360 (reject) and 8× = 480 (pass), with a 400-char
+ * response between the two thresholds AND above the floor. The previous
+ * version used a 70-char reply at recent_avg=10, which asserted that a
+ * perfectly human 70-char iMessage was a "length anomaly" — exactly the
+ * over-constraint the floor removes. */
 static void guard_g5_imessage_channel_uses_stricter_mult(void) {
-    char raw[256];
-    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 70);
+    char raw[512];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 400);
 
     hu_allocator_t alloc = A();
     char *out = NULL;
@@ -884,7 +894,7 @@ static void guard_g5_imessage_channel_uses_stricter_mult(void) {
     memset(&report, 0, sizeof(report));
 
     hu_guard_context_t ctx = {0};
-    ctx.recent_avg_len = 10;
+    ctx.recent_avg_len = 60; /* 6× = 360 (reject), 8× = 480 (pass) */
     ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel("imessage", 8);
 
     HU_ASSERT_EQ(
@@ -898,6 +908,35 @@ static void guard_g5_imessage_channel_uses_stricter_mult(void) {
     outcome = HU_GUARD_OK;
     memset(&report, 0, sizeof(report));
     ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel("discord", 7);
+
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(!report.detected_length_anomaly);
+}
+
+/* G5 floor — a natural-length reply (135 chars, the live Dermot case) must
+ * NOT be rejected even when the recipient's rolling average has collapsed
+ * to a tiny value (18 chars) after a run of forced-short replies. This pins
+ * the death-spiral fix: below HU_GUARD_LENGTH_ANOMALY_FLOOR, G5 never fires
+ * regardless of the multiplier ratio (135 > 18×6=108 would have rejected
+ * pre-floor). */
+static void guard_g5_does_not_fire_below_absolute_floor(void) {
+    char raw[256];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 135);
+    HU_ASSERT(raw_len <= HU_GUARD_LENGTH_ANOMALY_FLOOR);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    hu_guard_context_t ctx = {0};
+    ctx.recent_avg_len = 18; /* collapsed avg from prior forced-short replies */
+    ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel("imessage", 8);
 
     HU_ASSERT_EQ(
         hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, &report),
@@ -2417,6 +2456,7 @@ void run_response_guard_tests(void) {
      * director echo). All exercise the new `_ex` API. */
     HU_RUN_TEST(guard_length_mult_for_channel_compact_vs_default);
     HU_RUN_TEST(guard_g5_imessage_channel_uses_stricter_mult);
+    HU_RUN_TEST(guard_g5_does_not_fire_below_absolute_floor);
     HU_RUN_TEST(guard_ex_rejects_length_anomaly);
     HU_RUN_TEST(guard_ex_rejects_director_echo);
     HU_RUN_TEST(guard_ex_passes_long_response_when_no_avg);

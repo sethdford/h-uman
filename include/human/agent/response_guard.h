@@ -227,6 +227,22 @@ void hu_guard_reject_stats_reset(void);
 #define HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT 8u
 #define HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT 6u
 
+/* G5 absolute floor. The length-anomaly check fires only when the
+ * response exceeds BOTH this floor AND recent_avg_len × mult. Rationale:
+ * the leak class G5 defends against (chain-of-thought / prompt-context
+ * dumps — e.g. the 2026-05-12 leak at 979 chars) is intrinsically large
+ * in ABSOLUTE terms. A normal-length human reply (a few sentences) can
+ * never be such a dump regardless of how terse the recipient's recent
+ * messages were. Without this floor, a collapsed rolling average (e.g.
+ * 18 chars after a run of forced-short replies) makes a perfectly
+ * natural 135-char reply look "anomalous" at 7.5× — rejecting it, which
+ * triggers a repair-prompt retry that shortens the reply further, which
+ * drops the average again: a death-spiral toward sub-human terseness.
+ * 320 chars ≈ 2-3 long sentences, well above a typical iMessage and well
+ * below the documented leak size, so it removes the spiral without
+ * weakening dump detection. */
+#define HU_GUARD_LENGTH_ANOMALY_FLOOR 320u
+
 /* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
 unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
 

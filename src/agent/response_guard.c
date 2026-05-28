@@ -503,6 +503,12 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
 static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
     if (!ctx || ctx->recent_avg_len == 0)
         return false;
+    /* Absolute floor: a context/CoT dump is intrinsically large. Below the
+     * floor, no reply can be such a dump, so don't penalize natural-length
+     * messages just because the recipient's rolling average is tiny. This
+     * breaks the forced-short → low-avg → reject → shorter death-spiral. */
+    if (response_len <= HU_GUARD_LENGTH_ANOMALY_FLOOR)
+        return false;
     unsigned mult = ctx->length_anomaly_mult;
     if (mult == 0)
         mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;

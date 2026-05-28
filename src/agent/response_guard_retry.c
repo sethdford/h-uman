@@ -46,7 +46,9 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     static const char repair_instruction_base[] =
         "Your previous draft was invalid (internal model tokens or runaway repetition). "
         "Reply ONLY with the final human-visible text for the user's latest message below. "
-        "Short, natural, channel-appropriate. No analysis, XML, markdown fences, or filler. "
+        "Write the way a real person texts: match the natural length and tone of the "
+        "conversation — don't pad it out, don't clip it to a fragment. "
+        "No analysis, XML, markdown fences, or filler. "
         "Do not think out loud or narrate your reasoning — no 'Let me think' or 'Step 1:' prose. "
         "Do not refer to yourself in third-person by name (e.g. 'As Aria, I...'). "
         "Do not end with AI-helper closers (e.g. 'Is there anything else I can help with?'). "
