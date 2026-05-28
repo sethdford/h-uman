@@ -27,6 +27,20 @@ static const char *DEFAULT_TONE_HINTS[3] = {
     "The user communicates casually. Match their tone.",
     "The user is discussing technical details. Be precise and specific.",
     "The user communicates formally. Use clear, professional language."};
+
+/* Verbalized confidence addendum for factual queries */
+static const char *const k_verbalized_confidence_addendum =
+    "\n[CONFIDENCE TAGGING]\n"
+    "If your response contains a factual claim, append a confidence tag in\n"
+    "the format [conf=0.X] at the very end where 0.X is your honest self-\n"
+    "assessment:\n"
+    "- 0.9-1.0: certain (direct evidence in context)\n"
+    "- 0.7-0.9: confident (evidence is recent and unambiguous)\n"
+    "- 0.5-0.7: probable (evidence exists but may be stale or partial)\n"
+    "- 0.3-0.5: unsure (going off general knowledge, not specific evidence)\n"
+    "- 0.0-0.3: guessing (no real evidence)\n"
+    "The tag will be stripped before display. Be honest — over-claiming\n"
+    "hurts trust.\n";
 static const size_t DEFAULT_TONE_HINTS_LEN[3] = {49, 66, 65};
 
 static hu_error_t hu_prompt_data_init(hu_allocator_t *alloc) {
@@ -1338,6 +1352,18 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 goto fail;
         }
         err = append_texting_shape_rules(alloc, &buf, &len, &cap, config->max_response_chars);
+        if (err != HU_OK)
+            goto fail;
+    }
+
+    /* Task 3: Append verbalized confidence tagging addendum ONLY on factual
+     * queries. The caller (agent_turn.c) classifies the query and sets
+     * config->is_factual_query; it defaults false, so casual/non-factual
+     * turns don't get the [conf=0.X] instruction (which would otherwise
+     * prompt spurious confidence tags the parser then has to strip). */
+    if (config->is_factual_query) {
+        err = append(alloc, &buf, &len, &cap, k_verbalized_confidence_addendum,
+                     strlen(k_verbalized_confidence_addendum));
         if (err != HU_OK)
             goto fail;
     }

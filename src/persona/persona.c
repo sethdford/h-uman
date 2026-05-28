@@ -438,7 +438,176 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
                     persona->contacts_count * sizeof(hu_contact_profile_t));
     }
 
+    /* Cross-channel ACL */
+    if (persona->cross_channel_acl.rules) {
+        for (size_t i = 0; i < persona->cross_channel_acl.rule_count; i++) {
+            if (persona->cross_channel_acl.rules[i].allow_list) {
+                for (size_t j = 0; j < persona->cross_channel_acl.rules[i].allow_count; j++) {
+                    if (persona->cross_channel_acl.rules[i].allow_list[j]) {
+                        alloc->free(alloc->ctx, persona->cross_channel_acl.rules[i].allow_list[j],
+                                    strlen(persona->cross_channel_acl.rules[i].allow_list[j]) + 1);
+                    }
+                }
+                alloc->free(alloc->ctx, persona->cross_channel_acl.rules[i].allow_list,
+                            persona->cross_channel_acl.rules[i].allow_count * sizeof(char *));
+            }
+        }
+        alloc->free(alloc->ctx, persona->cross_channel_acl.rules,
+                    persona->cross_channel_acl.rule_count * sizeof(hu_xchan_acl_rule_t));
+    }
+
     memset(persona, 0, sizeof(*persona));
+}
+
+/* --- Safe defaults and persona initialization --- */
+
+static hu_error_t populate_safe_default_acl(hu_allocator_t *alloc, hu_xchan_acl_t *acl) {
+    if (!acl)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Seven default rules: one per relationship type. The pattern is:
+     * - coworker can see: coworker (same-type always allowed)
+     * - work can see: work, coworker
+     * - acquaintance can see: acquaintance, work
+     * - friend can see: friend, acquaintance, coworker (broader than work)
+     * - close_friend can see: close_friend, friend, family (deeper)
+     * - family can see: family, close_friend, partner
+     * - partner can see: partner, family (exclusive)
+     *
+     * Safe default is deny_unknown (close if trust is unclear).
+     */
+
+    acl->rule_count = 7;
+    acl->rules = alloc->alloc(alloc->ctx, 7 * sizeof(hu_xchan_acl_rule_t));
+    if (!acl->rules)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    memset(acl->rules, 0, 7 * sizeof(hu_xchan_acl_rule_t));
+
+    /* Rule 0: coworker */
+    strncpy(acl->rules[0].relationship_type, "coworker", 31);
+    acl->rules[0].allow_list = alloc->alloc(alloc->ctx, sizeof(char *));
+    if (!acl->rules[0].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[0].allow_list[0] = alloc->alloc(alloc->ctx, 10);
+    if (!acl->rules[0].allow_list[0])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[0].allow_list[0], "coworker");
+    acl->rules[0].allow_count = 1;
+
+    /* Rule 1: work */
+    strncpy(acl->rules[1].relationship_type, "work", 31);
+    acl->rules[1].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
+    if (!acl->rules[1].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[1].allow_list[0] = alloc->alloc(alloc->ctx, 5);
+    acl->rules[1].allow_list[1] = alloc->alloc(alloc->ctx, 10);
+    if (!acl->rules[1].allow_list[0] || !acl->rules[1].allow_list[1])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[1].allow_list[0], "work");
+    strcpy(acl->rules[1].allow_list[1], "coworker");
+    acl->rules[1].allow_count = 2;
+
+    /* Rule 2: acquaintance */
+    strncpy(acl->rules[2].relationship_type, "acquaintance", 31);
+    acl->rules[2].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
+    if (!acl->rules[2].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[2].allow_list[0] = alloc->alloc(alloc->ctx, 13);
+    acl->rules[2].allow_list[1] = alloc->alloc(alloc->ctx, 5);
+    if (!acl->rules[2].allow_list[0] || !acl->rules[2].allow_list[1])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[2].allow_list[0], "acquaintance");
+    strcpy(acl->rules[2].allow_list[1], "work");
+    acl->rules[2].allow_count = 2;
+
+    /* Rule 3: friend */
+    strncpy(acl->rules[3].relationship_type, "friend", 31);
+    acl->rules[3].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
+    if (!acl->rules[3].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[3].allow_list[0] = alloc->alloc(alloc->ctx, 7);
+    acl->rules[3].allow_list[1] = alloc->alloc(alloc->ctx, 13);
+    acl->rules[3].allow_list[2] = alloc->alloc(alloc->ctx, 10);
+    if (!acl->rules[3].allow_list[0] || !acl->rules[3].allow_list[1] ||
+        !acl->rules[3].allow_list[2])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[3].allow_list[0], "friend");
+    strcpy(acl->rules[3].allow_list[1], "acquaintance");
+    strcpy(acl->rules[3].allow_list[2], "coworker");
+    acl->rules[3].allow_count = 3;
+
+    /* Rule 4: close_friend */
+    strncpy(acl->rules[4].relationship_type, "close_friend", 31);
+    acl->rules[4].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
+    if (!acl->rules[4].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[4].allow_list[0] = alloc->alloc(alloc->ctx, 13);
+    acl->rules[4].allow_list[1] = alloc->alloc(alloc->ctx, 7);
+    acl->rules[4].allow_list[2] = alloc->alloc(alloc->ctx, 7);
+    if (!acl->rules[4].allow_list[0] || !acl->rules[4].allow_list[1] ||
+        !acl->rules[4].allow_list[2])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[4].allow_list[0], "close_friend");
+    strcpy(acl->rules[4].allow_list[1], "friend");
+    strcpy(acl->rules[4].allow_list[2], "family");
+    acl->rules[4].allow_count = 3;
+
+    /* Rule 5: family */
+    strncpy(acl->rules[5].relationship_type, "family", 31);
+    acl->rules[5].allow_list = alloc->alloc(alloc->ctx, 3 * sizeof(char *));
+    if (!acl->rules[5].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[5].allow_list[0] = alloc->alloc(alloc->ctx, 7);
+    acl->rules[5].allow_list[1] = alloc->alloc(alloc->ctx, 13);
+    acl->rules[5].allow_list[2] = alloc->alloc(alloc->ctx, 8);
+    if (!acl->rules[5].allow_list[0] || !acl->rules[5].allow_list[1] ||
+        !acl->rules[5].allow_list[2])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[5].allow_list[0], "family");
+    strcpy(acl->rules[5].allow_list[1], "close_friend");
+    strcpy(acl->rules[5].allow_list[2], "partner");
+    acl->rules[5].allow_count = 3;
+
+    /* Rule 6: partner */
+    strncpy(acl->rules[6].relationship_type, "partner", 31);
+    acl->rules[6].allow_list = alloc->alloc(alloc->ctx, 2 * sizeof(char *));
+    if (!acl->rules[6].allow_list)
+        return HU_ERR_OUT_OF_MEMORY;
+    acl->rules[6].allow_list[0] = alloc->alloc(alloc->ctx, 8);
+    acl->rules[6].allow_list[1] = alloc->alloc(alloc->ctx, 7);
+    if (!acl->rules[6].allow_list[0] || !acl->rules[6].allow_list[1])
+        return HU_ERR_OUT_OF_MEMORY;
+    strcpy(acl->rules[6].allow_list[0], "partner");
+    strcpy(acl->rules[6].allow_list[1], "family");
+    acl->rules[6].allow_count = 2;
+
+    /* Default policy: deny_unknown (safe-default-closed) */
+    strncpy(acl->default_policy, "deny_unknown", 31);
+
+    return HU_OK;
+}
+
+void hu_persona_load_defaults(hu_persona_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+
+    /* Use the system allocator */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = populate_safe_default_acl(&alloc, &out->cross_channel_acl);
+    if (err != HU_OK) {
+        /* On failure, zero the ACL struct and set rule_count = 0
+         * so deinit/filter are safe. Fail-closed: zero rules → deny everything. */
+        memset(&out->cross_channel_acl, 0, sizeof(out->cross_channel_acl));
+    }
+}
+
+void hu_persona_free(hu_persona_t *persona) {
+    if (!persona)
+        return;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_deinit(&alloc, persona);
 }
 
 const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,

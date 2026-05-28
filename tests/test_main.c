@@ -191,6 +191,7 @@ void run_circadian_tests(void);
 void run_relationship_tests(void);
 void run_replay_tests(void);
 void run_style_clone_tests(void);
+void run_uncertainty_tests(void);
 void run_life_sim_tests(void);
 void run_persona_mood_tests(void);
 void run_persona_feedback_tests(void);
@@ -808,6 +809,8 @@ void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
+void run_cross_channel_acl_tests(void);
+void run_cross_channel_pipeline_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void);                 /* T2: stub when SQLite off */
@@ -1101,6 +1104,7 @@ int main(int argc, char **argv) {
     run_relationship_tests();
     run_replay_tests();
     run_style_clone_tests();
+    run_uncertainty_tests();
     run_life_sim_tests();
     run_persona_mood_tests();
     run_persona_feedback_tests();
@@ -1685,6 +1689,8 @@ int main(int argc, char **argv) {
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
+    run_cross_channel_acl_tests();
+    run_cross_channel_pipeline_tests();
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests();                 /* T2: stubbed-out when SQLite off */
