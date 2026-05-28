@@ -86,8 +86,15 @@ static void test_aloop_smoke_virtual_time_and_stub(void) {
         abort();
     }
 
-    /* Arrange: register iMessage send stub */
+    /* Arrange: register iMessage send stub. hu_imessage_set_test_send_stub
+     * lives in src/channels/imessage.c, which is only compiled when
+     * HU_HAS_IMESSAGE is defined (genuine Apple/chat.db deps). On non-Apple /
+     * HU_HAS_IMESSAGE=OFF builds the symbol is absent, so guard the
+     * registration; the rest of the smoke test (virtual time + direct stub
+     * invocation below) is platform-independent and still exercised. */
+#ifdef HU_HAS_IMESSAGE
     hu_imessage_set_test_send_stub(test_send_stub_fn);
+#endif
 
     /* Simulate advancing virtual time (AC-6.4: within 60s) */
     int64_t t_end_ms = t0_ms + 60000; /* 60 seconds later */
@@ -124,7 +131,9 @@ static void test_aloop_smoke_virtual_time_and_stub(void) {
     }
 
     /* Clean up */
+#ifdef HU_HAS_IMESSAGE
     hu_imessage_set_test_send_stub(NULL);
+#endif
     hu_time_set_test_override_ms(0);
 }
 

@@ -371,48 +371,57 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_HAS_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
-    # Phase 2 Task 11 (RL SOTA): tapback inbound poll. Lives in its own TU
-    # to avoid an enum-name collision between human/channels/reaction_event.h
-    # (Task 10) and human/channel.h (HU_REACTION_QUESTION /
-    # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
-    # in src/channels/imessage.c near hu_imessage_poll for the full story.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
-    # E2: sticker send action surface. Wired via vtable.
+    # E2: sticker send action surface. Wired via vtable. Genuine Apple deps
+    # (AX / sticker injection), so stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
-    # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
-    # primitives that render iMessage events into canonical English for
-    # personal-model ingestion. No chat.db / Apple deps; ingest wiring
-    # lands in Phase 1b.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_ingest.c)
     # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: schema-version
     # probe + drift canary. Caches the chat.db PRAGMA table_info result;
     # logs unknown columns at startup so operators see Apple-added fields
-    # before features silently break.
+    # before features silently break. Genuine chat.db dep, stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_schema.c)
     # Phase 5 of docs/plans/2026-05-18-imessage-sota.md: per-balloon
     # payload decoders (URL preview, Apple Pay, Placemark, Music, Poll).
     # Privacy contracts pinned in tests: never reads amount/currency or
-    # latitude/longitude keys.
+    # latitude/longitude keys. Genuine chat.db dep, stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_balloon_decode.c)
-    # Tier 1 #3 from docs/plans/2026-05-19-better-than-human.md:
-    # conversation-gap detection — surfaces previously-active contacts
-    # who have gone silent, for proactive-outreach prompting. Pure
-    # classifier + SQL scanner (gated under HU_IS_TEST).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
-    # Tier 2 Sprint A — per-contact relationship signatures: TOD
-    # distribution, response latency, initiation ratio, frequency
-    # aggregates per contact. Pure helpers + SQL scanner (HU_IS_TEST stub).
-    list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
-    # Tier 1 Phase 2 (iMessage action surface): predicate that selects
-    # reply style per conversation (flat/threaded/tapback variants).
-    # Wired at send time before hu_imessage_send. Pure classifier.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
-    # Tier 1 Phase 2 (iMessage action surface F1): build facts struct from
-    # conversation state. Pure bridge between dispatcher (F2) and predicate (Phase A).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
-    # Threaded inline reply path (Tier 1: Cmd-R via AX, Tier 2/3 in C2/C3).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 endif()
+# iMessage pure-logic / internally-Apple-guarded sources. Compiled
+# UNCONDITIONALLY (not under HU_HAS_IMESSAGE): each one either contains zero
+# chat.db / Apple deps or wraps its chat.db SQL in an internal
+# `#if !HU_IS_TEST && defined(__APPLE__) ...` guard with a non-Apple stub, so
+# they compile clean on every platform. Unconditional core callers
+# (src/daemon_reaction_poll.c, src/daemon_social_tick.c,
+# src/agent/reaction_handler.c) plus tests reference their exported symbols on
+# every platform, so gating them caused undefined-reference link breaks in the
+# minimal / no-sqlite / cross-arm64 / HU_HAS_IMESSAGE=OFF CI variants.
+#
+# Tier 2 Task 11 (RL SOTA): tapback inbound poll (hu_imessage_poll_reactions,
+# hu_imessage_lookup_latest_sent_guid). SQL behind internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+# Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
+# primitives that render iMessage events into canonical English for
+# personal-model ingestion (hu_reaction_ingest_personal_model,
+# hu_imessage_synth_attributed_message). No chat.db / Apple deps.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_ingest.c)
+# Tier 1 #3 from docs/plans/2026-05-19-better-than-human.md:
+# conversation-gap detection (hu_imessage_gap_classify_stale,
+# hu_imessage_scan_stale_contacts). Pure classifier + SQL scanner behind
+# internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
+# Tier 2 Sprint A — per-contact relationship signatures
+# (hu_contact_signature_compute, hu_contact_signature_top_n). Pure helpers +
+# SQL scanner behind internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
+# Threaded inline reply path (hu_imessage_reply + test stubs). External calls
+# only to unconditional symbols (hu_imessage_action_log_jsonl, log, time).
+list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
+# Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
+# facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
+# error.h/persona.h); core callers (src/daemon.c
+# hu_daemon_dispatch_imessage_reply) plus tests/test_imessage_reply_style.c
+# reference them on every platform.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
+list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
     set(HU_HAS_PWA_FLAG TRUE)
