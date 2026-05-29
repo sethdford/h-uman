@@ -235,4 +235,53 @@ hu_dpo_train_step(hu_dpo_collector_t *collector, hu_allocator_t *alloc, hu_provi
     return hu_dpo_judge_step(collector, alloc, provider, model, model_len, beta, batch_size, out);
 }
 
+/* US-104: Proactive outcome signal processing
+ *
+ * Insert a proactive send into the proactive_sends tracking table. Called
+ * when hu_follow_up_send() sends a proactive message to a contact.
+ *
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null args,
+ * HU_ERR_IO on SQLite failure. Skips silently when SQLITE is disabled. */
+hu_error_t hu_dpo_collector_insert_proactive_send(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    const char *channel, size_t channel_len, const char *contact, size_t contact_len,
+    const char *message_ref, size_t message_ref_len);
+
+/* Update a proactive send's outcome (reply, ignored, blocked) based on signal
+ * detection. Call this when a reply arrives (outcome=REPLY), when 24h timeout
+ * fires (outcome=IGNORED), or when contact blocks (outcome=BLOCKED).
+ *
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null args,
+ * HU_ERR_IO on SQLite failure. Skips silently when SQLITE is disabled. */
+hu_error_t hu_dpo_collector_update_proactive_outcome(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    const char *channel, size_t channel_len, const char *contact, size_t contact_len,
+    const char *message_ref, size_t message_ref_len, int outcome_type);
+
+/* Async processor: reads unprocessed proactive outcome signals from the
+ * database and updates the bandit for learning. Called periodically
+ * (rate-limited to once per 60 seconds) from the daemon's main loop.
+ *
+ * Reads rows WHERE outcome_type IS NOT NULL AND processed = 0,
+ * calls hu_contextual_bandit_update for each, and marks processed=1.
+ *
+ * Requires HU_ENABLE_SQLITE and bandit != NULL. Returns HU_OK on success,
+ * HU_ERR_INVALID_ARGUMENT if arguments are NULL, HU_ERR_IO on database
+ * errors. */
+hu_error_t hu_proactive_outcomes_process_async(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    void *bandit_opaque);
+
 #endif /* HU_ML_DPO_H */

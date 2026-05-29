@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
+#include "human/agent/contextual_bandit.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #endif
@@ -103,7 +104,19 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
         "processed_into_dpo INTEGER DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_po_msg_ref ON production_outcomes(channel, target, "
         "message_ref);"
-        "CREATE INDEX IF NOT EXISTS idx_po_unprocessed ON production_outcomes(processed_into_dpo);";
+        "CREATE INDEX IF NOT EXISTS idx_po_unprocessed ON production_outcomes(processed_into_dpo);"
+        /* US-104: proactive_sends table for tracking proactive message outcomes
+         * and feeding them to the contextual bandit for learning. */
+        "CREATE TABLE IF NOT EXISTS proactive_sends("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "channel TEXT NOT NULL,"
+        "contact TEXT NOT NULL,"
+        "message_ref TEXT,"
+        "sent_timestamp INTEGER NOT NULL,"
+        "outcome_type INTEGER,"
+        "outcome_timestamp INTEGER,"
+        "processed INTEGER DEFAULT 0);"
+        "CREATE INDEX IF NOT EXISTS idx_proactive_unprocessed ON proactive_sends(processed);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(collector->db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -1148,4 +1161,166 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
     (void)pairs_written;
     return HU_ERR_NOT_SUPPORTED;
 }
+#endif
+
+/* US-104: Proactive outcome signal functions. */
+
+#ifdef HU_ENABLE_SQLITE
+hu_error_t hu_dpo_collector_insert_proactive_send(sqlite3 *db, const char *channel,
+                                                  size_t channel_len, const char *contact,
+                                                  size_t contact_len, const char *message_ref,
+                                                  size_t message_ref_len) {
+    if (!db || !channel || !contact)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        db,
+        "INSERT INTO proactive_sends(channel, contact, message_ref, sent_timestamp) "
+        "VALUES(?, ?, ?, ?)",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(stmt, 1, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, contact, (int)contact_len, SQLITE_STATIC);
+    if (message_ref && message_ref_len > 0)
+        sqlite3_bind_text(stmt, 3, message_ref, (int)message_ref_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 3);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)time(NULL));
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
+}
+
+hu_error_t hu_dpo_collector_update_proactive_outcome(sqlite3 *db, const char *channel,
+                                                     size_t channel_len, const char *contact,
+                                                     size_t contact_len, const char *message_ref,
+                                                     size_t message_ref_len, int outcome_type) {
+    if (!db || !channel || !contact)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "UPDATE proactive_sends SET outcome_type = ?, "
+                                "outcome_timestamp = ? "
+                                "WHERE channel = ? AND contact = ? AND message_ref = ? "
+                                "AND outcome_type IS NULL",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_int(stmt, 1, outcome_type);
+    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)time(NULL));
+    sqlite3_bind_text(stmt, 3, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, contact, (int)contact_len, SQLITE_STATIC);
+    if (message_ref && message_ref_len > 0)
+        sqlite3_bind_text(stmt, 5, message_ref, (int)message_ref_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 5);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
+}
+
+hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque) {
+    if (!db || !bandit_opaque)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_contextual_bandit_t *bandit = (hu_contextual_bandit_t *)bandit_opaque;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "SELECT id, contact, outcome_type FROM proactive_sends "
+                                "WHERE outcome_type IS NOT NULL AND processed = 0 LIMIT 100",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int64_t row_id = sqlite3_column_int64(stmt, 0);
+        const char *contact_str = (const char *)sqlite3_column_text(stmt, 1);
+        int outcome_type = sqlite3_column_int(stmt, 2);
+
+        if (!contact_str)
+            continue;
+
+        /* Convert contact string to uint64_t contact_handle by simple hash. */
+        uint64_t contact_handle = 0;
+        for (const char *p = contact_str; *p; p++) {
+            contact_handle = contact_handle * 31 + (unsigned char)*p;
+        }
+
+        /* Update the bandit with the outcome. */
+        hu_error_t err =
+            hu_contextual_bandit_update(bandit, contact_handle, (hu_bandit_outcome_t)outcome_type);
+        if (err != HU_OK) {
+            sqlite3_finalize(stmt);
+            return err;
+        }
+
+        /* Mark this row as processed. */
+        sqlite3_stmt *update_stmt = NULL;
+        rc = sqlite3_prepare_v2(db, "UPDATE proactive_sends SET processed = 1 WHERE id = ?", -1,
+                                &update_stmt, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_finalize(stmt);
+            return HU_ERR_IO;
+        }
+
+        sqlite3_bind_int64(update_stmt, 1, row_id);
+        rc = sqlite3_step(update_stmt);
+        sqlite3_finalize(update_stmt);
+
+        if (rc != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            return HU_ERR_IO;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return HU_OK;
+}
+
+#else
+
+hu_error_t hu_dpo_collector_insert_proactive_send(void *db, const char *channel, size_t channel_len,
+                                                  const char *contact, size_t contact_len,
+                                                  const char *message_ref, size_t message_ref_len) {
+    (void)db;
+    (void)channel;
+    (void)channel_len;
+    (void)contact;
+    (void)contact_len;
+    (void)message_ref;
+    (void)message_ref_len;
+    return HU_OK;
+}
+
+hu_error_t hu_dpo_collector_update_proactive_outcome(void *db, const char *channel,
+                                                     size_t channel_len, const char *contact,
+                                                     size_t contact_len, const char *message_ref,
+                                                     size_t message_ref_len, int outcome_type) {
+    (void)db;
+    (void)channel;
+    (void)channel_len;
+    (void)contact;
+    (void)contact_len;
+    (void)message_ref;
+    (void)message_ref_len;
+    (void)outcome_type;
+    return HU_OK;
+}
+
+hu_error_t hu_proactive_outcomes_process_async(void *db, void *bandit_opaque) {
+    (void)db;
+    (void)bandit_opaque;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 #endif
