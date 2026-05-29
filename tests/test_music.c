@@ -1,6 +1,6 @@
-#include "test_framework.h"
-#include "human/music.h"
 #include "human/core/allocator.h"
+#include "human/music.h"
+#include "test_framework.h"
 #include <string.h>
 #include <unistd.h>
 
@@ -78,7 +78,7 @@ static void test_music_parse_full_response(void) {
     HU_ASSERT_STR_EQ(result.album_name, "A Night at the Opera");
     HU_ASSERT_STR_EQ(result.preview_url, "https://audio-ssl.itunes.apple.com/preview.m4a");
     HU_ASSERT_STR_EQ(result.track_view_url,
-                      "https://music.apple.com/us/album/bohemian-rhapsody/1440650428");
+                     "https://music.apple.com/us/album/bohemian-rhapsody/1440650428");
     HU_ASSERT_STR_EQ(result.genre, "Rock");
 
     hu_music_result_free(&alloc, &result);
@@ -89,7 +89,7 @@ static void test_music_parse_empty_results(void) {
     static const char json[] = "{\"resultCount\":0,\"results\":[]}";
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_search_response(&alloc, json, strlen(json), &result),
-                  HU_ERR_NOT_FOUND);
+                 HU_ERR_NOT_FOUND);
 }
 
 static void test_music_parse_missing_fields(void) {
@@ -114,8 +114,7 @@ static void test_music_parse_null_args(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_search_response(NULL, "{}", 2, &result), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_music_parse_search_response(&alloc, NULL, 0, &result),
-                  HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_music_parse_search_response(&alloc, NULL, 0, &result), HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_music_parse_no_track_or_artist(void) {
@@ -124,16 +123,15 @@ static void test_music_parse_no_track_or_artist(void) {
         "{\"resultCount\":1,\"results\":[{\"collectionName\":\"Some Album\"}]}";
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_search_response(&alloc, json, strlen(json), &result),
-                  HU_ERR_NOT_FOUND);
+                 HU_ERR_NOT_FOUND);
 }
 
 static void test_music_parse_multiple_results_takes_first(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    static const char json[] =
-        "{\"resultCount\":2,\"results\":["
-        "{\"trackName\":\"First\",\"artistName\":\"Artist1\"},"
-        "{\"trackName\":\"Second\",\"artistName\":\"Artist2\"}"
-        "]}";
+    static const char json[] = "{\"resultCount\":2,\"results\":["
+                               "{\"trackName\":\"First\",\"artistName\":\"Artist1\"},"
+                               "{\"trackName\":\"Second\",\"artistName\":\"Artist2\"}"
+                               "]}";
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_search_response(&alloc, json, strlen(json), &result), HU_OK);
     HU_ASSERT_STR_EQ(result.track_name, "First");
@@ -174,7 +172,7 @@ static void test_music_parse_spotify_empty_items(void) {
     static const char json[] = "{\"tracks\":{\"items\":[]}}";
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_spotify_response(&alloc, json, strlen(json), &result),
-                  HU_ERR_NOT_FOUND);
+                 HU_ERR_NOT_FOUND);
 }
 
 static void test_music_parse_spotify_no_tracks(void) {
@@ -182,13 +180,12 @@ static void test_music_parse_spotify_no_tracks(void) {
     static const char json[] = "{\"other\":{}}";
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_parse_spotify_response(&alloc, json, strlen(json), &result),
-                  HU_ERR_NOT_FOUND);
+                 HU_ERR_NOT_FOUND);
 }
 
 static void test_music_parse_spotify_null_args(void) {
     hu_music_result_t result = {0};
-    HU_ASSERT_EQ(hu_music_parse_spotify_response(NULL, "{}", 2, &result),
-                  HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_music_parse_spotify_response(NULL, "{}", 2, &result), HU_ERR_INVALID_ARGUMENT);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -299,7 +296,7 @@ static void test_music_parse_suggestion_only_whitespace(void) {
 
 static void test_music_preference_default_itunes(void) {
     HU_ASSERT_EQ(hu_music_detect_preference(NULL, NULL, 0),
-                  (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
+                 (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
 }
 
 static void test_music_preference_spotify_wins(void) {
@@ -310,8 +307,7 @@ static void test_music_preference_spotify_wins(void) {
         "love it https://music.apple.com/us/album/xyz",
     };
     size_t l[] = {49, 4, 38, 45};
-    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 4),
-                  (hu_music_source_t)HU_MUSIC_SOURCE_SPOTIFY);
+    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 4), (hu_music_source_t)HU_MUSIC_SOURCE_SPOTIFY);
 }
 
 static void test_music_preference_apple_wins(void) {
@@ -321,15 +317,13 @@ static void test_music_preference_apple_wins(void) {
         "https://open.spotify.com/track/abc",
     };
     size_t l[] = {36, 36, 34};
-    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 3),
-                  (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
+    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 3), (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
 }
 
 static void test_music_preference_no_urls(void) {
     const char *t[] = {"hey whats up", "not much"};
     size_t l[] = {12, 8};
-    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 2),
-                  (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
+    HU_ASSERT_EQ(hu_music_detect_preference(t, l, 2), (hu_music_source_t)HU_MUSIC_SOURCE_ITUNES);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -428,6 +422,48 @@ static void test_music_taste_load_missing_file(void) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * PART 7 — Result matching
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static void test_music_result_matches_exact_artist_and_title_passes(void) {
+    hu_music_result_t r = {0};
+    r.artist_name = "Queen";
+    r.track_name = "Bohemian Rhapsody (Remastered 2011)";
+    HU_ASSERT(hu_music_result_matches("Queen - Bohemian Rhapsody", &r));
+}
+
+static void test_music_result_matches_wrong_artist_rejected(void) {
+    hu_music_result_t r = {0};
+    r.artist_name = "Panic! at the Disco";
+    r.track_name = "Bohemian Rhapsody";
+    HU_ASSERT(!hu_music_result_matches("Queen - Bohemian Rhapsody", &r));
+}
+
+static void test_music_result_matches_wrong_title_rejected(void) {
+    hu_music_result_t r = {0};
+    r.artist_name = "Radiohead";
+    r.track_name = "Creep";
+    HU_ASSERT(!hu_music_result_matches("Radiohead - Karma Police", &r));
+}
+
+static void test_music_result_matches_feat_and_parenthetical_normalized(void) {
+    hu_music_result_t r = {0};
+    r.artist_name = "Calvin Harris";
+    r.track_name = "Feel So Close (Radio Edit)";
+    HU_ASSERT(hu_music_result_matches("Calvin Harris ft. Example - Feel So Close", &r));
+}
+
+static void test_music_result_matches_empty_inputs_rejected(void) {
+    hu_music_result_t r = {0};
+    r.artist_name = "Queen";
+    r.track_name = "Bohemian Rhapsody";
+    HU_ASSERT(!hu_music_result_matches("", &r));
+    HU_ASSERT(!hu_music_result_matches("Queen - Bohemian Rhapsody", NULL));
+    hu_music_result_t empty = {0};
+    HU_ASSERT(!hu_music_result_matches("Queen - Bohemian Rhapsody", &empty));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * PART 8 — Network stubs + cleanup
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -441,23 +477,23 @@ static void test_music_search_spotify_returns_not_supported(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_music_result_t result = {0};
     HU_ASSERT_EQ(hu_music_search_spotify(&alloc, "id", "secret", "test", 4, &result),
-                  HU_ERR_NOT_SUPPORTED);
+                 HU_ERR_NOT_SUPPORTED);
 }
 
 static void test_music_download_returns_not_supported(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char path[256];
-    HU_ASSERT_EQ(hu_music_download_preview(&alloc, "https://example.com/preview.m4a", path,
-                                            sizeof(path)),
-                  HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(
+        hu_music_download_preview(&alloc, "https://example.com/preview.m4a", path, sizeof(path)),
+        HU_ERR_NOT_SUPPORTED);
 }
 
 static void test_music_download_artwork_returns_not_supported(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char path[256];
-    HU_ASSERT_EQ(hu_music_download_artwork(&alloc, "https://example.com/art.jpg", path,
-                                            sizeof(path)),
-                  HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(
+        hu_music_download_artwork(&alloc, "https://example.com/art.jpg", path, sizeof(path)),
+        HU_ERR_NOT_SUPPORTED);
 }
 
 static void test_music_result_free_zeroed(void) {
@@ -530,6 +566,13 @@ void run_music_tests(void) {
     HU_RUN_TEST(test_music_taste_save_escaped_json);
     HU_RUN_TEST(test_music_taste_save_null_args);
     HU_RUN_TEST(test_music_taste_load_missing_file);
+
+    /* Result matching */
+    HU_RUN_TEST(test_music_result_matches_exact_artist_and_title_passes);
+    HU_RUN_TEST(test_music_result_matches_wrong_artist_rejected);
+    HU_RUN_TEST(test_music_result_matches_wrong_title_rejected);
+    HU_RUN_TEST(test_music_result_matches_feat_and_parenthetical_normalized);
+    HU_RUN_TEST(test_music_result_matches_empty_inputs_rejected);
 
     /* Network stubs + cleanup */
     HU_RUN_TEST(test_music_search_returns_not_supported);
