@@ -1,4 +1,6 @@
 /* tests/test_celebration_repo.c — pins B1c anti-re-celebration repository.
+ * Exercises the sqlite-backed hu_celebration_repo_t implementation in
+ * src/memory/repos/celebration_repo_sqlite.c (via hu_celebration_repo_create).
  * Spec: docs/plans/2026-05-29-prosocial-uplift/ */
 
 typedef int hu_test_celebration_repo_unused_;
