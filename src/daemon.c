@@ -112,6 +112,9 @@
  * the minimal variant. */
 #include "human/daemon_reflection_tick.h"
 
+/* Phase 2 DDD refactor: cross-bucket daemon state */
+#include "human/daemon/common.h"
+
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
  * regardless of HU_ENABLE_RL_FULL. Previously grouped inside the RL_FULL
@@ -180,8 +183,8 @@ static size_t g_classify_model_len = 29;
  * the file is absent on first-run users, in which case the graph stays
  * zeroed and the reaction handler is never wired (preserving the current
  * "no canonicalization" behavior for unconfigured deployments). */
-static hu_identity_graph_t g_identity_graph;
-static bool g_identity_graph_loaded = false;
+hu_identity_graph_t g_identity_graph;
+bool g_identity_graph_loaded = false;
 
 /* Sprint B.3 D1 — daemon-loaded autoresponder config.
  *
@@ -522,14 +525,14 @@ const hu_channel_daemon_config_t *hu_daemon_test_get_active_daemon_config(const 
  * that function's init branch becomes a no-op. The
  * relationship_multiplier mutation that follows the init guard
  * still fires (it's outside the guard). */
-static hu_proactive_budget_t gov_budget = {
+hu_proactive_budget_t gov_budget = {
     .daily_max = 6,
     .weekly_max = 15,
     .relationship_multiplier = 1.0,
     .cool_off_after_unanswered = 2,
     .cool_off_hours = 72,
 };
-static bool gov_budget_inited = true;
+bool gov_budget_inited = true;
 
 /* Proactive-style budget for outbound visual attachments (separate from check-in governor). */
 static hu_proactive_budget_t hu_daemon_visual_attach_gov;
