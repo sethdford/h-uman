@@ -328,6 +328,31 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
+/* A3 intrinsic motivation parser (docs/plans/2026-05-29-intrinsic-motivation/).
+ * Default-OFF; the daemon emits a one-shot enabled/disabled log on first tick. */
+static hu_error_t parse_intrinsic(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->intrinsic.enabled = hu_json_get_bool(obj, "enabled", cfg->intrinsic.enabled);
+    double b = hu_json_get_number(obj, "per_tick_token_budget",
+                                  (double)cfg->intrinsic.per_tick_token_budget);
+    if (b < 0.0)
+        b = 0.0;
+    if (b > 4294967295.0)
+        b = 4294967295.0;
+    cfg->intrinsic.per_tick_token_budget = (uint32_t)b;
+    return HU_OK;
+}
+
+/* C-series prosocial routines parser. Default-OFF. */
+static hu_error_t parse_prosocial_routines(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->prosocial_routines.enabled =
+        hu_json_get_bool(obj, "enabled", cfg->prosocial_routines.enabled);
+    return HU_OK;
+}
+
 /* Reflection loop config parser (T3, docs/plans/2026-05-26-reflection-loop).
  * Mirrors parse_learning's shape: optional fields with type-checked reads,
  * defaults already populated by config_merge so missing keys leave them
@@ -1583,6 +1608,14 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *learning_obj = hu_json_object_get(root, "learning");
     if (learning_obj)
         parse_learning(cfg, learning_obj);
+
+    hu_json_value_t *intrinsic_obj = hu_json_object_get(root, "intrinsic");
+    if (intrinsic_obj)
+        parse_intrinsic(cfg, intrinsic_obj);
+
+    hu_json_value_t *proutines_obj = hu_json_object_get(root, "prosocial_routines");
+    if (proutines_obj)
+        parse_prosocial_routines(cfg, proutines_obj);
 
     hu_json_value_t *reaction_obj = hu_json_object_get(root, "reaction_collection");
     if (reaction_obj) {
