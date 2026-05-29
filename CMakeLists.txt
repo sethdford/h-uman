@@ -1501,6 +1501,12 @@ list(APPEND HU_CORE_SOURCES
 # Music preview integration (iTunes Search API + 30s preview download)
 list(APPEND HU_CORE_SOURCES src/music.c)
 
+# Media inspiration (conversation cues -> medium picker, per-medium prompts, voice hints, TikTok URLs)
+list(APPEND HU_CORE_SOURCES src/inspiration.c)
+
+# YouTube Data API v3 search (find and verify canonical watch URLs)
+list(APPEND HU_CORE_SOURCES src/youtube.c)
+
 # Paperclip integration (requires libcurl for API calls)
 if(HU_ENABLE_CURL)
     list(APPEND HU_CORE_SOURCES
@@ -3701,6 +3707,12 @@ endif()
 
 # Music preview tests (pure computation — always compiled)
 list(APPEND HU_TEST_SOURCES tests/test_music.c)
+
+# Media inspiration tests (medium picker, voice hints, TikTok URLs)
+list(APPEND HU_TEST_SOURCES tests/test_inspiration.c)
+
+# YouTube Data API tests (pure JSON parsing — always compiled)
+list(APPEND HU_TEST_SOURCES tests/test_youtube.c)
 
 # Paperclip tests (requires libcurl)
 if(HU_ENABLE_CURL)

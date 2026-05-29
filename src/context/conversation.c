@@ -7850,7 +7850,24 @@ bool hu_conversation_should_send_music(const char *incoming, size_t incoming_len
                        hu_str_contains_ci_cstr(incoming, incoming_len, "band") ||
                        hu_str_contains_ci_cstr(incoming, incoming_len, "sing") ||
                        hu_str_contains_ci_cstr(incoming, incoming_len, "karaoke") ||
-                       hu_str_contains_ci_cstr(incoming, incoming_len, "what are you listening");
+                       hu_str_contains_ci_cstr(incoming, incoming_len, "what are you listening") ||
+                       /* YouTube / TikTok cues — keep in sync with the cue lists in
+                        * hu_inspiration_pick_medium (src/inspiration.c). Word-boundary
+                        * matched so "trendy" != "trend", "watchdog" != "watch", etc.
+                        * (see ~/.claude/rules/substring-classifier-pitfalls.md). */
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "tiktok") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "fyp") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "for you") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trend") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trending") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "reel") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "video") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "watch") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "clip") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "youtube") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "tutorial") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trailer") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "funny");
 
     float effective = probability;
     if (keyword_hit && effective < 1.0f) {

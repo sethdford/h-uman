@@ -1,7 +1,7 @@
 ---
-title: Valid, Human Media Inspirations - Implementation Plan
+title: Valid, Human Media Inspirations — Implementation Plan
+date: 2026-05-29
 status: active
-created: 2026-05-29
 ---
 
 # Valid, Human Media Inspirations — Implementation Plan
