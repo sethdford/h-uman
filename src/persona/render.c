@@ -315,6 +315,48 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
     return overlay_formality;
 }
 
+void hu_persona_steering_coeffs(const char *formality, const char *avg_length, double tier_scale,
+                                double *out_formality, double *out_verbosity) {
+    double f = 0.0, v = 0.0;
+    /* Only the two traits the Phase-2 activation-steering sweep validated are
+     * mapped: verbosity (monotonic) and formality (directional). warmth/humor
+     * stay unset pending better validation. Word-boundary matching avoids the
+     * "informal" ⊃ "formal" trap (substring-classifier-pitfalls.md): check
+     * casual BEFORE formal. */
+    if (formality && *formality) {
+        if (hu_str_contains_word_ci(formality, "casual") ||
+            hu_str_contains_word_ci(formality, "informal") ||
+            hu_str_contains_word_ci(formality, "relaxed"))
+            f = -0.6;
+        else if (hu_str_contains_word_ci(formality, "formal") ||
+                 hu_str_contains_word_ci(formality, "professional"))
+            f = 0.6;
+    }
+    if (avg_length && *avg_length) {
+        if (hu_str_contains_word_ci(avg_length, "short") ||
+            hu_str_contains_word_ci(avg_length, "brief") ||
+            hu_str_contains_word_ci(avg_length, "concise") ||
+            hu_str_contains_word_ci(avg_length, "terse"))
+            v = -0.6; /* terser */
+        else if (hu_str_contains_word_ci(avg_length, "long") ||
+                 hu_str_contains_word_ci(avg_length, "detailed") ||
+                 hu_str_contains_word_ci(avg_length, "verbose"))
+            v = 0.6;
+    }
+    /* tier_scale damps steering on casual/reflexive turns. Clamp the product to
+     * the measured capability-safe envelope [-1, 1] (Phase-2 sweep). */
+    if (tier_scale < 0.0)
+        tier_scale = 0.0;
+    f *= tier_scale;
+    v *= tier_scale;
+    f = f > 1.0 ? 1.0 : (f < -1.0 ? -1.0 : f);
+    v = v > 1.0 ? 1.0 : (v < -1.0 ? -1.0 : v);
+    if (out_formality)
+        *out_formality = f;
+    if (out_verbosity)
+        *out_verbosity = v;
+}
+
 /* --- Public entry point --------------------------------------------------- */
 
 hu_error_t hu_persona_render_for_channel_with_warmth(const hu_persona_overlay_t *overlay,

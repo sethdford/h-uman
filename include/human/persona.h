@@ -719,6 +719,14 @@ hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, co
 const char *hu_persona_effective_formality(const char *overlay_formality,
                                            const char *contact_warmth);
 
+/* Map persona overlay traits to activation-steering coefficients for the local
+ * model's residual stream. Only verbosity (avg_length) and formality are mapped
+ * — the traits the Phase-2 steering sweep validated; both outputs are clamped to
+ * the measured capability-safe range [-1, 1]. tier_scale (>=0) damps magnitude
+ * for casual/reflexive turns. Pure + NULL-safe; out pointers may be NULL. */
+void hu_persona_steering_coeffs(const char *formality, const char *avg_length, double tier_scale,
+                                double *out_formality, double *out_verbosity);
+
 /* Render variant that takes a contact's warmth_level string. The renderer
  * uses hu_persona_effective_formality(overlay->formality, contact_warmth)
  * as the effective formality, so a close-relationship contact gets casual
