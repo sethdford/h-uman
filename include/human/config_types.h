@@ -167,6 +167,14 @@ typedef struct hu_learning_config {
     bool persona_refresh_enabled;
 } hu_learning_config_t;
 
+/* A3 intrinsic motivation (docs/plans/2026-05-29-intrinsic-motivation/).
+ * Default-OFF: an agent with a goal of its own only runs when an operator
+ * explicitly opts in. See ~/.claude/rules/silent-config-gated-subsystems.md. */
+typedef struct hu_intrinsic_config {
+    bool enabled;                   /* default false */
+    uint32_t per_tick_token_budget; /* hard per-tick cap; 0 -> built-in default */
+} hu_intrinsic_config_t;
+
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100
 
 /* Reflection loop config (M2 closure, 2026-05-26-reflection-loop spec T3).

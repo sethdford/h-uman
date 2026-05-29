@@ -3,6 +3,7 @@ typedef int hu_test_opinions_unused_;
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/allocator.h"
+#include "human/humanness.h" /* hu_evolved_opinion_t + build_directive (firmness map) */
 #include "human/memory.h"
 #include "human/memory/opinions.h"
 #include "test_framework.h"
@@ -70,11 +71,39 @@ static void test_opinions_is_core_value_family(void) {
     HU_ASSERT_FALSE(hu_opinions_is_core_value("fam", 3, core_values, 3));
 }
 
+/* A1 conviction loop AC-6: regression guard on the conviction->firmness
+ * wording in hu_evolved_opinion_build_directive. The pre-generation stance
+ * injection (agent_turn.c:2698) relies on this mapping; pin it so a future
+ * edit can't silently flatten "firmly/moderately/tentatively". */
+static void test_evolved_opinion_directive_firmness_mapping(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    char t_firm[] = "remote work", s_firm[] = "net positive";
+    char t_mod[] = "tabs vs spaces", s_mod[] = "tabs win";
+    char t_tent[] = "best pizza", s_tent[] = "thin crust";
+
+    hu_evolved_opinion_t ops[3] = {
+        {t_firm, strlen(t_firm), s_firm, strlen(s_firm), 0.9, 0, 7}, /* > 0.8 -> firmly */
+        {t_mod, strlen(t_mod), s_mod, strlen(s_mod), 0.6, 0, 4},     /* > 0.5 -> moderately */
+        {t_tent, strlen(t_tent), s_tent, strlen(s_tent), 0.3, 0, 2}, /* else -> tentatively */
+    };
+
+    size_t len = 0;
+    char *dir = hu_evolved_opinion_build_directive(&alloc, ops, 3, 0.0, &len);
+    HU_ASSERT_NOT_NULL(dir);
+    HU_ASSERT_GT(len, 0);
+    HU_ASSERT_STR_CONTAINS(dir, "firmly");
+    HU_ASSERT_STR_CONTAINS(dir, "moderately");
+    HU_ASSERT_STR_CONTAINS(dir, "tentatively");
+    alloc.free(alloc.ctx, dir, len + 1);
+}
+
 void run_opinions_tests(void) {
     HU_TEST_SUITE("opinions");
     HU_RUN_TEST(test_opinions_upsert_get_pizza_best_food);
     HU_RUN_TEST(test_opinions_upsert_supersede_pizza_overrated);
     HU_RUN_TEST(test_opinions_is_core_value_family);
+    HU_RUN_TEST(test_evolved_opinion_directive_firmness_mapping);
 }
 
 #else

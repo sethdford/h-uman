@@ -680,6 +680,7 @@ set(HU_CORE_SOURCES
     src/persona/humor.c
     src/persona/markdown_loader.c
     src/persona/somatic.c
+    src/persona/taste.c
     src/persona/narrative_self.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
@@ -856,6 +857,8 @@ set(HU_CORE_SOURCES
     src/agent/speculative.c
     src/agent/uncertainty.c
     src/agent/autonomy.c
+    src/agent/belief_update.c
+    src/agent/intrinsic_drive.c
     src/permission.c
     src/mcp_manager.c
     src/mcp_tool_wrapper.c
@@ -3594,6 +3597,9 @@ tests/test_imessage_action_telemetry.c
     tests/test_visual_content.c
     tests/test_media_gen.c
     tests/test_opinions.c
+    tests/test_belief_update.c
+    tests/test_taste.c
+    tests/test_intrinsic_drive.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
     tests/test_skill_system.c
