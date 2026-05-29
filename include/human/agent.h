@@ -411,6 +411,13 @@ struct hu_agent {
      * fires only when cfg.intrinsic.enabled. Zero-init via memset. */
     hu_intrinsic_drive_t intrinsic_drive;
 
+    /* C-series: per-routine last-run timestamps (unix s). In-memory like the
+     * intrinsic drive; conservative cadences bound any post-restart re-fire. */
+    int64_t routine_last_morning;
+    int64_t routine_last_evening;
+    int64_t routine_last_weekly;
+    int64_t routine_last_thinking;
+
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after
      * hu_w7_facade_open; ticked once per main-loop iteration; closed BEFORE

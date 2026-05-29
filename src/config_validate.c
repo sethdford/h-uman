@@ -75,6 +75,7 @@ static const char *const hu_config_top_keys[] = {
      * picks them up correctly. */
     "learning",
     "intrinsic", /* A3 intrinsic motivation — docs/plans/2026-05-29-intrinsic-motivation/ */
+    "prosocial_routines", /* C-series — docs/plans/2026-05-29-prosocial-uplift/ */
     "inference",
     /* 2026-05-25: initiative layer (proactive proposer skeleton). See
      * docs/plans/2026-05-25-initiative-layer/. Disabled by default — flipping
