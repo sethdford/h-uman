@@ -28,7 +28,14 @@ per-turn flow is unidirectional: **persona → cognition → behavior**.
 
 Rule: do **not** add cross-includes between `cognition/` and `behavior/`.
 Communicate through the aggregate roots. New "person" state belongs to one of
-the two roots, not a fourth scattered struct.
+the two roots, not a fourth scattered struct. Enforced by
+`scripts/check-modeled-person-layering.sh` (see
+[`.claude/rules/modeled-person-layering.md`](../../../.claude/rules/modeled-person-layering.md)).
+The canonical shape for modules in these three layers — pure predicate, thin
+wire, repository-backed persistence, config gate, layer placement — is
+[modeled-person-module-shape.md](modeled-person-module-shape.md), which also
+carries the verified context map (which look-alike modules are legitimately
+distinct vs the one true duplicate).
 
 ## Recall (Memory)
 

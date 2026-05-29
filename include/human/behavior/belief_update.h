@@ -1,5 +1,5 @@
-#ifndef HU_AGENT_BELIEF_UPDATE_H
-#define HU_AGENT_BELIEF_UPDATE_H
+#ifndef HU_BEHAVIOR_BELIEF_UPDATE_H
+#define HU_BEHAVIOR_BELIEF_UPDATE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -99,4 +99,4 @@ hu_error_t hu_belief_update_evaluate_turn(hu_allocator_t *alloc, sqlite3 *op_db,
                                           size_t *out_directive_len, bool *out_changed);
 #endif /* HU_ENABLE_SQLITE */
 
-#endif /* HU_AGENT_BELIEF_UPDATE_H */
+#endif /* HU_BEHAVIOR_BELIEF_UPDATE_H */

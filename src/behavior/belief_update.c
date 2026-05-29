@@ -1,12 +1,12 @@
 /*
  * belief_update.c — pure conviction-loop decision faculty (A1).
  *
- * No SQLite, no agent state: see include/human/agent/belief_update.h and
+ * No SQLite, no agent state: see include/human/behavior/belief_update.h and
  * docs/plans/2026-05-29-conviction-loop/. The DB write + signal wiring live
  * in daemon.c; this file is only the decision + two pure helpers.
  */
 
-#include "human/agent/belief_update.h"
+#include "human/behavior/belief_update.h"
 
 #include <ctype.h>
 #include <string.h>

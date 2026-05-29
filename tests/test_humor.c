@@ -1,4 +1,4 @@
-#include "human/context/humor.h"
+#include "human/cognition/humor.h"
 #include "human/core/allocator.h"
 #include "human/persona.h"
 #include "test_framework.h"

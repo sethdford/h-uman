@@ -776,7 +776,7 @@ set(HU_CORE_SOURCES
     src/context/style_tracker.c
     src/context/theory_of_mind.c
     src/context/mood.c
-    src/context/emotional_state.c
+    src/memory/repos/emotional_state_repo_sqlite.c
     src/context/event_extract.c
     src/context/temporal_events.c
     src/context/vision.c
@@ -842,11 +842,10 @@ set(HU_CORE_SOURCES
     src/agent/timing.c
     src/agent/governor.c
     src/agent/activation_steering.c
-    src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
     src/agent/planning.c
     src/agent/collab_planning.c
-    src/agent/rel_dynamics.c
+    src/behavior/rel_dynamics.c
     src/context/rel_dynamics.c
     src/agent/conv_goals.c
     src/agent/superhuman.c
@@ -858,13 +857,14 @@ set(HU_CORE_SOURCES
     src/agent/conversation_plan.c
     src/agent/info_asymmetry.c
     src/agent/theory_of_mind.c
+    src/memory/repos/theory_of_mind_repo_sqlite.c
     src/agent/tool_call_parser.c
     src/agent/tool_router.c
     src/agent/speculative.c
     src/agent/uncertainty.c
     src/agent/autonomy.c
-    src/agent/belief_update.c
-    src/agent/intrinsic_drive.c
+    src/behavior/belief_update.c
+    src/cognition/intrinsic_drive.c
     src/agent/prosocial_routine.c
     src/permission.c
     src/mcp_manager.c
@@ -907,6 +907,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_graph.c
     src/memory/comfort_patterns.c
     src/memory/emotional_moments.c
+    src/memory/repos/emotional_moments_repo_sqlite.c
     src/memory/superhuman.c
     src/memory/contact_graph.c
     src/memory/identity_resolver.c
@@ -999,6 +1000,7 @@ set(HU_CORE_SOURCES
     # so the public symbols resolve at link time in both build variants.
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
+    src/memory/repos/self_model_repo_sqlite.c
     src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
@@ -1428,6 +1430,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/training.c
     src/persona/life_sim.c
     src/persona/mood.c
+    src/memory/repos/mood_repo_sqlite.c
     src/persona/style_learner.c
     src/persona/micro_expression.c
     src/persona/creative_voice.c
@@ -1458,7 +1461,7 @@ list(APPEND HU_CORE_SOURCES
     src/context/self_awareness.c
     src/context/anticipatory.c
     src/context/protective.c
-    src/context/humor.c
+    src/cognition/humor.c
     src/context/social_graph.c
     src/memory/degradation.c
     src/memory/opinions.c
@@ -1554,6 +1557,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
         src/memory/repos/boundary_repo_sqlite.c
         src/memory/repos/celebration_repo_sqlite.c
+        src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -3587,7 +3591,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
-    tests/test_relationship_dynamics.c
     tests/test_arbitrator.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
@@ -3625,6 +3628,9 @@ tests/test_imessage_action_telemetry.c
     tests/test_opinions.c
     tests/test_belief_update.c
     tests/test_taste.c
+    tests/test_somatic.c
+    tests/test_narrative_self.c
+    tests/test_attachment.c
     tests/test_intrinsic_drive.c
     tests/test_prosocial_routine.c
     tests/test_life_chapters.c

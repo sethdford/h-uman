@@ -32,11 +32,16 @@
 - [x] Tests: `runner_disabled_is_noop`, `runner_enabled_ripe_starts_and_audits`
       (audit contains origin+outcome), `runner_user_active_skips` (preemption),
       `runner_below_tick_budget_skips` (budget cap). All PASS.
-- [ ] REMAINING (thin, behavior-verifiable only on a live daemon): the per-
-      iteration daemon main-loop call-site that invokes `hu_intrinsic_run_tick`
-      + maintains `hu_intrinsic_drive_t` rise/decay across the user and idle
-      paths + sources user_active/budget. Default-OFF, so nothing runs until
-      this lands. Wire it together with the live threat-model re-review.
+- [x] DONE (2026-05-29, daemon wire): `hu_intrinsic_drive_t intrinsic_drive`
+      added to the agent struct; `daemon.c` marks user activity
+      (`hu_intrinsic_drive_tick(.., true, ..)`) at the reactive send site and,
+      on a 5-min idle cadence beside the personal-model idle-decay block, ages
+      the drive (`.., false, ..`) + calls `hu_intrinsic_run_tick` with
+      config-sourced `enabled`/`per_tick_token_budget`, `user_active=false`,
+      and a granted per-tick budget. Default-OFF (nothing runs until
+      `intrinsic.enabled=true`). Build + full suite 13154/13154 + 0 ASan.
+      Live daemon-turn FIRING still unexercised by tests (heavy loop path) —
+      pairs with the live threat-model re-review before enabling in prod.
 
 ## T5 — Share only via init_proposer ⓣ → AC-5
 - [ ] Shareable exploration output routed through existing `hu_init_proposer`

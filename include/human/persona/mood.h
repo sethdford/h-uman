@@ -25,11 +25,16 @@ typedef enum hu_mood_enum {
 
 typedef struct hu_mood_state {
     hu_mood_enum_t mood;
-    float intensity; /* 0-1 */
-    char cause[128]; /* optional */
+    float intensity;  /* 0-1 */
+    char cause[128];  /* optional */
     float decay_rate; /* per hour toward neutral */
     int64_t set_at;
 } hu_mood_state_t;
+
+/* Pure name<->enum mapping. Returns "neutral" for out-of-range. Lives in the
+ * domain module (src/persona/mood.c); the persistence repo consumes it so the
+ * MOOD_NAMES table is defined once. */
+const char *hu_mood_name(hu_mood_enum_t mood);
 
 /* Get current mood (decayed). In-memory cache + fallback to mood_log. */
 hu_error_t hu_mood_get_current(hu_allocator_t *alloc, hu_memory_t *memory, hu_mood_state_t *out);
@@ -39,7 +44,6 @@ hu_error_t hu_mood_set(hu_allocator_t *alloc, hu_memory_t *memory, hu_mood_enum_
                        float intensity, const char *cause, size_t cause_len);
 
 /* Build prompt directive. Returns NULL if intensity < 0.2. */
-char *hu_mood_build_directive(hu_allocator_t *alloc, const hu_mood_state_t *state,
-                              size_t *out_len);
+char *hu_mood_build_directive(hu_allocator_t *alloc, const hu_mood_state_t *state, size_t *out_len);
 
 #endif /* HU_PERSONA_MOOD_H */

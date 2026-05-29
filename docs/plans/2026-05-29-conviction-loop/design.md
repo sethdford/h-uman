@@ -176,6 +176,51 @@ Rubric unit tests pin both extremes (AC-7).
 - **Gate asymmetry** → new TU is SQLite-gated; add to test_main under the
   same `#ifdef` (`.claude/rules/test-source-gate-symmetry.md`).
 
+## Verification status (2026-05-29)
+
+- **Unit boundary — PROVEN.** `hu_belief_update_evaluate_turn` is exercised
+  end-to-end against a real in-`:memory:` SQLite store: flip→one opinion_history
+  row, reassertion-veto (with a real `pressure_history`), per-convo cap, and
+  bare-assertion no-op (`tests/test_belief_update.c` e2e block). 48/48 pass.
+- **Daemon glue — compiler+ASan verified.** The wire at `src/daemon.c`
+  (post-response belief block) is straight-line: call `evaluate_turn`, park
+  `out_directive` on `agent->belief_pending_directive`, bump
+  `belief_changes_this_convo`, guard against overwrite. Built into both
+  binaries; full suite 13154/13154, 0 ASan. NOT mirrored in a test (that would
+  pin a copy — see `.claude/rules/tests-that-pin-bugs.md`).
+- **Live firing — DEPLOY-CLASS, not yet run.** The block executes only inside
+  the running service loop processing a real channel batch (the e2e test
+  harness drives `hu_agent_turn`, not the loop). No daemon was running this
+  session, so live firing is unverified. Use the probe below when the daemon
+  is next up.
+
+### Live-daemon probe (run in minutes once the daemon is up)
+
+```sh
+# 1. Find the live memory db (the daemon's sqlite memory backend).
+DB=~/.human/memory.db   # adjust to the configured memory path
+
+# 2. Seed a held opinion the agent can be argued out of.
+sqlite3 "$DB" "INSERT INTO evolved_opinions(topic,stance,conviction,updated_at)
+               VALUES('remote work','is overrated',0.5,strftime('%s','now'));"
+
+# 3. From an allowlisted channel, send an EVIDENCE-bearing contradiction on
+#    that topic (must carry a cue word: because/data/study/actually/...):
+#      "actually the data shows remote work boosts output"
+#    (a bare 'no you're wrong' must NOT move it — that's the anti-sycophancy veto)
+
+# 4. After the reply lands, confirm a belief change was recorded:
+sqlite3 "$DB" "SELECT topic,old_stance,new_stance,change_reason,changed_at
+               FROM opinion_history ORDER BY changed_at DESC LIMIT 3;"
+#    Expect: one row for 'remote work' with a non-empty change_reason.
+
+# 5. On the NEXT turn, the reply should ACKNOWLEDGE the change ("I've been
+#    rethinking this...") — the stashed shift directive injected by agent_turn.c.
+```
+
+Negative control: repeat step 3 with a bare reassertion (no cue word, repeated
+claim) and confirm `opinion_history` gains NO row — the reassertion veto.
+
 ## Out of scope (deferred follow-ups)
 
 - Direction-aware conviction update (replace internal naive blend).

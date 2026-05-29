@@ -1,14 +1,14 @@
 /*
  * intrinsic_drive.c — bounded intrinsic motivation (A3). Pure drive dynamics +
  * the safety-bearing start predicate + self-originated goal. See
- * include/human/agent/intrinsic_drive.h and
+ * include/human/cognition/intrinsic_drive.h and
  * docs/plans/2026-05-29-intrinsic-motivation/.
  *
  * SAFETY: internal + propose-only, no action surface. The start predicate is
  * the load-bearing guarantee (preemption / budget / rate) and is pure.
  */
 
-#include "human/agent/intrinsic_drive.h"
+#include "human/cognition/intrinsic_drive.h"
 
 #include <stdio.h>
 

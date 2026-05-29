@@ -30,6 +30,7 @@
 #include "human/agent/worktree.h"
 #include "human/behavior/pressure_history.h"
 #include "human/channel.h"
+#include "human/cognition/intrinsic_drive.h"
 #include "human/contact_send_recency.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
@@ -50,7 +51,6 @@
 #include "human/intelligence/meta_learning.h"
 #endif
 #include "human/agent/growth_narrative.h"
-#include "human/agent/intrinsic_drive.h"
 #include "human/agent/process_reward.h"
 #include "human/agent/reflection.h"
 #include "human/cognition/attachment.h"
@@ -417,7 +417,6 @@ struct hu_agent {
     int64_t routine_last_evening;
     int64_t routine_last_weekly;
     int64_t routine_last_thinking;
-
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after
      * hu_w7_facade_open; ticked once per main-loop iteration; closed BEFORE
