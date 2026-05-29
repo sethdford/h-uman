@@ -440,6 +440,65 @@ static void render_unprofessional_overlay_renders_casual(void) {
     free(out);
 }
 
+/* --- hu_persona_steering_coeffs: overlay traits -> steering coefficients --- */
+
+static void steering_coeffs_formal_is_positive(void) {
+    double f = -9, v = -9;
+    hu_persona_steering_coeffs("formal", NULL, 1.0, &f, &v);
+    HU_ASSERT(f > 0.0);
+    HU_ASSERT_EQ((int)(v * 1000), 0); /* no avg_length -> verbosity 0 */
+}
+
+static void steering_coeffs_casual_is_negative(void) {
+    double f = 9;
+    hu_persona_steering_coeffs("casual", NULL, 1.0, &f, NULL);
+    HU_ASSERT(f < 0.0);
+}
+
+static void steering_coeffs_informal_not_treated_as_formal(void) {
+    /* "informal" contains "formal" — word-boundary matching must read it casual. */
+    double f = 9;
+    hu_persona_steering_coeffs("informal", NULL, 1.0, &f, NULL);
+    HU_ASSERT(f < 0.0);
+}
+
+static void steering_coeffs_short_is_negative_verbosity(void) {
+    double v = 9;
+    hu_persona_steering_coeffs(NULL, "short", 1.0, NULL, &v);
+    HU_ASSERT(v < 0.0);
+}
+
+static void steering_coeffs_long_is_positive_verbosity(void) {
+    double v = -9;
+    hu_persona_steering_coeffs(NULL, "detailed", 1.0, NULL, &v);
+    HU_ASSERT(v > 0.0);
+}
+
+static void steering_coeffs_clamped_to_safe_envelope(void) {
+    /* tier_scale=10 would push past 1.0 without the clamp. */
+    double f = 0, v = 0;
+    hu_persona_steering_coeffs("formal", "detailed", 10.0, &f, &v);
+    HU_ASSERT(f <= 1.0 && f > 0.0);
+    HU_ASSERT(v <= 1.0 && v > 0.0);
+}
+
+static void steering_coeffs_null_and_unknown_are_zero(void) {
+    double f = 9, v = 9;
+    hu_persona_steering_coeffs(NULL, NULL, 1.0, &f, &v);
+    HU_ASSERT_EQ((int)(f * 1000), 0);
+    HU_ASSERT_EQ((int)(v * 1000), 0);
+    hu_persona_steering_coeffs("neutral-ish", "medium", 1.0, &f, &v);
+    HU_ASSERT_EQ((int)(f * 1000), 0);
+    HU_ASSERT_EQ((int)(v * 1000), 0);
+}
+
+static void steering_coeffs_negative_tier_scale_is_zero(void) {
+    double f = 9, v = 9;
+    hu_persona_steering_coeffs("formal", "detailed", -1.0, &f, &v);
+    HU_ASSERT_EQ((int)(f * 1000), 0);
+    HU_ASSERT_EQ((int)(v * 1000), 0);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
@@ -470,4 +529,13 @@ void run_persona_overlay_render_tests(void) {
     HU_RUN_TEST(effective_formality_unfriendly_does_not_override);
     HU_RUN_TEST(render_informal_overlay_renders_casual);
     HU_RUN_TEST(render_unprofessional_overlay_renders_casual);
+
+    HU_RUN_TEST(steering_coeffs_formal_is_positive);
+    HU_RUN_TEST(steering_coeffs_casual_is_negative);
+    HU_RUN_TEST(steering_coeffs_informal_not_treated_as_formal);
+    HU_RUN_TEST(steering_coeffs_short_is_negative_verbosity);
+    HU_RUN_TEST(steering_coeffs_long_is_positive_verbosity);
+    HU_RUN_TEST(steering_coeffs_clamped_to_safe_envelope);
+    HU_RUN_TEST(steering_coeffs_null_and_unknown_are_zero);
+    HU_RUN_TEST(steering_coeffs_negative_tier_scale_is_zero);
 }

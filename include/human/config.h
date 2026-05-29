@@ -198,6 +198,16 @@ typedef struct hu_agent_config {
     bool compaction_use_structured; /* use XML structured summaries */
     char *self_rag_mode;     /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
     bool self_rag_streaming; /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
+    /* RAG-over-own-messages voice grounding: retrieve the user's most-similar
+     * past sent messages and inject them as per-turn few-shot grounding.
+     * Default off — flip on for the LoRA-vs-RAG A/B ("measure before optimize").
+     * Corpus = ~/.human/voice_corpus.jsonl (the harvested sent-message corpus). */
+    bool rag_grounding_enabled;
+    /* Activation steering: when true, the agent maps the active persona overlay's
+     * traits to residual-stream steering coefficients and sends them to the local
+     * model (mlx_local) as a "steering" field. Default off; the local server
+     * clamps to the measured-safe range and treats absent/zero as a no-op. */
+    bool activation_steering_enabled;
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {
