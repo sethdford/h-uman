@@ -3928,6 +3928,7 @@ if(HU_ENABLE_ML)
         tests/test_dpo_real_mlx.c
         tests/test_value_head.c
         tests/test_cli_dpo.c
+        tests/test_reward_model_huml.c
         tests/test_reward_model_train.c
         tests/test_reward_model_inference.c
         tests/test_kto_loss.c

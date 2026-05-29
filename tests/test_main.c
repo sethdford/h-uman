@@ -653,6 +653,9 @@ void run_cli_dpo_tests(void);
 /* Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
  * check + save/load round trip. */
 void run_value_head_tests(void);
+/* Phase 3 Task 2 (RL SOTA): HUML reward model factory + scoring +
+ * batch scoring. */
+void run_reward_model_huml_tests(void);
 /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke +
  * M3 NaN contract for one-sided KTO pairs. Task 3 will APPEND
  * Bradley-Terry convergence + FD grad check to the same runner. */
@@ -1562,6 +1565,8 @@ int main(int argc, char **argv) {
     /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
      * backward (analytical + finite-diff grad check), save/load round trip. */
     run_value_head_tests();
+    /* Phase 3 Task 2 (RL SOTA): HUML reward model factory + scoring. */
+    run_reward_model_huml_tests();
     /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t vtable + HUML factory
      * (toy GPT + Task 1 value head). Smoke score-returns-finite + M3
      * NaN contract for one-sided KTO pairs in score_batch. */
