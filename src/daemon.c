@@ -2427,6 +2427,21 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
     if (!msg || msg_len == 0)
         return true;
 
+    /* iMessage owns its final delivery in the post-turn action-surface
+     * dispatcher (threaded reply via Cmd-R / Show-Menu, with a documented
+     * flat fallback). iMessage exposes no send_event, so a generic bus
+     * delivery here would fall back to a FLAT vtable->send — stripping all
+     * threading intent — and then set text_delivered_via_bus=true, which
+     * makes the post-turn guard skip the dispatcher entirely. Every reply
+     * would land as a free-floating new message instead of a native thread
+     * reply. Defer: return without sending so text_delivered_via_bus stays
+     * false and the dispatcher region owns delivery. */
+    if (sch->channel->vtable->name) {
+        const char *cn = sch->channel->vtable->name(sch->channel->ctx);
+        if (cn && strcmp(cn, "imessage") == 0)
+            return true;
+    }
+
     hu_error_t se = HU_OK;
     bool sent_via_embed = false;
     if (sch->channel->vtable->name && sch->channel->vtable->send) {
@@ -13038,7 +13053,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_conversation_snapshot_t snap = {0};
                                     (void)hu_daemon_dispatch_imessage_reply(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, NULL, 0,
+                                        send_target, send_target_len,
+                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
+                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
+                                                                  : 0,
                                         choreo_plan.segments[seg].text,
                                         choreo_plan.segments[seg].text_len,
                                         (const struct hu_conversation_snapshot *)&snap,
@@ -13153,7 +13171,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                  * chat.db if needed for richer context. */
                                                 (void)hu_daemon_dispatch_imessage_reply(
                                                     ch->channel, agent ? agent->persona : NULL,
-                                                    agent, config, batch_key, key_len, NULL, 0,
+                                                    agent, config, batch_key, key_len,
+                                                    msgs[batch_start].guid[0]
+                                                        ? msgs[batch_start].guid
+                                                        : NULL,
+                                                    msgs[batch_start].guid[0]
+                                                        ? strlen(msgs[batch_start].guid)
+                                                        : 0,
                                                     dt_chunks[dt], dt_len,
                                                     (const struct hu_conversation_snapshot *)&snap,
                                                     (int64_t)msgs[batch_start].message_id);
@@ -13186,8 +13210,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                          * needed for richer context. */
                                         (void)hu_daemon_dispatch_imessage_reply(
                                             ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len, NULL, 0, fragments[f].text,
-                                            fragments[f].text_len,
+                                            config, batch_key, key_len,
+                                            msgs[batch_start].guid[0] ? msgs[batch_start].guid
+                                                                      : NULL,
+                                            msgs[batch_start].guid[0]
+                                                ? strlen(msgs[batch_start].guid)
+                                                : 0,
+                                            fragments[f].text, fragments[f].text_len,
                                             (const struct hu_conversation_snapshot *)&snap,
                                             (int64_t)msgs[batch_start].message_id);
                                     } else {
@@ -13306,8 +13335,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_conversation_snapshot_t snap = {0};
                                     (void)hu_daemon_dispatch_imessage_reply(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, NULL, 0, send_text,
-                                        send_text_len,
+                                        send_target, send_target_len,
+                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
+                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
+                                                                  : 0,
+                                        send_text, send_text_len,
                                         (const struct hu_conversation_snapshot *)&snap,
                                         (int64_t)msgs[batch_start].message_id);
                                 } else {

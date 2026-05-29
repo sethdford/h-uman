@@ -13,6 +13,16 @@ static hu_imessage_reply_tier_fn g_test_tier2 = NULL;
 static hu_imessage_reply_flat_send_fn g_test_flat_send = NULL;
 static char g_last_tier[32] = {0};
 
+/* Test-only stub for the post-send chat.db threading check. */
+static hu_imessage_reply_verify_fn g_test_verify = NULL;
+
+/* Whether the MOST RECENT hu_imessage_reply call produced a verified native
+ * iMessage thread. Reset to false at the start of every call; set true only
+ * when the post-send chat.db read-back confirms thread_originator_guid is
+ * populated. The daemon dispatcher reads this via the getter to report the
+ * reply outcome honestly instead of assuming THREADED on any HU_OK. */
+static bool g_last_verified_threaded = false;
+
 void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
                                       hu_imessage_reply_tier_fn tier2,
                                       hu_imessage_reply_flat_send_fn flat_send) {
@@ -21,8 +31,34 @@ void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
     g_test_flat_send = flat_send;
 }
 
+void hu_imessage_set_test_reply_verify_stub(hu_imessage_reply_verify_fn verify) {
+    g_test_verify = verify;
+}
+
 const char *hu_imessage_test_last_reply_tier(void) {
     return g_last_tier;
+}
+
+bool hu_imessage_reply_last_verified_threaded(void) {
+    return g_last_verified_threaded;
+}
+
+/* Cross-platform wrapper around the post-send chat.db threading check.
+ * In test builds, delegates to g_test_verify (false if unset). On macOS
+ * with TAPBACK wiring, delegates to the production chat.db poll. Otherwise
+ * returns false — we never claim a native thread we couldn't confirm. */
+bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, int64_t since_unix) {
+    if (g_test_verify) {
+        return g_test_verify(target, target_len, since_unix);
+    }
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+    return hu_imessage_ax_reply_verify_threaded(target, target_len, since_unix);
+#else
+    (void)target;
+    (void)target_len;
+    (void)since_unix;
+    return false;
+#endif
 }
 
 /* One-shot guard for the Tier-3 degradation WARN: a busy reply path that
@@ -43,8 +79,8 @@ int hu_imessage_test_reply_warn_count(void) {
 
 /* Emit one telemetry line for the completed reply. Best-effort:
  * telemetry failure never blocks the reply. */
-static void emit_telemetry(const char *tier_used, int send_result, int64_t elapsed_ms,
-                           const char *target, size_t target_len) {
+static void emit_telemetry(const char *tier_used, hu_reply_style_t style, int send_result,
+                           int64_t elapsed_ms, const char *target, size_t target_len) {
     hu_imessage_action_log_t log = {0};
     log.ts_unix = (int64_t)time(NULL);
     /* For C4, target is used as a rough chat-id-hash. F2's dispatcher
@@ -56,7 +92,10 @@ static void emit_telemetry(const char *tier_used, int send_result, int64_t elaps
     /* Facts are not yet built at this layer — F2 will pass them in.
      * For C4 emit with zero-valued facts; the line still has the
      * tier_used + elapsed_ms which is the value-add of this hop. */
-    log.style_chosen = HU_REPLY_STYLE_THREADED; /* always THREADED at this entry */
+    /* THREADED only when the post-send chat.db read-back confirmed a native
+     * thread; otherwise the AX Return committed a FLAT message and we report
+     * it truthfully. */
+    log.style_chosen = style;
     log.send_result = send_result;
     log.tier_used = tier_used;
     log.elapsed_ms = (int)elapsed_ms;
@@ -77,13 +116,17 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                              const char *body, size_t body_len) {
     (void)ctx;
     g_last_tier[0] = '\0';
+    g_last_verified_threaded = false;
 
     if (!target || !body || target_len == 0 || body_len == 0) {
         return HU_ERR_INVALID_ARGUMENT;
     }
 
-    /* Record start time for elapsed_ms. */
+    /* Record start time for elapsed_ms, and a wall-clock floor for the
+     * post-send chat.db read-back: the verified outbound row must be newer
+     * than the instant we began the send. */
     int64_t ts_start_ms = hu_time_get_current_ms();
+    int64_t since_unix = (int64_t)time(NULL);
 
     /* Tier 1: Cmd-R via AX. */
     bool t1_ok = false;
@@ -97,8 +140,15 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     }
     if (t1_ok) {
         snprintf(g_last_tier, sizeof(g_last_tier), "cmdR");
+        /* The AX Cmd-R path may have committed a FLAT message even on a
+         * "true" return (IMCore is entitlement-locked on macOS 26+). Read
+         * back from chat.db to know whether it actually threaded. */
+        g_last_verified_threaded =
+            hu_imessage_reply_verify_threaded(target, target_len, since_unix);
         int64_t ts_end_ms = hu_time_get_current_ms();
-        emit_telemetry("cmdR", 0, ts_end_ms - ts_start_ms, target, target_len);
+        emit_telemetry("cmdR",
+                       g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
+                       ts_end_ms - ts_start_ms, target, target_len);
         return HU_OK;
     }
 
@@ -114,8 +164,12 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     }
     if (t2_ok) {
         snprintf(g_last_tier, sizeof(g_last_tier), "ax_menu");
+        g_last_verified_threaded =
+            hu_imessage_reply_verify_threaded(target, target_len, since_unix);
         int64_t ts_end_ms = hu_time_get_current_ms();
-        emit_telemetry("ax_menu", 0, ts_end_ms - ts_start_ms, target, target_len);
+        emit_telemetry("ax_menu",
+                       g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
+                       ts_end_ms - ts_start_ms, target, target_len);
         return HU_OK;
     }
 
@@ -143,6 +197,7 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     }
     snprintf(g_last_tier, sizeof(g_last_tier), "flat_fallback");
     int64_t ts_end_ms = hu_time_get_current_ms();
-    emit_telemetry("flat_fallback", (int)err, ts_end_ms - ts_start_ms, target, target_len);
+    emit_telemetry("flat_fallback", HU_REPLY_STYLE_FLAT, (int)err, ts_end_ms - ts_start_ms, target,
+                   target_len);
     return err;
 }
