@@ -36,11 +36,18 @@ hu_error_t hu_gate_manager_create(hu_allocator_t *alloc, const char *gates_dir,
 
     /* Ensure directory exists */
 #ifdef HU_IS_TEST
-    /* In test mode, use a different directory per test run to avoid conflicts */
+    /* In test mode, use a different directory per test run to avoid conflicts.
+     * The "%.980s" precision cap bounds the directory component so GCC's
+     * -Wformat-truncation pass can prove the result fits test_dir[1024]
+     * (980 + ".test." + up to 20 digits of pid < 1024). It also closes a
+     * latent overflow: the subsequent memcpy back into gates_dir[1024] can
+     * never exceed the buffer because test_dir is now provably bounded. */
     char test_dir[1024];
-    snprintf(test_dir, sizeof(test_dir), "%s.test.%lu", mgr->gates_dir, (unsigned long)getpid());
-    memcpy(mgr->gates_dir, test_dir, strlen(test_dir));
-    mgr->gates_dir[strlen(test_dir)] = '\0';
+    snprintf(test_dir, sizeof(test_dir), "%.980s.test.%lu", mgr->gates_dir,
+             (unsigned long)getpid());
+    size_t test_dir_len = strlen(test_dir);
+    memcpy(mgr->gates_dir, test_dir, test_dir_len);
+    mgr->gates_dir[test_dir_len] = '\0';
 #endif
 
     mkdir(mgr->gates_dir, 0755);
@@ -90,14 +97,9 @@ static char *gate_to_json(hu_allocator_t *alloc, const hu_approval_gate_t *gate)
         buf, est,
         "{\"gate_id\":\"%s\",\"description\":\"%s\",\"context_json\":%s,\"status\":%d,"
         "\"created_at\":%ld,\"timeout_at\":%ld,\"resolved_at\":%ld,\"response\":\"%s\"}",
-        gate->gate_id,
-        gate->description ? gate->description : "",
-        gate->context_json ? gate->context_json : "null",
-        (int)gate->status,
-        (long)gate->created_at,
-        (long)gate->timeout_at,
-        (long)gate->resolved_at,
-        gate->response ? gate->response : "");
+        gate->gate_id, gate->description ? gate->description : "",
+        gate->context_json ? gate->context_json : "null", (int)gate->status, (long)gate->created_at,
+        (long)gate->timeout_at, (long)gate->resolved_at, gate->response ? gate->response : "");
 
     if (written < 0 || (size_t)written >= est) {
         alloc->free(alloc->ctx, buf, est);
@@ -291,8 +293,8 @@ static hu_error_t save_gate_to_file(hu_allocator_t *alloc, const char *path,
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 hu_error_t hu_gate_create(hu_gate_manager_t *mgr, hu_allocator_t *alloc, const char *description,
-                          size_t description_len, const char *context_json,
-                          size_t context_json_len, int64_t timeout_sec, char *gate_id_out) {
+                          size_t description_len, const char *context_json, size_t context_json_len,
+                          int64_t timeout_sec, char *gate_id_out) {
     if (!mgr || !alloc || !description || !gate_id_out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -356,7 +358,8 @@ static void gate_free_wrapper(void *ctx, void *ptr, size_t size) {
     free(ptr);
 }
 
-hu_error_t hu_gate_check(hu_gate_manager_t *mgr, const char *gate_id, hu_gate_status_t *out_status) {
+hu_error_t hu_gate_check(hu_gate_manager_t *mgr, const char *gate_id,
+                         hu_gate_status_t *out_status) {
     if (!mgr || !gate_id || !out_status)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -423,9 +426,9 @@ hu_error_t hu_gate_load(hu_gate_manager_t *mgr, hu_allocator_t *alloc, const cha
 }
 
 hu_error_t hu_gate_resolve(hu_gate_manager_t *mgr, hu_allocator_t *alloc, const char *gate_id,
-                           hu_gate_status_t decision, const char *response,
-                           size_t response_len) {
-    if (!mgr || !alloc || !gate_id || (decision != HU_GATE_APPROVED && decision != HU_GATE_REJECTED))
+                           hu_gate_status_t decision, const char *response, size_t response_len) {
+    if (!mgr || !alloc || !gate_id ||
+        (decision != HU_GATE_APPROVED && decision != HU_GATE_REJECTED))
         return HU_ERR_INVALID_ARGUMENT;
 
     /* Load existing gate */
@@ -482,7 +485,8 @@ hu_error_t hu_gate_list_pending(hu_gate_manager_t *mgr, hu_allocator_t *alloc,
         return HU_ERR_IO;
 
     size_t cap = 32;
-    hu_approval_gate_t *gates = (hu_approval_gate_t *)alloc->alloc(alloc->ctx, cap * sizeof(*gates));
+    hu_approval_gate_t *gates =
+        (hu_approval_gate_t *)alloc->alloc(alloc->ctx, cap * sizeof(*gates));
     if (!gates) {
         closedir(dir);
         return HU_ERR_OUT_OF_MEMORY;
@@ -490,7 +494,8 @@ hu_error_t hu_gate_list_pending(hu_gate_manager_t *mgr, hu_allocator_t *alloc,
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (strlen(entry->d_name) < 6 || strcmp(entry->d_name + strlen(entry->d_name) - 5, ".json") != 0)
+        if (strlen(entry->d_name) < 6 ||
+            strcmp(entry->d_name + strlen(entry->d_name) - 5, ".json") != 0)
             continue;
 
         /* Extract gate_id (remove .json suffix) */

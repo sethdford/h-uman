@@ -477,6 +477,11 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
  *
  * On failure, *out_response is NULL.
  */
+/* Both call sites live in the #else (non-test) branches of the proposer
+ * tick/run functions, so in HU_IS_TEST (human_tests) builds this helper
+ * is unused and would trip -Wunused-function under -Werror. Guard the
+ * definition with the same condition as its callers. */
+#if !HU_IS_TEST
 static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provider *provider,
                                          const char *sys_prompt, const char *user_msg,
                                          const char *model, char **out_response,
@@ -536,6 +541,7 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
                                               user_msg, strlen(user_msg), model, strlen(model), 0.2,
                                               out_response, out_response_len);
 }
+#endif /* !HU_IS_TEST */
 
 /* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated
  * responses. Even with gemini-3.5-flash + json_object mode, the model

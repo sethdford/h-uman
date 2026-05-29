@@ -16,4 +16,9 @@ override_dh_auto_install:
 	DESTDIR=debian/human cmake --install build
 
 override_dh_auto_test:
-	cd build && ./human_tests
+	# Run from the source root (NOT `cd build`) so tests that open
+	# repo-relative fixture files — e.g. test_homebrew_formula.c opening
+	# Formula/human.rb and scripts/install/human-daemon.plist.template —
+	# resolve correctly. This matches the canonical invocation used
+	# everywhere else in CI (`./build/human_tests` from the repo root).
+	./build/human_tests

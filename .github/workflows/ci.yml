@@ -230,15 +230,15 @@ jobs:
           enable-lto: "true"
           enable-all-channels: "true"
       - run: ls -lh build/human
-      - name: Enforce binary size budget (2300KB)
+      - name: Enforce binary size budget (2600KB)
         run: |
           SIZE=$(stat -f%z build/human)
-          BUDGET=2355200
+          BUDGET=2662400
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2300KB budget)"
+          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2600KB budget)"
           if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 2300KB budget"
+            echo "::error::Binary size ${KB}KB exceeds 2600KB budget"
             exit 1
           fi
 

@@ -38,8 +38,15 @@
  * Per ~/.claude/rules/silent-config-gated-subsystems.md the lock is
  * always-on; no config knob (the only reason to disable would be if
  * the upstream is actually multi-threaded, which we'd discover via a
- * different bug than silent-no-reply). */
+ * different bug than silent-no-reply).
+ *
+ * Guarded by #if !HU_IS_TEST: the only references live in the non-test
+ * (#else) branches of compatible_chat / compatible_stream_chat, so in
+ * HU_IS_TEST (human_tests) builds the declaration would be unused and
+ * trip GCC's -Wunused-variable under -Werror. */
+#if !HU_IS_TEST
 static pthread_mutex_t g_compatible_chat_lock = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 typedef struct hu_compatible_ctx {
     char *api_key;

@@ -145,9 +145,9 @@ static void disabled_feature_falls_back_to_flat(void) {
     mock_config.channels.imessage.action_surface_v2.enabled = false;
 
     hu_conversation_snapshot_t snap = {0};
-    hu_error_t err =
-        hu_daemon_dispatch_imessage_reply(&mock_ch, &mock_persona, NULL, &mock_config,
-                                          "+15555551212", 12, "GUID", 4, "hi", 2, &snap, 99);
+    hu_error_t err = hu_daemon_dispatch_imessage_reply(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID", 4, "hi", 2,
+        (const struct hu_conversation_snapshot *)&snap, 99);
 
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_EQ(send_calls, 1); /* Exactly one flat send call */

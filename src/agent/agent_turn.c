@@ -3698,6 +3698,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     }
                     hu_agent_turn_state_set_emotional_register(agent, _reg);
                 }
+                /* load_with_channel hands the caller an owned snapshot
+                 * (fresh build or cache clone); release it before the
+                 * next per-turn-state query reuses _wm_mf. NULL-safe. */
+                if (_wm_snap)
+                    hu_world_model_free(agent->alloc, _wm_snap);
 
                 /* Per-turn state #26: capture the most-recently-applied
                  * persona-delta kind that's shaping this turn's prompt.
