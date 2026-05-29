@@ -36,6 +36,7 @@
 #include "human/channels/imessage.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/inspiration.h"
 #include "test_framework.h"
 
 #include <stdbool.h>
@@ -148,6 +149,72 @@ static void test_imessage_rich_link_url_has_no_trailing_whitespace(void) {
     hu_imessage_destroy(&ch);
 }
 
+/* ── 4. hu_inspiration_send_two_bubble contract ───────────────────────────── */
+
+/* Recording mock channel: captures every send so we can assert bubble ORDER. */
+#define MOCK_MAX_SENDS 8
+static char mock_msgs[MOCK_MAX_SENDS][512];
+static size_t mock_msg_count;
+
+static void mock_reset(void) {
+    mock_msg_count = 0;
+}
+
+static hu_error_t mock_send(void *ctx, const char *target, size_t target_len, const char *message,
+                            size_t message_len, const char *const *media, size_t media_count) {
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)media;
+    (void)media_count;
+    if (mock_msg_count < MOCK_MAX_SENDS) {
+        size_t n = message_len < sizeof(mock_msgs[0]) - 1 ? message_len : sizeof(mock_msgs[0]) - 1;
+        memcpy(mock_msgs[mock_msg_count], message, n);
+        mock_msgs[mock_msg_count][n] = '\0';
+        mock_msg_count++;
+    }
+    return HU_OK;
+}
+
+static hu_channel_vtable_t mock_vtable = {.send = mock_send};
+static hu_channel_t mock_channel = {.vtable = &mock_vtable, .ctx = NULL};
+
+static void test_two_bubble_sends_human_line_then_bare_url(void) {
+    /* Two bubbles: first the casual message, then the bare URL.
+     * Ordering is critical for iMessage's unfurl behavior. This test
+     * verifies BOTH bubbles are sent AND that they arrive in the right order. */
+    mock_reset();
+    const char *casual = "this one's been stuck in my head";
+    const char *url = "https://music.apple.com/us/album/x/1?i=2";
+
+    bool ok = hu_inspiration_send_two_bubble(&mock_channel, "chat1", 5, casual, url, 0);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_EQ(mock_msg_count, 2u);                     /* TWO bubbles */
+    HU_ASSERT_TRUE(strstr(mock_msgs[0], "http") == NULL); /* bubble 1 = human line, no URL */
+    HU_ASSERT_TRUE(strcmp(mock_msgs[0], casual) == 0);    /* it IS the casual line */
+    HU_ASSERT_TRUE(strcmp(mock_msgs[1], url) == 0);       /* bubble 2 = bare URL verbatim */
+}
+
+static void test_two_bubble_empty_casual_sends_url_only(void) {
+    /* When casual_msg is empty, only the URL bubble is sent. */
+    mock_reset();
+    const char *url = "https://music.apple.com/us/album/y/2?i=3";
+
+    bool ok = hu_inspiration_send_two_bubble(&mock_channel, "chat1", 5, "", url, 0);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_EQ(mock_msg_count, 1u); /* ONE bubble */
+    HU_ASSERT_TRUE(strcmp(mock_msgs[0], url) == 0);
+}
+
+static void test_two_bubble_invalid_url_sends_nothing(void) {
+    /* hu_tool_validate_url requires https:// URLs; bare strings are rejected. */
+    mock_reset();
+
+    bool ok = hu_inspiration_send_two_bubble(&mock_channel, "chat1", 5, "hey", "not a url", 0);
+    HU_ASSERT_FALSE(ok);
+    HU_ASSERT_EQ(mock_msg_count, 0u); /* NOTHING sent */
+}
+
 /* ── Registration ───────────────────────────────────────────────────────── */
 
 void run_imessage_rich_link_tests(void);
@@ -163,6 +230,10 @@ void run_imessage_rich_link_tests(void) {
     HU_RUN_TEST(test_imessage_rich_link_send_url_alone_preserves_bytes);
     HU_RUN_TEST(test_imessage_rich_link_send_url_has_zero_attachments);
     HU_RUN_TEST(test_imessage_rich_link_url_has_no_trailing_whitespace);
+
+    HU_RUN_TEST(test_two_bubble_sends_human_line_then_bare_url);
+    HU_RUN_TEST(test_two_bubble_empty_casual_sends_url_only);
+    HU_RUN_TEST(test_two_bubble_invalid_url_sends_nothing);
 }
 
 #else /* !HU_HAS_IMESSAGE */

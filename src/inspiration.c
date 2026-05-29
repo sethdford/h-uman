@@ -1,8 +1,10 @@
 #include "human/inspiration.h"
 #include "human/core/string.h"
+#include "human/tools/validation.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 hu_inspiration_medium_t hu_inspiration_pick_medium(const char *incoming, size_t incoming_len,
                                                    bool youtube_available) {
@@ -85,4 +87,21 @@ size_t hu_tiktok_tag_url(const char *keyword, size_t keyword_len, char *out, siz
         return 0;
     int n = snprintf(out, cap, "https://www.tiktok.com/tag/%s", enc);
     return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+}
+
+bool hu_inspiration_send_two_bubble(hu_channel_t *channel, const char *target, size_t target_len,
+                                    const char *casual_msg, const char *url, unsigned gap_us) {
+    if (!channel || !channel->vtable || !channel->vtable->send || !url || !*url)
+        return false;
+    if (hu_tool_validate_url(url) != HU_OK)
+        return false;
+
+    if (casual_msg && *casual_msg) {
+        channel->vtable->send(channel->ctx, target, target_len, casual_msg, strlen(casual_msg),
+                              NULL, 0);
+        if (gap_us > 0)
+            usleep(gap_us);
+    }
+    channel->vtable->send(channel->ctx, target, target_len, url, strlen(url), NULL, 0);
+    return true;
 }

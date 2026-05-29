@@ -1,6 +1,7 @@
 #ifndef HU_INSPIRATION_H
 #define HU_INSPIRATION_H
 
+#include "human/channel.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -33,5 +34,14 @@ size_t hu_inspiration_build_voice_hint(const char *formality, const char *traits
  * Strips a leading '#', URL-encodes non-alnum, drops separators. Returns bytes
  * written or 0 on bad input/overflow. */
 size_t hu_tiktok_tag_url(const char *keyword, size_t keyword_len, char *out, size_t cap);
+
+/* Send an inspiration as two bubbles on an unfurling channel: the persona-voiced
+ * human line first, an optional human-pacing gap (gap_us microseconds; pass 0 in
+ * tests), then the bare URL alone so the platform renders its rich card. The URL
+ * bubble body is exactly the URL bytes — never a caption inline, which suppresses
+ * the unfurl. casual_msg may be NULL/empty (URL-only then). Validates url via
+ * hu_tool_validate_url; returns false (sends nothing) on invalid url or bad args. */
+bool hu_inspiration_send_two_bubble(hu_channel_t *channel, const char *target, size_t target_len,
+                                    const char *casual_msg, const char *url, unsigned gap_us);
 
 #endif

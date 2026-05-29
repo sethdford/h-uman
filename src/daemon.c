@@ -2754,31 +2754,6 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
-/* Send an inspiration as two bubbles on an unfurling channel: the persona-voiced
- * human line first, a short human-pacing gap, then the bare URL alone so the
- * platform renders its rich card. casual_msg may be empty (URL only then).
- * The URL bubble body is exactly the URL bytes — never a caption inline, which
- * would suppress the unfurl. Returns true if the URL bubble was sent.
- * Guarded to the non-test build: its only callers live in the service-loop
- * share path, which is itself under #if !defined(HU_IS_TEST). */
-#if !defined(HU_IS_TEST)
-static bool send_unfurl_two_bubble(hu_channel_t *channel, const char *target, size_t target_len,
-                                   const char *casual_msg, const char *url, uint32_t seed) {
-    if (!channel || !channel->vtable || !channel->vtable->send || !url || !*url)
-        return false;
-    if (hu_tool_validate_url(url) != HU_OK)
-        return false;
-
-    if (casual_msg && *casual_msg) {
-        channel->vtable->send(channel->ctx, target, target_len, casual_msg, strlen(casual_msg),
-                              NULL, 0);
-        usleep(1500000 + (seed % 1500000)); /* human-pacing gap between bubbles */
-    }
-    channel->vtable->send(channel->ctx, target, target_len, url, strlen(url), NULL, 0);
-    return true;
-}
-#endif /* !HU_IS_TEST */
-
 /* Consecutive successful turns that produced zero-length assistant text
  * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
 static unsigned g_empty_agent_response_streak;
@@ -13925,9 +13900,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              * share lands in a natural conversational rhythm. */
                                             usleep(3000000 + (music_seed % 4000000));
 
-                                            if (send_unfurl_two_bubble(ch->channel, batch_key,
-                                                                       key_len, casual_msg, url,
-                                                                       music_seed)) {
+                                            if (hu_inspiration_send_two_bubble(
+                                                    ch->channel, batch_key, key_len, casual_msg,
+                                                    url, 1500000u + (music_seed % 1500000u))) {
                                                 hu_log_info("human", agent ? agent->observer : NULL,
                                                             "sent music rich-link: %s - %s [%s]",
                                                             song.artist_name ? song.artist_name
