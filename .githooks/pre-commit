@@ -203,3 +203,17 @@ if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
         exit 1
     fi
 fi
+
+# Docs frontmatter gate. Every docs/**/*.md (except docs/plans/, which the
+# check skips by default) must start with a line-1 `---` YAML frontmatter block.
+# Shifts the CI doc-fleet frontmatter failure left to commit time so new docs
+# can't land without frontmatter. Fires when any docs/*.md is staged.
+staged_docs=$(git diff --cached --name-only --diff-filter=ACM -- 'docs/*.md' 'docs/**/*.md')
+if [ -n "$staged_docs" ] && [ -x "scripts/check-docs-frontmatter.sh" ]; then
+    if ! bash scripts/check-docs-frontmatter.sh; then
+        echo ""
+        echo "Pre-commit blocked: a docs/ Markdown file is missing line-1 YAML frontmatter."
+        echo "Add a '---' frontmatter block (title:, etc.) at the top. doc-fleet enforces this in CI."
+        exit 1
+    fi
+fi
