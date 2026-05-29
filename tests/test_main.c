@@ -223,7 +223,9 @@ void run_behavior_prosocial_tests(void);
 void run_win_detect_tests(void);
 void run_prosocial_moment_tests(void);
 void run_celebration_tests(void);
+#ifdef HU_ENABLE_SQLITE
 void run_celebration_repo_tests(void);
+#endif
 void run_behavior_prompt_tests(void);
 void run_behavior_support_strategy_tests(void);
 void run_behavior_trust_tests(void);
@@ -1167,7 +1169,9 @@ int main(int argc, char **argv) {
     run_win_detect_tests();
     run_celebration_tests();
     run_prosocial_moment_tests();
+#ifdef HU_ENABLE_SQLITE
     run_celebration_repo_tests();
+#endif
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();
     run_behavior_trust_tests();
