@@ -67,9 +67,13 @@ runs:
       uses: actions/cache@v5
       with:
         path: ~/.cache/ccache
-        key: ${{ runner.os }}-ccache-${{ hashFiles('src/**', 'include/**') }}
+        # cache version bumped to -v2- (2026-05-29): the prefix restore-keys
+        # had been restoring a concurrent branch's ccache, serving stale objects
+        # for changed sources (phantom symbols / dpo.h errors in variant builds).
+        # v2 evicts the poisoned caches; content-addressed reuse resumes after.
+        key: ${{ runner.os }}-ccache-v2-${{ hashFiles('src/**', 'include/**') }}
         restore-keys: |
-          ${{ runner.os }}-ccache-
+          ${{ runner.os }}-ccache-v2-
 
     - name: Configure ccache
       shell: bash

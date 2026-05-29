@@ -2,10 +2,10 @@
  * When HU_ENABLE_SQLITE is not defined, all operations return HU_ERR_NOT_SUPPORTED.
  */
 
+#include "human/ml/experiment_store.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/ml/experiment.h"
-#include "human/ml/experiment_store.h"
 #include "human/ml/ml.h"
 #include <stddef.h>
 #include <stdio.h>
@@ -23,8 +23,11 @@ struct hu_experiment_store {
     const char *path;
 };
 
-static int config_hash(const hu_experiment_config_t *config)
-{
+#ifdef HU_ENABLE_SQLITE
+/* config_hash + status_to_string are only used by the SQLite-backed store
+ * below; gate them so they are not dead code (-Werror=unused-function) when
+ * HU_ENABLE_SQLITE is off (cross-arm64 / minimal variants). */
+static int config_hash(const hu_experiment_config_t *config) {
     if (!config)
         return 0;
     const unsigned char *p = (const unsigned char *)config;
@@ -34,8 +37,7 @@ static int config_hash(const hu_experiment_config_t *config)
     return h;
 }
 
-static const char *status_to_string(hu_experiment_status_t status)
-{
+static const char *status_to_string(hu_experiment_status_t status) {
     switch (status) {
     case HU_EXPERIMENT_KEEP:
         return "keep";
@@ -47,30 +49,28 @@ static const char *status_to_string(hu_experiment_status_t status)
         return "unknown";
     }
 }
+#endif /* HU_ENABLE_SQLITE — config_hash / status_to_string helpers */
 
 #ifdef HU_ENABLE_SQLITE
 
-static const char *create_table_sql =
-    "CREATE TABLE IF NOT EXISTS experiments ("
-    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-    "iteration INT,"
-    "val_bpb REAL,"
-    "peak_memory_mb REAL,"
-    "training_seconds REAL,"
-    "status TEXT,"
-    "description TEXT,"
-    "config_hash INT,"
-    "created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
+static const char *create_table_sql = "CREATE TABLE IF NOT EXISTS experiments ("
+                                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                      "iteration INT,"
+                                      "val_bpb REAL,"
+                                      "peak_memory_mb REAL,"
+                                      "training_seconds REAL,"
+                                      "status TEXT,"
+                                      "description TEXT,"
+                                      "config_hash INT,"
+                                      "created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
 
 hu_error_t hu_experiment_store_open(hu_allocator_t *alloc, const char *db_path,
-                                    hu_experiment_store_t **out)
-{
+                                    hu_experiment_store_t **out) {
     if (!alloc || !db_path || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
-    hu_experiment_store_t *store =
-        alloc->alloc(alloc->ctx, sizeof(hu_experiment_store_t));
+    hu_experiment_store_t *store = alloc->alloc(alloc->ctx, sizeof(hu_experiment_store_t));
     if (!store)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -96,14 +96,12 @@ hu_error_t hu_experiment_store_open(hu_allocator_t *alloc, const char *db_path,
 }
 
 hu_error_t hu_experiment_store_save(hu_experiment_store_t *store,
-                                    const hu_experiment_result_t *result)
-{
+                                    const hu_experiment_result_t *result) {
     if (!store || !result)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const char *sql =
-        "INSERT INTO experiments(iteration,val_bpb,peak_memory_mb,training_seconds,"
-        "status,description,config_hash) VALUES(?,?,?,?,?,?,?)";
+    const char *sql = "INSERT INTO experiments(iteration,val_bpb,peak_memory_mb,training_seconds,"
+                      "status,description,config_hash) VALUES(?,?,?,?,?,?,?)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(store->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -125,8 +123,7 @@ hu_error_t hu_experiment_store_save(hu_experiment_store_t *store,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
 }
 
-hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count)
-{
+hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count) {
     if (!store || !count)
         return HU_ERR_INVALID_ARGUMENT;
     *count = 0;
@@ -144,8 +141,7 @@ hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count
     return HU_OK;
 }
 
-void hu_experiment_store_close(hu_experiment_store_t *store)
-{
+void hu_experiment_store_close(hu_experiment_store_t *store) {
     if (!store)
         return;
     sqlite3_close(store->db);
@@ -155,8 +151,7 @@ void hu_experiment_store_close(hu_experiment_store_t *store)
 #else /* !HU_ENABLE_SQLITE */
 
 hu_error_t hu_experiment_store_open(hu_allocator_t *alloc, const char *db_path,
-                                    hu_experiment_store_t **out)
-{
+                                    hu_experiment_store_t **out) {
     (void)alloc;
     (void)db_path;
     (void)out;
@@ -166,8 +161,7 @@ hu_error_t hu_experiment_store_open(hu_allocator_t *alloc, const char *db_path,
 }
 
 hu_error_t hu_experiment_store_save(hu_experiment_store_t *store,
-                                    const hu_experiment_result_t *result)
-{
+                                    const hu_experiment_result_t *result) {
     (void)store;
     (void)result;
     if (!store || !result)
@@ -175,8 +169,7 @@ hu_error_t hu_experiment_store_save(hu_experiment_store_t *store,
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count)
-{
+hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count) {
     (void)store;
     (void)count;
     if (!store || !count)
@@ -184,8 +177,7 @@ hu_error_t hu_experiment_store_count(hu_experiment_store_t *store, size_t *count
     return HU_ERR_NOT_SUPPORTED;
 }
 
-void hu_experiment_store_close(hu_experiment_store_t *store)
-{
+void hu_experiment_store_close(hu_experiment_store_t *store) {
     (void)store;
 }
 
