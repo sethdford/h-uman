@@ -17,7 +17,8 @@ set -euo pipefail
 # Measured 2026-05-29 at the start of Phase 0.
 # Updated 2026-05-29 after boundary_repo migration: 110 -> 109
 # Updated 2026-05-29 after feed_items_repo migration (inbox.c): 109 -> 108
-BASELINE=108
+# Updated 2026-05-29 after memories_repo migration (promotion.c): 108 -> 107
+BASELINE=107
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

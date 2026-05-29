@@ -7,13 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef HU_ENABLE_SQLITE
-#include <sqlite3.h>
-#endif
+#include "human/memory/memories_repo.h"
 
-#define HU_PROMOTION_HIGH_EMOTION_THRESHOLD 0.7
+#define HU_PROMOTION_HIGH_EMOTION_THRESHOLD      0.7
 #define HU_PROMOTION_EMOTION_INTENSITY_THRESHOLD 0.3
-#define HU_PROMOTION_RECENCY_TURNS          3
+#define HU_PROMOTION_RECENCY_TURNS               3
 
 static bool entity_name_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
     if (a_len != b_len)
@@ -167,8 +165,8 @@ hu_error_t hu_promotion_run(hu_allocator_t *alloc, const hu_stm_buffer_t *buf, h
                 size_t new_cap = collected_cap ? collected_cap * 2 : 32;
                 promoted_entity_t *new_arr;
                 if (collected_cap == 0) {
-                    new_arr = (promoted_entity_t *)alloc->alloc(alloc->ctx,
-                                                                new_cap * sizeof(promoted_entity_t));
+                    new_arr = (promoted_entity_t *)alloc->alloc(
+                        alloc->ctx, new_cap * sizeof(promoted_entity_t));
                 } else {
                     new_arr = (promoted_entity_t *)alloc->realloc(
                         alloc->ctx, collected, collected_cap * sizeof(promoted_entity_t),
@@ -282,14 +280,14 @@ hu_error_t hu_promotion_run(hu_allocator_t *alloc, const hu_stm_buffer_t *buf, h
 }
 
 static const char *EMOTION_NAMES[] = {
-    "neutral", "joy", "sadness", "anger", "fear",
+    "neutral",  "joy",         "sadness",    "anger",   "fear",
     "surprise", "frustration", "excitement", "anxiety",
 };
 #define HU_EMOTION_NAME_COUNT (sizeof(EMOTION_NAMES) / sizeof(EMOTION_NAMES[0]))
 
 hu_error_t hu_promotion_run_emotions(hu_allocator_t *alloc, const hu_stm_buffer_t *buf,
-                                      hu_memory_t *memory, const char *contact_id,
-                                      size_t contact_id_len) {
+                                     hu_memory_t *memory, const char *contact_id,
+                                     size_t contact_id_len) {
     if (!alloc || !buf || !memory || !memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
     if (!memory->vtable->store)
@@ -345,31 +343,21 @@ hu_error_t hu_promotion_run_emotions(hu_allocator_t *alloc, const hu_stm_buffer_
 }
 
 hu_error_t hu_promotion_promote_tier(hu_memory_t *memory, const char *from_category,
-                                    size_t from_category_len, const char *to_category,
-                                    size_t to_category_len, size_t max_count) {
+                                     size_t from_category_len, const char *to_category,
+                                     size_t to_category_len, size_t max_count) {
     if (!memory || !from_category || !to_category)
         return HU_ERR_INVALID_ARGUMENT;
 
 #ifdef HU_ENABLE_SQLITE
-    sqlite3 *db = hu_sqlite_memory_get_db(memory);
-    if (!db)
-        return HU_ERR_NOT_SUPPORTED;
-
-    const char *sql = "UPDATE memories SET category = ?1, updated_at = datetime('now') "
-                     "WHERE rowid IN (SELECT rowid FROM memories WHERE category = ?2 "
-                     "ORDER BY updated_at DESC LIMIT ?3)";
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
-
-    sqlite3_bind_text(stmt, 1, to_category, (int)to_category_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, from_category, (int)from_category_len, SQLITE_STATIC);
-    sqlite3_bind_int64(stmt, 3, max_count > 0 ? (sqlite3_int64)max_count : 999999);
-
-    rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memories_repo_t repo;
+    hu_error_t cerr = hu_memories_repo_create(memory, &alloc, &repo);
+    if (cerr != HU_OK)
+        return cerr; /* HU_ERR_NOT_SUPPORTED for a non-sqlite backend */
+    hu_error_t err = repo.vtable->promote_tier(repo.ctx, from_category, from_category_len,
+                                               to_category, to_category_len, max_count);
+    repo.vtable->deinit(repo.ctx);
+    return err;
 #else
     (void)from_category_len;
     (void)to_category_len;
