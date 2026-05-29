@@ -223,6 +223,7 @@ static void test_e2e_config_json_flips_subsystem_on(void) {
     HU_ASSERT_EQ(cfg.reflection_loop.idle_threshold_hours, 2);
     HU_ASSERT_EQ(cfg.reflection_loop.daily_floor_hours, 24);
     HU_ASSERT_STR_EQ(cfg.reflection_loop.provider, "gemini-3.5-flash");
+    hu_arena_destroy(arena);
 }
 
 /* ── T12: failure-rate watchdog counters ───────────────────────── */
