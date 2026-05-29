@@ -851,6 +851,7 @@ set(HU_CORE_SOURCES
     src/agent/conversation_plan.c
     src/agent/info_asymmetry.c
     src/agent/theory_of_mind.c
+    src/memory/repos/theory_of_mind_repo_sqlite.c
     src/agent/tool_call_parser.c
     src/agent/tool_router.c
     src/agent/speculative.c

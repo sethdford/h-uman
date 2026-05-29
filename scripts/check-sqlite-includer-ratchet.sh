@@ -17,7 +17,7 @@ set -euo pipefail
 # Measured 2026-05-29 at the start of Phase 0.
 # Updated 2026-05-29 after boundary_repo migration: 110 -> 109
 # Updated 2026-05-29 after emotional_residue repo migration (Modeled-Person Phase 4): 109 -> 108
-BASELINE=104
+BASELINE=103
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
