@@ -125,8 +125,9 @@
 
 /* Phase 2 DDD refactor: cross-bucket daemon state */
 #include "human/daemon/common.h"
-#include "human/daemon/peripheral_gov.h"
 #include "human/daemon/message_router.h"
+#include "human/daemon/peripheral_gov.h"
+#include "human/daemon/proactive_policy.h"
 #include "human/daemon/reply_dedup.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
@@ -734,8 +735,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     localtime_r(&now, &tm_now);
     int hour = tm_now.tm_hour;
 
-    /* Only check in during social hours (9am-9pm) */
-    if (hour < 9 || hour > 21)
+    /* Only check in during social hours (9am-9pm) — predicate pinned by
+     * tests/test_proactive_policy.c (DDD Phase 2b scaffold). */
+    if (!hu_daemon_proactive_is_social_hour(hour))
         return;
 
     /* F119 (Pillar 19): Proactive volume governor — check budget before proceeding */
@@ -775,7 +777,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     static char g_sent_important_date_contacts[8][64];
     static int g_sent_important_date_count = 0;
     static int g_sent_important_date_ymd = -1;
-    int today_ymd = (tm_now.tm_year + 1900) * 10000 + (tm_now.tm_mon + 1) * 100 + tm_now.tm_mday;
+    int today_ymd = hu_daemon_proactive_ymd_from_tm(&tm_now);
     if (g_sent_important_date_ymd != today_ymd) {
         g_sent_important_date_ymd = today_ymd;
         g_sent_important_date_count = 0;
@@ -6513,11 +6515,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             size_t start = onc > 5 ? onc - 5 : 0;
                                             char plabel[64];
                                             hu_daemon_cross_channel_platform_label(oname, plabel,
-                                                                         sizeof(plabel));
+                                                                                   sizeof(plabel));
                                             for (size_t ei = start; ei < onc; ei++) {
                                                 char when[48];
-                                                hu_daemon_cross_channel_format_when(when, sizeof(when),
-                                                                          oent[ei].timestamp);
+                                                hu_daemon_cross_channel_format_when(
+                                                    when, sizeof(when), oent[ei].timestamp);
                                                 const char *role = oent[ei].from_me ? " (you)" : "";
                                                 char line[768];
                                                 int lw = snprintf(line, sizeof(line),
