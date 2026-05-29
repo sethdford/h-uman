@@ -11,6 +11,20 @@
 #include <string.h>
 #include <time.h>
 
+/* Pure gate for the RLAIF nightly — no I/O, so it's unit-testable without a
+ * DB or provider (tests/test_dpo.c). Apply a persona style patch only when the
+ * judge batch carries real preference signal: a non-empty batch whose
+ * alignment clears the majority bar. Without this gate the nightly patched the
+ * persona even from alignment=0.00 / loss=0.693 (random-baseline) batches —
+ * i.e. learned its "style" from noise. */
+bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result) {
+    if (!result)
+        return false;
+    if (result->pairs_evaluated == 0)
+        return false;
+    return result->alignment_score >= HU_RLAIF_MIN_ALIGNMENT_TO_PATCH;
+}
+
 hu_error_t hu_dpo_collector_create(hu_allocator_t *alloc,
 #ifdef HU_ENABLE_SQLITE
                                    sqlite3 *db,

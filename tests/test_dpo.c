@@ -551,8 +551,55 @@ static void dpo_margin_reflects_confidence(void) {
     hu_dpo_collector_deinit(&col);
 }
 
+/* RLAIF nightly gate — pure predicate, no DB/provider needed. Pins the
+ * boundary that keeps the nightly from patching the persona off noise batches
+ * (the live bug: it applied a style patch from alignment=0.00 / loss=0.693
+ * random-baseline batches). */
+static void rlaif_gate_rejects_noise_batch(void) {
+    hu_dpo_judge_result_t r = {
+        .loss = 0.6931, .alignment_score = 0.00, .pairs_evaluated = 32, .pairs_aligned = 0};
+    HU_ASSERT_FALSE(hu_rlaif_should_apply_style_patch(&r));
+}
+
+static void rlaif_gate_rejects_low_alignment(void) {
+    hu_dpo_judge_result_t r = {
+        .loss = 0.6924, .alignment_score = 0.03, .pairs_evaluated = 32, .pairs_aligned = 1};
+    HU_ASSERT_FALSE(hu_rlaif_should_apply_style_patch(&r));
+}
+
+static void rlaif_gate_accepts_at_threshold(void) {
+    hu_dpo_judge_result_t r = {.loss = 0.66,
+                               .alignment_score = HU_RLAIF_MIN_ALIGNMENT_TO_PATCH,
+                               .pairs_evaluated = 32,
+                               .pairs_aligned = 20};
+    HU_ASSERT_TRUE(hu_rlaif_should_apply_style_patch(&r));
+}
+
+static void rlaif_gate_accepts_strong_signal(void) {
+    hu_dpo_judge_result_t r = {
+        .loss = 0.6556, .alignment_score = 0.94, .pairs_evaluated = 32, .pairs_aligned = 30};
+    HU_ASSERT_TRUE(hu_rlaif_should_apply_style_patch(&r));
+}
+
+static void rlaif_gate_rejects_empty_batch(void) {
+    /* High alignment but zero pairs evaluated => no real evidence. */
+    hu_dpo_judge_result_t r = {
+        .loss = 0.0, .alignment_score = 1.0, .pairs_evaluated = 0, .pairs_aligned = 0};
+    HU_ASSERT_FALSE(hu_rlaif_should_apply_style_patch(&r));
+}
+
+static void rlaif_gate_rejects_null(void) {
+    HU_ASSERT_FALSE(hu_rlaif_should_apply_style_patch(NULL));
+}
+
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
+    HU_RUN_TEST(rlaif_gate_rejects_noise_batch);
+    HU_RUN_TEST(rlaif_gate_rejects_low_alignment);
+    HU_RUN_TEST(rlaif_gate_accepts_at_threshold);
+    HU_RUN_TEST(rlaif_gate_accepts_strong_signal);
+    HU_RUN_TEST(rlaif_gate_rejects_empty_batch);
+    HU_RUN_TEST(rlaif_gate_rejects_null);
     HU_RUN_TEST(dpo_create_and_init_tables);
     HU_RUN_TEST(dpo_record_pair_stores_correctly);
     HU_RUN_TEST(dpo_record_from_feedback_positive);

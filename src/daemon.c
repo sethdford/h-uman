@@ -4822,9 +4822,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                               &rlaif_result);
                             char *best_frag = NULL;
                             size_t best_frag_len = 0;
-                            if (hu_dpo_get_best_examples(&agent->sota.dpo_collector, alloc, 5,
-                                                         &best_frag, &best_frag_len) == HU_OK &&
-                                best_frag && best_frag_len > 0) {
+                            /* Gate: only patch the persona when the judge batch
+                             * shows real preference signal. Patching from a
+                             * noise batch (alignment ~0, loss ~0.693) drifts
+                             * the persona for no reason. */
+                            if (!hu_rlaif_should_apply_style_patch(&rlaif_result)) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "rlaif nightly: skipped style patch — alignment=%.2f "
+                                            "loss=%.4f from %zu pairs below bar %.2f (avoids "
+                                            "learning persona from noise)",
+                                            rlaif_result.alignment_score, rlaif_result.loss,
+                                            rlaif_result.pairs_evaluated,
+                                            (double)HU_RLAIF_MIN_ALIGNMENT_TO_PATCH);
+                            } else if (hu_dpo_get_best_examples(&agent->sota.dpo_collector, alloc,
+                                                                5, &best_frag,
+                                                                &best_frag_len) == HU_OK &&
+                                       best_frag && best_frag_len > 0) {
                                 hu_structured_patch_t style_patch;
                                 memset(&style_patch, 0, sizeof(style_patch));
                                 style_patch.type = HU_PATCH_STYLE_RULE;

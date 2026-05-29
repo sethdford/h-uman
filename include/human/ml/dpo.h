@@ -183,6 +183,20 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
  * out-of-tree callers. */
 typedef hu_dpo_judge_result_t hu_dpo_train_result_t;
 
+/* Minimum judge alignment (fraction of pairs where the judge ranked chosen >
+ * rejected) required before the RLAIF nightly applies a persona style patch
+ * derived from the batch's "best examples". Observed live: noise batches sit
+ * at alignment 0.00-0.03 (loss ~0.693, the random baseline) while batches with
+ * real signal reach ~0.94. A 0.6 majority bar cleanly separates them. */
+#define HU_RLAIF_MIN_ALIGNMENT_TO_PATCH 0.6
+
+/* Gate for the RLAIF nightly self-improvement: returns true only when the
+ * judge result shows REAL preference signal, so the nightly never patches the
+ * persona from a noise batch (which would drift the persona for no reason).
+ * Pure predicate (no I/O) — unit-tested in tests/test_dpo.c. Requires a
+ * non-empty batch whose alignment_score clears HU_RLAIF_MIN_ALIGNMENT_TO_PATCH. */
+bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result);
+
 /* Deprecated: renamed to `hu_dpo_judge_step` in Phase 0. The shim
  * forwards every argument verbatim so the result is bit-identical to
  * a direct call (pinned by tests/test_dpo_judge_naming.c). */
