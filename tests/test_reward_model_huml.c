@@ -440,11 +440,14 @@ static void test_training_reduces_loss(void) {
     hu_reward_model_train_metrics_t metrics = {0};
     HU_ASSERT_EQ(hu_reward_model_train(&rm, &alloc, pairs, 2, &train_cfg, &metrics), HU_OK);
 
-    /* Loss should decrease (or stay similar) */
+    /* AC-101.3: training must actually REDUCE loss, not merely run.
+     * A test named "reduces_loss" that only checks >=0 is a tests-that-pin-bugs
+     * smell — assert the real contract. */
     HU_ASSERT(metrics.initial_loss >= 0.0);
     HU_ASSERT(metrics.final_loss >= 0.0);
     HU_ASSERT(metrics.iters_completed == 10);
     HU_ASSERT(metrics.skipped_count == 0);
+    HU_ASSERT(metrics.final_loss < metrics.initial_loss);
 
     rm.vtable->deinit(rm.ctx, &alloc);
 }
@@ -516,7 +519,7 @@ void run_reward_model_huml_tests(void) {
     HU_RUN_TEST(test_gradient_check_finite_difference_batch_2);
     HU_RUN_TEST(test_gradient_check_finite_difference_batch_4);
     HU_RUN_TEST(test_gradient_check_finite_difference_batch_8);
-    // HU_RUN_TEST(test_preference_ranking_5_seeds);  /* Deferred: debug allocator init */
-    // HU_RUN_TEST(test_training_reduces_loss);      /* Deferred: debug allocator init */
+    HU_RUN_TEST(test_preference_ranking_5_seeds);
+    HU_RUN_TEST(test_training_reduces_loss);
     HU_RUN_TEST(test_kto_one_sided_train);
 }
