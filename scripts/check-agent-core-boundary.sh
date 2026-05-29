@@ -21,7 +21,9 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
 fail=0
 
-fac=$(grep -rln '#include "human/providers/factory.h"' src/agent 2>/dev/null \
+# `|| true`: grep returns 1 on zero matches, which under `set -o pipefail`
+# would otherwise abort the script the moment the count legitimately hits 0.
+fac=$({ grep -rln '#include "human/providers/factory.h"' src/agent 2>/dev/null || true; } \
   | wc -l | tr -d ' ')
 echo "agent/ provider-factory includes: $fac (ceiling $FACTORY_BASELINE)"
 if [ "$fac" -gt "$FACTORY_BASELINE" ]; then
@@ -34,7 +36,7 @@ elif [ "$fac" -lt "$FACTORY_BASELINE" ]; then
 fi
 
 memcmp_pat='memcmp\([a-zA-Z_]+ *, *"(imessage|slack|telegram|discord|whatsapp|signal|sms|email|voice|imap|gmail|mattermost|matrix|irc|line|lark|messenger)"'
-chan=$(grep -rnE "$memcmp_pat" src/agent 2>/dev/null | wc -l | tr -d ' ')
+chan=$({ grep -rnE "$memcmp_pat" src/agent 2>/dev/null || true; } | wc -l | tr -d ' ')
 echo "agent/ hardcoded channel-name memcmp: $chan (ceiling $MEMCMP_BASELINE)"
 if [ "$chan" -gt "$MEMCMP_BASELINE" ]; then
   echo "FAIL: new hardcoded channel-name memcmp in agent core. Use" >&2

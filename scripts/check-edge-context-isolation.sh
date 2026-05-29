@@ -48,7 +48,7 @@ list_cross() {
   for f in src/channels/*.c; do
     [ -e "$f" ] || continue
     base=$(basename "$f" .c)
-    grep -oE '#include "human/channels/[a-z_]+\.h"' "$f" 2>/dev/null \
+    { grep -oE '#include "human/channels/[a-z_]+\.h"' "$f" 2>/dev/null || true; } \
       | sed -E 's#.*human/channels/([a-z_]+)\.h.*#\1#' \
       | while IFS= read -r inc; do
           case "$inc" in

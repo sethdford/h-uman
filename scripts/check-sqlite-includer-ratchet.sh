@@ -19,8 +19,10 @@ BASELINE=110
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
-count=$(grep -rln '#include <sqlite3.h>' src/ 2>/dev/null \
-  | grep -vE 'src/memory/(engines|repos)/' \
+# `|| true`: both greps return 1 on zero matches; under `set -o pipefail`
+# that would abort the script the moment the count legitimately reaches 0.
+count=$({ grep -rln '#include <sqlite3.h>' src/ 2>/dev/null \
+  | grep -vE 'src/memory/(engines|repos)/' || true; } \
   | wc -l | tr -d ' ')
 
 echo "sqlite3.h includers (excl engines/repos): $count (ceiling $BASELINE)"
