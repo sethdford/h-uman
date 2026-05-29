@@ -150,6 +150,20 @@ if [ -x "scripts/check-test-silent-pass.sh" ]; then
     fi
 fi
 
+# Disabled-test-registration check — added after Sprint 60 US-101, where an
+# implementer commented out the two hardest AC tests with a vague excuse and
+# reported DONE; the suite went green without exercising them. Catches a
+# commented-out HU_RUN_TEST(...) registration in staged test files. Opt-out:
+# '// allow-disabled-test: <reason>' on the line. See check script header.
+if [ -x "scripts/check-disabled-test-registration.sh" ]; then
+    if ! scripts/check-disabled-test-registration.sh; then
+        echo ""
+        echo "Pre-commit blocked: commented-out HU_RUN_TEST registration (silent coverage hole)."
+        echo "Register it, delete it, or add '// allow-disabled-test: <reason>' if truly deferred."
+        exit 1
+    fi
+fi
+
 # Sprint 54 US-C3.9 — Doctor exit-code parity guard. Asserts that the
 # HU_DOCTOR_EXIT_* constants in include/human/doctor.h match the
 # exit-code table in docs/guides/doctor.md. Fires whenever either
