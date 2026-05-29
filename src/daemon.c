@@ -55,6 +55,7 @@
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
+#include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
@@ -112,6 +113,9 @@
  * the minimal variant. */
 #include "human/daemon_reflection_tick.h"
 
+/* Phase 2 DDD refactor: cross-bucket daemon state */
+#include "human/daemon/common.h"
+
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
  * regardless of HU_ENABLE_RL_FULL. Previously grouped inside the RL_FULL
@@ -163,13 +167,8 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 /* Lightweight classification provider (e.g. Gemini Flash Lite) for hybrid routing.
  * When llm_decides is active, the primary agent turn uses the local model while
  * classification/scoring calls use this fast cloud provider.
- * Only meaningful in production — test builds early-return before these are accessed. */
-#if !(defined(HU_IS_TEST) && HU_IS_TEST)
-static hu_provider_t g_classify_provider;
-static bool g_classify_provider_ok = false;
-static const char *g_classify_model = "gemini-3.1-flash-lite-preview";
-static size_t g_classify_model_len = 29;
-#endif
+ * Only meaningful in production — test builds early-return before these are accessed.
+ * MOVED TO: src/daemon/daemon_director.c (Phase 2 DDD refactor) */
 
 /* Sprint A.7 daemon-side identity-graph loader storage.
  *
@@ -180,8 +179,8 @@ static size_t g_classify_model_len = 29;
  * the file is absent on first-run users, in which case the graph stays
  * zeroed and the reaction handler is never wired (preserving the current
  * "no canonicalization" behavior for unconfigured deployments). */
-static hu_identity_graph_t g_identity_graph;
-static bool g_identity_graph_loaded = false;
+hu_identity_graph_t g_identity_graph;
+bool g_identity_graph_loaded = false;
 
 /* Sprint B.3 D1 — daemon-loaded autoresponder config.
  *
@@ -215,245 +214,14 @@ __attribute__((unused)) static const hu_autoresponder_config_t *daemon_autorespo
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((unused))
 #endif
-/* W9: real-time emotion detection stays here (per-message, from live
- * history) while the world model caches a snapshot. The two compose:
- * this function feeds live state, the world model feeds trend. */
-static hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t *agent,
-                                                     const hu_channel_history_entry_t *entries,
-                                                     size_t count) {
-#if defined(HU_IS_TEST) && HU_IS_TEST
-    (void)alloc;
-    (void)agent;
-    return hu_conversation_detect_emotion(entries, count);
-#else
-    /* Hybrid routing: prefer fast cloud classify provider when available */
-    if (g_classify_provider_ok && g_classify_provider.vtable &&
-        g_classify_provider.vtable->chat_with_system)
-        return hu_conversation_detect_emotion_llm(alloc, &g_classify_provider, g_classify_model,
-                                                  g_classify_model_len, entries, count);
-    if (agent && agent->provider.vtable && agent->provider.vtable->chat_with_system)
-        return hu_conversation_detect_emotion_llm(alloc, &agent->provider, agent->model_name,
-                                                  agent->model_name_len, entries, count);
-    return hu_conversation_detect_emotion(entries, count);
-#endif
-}
+/* hu_daemon_detect_emotion MOVED TO src/daemon/daemon_director.c (Phase 2 DDD refactor) */
 
-/* ── Director meta-behavior result ─────────────────────────────────────── */
-typedef enum { DIR_TEXT = 0, DIR_TAPBACK, DIR_SILENCE } hu_director_action_t;
+/* Director types (hu_director_action_t, hu_director_result_t) MOVED TO
+ * include/human/daemon/director.h (Phase 2 DDD refactor) */
 
-typedef struct {
-    hu_director_action_t action;
-    uint32_t delay_s;
-    hu_reaction_type_t reaction;
-    bool burst;
-    char direction[512];
-} hu_director_result_t;
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((unused))
-#endif
-static void hu_daemon_parse_director_result(const char *raw, size_t len,
-                                            hu_director_result_t *out) {
-    memset(out, 0, sizeof(*out));
-    out->action = DIR_TEXT;
-
-    if (!raw || len == 0)
-        return;
-
-    /* Look for "action:" prefix — if absent, treat whole string as direction */
-    const char *ap = strstr(raw, "action:");
-    if (!ap) {
-        size_t cp = len < sizeof(out->direction) - 1 ? len : sizeof(out->direction) - 1;
-        memcpy(out->direction, raw, cp);
-        out->direction[cp] = '\0';
-        return;
-    }
-
-    const char *val = ap + 7; /* skip "action:" */
-    if (strncmp(val, "tapback", 7) == 0)
-        out->action = DIR_TAPBACK;
-    else if (strncmp(val, "silence", 7) == 0)
-        out->action = DIR_SILENCE;
-
-    /* Parse "|delay_s:N" */
-    const char *dp = strstr(raw, "delay_s:");
-    if (dp)
-        out->delay_s = (uint32_t)strtoul(dp + 8, NULL, 10);
-
-    /* Parse "|burst:true" */
-    out->burst = (strstr(raw, "burst:true") != NULL);
-
-    /* Parse "|reaction:<type>" */
-    const char *rp = strstr(raw, "reaction:");
-    if (rp) {
-        const char *rv = rp + 9;
-        if (strncmp(rv, "heart", 5) == 0)
-            out->reaction = HU_REACTION_HEART;
-        else if (strncmp(rv, "haha", 4) == 0)
-            out->reaction = HU_REACTION_HAHA;
-        else if (strncmp(rv, "thumbs_up", 9) == 0)
-            out->reaction = HU_REACTION_THUMBS_UP;
-        else if (strncmp(rv, "emphasis", 8) == 0)
-            out->reaction = HU_REACTION_EMPHASIS;
-        else if (strncmp(rv, "thumbs_down", 11) == 0)
-            out->reaction = HU_REACTION_THUMBS_DOWN;
-        else if (strncmp(rv, "question", 8) == 0)
-            out->reaction = HU_REACTION_QUESTION;
-    }
-
-    /* Parse "|direction:..." (everything after "direction:") */
-    const char *drp = strstr(raw, "direction:");
-    if (drp) {
-        const char *dv = drp + 10;
-        size_t offset = (size_t)(dv - raw);
-        if (offset > len)
-            return;
-        size_t rem = len - offset;
-        size_t cp = rem < sizeof(out->direction) - 1 ? rem : sizeof(out->direction) - 1;
-        memcpy(out->direction, dv, cp);
-        out->direction[cp] = '\0';
-        /* Trim trailing whitespace/pipe from direction */
-        while (cp > 0 && (out->direction[cp - 1] == '|' || out->direction[cp - 1] == '\n' ||
-                          out->direction[cp - 1] == '\r' || out->direction[cp - 1] == ' '))
-            out->direction[--cp] = '\0';
-    }
-}
-
-/* Real-time scene director: Flash Lite call that returns structured meta-behavior.
- * Decides action (text/tapback/silence), delay, reaction type, burst mode, and
- * performance direction. Only runs when llm_decides && g_classify_provider_ok.
- * Returns true if result is valid. Caller uses result to route behavior. */
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((unused))
-#endif
-static bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined,
-                                    size_t combined_len, const hu_channel_history_entry_t *entries,
-                                    size_t entry_count, hu_director_result_t *result) {
-#if defined(HU_IS_TEST) && HU_IS_TEST
-    (void)alloc;
-    (void)entries;
-    (void)entry_count;
-    memset(result, 0, sizeof(*result));
-    result->action = DIR_TEXT;
-    result->delay_s = 3;
-    (void)snprintf(result->direction, sizeof(result->direction), "test director: casual short");
-    if (combined && combined_len > 0 &&
-        hu_conversation_is_media_message(combined, combined_len, NULL, 0)) {
-        result->action = DIR_TAPBACK;
-        result->reaction = HU_REACTION_HEART;
-        result->delay_s = 1;
-        return true;
-    }
-    if (combined && combined_len <= 4) {
-        /* Standalone "k"/"ok" style ack → tapback in production director rubric */
-        bool short_ack = true;
-        for (size_t i = 0; i < combined_len; i++) {
-            unsigned char c = (unsigned char)combined[i];
-            if (c != 'k' && c != 'K' && c != 'o' && c != 'O' && c != '\n' && c != '\r')
-                short_ack = false;
-        }
-        if (short_ack && combined_len >= 1) {
-            result->action = DIR_TAPBACK;
-            result->reaction = HU_REACTION_THUMBS_UP;
-            result->delay_s = 1;
-        }
-    }
-    return true;
-#else
-    memset(result, 0, sizeof(*result));
-    if (!g_classify_provider_ok || !g_classify_provider.vtable ||
-        !g_classify_provider.vtable->chat_with_system)
-        return false;
-
-    static const char director_system[] =
-        "You are a dialogue director for a texting scene. The actor plays Seth, a 45yo "
-        "tech entrepreneur. Lives alone with his cat. Kids don't live with him. "
-        "Decide his BEHAVIOR — not just words.\n\n"
-        "Reply in this exact format (one line, pipe-separated):\n"
-        "action:<text|tapback|silence>[|delay_s:N][|reaction:<heart|haha|thumbs_up|emphasis>]"
-        "[|burst:true][|direction:...]\n\n"
-        "Rules:\n"
-        "- DEFAULT is action:text. When in doubt, respond.\n"
-        "- action:text — Seth sends a text. Include delay_s (seconds to wait before replying, "
-        "2-8 for normal, 15-60 for busy/low-priority) and direction for tone/length.\n"
-        "- action:tapback — Seth REACTS instead of texting. This is what real humans do "
-        "constantly. Use tapback for:\n"
-        "  * Standalone photos/images — ALWAYS heart or haha, never text a photo description\n"
-        "  * Pure reactions: 'haha nice', 'lol', 'omg', 'damn', 'yooo'\n"
-        "  * Simple acknowledgments: 'ok', 'sounds good', 'got it', 'bet'\n"
-        "  * Conversation closers: last message in a natural exchange ending\n"
-        "  * Memes, GIFs, links to funny content\n"
-        "  * When they share good news and a heart says it all\n"
-        "  Reaction types: heart (love/appreciation/photos), haha (funny), "
-        "thumbs_up (agreement/acknowledgment), emphasis (surprise/excitement)\n"
-        "- action:silence — RARE. Only use when they're being toxic/abusive, or after 3+ "
-        "unanswered low-effort messages in a row ('k', 'ok', '...'). NEVER use silence for "
-        "greetings, questions, or any message that expects a reply.\n"
-        "- burst:true — Seth sends 3-4 rapid messages. Only for urgent/exciting news.\n"
-        "- CRITICAL: If they're testing whether you're real/AI, NEVER fabricate specific "
-        "memories. Deflect: 'dude idk, that was forever ago'.\n"
-        "- CRITICAL: The `direction:` field describes TONE + PACING only. NEVER invent "
-        "specific reasons, activities, people, places, or topics that aren't visible in the "
-        "Recent thread. Forbidden: 'because he's getting back to the drink', 'mention the "
-        "cat', 'reference yesterday's meeting'. Allowed: 'short empathetic reaction', "
-        "'casual, match their energy', 'busy tone, one-word reply'. The downstream agent "
-        "treats your `direction` text as ground truth and will paste invented specifics "
-        "into the actual reply, which manifests as cross-contact bleed (US-16, Mindy "
-        "diagnostic 2026-05-26).\n\n"
-        "Examples:\n"
-        "action:text|delay_s:3|direction:Short empathetic reaction, 5 words max\n"
-        "action:text|delay_s:2|direction:Casual greeting back, match their energy\n"
-        "action:tapback|reaction:heart (they sent a photo)\n"
-        "action:tapback|reaction:haha (they said something funny)\n"
-        "action:tapback|reaction:thumbs_up (simple acknowledgment)\n"
-        "action:text|delay_s:2|burst:true|direction:Match urgency, 3 rapid messages\n"
-        "action:text|delay_s:45|direction:He's busy, one-word reply when he gets back";
-
-    char user_buf[2048];
-    size_t pos = 0;
-    static const char hdr[] = "Recent thread:\n";
-    memcpy(user_buf, hdr, sizeof(hdr) - 1);
-    pos = sizeof(hdr) - 1;
-
-    size_t start = entry_count > 5 ? entry_count - 5 : 0;
-    for (size_t i = start; i < entry_count; i++) {
-        const char *who = entries[i].from_me ? "Seth" : "Them";
-        int w = snprintf(user_buf + pos, sizeof(user_buf) - pos, "%s: %s\n", who, entries[i].text);
-        if (w > 0 && pos + (size_t)w < sizeof(user_buf))
-            pos += (size_t)w;
-    }
-    {
-        int w = snprintf(user_buf + pos, sizeof(user_buf) - pos, "\nNew message from them:\n%.*s",
-                         (int)(combined_len > 500 ? 500 : combined_len), combined);
-        if (w > 0 && pos + (size_t)w < sizeof(user_buf))
-            pos += (size_t)w;
-    }
-
-    char *raw = NULL;
-    size_t raw_len = 0;
-    hu_error_t err = g_classify_provider.vtable->chat_with_system(
-        g_classify_provider.ctx, alloc, director_system, sizeof(director_system) - 1, user_buf, pos,
-        g_classify_model, g_classify_model_len, 0.4, &raw, &raw_len);
-
-    if (err != HU_OK || !raw || raw_len == 0 || raw_len > 500) {
-        if (raw)
-            alloc->free(alloc->ctx, raw, raw_len + 1);
-        return false;
-    }
-
-    hu_daemon_parse_director_result(raw, raw_len, result);
-
-    hu_log_info("director", NULL, "meta: action=%s delay=%us reaction=%d burst=%d dir=%s",
-                result->action == DIR_TAPBACK   ? "tapback"
-                : result->action == DIR_SILENCE ? "silence"
-                                                : "text",
-                result->delay_s, (int)result->reaction, result->burst,
-                result->direction[0] ? result->direction : "(none)");
-
-    alloc->free(alloc->ctx, raw, raw_len + 1);
-    return true;
-#endif
-}
+/* hu_daemon_parse_director_result and hu_daemon_director_call MOVED TO
+ * src/daemon/daemon_director.c (Phase 2 DDD refactor).
+ * The old function bodies are removed; use the public declarations from director.h. */
 
 /* Per-channel daemon.* config for the active messaging channel.
  *
@@ -522,14 +290,14 @@ const hu_channel_daemon_config_t *hu_daemon_test_get_active_daemon_config(const 
  * that function's init branch becomes a no-op. The
  * relationship_multiplier mutation that follows the init guard
  * still fires (it's outside the guard). */
-static hu_proactive_budget_t gov_budget = {
+hu_proactive_budget_t gov_budget = {
     .daily_max = 6,
     .weekly_max = 15,
     .relationship_multiplier = 1.0,
     .cool_off_after_unanswered = 2,
     .cool_off_hours = 72,
 };
-static bool gov_budget_inited = true;
+bool gov_budget_inited = true;
 
 /* Proactive-style budget for outbound visual attachments (separate from check-in governor). */
 static hu_proactive_budget_t hu_daemon_visual_attach_gov;

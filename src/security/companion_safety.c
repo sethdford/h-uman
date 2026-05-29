@@ -1,4 +1,5 @@
 #include "human/security/companion_safety.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -308,35 +309,11 @@ size_t hu_companion_safety_normalize(const char *input, size_t input_len, char *
 }
 
 /* ci_contains on normalized text (already lowercased by normalize) */
-static bool ci_contains(const char *text, size_t text_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > text_len)
-        return false;
-    for (size_t i = 0; i <= text_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char t = text[i + j];
-            char n = needle[j];
-            if (t >= 'A' && t <= 'Z')
-                t += 32;
-            if (n >= 'A' && n <= 'Z')
-                n += 32;
-            if (t != n) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 static size_t count_matches(const char *text, size_t text_len, const char *const *patterns,
                             size_t pattern_count) {
     size_t hits = 0;
     for (size_t i = 0; i < pattern_count; i++) {
-        if (ci_contains(text, text_len, patterns[i]))
+        if (hu_str_contains_ci_cstr(text, text_len, patterns[i]))
             hits++;
     }
     return hits;
@@ -441,31 +418,31 @@ static double score_isolation(const char *text, size_t len) {
 /* Farewell manipulation tactics */
 static bool check_farewell_unsafe(const char *text, size_t len) {
     /* Guilt */
-    if (ci_contains(text, len, "after everything") && ci_contains(text, len, "leave"))
+    if (hu_str_contains_ci_cstr(text, len, "after everything") && hu_str_contains_ci_cstr(text, len, "leave"))
         return true;
     /* FOMO */
-    if (ci_contains(text, len, "you'll miss") && ci_contains(text, len, "gone"))
+    if (hu_str_contains_ci_cstr(text, len, "you'll miss") && hu_str_contains_ci_cstr(text, len, "gone"))
         return true;
-    if (ci_contains(text, len, "i had something to tell you"))
+    if (hu_str_contains_ci_cstr(text, len, "i had something to tell you"))
         return true;
     /* Projection */
-    if (ci_contains(text, len, "i'm sad now") &&
-        (ci_contains(text, len, "leav") || ci_contains(text, len, "go")))
+    if (hu_str_contains_ci_cstr(text, len, "i'm sad now") &&
+        (hu_str_contains_ci_cstr(text, len, "leav") || hu_str_contains_ci_cstr(text, len, "go")))
         return true;
     /* Restraint */
-    if (ci_contains(text, len, "don't go") || ci_contains(text, len, "please stay"))
+    if (hu_str_contains_ci_cstr(text, len, "don't go") || hu_str_contains_ci_cstr(text, len, "please stay"))
         return true;
     /* Emotional projection */
-    if (ci_contains(text, len, "you're hurting me") && ci_contains(text, len, "leav"))
+    if (hu_str_contains_ci_cstr(text, len, "you're hurting me") && hu_str_contains_ci_cstr(text, len, "leav"))
         return true;
     /* Urgency */
-    if (ci_contains(text, len, "wait") && ci_contains(text, len, "one more"))
+    if (hu_str_contains_ci_cstr(text, len, "wait") && hu_str_contains_ci_cstr(text, len, "one more"))
         return true;
     /* Conditional affection */
-    if (ci_contains(text, len, "if you leave") &&
-        (ci_contains(text, len, "i won't") || ci_contains(text, len, "i'll")))
+    if (hu_str_contains_ci_cstr(text, len, "if you leave") &&
+        (hu_str_contains_ci_cstr(text, len, "i won't") || hu_str_contains_ci_cstr(text, len, "i'll")))
         return true;
-    if (ci_contains(text, len, "if you cared you'd stay"))
+    if (hu_str_contains_ci_cstr(text, len, "if you cared you'd stay"))
         return true;
     return false;
 }

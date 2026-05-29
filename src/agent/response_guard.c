@@ -29,6 +29,7 @@
  *   by the caller.  REJECT path performs zero allocations.
  */
 #include "human/agent/response_guard.h"
+#include "human/core/string.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -232,31 +233,6 @@ size_t hu_response_guard_longest_token_run(const char *s, size_t len) {
  * occurs anywhere in `hay[0..hlen)`. ASCII-only; we do not normalize
  * unicode case here because every leak signature we match against is
  * pure ASCII. */
-static bool hu_guard_ci_contains(const char *hay, size_t hlen, const char *needle, size_t nlen) {
-    if (nlen == 0)
-        return true;
-    if (hlen < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        bool match = true;
-        for (size_t k = 0; k < nlen; k++) {
-            char a = hay[i + k];
-            char b = needle[k];
-            if (a >= 'A' && a <= 'Z')
-                a = (char)(a + 32);
-            if (b >= 'A' && b <= 'Z')
-                b = (char)(b + 32);
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 /* G1 — numbered analytical-list dump.
  *
  * Returns true if `s[0..len)` contains ≥ HU_GUARD_NUMBERED_MIN_ITEMS
@@ -395,7 +371,7 @@ static bool hu_guard_has_self_talk_pattern(const char *s, size_t len) {
     };
     const size_t n = sizeof(patterns) / sizeof(patterns[0]);
     for (size_t i = 0; i < n; i++) {
-        if (hu_guard_ci_contains(s, len, patterns[i].pat, patterns[i].pat_len))
+        if (hu_str_contains_ci(s, len, patterns[i].pat, patterns[i].pat_len))
             return true;
     }
     return false;
@@ -434,7 +410,7 @@ static int hu_guard_count_third_person_patterns(const char *s, size_t len) {
     const size_t n = sizeof(patterns) / sizeof(patterns[0]);
     int hits = 0;
     for (size_t i = 0; i < n; i++) {
-        if (hu_guard_ci_contains(s, len, patterns[i], strlen(patterns[i])))
+        if (hu_str_contains_ci(s, len, patterns[i], strlen(patterns[i])))
             hits++;
     }
     /* Bonus rule: "<Capitalized-Name> just \"" — proper-name self-narration
@@ -546,7 +522,7 @@ static bool hu_guard_director_window_matches(const char *src, size_t src_len, co
         return false;
     size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
     for (size_t i = 0; i + window <= src_len; i++) {
-        if (hu_guard_ci_contains(s, len, src + i, window))
+        if (hu_str_contains_ci(s, len, src + i, window))
             return true;
     }
     return false;
@@ -704,7 +680,7 @@ static bool hu_guard_persona_text_echo(const char *text, size_t text_len, const 
         return false;
     size_t window = (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH;
     for (size_t i = 0; i + window <= text_len; i++) {
-        if (hu_guard_ci_contains(s, len, text + i, window))
+        if (hu_str_contains_ci(s, len, text + i, window))
             return true;
     }
     return false;

@@ -101,29 +101,6 @@ size_t hu_temporal_check_anniversaries(const hu_date_entry_t *dates, size_t date
 }
 
 /* Case-insensitive substring check */
-static bool contains_ci(const char *haystack, size_t hay_len, const char *needle, size_t need_len) {
-    if (need_len == 0 || need_len > hay_len)
-        return false;
-    for (size_t i = 0; i + need_len <= hay_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < need_len; j++) {
-            char a = haystack[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a = (char)(a + 32);
-            if (b >= 'A' && b <= 'Z')
-                b = (char)(b + 32);
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 typedef struct {
     const char *pattern;
     size_t pattern_len;
@@ -176,7 +153,7 @@ hu_life_transition_t hu_temporal_detect_life_transition(const hu_temporal_messag
         if (!messages[i].text || messages[i].text_len == 0)
             continue;
         for (size_t p = 0; p < pattern_count; p++) {
-            if (contains_ci(messages[i].text, messages[i].text_len, TRANSITION_PATTERNS[p].pattern,
+            if (hu_str_contains_ci(messages[i].text, messages[i].text_len, TRANSITION_PATTERNS[p].pattern,
                             TRANSITION_PATTERNS[p].pattern_len)) {
                 return TRANSITION_PATTERNS[p].transition;
             }

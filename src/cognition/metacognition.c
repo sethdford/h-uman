@@ -1,4 +1,5 @@
 #include "human/cognition/metacognition.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -590,24 +591,6 @@ hu_error_t hu_metacognition_apply(hu_metacog_action_t action, char *prompt_buf, 
     return HU_OK;
 }
 
-static bool contains_ci(const char *hay, size_t hay_len, const char *needle) {
-    if (!needle || !hay || hay_len == 0)
-        return false;
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hay_len)
-        return false;
-    for (size_t i = 0; i + nlen <= hay_len; i++) {
-        size_t j;
-        for (j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)hay[i + j]) != tolower((unsigned char)needle[j]))
-                break;
-        }
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
-
 float hu_metacog_label_from_followup(const char *followup, size_t followup_len) {
     if (!followup || followup_len == 0)
         return 0.0f;
@@ -621,11 +604,11 @@ float hu_metacog_label_from_followup(const char *followup, size_t followup_len) 
 
     int neg_hits = 0, pos_hits = 0;
     for (size_t i = 0; neg[i]; i++) {
-        if (contains_ci(followup, followup_len, neg[i]))
+        if (hu_str_contains_ci_cstr(followup, followup_len, neg[i]))
             neg_hits++;
     }
     for (size_t i = 0; pos[i]; i++) {
-        if (contains_ci(followup, followup_len, pos[i]))
+        if (hu_str_contains_ci_cstr(followup, followup_len, pos[i]))
             pos_hits++;
     }
 

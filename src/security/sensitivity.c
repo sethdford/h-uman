@@ -1,26 +1,9 @@
 #include "human/security/sensitivity.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <string.h>
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
-
-static bool ci_contains(const char *haystack, size_t haystack_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > haystack_len)
-        return false;
-    for (size_t i = 0; i <= haystack_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
 
 static bool ends_with(const char *s, size_t s_len, const char *suffix) {
     size_t suffix_len = strlen(suffix);
@@ -185,8 +168,8 @@ static bool has_phone_pattern(const char *msg, size_t len) {
 
 /* Private key header: -----BEGIN ... PRIVATE KEY----- */
 static bool has_private_key_header(const char *msg, size_t len) {
-    return ci_contains(msg, len, "-----BEGIN") &&
-           ci_contains(msg, len, "PRIVATE KEY-----");
+    return hu_str_contains_ci_cstr(msg, len, "-----BEGIN") &&
+           hu_str_contains_ci_cstr(msg, len, "PRIVATE KEY-----");
 }
 
 /* ── S3 path patterns ─────────────────────────────────────────────────── */
@@ -226,7 +209,7 @@ hu_sensitivity_result_t hu_sensitivity_classify_message(const char *msg, size_t 
     const char *s2_reason = NULL;
 
     for (size_t i = 0; i < S3_KEYWORD_COUNT; i++) {
-        if (ci_contains(msg, msg_len, S3_KEYWORDS[i])) {
+        if (hu_str_contains_ci_cstr(msg, msg_len, S3_KEYWORDS[i])) {
             s3_signals++;
             if (!s3_reason)
                 s3_reason = S3_KEYWORDS[i];
@@ -254,7 +237,7 @@ hu_sensitivity_result_t hu_sensitivity_classify_message(const char *msg, size_t 
     }
 
     for (size_t i = 0; i < S2_KEYWORD_COUNT; i++) {
-        if (ci_contains(msg, msg_len, S2_KEYWORDS[i])) {
+        if (hu_str_contains_ci_cstr(msg, msg_len, S2_KEYWORDS[i])) {
             s2_signals++;
             if (!s2_reason)
                 s2_reason = S2_KEYWORDS[i];
@@ -297,7 +280,7 @@ hu_sensitivity_result_t hu_sensitivity_classify_path(const char *path, size_t pa
         return result;
 
     for (size_t i = 0; i < S3_PATH_SEGMENT_COUNT; i++) {
-        if (ci_contains(path, path_len, S3_PATH_SEGMENTS[i])) {
+        if (hu_str_contains_ci_cstr(path, path_len, S3_PATH_SEGMENTS[i])) {
             result.level = HU_SENSITIVITY_S3;
             result.reason = S3_PATH_SEGMENTS[i];
             return result;
@@ -321,7 +304,7 @@ hu_sensitivity_result_t hu_sensitivity_classify_tool(const char *tool_name, size
         return result;
 
     for (size_t i = 0; i < S3_TOOL_SEGMENT_COUNT; i++) {
-        if (ci_contains(tool_name, tool_len, S3_TOOL_SEGMENTS[i])) {
+        if (hu_str_contains_ci_cstr(tool_name, tool_len, S3_TOOL_SEGMENTS[i])) {
             result.level = HU_SENSITIVITY_S3;
             result.reason = S3_TOOL_SEGMENTS[i];
             return result;

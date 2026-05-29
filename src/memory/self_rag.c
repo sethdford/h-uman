@@ -1,5 +1,6 @@
 #include "human/memory/self_rag.h"
 #include "human/core/log.h"
+#include "human/core/string.h"
 #include <stdatomic.h>
 #include <string.h>
 
@@ -10,30 +11,6 @@ hu_srag_config_t hu_srag_config_default(void) {
     cfg.confidence_threshold = 0.7;
     cfg.provider = NULL;
     return cfg;
-}
-
-static bool srag_contains_ci(const char *hay, size_t hay_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > hay_len)
-        return false;
-    for (size_t i = 0; i <= hay_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char a = hay[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a = (char)(a + 32);
-            if (b >= 'A' && b <= 'Z')
-                b = (char)(b + 32);
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
 }
 
 static bool srag_starts_with_ci(const char *str, size_t str_len, const char *prefix) {
@@ -57,7 +34,7 @@ static bool is_greeting(const char *query, size_t query_len) {
     static const char *greetings[] = {"hi", "hello", "hey", "thanks", "bye", "ok", "thank you"};
     for (size_t i = 0; i < sizeof(greetings) / sizeof(greetings[0]); i++) {
         size_t glen = strlen(greetings[i]);
-        if (query_len == glen && srag_contains_ci(query, query_len, greetings[i]))
+        if (query_len == glen && hu_str_contains_ci_cstr(query, query_len, greetings[i]))
             return true;
         if (query_len > glen && srag_starts_with_ci(query, query_len, greetings[i]) &&
             (query[glen] == ' ' || query[glen] == '!' || query[glen] == '.'))
@@ -114,7 +91,7 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
     static const char *personal[] = {"my ",         "I ",           "remember when",
                                      "you told me", "we discussed", "my name"};
     for (size_t i = 0; i < sizeof(personal) / sizeof(personal[0]); i++) {
-        if (srag_contains_ci(query, query_len, personal[i])) {
+        if (hu_str_contains_ci_cstr(query, query_len, personal[i])) {
             out->decision = HU_SRAG_RETRIEVE;
             out->confidence = 0.9;
             out->is_personal_query = true;
@@ -124,7 +101,7 @@ hu_error_t hu_srag_should_retrieve(hu_allocator_t *alloc, const hu_srag_config_t
 
     static const char *temporal[] = {"yesterday", "last week", "ago", "recently", "last month"};
     for (size_t i = 0; i < sizeof(temporal) / sizeof(temporal[0]); i++) {
-        if (srag_contains_ci(query, query_len, temporal[i])) {
+        if (hu_str_contains_ci_cstr(query, query_len, temporal[i])) {
             out->decision = HU_SRAG_RETRIEVE_AND_VERIFY;
             out->confidence = 0.85;
             out->has_temporal_marker = true;

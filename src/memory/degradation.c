@@ -1,7 +1,7 @@
+#include "human/memory/degradation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
-#include "human/memory/degradation.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -24,29 +24,12 @@ static bool strncasecmp_eq(const char *a, size_t a_len, const char *b, size_t b_
     return true;
 }
 
-static bool contains_word(const char *content, size_t len, const char *word,
-                          size_t word_len) {
-    if (word_len == 0 || word_len > len)
-        return false;
-    for (size_t i = 0; i + word_len <= len; i++) {
-        if (strncasecmp_eq(content + i, word_len, word, word_len)) {
-            bool before_ok = (i == 0) || !isalnum((unsigned char)content[i - 1]);
-            bool after_ok =
-                (i + word_len >= len) || !isalnum((unsigned char)content[i + word_len]);
-            if (before_ok && after_ok)
-                return true;
-        }
-    }
-    return false;
-}
-
 /* Commitment: promised, commitment, i'll, i will, deadline, swear */
 static const struct {
     const char *word;
     size_t len;
 } COMMITMENT[] = {
-    {"promised", 8}, {"commitment", 10}, {"i'll", 4}, {"i will", 6},
-    {"deadline", 8}, {"swear", 5},
+    {"promised", 8}, {"commitment", 10}, {"i'll", 4}, {"i will", 6}, {"deadline", 8}, {"swear", 5},
 };
 static const size_t COMMITMENT_COUNT = sizeof(COMMITMENT) / sizeof(COMMITMENT[0]);
 
@@ -55,7 +38,7 @@ static const struct {
     const char *word;
     size_t len;
 } EMOTIONAL[] = {
-    {"love", 4}, {"died", 4}, {"funeral", 7}, {"hospital", 8},
+    {"love", 4},   {"died", 4},    {"funeral", 7},  {"hospital", 8},
     {"cancer", 6}, {"divorce", 7}, {"pregnant", 8},
 };
 static const size_t EMOTIONAL_COUNT = sizeof(EMOTIONAL) / sizeof(EMOTIONAL[0]);
@@ -65,21 +48,22 @@ bool hu_degradation_is_protected(const char *content, size_t content_len) {
         return false;
 
     for (size_t i = 0; i < COMMITMENT_COUNT; i++) {
-        if (contains_word(content, content_len, COMMITMENT[i].word, COMMITMENT[i].len))
+        if (hu_str_contains_word_ci_n(content, content_len, COMMITMENT[i].word))
             return true;
     }
     for (size_t i = 0; i < EMOTIONAL_COUNT; i++) {
-        if (contains_word(content, content_len, EMOTIONAL[i].word, EMOTIONAL[i].len))
+        if (hu_str_contains_word_ci_n(content, content_len, EMOTIONAL[i].word))
             return true;
     }
 
     static const char *skip_caps[] = {
-        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-        "Saturday", "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
-        "The", "This", "That", "These", "Those", "There", "Then", "But",
-        "And", "For", "Not", "Yet", "So", "Or", "We", "He", "She", "It",
-        "A", "I", "In", "On", "At", "To", "My", "Our", "If", "No",
+        "Sunday",  "Monday",    "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+        "January", "February",  "March",   "April",     "May",      "June",   "July",
+        "August",  "September", "October", "November",  "December", "The",    "This",
+        "That",    "These",     "Those",   "There",     "Then",     "But",    "And",
+        "For",     "Not",       "Yet",     "So",        "Or",       "We",     "He",
+        "She",     "It",        "A",       "I",         "In",       "On",     "At",
+        "To",      "My",        "Our",     "If",        "No",
     };
     static const size_t skip_caps_count = sizeof(skip_caps) / sizeof(skip_caps[0]);
 
@@ -118,8 +102,7 @@ bool hu_degradation_is_protected(const char *content, size_t content_len) {
     return false;
 }
 
-hu_degradation_type_t hu_degradation_roll(const hu_degradation_config_t *config,
-                                          uint32_t seed) {
+hu_degradation_type_t hu_degradation_roll(const hu_degradation_config_t *config, uint32_t seed) {
     if (!config)
         return HU_DEGRADE_NONE;
 
@@ -143,9 +126,8 @@ static const struct {
     const char *replacement;
     size_t repl_len;
 } DAYS[] = {
-    {"Sunday", 6, "Monday", 6},     {"Monday", 6, "Tuesday", 7},
-    {"Tuesday", 7, "Wednesday", 9}, {"Wednesday", 9, "Thursday", 8},
-    {"Thursday", 8, "Friday", 6},   {"Friday", 6, "Saturday", 8},
+    {"Sunday", 6, "Monday", 6},      {"Monday", 6, "Tuesday", 7},  {"Tuesday", 7, "Wednesday", 9},
+    {"Wednesday", 9, "Thursday", 8}, {"Thursday", 8, "Friday", 6}, {"Friday", 6, "Saturday", 8},
     {"Saturday", 8, "Sunday", 6},
 };
 static const size_t DAYS_COUNT = sizeof(DAYS) / sizeof(DAYS[0]);
@@ -180,9 +162,8 @@ static char *apply_fuzz(hu_allocator_t *alloc, const char *content, size_t conte
         if (i + LAST_WEEK_LEN <= content_len &&
             strncasecmp_eq(content + i, LAST_WEEK_LEN, LAST_WEEK, LAST_WEEK_LEN)) {
             bool boundary_before = (i == 0) || !isalnum((unsigned char)content[i - 1]);
-            bool boundary_after =
-                (i + LAST_WEEK_LEN >= content_len) ||
-                !isalnum((unsigned char)content[i + LAST_WEEK_LEN]);
+            bool boundary_after = (i + LAST_WEEK_LEN >= content_len) ||
+                                  !isalnum((unsigned char)content[i + LAST_WEEK_LEN]);
             if (boundary_before && boundary_after) {
                 memcpy(out + pos, COUPLE_WEEKS, COUPLE_WEEKS_LEN);
                 pos += COUPLE_WEEKS_LEN;
@@ -197,9 +178,8 @@ static char *apply_fuzz(hu_allocator_t *alloc, const char *content, size_t conte
             if (i + DAYS[d].len <= content_len &&
                 strncasecmp_eq(content + i, DAYS[d].len, DAYS[d].name, DAYS[d].len)) {
                 bool boundary_before = (i == 0) || !isalnum((unsigned char)content[i - 1]);
-                bool boundary_after =
-                    (i + DAYS[d].len >= content_len) ||
-                    !isalnum((unsigned char)content[i + DAYS[d].len]);
+                bool boundary_after = (i + DAYS[d].len >= content_len) ||
+                                      !isalnum((unsigned char)content[i + DAYS[d].len]);
                 if (boundary_before && boundary_after) {
                     memcpy(out + pos, DAYS[d].replacement, DAYS[d].repl_len);
                     pos += DAYS[d].repl_len;
@@ -214,7 +194,7 @@ static char *apply_fuzz(hu_allocator_t *alloc, const char *content, size_t conte
         /* Single digits */
         if (content[i] >= '0' && content[i] <= '9') {
             bool standalone = (i == 0 || !isdigit((unsigned char)content[i - 1])) &&
-                             (i + 1 >= content_len || !isdigit((unsigned char)content[i + 1]));
+                              (i + 1 >= content_len || !isdigit((unsigned char)content[i + 1]));
             if (standalone) {
                 apply_fuzz_digit(out, &pos, content[i]);
                 continue;
@@ -261,9 +241,8 @@ static void first_n_words(const char *s, size_t len, size_t n, char *out, size_t
     *out_len = pos;
 }
 
-char *hu_degradation_apply(hu_allocator_t *alloc, const char *content,
-                           size_t content_len, hu_degradation_type_t type,
-                           uint32_t seed, size_t *out_len) {
+char *hu_degradation_apply(hu_allocator_t *alloc, const char *content, size_t content_len,
+                           hu_degradation_type_t type, uint32_t seed, size_t *out_len) {
     if (!alloc || !content || !out_len)
         return NULL;
 
@@ -355,8 +334,7 @@ char *hu_memory_degradation_apply(hu_allocator_t *alloc, const char *content, si
     }
 }
 
-char *hu_degradation_process(hu_allocator_t *alloc, const char *content,
-                             size_t content_len,
+char *hu_degradation_process(hu_allocator_t *alloc, const char *content, size_t content_len,
                              const hu_degradation_config_t *config, uint32_t seed,
                              size_t *out_len) {
     if (!alloc || !content || !out_len)
@@ -370,11 +348,11 @@ char *hu_degradation_process(hu_allocator_t *alloc, const char *content,
     }
 
     hu_degradation_config_t cfg = config ? *config
-                                        : (hu_degradation_config_t){
-                                              .perfect_rate = 0.90,
-                                              .fuzz_rate = 0.05,
-                                              .ask_rate = 0.05,
-                                          };
+                                         : (hu_degradation_config_t){
+                                               .perfect_rate = 0.90,
+                                               .fuzz_rate = 0.05,
+                                               .ask_rate = 0.05,
+                                           };
     hu_degradation_type_t t = hu_degradation_roll(&cfg, seed);
     return hu_degradation_apply(alloc, content, content_len, t, seed, out_len);
 }
@@ -389,13 +367,12 @@ double hu_forgetting_retention(double hours_since_recall, uint32_t rehearsal_cou
     uint32_t r = (rehearsal_count == 0) ? 1 : rehearsal_count;
     double effective_stability =
         config->stability_factor * pow((double)r, 1.0 / (double)config->rehearsal_boost);
-    double retention =
-        exp(-hours_since_recall / (effective_stability * 24.0));
+    double retention = exp(-hours_since_recall / (effective_stability * 24.0));
     return retention > config->min_retention ? retention : config->min_retention;
 }
 
 bool hu_forgetting_should_recall(double hours_since_recall, uint32_t rehearsal_count,
-                                const hu_forgetting_config_t *config, uint32_t seed) {
+                                 const hu_forgetting_config_t *config, uint32_t seed) {
     double retention = hu_forgetting_retention(hours_since_recall, rehearsal_count, config);
     uint32_t state = seed;
     double roll = lcg_roll(&state);
@@ -406,12 +383,11 @@ hu_error_t hu_forgetting_create_table_sql(char *buf, size_t cap, size_t *out_len
     if (!buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
 
-    static const char sql[] =
-        "CREATE TABLE IF NOT EXISTS memory_recall_log (\n"
-        "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        "    memory_id INTEGER NOT NULL,\n"
-        "    recalled_at INTEGER NOT NULL\n"
-        ")";
+    static const char sql[] = "CREATE TABLE IF NOT EXISTS memory_recall_log (\n"
+                              "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+                              "    memory_id INTEGER NOT NULL,\n"
+                              "    recalled_at INTEGER NOT NULL\n"
+                              ")";
 
     size_t len = sizeof(sql) - 1;
     if (len >= cap)
@@ -421,8 +397,8 @@ hu_error_t hu_forgetting_create_table_sql(char *buf, size_t cap, size_t *out_len
     return HU_OK;
 }
 
-hu_error_t hu_forgetting_log_recall_sql(int64_t memory_id, uint64_t recalled_at,
-                                        char *buf, size_t cap, size_t *out_len) {
+hu_error_t hu_forgetting_log_recall_sql(int64_t memory_id, uint64_t recalled_at, char *buf,
+                                        size_t cap, size_t *out_len) {
     if (!buf || !out_len || cap < 128)
         return HU_ERR_INVALID_ARGUMENT;
 

@@ -4,6 +4,7 @@
  */
 
 #include "human/intelligence/weakness.h"
+#include "human/core/string.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/eval.h"
@@ -13,48 +14,33 @@
 
 #define WEAKNESS_TYPE_COUNT 5
 
-static int str_contains_ci(const char *haystack, size_t hay_len,
-                          const char *needle, size_t needle_len) {
-    if (needle_len == 0 || needle_len > hay_len) return 0;
-    for (size_t i = 0; i <= hay_len - needle_len; i++) {
-        size_t j = 0;
-        for (; j < needle_len; j++) {
-            if (tolower((unsigned char)haystack[i + j]) !=
-                tolower((unsigned char)needle[j]))
-                break;
-        }
-        if (j == needle_len) return 1;
-    }
-    return 0;
-}
-
 static hu_weakness_type_t classify_by_category(const char *cat) {
     if (!cat || cat[0] == '\0') return HU_WEAKNESS_UNKNOWN;
     size_t len = strlen(cat);
-    if (str_contains_ci(cat, len, "math", 4) ||
-        str_contains_ci(cat, len, "reason", 6) ||
-        str_contains_ci(cat, len, "logic", 5) ||
-        str_contains_ci(cat, len, "arithmetic", 10))
+    if (hu_str_contains_ci(cat, len, "math", 4) ||
+        hu_str_contains_ci(cat, len, "reason", 6) ||
+        hu_str_contains_ci(cat, len, "logic", 5) ||
+        hu_str_contains_ci(cat, len, "arithmetic", 10))
         return HU_WEAKNESS_REASONING;
-    if (str_contains_ci(cat, len, "knowledge", 9) ||
-        str_contains_ci(cat, len, "fact", 4) ||
-        str_contains_ci(cat, len, "trivia", 6) ||
-        str_contains_ci(cat, len, "geo", 3) ||
-        str_contains_ci(cat, len, "history", 7) ||
-        str_contains_ci(cat, len, "science", 7))
+    if (hu_str_contains_ci(cat, len, "knowledge", 9) ||
+        hu_str_contains_ci(cat, len, "fact", 4) ||
+        hu_str_contains_ci(cat, len, "trivia", 6) ||
+        hu_str_contains_ci(cat, len, "geo", 3) ||
+        hu_str_contains_ci(cat, len, "history", 7) ||
+        hu_str_contains_ci(cat, len, "science", 7))
         return HU_WEAKNESS_KNOWLEDGE;
-    if (str_contains_ci(cat, len, "tool", 4) ||
-        str_contains_ci(cat, len, "function", 8) ||
-        str_contains_ci(cat, len, "api", 3))
+    if (hu_str_contains_ci(cat, len, "tool", 4) ||
+        hu_str_contains_ci(cat, len, "function", 8) ||
+        hu_str_contains_ci(cat, len, "api", 3))
         return HU_WEAKNESS_TOOL_USE;
-    if (str_contains_ci(cat, len, "code", 4) ||
-        str_contains_ci(cat, len, "coding", 6))
+    if (hu_str_contains_ci(cat, len, "code", 4) ||
+        hu_str_contains_ci(cat, len, "coding", 6))
         return HU_WEAKNESS_TOOL_USE;  /* map to TOOL_USE for now */
-    if (str_contains_ci(cat, len, "format", 6) ||
-        str_contains_ci(cat, len, "output", 6) ||
-        str_contains_ci(cat, len, "style", 5) ||
-        str_contains_ci(cat, len, "instruction", 11) ||
-        str_contains_ci(cat, len, "follow", 6))
+    if (hu_str_contains_ci(cat, len, "format", 6) ||
+        hu_str_contains_ci(cat, len, "output", 6) ||
+        hu_str_contains_ci(cat, len, "style", 5) ||
+        hu_str_contains_ci(cat, len, "instruction", 11) ||
+        hu_str_contains_ci(cat, len, "follow", 6))
         return HU_WEAKNESS_FORMAT;
     return HU_WEAKNESS_UNKNOWN;
 }

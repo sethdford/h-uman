@@ -81,17 +81,19 @@ typedef struct hu_scheduler_config {
  * configuration for the production daemon's HTTP-based mlx_local
  * provider when it talks to a streaming mlx-server.
  *
- * `streaming_enabled` (default FALSE — revised T3 2026-05-26): opts
- * INTO the SSE-streaming path for chat completions when true; uses
- * the buffered response shape when false. The default is FALSE
- * because mlx-server.py's `strip_thought_channels` postprocessor
- * currently only runs in the non-streaming response shape, so the
- * streaming path leaks raw `<|channel>thought` markers as visible
- * text. agent_stream.c carried an unconditional workaround forcing
- * this off since 2026-05-25; T3 replaced that workaround with this
- * gate so operators can opt IN once they've verified their server
- * strips thought markers in streaming mode (or once a client-side
- * filter ships in T4+).
+ * `streaming_enabled` (default TRUE — revised after T4 harmony_filter
+ * shipped): selects the SSE-streaming path for chat completions when
+ * true; uses the buffered response shape when false. The default was
+ * FALSE while mlx-server.py's `strip_thought_channels` postprocessor
+ * only ran in the non-streaming shape, so the streaming path leaked
+ * raw `<|channel>thought` markers as visible text. That precondition
+ * is now satisfied: the T4 client-side harmony filter
+ * (src/util/harmony_filter.c) strips thought channels in the streaming
+ * path too, AND the persona/voice guards run on the streamed result.
+ * So the default UX is now streaming (lower first-token latency) and
+ * operators opt OUT via {"mlx_local": {"streaming_enabled": false}}.
+ * See src/config_merge.c (the merge default) and src/config_validate.c
+ * for the authoritative default + the rationale comment.
  *
  * `first_token_budget_ms` (default 500): operator-visible budget for
  * the first SSE event to arrive after POST send. If the actual first-
@@ -103,7 +105,7 @@ typedef struct hu_scheduler_config {
  * line at startup confirming the opt-in state — operators should see
  * positive confirmation of the latency win, not just a silent flip. */
 typedef struct hu_mlx_local_config {
-    bool streaming_enabled;    /* default false (see comment above) */
+    bool streaming_enabled;    /* default true (see comment above) */
     int first_token_budget_ms; /* default 500; <=0 keeps the default */
 } hu_mlx_local_config_t;
 

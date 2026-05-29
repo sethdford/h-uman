@@ -592,8 +592,53 @@ static void rlaif_gate_rejects_null(void) {
     HU_ASSERT_FALSE(hu_rlaif_should_apply_style_patch(NULL));
 }
 
+/* Judge score parser — the boundary that decides whether a pair is SCORED or
+ * SKIPPED. A failed/empty/non-numeric judge reply must return false so the
+ * caller skips the pair instead of fabricating a neutral-50 tie (which is what
+ * manufactured the alignment=0 / loss=ln2 noise). */
+static void judge_parse_extracts_number(void) {
+    double s = -1.0;
+    HU_ASSERT_TRUE(hu_dpo_parse_judge_score("100", 3, &s));
+    HU_ASSERT_EQ((int)s, 100);
+}
+
+static void judge_parse_leading_text_then_number(void) {
+    double s = -1.0;
+    HU_ASSERT_TRUE(hu_dpo_parse_judge_score("Score: 85", 9, &s));
+    HU_ASSERT_EQ((int)s, 85);
+}
+
+static void judge_parse_empty_returns_false(void) {
+    /* The failure signature: empty reply (timeout / thinking-only) must NOT
+     * yield a score, so the caller skips rather than scoring a fake tie. */
+    double s = 50.0;
+    HU_ASSERT_FALSE(hu_dpo_parse_judge_score("", 0, &s));
+}
+
+static void judge_parse_no_digit_returns_false(void) {
+    double s = 50.0;
+    HU_ASSERT_FALSE(hu_dpo_parse_judge_score("no idea", 7, &s));
+}
+
+static void judge_parse_null_returns_false(void) {
+    double s = 50.0;
+    HU_ASSERT_FALSE(hu_dpo_parse_judge_score(NULL, 5, &s));
+}
+
+static void judge_parse_clamps_above_100(void) {
+    double s = -1.0;
+    HU_ASSERT_TRUE(hu_dpo_parse_judge_score("9999", 4, &s));
+    HU_ASSERT_EQ((int)s, 100);
+}
+
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
+    HU_RUN_TEST(judge_parse_extracts_number);
+    HU_RUN_TEST(judge_parse_leading_text_then_number);
+    HU_RUN_TEST(judge_parse_empty_returns_false);
+    HU_RUN_TEST(judge_parse_no_digit_returns_false);
+    HU_RUN_TEST(judge_parse_null_returns_false);
+    HU_RUN_TEST(judge_parse_clamps_above_100);
     HU_RUN_TEST(rlaif_gate_rejects_noise_batch);
     HU_RUN_TEST(rlaif_gate_rejects_low_alignment);
     HU_RUN_TEST(rlaif_gate_accepts_at_threshold);

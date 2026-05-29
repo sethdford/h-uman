@@ -14,6 +14,7 @@ void run_data_loader_tests(void);
 void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
+void run_agent_app_config_tests(void);
 void run_task_store_tests(void);
 void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
@@ -22,6 +23,7 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_string_ci_tests(void);
 void run_rand_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
@@ -68,6 +70,7 @@ void run_api_key_tests(void);
 void run_channel_tests(void);
 void run_channel_class_tests(void);
 void run_channel_format_tests(void);
+void run_channel_behavior_class_tests(void);
 void run_channel_rate_limit_tests(void);
 void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
@@ -396,6 +399,7 @@ void run_outbound_crosstalk_tests(void);
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 #ifdef HU_ENABLE_SQLITE
+void run_boundary_repo_tests(void);
 void run_outbound_crosstalk_sqlite_tests(void);
 /* Sprint 60 E2E SOTA proof — full pipeline through a file-based db. */
 void run_outbound_e2e_sota_proof_tests(void);
@@ -785,6 +789,7 @@ void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+void run_daemon_director_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
  * gate here so the forward decl + call site don't reference a missing
@@ -964,6 +969,7 @@ int main(int argc, char **argv) {
     run_agent_modules_tests();
     run_agent_definition_tests();
     run_agent_git_tests();
+    run_agent_app_config_tests();
     run_task_store_tests();
     run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
@@ -972,6 +978,7 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_string_ci_tests();
     run_rand_tests();
     run_log_once_tests();
     run_vertex_adc_tests();
@@ -1018,6 +1025,7 @@ int main(int argc, char **argv) {
     run_channel_tests();
     run_channel_class_tests();
     run_channel_format_tests();
+    run_channel_behavior_class_tests();
     run_channel_rate_limit_tests();
     run_channel_http_tests();
     run_webhook_channel_tests();
@@ -1314,6 +1322,7 @@ int main(int argc, char **argv) {
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
 #ifdef HU_ENABLE_SQLITE
+    run_boundary_repo_tests();
     run_outbound_crosstalk_sqlite_tests();
     run_outbound_e2e_sota_proof_tests();
     run_burst_egress_tests();
@@ -1687,6 +1696,7 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+    run_daemon_director_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
 #endif

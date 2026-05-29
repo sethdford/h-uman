@@ -1456,6 +1456,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * impossible without breaking tests/test_agent_turn_request_overrides.c. */
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
 
+        /* Realtime streaming hint (gemma-realtime Option B): casual tiers stream
+         * incrementally for a live feel; analytical/deep stay buffered+cleaned so
+         * bare-markdown deliberation never leaks. Inert unless on-device streaming
+         * is operator-enabled and the provider is the OpenAI-compatible local
+         * server, which is the only consumer of stream_strip on the wire. */
+        req.stream_strip = hu_model_tier_stream_strip(early_tier);
+
         /* Buffer provider text until the final content clears guards. Tool
          * events still stream through stream_chunk_to_event_cb. */
         bool quality_buffered = (on_event != NULL);

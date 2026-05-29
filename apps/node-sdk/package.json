@@ -19,7 +19,7 @@
     "directory": "apps/node-sdk"
   },
   "scripts": {
-    "test": "node --test test/smoke.test.js test/binary.test.js"
+    "test": "node --test test/smoke.test.js test/binary.test.js test/fallback.test.js"
   },
   "engines": {
     "node": ">=18.0.0"

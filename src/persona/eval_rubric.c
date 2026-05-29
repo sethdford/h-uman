@@ -8,6 +8,7 @@
  */
 
 #include "human/persona/eval_rubric.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -35,23 +36,6 @@ static size_t safe_strlen(const char *s) {
 }
 
 /* ── Helper: case-insensitive substring match with word boundaries ── */
-
-static bool str_contains_word_ci(const char *s, const char *needle) {
-    if (!s || !needle || !*needle)
-        return false;
-    size_t nlen = strlen(needle), slen = strlen(s);
-    if (slen < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= slen; i++) {
-        if (strncasecmp(s + i, needle, nlen) != 0)
-            continue;
-        bool left_ok = (i == 0) || !isalnum((unsigned char)s[i - 1]);
-        bool right_ok = (i + nlen == slen) || !isalnum((unsigned char)s[i + nlen]);
-        if (left_ok && right_ok)
-            return true;
-    }
-    return false;
-}
 
 /* ── Helper: classify emoji (rough heuristic) ──────────────────────── */
 
@@ -198,39 +182,39 @@ int hu_eval_rubric_formality_match(const char *incoming, const char *reply_basel
 
     /* Detect incoming formality tier */
     bool incoming_formal =
-        str_contains_word_ci(incoming, "professional") ||
-        str_contains_word_ci(incoming, "formal") || str_contains_word_ci(incoming, "proper") ||
-        str_contains_word_ci(incoming, "official") || str_contains_word_ci(incoming, "business");
+        hu_str_contains_word_ci(incoming, "professional") ||
+        hu_str_contains_word_ci(incoming, "formal") || hu_str_contains_word_ci(incoming, "proper") ||
+        hu_str_contains_word_ci(incoming, "official") || hu_str_contains_word_ci(incoming, "business");
 
     bool incoming_casual =
-        str_contains_word_ci(incoming, "casual") || str_contains_word_ci(incoming, "chill") ||
-        str_contains_word_ci(incoming, "laid-back") || str_contains_word_ci(incoming, "relaxed") ||
-        str_contains_word_ci(incoming, "informal");
+        hu_str_contains_word_ci(incoming, "casual") || hu_str_contains_word_ci(incoming, "chill") ||
+        hu_str_contains_word_ci(incoming, "laid-back") || hu_str_contains_word_ci(incoming, "relaxed") ||
+        hu_str_contains_word_ci(incoming, "informal");
 
     /* Detect formality tier in both responses */
-    bool baseline_formal = str_contains_word_ci(reply_baseline, "professional") ||
-                           str_contains_word_ci(reply_baseline, "formal") ||
-                           str_contains_word_ci(reply_baseline, "proper") ||
-                           str_contains_word_ci(reply_baseline, "official") ||
-                           str_contains_word_ci(reply_baseline, "business");
+    bool baseline_formal = hu_str_contains_word_ci(reply_baseline, "professional") ||
+                           hu_str_contains_word_ci(reply_baseline, "formal") ||
+                           hu_str_contains_word_ci(reply_baseline, "proper") ||
+                           hu_str_contains_word_ci(reply_baseline, "official") ||
+                           hu_str_contains_word_ci(reply_baseline, "business");
 
-    bool baseline_casual = str_contains_word_ci(reply_baseline, "casual") ||
-                           str_contains_word_ci(reply_baseline, "chill") ||
-                           str_contains_word_ci(reply_baseline, "laid-back") ||
-                           str_contains_word_ci(reply_baseline, "relaxed") ||
-                           str_contains_word_ci(reply_baseline, "informal");
+    bool baseline_casual = hu_str_contains_word_ci(reply_baseline, "casual") ||
+                           hu_str_contains_word_ci(reply_baseline, "chill") ||
+                           hu_str_contains_word_ci(reply_baseline, "laid-back") ||
+                           hu_str_contains_word_ci(reply_baseline, "relaxed") ||
+                           hu_str_contains_word_ci(reply_baseline, "informal");
 
-    bool persona_formal = str_contains_word_ci(reply_persona, "professional") ||
-                          str_contains_word_ci(reply_persona, "formal") ||
-                          str_contains_word_ci(reply_persona, "proper") ||
-                          str_contains_word_ci(reply_persona, "official") ||
-                          str_contains_word_ci(reply_persona, "business");
+    bool persona_formal = hu_str_contains_word_ci(reply_persona, "professional") ||
+                          hu_str_contains_word_ci(reply_persona, "formal") ||
+                          hu_str_contains_word_ci(reply_persona, "proper") ||
+                          hu_str_contains_word_ci(reply_persona, "official") ||
+                          hu_str_contains_word_ci(reply_persona, "business");
 
-    bool persona_casual = str_contains_word_ci(reply_persona, "casual") ||
-                          str_contains_word_ci(reply_persona, "chill") ||
-                          str_contains_word_ci(reply_persona, "laid-back") ||
-                          str_contains_word_ci(reply_persona, "relaxed") ||
-                          str_contains_word_ci(reply_persona, "informal");
+    bool persona_casual = hu_str_contains_word_ci(reply_persona, "casual") ||
+                          hu_str_contains_word_ci(reply_persona, "chill") ||
+                          hu_str_contains_word_ci(reply_persona, "laid-back") ||
+                          hu_str_contains_word_ci(reply_persona, "relaxed") ||
+                          hu_str_contains_word_ci(reply_persona, "informal");
 
     /* Score based on match */
     if (incoming_formal) {

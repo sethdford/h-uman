@@ -707,6 +707,7 @@ set(HU_CORE_SOURCES
     src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
+    src/agent/app_config.c
     src/agent/dispatcher.c
     src/agent/compaction.c
     src/agent/spawn.c
@@ -1154,6 +1155,7 @@ set(HU_CORE_SOURCES
     src/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
+    src/channels/behavior_class.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
     src/channels/channel_http.c
@@ -1178,6 +1180,7 @@ set(HU_CORE_SOURCES
     src/daemon_cron.c
     src/daemon_routing.c
     src/daemon_proactive.c
+    src/daemon/daemon_director.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
@@ -1528,6 +1531,7 @@ endif()
 # Phase 7 feeds: OAuth token storage (oauth_tokens table)
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
+        src/memory/repos/boundary_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3109,6 +3113,7 @@ set(HU_TEST_SOURCES
     tests/test_main.c
     tests/test_agent_definition.c
     tests/test_agent_git.c
+    tests/test_agent_app_config.c
     tests/test_bg_registry.c
     tests/test_canvas_render.c
     tests/test_canvas_e2e.c
@@ -3195,6 +3200,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
     tests/test_vertex_adc.c
@@ -3238,6 +3244,7 @@ set(HU_TEST_SOURCES
     tests/test_api_key.c
     tests/test_channel.c
     tests/test_channel_format.c
+    tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
     tests/test_channel_http.c
     tests/test_webhook_channel.c
@@ -3268,6 +3275,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
     tests/test_config_migrate.c
@@ -3774,6 +3782,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_stats_e2e.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_pipeline_perf.c)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
+    list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
 endif()
 
 # SOTA capability tests

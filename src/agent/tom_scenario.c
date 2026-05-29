@@ -1,4 +1,5 @@
 #include "human/agent/tom_scenario.h"
+#include "human/core/string.h"
 
 #include "human/core/json.h"
 #include "human/memory/belief.h"
@@ -167,34 +168,6 @@ hu_error_t hu_tom_b8_synthetic_pack_run_smoke(hu_allocator_t *alloc, const char 
     return HU_OK;
 }
 
-static unsigned char tom_ascii_tolower(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + 32u) : c;
-}
-
-static bool tom_substr_ci_bounded(const char *s, size_t slen, const char *needle) {
-    if (!s || !needle || !needle[0]) {
-        return false;
-    }
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > slen) {
-        return false;
-    }
-    for (size_t i = 0; i + nlen <= slen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            if (tom_ascii_tolower((unsigned char)s[i + j]) !=
-                tom_ascii_tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void wm_tom_merge_field(char *field, size_t cap, const char *incoming) {
     if (!field || cap == 0 || !incoming || !incoming[0]) {
         return;
@@ -221,9 +194,10 @@ static void wm_tom_merge_field(char *field, size_t cap, const char *incoming) {
     field[lo + inlen] = '\0';
 }
 
-void hu_world_model_merge_tom_scenario(hu_world_model_t *wm, const char *premise, size_t premise_len,
-                                       const char *question, size_t question_len,
-                                       const char *category, size_t category_len, int64_t now_ms) {
+void hu_world_model_merge_tom_scenario(hu_world_model_t *wm, const char *premise,
+                                       size_t premise_len, const char *question,
+                                       size_t question_len, const char *category,
+                                       size_t category_len, int64_t now_ms) {
     if (!wm || !premise || premise_len == 0 || !question || question_len == 0 || !category ||
         category_len == 0) {
         return;
@@ -269,7 +243,7 @@ bool hu_tom_scenario_gold_matches_response(const char *gold_answer, const char *
             }
             memcpy(seg, seg_start, seglen);
             seg[seglen] = '\0';
-            if (tom_substr_ci_bounded(response, response_len, seg)) {
+            if (hu_str_contains_ci_cstr(response, response_len, seg)) {
                 matched_long++;
             }
         }
@@ -282,11 +256,11 @@ bool hu_tom_scenario_gold_matches_response(const char *gold_answer, const char *
         return matched_long == long_segments;
     }
 
-    return tom_substr_ci_bounded(response, response_len, gold_answer);
+    return hu_str_contains_ci_cstr(response, response_len, gold_answer);
 }
 
-static int tom_json_pack_score_gold_one(const char *premise, const char *question, const char *category,
-                                        const char *gold) {
+static int tom_json_pack_score_gold_one(const char *premise, const char *question,
+                                        const char *category, const char *gold) {
     hu_theory_of_mind_t tom;
     hu_tom_scenario_synthesize(premise, strlen(premise), question, strlen(question), category,
                                strlen(category), 1735689600000LL, &tom);

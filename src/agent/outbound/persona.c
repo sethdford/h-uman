@@ -47,6 +47,7 @@
  */
 
 #include "human/agent/outbound_pipeline.h"
+#include "human/core/string.h"
 #include "human/eval/shape.h"
 
 #include <ctype.h>
@@ -120,22 +121,6 @@ static const char *const AI_SELF_AWARE[] = {
 };
 
 /* Case-insensitive substring search. */
-static int contains_ci(const char *haystack, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hlen)
-        return 0;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        size_t k = 0;
-        while (k < nlen &&
-               tolower((unsigned char)haystack[i + k]) == tolower((unsigned char)needle[k])) {
-            k++;
-        }
-        if (k == nlen)
-            return 1;
-    }
-    return 0;
-}
-
 static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
                                          hu_outbound_context_t *ctx) {
     (void)self;
@@ -144,7 +129,7 @@ static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self, hu_
         return hu_outbound_verdict_send();
 
     for (size_t i = 0; PROJECT_JARGON[i]; i++) {
-        if (contains_ci(msg->content, msg->content_len, PROJECT_JARGON[i])) {
+        if (hu_str_contains_ci_cstr(msg->content, msg->content_len, PROJECT_JARGON[i])) {
             return hu_outbound_verdict_regenerate(
                 "persona_project_jargon",
                 "Skip the project talk. Reply like Seth would to family — "
@@ -153,7 +138,7 @@ static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self, hu_
     }
 
     for (size_t i = 0; AI_SELF_AWARE[i]; i++) {
-        if (contains_ci(msg->content, msg->content_len, AI_SELF_AWARE[i])) {
+        if (hu_str_contains_ci_cstr(msg->content, msg->content_len, AI_SELF_AWARE[i])) {
             return hu_outbound_verdict_regenerate(
                 "persona_ai_self_aware",
                 "Don't narrate yourself. Write what Seth would say, not what "

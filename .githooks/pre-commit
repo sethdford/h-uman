@@ -165,3 +165,55 @@ if [ -n "$staged_doctor_inputs" ] && [ -x "scripts/check-doctor-exit-codes-in-sy
         exit 1
     fi
 fi
+
+# DDD bounded-context erosion guards (Phase 0). Each is a ratchet: green today,
+# fails only on NEW boundary violations. See
+# docs/plans/2026-05-29-ddd-bounded-contexts/phase-0-erosion-guards-and-renames.md
+# and the matching .claude/rules/*.md.
+
+# T1: no new file may #include <sqlite3.h> outside the engine/repo layers.
+staged_src_c=$(git diff --cached --name-only --diff-filter=ACM -- 'src/**/*.c' 'src/*.c' 'src/**/*.h')
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-sqlite-includer-ratchet.sh" ]; then
+    if ! scripts/check-sqlite-includer-ratchet.sh; then
+        echo ""
+        echo "Pre-commit blocked: a new file added #include <sqlite3.h>."
+        echo "Use a memory repository — see .claude/rules/sqlite-includer-ratchet.md."
+        exit 1
+    fi
+fi
+
+# Edge isolation: a concrete channel must not depend on a different channel.
+staged_channels=$(git diff --cached --name-only --diff-filter=ACM -- 'src/channels/*.c')
+if [ -n "$staged_channels" ] && [ -x "scripts/check-edge-context-isolation.sh" ]; then
+    if ! scripts/check-edge-context-isolation.sh; then
+        echo ""
+        echo "Pre-commit blocked: new cross-channel dependency."
+        echo "See .claude/rules/edge-context-isolation.md."
+        exit 1
+    fi
+fi
+
+# Agent-core boundary: no provider factory / hardcoded channel-name memcmp.
+staged_agent=$(git diff --cached --name-only --diff-filter=ACM -- 'src/agent/*.c' 'src/agent/**/*.c')
+if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
+    if ! scripts/check-agent-core-boundary.sh; then
+        echo ""
+        echo "Pre-commit blocked: agent-core boundary violation."
+        echo "See .claude/rules/agent-core-boundary.md."
+        exit 1
+    fi
+fi
+
+# Docs frontmatter gate. Every docs/**/*.md (except docs/plans/, which the
+# check skips by default) must start with a line-1 `---` YAML frontmatter block.
+# Shifts the CI doc-fleet frontmatter failure left to commit time so new docs
+# can't land without frontmatter. Fires when any docs/*.md is staged.
+staged_docs=$(git diff --cached --name-only --diff-filter=ACM -- 'docs/*.md' 'docs/**/*.md')
+if [ -n "$staged_docs" ] && [ -x "scripts/check-docs-frontmatter.sh" ]; then
+    if ! bash scripts/check-docs-frontmatter.sh; then
+        echo ""
+        echo "Pre-commit blocked: a docs/ Markdown file is missing line-1 YAML frontmatter."
+        echo "Add a '---' frontmatter block (title:, etc.) at the top. doc-fleet enforces this in CI."
+        exit 1
+    fi
+fi

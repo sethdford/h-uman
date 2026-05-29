@@ -10,43 +10,26 @@
 #include <string.h>
 #include <time.h>
 
-static bool contains_keyword(const char *title, size_t title_len, const char *keyword) {
-    size_t kw_len = strlen(keyword);
-    if (kw_len > title_len)
-        return false;
-    for (size_t i = 0; i <= title_len - kw_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < kw_len; j++) {
-            if (tolower((unsigned char)title[i + j]) != tolower((unsigned char)keyword[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
 
 hu_event_type_t hu_calendar_detect_type(const char *title, size_t title_len) {
     if (!title || title_len == 0)
         return HU_EVENT_OTHER;
 
-    if (contains_keyword(title, title_len, "birthday") ||
-        contains_keyword(title, title_len, "bday"))
+    if (hu_str_contains_ci_cstr(title, title_len, "birthday") ||
+        hu_str_contains_ci_cstr(title, title_len, "bday"))
         return HU_EVENT_BIRTHDAY;
-    if (contains_keyword(title, title_len, "meeting") ||
-        contains_keyword(title, title_len, "call") ||
-        contains_keyword(title, title_len, "standup") || contains_keyword(title, title_len, "sync"))
+    if (hu_str_contains_ci_cstr(title, title_len, "meeting") ||
+        hu_str_contains_ci_cstr(title, title_len, "call") ||
+        hu_str_contains_ci_cstr(title, title_len, "standup") || hu_str_contains_ci_cstr(title, title_len, "sync"))
         return HU_EVENT_MEETING;
-    if (contains_keyword(title, title_len, "remind") || contains_keyword(title, title_len, "todo"))
+    if (hu_str_contains_ci_cstr(title, title_len, "remind") || hu_str_contains_ci_cstr(title, title_len, "todo"))
         return HU_EVENT_REMINDER;
-    if (contains_keyword(title, title_len, "deadline") || contains_keyword(title, title_len, "due"))
+    if (hu_str_contains_ci_cstr(title, title_len, "deadline") || hu_str_contains_ci_cstr(title, title_len, "due"))
         return HU_EVENT_DEADLINE;
-    if (contains_keyword(title, title_len, "dinner") ||
-        contains_keyword(title, title_len, "lunch") ||
-        contains_keyword(title, title_len, "party") ||
-        contains_keyword(title, title_len, "hangout"))
+    if (hu_str_contains_ci_cstr(title, title_len, "dinner") ||
+        hu_str_contains_ci_cstr(title, title_len, "lunch") ||
+        hu_str_contains_ci_cstr(title, title_len, "party") ||
+        hu_str_contains_ci_cstr(title, title_len, "hangout"))
         return HU_EVENT_SOCIAL;
 
     return HU_EVENT_OTHER;

@@ -124,21 +124,11 @@ static int ctx_strncasecmp(const char *a, const char *b, size_t n) {
     return 0;
 }
 
-static bool condition_contains(const char *condition, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (len < nlen)
-        return false;
-    for (size_t i = 0; i <= len - nlen; i++) {
-        if (ctx_strncasecmp(condition + i, needle, nlen) == 0)
-            return true;
-    }
-    return false;
-}
 
 bool hu_weather_is_notable(const char *condition, size_t len, double temp_f) {
     if (condition && len > 0) {
-        if (condition_contains(condition, len, "snow") || condition_contains(condition, len, "storm") ||
-            condition_contains(condition, len, "hurricane"))
+        if (hu_str_contains_ci_cstr(condition, len, "snow") || hu_str_contains_ci_cstr(condition, len, "storm") ||
+            hu_str_contains_ci_cstr(condition, len, "hurricane"))
             return true;
     }
     if (temp_f > 100.0 || temp_f < 10.0)

@@ -710,6 +710,25 @@ static void conversation_floor_applies_to_judge_fallback(void) {
     HU_ASSERT(sel.tier >= HU_TIER_CONVERSATIONAL);
 }
 
+/* stream_strip mapping: casual tiers stream incrementally (raw), deep tiers
+ * stay buffered/clean. Tri-state: -1 = incremental, +1 = buffer, 0 = no opinion.
+ * Pure function — no provider, no server needed (security-predicate-extraction). */
+static void stream_strip_reflexive_streams_incrementally(void) {
+    HU_ASSERT_EQ(hu_model_tier_stream_strip(HU_TIER_REFLEXIVE), -1);
+}
+
+static void stream_strip_conversational_streams_incrementally(void) {
+    HU_ASSERT_EQ(hu_model_tier_stream_strip(HU_TIER_CONVERSATIONAL), -1);
+}
+
+static void stream_strip_analytical_stays_buffered(void) {
+    HU_ASSERT_EQ(hu_model_tier_stream_strip(HU_TIER_ANALYTICAL), 1);
+}
+
+static void stream_strip_deep_stays_buffered(void) {
+    HU_ASSERT_EQ(hu_model_tier_stream_strip(HU_TIER_DEEP), 1);
+}
+
 void run_model_router_tests(void) {
     HU_TEST_SUITE("Model Router");
 
@@ -808,4 +827,10 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(conversation_floor_zero_allows_reflexive);
     HU_RUN_TEST(conversation_floor_does_not_downgrade_higher);
     HU_RUN_TEST(conversation_floor_applies_to_judge_fallback);
+
+    /* stream_strip tier mapping (realtime streaming SOTA) */
+    HU_RUN_TEST(stream_strip_reflexive_streams_incrementally);
+    HU_RUN_TEST(stream_strip_conversational_streams_incrementally);
+    HU_RUN_TEST(stream_strip_analytical_stays_buffered);
+    HU_RUN_TEST(stream_strip_deep_stays_buffered);
 }

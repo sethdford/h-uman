@@ -1,59 +1,33 @@
+#include "human/memory/compression.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
-#include "human/memory/compression.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
 #define HU_COMPRESSION_ESCAPE_BUF 1024
-#define HU_COMPRESSION_SQL_BUF 4096
+#define HU_COMPRESSION_SQL_BUF    4096
 
 static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len) {
     (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
 }
 
-static int tolower_char(unsigned char c) {
-    return tolower(c);
-}
-
-static bool strncasecmp_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
-    if (a_len != b_len)
-        return false;
-    for (size_t i = 0; i < a_len; i++) {
-        if (tolower_char((unsigned char)a[i]) != tolower_char((unsigned char)b[i]))
-            return false;
-    }
-    return true;
-}
-
-static bool message_contains(const char *msg, size_t msg_len, const char *needle,
-                             size_t needle_len) {
-    if (needle_len == 0 || needle_len > msg_len)
-        return false;
-    for (size_t i = 0; i + needle_len <= msg_len; i++) {
-        if (strncasecmp_eq(msg + i, needle_len, needle, needle_len))
-            return true;
-    }
-    return false;
-}
-
 hu_error_t hu_compression_create_table_sql(char *buf, size_t cap, size_t *out_len) {
     if (!buf || !out_len || cap < 512)
         return HU_ERR_INVALID_ARGUMENT;
-    static const char sql[] =
-        "CREATE TABLE IF NOT EXISTS shared_references (\n"
-        "    id INTEGER PRIMARY KEY,\n"
-        "    contact_id TEXT NOT NULL,\n"
-        "    compressed_form TEXT NOT NULL,\n"
-        "    expanded_meaning TEXT NOT NULL,\n"
-        "    usage_count INTEGER DEFAULT 1,\n"
-        "    strength REAL DEFAULT 0.3,\n"
-        "    created_at INTEGER NOT NULL,\n"
-        "    last_used_at INTEGER,\n"
-        "    compression_stage INTEGER DEFAULT 1,\n"
-        "    UNIQUE(contact_id, compressed_form)\n"
-        ")";
+    static const char sql[] = "CREATE TABLE IF NOT EXISTS shared_references (\n"
+                              "    id INTEGER PRIMARY KEY,\n"
+                              "    contact_id TEXT NOT NULL,\n"
+                              "    compressed_form TEXT NOT NULL,\n"
+                              "    expanded_meaning TEXT NOT NULL,\n"
+                              "    usage_count INTEGER DEFAULT 1,\n"
+                              "    strength REAL DEFAULT 0.3,\n"
+                              "    created_at INTEGER NOT NULL,\n"
+                              "    last_used_at INTEGER,\n"
+                              "    compression_stage INTEGER DEFAULT 1,\n"
+                              "    UNIQUE(contact_id, compressed_form)\n"
+                              ")";
     size_t len = sizeof(sql) - 1;
     if (len >= cap)
         return HU_ERR_INVALID_ARGUMENT;
@@ -63,7 +37,7 @@ hu_error_t hu_compression_create_table_sql(char *buf, size_t cap, size_t *out_le
 }
 
 hu_error_t hu_compression_insert_sql(const hu_shared_ref_t *ref, char *buf, size_t cap,
-                                    size_t *out_len) {
+                                     size_t *out_len) {
     if (!ref || !buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
     if (!ref->contact_id || !ref->compressed_form || !ref->expanded_meaning)
@@ -143,8 +117,8 @@ hu_error_t hu_compression_record_usage_sql(int64_t ref_id, uint64_t now_ms, char
 }
 
 size_t hu_compression_find_in_message(const hu_shared_ref_t *refs, size_t ref_count,
-                                      const char *message, size_t msg_len,
-                                      size_t *match_indices, size_t max_matches) {
+                                      const char *message, size_t msg_len, size_t *match_indices,
+                                      size_t max_matches) {
     if (!refs || !message || !match_indices || max_matches == 0)
         return 0;
 
@@ -152,17 +126,16 @@ size_t hu_compression_find_in_message(const hu_shared_ref_t *refs, size_t ref_co
     for (size_t i = 0; i < ref_count && count < max_matches; i++) {
         if (!refs[i].compressed_form || refs[i].compressed_form_len == 0)
             continue;
-        if (message_contains(message, msg_len, refs[i].compressed_form,
-                              refs[i].compressed_form_len)) {
+        if (hu_str_contains_ci(message, msg_len, refs[i].compressed_form,
+                               refs[i].compressed_form_len)) {
             match_indices[count++] = i;
         }
     }
     return count;
 }
 
-bool hu_compression_should_deploy(const hu_shared_ref_t *ref,
-                                  const hu_compression_config_t *config, bool in_conflict,
-                                  uint32_t seed) {
+bool hu_compression_should_deploy(const hu_shared_ref_t *ref, const hu_compression_config_t *config,
+                                  bool in_conflict, uint32_t seed) {
     if (!ref || !config)
         return false;
     if (in_conflict && config->never_during_conflict)
@@ -177,7 +150,7 @@ bool hu_compression_should_deploy(const hu_shared_ref_t *ref,
 }
 
 double hu_compression_decay_strength(double current_strength, uint64_t last_used_ms,
-                                    uint64_t now_ms, double decay_rate_per_week) {
+                                     uint64_t now_ms, double decay_rate_per_week) {
     if (last_used_ms >= now_ms)
         return current_strength;
     uint64_t elapsed_ms = now_ms - last_used_ms;

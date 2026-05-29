@@ -49,20 +49,6 @@ static size_t extract_json_strings(const char *json, size_t json_len, extracted_
     return count;
 }
 
-static bool ci_contains(const char *s, size_t slen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > slen)
-        return false;
-    for (size_t i = 0; i + nlen <= slen; i++) {
-        size_t j = 0;
-        while (j < nlen && tolower((unsigned char)s[i + j]) == tolower((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
-
 static bool has_prefix(const char *s, size_t slen, const char *prefix) {
     size_t plen = strlen(prefix);
     return slen >= plen && memcmp(s, prefix, plen) == 0;
@@ -79,34 +65,34 @@ static uint32_t scan_string(const char *s, size_t len) {
         if (s[i] == ';' || s[i] == '|')
             flags |= HU_ARG_RISK_SHELL_INJECT;
     }
-    if (ci_contains(s, len, "&&"))
+    if (hu_str_contains_ci_cstr(s, len, "&&"))
         flags |= HU_ARG_RISK_SHELL_INJECT;
 
     /* Path traversal */
-    if (ci_contains(s, len, "../") || ci_contains(s, len, "..\\"))
+    if (hu_str_contains_ci_cstr(s, len, "../") || hu_str_contains_ci_cstr(s, len, "..\\"))
         flags |= HU_ARG_RISK_PATH_TRAVERSAL;
-    if (ci_contains(s, len, "/etc/passwd") || ci_contains(s, len, "/etc/shadow"))
+    if (hu_str_contains_ci_cstr(s, len, "/etc/passwd") || hu_str_contains_ci_cstr(s, len, "/etc/shadow"))
         flags |= HU_ARG_RISK_PATH_TRAVERSAL;
 
     /* Suspicious URLs (exfiltration, C2) */
     if (has_prefix(s, len, "http://") || has_prefix(s, len, "https://")) {
-        if (ci_contains(s, len, "ngrok") || ci_contains(s, len, "webhook.site") ||
-            ci_contains(s, len, "requestbin") || ci_contains(s, len, "burpcollaborator"))
+        if (hu_str_contains_ci_cstr(s, len, "ngrok") || hu_str_contains_ci_cstr(s, len, "webhook.site") ||
+            hu_str_contains_ci_cstr(s, len, "requestbin") || hu_str_contains_ci_cstr(s, len, "burpcollaborator"))
             flags |= HU_ARG_RISK_EXFILTRATION;
     }
-    if (ci_contains(s, len, "curl ") || ci_contains(s, len, "wget "))
+    if (hu_str_contains_ci_cstr(s, len, "curl ") || hu_str_contains_ci_cstr(s, len, "wget "))
         flags |= HU_ARG_RISK_URL_SUSPECT;
 
     /* Secret/credential patterns */
-    if (ci_contains(s, len, "api_key") || ci_contains(s, len, "apikey") ||
-        ci_contains(s, len, "secret_key") || ci_contains(s, len, "password"))
+    if (hu_str_contains_ci_cstr(s, len, "api_key") || hu_str_contains_ci_cstr(s, len, "apikey") ||
+        hu_str_contains_ci_cstr(s, len, "secret_key") || hu_str_contains_ci_cstr(s, len, "password"))
         flags |= HU_ARG_RISK_SECRET_LEAK;
     if (has_prefix(s, len, "sk-") || has_prefix(s, len, "ghp_") || has_prefix(s, len, "glpat-"))
         flags |= HU_ARG_RISK_SECRET_LEAK;
 
     /* Prompt injection markers in tool args */
-    if (ci_contains(s, len, "ignore previous") || ci_contains(s, len, "ignore all") ||
-        ci_contains(s, len, "system prompt") || ci_contains(s, len, "you are now"))
+    if (hu_str_contains_ci_cstr(s, len, "ignore previous") || hu_str_contains_ci_cstr(s, len, "ignore all") ||
+        hu_str_contains_ci_cstr(s, len, "system prompt") || hu_str_contains_ci_cstr(s, len, "you are now"))
         flags |= HU_ARG_RISK_PROMPT_INJECT;
 
     return flags;

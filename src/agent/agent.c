@@ -2620,3 +2620,44 @@ hu_error_t hu_agent_reload_config(hu_agent_t *agent, char **summary_out, size_t 
 
     return HU_OK;
 }
+
+/* Phase 4A proof-of-concept: narrow facade over hu_config_t.
+ * Agent turn loop accepts app_config projection instead of full config,
+ * reducing coupling on the 65-substruct god-config. */
+hu_error_t hu_agent_from_app_config(hu_agent_t *out, hu_allocator_t *alloc, hu_provider_t provider,
+                                    const hu_tool_t *tools, size_t tools_count, hu_memory_t *memory,
+                                    hu_session_store_t *session_store, hu_observer_t *observer,
+                                    hu_security_policy_t *policy,
+                                    const hu_agent_app_config_t *app_cfg) {
+    if (!out || !alloc || !provider.vtable || !app_cfg || !app_cfg->default_model)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Build hu_agent_context_config_t from app_cfg projection */
+    hu_agent_context_config_t ctx_cfg = {
+        .token_limit = app_cfg->token_limit,
+        .pressure_warn = app_cfg->pressure_warn,
+        .pressure_compact = app_cfg->pressure_compact,
+        .compact_target = app_cfg->compact_target,
+        .compact_context = app_cfg->compact_context,
+        .llm_compiler_enabled = app_cfg->llm_compiler_enabled,
+        .mcts_planner_enabled = app_cfg->mcts_planner_enabled,
+        .tree_of_thought = app_cfg->tree_of_thought,
+        .constitutional_ai = app_cfg->constitutional_ai,
+        .constitutional_style_rules_enabled = app_cfg->constitutional_style_rules_enabled,
+        .speculative_cache = app_cfg->speculative_cache,
+        .tool_routing_enabled = app_cfg->tool_routing_enabled,
+        .multi_agent = app_cfg->multi_agent,
+        .hula_enabled = app_cfg->hula_enabled,
+        .compaction_use_structured = app_cfg->compaction_use_structured,
+    };
+
+    /* Delegate to hu_agent_from_config with projection fields */
+    return hu_agent_from_config(
+        out, alloc, provider, tools, tools_count, memory, session_store, observer, policy,
+        app_cfg->default_model, app_cfg->default_model_len, app_cfg->default_provider,
+        app_cfg->default_provider_len, app_cfg->temperature, app_cfg->workspace_dir,
+        app_cfg->workspace_dir_len, app_cfg->max_tool_iterations, app_cfg->max_history_messages,
+        app_cfg->auto_save, app_cfg->autonomy_level, NULL,
+        0, /* custom_instructions not projected (used for CLI only) */
+        app_cfg->persona, app_cfg->persona_len, &ctx_cfg);
+}

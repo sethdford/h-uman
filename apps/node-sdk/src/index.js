@@ -34,7 +34,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { writeFile, unlink, mkdtemp } from "node:fs/promises";
+import { writeFile, unlink, mkdtemp, access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -102,20 +103,118 @@ function spawnCapture(bin, argv, timeoutMs = 30000) {
 }
 
 /**
+ * Look up an executable on PATH (a minimal `which`).
+ *
+ * If `name` already contains a path separator it is treated as a
+ * direct path and probed in place. Otherwise each PATH entry is
+ * checked for an executable `name`. Returns the resolved absolute-ish
+ * path, or null if nothing executable is found.
+ *
+ * @param {string} name
+ * @returns {Promise<string|null>}
+ */
+export async function findOnPath(name) {
+  if (name.includes(path.sep)) {
+    try {
+      await access(name, fsConstants.X_OK);
+      return name;
+    } catch {
+      return null;
+    }
+  }
+  const dirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // keep looking
+    }
+  }
+  return null;
+}
+
+/**
+ * Pure resolver for which `human` binary to invoke.
+ *
+ * Decision order (I/O is injected via `findOnPath` and `ensureBinary`
+ * so this is unit-testable without a real PATH or a real download):
+ *
+ *   1. An explicitly-chosen binary (constructor arg or HUMAN_BIN) is
+ *      returned as-is — NEVER triggers a download, even if missing.
+ *   2. Otherwise, if `findOnPath(humanBin)` resolves, use it.
+ *   3. Otherwise (nothing explicit, nothing on PATH) fall back to
+ *      `ensureBinary()` — the platform-matched auto-download.
+ *
+ * @param {object} deps
+ * @param {boolean} deps.explicit      Caller passed humanBin or set HUMAN_BIN.
+ * @param {string}  deps.humanBin      Configured binary name/path.
+ * @param {(name:string)=>Promise<string|null>} deps.findOnPath PATH lookup.
+ * @param {()=>Promise<string>} deps.ensureBinary Last-resort downloader.
+ * @returns {Promise<string>} the resolved binary path.
+ */
+export async function resolveBinary({ explicit, humanBin, findOnPath: find, ensureBinary }) {
+  if (explicit) return humanBin;
+  const onPath = await find(humanBin);
+  if (onPath) return onPath;
+  return await ensureBinary();
+}
+
+/**
  * Subprocess-based binding to the `human hula` CLI.
  *
  * Construct once and reuse. Each call to `validate` / `run` /
  * `compile` / `expand` / `replay` spawns a fresh `human` process.
  * Concurrency-safe (no shared state across calls).
+ *
+ * Binary resolution is LAZY: construction never touches the network.
+ * The binary is resolved on first use via `resolveBinary` and cached.
  */
 export class HuLa {
   /**
    * @param {string} [humanBin]
    *   Path to the `human` binary. Defaults to the HUMAN_BIN env var
-   *   if set, otherwise the first `human` on PATH.
+   *   if set, otherwise the first `human` on PATH. If neither is set
+   *   and nothing is on PATH, a platform-matched binary is
+   *   auto-downloaded on first use (see ./binary.js ensureBinary). An
+   *   explicitly-passed `humanBin` or HUMAN_BIN always wins and never
+   *   downloads.
    */
   constructor(humanBin) {
+    // Whether the caller explicitly chose a binary. Captured at
+    // construction so a later process.env mutation can't retroactively
+    // turn an implicit default into an "explicit" choice mid-session.
+    this._explicit = humanBin != null || process.env.HUMAN_BIN != null;
     this.humanBin = humanBin || process.env.HUMAN_BIN || "human";
+    // Lazily resolved on first use; cached thereafter (a Promise so
+    // concurrent first calls share one resolution).
+    this._resolvedBin = null;
+  }
+
+  /**
+   * Resolve (and cache) the binary path, downloading as a last resort.
+   * Cheap on the common path (explicit or on PATH); only the
+   * genuinely-missing case performs network I/O, and only once.
+   *
+   * @returns {Promise<string>}
+   */
+  _resolveBin() {
+    if (this._resolvedBin === null) {
+      this._resolvedBin = resolveBinary({
+        explicit: this._explicit,
+        humanBin: this.humanBin,
+        findOnPath,
+        // Import lazily so merely constructing a HuLa never loads the
+        // download machinery and offline users who supply a binary
+        // never pay for it.
+        ensureBinary: async () => {
+          const mod = await import("./binary.js");
+          return mod.ensureBinary();
+        },
+      });
+    }
+    return this._resolvedBin;
   }
 
   /**
@@ -127,7 +226,8 @@ export class HuLa {
     const tmpPath = path.join(dir, `${verb}.hula.json`);
     try {
       await writeFile(tmpPath, JSON.stringify(program), "utf8");
-      return await spawnCapture(this.humanBin, ["hula", verb, tmpPath]);
+      const bin = await this._resolveBin();
+      return await spawnCapture(bin, ["hula", verb, tmpPath]);
     } finally {
       try { await unlink(tmpPath); } catch { /* ignore */ }
     }
@@ -164,8 +264,9 @@ export class HuLa {
    *
    * @returns {Promise<HulaResult>}
    */
-  schema() {
-    return spawnCapture(this.humanBin, ["hula", "schema"]);
+  async schema() {
+    const bin = await this._resolveBin();
+    return spawnCapture(bin, ["hula", "schema"]);
   }
 
   /**
@@ -183,7 +284,8 @@ export class HuLa {
     try {
       await writeFile(tmplPath, template, "utf8");
       await writeFile(varsPath, JSON.stringify(vars), "utf8");
-      return await spawnCapture(this.humanBin, ["hula", "expand", tmplPath, varsPath]);
+      const bin = await this._resolveBin();
+      return await spawnCapture(bin, ["hula", "expand", tmplPath, varsPath]);
     } finally {
       try { await unlink(tmplPath); } catch { /* ignore */ }
       try { await unlink(varsPath); } catch { /* ignore */ }
@@ -212,7 +314,8 @@ export class HuLa {
       const argv = ["hula", "compile"];
       if (lite) argv.push("--lite");
       argv.push(tmpPath);
-      return await spawnCapture(this.humanBin, argv);
+      const bin = await this._resolveBin();
+      return await spawnCapture(bin, argv);
     } finally {
       try { await unlink(tmpPath); } catch { /* ignore */ }
     }
@@ -234,7 +337,8 @@ export class HuLa {
       const argv = ["hula", "replay"];
       if (opts.configPath) argv.push("--config", opts.configPath);
       argv.push(tmpPath);
-      return await spawnCapture(this.humanBin, argv);
+      const bin = await this._resolveBin();
+      return await spawnCapture(bin, argv);
     } finally {
       try { await unlink(tmpPath); } catch { /* ignore */ }
     }
