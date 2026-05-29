@@ -1283,6 +1283,7 @@ static void test_config_parse_learning_nightly_lora_default_is_false(void) {
     /* Empty JSON — no learning block. Default must be false. */
     HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, "{}", 2), HU_OK);
     HU_ASSERT_TRUE(!cfg_local.learning.nightly_lora_enabled);
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_learning_nightly_lora_explicit_true(void) {
@@ -1296,6 +1297,7 @@ static void test_config_parse_learning_nightly_lora_explicit_true(void) {
     const char *json = "{\"learning\":{\"nightly_lora_enabled\":true}}";
     HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
     HU_ASSERT_TRUE(cfg_local.learning.nightly_lora_enabled);
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_learning_nightly_lora_explicit_false(void) {
@@ -1309,6 +1311,7 @@ static void test_config_parse_learning_nightly_lora_explicit_false(void) {
     const char *json = "{\"learning\":{\"nightly_lora_enabled\":false}}";
     HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
     HU_ASSERT_TRUE(!cfg_local.learning.nightly_lora_enabled);
+    hu_arena_destroy(arena);
 }
 
 /* REFL-T3 (2026-05-26): reflection block parsing contracts.
@@ -1337,6 +1340,7 @@ static void test_config_parse_reflection_defaults_when_block_absent(void) {
     HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
     HU_ASSERT_STR_EQ(cfg_local.reflection_loop.provider, "gemini-3.5-flash");
     HU_ASSERT_STR_EQ(cfg_local.reflection_loop.local_provider, "gemma-4-31b-local");
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_reflection_partial_block_keeps_other_defaults(void) {
@@ -1355,6 +1359,7 @@ static void test_config_parse_reflection_partial_block_keeps_other_defaults(void
     HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
     HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
     HU_ASSERT_STR_EQ(cfg_local.reflection_loop.provider, "gemini-3.5-flash");
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_reflection_provider_override(void) {
@@ -1374,6 +1379,7 @@ static void test_config_parse_reflection_provider_override(void) {
     HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 48);
     /* idle_threshold_hours unspecified → stays at default 2 */
     HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_reflection_clamps_pathological_hours(void) {
@@ -1394,6 +1400,7 @@ static void test_config_parse_reflection_clamps_pathological_hours(void) {
     HU_ASSERT_EQ(cfg_local.reflection_loop.min_interval_hours, 12);
     HU_ASSERT_EQ(cfg_local.reflection_loop.idle_threshold_hours, 2);
     HU_ASSERT_EQ(cfg_local.reflection_loop.daily_floor_hours, 24);
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_learning_default_does_not_serialize(void) {
