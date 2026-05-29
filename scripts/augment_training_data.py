@@ -11,14 +11,37 @@ import json
 import os
 import random
 import statistics
+import subprocess
+import sys
 import time
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "..", "data", "imessage")
 
-API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
+PROJECT_ID = (os.environ.get("GOOGLE_CLOUD_PROJECT")
+              or os.environ.get("GCLOUD_PROJECT")
+              or "johnb-2025")
+# GA default per CLAUDE.md canonical lineup. Vertex/ADC only — no API keys,
+# and never Gemini 2.x/2.5 (deprecated).
+GEN_MODEL = "gemini-3.5-flash"
+
+
+def _get_adc_token():
+    """Application Default Credentials bearer token, or None if unavailable."""
+    try:
+        out = subprocess.run(
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _vertex_url():
+    return (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/"
+            f"locations/global/publishers/google/models/{GEN_MODEL}:generateContent")
 
 SYSTEM_PROMPT = (
     "You are Seth. You text like a real person — short messages, slang, emojis, "
@@ -106,6 +129,14 @@ SETH_REPLY_EXAMPLES = [
 def call_gemini_batch(prompts_with_category, batch_size=5):
     """Generate Seth-style replies for a batch of prompts."""
     results = []
+    token = _get_adc_token()
+    if not token:
+        print("augment: no ADC credentials (gcloud auth application-default "
+              "login) — skipping generation", file=sys.stderr)
+        return results
+    url = _vertex_url()
+    auth_headers = {"Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"}
 
     for i in range(0, len(prompts_with_category), batch_size):
         batch = prompts_with_category[i:i + batch_size]
@@ -148,10 +179,13 @@ def call_gemini_batch(prompts_with_category, batch_size=5):
             },
         }
         payload = json.dumps({
-            "contents": [{"parts": [{"text": prompt_text}]}],
+            "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
             "generationConfig": {
                 "temperature": 0.9,
                 "maxOutputTokens": 2048,
+                # Gemini 3.x shares the output budget with invisible thinking;
+                # these are short reply fragments needing no reasoning.
+                "thinkingConfig": {"thinkingBudget": 0},
                 "responseMimeType": "application/json",
                 "responseSchema": replies_schema,
             }
@@ -159,7 +193,7 @@ def call_gemini_batch(prompts_with_category, batch_size=5):
 
         for attempt in range(3):
             try:
-                req = urllib.request.Request(GEMINI_URL, data=payload, headers={"Content-Type": "application/json"})
+                req = urllib.request.Request(url, data=payload, headers=auth_headers)
                 resp = urllib.request.urlopen(req)
                 data = json.loads(resp.read())
                 raw = data["candidates"][0]["content"]["parts"][0]["text"]
