@@ -286,12 +286,24 @@ class LocalBackend:
         full generation time (generation-bound; diagnostics only). Falls back
         to first_token_ms = total_ms if the server streams no content. Raises
         BackendUnreachable on transport failure.
+
+        DO NOT add `max_tokens` to the request body to "fix" empty replies.
+        That hypothesis was tested and DISPROVEN (A/B probe, 2026-05-29):
+          - NO max_tokens (this code):      EMPTY 0/5
+          - max_tokens=512 ("headroom"):    EMPTY 1/5 (the empty took 187s)
+        The empty-reply signature is an INTERMITTENT thinking-runaway in the
+        gemma-realtime server on :8741 (a SEPARATE repo we don't edit), not
+        budget starvation — so a max_tokens cap makes it WORSE, not better,
+        by truncating the (rare) long-but-valid generations. The empty is a
+        genuine model-serving defect this harness is meant to SURFACE (see
+        count_empty_replies); it is deliberately not retried or masked here.
         """
         body = json.dumps({
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "stream": True,
+            # NOTE: no "max_tokens" — see docstring; the cap is the wrong lever.
         }).encode()
         req = urllib.request.Request(
             f"{self.url}/v1/chat/completions", data=body,
