@@ -1,18 +1,21 @@
 /* Feature-test macros must precede the first include so libc's <features.h>
- * exposes the right symbols. On musl (alpine docker build) arc4random_uniform
- * is declared in <stdlib.h> only under `_BSD_SOURCE || _GNU_SOURCE` — NOT
- * _DEFAULT_SOURCE — and strict -std=c11 (__STRICT_ANSI__) otherwise suppresses
- * it. _GNU_SOURCE is the portable choice: it enables arc4random on both musl
- * and glibc (>=2.36) without the -Werror deprecation warning that bare
- * _BSD_SOURCE triggers on glibc. macOS declares arc4random unconditionally. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
+ * exposes the right symbols. dirent's d_type and the BSD/XOPEN surface need a
+ * non-strict-ANSI source level; this is the same proven combination used by
+ * the rest of the codebase. Uniform random goes through hu_rand_uniform
+ * (human/core/rand.h) so we never touch arc4random directly — musl does not
+ * implement the arc4random family at all. */
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
 #endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE
 #endif
 #include "human/persona/sticker.h"
 #include "human/core/log.h"
+#include "human/core/rand.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -330,7 +333,7 @@ bool hu_persona_pick_sticker(const char *sticker_dir, const hu_sticker_query_t *
     }
 
     /* Uniform random pick from the set. */
-    unsigned int idx = arc4random_uniform((unsigned int)pick_count);
+    unsigned int idx = hu_rand_uniform((unsigned int)pick_count);
     const char *picked = pick_set[idx];
 
     /* Build absolute path. */

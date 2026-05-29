@@ -1,20 +1,21 @@
 /* Feature-test macros must precede the first include so libc's <features.h>
- * exposes the right symbols. On musl (alpine docker build) arc4random_uniform
- * (<stdlib.h>) is declared only under `_BSD_SOURCE || _GNU_SOURCE` — NOT
- * _DEFAULT_SOURCE — and usleep (<unistd.h>) likewise needs a BSD/XOPEN macro;
- * strict -std=c11 (__STRICT_ANSI__) otherwise suppresses both. _GNU_SOURCE is
- * the portable choice (enables them on musl and glibc without the -Werror
- * deprecation warning bare _BSD_SOURCE triggers on glibc). macOS declares
- * arc4random unconditionally. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
+ * exposes the right symbols. usleep (<unistd.h>) needs a BSD/XOPEN source
+ * level; strict -std=c11 (__STRICT_ANSI__) otherwise suppresses it. This is
+ * the same proven combination used by the rest of the codebase. Uniform
+ * random goes through hu_rand_uniform (human/core/rand.h) so we never touch
+ * arc4random directly — musl does not implement the arc4random family. */
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
 #endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE
 #endif
 #include "human/persona/pacing.h"
+#include "human/core/rand.h"
 #include "human/core/time.h"
-#include <stdlib.h> /* arc4random_uniform */
 #include <unistd.h> /* usleep */
 
 void hu_persona_pace_reply_start(uint64_t *start_ms_out) {
@@ -35,7 +36,7 @@ void hu_persona_pace_reply_finish(const hu_persona_t *persona, uint64_t start_ms
      * suspiciously crisp even at the minimum. */
     int64_t target_ms = (min_delay_ms * 12) / 10;
     if (variance_ms > 0) {
-        int64_t jitter = (int64_t)arc4random_uniform((uint32_t)(variance_ms * 2)) - variance_ms;
+        int64_t jitter = (int64_t)hu_rand_uniform((uint32_t)(variance_ms * 2)) - variance_ms;
         target_ms += jitter;
     }
     if (target_ms < (min_delay_ms * 12) / 10)

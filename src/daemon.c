@@ -4,15 +4,6 @@
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
 #endif
-/* musl (alpine docker build) declares arc4random_uniform in <stdlib.h> only
- * under `_BSD_SOURCE || _GNU_SOURCE` — NOT _DEFAULT_SOURCE — and strict
- * -std=c11 (__STRICT_ANSI__) suppresses it. _GNU_SOURCE is the portable
- * choice (enables it on musl and glibc without the -Werror deprecation
- * warning bare _BSD_SOURCE triggers on glibc). macOS declares it
- * unconditionally. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE
 #endif
@@ -24,6 +15,7 @@
 #include "human/core/error.h"
 #include "human/core/log.h"
 #include "human/core/process_util.h"
+#include "human/core/rand.h"
 #include "human/core/string.h"
 #include "human/humanness.h"
 
@@ -3869,7 +3861,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (current_minute % 60 == 0 && proactive_due_at == 0) {
                     unsigned int jitter_sec = 0;
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                    jitter_sec = (unsigned int)arc4random_uniform(1801);
+                    jitter_sec = (unsigned int)hu_rand_uniform(1801);
 #else
                     {
                         uint32_t s = (uint32_t)time(NULL);
@@ -6120,7 +6112,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     {
                         uint32_t seed = 0;
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                        seed = (uint32_t)arc4random_uniform(5001);
+                        seed = (uint32_t)hu_rand_uniform(5001);
 #else
                         seed = ((uint32_t)time(NULL) * 1103515245u + 12345u) % 5001u;
 #endif
@@ -6131,7 +6123,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     {
                         uint32_t vseed = 0;
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                        vseed = (uint32_t)arc4random_uniform(8001);
+                        vseed = (uint32_t)hu_rand_uniform(8001);
 #else
                         vseed = ((uint32_t)time(NULL) * 2654435769u + 54321u) % 8001u;
 #endif
@@ -6143,7 +6135,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     uint32_t jitter_range = base_delay * 30 / 100;
                     uint32_t jitter = 0;
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                    jitter = (uint32_t)arc4random_uniform(jitter_range * 2 + 1);
+                    jitter = (uint32_t)hu_rand_uniform(jitter_range * 2 + 1);
 #else
                     {
                         uint32_t s = (uint32_t)time(NULL);
@@ -6164,7 +6156,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         adjusted = adjusted * 3;
                         adjusted += 90000 + (int32_t)(
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                                                arc4random_uniform(90001)
+                                                hu_rand_uniform(90001)
 #else
                                                 (((uint32_t)time(NULL) * 2654435769u) >> 16u) %
                                                 90001u
@@ -6175,7 +6167,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         adjusted = adjusted * 2;
                         adjusted += 45000 + (int32_t)(
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                                                arc4random_uniform(75001)
+                                                hu_rand_uniform(75001)
 #else
                                                 (((uint32_t)time(NULL) * 2654435769u) >> 16u) %
                                                 75001u
@@ -6186,7 +6178,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         adjusted = adjusted * 2;
                         adjusted += 20000 + (int32_t)(
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                                                arc4random_uniform(40001)
+                                                hu_rand_uniform(40001)
 #else
                                                 (((uint32_t)time(NULL) * 2654435769u) >> 16u) %
                                                 40001u
@@ -6204,13 +6196,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Rare "busy" delay: 1% chance of 15-45 second delay */
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                    if (arc4random_uniform(100) < 1)
+                    if (hu_rand_uniform(100) < 1)
 #else
                     if ((((uint32_t)time(NULL) * 1103515245u + 12345u) >> 16u) % 100u < 1u)
 #endif
                         adjusted += (int32_t)(15000 + (uint32_t)(
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-                                                          arc4random_uniform(30001)
+                                                          hu_rand_uniform(30001)
 #else
                                                           (((uint32_t)time(NULL) * 1103515245u +
                                                             12345u) >>

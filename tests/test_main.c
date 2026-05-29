@@ -22,6 +22,7 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_rand_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
 void run_init_proposer_tests(void);
@@ -959,6 +960,7 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_rand_tests();
     run_log_once_tests();
     run_vertex_adc_tests();
     run_init_proposer_tests();

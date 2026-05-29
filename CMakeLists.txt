@@ -515,6 +515,7 @@ set(HU_CORE_SOURCES
     src/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
+    src/core/rand.c
     src/core/error.c
     src/core/arena.c
     src/core/string.c
@@ -3186,6 +3187,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_rand.c
     tests/test_log_once.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
