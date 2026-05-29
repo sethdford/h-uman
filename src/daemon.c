@@ -23,6 +23,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/belief_update.h"
 #include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
@@ -3598,6 +3599,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
     while (!HU_STOP_FLAG) {
+        /* A3 intrinsic motivation idle tick (default-off via cfg.intrinsic). Runs
+         * at most once/minute so the drive rises on a human timescale, not the
+         * ~1s loop cadence. The runner self-gates on enabled + budget + quiet +
+         * rate + drive, and is internal/propose-only (no action surface). */
+        if (agent && config) {
+            static time_t hu_last_intrinsic_min = 0;
+            time_t hu_now_min = time(NULL) / 60;
+            if (hu_now_min != hu_last_intrinsic_min) {
+                hu_last_intrinsic_min = hu_now_min;
+                int64_t hu_now = (int64_t)time(NULL);
+                hu_intrinsic_drive_tick(&agent->intrinsic_drive, false, hu_now);
+                hu_intrinsic_runtime_cfg_t hu_icfg = {
+                    .enabled = config->intrinsic.enabled,
+                    .per_tick_token_budget = config->intrinsic.per_tick_token_budget};
+                hu_intrinsic_start_facts_t hu_if;
+                hu_if.drive_level = hu_intrinsic_drive_level(&agent->intrinsic_drive);
+                hu_if.secs_since_user = agent->intrinsic_drive.last_user_ts
+                                            ? (hu_now - agent->intrinsic_drive.last_user_ts)
+                                            : 999999;
+                hu_if.secs_since_intrinsic = agent->intrinsic_drive.last_intrinsic_ts
+                                                 ? (hu_now - agent->intrinsic_drive.last_intrinsic_ts)
+                                                 : 999999;
+                hu_if.budget_tokens_remaining = HU_INTRINSIC_DEFAULT_TICK_BUDGET;
+                hu_if.user_active = false;
+                hu_intrinsic_tick_result_t hu_ir;
+                hu_intrinsic_run_tick(&agent->intrinsic_drive, &hu_icfg, &hu_if, agent->observer,
+                                      hu_now, &hu_ir);
+                /* STARTED => goal originated + audit-logged. Sharing is a separate
+                 * proposer-gated step (AC-5); v1 logs the intent only. */
+            }
+        }
 #ifdef HU_HAS_CRON
         {
             time_t t = time(NULL);
@@ -12119,6 +12151,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (op_db) {
                         (void)hu_evolved_opinions_extract_and_store(op_db, response, response_len,
                                                                     (int64_t)time(NULL));
+                        /* A3: a completed user turn is user activity — decay the drive. */
+                        hu_intrinsic_drive_tick(&agent->intrinsic_drive, true, (int64_t)time(NULL));
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            uint64_t kh = 1469598103934665603ULL;
+                            for (size_t bi = 0; bi < key_len; bi++) { kh ^= (uint64_t)(unsigned char)batch_key[bi]; kh *= 1099511628211ULL; }
+                            if (kh != agent->belief_convo_key_hash) { agent->belief_convo_key_hash = kh; agent->belief_changes_this_convo = 0; }
+                            char *bdir = NULL; size_t bdlen = 0; bool bchanged = false;
+                            (void)hu_belief_update_evaluate_turn(alloc, op_db, &agent->pressure_history, combined, combined_len, agent->belief_changes_this_convo, (int64_t)time(NULL), &bdir, &bdlen, &bchanged);
+                            if (bchanged) {
+                                agent->belief_changes_this_convo++;
+                                if (agent->belief_pending_directive) { alloc->free(alloc->ctx, agent->belief_pending_directive, agent->belief_pending_directive_len + 1); }
+                                agent->belief_pending_directive = bdir; agent->belief_pending_directive_len = bdlen;
+                            } else if (bdir) { alloc->free(alloc->ctx, bdir, bdlen + 1); }
+                        }
                     }
                 }
 #endif

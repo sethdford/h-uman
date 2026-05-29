@@ -68,6 +68,7 @@
 #include "human/ml/dpo.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observer.h"
+#include "human/agent/intrinsic_drive.h"
 #include "human/permission.h"
 #include "human/persona.h"
 #include "human/persona/circadian.h"
@@ -387,6 +388,22 @@ struct hu_agent {
      * sizeof(agent))` (the struct is POD with no embedded pointers).
      * Footprint: ~1.2 KB. */
     hu_pressure_history_t pressure_history;
+
+    /* A1 conviction loop: per-conversation belief-change accounting. The
+     * counter caps belief updates per conversation (AC-4); it self-resets
+     * when belief_convo_key_hash changes (i.e. a new conversation). Both
+     * zero-init via the struct's memset; no separate reset hook needed. A
+     * pending shift directive (set when a belief flips) is injected into the
+     * NEXT turn's prompt so the model can acknowledge the change (AC-5). */
+    uint32_t belief_changes_this_convo;
+    uint64_t belief_convo_key_hash;
+    char *belief_pending_directive; /* owned; freed + cleared on consume */
+    size_t belief_pending_directive_len;
+
+    /* A3 intrinsic motivation: bounded internal drive state. Ticked on each
+     * user turn (decay) and each idle service-loop tick (rise); the runner
+     * fires only when cfg.intrinsic.enabled. Zero-init via memset. */
+    hu_intrinsic_drive_t intrinsic_drive;
 
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after
