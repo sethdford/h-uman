@@ -125,6 +125,7 @@
 
 /* Phase 2 DDD refactor: cross-bucket daemon state */
 #include "human/daemon/common.h"
+#include "human/daemon/peripheral_gov.h"
 #include "human/daemon/reply_dedup.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
@@ -351,29 +352,9 @@ hu_proactive_budget_t gov_budget = {
 };
 bool gov_budget_inited = true;
 
-/* Proactive-style budget for outbound visual attachments (separate from check-in governor). */
-static hu_proactive_budget_t hu_daemon_visual_attach_gov;
-static bool hu_daemon_visual_attach_gov_init;
-
-static bool hu_daemon_visual_attach_gov_allow(uint64_t now_ms) {
-    if (!hu_daemon_visual_attach_gov_init) {
-        hu_proactive_budget_config_t cfg = {
-            .daily_max = 4,
-            .weekly_max = 14,
-            .relationship_multiplier = 1.0,
-            .cool_off_after_unanswered = 255,
-            .cool_off_hours = 0,
-        };
-        hu_governor_init(&cfg, &hu_daemon_visual_attach_gov);
-        hu_daemon_visual_attach_gov_init = true;
-    }
-    return hu_governor_has_budget(&hu_daemon_visual_attach_gov, now_ms);
-}
-
-static void hu_daemon_visual_attach_gov_after_send(uint64_t now_ms) {
-    if (hu_daemon_visual_attach_gov_init)
-        (void)hu_governor_record_sent(&hu_daemon_visual_attach_gov, now_ms);
-}
+/* Visual-attachment send governor (hu_daemon_visual_attach_gov_allow/
+ * _after_send) extracted to src/daemon/daemon_peripheral_gov.c — DDD Phase 2.4.
+ * Declared via human/daemon/peripheral_gov.h. */
 #endif /* !HU_IS_TEST */
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
