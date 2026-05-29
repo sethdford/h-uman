@@ -151,6 +151,9 @@ def read_messages(db_path):
     """Read (session_id, role, content) rows ordered as the extractor does.
     Returns [] if the table/columns aren't present (reports gracefully)."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # Real conversation content occasionally holds bytes that aren't valid UTF-8
+    # (mojibake, truncated multibyte). Decode tolerantly rather than crashing.
+    conn.text_factory = lambda b: b.decode("utf-8", "replace") if isinstance(b, bytes) else b
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
         if not {"session_id", "role", "content"} <= cols:
