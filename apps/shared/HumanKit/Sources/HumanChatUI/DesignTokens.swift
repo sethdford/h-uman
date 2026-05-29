@@ -260,27 +260,25 @@ public enum HUTokens {
     public enum Haptic {
         case light, medium, heavy, success, warning, selection
 
+        // UIKit feedback generators are @MainActor-isolated under Swift 6.
+        // trigger() is therefore @MainActor; all call sites are SwiftUI Views
+        // (implicitly @MainActor), so this is a no-op for callers.
+        @MainActor
         public func trigger() {
             #if canImport(UIKit)
-            // UIKit feedback generators are @MainActor-isolated under Swift 6.
-            // Hop to the main actor so trigger() stays callable from any
-            // (synchronous, nonisolated) context; haptics are fire-and-forget,
-            // so the async hop is imperceptible.
-            Task { @MainActor in
-                switch self {
-                case .light:
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                case .medium:
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                case .heavy:
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                case .success:
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                case .warning:
-                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                case .selection:
-                    UISelectionFeedbackGenerator().selectionChanged()
-                }
+            switch self {
+            case .light:
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case .medium:
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            case .heavy:
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            case .success:
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case .warning:
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            case .selection:
+                UISelectionFeedbackGenerator().selectionChanged()
             }
             #endif
         }
