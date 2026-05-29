@@ -1187,6 +1187,7 @@ set(HU_CORE_SOURCES
     src/daemon_routing.c
     src/daemon_proactive.c
     src/daemon/daemon_director.c
+    src/daemon/daemon_identity.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
@@ -1539,6 +1540,8 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
         src/memory/repos/boundary_repo_sqlite.c
         src/memory/repos/celebration_repo_sqlite.c
+        src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/memories_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3794,6 +3797,8 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
 endif()
 
 # SOTA capability tests
