@@ -211,6 +211,54 @@ integration concerns exercised by actually running the nightly tool.
 5. Follow-up remediation tasks spawned from whatever the first verdict shows
    breaking.
 
+## Findings (first runs, 2026-05-28/29)
+
+### F1 — Empty-reply depth window (thinking starvation at turns ~11–15)
+
+The first partial live run surfaced a reproducible coherence limitation: a
+cluster of **empty assistant turns** (zero visible content after thinking-token
+strip) at a conversation-depth window, recovering afterward.
+
+**Evidence (cross-scenario depth alignment):**
+- `casual_catchup` — empties at turns 13, 14, 15; coherent again from 16.
+- `emotional_escalation` — empties at turns 11, 12, 13, 14; coherent again from 16.
+- Two *different-content* scenarios go empty at the *same depth band*. Content is
+  not the variable; **conversation depth (prompt size) is**.
+- The empty turns are the **slowest** (44–52 s vs 31.8 s p50): long generation,
+  zero output — the budget went somewhere invisible.
+
+**Confirming run (judge-OFF spot-check, 2026-05-29):** an independent 14-turn
+`casual_catchup` re-run with the judge disabled (isolating the serving path from
+judge variance) reproduced the same signature: empties at turns **11 and 13**
+(rate 0.143), and both empty turns were again among the slowest (**90.3 s** and
+**68.6 s** first-token). Latency growth on this single scenario was 1.601 with a
+178 s turn-9 outlier — a real at-depth climb, though one scenario alone does not
+move the multi-scenario nightly verdict. Same depth band (~11–15), same
+"empty turns are the slow turns" tell, with the judge entirely out of the loop —
+which rules out the judge as the cause and pins it on prompt-size-vs-budget at
+depth.
+
+**Root cause (consistent with the M3 live-path fix, memory `m3_live_path_extractor_strip.md`):**
+the `seth-lora-v4-repair` adapter emits ~150–200 thinking tokens regardless of
+prompt. As history grows, the prompt consumes more of a fixed generation budget;
+at the depth band the thought block eats the whole remaining budget, leaving an
+empty visible reply after strip. KV/prompt-cache state shifts at turn 16 appear
+to free budget, hence recovery.
+
+**Why this is NOT a harness bug:** the harness faithfully records what the server
+returned. The impact is already penalized by the retention gate (an empty
+probe-turn fails its anchor) and the voice gate (an empty late-third turn tanks
+the score). `count_empty_replies()` surfaces count/turns/rate into each scenario
+verdict as a **diagnostic** so a nightly reviewer can see *why* a gate moved
+without double-counting the failure.
+
+**Remediation (server-side, NOT this repo):** the fix is a thinking-headroom
+guarantee in the gemma-realtime serving path (`mlx-server.py`
+`_thinking_headroom_tokens()` — already landed for the non-stream path in commit
+`689f05c`, default 512 tunable via `GEMMA_THINKING_HEADROOM_TOKENS`). The deep
+multi-turn case needs the same headroom applied as prompt size grows. Tracked as
+a follow-up against the serving repo, not h-uman.
+
 ## Related
 
 - `scripts/eval_fidelity_nightly.py` — the nightly-tool pattern this mirrors
