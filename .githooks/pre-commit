@@ -204,6 +204,20 @@ if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
     fi
 fi
 
+# Modeled-Person layering: persona -> cognition -> behavior is unidirectional;
+# no cognition<->behavior cross-talk and no persona dependency on either.
+staged_mperson=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'src/persona/*.c' 'src/cognition/*.c' 'src/behavior/*.c' \
+    'include/human/persona/*.h' 'include/human/cognition/*.h' 'include/human/behavior/*.h')
+if [ -n "$staged_mperson" ] && [ -x "scripts/check-modeled-person-layering.sh" ]; then
+    if ! scripts/check-modeled-person-layering.sh; then
+        echo ""
+        echo "Pre-commit blocked: Modeled-Person layering violation."
+        echo "See .claude/rules/modeled-person-layering.md."
+        exit 1
+    fi
+fi
+
 # Docs frontmatter gate. Every docs/**/*.md (except docs/plans/, which the
 # check skips by default) must start with a line-1 `---` YAML frontmatter block.
 # Shifts the CI doc-fleet frontmatter failure left to commit time so new docs
