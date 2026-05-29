@@ -133,9 +133,28 @@ def call_gemini_batch(prompts_with_category, batch_size=5):
 
         prompt_text += "]\n"
 
+        # Structured output: constrain generation to the exact array shape
+        # (see eval_humanness.py reference pattern), removing the fence strip.
+        replies_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "incoming": {"type": "string"},
+                    "replies": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["incoming", "replies"],
+                "propertyOrdering": ["incoming", "replies"],
+            },
+        }
         payload = json.dumps({
             "contents": [{"parts": [{"text": prompt_text}]}],
-            "generationConfig": {"temperature": 0.9, "maxOutputTokens": 2048}
+            "generationConfig": {
+                "temperature": 0.9,
+                "maxOutputTokens": 2048,
+                "responseMimeType": "application/json",
+                "responseSchema": replies_schema,
+            }
         }).encode()
 
         for attempt in range(3):

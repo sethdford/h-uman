@@ -133,10 +133,70 @@ EVAL_DIMENSIONS = [
 ]
 
 
-def call_gemini(prompt, temperature=0.7):
+def _humanness_judge_schema():
+    """Vertex Gemini responseSchema for the judge output.
+
+    Derived from EVAL_DIMENSIONS so the schema can never drift from the
+    prompt's score keys. This is the REFERENCE pattern for the other
+    fence-stripping judge scripts (eval_base_capability, eval_golden_set,
+    eval_blinded_ab, augment_training_data): instead of parsing JSON out of
+    a ```json fence in free text, constrain the model to emit bare JSON via
+    generationConfig.responseSchema + responseMimeType.
+    """
+    score_keys = [d.split(" (")[0] for d in EVAL_DIMENSIONS]
+    return {
+        "type": "object",
+        "properties": {
+            "scores": {
+                "type": "object",
+                "properties": {
+                    k: {"type": "integer", "minimum": 1, "maximum": 10}
+                    for k in score_keys
+                },
+                "required": score_keys,
+                "propertyOrdering": score_keys,
+            },
+            "overall": {"type": "integer", "minimum": 1, "maximum": 10},
+            "ai_tells_detected": {"type": "array", "items": {"type": "string"}},
+            "human_signals_detected": {"type": "array", "items": {"type": "string"}},
+            "verdict": {"type": "string", "enum": ["HUMAN", "AI", "BORDERLINE"]},
+        },
+        "required": [
+            "scores", "overall", "ai_tells_detected",
+            "human_signals_detected", "verdict",
+        ],
+        "propertyOrdering": [
+            "scores", "overall", "ai_tells_detected",
+            "human_signals_detected", "verdict",
+        ],
+    }
+
+
+_HUMANNESS_JUDGE_SCHEMA = _humanness_judge_schema()
+
+
+def _loads_json_lenient(raw):
+    """Parse model JSON. With responseSchema set, Gemini returns bare JSON;
+    this keeps a defensive ```-fence strip for endpoints/models that ignore
+    the schema, so the call never hard-fails on a stray code fence."""
+    s = raw
+    if "```json" in s:
+        s = s.split("```json")[1].split("```")[0].strip()
+    elif "```" in s:
+        s = s.split("```")[1].split("```")[0].strip()
+    return json.loads(s)
+
+
+def call_gemini(prompt, temperature=0.7, response_schema=None):
+    gen_cfg = {"temperature": temperature, "maxOutputTokens": 2048}
+    if response_schema is not None:
+        # Vertex Gemini structured output: constrain the model to emit JSON
+        # matching response_schema — removes the fragile fence-strip parse.
+        gen_cfg["responseMimeType"] = "application/json"
+        gen_cfg["responseSchema"] = response_schema
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": 2048}
+        "generationConfig": gen_cfg,
     }).encode()
     headers = {"Content-Type": "application/json"}
     if not API_KEY:
@@ -270,12 +330,9 @@ Return ONLY valid JSON with this exact structure:
   "verdict": "HUMAN" or "AI" or "BORDERLINE"
 }}"""
 
-    raw = call_gemini(eval_prompt, temperature=0.3)
-    if "```json" in raw:
-        raw = raw.split("```json")[1].split("```")[0].strip()
-    elif "```" in raw:
-        raw = raw.split("```")[1].split("```")[0].strip()
-    result = json.loads(raw)
+    raw = call_gemini(eval_prompt, temperature=0.3,
+                      response_schema=_HUMANNESS_JUDGE_SCHEMA)
+    result = _loads_json_lenient(raw)
     local_tells = detect_structural_tells(response)
     if local_tells:
         existing = result.get("ai_tells_detected", [])
