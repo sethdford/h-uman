@@ -85,7 +85,9 @@
 #include "human/music.h"
 #include "human/persona/persona_deltas.h"
 /* Proactive image generation */
+#include "human/inspiration.h"
 #include "human/tools/image_gen.h"
+#include "human/tools/validation.h"
 /* Daemon modules */
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
@@ -2751,6 +2753,31 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 #endif /* !HU_IS_TEST */
 
 /* ── Service loop ──────────────────────────────────────────────────────── */
+
+/* Send an inspiration as two bubbles on an unfurling channel: the persona-voiced
+ * human line first, a short human-pacing gap, then the bare URL alone so the
+ * platform renders its rich card. casual_msg may be empty (URL only then).
+ * The URL bubble body is exactly the URL bytes — never a caption inline, which
+ * would suppress the unfurl. Returns true if the URL bubble was sent.
+ * Guarded to the non-test build: its only callers live in the service-loop
+ * share path, which is itself under #if !defined(HU_IS_TEST). */
+#if !defined(HU_IS_TEST)
+static bool send_unfurl_two_bubble(hu_channel_t *channel, const char *target, size_t target_len,
+                                   const char *casual_msg, const char *url, uint32_t seed) {
+    if (!channel || !channel->vtable || !channel->vtable->send || !url || !*url)
+        return false;
+    if (hu_tool_validate_url(url) != HU_OK)
+        return false;
+
+    if (casual_msg && *casual_msg) {
+        channel->vtable->send(channel->ctx, target, target_len, casual_msg, strlen(casual_msg),
+                              NULL, 0);
+        usleep(1500000 + (seed % 1500000)); /* human-pacing gap between bubbles */
+    }
+    channel->vtable->send(channel->ctx, target, target_len, url, strlen(url), NULL, 0);
+    return true;
+}
+#endif /* !HU_IS_TEST */
 
 /* Consecutive successful turns that produced zero-length assistant text
  * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
@@ -13759,6 +13786,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             music_prompt[mp_len] = '\0';
                         }
 
+                        /* Persona voice hint → the human line sounds like the user */
+                        if (agent && agent->persona) {
+                            char vh[256];
+                            const char *form =
+                                agent->persona->overlays && agent->persona->overlays_count > 0
+                                    ? agent->persona->overlays[0].formality
+                                    : NULL;
+                            const char *trait = (agent->persona->traits_count > 0)
+                                                    ? agent->persona->traits[0]
+                                                    : NULL;
+                            size_t vlen =
+                                hu_inspiration_build_voice_hint(form, trait, vh, sizeof(vh));
+                            if (vlen > 0 && mp_len + vlen + 2 < sizeof(music_prompt)) {
+                                music_prompt[mp_len++] = '\n';
+                                memcpy(music_prompt + mp_len, vh, vlen);
+                                mp_len += vlen;
+                                music_prompt[mp_len] = '\0';
+                            }
+                        }
+
                         if (mp_len > 0 && agent->provider.vtable &&
                             agent->provider.vtable->chat_with_system) {
                             char *music_suggestion = NULL;
@@ -13873,40 +13920,46 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                                         if (rich_link) {
                                             const char *url = link_song->track_view_url;
-                                            size_t url_len = strlen(url);
 
                                             /* Same human-pacing delay as the legacy path so the
                                              * share lands in a natural conversational rhythm. */
                                             usleep(3000000 + (music_seed % 4000000));
 
-                                            ch->channel->vtable->send(ch->channel->ctx, batch_key,
-                                                                      key_len, url, url_len, NULL,
-                                                                      0);
+                                            if (send_unfurl_two_bubble(ch->channel, batch_key,
+                                                                       key_len, casual_msg, url,
+                                                                       music_seed)) {
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "sent music rich-link: %s - %s [%s]",
+                                                            song.artist_name ? song.artist_name
+                                                                             : "?",
+                                                            song.track_name ? song.track_name : "?",
+                                                            has_spotify ? "spotify" : "itunes");
 
-                                            hu_log_info("human", agent ? agent->observer : NULL,
-                                                        "sent music rich-link: %s - %s [%s]",
-                                                        song.artist_name ? song.artist_name : "?",
-                                                        song.track_name ? song.track_name : "?",
-                                                        has_spotify ? "spotify" : "itunes");
-
-                                            hu_music_taste_record_send(batch_key, key_len,
-                                                                       song.artist_name,
-                                                                       song.track_name);
-                                            {
-                                                static uint64_t last_taste_save_ms;
-                                                uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
-                                                if (tnow - last_taste_save_ms > 30000) {
-                                                    last_taste_save_ms = tnow;
-                                                    const char *th = getenv("HOME");
-                                                    if (th) {
-                                                        char tp[512];
-                                                        int tn2 = snprintf(
-                                                            tp, sizeof(tp),
-                                                            "%s/.human/music_taste.json", th);
-                                                        if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                            hu_music_taste_save(tp, (size_t)tn2);
+                                                hu_music_taste_record_send(batch_key, key_len,
+                                                                           song.artist_name,
+                                                                           song.track_name);
+                                                {
+                                                    static uint64_t last_taste_save_ms;
+                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
+                                                    if (tnow - last_taste_save_ms > 30000) {
+                                                        last_taste_save_ms = tnow;
+                                                        const char *th = getenv("HOME");
+                                                        if (th) {
+                                                            char tp[512];
+                                                            int tn2 = snprintf(
+                                                                tp, sizeof(tp),
+                                                                "%s/.human/music_taste.json", th);
+                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                                hu_music_taste_save(tp,
+                                                                                    (size_t)tn2);
+                                                        }
                                                     }
                                                 }
+                                            } else {
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "music rich-link rejected by url "
+                                                            "validation: %s",
+                                                            url ? url : "(null)");
                                             }
                                         } else {
                                             /* Legacy: channel doesn't unfurl URLs (SMS etc.).
