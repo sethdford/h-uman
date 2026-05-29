@@ -899,6 +899,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_graph.c
     src/memory/comfort_patterns.c
     src/memory/emotional_moments.c
+    src/memory/repos/emotional_moments_repo_sqlite.c
     src/memory/superhuman.c
     src/memory/contact_graph.c
     src/memory/identity_resolver.c
