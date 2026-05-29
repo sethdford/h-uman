@@ -204,6 +204,7 @@ void run_persona_sticker_tests(void);
 void run_voice_maturity_tests(void);
 void run_style_learner_tests(void);
 void run_persona_refresh_tests(void);
+void run_persona_rag_tests(void);
 void run_temporal_tests(void);
 void run_inner_world_tests(void);
 void run_persona_eval_tests(void);
@@ -1129,6 +1130,7 @@ int main(int argc, char **argv) {
     run_style_mirror_tests();
     run_style_learner_tests();
     run_persona_refresh_tests();
+    run_persona_rag_tests();
     run_temporal_tests();
     run_inner_world_tests();
     run_persona_eval_tests();

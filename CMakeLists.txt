@@ -1388,6 +1388,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/pacing.c
     src/persona/render.c
     src/persona/examples.c
+    src/persona/rag.c
     src/persona/sampler.c
     src/persona/analyzer.c
     src/persona/creator.c
@@ -3496,6 +3497,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_persona_refresh.c
+    tests/test_persona_rag.c
     tests/test_agent.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
