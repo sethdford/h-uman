@@ -1181,6 +1181,7 @@ set(HU_CORE_SOURCES
     src/daemon_routing.c
     src/daemon_proactive.c
     src/daemon/daemon_director.c
+    src/daemon/daemon_identity.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
