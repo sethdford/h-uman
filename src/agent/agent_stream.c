@@ -59,6 +59,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/humor.h"
 #include "human/persona/narrative_self.h"
+#include "human/persona/rag.h"
 #include "human/persona/somatic.h"
 #include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
@@ -605,6 +606,41 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                          exs[ei]->incoming, exs[ei]->response);
                             if (n > 0 && lpo + (size_t)n < sizeof(lp))
                                 lpo += (size_t)n;
+                        }
+                    }
+                }
+            }
+            /* RAG-over-own-messages voice grounding (default off): retrieve
+             * Seth's most-similar real past messages to THIS incoming message and
+             * inject them as dynamic few-shot grounding — the SOTA RAG leg next to
+             * the fine-tuned adapter + personal model.
+             *
+             * Register-conditional (live A/B 2026-05-29, rag-ab-live-verdict.json):
+             * RAG grounding HELPS the substantive register (+0.110) but slightly
+             * hurts casual (-0.078, richer context fights curt brevity). So gate it
+             * on ANALYTICAL/DEEP turns only; REFLEXIVE/CONVERSATIONAL and unknown
+             * tier (turn_tier < 0) skip it. */
+            if (agent->config && agent->config->agent.rag_grounding_enabled &&
+                agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
+                const char *home = getenv("HOME");
+                if (home && *home) {
+                    char qbuf[512];
+                    size_t qn = msg_len < sizeof(qbuf) - 1 ? msg_len : sizeof(qbuf) - 1;
+                    if (msg && qn > 0) {
+                        memcpy(qbuf, msg, qn);
+                        qbuf[qn] = '\0';
+                        char cpath[768];
+                        int pn =
+                            snprintf(cpath, sizeof(cpath), "%s/.human/voice_corpus.jsonl", home);
+                        if (pn > 0 && (size_t)pn < sizeof(cpath)) {
+                            char rag_buf[2048];
+                            size_t rn = hu_persona_rag_ground_from_file(
+                                qbuf, cpath, 3, rag_buf, sizeof(rag_buf), agent->alloc);
+                            if (rn > 0) {
+                                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n%s", rag_buf);
+                                if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                                    lpo += (size_t)n;
+                            }
                         }
                     }
                 }

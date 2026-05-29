@@ -198,6 +198,11 @@ typedef struct hu_agent_config {
     bool compaction_use_structured; /* use XML structured summaries */
     char *self_rag_mode;     /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
     bool self_rag_streaming; /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
+    /* RAG-over-own-messages voice grounding: retrieve the user's most-similar
+     * past sent messages and inject them as per-turn few-shot grounding.
+     * Default off — flip on for the LoRA-vs-RAG A/B ("measure before optimize").
+     * Corpus = ~/.human/voice_corpus.jsonl (the harvested sent-message corpus). */
+    bool rag_grounding_enabled;
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {
