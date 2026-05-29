@@ -134,6 +134,21 @@ static void explicit_reaction_collection_true_preserved(void) {
     test_config_destroy(cfg);
 }
 
+/* Wave 6: fresh config defaults mlx_local streaming ON (harmony filter +
+ * outbound guards make it safe); explicit opt-out is preserved. */
+static void fresh_config_mlx_streaming_on_by_default(void) {
+    hu_config_t *cfg = test_config_create("{}");
+    HU_ASSERT_TRUE(cfg->mlx_local.streaming_enabled);
+    test_config_destroy(cfg);
+}
+
+static void explicit_mlx_streaming_off_preserved(void) {
+    const char *json = "{\"mlx_local\":{\"streaming_enabled\":false}}";
+    hu_config_t *cfg = test_config_create(json);
+    HU_ASSERT_FALSE(cfg->mlx_local.streaming_enabled);
+    test_config_destroy(cfg);
+}
+
 void run_config_seth_voice_defaults_tests(void) {
     HU_TEST_SUITE("AC-1: mlx_local_routing tri-state");
     HU_RUN_TEST(fresh_config_routing_defaults_to_auto);
@@ -149,4 +164,8 @@ void run_config_seth_voice_defaults_tests(void) {
     HU_RUN_TEST(fresh_config_reaction_collection_enabled_by_default);
     HU_RUN_TEST(explicit_reaction_collection_false_preserved);
     HU_RUN_TEST(explicit_reaction_collection_true_preserved);
+
+    HU_TEST_SUITE("Wave 6: mlx_local streaming default");
+    HU_RUN_TEST(fresh_config_mlx_streaming_on_by_default);
+    HU_RUN_TEST(explicit_mlx_streaming_off_preserved);
 }
