@@ -63,20 +63,21 @@ static const hu_reward_model_vtable_t huml_rm_vtable;
  * can free with `cap * sizeof(int32_t)` — the 3-arg
  * alloc->free(ctx, ptr, size) requires the EXACT allocated size for the
  * tracking allocator to balance its ledger (see allocator.h:11). */
-static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s,
-                                  size_t vocab_size, int32_t **out, size_t *out_n,
-                                  size_t *out_cap) {
+static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s, size_t vocab_size,
+                                  int32_t **out, size_t *out_n, size_t *out_cap) {
     if (!alloc || !alloc->alloc || !s || !out || !out_n) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     size_t cap = 16, n = 0;
     int32_t *buf = (int32_t *)alloc->alloc(alloc->ctx, cap * sizeof(int32_t));
-    if (!buf) return HU_ERR_OUT_OF_MEMORY;
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
     const char *p = s;
     while (*p) {
         char *endp = NULL;
         long v = strtol(p, &endp, 10);
-        if (endp == p) break;
+        if (endp == p)
+            break;
         if (n == cap) {
             size_t old_cap = cap;
             cap *= 2;
@@ -89,29 +90,32 @@ static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s,
             alloc->free(alloc->ctx, buf, old_cap * sizeof(int32_t));
             buf = nb;
         }
-        if (v < 0) v = 0;
-        if (vocab_size > 0 && (size_t)v >= vocab_size) v = (long)(vocab_size - 1);
+        if (v < 0)
+            v = 0;
+        if (vocab_size > 0 && (size_t)v >= vocab_size)
+            v = (long)(vocab_size - 1);
         buf[n++] = (int32_t)v;
         p = endp;
-        while (*p == ' ' || *p == '\t') p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
     }
     *out = buf;
     *out_n = n;
-    if (out_cap) *out_cap = cap;
+    if (out_cap)
+        *out_cap = cap;
     return HU_OK;
 }
 
 /* Run the backbone forward on `prompt response` (space-joined), pull out
  * the last-position [vocab_size] logits as the hidden state, and project
  * through the value head. Caller-allocated `out_score` is set on HU_OK. */
-static hu_error_t huml_rm_score(void *vctx, hu_allocator_t *alloc,
-                                 const char *prompt, size_t prompt_len,
-                                 const char *response, size_t response_len,
-                                 double *out_score) {
-    if (!vctx || !alloc || !alloc->alloc || !alloc->free
-        || !prompt || prompt_len == 0
-        || !response || response_len == 0
-        || !out_score) {
+/* Core scorer. When out_h != NULL it receives a copy of the last-position
+ * [hidden_dim] hidden vector fed to the value head (for analytical backprop). */
+static hu_error_t huml_score_core(void *vctx, hu_allocator_t *alloc, const char *prompt,
+                                  size_t prompt_len, const char *response, size_t response_len,
+                                  double *out_score, float *out_h) {
+    if (!vctx || !alloc || !alloc->alloc || !alloc->free || !prompt || prompt_len == 0 ||
+        !response || response_len == 0 || !out_score) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     huml_rm_ctx_t *c = (huml_rm_ctx_t *)vctx;
@@ -122,11 +126,10 @@ static hu_error_t huml_rm_score(void *vctx, hu_allocator_t *alloc,
     int32_t *prompt_ids = NULL, *response_ids = NULL;
     size_t pl = 0, rl = 0;
     size_t pcap = 0, rcap = 0;
-    hu_error_t err = parse_id_string(alloc, prompt, c->vocab_size,
-                                      &prompt_ids, &pl, &pcap);
-    if (err != HU_OK) return err;
-    err = parse_id_string(alloc, response, c->vocab_size,
-                          &response_ids, &rl, &rcap);
+    hu_error_t err = parse_id_string(alloc, prompt, c->vocab_size, &prompt_ids, &pl, &pcap);
+    if (err != HU_OK)
+        return err;
+    err = parse_id_string(alloc, response, c->vocab_size, &response_ids, &rl, &rcap);
     if (err != HU_OK) {
         alloc->free(alloc->ctx, prompt_ids, pcap * sizeof(int32_t));
         return err;
@@ -192,23 +195,43 @@ static hu_error_t huml_rm_score(void *vctx, hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     }
     const float *h = logits + (total - 1) * V;
+    if (out_h)
+        memcpy(out_h, h, V * sizeof(float));
     double score = 0.0;
     err = hu_value_head_forward(&c->value_head, h, &score);
 
     alloc->free(alloc->ctx, output.data, output.size_bytes);
     alloc->free(alloc->ctx, ids, total * sizeof(int32_t));
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
     *out_score = score;
     return HU_OK;
 }
 
+/* vtable scorer — thin wrapper, no hidden state needed. */
+static hu_error_t huml_rm_score(void *vctx, hu_allocator_t *alloc, const char *prompt,
+                                size_t prompt_len, const char *response, size_t response_len,
+                                double *out_score) {
+    return huml_score_core(vctx, alloc, prompt, prompt_len, response, response_len, out_score,
+                           NULL);
+}
+
+/* Priv (declared in reward_model_priv.h): score AND return the last-position
+ * hidden vector, so the training loop can run analytical value-head backprop. */
+hu_error_t reward_model_huml_score_hidden(hu_reward_model_t *rm, hu_allocator_t *alloc,
+                                          const char *prompt, size_t prompt_len,
+                                          const char *response, size_t response_len,
+                                          double *out_score, float *out_h) {
+    if (!rm || !rm->ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    return huml_score_core(rm->ctx, alloc, prompt, prompt_len, response, response_len, out_score,
+                           out_h);
+}
+
 static hu_error_t huml_rm_score_batch(void *vctx, hu_allocator_t *alloc,
-                                       const hu_preference_pair_t *pairs,
-                                       size_t n,
-                                       double *out_chosen_scores,
-                                       double *out_rejected_scores) {
-    if (!vctx || !alloc || !pairs || n == 0
-        || !out_chosen_scores || !out_rejected_scores) {
+                                      const hu_preference_pair_t *pairs, size_t n,
+                                      double *out_chosen_scores, double *out_rejected_scores) {
+    if (!vctx || !alloc || !pairs || n == 0 || !out_chosen_scores || !out_rejected_scores) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     for (size_t i = 0; i < n; i++) {
@@ -224,18 +247,16 @@ static hu_error_t huml_rm_score_batch(void *vctx, hu_allocator_t *alloc,
         }
         if (p->chosen_len > 0) {
             double s = 0.0;
-            hu_error_t err = huml_rm_score(vctx, alloc,
-                                            p->prompt, p->prompt_len,
-                                            p->chosen, p->chosen_len, &s);
+            hu_error_t err =
+                huml_rm_score(vctx, alloc, p->prompt, p->prompt_len, p->chosen, p->chosen_len, &s);
             out_chosen_scores[i] = (err == HU_OK) ? s : NAN;
         } else {
             out_chosen_scores[i] = NAN;
         }
         if (p->rejected_len > 0) {
             double s = 0.0;
-            hu_error_t err = huml_rm_score(vctx, alloc,
-                                            p->prompt, p->prompt_len,
-                                            p->rejected, p->rejected_len, &s);
+            hu_error_t err = huml_rm_score(vctx, alloc, p->prompt, p->prompt_len, p->rejected,
+                                           p->rejected_len, &s);
             out_rejected_scores[i] = (err == HU_OK) ? s : NAN;
         } else {
             out_rejected_scores[i] = NAN;
@@ -244,10 +265,14 @@ static hu_error_t huml_rm_score_batch(void *vctx, hu_allocator_t *alloc,
     return HU_OK;
 }
 
-static const char *huml_rm_name(void *vctx) { (void)vctx; return "reward_model_huml"; }
+static const char *huml_rm_name(void *vctx) {
+    (void)vctx;
+    return "reward_model_huml";
+}
 
 static void huml_rm_deinit(void *vctx, hu_allocator_t *alloc) {
-    if (!vctx) return;
+    if (!vctx)
+        return;
     huml_rm_ctx_t *c = (huml_rm_ctx_t *)vctx;
     hu_value_head_deinit(&c->value_head, alloc);
     if (c->backbone.vtable && c->backbone.vtable->deinit) {
@@ -266,28 +291,30 @@ static const hu_reward_model_vtable_t huml_rm_vtable = {
 };
 
 huml_rm_ctx_t *hu_reward_model_huml_ctx_or_null(hu_reward_model_t *rm) {
-    if (!rm || rm->vtable != &huml_rm_vtable) return NULL;
+    if (!rm || rm->vtable != &huml_rm_vtable)
+        return NULL;
     return (huml_rm_ctx_t *)rm->ctx;
 }
 
 hu_error_t hu_reward_model_create_huml(hu_allocator_t *alloc,
-                                        const hu_reward_model_config_t *config,
-                                        hu_reward_model_t *out) {
+                                       const hu_reward_model_config_t *config,
+                                       hu_reward_model_t *out) {
     if (!alloc || !alloc->alloc || !alloc->free || !config || !out) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     if (config->backend != HU_REWARD_MODEL_BACKEND_HUML) {
         return HU_ERR_INVALID_ARGUMENT;
     }
-    if (config->vocab_size == 0 || config->hidden_dim == 0
-        || config->vocab_size != config->hidden_dim) {
+    if (config->vocab_size == 0 || config->hidden_dim == 0 ||
+        config->vocab_size != config->hidden_dim) {
         /* For HUML the hidden state IS the last-position logits vector;
          * its length is vocab_size by construction. The two MUST match. */
         return HU_ERR_INVALID_ARGUMENT;
     }
 
     huml_rm_ctx_t *c = (huml_rm_ctx_t *)alloc->alloc(alloc->ctx, sizeof(huml_rm_ctx_t));
-    if (!c) return HU_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->vocab_size = config->vocab_size;
     c->hidden_dim = config->hidden_dim;
@@ -333,21 +360,26 @@ hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir) {
         return HU_ERR_INVALID_ARGUMENT;
 
     huml_rm_ctx_t *c = hu_reward_model_huml_ctx_or_null((hu_reward_model_t *)rm);
-    if (!c) return HU_ERR_NOT_SUPPORTED;
+    if (!c)
+        return HU_ERR_NOT_SUPPORTED;
 
     char path[1024];
     int n = snprintf(path, sizeof(path), "%s/value_head.vh", dir);
-    if (n <= 0 || (size_t)n >= sizeof(path)) return HU_ERR_INVALID_ARGUMENT;
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_error_t err = hu_value_head_save(&c->value_head, path);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
 
     n = snprintf(path, sizeof(path), "%s/rm_meta.json", dir);
-    if (n <= 0 || (size_t)n >= sizeof(path)) return HU_ERR_INVALID_ARGUMENT;
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return HU_ERR_INVALID_ARGUMENT;
     FILE *f = fopen(path, "w");
-    if (!f) return HU_ERR_IO;
-    fprintf(f, "{\"vocab_size\":%zu,\"hidden_dim\":%zu,\"backend\":\"huml\"}\n",
-            c->vocab_size, c->hidden_dim);
+    if (!f)
+        return HU_ERR_IO;
+    fprintf(f, "{\"vocab_size\":%zu,\"hidden_dim\":%zu,\"backend\":\"huml\"}\n", c->vocab_size,
+            c->hidden_dim);
     fclose(f);
     return HU_OK;
 }
@@ -370,46 +402,55 @@ hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir) {
  * just loaded from disk. This way the backbone is always fresh — the
  * HUML backbone is frozen during RM training (see reward_model_train.c)
  * and the trained surface is the value head only. */
-hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir,
-                                 hu_reward_model_t *out) {
+hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir, hu_reward_model_t *out) {
     if (!alloc || !alloc->alloc || !alloc->free || !dir || !dir[0] || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
     char meta_path[1024];
     char vh_path[1024];
     int n = snprintf(meta_path, sizeof(meta_path), "%s/rm_meta.json", dir);
-    if (n <= 0 || (size_t)n >= sizeof(meta_path)) return HU_ERR_INVALID_ARGUMENT;
+    if (n <= 0 || (size_t)n >= sizeof(meta_path))
+        return HU_ERR_INVALID_ARGUMENT;
     n = snprintf(vh_path, sizeof(vh_path), "%s/value_head.vh", dir);
-    if (n <= 0 || (size_t)n >= sizeof(vh_path)) return HU_ERR_INVALID_ARGUMENT;
+    if (n <= 0 || (size_t)n >= sizeof(vh_path))
+        return HU_ERR_INVALID_ARGUMENT;
 
     FILE *f = fopen(meta_path, "r");
-    if (!f) return HU_ERR_IO;
+    if (!f)
+        return HU_ERR_IO;
     char meta_buf[1024];
     size_t got = fread(meta_buf, 1, sizeof(meta_buf) - 1, f);
     fclose(f);
-    if (got == 0) return HU_ERR_PARSE;
+    if (got == 0)
+        return HU_ERR_PARSE;
     meta_buf[got] = '\0';
 
     size_t vocab_size = 0, hidden_dim = 0;
     const char *vf = strstr(meta_buf, "\"vocab_size\"");
     const char *hf = strstr(meta_buf, "\"hidden_dim\"");
     const char *bf = strstr(meta_buf, "\"backend\"");
-    if (!vf || !hf || !bf) return HU_ERR_PARSE;
+    if (!vf || !hf || !bf)
+        return HU_ERR_PARSE;
     /* Strict: backend must be "huml" (this loader only handles HUML). */
     const char *bq = strchr(bf + 9, '"');
-    if (!bq) return HU_ERR_PARSE;
+    if (!bq)
+        return HU_ERR_PARSE;
     bq++;
     const char *be = strchr(bq, '"');
     if (!be || (size_t)(be - bq) != 4 || strncmp(bq, "huml", 4) != 0)
         return HU_ERR_NOT_SUPPORTED;
     /* Find the first digit after each field name. */
     const char *vp = vf + strlen("\"vocab_size\"");
-    while (*vp && (*vp < '0' || *vp > '9')) vp++;
-    if (!*vp) return HU_ERR_PARSE;
+    while (*vp && (*vp < '0' || *vp > '9'))
+        vp++;
+    if (!*vp)
+        return HU_ERR_PARSE;
     vocab_size = (size_t)strtoul(vp, NULL, 10);
     const char *hp = hf + strlen("\"hidden_dim\"");
-    while (*hp && (*hp < '0' || *hp > '9')) hp++;
-    if (!*hp) return HU_ERR_PARSE;
+    while (*hp && (*hp < '0' || *hp > '9'))
+        hp++;
+    if (!*hp)
+        return HU_ERR_PARSE;
     hidden_dim = (size_t)strtoul(hp, NULL, 10);
     if (vocab_size == 0 || hidden_dim == 0 || vocab_size != hidden_dim)
         return HU_ERR_PARSE;
@@ -421,7 +462,8 @@ hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir,
     };
     hu_reward_model_t tmp = {0};
     hu_error_t err = hu_reward_model_create_huml(alloc, &cfg, &tmp);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
 
     huml_rm_ctx_t *c = hu_reward_model_huml_ctx_or_null(&tmp);
     if (!c) {

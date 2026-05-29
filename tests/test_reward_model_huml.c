@@ -16,6 +16,9 @@ hu_error_t reward_model_compute_bt_loss_only_for_test(hu_reward_model_t *rm, hu_
                                                       const hu_preference_pair_t *pairs, size_t n,
                                                       double *out_loss);
 float *reward_model_huml_value_head_W_for_test(hu_reward_model_t *rm);
+hu_error_t reward_model_compute_bt_grad_for_test(hu_reward_model_t *rm, hu_allocator_t *alloc,
+                                                 const hu_preference_pair_t *pairs, size_t n,
+                                                 float *out_dW, double *out_db);
 
 /* AC-101.2: Scoring is deterministic and reproducible */
 static void test_score_deterministic(void) {
@@ -177,165 +180,84 @@ static void test_bradley_terry_loss_math(void) {
     HU_ASSERT(fabs(loss - loss_alt) < 1e-10);
 }
 
-/* AC-101.4: Finite-difference gradient check on batch size 2 */
-static void test_gradient_check_finite_difference_batch_2(void) {
-    hu_allocator_t alloc_storage = hu_system_allocator();
-    hu_allocator_t *alloc = &alloc_storage;
-
-    hu_reward_model_config_t cfg = {
-        .backend = HU_REWARD_MODEL_BACKEND_HUML,
-        .vocab_size = 100,
-        .hidden_dim = 100,
-    };
-
-    hu_reward_model_t rm = {0};
-    HU_ASSERT_EQ(hu_reward_model_create_huml(alloc, &cfg, &rm), HU_OK);
-
-    hu_preference_pair_t pairs[2] = {
-        {.prompt = "1",
-         .prompt_len = 1,
-         .chosen = "2",
-         .chosen_len = 1,
-         .rejected = "3",
-         .rejected_len = 1},
-        {.prompt = "4",
-         .prompt_len = 1,
-         .chosen = "5",
-         .chosen_len = 1,
-         .rejected = "6",
-         .rejected_len = 1},
-    };
-
-    /* Get baseline loss */
-    double baseline_loss = 0.0;
-    HU_ASSERT_EQ(reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 2, &baseline_loss),
-                 HU_OK);
-
-    /* Check first few weights via finite difference */
-    const double eps = 1e-4;
-    float *W = reward_model_huml_value_head_W_for_test(&rm);
+/* AC-101.4: validate the ANALYTICAL value-head gradient against CENTRAL finite
+ * differences of the same mean Bradley-Terry loss. A correct analytical
+ * gradient matches FD within float32 tolerance; a wrong one (sign error,
+ * missing term, or a gradient that was never actually computed) does not.
+ * Assumes hidden_dim == 100 (all three batch tests use vocab_size=100). */
+static void gradient_check_against_fd(hu_reward_model_t *rm, hu_allocator_t *alloc,
+                                      const hu_preference_pair_t *pairs, size_t n) {
+    float *W = reward_model_huml_value_head_W_for_test(rm);
     HU_ASSERT_NOT_NULL(W);
 
-    for (int w_idx = 0; w_idx < 3; w_idx++) {
-        float saved = W[w_idx];
-        W[w_idx] = saved + (float)eps;
+    float analytic[100];
+    double analytic_db = 0.0;
+    HU_ASSERT_EQ(reward_model_compute_bt_grad_for_test(rm, alloc, pairs, n, analytic, &analytic_db),
+                 HU_OK);
 
-        double perturbed_loss = 0.0;
-        HU_ASSERT_EQ(
-            reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 2, &perturbed_loss),
-            HU_OK);
+    const double eps = 1e-2; /* large enough that float32 W rounding stays << step */
+    int checked = 0;
+    for (int j = 0; j < 100 && checked < 8; j++) {
+        float saved = W[j];
+        double lp = 0.0, lm = 0.0;
+        W[j] = saved + (float)eps;
+        HU_ASSERT_EQ(reward_model_compute_bt_loss_only_for_test(rm, alloc, pairs, n, &lp), HU_OK);
+        W[j] = saved - (float)eps;
+        HU_ASSERT_EQ(reward_model_compute_bt_loss_only_for_test(rm, alloc, pairs, n, &lm), HU_OK);
+        W[j] = saved;
 
-        double numerical_grad = (perturbed_loss - baseline_loss) / eps;
-        W[w_idx] = saved;
-
-        /* Gradient should be reasonable (not NaN and reasonable magnitude) */
-        HU_ASSERT(!isnan(numerical_grad));
-        HU_ASSERT(fabs(numerical_grad) < 100.0); /* Sanity check */
+        double fd = (lp - lm) / (2.0 * eps);
+        double a = (double)analytic[j];
+        /* Skip ill-conditioned near-zero gradients (relative error blows up). */
+        if (fabs(a) < 1e-3 && fabs(fd) < 1e-3)
+            continue;
+        double rel = fabs(a - fd) / (fabs(a) + fabs(fd) + 1e-9);
+        HU_ASSERT(rel < 2e-2); /* analytical matches FD to ~2% (float32-limited) */
+        checked++;
     }
-
-    rm.vtable->deinit(rm.ctx, alloc);
+    HU_ASSERT(checked > 0); /* must have exercised at least one non-trivial weight */
 }
 
-/* AC-101.4: Finite-difference gradient check on batch size 4 */
-static void test_gradient_check_finite_difference_batch_4(void) {
-    hu_allocator_t alloc_storage = hu_system_allocator();
-    hu_allocator_t *alloc = &alloc_storage;
-
-    hu_reward_model_config_t cfg = {
-        .backend = HU_REWARD_MODEL_BACKEND_HUML,
-        .vocab_size = 100,
-        .hidden_dim = 100,
-    };
-
-    hu_reward_model_t rm = {0};
-    HU_ASSERT_EQ(hu_reward_model_create_huml(alloc, &cfg, &rm), HU_OK);
-
-    hu_preference_pair_t pairs[4];
-    for (int i = 0; i < 4; i++) {
-        snprintf(pairs[i].prompt, sizeof(pairs[i].prompt), "%d", i);
+static void make_int_pairs(hu_preference_pair_t *pairs, int n) {
+    memset(pairs, 0, (size_t)n * sizeof(pairs[0]));
+    for (int i = 0; i < n; i++) {
+        /* integer-ID tokens within vocab=100; low chosen vs high rejected so
+         * the loss has a non-trivial gradient to check against. */
+        snprintf(pairs[i].prompt, sizeof(pairs[i].prompt), "0 1");
         pairs[i].prompt_len = strlen(pairs[i].prompt);
-        snprintf(pairs[i].chosen, sizeof(pairs[i].chosen), "%d", i + 10);
+        snprintf(pairs[i].chosen, sizeof(pairs[i].chosen), "%d", 2 + (i % 5));
         pairs[i].chosen_len = strlen(pairs[i].chosen);
-        snprintf(pairs[i].rejected, sizeof(pairs[i].rejected), "%d", i + 20);
+        snprintf(pairs[i].rejected, sizeof(pairs[i].rejected), "%d", 40 + (i % 5));
         pairs[i].rejected_len = strlen(pairs[i].rejected);
     }
-
-    double baseline_loss = 0.0;
-    HU_ASSERT_EQ(reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 4, &baseline_loss),
-                 HU_OK);
-
-    const double eps = 1e-4;
-    float *W = reward_model_huml_value_head_W_for_test(&rm);
-    HU_ASSERT_NOT_NULL(W);
-
-    for (int w_idx = 0; w_idx < 3; w_idx++) {
-        float saved = W[w_idx];
-        W[w_idx] = saved + (float)eps;
-
-        double perturbed_loss = 0.0;
-        HU_ASSERT_EQ(
-            reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 4, &perturbed_loss),
-            HU_OK);
-
-        double numerical_grad = (perturbed_loss - baseline_loss) / eps;
-        W[w_idx] = saved;
-
-        HU_ASSERT(!isnan(numerical_grad));
-        HU_ASSERT(fabs(numerical_grad) < 100.0);
-    }
-
-    rm.vtable->deinit(rm.ctx, alloc);
 }
 
-/* AC-101.4: Finite-difference gradient check on batch size 8 */
-static void test_gradient_check_finite_difference_batch_8(void) {
-    hu_allocator_t alloc_storage = hu_system_allocator();
-    hu_allocator_t *alloc = &alloc_storage;
-
+static void run_gradient_check_for_batch(int n) {
+    hu_allocator_t alloc = hu_system_allocator();
     hu_reward_model_config_t cfg = {
         .backend = HU_REWARD_MODEL_BACKEND_HUML,
         .vocab_size = 100,
         .hidden_dim = 100,
     };
-
     hu_reward_model_t rm = {0};
-    HU_ASSERT_EQ(hu_reward_model_create_huml(alloc, &cfg, &rm), HU_OK);
+    HU_ASSERT_EQ(hu_reward_model_create_huml(&alloc, &cfg, &rm), HU_OK);
 
     hu_preference_pair_t pairs[8];
-    for (int i = 0; i < 8; i++) {
-        snprintf(pairs[i].prompt, sizeof(pairs[i].prompt), "%d", i);
-        pairs[i].prompt_len = strlen(pairs[i].prompt);
-        snprintf(pairs[i].chosen, sizeof(pairs[i].chosen), "%d", i + 10);
-        pairs[i].chosen_len = strlen(pairs[i].chosen);
-        snprintf(pairs[i].rejected, sizeof(pairs[i].rejected), "%d", i + 20);
-        pairs[i].rejected_len = strlen(pairs[i].rejected);
-    }
+    make_int_pairs(pairs, n);
+    gradient_check_against_fd(&rm, &alloc, pairs, (size_t)n);
 
-    double baseline_loss = 0.0;
-    HU_ASSERT_EQ(reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 8, &baseline_loss),
-                 HU_OK);
+    rm.vtable->deinit(rm.ctx, &alloc);
+}
 
-    const double eps = 1e-4;
-    float *W = reward_model_huml_value_head_W_for_test(&rm);
-    HU_ASSERT_NOT_NULL(W);
-
-    for (int w_idx = 0; w_idx < 3; w_idx++) {
-        float saved = W[w_idx];
-        W[w_idx] = saved + (float)eps;
-
-        double perturbed_loss = 0.0;
-        HU_ASSERT_EQ(
-            reward_model_compute_bt_loss_only_for_test(&rm, alloc, pairs, 8, &perturbed_loss),
-            HU_OK);
-
-        double numerical_grad = (perturbed_loss - baseline_loss) / eps;
-        W[w_idx] = saved;
-
-        HU_ASSERT(!isnan(numerical_grad));
-        HU_ASSERT(fabs(numerical_grad) < 100.0);
-    }
-
-    rm.vtable->deinit(rm.ctx, alloc);
+/* AC-101.4: analytical-vs-finite-difference gradient checks on 3 batch sizes. */
+static void test_gradient_check_finite_difference_batch_2(void) {
+    run_gradient_check_for_batch(2);
+}
+static void test_gradient_check_finite_difference_batch_4(void) {
+    run_gradient_check_for_batch(4);
+}
+static void test_gradient_check_finite_difference_batch_8(void) {
+    run_gradient_check_for_batch(8);
 }
 
 /* AC-101.5: Preference ranking test (5 seeds) */
