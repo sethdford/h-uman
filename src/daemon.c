@@ -13850,7 +13850,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_music_result_t *link_song =
                                         has_spotify ? &spotify_song : &song;
 
-                                    if (search_err == HU_OK &&
+                                    bool song_verified =
+                                        hu_music_result_matches(search_query, &song) ||
+                                        (has_spotify &&
+                                         hu_music_result_matches(search_query, &spotify_song));
+                                    if (search_err == HU_OK && song_verified &&
                                         (song.track_view_url ||
                                          (has_spotify && spotify_song.track_view_url))) {
                                         /* Rich-link mode: when the channel auto-unfurls bare URLs
@@ -13987,8 +13991,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 (void)unlink(artwork_path);
                                         }
                                     } else {
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "music search failed for: %s", search_query);
+                                        hu_log_info(
+                                            "human", agent ? agent->observer : NULL,
+                                            "music share skipped (no verified match) for: %s",
+                                            search_query);
                                     }
                                     hu_music_result_free(alloc, &song);
                                     if (has_spotify)
