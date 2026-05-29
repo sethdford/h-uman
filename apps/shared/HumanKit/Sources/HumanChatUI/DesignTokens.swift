@@ -260,10 +260,6 @@ public enum HUTokens {
     public enum Haptic {
         case light, medium, heavy, success, warning, selection
 
-        // UIKit feedback generators are @MainActor-isolated under Swift 6.
-        // trigger() is therefore @MainActor; all call sites are SwiftUI Views
-        // (implicitly @MainActor), so this is a no-op for callers.
-        @MainActor
         public func trigger() {
             #if canImport(UIKit)
             switch self {
