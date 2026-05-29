@@ -818,6 +818,7 @@ void run_reflection_storage_tests(void);                 /* T2: stub when SQLite
 void run_reflection_prompt_tests(void);                  /* T4: stub when SQLite off */
 void run_reflection_orchestration_tests(void);           /* T5: stub when SQLite off */
 void run_reflection_consumer_tests(void);                /* T6: stub when SQLite off */
+void run_reflection_turn_source_tests(void);             /* T9fu: stub when SQLite off */
 void run_personal_model_reflection_slice_tests(void);    /* T7: stub when SQLite off */
 void run_reflection_retire_on_contradiction_tests(void); /* T8: stub when SQLite off */
 void run_reflection_quorum_tests(void);                  /* T11: stub when SQLite off */
@@ -1698,6 +1699,7 @@ int main(int argc, char **argv) {
     run_reflection_prompt_tests();                  /* T4: stubbed-out when SQLite off */
     run_reflection_orchestration_tests();           /* T5: stubbed-out when SQLite off */
     run_reflection_consumer_tests();                /* T6: stubbed-out when SQLite off */
+    run_reflection_turn_source_tests();             /* T9fu: stubbed-out when SQLite off */
     run_reflection_quorum_tests();                  /* T11: stubbed-out when SQLite off */
     run_personal_model_reflection_slice_tests();    /* T7: stubbed-out when SQLite off */
     run_reflection_retire_on_contradiction_tests(); /* T8: stubbed-out when SQLite off */

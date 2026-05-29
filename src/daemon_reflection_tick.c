@@ -17,15 +17,13 @@
  *      The internal gate decides whether to actually fire; this
  *      wrapper just feeds it the daemon's view of the world.
  *
- * Turn source (the deferred T4 decision): Phase 1 ships with a STUB
- * iter that always returns 0 turns. The hu_reflection_run gate
- * detects this and returns NO_INPUT, so the wire-up is verifiable
- * (operator can enable the subsystem in config, see startup logs +
- * tick logs, and confirm "no input source wired yet" without the
- * daemon crashing or producing nonsense patterns). A follow-up task
- * (tracked in tasks.md under T9-followup) wires the real turn
- * iterator once the team picks a turn source (see the four options
- * discussed at the top of this sprint's session log). */
+ * Turn source (T9-followup, the resolved T4 decision): the production
+ * iter streams the canonical `messages` conversation ledger — the same
+ * table the memory engine's save_message path writes — via
+ * hu_reflection_sqlite_turn_source (src/reflection/turn_source.c). It
+ * reads only the sqlite3 handle, so the reflection module stays
+ * daemon-free. NO_INPUT now means the ledger is genuinely empty (no
+ * conversations yet), not "unwired". */
 
 #include "human/agent.h"
 #include "human/config.h"
@@ -42,16 +40,6 @@
 #include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
-
-/* ── Stub turn iter (T10 follow-up replaces this) ─────────────── */
-
-/* Returns false on first call → hu_reflection_run sees 0 turns →
- * status=NO_INPUT, no provider call, no run row inserted. */
-static bool stub_turn_iter(void *ctx, hu_reflection_turn_t *out_turn) {
-    (void)ctx;
-    (void)out_turn;
-    return false;
-}
 
 /* ── One-shot migration ──────────────────────────────────────── */
 
@@ -117,13 +105,31 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
     if (!agent->provider.vtable || !agent->provider.vtable->chat_with_system)
         return;
 
+    /* Production turn source: stream the most-recent slice of the
+     * `messages` ledger, oldest-first. Cursor is prepared per tick and
+     * disposed after the run — cheap (one prepared stmt) and keeps the
+     * cursor's lifetime tightly bounded to the run. If the cursor can't
+     * be prepared (e.g. the memory backend hasn't created `messages`
+     * yet) warn once and skip this tick rather than crash. */
+    hu_reflection_sqlite_turn_source_t *src = NULL;
+    hu_error_t src_err = hu_reflection_sqlite_turn_source_init(
+        &src, db, alloc, HU_REFLECTION_TURN_SOURCE_DEFAULT_MAX);
+    if (src_err != HU_OK || !src) {
+        static atomic_bool warned_no_source = false;
+        hu_log_warn_once(&warned_no_source, "reflection.daemon", NULL,
+                         "reflection turn source unavailable (err=%d) — the `messages` "
+                         "ledger may not exist yet; skipping reflection this tick",
+                         (int)src_err);
+        return;
+    }
+
     hu_reflection_run_inputs_t inputs = {
         .db = db,
         .cfg = &cfg->reflection_loop,
         .provider = &agent->provider,
         .alloc = alloc,
-        .iter_fn = stub_turn_iter,
-        .iter_ctx = NULL,
+        .iter_fn = hu_reflection_sqlite_turn_iter,
+        .iter_ctx = src,
         .last_user_activity_ms = last_user_activity_ms,
         .now_ms = now_ms,
         .max_input_chars = 0, /* default 100K */
@@ -132,6 +138,8 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
     hu_reflection_run_status_t status = HU_REFLECTION_RUN_GATED;
     int kept = 0, dropped = 0;
     (void)hu_reflection_run(&inputs, /*force=*/false, &status, &kept, &dropped);
+
+    hu_reflection_sqlite_turn_source_dispose(src);
 
     /* Per-tick logging: only emit something when a run actually
      * happened OR an error fired. Gated ticks are too noisy to log
@@ -142,15 +150,14 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
                     dropped);
         break;
     case HU_REFLECTION_RUN_NO_INPUT:
-        /* This is the expected Phase 1 path — stub iter returns 0 turns.
-         * One-shot to avoid log flooding when the operator enables the
-         * subsystem before T10's real iter lands. */
+        /* The `messages` ledger is empty this tick — no conversations to
+         * reflect on yet. One-shot to avoid log flooding on a fresh
+         * install before any messages accrue. */
         {
             static atomic_bool warned_no_input = false;
             hu_log_info_once(&warned_no_input, "reflection.daemon", NULL,
-                             "reflection_loop enabled but no turn source wired "
-                             "(stub iter returns 0 turns). T10 follow-up will "
-                             "wire the production turn iterator.");
+                             "reflection_loop enabled but the conversation ledger is "
+                             "empty (0 turns) — nothing to reflect on yet");
         }
         break;
     case HU_REFLECTION_RUN_PROVIDER_ERROR:
