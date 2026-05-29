@@ -184,20 +184,23 @@ static void test_bradley_terry_loss_math(void) {
  * differences of the same mean Bradley-Terry loss. A correct analytical
  * gradient matches FD within float32 tolerance; a wrong one (sign error,
  * missing term, or a gradient that was never actually computed) does not.
- * Assumes hidden_dim == 100 (all three batch tests use vocab_size=100). */
+ * hidden_dim is passed explicitly (no hardcoded buffer) so the helper is safe
+ * if a future caller uses a different value-head width. */
 static void gradient_check_against_fd(hu_reward_model_t *rm, hu_allocator_t *alloc,
-                                      const hu_preference_pair_t *pairs, size_t n) {
+                                      const hu_preference_pair_t *pairs, size_t n,
+                                      size_t hidden_dim) {
     float *W = reward_model_huml_value_head_W_for_test(rm);
     HU_ASSERT_NOT_NULL(W);
 
-    float analytic[100];
+    float *analytic = (float *)alloc->alloc(alloc->ctx, hidden_dim * sizeof(float));
+    HU_ASSERT_NOT_NULL(analytic);
     double analytic_db = 0.0;
     HU_ASSERT_EQ(reward_model_compute_bt_grad_for_test(rm, alloc, pairs, n, analytic, &analytic_db),
                  HU_OK);
 
     const double eps = 1e-2; /* large enough that float32 W rounding stays << step */
     int checked = 0;
-    for (int j = 0; j < 100 && checked < 8; j++) {
+    for (size_t j = 0; j < hidden_dim && checked < 8; j++) {
         float saved = W[j];
         double lp = 0.0, lm = 0.0;
         W[j] = saved + (float)eps;
@@ -216,6 +219,7 @@ static void gradient_check_against_fd(hu_reward_model_t *rm, hu_allocator_t *all
         checked++;
     }
     HU_ASSERT(checked > 0); /* must have exercised at least one non-trivial weight */
+    alloc->free(alloc->ctx, analytic, hidden_dim * sizeof(float));
 }
 
 static void make_int_pairs(hu_preference_pair_t *pairs, int n) {
@@ -244,7 +248,7 @@ static void run_gradient_check_for_batch(int n) {
 
     hu_preference_pair_t pairs[8];
     make_int_pairs(pairs, n);
-    gradient_check_against_fd(&rm, &alloc, pairs, (size_t)n);
+    gradient_check_against_fd(&rm, &alloc, pairs, (size_t)n, cfg.hidden_dim);
 
     rm.vtable->deinit(rm.ctx, &alloc);
 }

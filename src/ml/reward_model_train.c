@@ -160,11 +160,18 @@ hu_error_t hu_reward_model_train(hu_reward_model_t *rm, hu_allocator_t *alloc,
     float *dW_l = (float *)alloc->alloc(alloc->ctx, V * sizeof(float));
     double *total_dW = (double *)alloc->alloc(alloc->ctx, V * sizeof(double));
     if (!h_w || !h_l || !dW_w || !dW_l || !total_dW) {
-        alloc->free(alloc->ctx, h_w, V * sizeof(float));
-        alloc->free(alloc->ctx, h_l, V * sizeof(float));
-        alloc->free(alloc->ctx, dW_w, V * sizeof(float));
-        alloc->free(alloc->ctx, dW_l, V * sizeof(float));
-        alloc->free(alloc->ctx, total_dW, V * sizeof(double));
+        /* Partial-allocation cleanup: any subset may be NULL — guard each
+         * free (some tracking allocators reject free(NULL, size)). */
+        if (h_w)
+            alloc->free(alloc->ctx, h_w, V * sizeof(float));
+        if (h_l)
+            alloc->free(alloc->ctx, h_l, V * sizeof(float));
+        if (dW_w)
+            alloc->free(alloc->ctx, dW_w, V * sizeof(float));
+        if (dW_l)
+            alloc->free(alloc->ctx, dW_l, V * sizeof(float));
+        if (total_dW)
+            alloc->free(alloc->ctx, total_dW, V * sizeof(double));
         return HU_ERR_OUT_OF_MEMORY;
     }
 
@@ -244,11 +251,16 @@ hu_error_t reward_model_compute_bt_grad_for_test(hu_reward_model_t *rm, hu_alloc
     float *dW_l = (float *)alloc->alloc(alloc->ctx, V * sizeof(float));
     double *acc = (double *)alloc->alloc(alloc->ctx, V * sizeof(double));
     if (!h_w || !h_l || !dW_w || !dW_l || !acc) {
-        alloc->free(alloc->ctx, h_w, V * sizeof(float));
-        alloc->free(alloc->ctx, h_l, V * sizeof(float));
-        alloc->free(alloc->ctx, dW_w, V * sizeof(float));
-        alloc->free(alloc->ctx, dW_l, V * sizeof(float));
-        alloc->free(alloc->ctx, acc, V * sizeof(double));
+        if (h_w)
+            alloc->free(alloc->ctx, h_w, V * sizeof(float));
+        if (h_l)
+            alloc->free(alloc->ctx, h_l, V * sizeof(float));
+        if (dW_w)
+            alloc->free(alloc->ctx, dW_w, V * sizeof(float));
+        if (dW_l)
+            alloc->free(alloc->ctx, dW_l, V * sizeof(float));
+        if (acc)
+            alloc->free(alloc->ctx, acc, V * sizeof(double));
         return HU_ERR_OUT_OF_MEMORY;
     }
 
