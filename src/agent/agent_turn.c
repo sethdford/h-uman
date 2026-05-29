@@ -1,13 +1,13 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
-#include "human/persona/taste.h"
 #include "human/agent/humanness.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
+#include "human/persona/taste.h"
 
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
@@ -4177,6 +4177,28 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                            agent->belief_pending_directive_len + 1);
         agent->belief_pending_directive = NULL;
         agent->belief_pending_directive_len = 0;
+    }
+
+    /* B1 prosocial: if the daemon detected a win last turn, inject the B0-gated
+     * celebration directive once so the model acknowledges it warmly, then
+     * consume it (free + clear). */
+    if (system_prompt && agent->prosocial_pending_directive &&
+        agent->prosocial_pending_directive_len > 0) {
+        size_t pd_len = agent->prosocial_pending_directive_len;
+        size_t new_len = system_prompt_len + 1 + pd_len;
+        char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, system_prompt,
+                                                     system_prompt_len + 1, new_len + 1);
+        if (new_sp) {
+            new_sp[system_prompt_len] = '\n';
+            memcpy(new_sp + system_prompt_len + 1, agent->prosocial_pending_directive, pd_len);
+            new_sp[new_len] = '\0';
+            system_prompt = new_sp;
+            system_prompt_len = new_len;
+        }
+        agent->alloc->free(agent->alloc->ctx, agent->prosocial_pending_directive,
+                           agent->prosocial_pending_directive_len + 1);
+        agent->prosocial_pending_directive = NULL;
+        agent->prosocial_pending_directive_len = 0;
     }
 
 #ifdef HU_ENABLE_SQLITE

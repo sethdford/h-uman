@@ -32,6 +32,9 @@
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#include "human/behavior/win_detect.h"
+#include "human/memory/celebration_repo.h"
+#include "human/persona/celebration.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
 #endif
@@ -3525,17 +3528,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 hu_last_intrinsic_min = hu_now_min;
                 int64_t hu_now = (int64_t)time(NULL);
                 hu_intrinsic_drive_tick(&agent->intrinsic_drive, false, hu_now);
-                hu_intrinsic_runtime_cfg_t hu_icfg = {
-                    .enabled = config->intrinsic.enabled,
-                    .per_tick_token_budget = config->intrinsic.per_tick_token_budget};
+                hu_intrinsic_runtime_cfg_t hu_icfg = {.enabled = config->intrinsic.enabled,
+                                                      .per_tick_token_budget =
+                                                          config->intrinsic.per_tick_token_budget};
                 hu_intrinsic_start_facts_t hu_if;
                 hu_if.drive_level = hu_intrinsic_drive_level(&agent->intrinsic_drive);
                 hu_if.secs_since_user = agent->intrinsic_drive.last_user_ts
                                             ? (hu_now - agent->intrinsic_drive.last_user_ts)
                                             : 999999;
-                hu_if.secs_since_intrinsic = agent->intrinsic_drive.last_intrinsic_ts
-                                                 ? (hu_now - agent->intrinsic_drive.last_intrinsic_ts)
-                                                 : 999999;
+                hu_if.secs_since_intrinsic =
+                    agent->intrinsic_drive.last_intrinsic_ts
+                        ? (hu_now - agent->intrinsic_drive.last_intrinsic_ts)
+                        : 999999;
                 hu_if.budget_tokens_remaining = HU_INTRINSIC_DEFAULT_TICK_BUDGET;
                 hu_if.user_active = false;
                 hu_intrinsic_tick_result_t hu_ir;
@@ -12070,15 +12074,83 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_intrinsic_drive_tick(&agent->intrinsic_drive, true, (int64_t)time(NULL));
                         if (combined_len > 0 && batch_key && key_len > 0) {
                             uint64_t kh = 1469598103934665603ULL;
-                            for (size_t bi = 0; bi < key_len; bi++) { kh ^= (uint64_t)(unsigned char)batch_key[bi]; kh *= 1099511628211ULL; }
-                            if (kh != agent->belief_convo_key_hash) { agent->belief_convo_key_hash = kh; agent->belief_changes_this_convo = 0; }
-                            char *bdir = NULL; size_t bdlen = 0; bool bchanged = false;
-                            (void)hu_belief_update_evaluate_turn(alloc, op_db, &agent->pressure_history, combined, combined_len, agent->belief_changes_this_convo, (int64_t)time(NULL), &bdir, &bdlen, &bchanged);
+                            for (size_t bi = 0; bi < key_len; bi++) {
+                                kh ^= (uint64_t)(unsigned char)batch_key[bi];
+                                kh *= 1099511628211ULL;
+                            }
+                            if (kh != agent->belief_convo_key_hash) {
+                                agent->belief_convo_key_hash = kh;
+                                agent->belief_changes_this_convo = 0;
+                            }
+                            char *bdir = NULL;
+                            size_t bdlen = 0;
+                            bool bchanged = false;
+                            (void)hu_belief_update_evaluate_turn(
+                                alloc, op_db, &agent->pressure_history, combined, combined_len,
+                                agent->belief_changes_this_convo, (int64_t)time(NULL), &bdir,
+                                &bdlen, &bchanged);
                             if (bchanged) {
                                 agent->belief_changes_this_convo++;
-                                if (agent->belief_pending_directive) { alloc->free(alloc->ctx, agent->belief_pending_directive, agent->belief_pending_directive_len + 1); }
-                                agent->belief_pending_directive = bdir; agent->belief_pending_directive_len = bdlen;
-                            } else if (bdir) { alloc->free(alloc->ctx, bdir, bdlen + 1); }
+                                if (agent->belief_pending_directive) {
+                                    alloc->free(alloc->ctx, agent->belief_pending_directive,
+                                                agent->belief_pending_directive_len + 1);
+                                }
+                                agent->belief_pending_directive = bdir;
+                                agent->belief_pending_directive_len = bdlen;
+                            } else if (bdir) {
+                                alloc->free(alloc->ctx, bdir, bdlen + 1);
+                            }
+                        }
+
+                        /* B1 prosocial: celebrate a genuine win the user just
+                         * shared — gated by B0 (prosocial integrity), never
+                         * re-celebrated (celebration_repo, 7-day window).
+                         * dependency_risk is NONE at this site; feeding a live
+                         * safety assessment is a documented follow-up. */
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            hu_win_signal_t cwin = hu_win_detect(combined, combined_len);
+                            if (cwin.is_win) {
+                                uint64_t wkh = 1469598103934665603ULL;
+                                for (size_t wi = 0; wi < combined_len; wi++) {
+                                    wkh ^= (uint64_t)(unsigned char)combined[wi];
+                                    wkh *= 1099511628211ULL;
+                                }
+                                char cwin_key[17];
+                                snprintf(cwin_key, sizeof(cwin_key), "%016llx",
+                                         (unsigned long long)wkh);
+                                hu_celebration_repo_t crepo;
+                                if (hu_celebration_repo_create(agent->memory, alloc, &crepo) ==
+                                    HU_OK) {
+                                    int64_t cnow = (int64_t)time(NULL);
+                                    bool celebrated = false;
+                                    crepo.vtable->was_recent(crepo.ctx, batch_key, key_len,
+                                                             cwin_key, strlen(cwin_key), cnow,
+                                                             (int64_t)7 * 24 * 3600, &celebrated);
+                                    if (!celebrated) {
+                                        size_t cdlen = 0;
+                                        char *cdir = hu_celebration_build_directive(
+                                            alloc, cwin.kind, HU_BRISK_NONE, &cdlen);
+                                        if (cdir) {
+                                            hu_celebration_t cel = {0};
+                                            cel.contact_id = batch_key;
+                                            cel.contact_id_len = key_len;
+                                            cel.win_key = cwin_key;
+                                            cel.win_key_len = strlen(cwin_key);
+                                            cel.kind = (int)cwin.kind;
+                                            cel.celebrated_at = cnow;
+                                            crepo.vtable->record(crepo.ctx, &cel);
+                                            if (agent->prosocial_pending_directive) {
+                                                alloc->free(
+                                                    alloc->ctx, agent->prosocial_pending_directive,
+                                                    agent->prosocial_pending_directive_len + 1);
+                                            }
+                                            agent->prosocial_pending_directive = cdir;
+                                            agent->prosocial_pending_directive_len = cdlen;
+                                        }
+                                    }
+                                    crepo.vtable->deinit(crepo.ctx);
+                                }
+                            }
                         }
                     }
                 }
