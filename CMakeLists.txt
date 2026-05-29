@@ -1195,6 +1195,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_identity.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
+    src/daemon/daemon_proactive_policy.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
@@ -3302,6 +3303,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
+    tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
