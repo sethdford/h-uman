@@ -34,7 +34,25 @@
       "Bash(rm -rf /)*",
       "Bash(git push --force)*",
       "Bash(git push -f)*",
-      "Bash(git reset --hard)*"
+      "Bash(git reset --hard)*",
+      "Bash(*ANTHROPIC_API_KEY*)",
+      "Bash(*sk-ant-*)",
+      "Bash(*SECRET_KEY*)",
+      "Bash(*GEMINI_API_KEY*)",
+      "Read(./.env)",
+      "Read(./**/.env)"
+    ]
+  },
+  "autoMode": {
+    "soft_deny": [
+      "$defaults"
+    ],
+    "hard_deny": [
+      "$defaults",
+      "Never cp/copy/install over a running binary (e.g. ~/.local/bin/human-daemon); the daemon may only be installed via scripts/install-human-daemon.sh, which does an atomic mv.",
+      "Never run git commit with --no-verify or otherwise bypass the .githooks pre-commit / commit-msg hooks.",
+      "Never push directly to the main branch; work happens on feature branches and lands via PR.",
+      "Never introduce SQLITE_TRANSIENT in C code; SQLite text/blob binds must use SQLITE_STATIC (null)."
     ]
   },
   "hooks": {
@@ -65,7 +83,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f build/human_tests ] && git diff --name-only HEAD 2>/dev/null | grep -qE '\\.(c|h)$'; then echo 'C files changed — verifying build...' >&2; cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; if [ $? -ne 0 ]; then echo 'BUILD FAILED — fix before completing' >&2; exit 1; fi; fi; exit 0"
+            "command": "if [ -f build/human_tests ] && git diff --name-only HEAD 2>/dev/null | grep -qE '\\.(c|h)$'; then echo 'C files changed \u2014 verifying build...' >&2; cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; if [ $? -ne 0 ]; then echo 'BUILD FAILED \u2014 fix before completing' >&2; exit 1; fi; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/redact-message-display.py 2>/dev/null || true",
+            "timeout": 5
           }
         ]
       }
