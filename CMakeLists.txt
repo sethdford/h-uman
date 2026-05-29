@@ -750,6 +750,7 @@ set(HU_CORE_SOURCES
     src/agent/preferences.c
     src/agent/awareness.c
     src/agent/outcomes.c
+    src/agent/contextual_bandit.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
     src/agent/stop_sequence_registry.c
@@ -3182,6 +3183,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
@@ -3235,6 +3237,7 @@ set(HU_TEST_SOURCES
     tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
+    tests/test_contextual_bandit.c
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
@@ -3870,6 +3873,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_dpo_collector.c
+    tests/test_proactive_outcomes.c
+    tests/test_e2e_learning_loop.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /
@@ -3963,6 +3969,7 @@ if(HU_ENABLE_ML)
         tests/test_dpo_real_mlx.c
         tests/test_value_head.c
         tests/test_cli_dpo.c
+        tests/test_reward_model_huml.c
         tests/test_reward_model_train.c
         tests/test_reward_model_inference.c
         tests/test_kto_loss.c

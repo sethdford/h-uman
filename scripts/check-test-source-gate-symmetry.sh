@@ -447,6 +447,14 @@ BASELINE_ALLOWLIST = {
     "tests/test_lora_training_runner_proof_directory.c",
     # ML+SQLITE: test gated by HU_ENABLE_ML, source also requires SQLITE.
     "tests/test_training_data_extractor.c",
+    # Sprint 60 US-107: e2e learning-loop proof. Body is fully wrapped in
+    # nested `#ifdef HU_ENABLE_ML` / `#ifdef HU_ENABLE_SQLITE` with a stub
+    # `run_e2e_learning_loop_tests` (guarded by the HU_E2E_LOOP_BUILT sentinel)
+    # for variants where either flag is off, so it links everywhere. The
+    # heuristic doesn't union nested-guard frames, so it can't see HU_ENABLE_ML
+    # asserted at the inner SQLITE level — same ML+SQLITE limitation as
+    # test_training_data_extractor.c above.
+    "tests/test_e2e_learning_loop.c",
     # test_main.c is the dispatcher; its #ifdef gating happens inline
     # per-call and per-decl, and the script can't model that well.
     "tests/test_main.c",

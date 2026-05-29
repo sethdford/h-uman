@@ -245,6 +245,7 @@ static void daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int
  * first-run default (info-level log per silent-config-gated-subsystems
  * rule). */
 #include "human/autoresponder.h"
+#include "human/ml/dpo.h"          /* US-102 mining: production_outcomes → dpo_pairs */
 #include "human/ml/lora_nightly.h" /* N2: nightly LoRA export→train→swap tick */
 static hu_autoresponder_config_t g_autoresponder_cfg;
 static bool g_autoresponder_loaded = false;
@@ -4298,6 +4299,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                   ? hu_sqlite_memory_get_db(agent->memory)
                                                   : NULL;
                                 if (db) {
+                                    /* AC-105.2 / AC-102.7: mine fresh production_outcomes into
+                                     * dpo_pairs BEFORE counting + training, so the nightly run
+                                     * trains on the latest implicit feedback. This closes the
+                                     * learning loop in production: outbound outcome → implicit
+                                     * signal → mining → dpo_pair → nightly train → hot-swap. */
+                                    int mined_pairs = 0;
+                                    hu_error_t mine_err = hu_dpo_collector_mine_pairs_from_outcomes(
+                                        db, INT_MAX, &mined_pairs);
+                                    if (mine_err == HU_OK && mined_pairs > 0) {
+                                        hu_log_info("lora-nightly", agent ? agent->observer : NULL,
+                                                    "mined %d DPO pair(s) from production_outcomes",
+                                                    mined_pairs);
+                                    }
+
                                     const char *count_sql = "SELECT COUNT(*) FROM dpo_pairs";
                                     sqlite3_stmt *stmt = NULL;
                                     if (sqlite3_prepare_v2(db, count_sql, -1, &stmt, NULL) ==
