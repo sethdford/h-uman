@@ -1,8 +1,31 @@
 # Realtime Streaming → SOTA: Root Cause & Decision Plan
 
 **Date:** 2026-05-29
-**Status:** DECISION NEEDED (server-side change crosses a separate-repo boundary)
+**Status:** OPTION B IN PROGRESS — server-side per-request flag SHIPPED + unit-tested
+(authorized 2026-05-29); de-risk experiment + h-uman router wiring remain.
 **Owner signal:** `scripts/eval_streaming_smoke.py` (the tripwire — exits 0 the day this is fixed)
+
+## Progress (2026-05-29)
+
+- ✅ **Server per-request override SHIPPED** (gemma-realtime `scripts/mlx-server.py`):
+  `_handle_stream` now passes the request body to `_stream_should_buffer(req)`, which
+  delegates to a pure predicate `_resolve_should_buffer(req_flag, env, no_think_active)`.
+  A request can set `"stream_strip": false` to force incremental streaming for that
+  one turn, overriding the global `HU_STREAM_BUFFER_STRIP` env. Precedence: **per-request
+  flag > env > model-deliberates default.** Backward-compatible: `req=None` reproduces
+  the legacy env/default behavior exactly. Pinned by `tests/test_server.py::
+  TestStreamShouldBufferPrecedence` (12 new tests, all 4 legacy `TestStreamShouldBuffer`
+  tests still green; 39 model-free unit tests pass).
+- ✅ **Tripwire extended** to probe BOTH a casual (exit-code driver) and an analytical
+  (informational) prompt, and to report **absolute TTFT ms** per regime
+  (`delivery.ttft_ms`). 24 unit tests pass.
+- ⏳ **De-risk experiment** (next): run the existing server with the new flag /
+  `HU_STREAM_BUFFER_STRIP=0` on a scratch port and probe casual prompts — confirm
+  casual turns stream CLEAN incrementally before wiring the router. Loads a 2nd 31B
+  model → must coordinate with the nightly-eval serial lock (do not double-load during
+  a run). Deferred while a concurrent session is active.
+- ⏳ **h-uman router wiring** (gated on de-risk): send `stream_strip:false` per turn-type
+  from `model_router` (reflexive/casual → incremental; analytical/deep → buffered).
 
 ---
 

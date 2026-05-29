@@ -209,6 +209,107 @@ def test_main_exits_two_when_server_down():
     print("✓ main_exits_two_when_server_down")
 
 
+# ---------------------------------------------------------------------------
+# classify_delivery — absolute TTFT (ms) reporting
+# ---------------------------------------------------------------------------
+
+def test_classify_delivery_reports_absolute_ttft_ms():
+    # The first content chunk landed at 200 ms; that IS the absolute TTFT, the
+    # number that maps to the SOTA bar (< ~300 ms feels instant).
+    d = ss.classify_delivery([200.0, 1200.0, 50000.0], content_len=120)
+    assert d["ttft_ms"] == 200.0, f"ttft_ms should be first-chunk ms: {d}"
+    print("✓ classify_delivery_reports_absolute_ttft_ms")
+
+
+def test_classify_delivery_zero_chunks_ttft_ms_is_zero():
+    d = ss.classify_delivery([], content_len=0)
+    assert d["ttft_ms"] == 0.0
+    print("✓ classify_delivery_zero_chunks_ttft_ms_is_zero")
+
+
+def test_classify_delivery_buffered_ttft_ms_equals_total():
+    # Buffered: the single chunk lands at the very end, so absolute TTFT ~= total.
+    d = ss.classify_delivery([50000.0], content_len=120)
+    assert d["ttft_ms"] == 50000.0
+    print("✓ classify_delivery_buffered_ttft_ms_equals_total")
+
+
+# ---------------------------------------------------------------------------
+# probe_regime — single-prompt bundle (delivery + leaks + verdict)
+# ---------------------------------------------------------------------------
+
+def test_probe_regime_bundles_delivery_and_verdict():
+    spread = ([200.0, 8000.0, 50000.0], "clean incremental reply")
+    with mock.patch.object(ss, "probe_stream", return_value=spread):
+        r = ss.probe_regime("http://x", "hey", timeout=5)
+    assert r["prompt"] == "hey"
+    assert r["delivery"]["incremental"] is True
+    assert r["streaming_beneficial"] is True
+    assert r["exit_code"] == 0
+    assert r["delivery"]["ttft_ms"] == 200.0
+    print("✓ probe_regime_bundles_delivery_and_verdict")
+
+
+def test_probe_regime_propagates_server_down():
+    with mock.patch.object(ss, "probe_stream",
+                           side_effect=ss.ServerDown("refused")):
+        try:
+            ss.probe_regime("http://x", "hey", timeout=5)
+        except ss.ServerDown:
+            print("✓ probe_regime_propagates_server_down")
+            return
+    raise AssertionError("probe_regime must propagate ServerDown")
+
+
+# ---------------------------------------------------------------------------
+# main — dual-regime (casual drives exit code; analytical informational)
+# ---------------------------------------------------------------------------
+
+def test_main_probes_both_regimes_and_records_each():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        spread = ([200.0, 8000.0, 50000.0], "clean reply")
+        with mock.patch.object(ss, "probe_stream", return_value=spread):
+            code = ss.main(["--server-url", "http://x", "--output-json", str(out)])
+        verdict = json.loads(out.read_text())
+        assert code == 0
+        # Both regimes present; casual mirrors the top-level verdict fields.
+        assert "casual" in verdict and "analytical" in verdict
+        assert verdict["casual"]["delivery"]["incremental"] is True
+        assert verdict["analytical"]["delivery"]["incremental"] is True
+        assert verdict["delivery"] == verdict["casual"]["delivery"]
+    print("✓ main_probes_both_regimes_and_records_each")
+
+
+def test_main_skips_analytical_when_empty():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        buffered = ([50000.0], "whole reply at once")
+        with mock.patch.object(ss, "probe_stream", return_value=buffered):
+            code = ss.main(["--server-url", "http://x", "--analytical-prompt", "",
+                            "--output-json", str(out)])
+        verdict = json.loads(out.read_text())
+        assert code == 1, "buffered casual => exit 1"
+        assert "analytical" not in verdict, "empty analytical prompt must skip the probe"
+        assert verdict["casual"]["delivery"]["ttft_ms"] == 50000.0
+    print("✓ main_skips_analytical_when_empty")
+
+
+def test_main_casual_server_down_exits_two_before_analytical():
+    # If the casual probe can't reach the server, exit 2 immediately — the
+    # analytical probe must not run (and not mask the down state).
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(ss, "probe_stream",
+                               side_effect=ss.ServerDown("refused")):
+            code = ss.main(["--server-url", "http://x", "--output-json", str(out)])
+        verdict = json.loads(out.read_text())
+        assert code == 2
+        assert verdict["status"] == "SERVER_DOWN"
+        assert "analytical" not in verdict
+    print("✓ main_casual_server_down_exits_two_before_analytical")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

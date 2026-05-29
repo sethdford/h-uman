@@ -70,13 +70,17 @@ def classify_delivery(chunk_timestamps_ms, content_len):
     chunk_count = len(chunk_timestamps_ms)
     if chunk_count == 0:
         return {"chunk_count": 0, "incremental": False, "ttft_ratio": 1.0,
-                "content_len": content_len}
+                "ttft_ms": 0.0, "content_len": content_len}
     first = chunk_timestamps_ms[0]
     last = chunk_timestamps_ms[-1]
     ttft_ratio = (first / last) if last > 0 else 1.0
     incremental = chunk_count >= 2 and ttft_ratio < INCREMENTAL_TTFT_MAX
+    # Absolute time-to-first-token: when the first CONTENT chunk landed,
+    # in ms from request start. This is the number that maps to the SOTA
+    # bar (< ~300 ms feels instant); ttft_ratio only says buffered-vs-not.
     return {"chunk_count": chunk_count, "incremental": incremental,
-            "ttft_ratio": ttft_ratio, "content_len": content_len}
+            "ttft_ratio": ttft_ratio, "ttft_ms": round(first, 1),
+            "content_len": content_len}
 
 
 def find_harmony_leaks(text):
@@ -156,6 +160,29 @@ def probe_stream(server_url, prompt, timeout=120):
     return stamps, "".join(parts)
 
 
+def probe_regime(server_url, prompt, timeout):
+    """Probe one prompt and return its full per-regime report dict.
+
+    Bundles delivery classification + leak scan + verdict + a content preview
+    for a single prompt. Raises ServerDown on transport failure (the caller
+    decides whether that's fatal — a casual-regime failure means the server is
+    down; an analytical-regime failure is recorded but non-fatal).
+    """
+    stamps, content = probe_stream(server_url, prompt, timeout)
+    delivery = classify_delivery(stamps, content_len=len(content))
+    leaks = find_harmony_leaks(content)
+    v = streaming_verdict(delivery, leaks)
+    return {
+        "prompt": prompt,
+        "delivery": delivery,
+        "harmony_leaks": leaks,
+        "streaming_beneficial": v["streaming_beneficial"],
+        "reason": v["reason"],
+        "exit_code": v["exit_code"],
+        "content_preview": content[:160],
+    }
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -163,7 +190,15 @@ def main(argv=None):
                     help="gemma-realtime server base URL (default :8741)")
     ap.add_argument("--prompt",
                     default="hey what are you up to tonight? been a long week",
-                    help="probe prompt (a casual turn the model should answer fast)")
+                    help="CASUAL probe prompt — the realtime target. Drives the "
+                         "exit code: Option B wants this regime streaming clean.")
+    ap.add_argument("--analytical-prompt",
+                    default=("Summarize the tradeoffs between speculative decoding "
+                             "and prompt caching for on-device LLM inference. Use "
+                             "bullet points and be specific."),
+                    help="ANALYTICAL/structured probe — the regime that SHOULD stay "
+                         "buffered/clean. Reported for comparison; does NOT drive "
+                         "the exit code. Pass '' to skip.")
     ap.add_argument("--timeout", type=float, default=120.0,
                     help="per-request timeout in seconds")
     ap.add_argument("--output-json", default=None,
@@ -176,28 +211,41 @@ def main(argv=None):
         "prompt": args.prompt,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+
+    # CASUAL regime drives the verdict: this is the realtime-feel target. A
+    # transport failure here means the server is down (exit 2).
     try:
-        stamps, content = probe_stream(args.server_url, args.prompt, args.timeout)
+        casual = probe_regime(args.server_url, args.prompt, args.timeout)
     except ServerDown as e:
         verdict.update({"status": "SERVER_DOWN", "error": str(e),
                         "streaming_beneficial": False, "exit_code": 2})
         _emit(verdict, args.output_json)
         return 2
 
-    delivery = classify_delivery(stamps, content_len=len(content))
-    leaks = find_harmony_leaks(content)
-    v = streaming_verdict(delivery, leaks)
     verdict.update({
         "status": "OK",
-        "delivery": delivery,
-        "harmony_leaks": leaks,
-        "streaming_beneficial": v["streaming_beneficial"],
-        "reason": v["reason"],
-        "exit_code": v["exit_code"],
-        "content_preview": content[:160],
+        "delivery": casual["delivery"],
+        "harmony_leaks": casual["harmony_leaks"],
+        "streaming_beneficial": casual["streaming_beneficial"],
+        "reason": casual["reason"],
+        "exit_code": casual["exit_code"],
+        "content_preview": casual["content_preview"],
+        "casual": casual,
     })
+
+    # ANALYTICAL regime is informational — it shows whether the buffered/clean
+    # default still holds for structured turns once Option B routing lands. A
+    # failure here is recorded but never changes the exit code.
+    if args.analytical_prompt:
+        try:
+            verdict["analytical"] = probe_regime(
+                args.server_url, args.analytical_prompt, args.timeout)
+        except ServerDown as e:
+            verdict["analytical"] = {"prompt": args.analytical_prompt,
+                                     "status": "SERVER_DOWN", "error": str(e)}
+
     _emit(verdict, args.output_json)
-    return v["exit_code"]
+    return casual["exit_code"]
 
 
 def _emit(verdict, output_json):
