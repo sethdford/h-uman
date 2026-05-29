@@ -180,6 +180,13 @@ class BackendUnreachable(RuntimeError):
     """Raised when the local mlx-server cannot be reached. Never fall back to cloud."""
 
 
+class JudgeUnavailable(RuntimeError):
+    """Raised when the cloud judge fails mid-run (ADC revoked, malformed reply,
+    empty result). Distinct from BackendUnreachable: the model-under-test is
+    fine, but the qualitative axes cannot be scored. Caught once in main() so a
+    judge failure degrades to SKIPPED rather than crashing or silently scoring 0."""
+
+
 class LocalBackend:
     """Talks to the local mlx-server's OpenAI-compatible endpoint.
 
@@ -237,17 +244,22 @@ Return JSON: {{"retained": true|false, "why": "..."}}"""
     raw = call_gemini(prompt).strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-    return bool(json.loads(raw)["retained"])
+    try:
+        return bool(json.loads(raw)["retained"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise JudgeUnavailable(f"retention judge returned unparseable output: {e}") from e
 
 
 def judge_voice_window(scenario_name, exchanges_window):
     """Score a window of (user, ai) exchanges. Returns (overall_score_1_10, verdict).
 
-    Reuses eval_multiturn.evaluate_conversation. Returns (0.0, 'AI') on judge error.
+    Reuses eval_multiturn.evaluate_conversation. Raises JudgeUnavailable on judge
+    error rather than returning a falsely-low (0.0, 'AI') score — a swallowed
+    failure would manufacture a spurious voice-drift FAIL, masking the real cause.
     """
     result = evaluate_conversation(scenario_name, exchanges_window)
     if not result:
-        return 0.0, "AI"
+        raise JudgeUnavailable(f"voice judge returned no result for {scenario_name!r}")
     return result.get("overall_score", 0.0), result.get("overall_verdict", "AI")
 
 
@@ -321,6 +333,21 @@ def main(argv=None):
                        "scenarios": scenario_verdicts}, args.output_json)
         print(f"DEFERRED: mlx-server unreachable: {e}")
         return 2
+    except JudgeUnavailable as e:
+        # The model-under-test ran; the cloud judge died. Degrade to SKIPPED so a
+        # judge outage never masquerades as a model FAIL. Re-run latency-only by
+        # re-driving with judge_on=False so a latency regression is still caught.
+        print(f"WARN: judge unavailable mid-run ({e}); re-running latency-only.")
+        scenario_verdicts = []
+        try:
+            for scenario in multiturn_scenarios_deep.DEEP_SCENARIOS:
+                scenario_verdicts.append(run_scenario(scenario, backend, judge_on=False))
+        except BackendUnreachable as be:
+            write_verdict({"run_passed": False, "backend": "UNREACHABLE", "error": str(be),
+                           "scenarios": scenario_verdicts}, args.output_json)
+            print(f"DEFERRED: mlx-server unreachable: {be}")
+            return 2
+        judge_on = False  # fall through to the SKIPPED accounting below
 
     verdict = run_verdict(scenario_verdicts)
     verdict["judge"] = "OK" if judge_on else "SKIPPED"
@@ -331,7 +358,10 @@ def main(argv=None):
           f"judge={verdict['judge']}")
 
     if not judge_on:
-        return 3  # SKIPPED — latency ran, qualitative axes did not
+        # SKIPPED only if the one axis we could measure (latency) held. A latency
+        # regression must surface as FAIL even when qualitative axes are skipped.
+        latency_all_pass = all(sv["latency"]["passed"] for sv in scenario_verdicts)
+        return 3 if latency_all_pass else 1
     return 0 if verdict["run_passed"] else 1
 
 

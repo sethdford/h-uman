@@ -339,6 +339,63 @@ def test_main_skipped_when_judge_unavailable():
     print("✓ main_skipped_when_judge_unavailable")
 
 
+def test_judge_anchor_retention_raises_on_malformed_output():
+    # A judge that returns garbage (not JSON) must raise JudgeUnavailable, not crash
+    # with a bare ValueError nor be mistaken for a model failure.
+    with mock.patch.object(mt, "call_gemini", return_value="sorry, I can't help with that"):
+        try:
+            mt.judge_anchor_retention("fact", "probe", "response")
+        except mt.JudgeUnavailable:
+            print("✓ judge_anchor_retention_raises_on_malformed_output")
+            return
+    raise AssertionError("expected JudgeUnavailable on unparseable judge output")
+
+
+def test_judge_voice_window_raises_on_empty_result():
+    # A falsy judge result must raise rather than silently scoring (0.0, 'AI'),
+    # which would manufacture a spurious voice-drift FAIL.
+    with mock.patch.object(mt, "evaluate_conversation", return_value=None):
+        try:
+            mt.judge_voice_window("casual_catchup", [("hi", "hey")])
+        except mt.JudgeUnavailable:
+            print("✓ judge_voice_window_raises_on_empty_result")
+            return
+    raise AssertionError("expected JudgeUnavailable when judge returns no result")
+
+
+def test_main_fails_when_judge_off_but_latency_breaks():
+    # CRITICAL contract: with the judge unavailable, a latency regression must
+    # surface as FAIL (exit 1), NOT be masked as SKIPPED (exit 3).
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 99999.0)] * 400  # every turn blows the ceiling
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=False):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        assert code == 1, f"judge off + latency fail → FAIL exit 1, got {code}"
+    print("✓ main_fails_when_judge_off_but_latency_breaks")
+
+
+def test_main_degrades_to_skipped_when_judge_dies_midrun():
+    # Judge available at start, then raises JudgeUnavailable. main() must re-run
+    # latency-only and degrade to SKIPPED (exit 3) when latency holds — a judge
+    # outage must never masquerade as a model FAIL.
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 100.0)] * 400
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=True), \
+             mock.patch.object(mt, "judge_anchor_retention",
+                               side_effect=mt.JudgeUnavailable("ADC revoked")):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        verdict = json.loads(out.read_text())
+        assert code == 3, f"judge dies mid-run + latency ok → SKIPPED exit 3, got {code}"
+        assert verdict["judge"] == "SKIPPED"
+    print("✓ main_degrades_to_skipped_when_judge_dies_midrun")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
