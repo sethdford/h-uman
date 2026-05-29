@@ -1,3 +1,9 @@
+/* glibc gates pthread_getattr_np (used in the Linux branch of probe_stack_size)
+ * behind _GNU_SOURCE; define it before any include so the declaration is
+ * visible on Linux. macOS ignores it and uses the __APPLE__ branch. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "human/gateway/thread_pool.h"
 #include "test_framework.h"
 #include <pthread.h>

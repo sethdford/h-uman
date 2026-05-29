@@ -563,7 +563,10 @@ jobs:
           #   With `--ignore-errors source` we skip those entries instead of
           #   killing the whole capture. lcov even prints this exact hint
           #   when the error fires.
-          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov,source
+          # `negative`: geninfo errors on a spurious negative execution count
+          #   (e.g. stats.c instrumentation artifact). lcov prints this exact
+          #   hint; ignoring it skips the bad datum instead of failing the job.
+          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov,source,negative
           lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info --ignore-errors unused
           lcov --list coverage.info | tail -20
       - name: Upload to Codecov

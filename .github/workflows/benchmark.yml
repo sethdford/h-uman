@@ -32,7 +32,10 @@ jobs:
       - name: Check binary size regression
         if: github.event_name == 'pull_request'
         run: |
-          BASELINE=2489344
+          # Bumped 2026-05-29: binary grew with the media-inspiration feature
+          # (music/YouTube/TikTok) + accumulated main features. 2641312 is the
+          # measured size at that point; 5% headroom is preserved for growth.
+          BASELINE=2641312
           ACTUAL=$(stat -c%s build/human 2>/dev/null || stat -f%z build/human)
           THRESHOLD=$((BASELINE * 105 / 100))
           if [ "$ACTUAL" -gt "$THRESHOLD" ]; then

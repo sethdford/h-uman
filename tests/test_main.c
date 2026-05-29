@@ -1167,7 +1167,9 @@ int main(int argc, char **argv) {
     run_win_detect_tests();
     run_celebration_tests();
     run_prosocial_moment_tests();
-    run_celebration_repo_tests();
+#ifdef HU_ENABLE_SQLITE
+    run_celebration_repo_tests(); /* defined in SQLITE-gated test_celebration_repo.c */
+#endif
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();
     run_behavior_trust_tests();

@@ -57,6 +57,9 @@ final class IntentHandlerConcurrencyTests: XCTestCase {
         // The default URL is `wss://localhost:3000/ws`, ensureConnected's
         // 15s polling loop will give up if no listener exists. Wait long
         // enough for that path to fail.
-        wait(for: [exp], timeout: 20.0)
+        // A 20s wait left only ~5s margin over ensureConnected's 15s internal
+        // timeout, which loaded CI runners blew past (flaky "Exceeded timeout
+        // of 20 seconds"). 60s gives ample margin while staying bounded.
+        wait(for: [exp], timeout: 60.0)
     }
 }
