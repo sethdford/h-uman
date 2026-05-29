@@ -68,6 +68,7 @@ void run_api_key_tests(void);
 void run_channel_tests(void);
 void run_channel_class_tests(void);
 void run_channel_format_tests(void);
+void run_channel_behavior_class_tests(void);
 void run_channel_rate_limit_tests(void);
 void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
@@ -1018,6 +1019,7 @@ int main(int argc, char **argv) {
     run_channel_tests();
     run_channel_class_tests();
     run_channel_format_tests();
+    run_channel_behavior_class_tests();
     run_channel_rate_limit_tests();
     run_channel_http_tests();
     run_webhook_channel_tests();

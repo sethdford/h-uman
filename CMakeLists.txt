@@ -1154,6 +1154,7 @@ set(HU_CORE_SOURCES
     src/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
+    src/channels/behavior_class.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
     src/channels/channel_http.c
@@ -3238,6 +3239,7 @@ set(HU_TEST_SOURCES
     tests/test_api_key.c
     tests/test_channel.c
     tests/test_channel_format.c
+    tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
     tests/test_channel_http.c
     tests/test_webhook_channel.c
