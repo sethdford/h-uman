@@ -126,6 +126,248 @@ _MLX_DRAFT_MODEL = None
 _MLX_DRAFT_TOKENIZER = None
 _MLX_DRAFT_PATH = ""
 
+# Phase 1a — prompt-cache prefix reuse. The persona system prompt is large
+# and mostly stable across a conversation; only the tail (latest user turn,
+# per-turn circadian/time injection) changes. We hold the KV cache from the
+# previous request plus the token-id list it corresponds to, and on each new
+# request reuse the KV for the longest shared token PREFIX, prefilling only
+# the divergent suffix. This is correctness-preserving: KV is never reused for
+# a position whose token differs, so output is byte-identical to a cold
+# prefill — we only ever save the prefill compute of the shared prefix.
+#
+# Disabled by setting HU_MLX_PROMPT_CACHE=0. The server is single-threaded
+# (HTTPServer, not Threading), so this global state needs no locking — one
+# request is prefilled+generated to completion before the next begins.
+_PROMPT_CACHE = None          # list of per-layer cache objects, or None
+_PROMPT_CACHE_IDS: list = []  # token ids the cache currently holds KV for
+
+
+def _prompt_cache_enabled() -> bool:
+    return os.environ.get("HU_MLX_PROMPT_CACHE", "1") not in ("0", "false", "False", "")
+
+
+def _invalidate_prompt_cache(reason: str = "") -> None:
+    """Drop the reuse cache. MUST be called whenever the model weights or
+    adapter change — KV cached under old weights is invalid for new ones."""
+    global _PROMPT_CACHE, _PROMPT_CACHE_IDS
+    if _PROMPT_CACHE is not None or _PROMPT_CACHE_IDS:
+        if reason:
+            print(f"[mlx-server] prompt cache invalidated ({reason})", flush=True)
+    _PROMPT_CACHE = None
+    _PROMPT_CACHE_IDS = []
+
+
+def _cache_is_rotating(cache) -> bool:
+    """True if ANY layer is a RotatingKVCache (sliding-window attention, e.g.
+    Gemma's hybrid local/global layers — identified by a `max_size`). Trimming
+    such a cache is NOT bit-exact even when can_trim_prompt_cache() says yes:
+    the ring-buffer layout differs from a fresh contiguous prefill, producing
+    tiny fp differences in attention that can flip a greedy token. So we allow
+    only NON-trimming reuse (pure extension) on these — never a tail trim."""
+    try:
+        return any(getattr(c, "max_size", None) is not None for c in cache)
+    except TypeError:
+        return False
+
+
+def _common_prefix_len(a, b) -> int:
+    """Length of the longest shared prefix of two token-id sequences."""
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _plan_prompt_cache_reuse(cached_ids, new_ids, trimmable: bool):
+    """Decide how to reuse a populated prompt cache for a new prompt.
+
+    Pure function (no globals, no model) so the prefix logic is unit-testable
+    without a GPU. Returns (action, trim_count, suffix_ids):
+
+      action == "reset" — no usable overlap, or the cache type can't be
+                trimmed; caller builds a fresh cache and prefills ALL of
+                new_ids. trim_count is 0, suffix_ids == new_ids.
+      action == "reuse" — keep the cache, drop `trim_count` tokens off its
+                tail, then prefill only `suffix_ids` (= new_ids[common:]).
+    """
+    if not cached_ids:
+        return ("reset", 0, list(new_ids))
+    common = _common_prefix_len(cached_ids, new_ids)
+    if common == 0:
+        return ("reset", 0, list(new_ids))
+    trim_count = len(cached_ids) - common
+    if trim_count > 0 and not trimmable:
+        # Divergent tail can't be dropped from this cache type → rebuild.
+        return ("reset", 0, list(new_ids))
+    suffix = list(new_ids[common:])
+    if not suffix:
+        # new_ids is a prefix of (or equal to) the cached tokens — we've
+        # already prefilled past this point. Replay the final token as a
+        # 1-token suffix so generation has a position to continue from.
+        if common >= 1:
+            return ("reuse", len(cached_ids) - (common - 1), list(new_ids[common - 1:]))
+        return ("reset", 0, list(new_ids))
+    return ("reuse", trim_count, suffix)
+
+
+def _prepare_prompt_cache(prompt_ids):
+    """Plan + apply prompt-cache reuse for a freshly tokenized prompt.
+
+    Mutates the module-level cache state and returns (prompt_for_generate,
+    prompt_cache) where:
+      - prompt_for_generate is the token-id list to actually feed the
+        generator (the full prompt on reset, or just the suffix on reuse).
+      - prompt_cache is the cache object list to pass through, or None when
+        caching is disabled / unavailable (caller then feeds the full prompt
+        with no cache).
+
+    On any failure the function degrades to (full_ids, None) so a cache bug
+    can never change OUTPUT, only forfeit the speedup.
+    """
+    global _PROMPT_CACHE, _PROMPT_CACHE_IDS
+    full_ids = list(prompt_ids)
+    if not _prompt_cache_enabled() or _MLX_MODEL is None:
+        return full_ids, None
+    try:
+        from mlx_lm.models.cache import (
+            make_prompt_cache,
+            trim_prompt_cache,
+            can_trim_prompt_cache,
+        )
+    except Exception:  # noqa: BLE001 — cache utils absent on old mlx_lm
+        return full_ids, None
+
+    try:
+        # "trimmable" gates whether we may drop a divergent TAIL. It requires
+        # both that mlx_lm reports the cache trimmable AND that the cache is
+        # not rotating (rotating trims aren't bit-exact — see
+        # _cache_is_rotating). Pure extension (trim_count == 0) never trims and
+        # is allowed regardless, so sliding-window models still benefit from
+        # multi-turn continuation.
+        trimmable = bool(
+            _PROMPT_CACHE is not None
+            and can_trim_prompt_cache(_PROMPT_CACHE)
+            and not _cache_is_rotating(_PROMPT_CACHE)
+        )
+        action, trim_count, suffix = _plan_prompt_cache_reuse(
+            _PROMPT_CACHE_IDS, full_ids, trimmable
+        )
+        if action == "reuse" and _PROMPT_CACHE is not None:
+            if trim_count > 0:
+                # trim_prompt_cache returns the number ACTUALLY trimmed. A
+                # RotatingKVCache (sliding-window models like Gemma) can't
+                # always drop the exact tail once it has wrapped — it may
+                # trim fewer tokens than asked. If so, the cache no longer
+                # corresponds to the shared prefix and reusing it would feed
+                # STALE KV for diverged positions (observed: subtly different
+                # output). Correctness over speed — rebuild on a partial trim.
+                actual = trim_prompt_cache(_PROMPT_CACHE, trim_count)
+                if actual != trim_count:
+                    _PROMPT_CACHE = make_prompt_cache(_MLX_MODEL)
+                    _PROMPT_CACHE_IDS = []
+                    return full_ids, _PROMPT_CACHE
+                _PROMPT_CACHE_IDS = _PROMPT_CACHE_IDS[: len(_PROMPT_CACHE_IDS) - trim_count]
+            reused = len(full_ids) - len(suffix)
+            if reused > 0:
+                print(f"[mlx-server] prompt cache: reused {reused} of "
+                      f"{len(full_ids)} prompt tokens", flush=True)
+            return suffix, _PROMPT_CACHE
+        # reset
+        _PROMPT_CACHE = make_prompt_cache(_MLX_MODEL)
+        _PROMPT_CACHE_IDS = []
+        return full_ids, _PROMPT_CACHE
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlx-server] prompt cache disabled this turn: {exc}", flush=True)
+        _invalidate_prompt_cache()
+        return full_ids, None
+
+
+def _finalize_prompt_cache(full_prompt_ids, generated_ids) -> None:
+    """Record what the cache now holds KV for: the full prompt plus the
+    tokens we just generated. Next request diffs against this."""
+    global _PROMPT_CACHE_IDS
+    if _PROMPT_CACHE is None:
+        return
+    _PROMPT_CACHE_IDS = list(full_prompt_ids) + list(generated_ids)
+
+
+def _stream_generate_iter(full_ids, suffix_ids, max_tokens, prompt_cache):
+    """Build an mlx_lm.stream_generate iterator, degrading gracefully when an
+    older mlx_lm rejects optional kwargs (prompt_cache, draft_model).
+
+    Returns (iterator, used_cache). CRITICAL invariant: if prompt_cache is
+    dropped, we feed the FULL prompt — never the suffix — because a suffix
+    without its cached prefix would silently truncate the model's context.
+    """
+    from mlx_lm import stream_generate
+    draft = _MLX_DRAFT_MODEL
+    # Attempt ladder: (prompt_arg, use_cache, use_draft).
+    attempts = []
+    if prompt_cache is not None:
+        attempts.append((suffix_ids, True, draft is not None))
+    attempts.append((full_ids, False, draft is not None))
+    attempts.append((full_ids, False, False))
+    last_exc = None
+    for prompt_arg, use_cache, use_draft in attempts:
+        kw = {"prompt": prompt_arg, "max_tokens": max_tokens}
+        if use_cache:
+            kw["prompt_cache"] = prompt_cache
+        if use_draft:
+            kw["draft_model"] = draft
+        try:
+            iterator = stream_generate(_MLX_MODEL, _MLX_TOKENIZER, **kw)
+            if not use_cache:
+                # We're feeding the full prompt with no cache this turn;
+                # discard any cache state so finalize doesn't mis-record it.
+                _invalidate_prompt_cache()
+            return iterator, use_cache
+        except TypeError as exc:
+            last_exc = exc
+            continue
+    raise last_exc if last_exc else RuntimeError("stream_generate unavailable")
+
+
+def _maybe_enable_turbo_kv() -> bool:
+    """Phase 1c — optional TurboKV compressed KV cache (~50% KV-cache memory
+    for ~+0.5% PPL). OFF by default; enable with HU_MLX_TURBO_KV=1. Requires a
+    custom mlx build exposing mlx.nn.layers.turbo_kv_cache; if that's absent we
+    log once and run with the standard cache (no-op).
+
+    Patches mlx_lm.models.cache.make_prompt_cache, which is the same factory
+    the Phase 1a prompt-cache reuse calls — so reuse transparently gets turbo
+    caches too. Safe interaction: a turbo cache reports can_trim=False (or is
+    flagged rotating), so prompt-cache reuse only does pure extension / reset,
+    never an unsafe trim. (Env knobs mirror scripts/turbo-serve.py.)"""
+    if os.environ.get("HU_MLX_TURBO_KV", "0") not in ("1", "true", "True"):
+        return False
+    try:
+        from mlx.nn.layers.turbo_kv_cache import TurboKVCache, patch_mlx_lm
+        import mlx_lm.models.cache as cache_mod
+    except Exception as exc:  # noqa: BLE001 — custom dep may be absent
+        print(f"[mlx-server] HU_MLX_TURBO_KV set but turbo_kv_cache unavailable "
+              f"({exc}); using standard KV cache", flush=True)
+        return False
+
+    mode = os.environ.get("TURBO_MODE", "asymmetric")
+    bits = int(os.environ.get("TURBO_BITS", "4"))
+    key_bits = bits if mode == "symmetric" else 0  # asymmetric: FP16 keys
+
+    def turbo_make_prompt_cache(model, max_kv_size=None):
+        if hasattr(model, "make_cache"):
+            cache = model.make_cache()
+        else:
+            cache = [TurboKVCache(bits=bits, key_bits=key_bits)
+                     for _ in range(len(model.layers))]
+        patch_mlx_lm(cache)
+        return cache
+
+    cache_mod.make_prompt_cache = turbo_make_prompt_cache
+    kb = "FP16" if key_bits == 0 else f"turbo{key_bits}"
+    print(f"[mlx-server] TurboKV enabled: K={kb} V=turbo{bits} ({mode} mode)",
+          flush=True)
+    return True
+
 
 def _try_load_mlx_model(model_id: str) -> bool:
     """Best-effort. Returns True if the model loaded successfully."""
@@ -135,6 +377,7 @@ def _try_load_mlx_model(model_id: str) -> bool:
     try:
         from mlx_lm import load
         _MLX_MODEL, _MLX_TOKENIZER = load(model_id)
+        _invalidate_prompt_cache("model loaded")
         return True
     except Exception as exc:  # noqa: BLE001 — mlx_lm raises a variety
         print(f"[mlx-server] load({model_id!r}) failed: {exc}", flush=True)
@@ -167,6 +410,120 @@ def _try_load_draft_model(draft_path: str) -> bool:
         _MLX_DRAFT_TOKENIZER = None
         _MLX_DRAFT_PATH = ""
         return False
+
+
+def _default_draft_for_model(model_id: str) -> str:
+    """Pick a tokenizer-compatible speculative-decoding draft when the
+    operator didn't set one — but ONLY for targets where spec decode actually
+    pays off.
+
+    Spec-decode benefit ∝ (target per-token cost − draft cost) × acceptance.
+    DENSE Gemma-4 (e.g. 31B) is far more expensive per token than the E2B
+    sibling → clear win. A sparse-MoE Gemma-4 (the "a4b" models, ~4B ACTIVE
+    params) costs little more than the draft, so the draft+verification
+    overhead makes spec decode a net SLOWDOWN (measured 0.79x on 26b-a4b,
+    2026-05-29). So we exclude MoE targets; an operator can still force one
+    with --draft-model if their hardware says otherwise.
+
+    The E2B sibling shares the Gemma-4 tokenizer exactly (vocab 262144,
+    byte-identical encodings — verified). Returns "" when no known-good
+    default applies."""
+    if not model_id:
+        return ""
+    mid = model_id.lower()
+    is_gemma4 = "gemma-4" in mid
+    is_small = "e2b" in mid or "270m" in mid
+    is_moe = "a4b" in mid  # sparse mixture-of-experts → draft doesn't pay off
+    if is_gemma4 and not is_small and not is_moe:
+        return "mlx-community/gemma-4-e2b-it-4bit"
+    return ""
+
+
+def _model_in_local_cache(repo_id: str) -> bool:
+    """True if repo_id is already in the local HF cache, so auto-loading a
+    default draft can never trigger a surprise multi-GB download. A local
+    filesystem path is treated as present (load surfaces a clean error if
+    wrong). Explicit operator drafts bypass this — they opted in."""
+    if not repo_id:
+        return False
+    if (os.sep in repo_id or repo_id.startswith("~")) and \
+            os.path.exists(os.path.expanduser(repo_id)):
+        return True
+    cache = os.path.expanduser("~/.cache/huggingface/hub")
+    snaps = os.path.join(cache, "models--" + repo_id.replace("/", "--"),
+                         "snapshots")
+    if not os.path.isdir(snaps):
+        return False
+    for d in os.listdir(snaps):
+        p = os.path.join(snaps, d)
+        if os.path.isdir(p) and os.listdir(p):
+            return True
+    return False
+
+
+def _tokenizers_compatible(tok_a, tok_b) -> bool:
+    """Speculative decoding requires draft and target to tokenize IDENTICALLY
+    — a divergent draft tokenizer silently corrupts acceptance (or output).
+    Compare vocab size and a probe encoding."""
+    if tok_a is None or tok_b is None:
+        return False
+    try:
+        va = getattr(tok_a, "vocab_size", None)
+        vb = getattr(tok_b, "vocab_size", None)
+        if va is not None and vb is not None and va != vb:
+            return False
+        probe = "Hey — quick tokenizer parity check, don't overthink it. 123"
+        return list(tok_a.encode(probe)) == list(tok_b.encode(probe))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _configure_draft_model(model_id: str, explicit_draft: str) -> None:
+    """Resolve, load, and verify the speculative-decoding draft AFTER the
+    target model is loaded. Precedence: explicit operator draft > auto-derived
+    sibling (only if already cached). Always verifies tokenizer parity and
+    disables spec decode on mismatch — correctness/safety over speed."""
+    global _MLX_DRAFT_MODEL, _MLX_DRAFT_TOKENIZER, _MLX_DRAFT_PATH
+    if _MLX_MODEL is None:
+        return  # no target loaded (stub mode) — nothing to draft for
+
+    draft = explicit_draft
+    # Auto-draft is OFF by default. Speculative decoding with the E2B draft
+    # was MEASURED to be a net SLOWDOWN on both available large Gemma-4
+    # targets (0.79x on 26b-a4b MoE, 0.69x on dense 31B; ~53% acceptance —
+    # see scripts/bench_spec_decode_live.py, 2026-05-29). The draft isn't
+    # cheap enough relative to these targets on this hardware to win. The
+    # plumbing stays for operators whose hardware/draft differs (set
+    # HU_MLX_DRAFT_AUTO=1 to auto-pick a sibling, or --draft-model to force);
+    # always re-measure with the bench before trusting it.
+    auto_on = os.environ.get("HU_MLX_DRAFT_AUTO", "0") in (
+        "1", "true", "True")
+    if not draft and auto_on:
+        cand = _default_draft_for_model(model_id)
+        if cand and cand != model_id:
+            if _model_in_local_cache(cand):
+                draft = cand
+                print(f"[mlx-server] spec decode: auto-selected draft {cand}",
+                      flush=True)
+            else:
+                print(f"[mlx-server] spec decode: draft {cand} not in local "
+                      f"cache; skipping auto-load (set HU_MLX_DRAFT_MODEL to "
+                      f"force a download)", flush=True)
+    if not draft:
+        return
+
+    if not _try_load_draft_model(draft):
+        return  # already logged; spec decode stays off
+    if not _tokenizers_compatible(_MLX_TOKENIZER, _MLX_DRAFT_TOKENIZER):
+        print(f"[mlx-server] spec decode: draft {draft!r} tokenizer INCOMPATIBLE "
+              f"with target {model_id!r} — disabling (would corrupt output)",
+              flush=True)
+        _MLX_DRAFT_MODEL = None
+        _MLX_DRAFT_TOKENIZER = None
+        _MLX_DRAFT_PATH = ""
+        return
+    print(f"[mlx-server] spec decode ENABLED (draft={_MLX_DRAFT_PATH})",
+          flush=True)
 
 
 def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
@@ -235,6 +592,10 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
 
     _CURRENT_ADAPTER = os.path.realpath(expanded)
     _TENSORS_LOADED = tensors_loaded
+
+    # The new adapter changes the model's weights — any KV cached under the
+    # previous weights is now invalid. Drop it so the next turn cold-prefills.
+    _invalidate_prompt_cache("adapter swap")
 
     return 200, {
         "status": "ok",
@@ -325,8 +686,6 @@ def _chat_completion_inline(body):
     completion_tokens = 0
     if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
         try:
-            from mlx_lm import generate
-            import mlx.core as mx
             tok = _MLX_TOKENIZER
             if hasattr(tok, "apply_chat_template"):
                 prompt = tok.apply_chat_template(
@@ -338,26 +697,33 @@ def _chat_completion_inline(body):
                     for m in messages
                 )
             # Single-threaded HTTPServer means we're on the main thread
-            # where load() initialized the GPU stream. Direct generate works.
-            text = generate(
-                _MLX_MODEL, _MLX_TOKENIZER,
-                prompt=prompt, max_tokens=max_tokens,
-            )
-            # Phase 0.1 — honest token accounting. Without this, every
-            # bench-gemma-perf.py run against the inline path reports
-            # tps=0 because completion_tokens=0. The tokenizer's
-            # encode() is the same one apply_chat_template used, so the
-            # counts are the actual decoded tokens (not an estimate).
-            try:
-                prompt_tokens = len(tok.encode(prompt))
-            except Exception:
-                prompt_tokens = 0
-            try:
-                # text is the assistant reply only — generate() returns
-                # the continuation, not prompt + continuation.
-                completion_tokens = len(tok.encode(text))
-            except Exception:
-                completion_tokens = 0
+            # where load() initialized the GPU stream. Phase 1a — collect the
+            # continuation via stream_generate so we reuse the prompt-prefix
+            # KV cache AND capture real generated token ids to finalize it
+            # (re-encoding text would risk a tokenization mismatch on the
+            # next turn's prefix diff, costing a needless cache reset).
+            full_ids = tok.encode(prompt)
+            prompt_tokens = len(full_ids)
+            suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+            iterator, used_cache = _stream_generate_iter(
+                full_ids, suffix_ids, max_tokens, prompt_cache)
+            parts = []
+            generated_ids = []
+            for item in iterator:
+                delta = getattr(item, "text", None)
+                if delta is None and isinstance(item, str):
+                    delta = item
+                if delta is None:
+                    delta = str(item)
+                if delta:
+                    parts.append(delta)
+                    completion_tokens += 1
+                tok_id = getattr(item, "token", None)
+                if tok_id is not None:
+                    generated_ids.append(tok_id)
+            text = "".join(parts)
+            if used_cache:
+                _finalize_prompt_cache(full_ids, generated_ids)
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
@@ -560,34 +926,44 @@ class SwapHandler(BaseHTTPRequestHandler):
                         for m in messages
                     )
                 try:
-                    prompt_tokens = len(tok.encode(prompt))
+                    full_ids = tok.encode(prompt)
                 except Exception:
-                    prompt_tokens = 0
+                    full_ids = None
+                prompt_tokens = len(full_ids) if full_ids is not None else 0
 
-                if stream_generate is not None:
-                    # Phase 3b — pass the draft model when loaded. Older
-                    # mlx_lm ignores unknown kwargs in **kwargs, newer
-                    # ones consume draft_model. We use a try/except
-                    # around the iterator construction itself in case a
-                    # specific version raises on unknown kwargs.
-                    sg_kwargs = {
-                        "prompt": prompt,
-                        "max_tokens": max_tokens,
-                    }
-                    if _MLX_DRAFT_MODEL is not None:
-                        sg_kwargs["draft_model"] = _MLX_DRAFT_MODEL
-                    try:
-                        iterator = stream_generate(
-                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
-                    except TypeError:
-                        # mlx_lm rejected draft_model — retry without it.
-                        sg_kwargs.pop("draft_model", None)
-                        iterator = stream_generate(
-                            _MLX_MODEL, _MLX_TOKENIZER, **sg_kwargs)
+                if stream_generate is not None and full_ids is not None:
+                    # Phase 1a — reuse KV for the shared prompt prefix; only
+                    # the divergent suffix is prefilled. Phase 3b — pass the
+                    # draft model when loaded for speculative decoding. The
+                    # iterator helper degrades gracefully on older mlx_lm.
+                    suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+                    iterator, used_cache = _stream_generate_iter(
+                        full_ids, suffix_ids, max_tokens, prompt_cache)
+                    generated_ids = []
                     for item in iterator:
                         # mlx_lm yields different shapes across versions:
                         # newer GenerationResponse objects have `.text`;
                         # older paths yield bare strings.
+                        delta = getattr(item, "text", None)
+                        if delta is None and isinstance(item, str):
+                            delta = item
+                        if delta is None:
+                            delta = str(item)
+                        tok_id = getattr(item, "token", None)
+                        if tok_id is not None:
+                            generated_ids.append(tok_id)
+                        if delta:
+                            emit(delta)
+                            completion_tokens += 1
+                    if used_cache:
+                        _finalize_prompt_cache(full_ids, generated_ids)
+                elif stream_generate is not None:
+                    # Tokenizer.encode failed; fall back to string prompt with
+                    # no cache reuse (still streams).
+                    iterator = stream_generate(
+                        _MLX_MODEL, _MLX_TOKENIZER, prompt=prompt,
+                        max_tokens=max_tokens)
+                    for item in iterator:
                         delta = getattr(item, "text", None)
                         if delta is None and isinstance(item, str):
                             delta = item
@@ -645,11 +1021,16 @@ class SwapHandler(BaseHTTPRequestHandler):
         pass
 
 
-def _run_inline_server(port: int, initial_adapter: str, model_id: str):
+def _run_inline_server(port: int, initial_adapter: str, model_id: str,
+                       draft_model: str = ""):
     """Boot the in-process HTTP server. This is the path that satisfies
     AC-M3-1 (a): we OWN the swap endpoint definition.
     """
     global _CURRENT_ADAPTER
+
+    # Phase 1c — optionally swap in the TurboKV compressed cache factory
+    # BEFORE any cache is built. No-op unless HU_MLX_TURBO_KV=1.
+    _maybe_enable_turbo_kv()
 
     # Try to load the model if it's available. Failures are tolerated —
     # the swap endpoint still works against a stub state so tests can
@@ -657,6 +1038,9 @@ def _run_inline_server(port: int, initial_adapter: str, model_id: str):
     if model_id and have_mlx_lm():
         if _try_load_mlx_model(model_id):
             print(f"[mlx-server] loaded mlx_lm model: {model_id}", flush=True)
+            # Phase 1b — configure speculative decoding AFTER the target is
+            # loaded (the tokenizer-parity check needs both tokenizers).
+            _configure_draft_model(model_id, draft_model)
         else:
             print(
                 f"[mlx-server] mlx_lm available but model {model_id!r} did not load; "
@@ -710,10 +1094,15 @@ def main():
                         "HUMAN_MLX_MODEL", "mlx-community/gemma-4-26b-a4b-it-4bit"),
                     help="Model id to load (only used when mlx_lm is installed)")
     ap.add_argument("--draft-model", default=os.environ.get("HU_MLX_DRAFT_MODEL", ""),
-                    help="Phase 3b — speculative decoding draft model id or local "
-                         "path. When set AND mlx_lm is installed, loaded alongside "
-                         "the target and passed to stream_generate via draft_model=. "
-                         "Empty disables spec decode (default).")
+                    help="Speculative-decoding draft model id or local path. When "
+                         "set, loaded alongside the target and passed to "
+                         "stream_generate via draft_model= (tokenizer parity is "
+                         "verified; mismatch disables spec decode). NOTE: spec "
+                         "decode was measured as a SLOWDOWN on both large Gemma-4 "
+                         "targets with the E2B draft, so auto-selection is OFF by "
+                         "default. Set HU_MLX_DRAFT_AUTO=1 to opt into auto-picking "
+                         "a compatible sibling, and re-measure with "
+                         "scripts/bench_spec_decode_live.py before trusting it.")
     ap.add_argument("--prefer-upstream", action="store_true",
                     help="If gemma-realtime is installed AND exposes "
                          "/v1/adapters/swap, delegate to it. Default is to "
@@ -758,14 +1147,10 @@ def main():
             spec.loader.exec_module(mod)
             return 0
 
-    # Phase 3b — attempt draft-model load before booting the server so
-    # the first request can already use spec decode. Failure is non-
-    # fatal; the server runs without spec decode.
-    if args.draft_model:
-        _try_load_draft_model(args.draft_model)
-
-    # Default path (and AC-M3-1 (a)): inline swap server.
-    _run_inline_server(args.port, args.adapter, args.model)
+    # Default path (and AC-M3-1 (a)): inline swap server. The draft model
+    # for speculative decoding is resolved + loaded + tokenizer-checked
+    # inside _run_inline_server, AFTER the target loads (Phase 1b).
+    _run_inline_server(args.port, args.adapter, args.model, args.draft_model)
     return 0
 
 
