@@ -1530,6 +1530,7 @@ endif()
 # Phase 7 feeds: OAuth token storage (oauth_tokens table)
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
+        src/memory/repos/boundary_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3778,6 +3779,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_stats_e2e.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_pipeline_perf.c)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
+    list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
 endif()
 
 # SOTA capability tests

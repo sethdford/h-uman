@@ -5,8 +5,7 @@
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
-#include "human/memory.h"
-#include <sqlite3.h>
+#include "human/memory/boundary_repo.h"
 #include <time.h>
 #endif
 
@@ -14,8 +13,7 @@
 static const char *const PAINFUL_KEYWORDS[] = {"death", "divorce", "loss", "funeral", "cancer"};
 static const size_t PAINFUL_COUNT = sizeof(PAINFUL_KEYWORDS) / sizeof(PAINFUL_KEYWORDS[0]);
 
-static bool contains_painful_keyword(const char *content, size_t len)
-{
+static bool contains_painful_keyword(const char *content, size_t len) {
     if (!content || len == 0)
         return false;
     for (size_t i = 0; i < PAINFUL_COUNT; i++) {
@@ -36,11 +34,9 @@ static bool contains_painful_keyword(const char *content, size_t len)
     return false;
 }
 
-bool hu_protective_memory_ok(hu_allocator_t *alloc, hu_memory_t *memory,
-                            const char *contact_id, size_t contact_id_len,
-                            const char *memory_content, size_t memory_len,
-                            float emotional_valence, int hour_local)
-{
+bool hu_protective_memory_ok(hu_allocator_t *alloc, hu_memory_t *memory, const char *contact_id,
+                             size_t contact_id_len, const char *memory_content, size_t memory_len,
+                             float emotional_valence, int hour_local) {
     (void)alloc;
     (void)memory;
     (void)contact_id;
@@ -58,75 +54,58 @@ bool hu_protective_memory_ok(hu_allocator_t *alloc, hu_memory_t *memory,
 
 #ifdef HU_ENABLE_SQLITE
 
-bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id,
-                               size_t contact_id_len, const char *topic,
-                               size_t topic_len)
-{
+bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id, size_t contact_id_len,
+                               const char *topic, size_t topic_len) {
     if (!memory || !contact_id || contact_id_len == 0 || !topic || topic_len == 0)
         return false;
 
-    sqlite3 *db = hu_sqlite_memory_get_db(memory);
-    if (!db)
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_boundary_repo_t repo;
+    hu_error_t err = hu_boundary_repo_create(memory, &alloc, &repo);
+    if (err != HU_OK)
         return false;
 
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                               "SELECT 1 FROM boundaries WHERE contact_id=? AND topic=? LIMIT 1",
-                               -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return false;
-
-    sqlite3_bind_text(stmt, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, topic, (int)topic_len, SQLITE_STATIC);
-
-    rc = sqlite3_step(stmt);
-    bool found = (rc == SQLITE_ROW);
-    sqlite3_finalize(stmt);
-    return found;
+    bool is_b = false;
+    err = repo.vtable->is_boundary(repo.ctx, contact_id, contact_id_len, topic, topic_len, &is_b);
+    repo.vtable->deinit(repo.ctx);
+    return (err == HU_OK) ? is_b : false;
 }
 
 hu_error_t hu_protective_add_boundary(hu_allocator_t *alloc, hu_memory_t *memory,
-                                     const char *contact_id, size_t contact_id_len,
-                                     const char *topic, size_t topic_len,
-                                     const char *type, const char *source)
-{
-    (void)alloc;
+                                      const char *contact_id, size_t contact_id_len,
+                                      const char *topic, size_t topic_len, const char *type,
+                                      const char *source) {
     if (!memory || !contact_id || contact_id_len == 0 || !topic || topic_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    sqlite3 *db = hu_sqlite_memory_get_db(memory);
-    if (!db)
-        return HU_ERR_NOT_SUPPORTED;
+    hu_boundary_repo_t repo;
+    hu_error_t err = hu_boundary_repo_create(memory, alloc, &repo);
+    if (err != HU_OK)
+        return err;
 
     const char *t = type ? type : "avoid";
     const char *s = source ? source : "explicit";
     int64_t set_at = (int64_t)time(NULL);
 
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                               "INSERT INTO boundaries (contact_id, topic, type, set_at, source) "
-                               "VALUES (?, ?, ?, ?, ?)",
-                               -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
+    hu_boundary_t b = {.contact_id = contact_id,
+                       .contact_id_len = contact_id_len,
+                       .topic = topic,
+                       .topic_len = topic_len,
+                       .type = t,
+                       .type_len = strlen(t),
+                       .source = s,
+                       .source_len = strlen(s),
+                       .created_at = set_at};
 
-    sqlite3_bind_text(stmt, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, topic, (int)topic_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, t, (int)strlen(t), SQLITE_STATIC);
-    sqlite3_bind_int64(stmt, 4, set_at);
-    sqlite3_bind_text(stmt, 5, s, (int)strlen(s), SQLITE_STATIC);
-
-    rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    err = repo.vtable->add(repo.ctx, &b);
+    repo.vtable->deinit(repo.ctx);
+    return err;
 }
 
 #else
 
-bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id,
-                               size_t contact_id_len, const char *topic,
-                               size_t topic_len)
-{
+bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id, size_t contact_id_len,
+                               const char *topic, size_t topic_len) {
     (void)memory;
     (void)contact_id;
     (void)contact_id_len;
@@ -136,10 +115,9 @@ bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id,
 }
 
 hu_error_t hu_protective_add_boundary(hu_allocator_t *alloc, hu_memory_t *memory,
-                                     const char *contact_id, size_t contact_id_len,
-                                     const char *topic, size_t topic_len,
-                                     const char *type, const char *source)
-{
+                                      const char *contact_id, size_t contact_id_len,
+                                      const char *topic, size_t topic_len, const char *type,
+                                      const char *source) {
     (void)alloc;
     (void)memory;
     (void)contact_id;
@@ -154,13 +132,11 @@ hu_error_t hu_protective_add_boundary(hu_allocator_t *alloc, hu_memory_t *memory
 #endif /* HU_ENABLE_SQLITE */
 
 /* Emotional words that suggest venting (no question = not asking for advice) */
-static const char *const VENTING_WORDS[] = {"angry", "frustrated", "upset", "stressed",
-                                            "overwhelmed", "exhausted", "terrible", "awful"};
-static const size_t VENTING_WORD_COUNT =
-    sizeof(VENTING_WORDS) / sizeof(VENTING_WORDS[0]);
+static const char *const VENTING_WORDS[] = {"angry",       "frustrated", "upset",    "stressed",
+                                            "overwhelmed", "exhausted",  "terrible", "awful"};
+static const size_t VENTING_WORD_COUNT = sizeof(VENTING_WORDS) / sizeof(VENTING_WORDS[0]);
 
-static bool looks_like_venting(const char *msg)
-{
+static bool looks_like_venting(const char *msg) {
     if (!msg)
         return false;
     size_t len = strlen(msg);
@@ -190,8 +166,7 @@ static bool looks_like_venting(const char *msg)
     return false;
 }
 
-bool hu_protective_advice_ok(const char *const *messages, size_t count)
-{
+bool hu_protective_advice_ok(const char *const *messages, size_t count) {
     if (!messages || count < 2)
         return false;
 

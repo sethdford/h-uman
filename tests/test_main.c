@@ -397,6 +397,7 @@ void run_outbound_crosstalk_tests(void);
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 #ifdef HU_ENABLE_SQLITE
+void run_boundary_repo_tests(void);
 void run_outbound_crosstalk_sqlite_tests(void);
 /* Sprint 60 E2E SOTA proof — full pipeline through a file-based db. */
 void run_outbound_e2e_sota_proof_tests(void);
@@ -1317,6 +1318,7 @@ int main(int argc, char **argv) {
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
 #ifdef HU_ENABLE_SQLITE
+    run_boundary_repo_tests();
     run_outbound_crosstalk_sqlite_tests();
     run_outbound_e2e_sota_proof_tests();
     run_burst_egress_tests();
