@@ -262,19 +262,25 @@ public enum HUTokens {
 
         public func trigger() {
             #if canImport(UIKit)
-            switch self {
-            case .light:
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            case .medium:
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            case .heavy:
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-            case .success:
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            case .warning:
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            case .selection:
-                UISelectionFeedbackGenerator().selectionChanged()
+            // UIKit feedback generators are @MainActor-isolated under Swift 6.
+            // Hop to the main actor so trigger() stays callable from any
+            // (synchronous, nonisolated) context; haptics are fire-and-forget,
+            // so the async hop is imperceptible.
+            Task { @MainActor in
+                switch self {
+                case .light:
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                case .medium:
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                case .heavy:
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                case .success:
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                case .warning:
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                case .selection:
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
             }
             #endif
         }
