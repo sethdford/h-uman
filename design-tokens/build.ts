@@ -1307,6 +1307,9 @@ function generateSwift(tokens: TokenMap): string {
   lines.push("    public enum Haptic {");
   lines.push("        case light, medium, heavy, success, warning, selection");
   lines.push("");
+  // @MainActor: UIKit feedback generators are main-actor-isolated under Swift 6.
+  // SwiftUI call sites (button actions, view bodies) are already on the main actor.
+  lines.push("        @MainActor");
   lines.push("        public func trigger() {");
   lines.push("            #if canImport(UIKit)");
   lines.push("            switch self {");

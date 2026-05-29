@@ -260,6 +260,7 @@ public enum HUTokens {
     public enum Haptic {
         case light, medium, heavy, success, warning, selection
 
+        @MainActor
         public func trigger() {
             #if canImport(UIKit)
             switch self {

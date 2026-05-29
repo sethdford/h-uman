@@ -1,6 +1,15 @@
 /* Characterization tests for the proactive check-in policy leaves
  * (DDD Phase 2b scaffold). Pins the exact behavior extracted from
- * hu_service_run_proactive_checkins so future decomposition can't drift it. */
+ * hu_service_run_proactive_checkins so future decomposition can't drift it.
+ *
+ * Coverage anchor: these tests exercise src/daemon/daemon_proactive_policy.c
+ * (hu_daemon_proactive_is_social_hour, hu_daemon_proactive_ymd_from_tm).
+ * Naming the source path lets check-untested.sh recognize the file as tested,
+ * since its symbols use the hu_daemon_proactive prefix rather than the
+ * daemon_proactive_policy basename the heuristic looks for. */
+// @covers-none — check-test-references maps "proactive_policy" -> src/agent/proactive.c
+// (wrong module); real coverage of src/daemon/daemon_proactive_policy.c is tracked by
+// check-untested.sh via the source-path anchor in the comment above.
 #include "human/daemon/proactive_policy.h"
 #include "test_framework.h"
 #include <string.h>

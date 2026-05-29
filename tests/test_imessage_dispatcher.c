@@ -1,3 +1,9 @@
+/* Coverage anchor: these tests exercise the iMessage reply dispatcher and
+ * cross-channel context formatters in src/daemon/daemon_message_router.c
+ * (hu_daemon_dispatch_imessage_reply). Naming the source path here lets
+ * check-untested.sh recognize the file as tested: its exported symbols use
+ * the hu_daemon_dispatch and hu_daemon_cross_channel prefixes rather than
+ * hu_daemon_message_router, so the basename heuristic alone would miss it. */
 #include "human/channel.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"

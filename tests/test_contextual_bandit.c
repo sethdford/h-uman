@@ -169,6 +169,7 @@ static void test_contextual_bandit_convergence_after_50_updates(void) {
      * The Gamma sampler is approximate, so we just verify it learns SOMETHING.
      * For 60% true rate, we expect empirical P to be > 50% (better than random). */
     HU_ASSERT_TRUE(empirical_p > 0.35); /* Should be much higher than random 0.3 for 60% */
+    hu_contextual_bandit_destroy(bandit);
 }
 
 /* ============================================================================

@@ -1,4 +1,4 @@
-/* libFuzzer harness for hu_sse_parser_feed. Must not crash on any input. */
+/* libFuzzer harness for hu_provider_sse_parser_feed. Must not crash on any input. */
 #include "human/core/allocator.h"
 #include "human/providers/sse.h"
 #include <stddef.h>
@@ -20,14 +20,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         return 0;
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_sse_parser_t p;
-    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    hu_provider_sse_parser_t p;
+    hu_error_t err = hu_provider_sse_parser_init(&p, &alloc);
     if (err != HU_OK)
         return 0;
 
-    err = hu_sse_parser_feed(&p, (const char *)data, size, sse_count_cb, NULL);
+    err = hu_provider_sse_parser_feed(&p, (const char *)data, size, sse_count_cb, NULL);
     (void)err;
 
-    hu_sse_parser_deinit(&p);
+    hu_provider_sse_parser_deinit(&p);
     return 0;
 }
