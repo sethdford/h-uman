@@ -1,0 +1,16 @@
+{
+  "casual": {
+    "lora_only": 0.695,
+    "lora_rag": 0.695,
+    "lora_rag_steer": 0.641,
+    "stack_delta_vs_lora": -0.054,
+    "n": 8
+  },
+  "substantive": {
+    "lora_only": 0.691,
+    "lora_rag": 0.784,
+    "lora_rag_steer": 0.792,
+    "stack_delta_vs_lora": 0.101,
+    "n": 5
+  }
+}
