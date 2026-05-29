@@ -371,48 +371,57 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_HAS_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
-    # Phase 2 Task 11 (RL SOTA): tapback inbound poll. Lives in its own TU
-    # to avoid an enum-name collision between human/channels/reaction_event.h
-    # (Task 10) and human/channel.h (HU_REACTION_QUESTION /
-    # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
-    # in src/channels/imessage.c near hu_imessage_poll for the full story.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
-    # E2: sticker send action surface. Wired via vtable.
+    # E2: sticker send action surface. Wired via vtable. Genuine Apple deps
+    # (AX / sticker injection), so stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
-    # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
-    # primitives that render iMessage events into canonical English for
-    # personal-model ingestion. No chat.db / Apple deps; ingest wiring
-    # lands in Phase 1b.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_ingest.c)
     # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: schema-version
     # probe + drift canary. Caches the chat.db PRAGMA table_info result;
     # logs unknown columns at startup so operators see Apple-added fields
-    # before features silently break.
+    # before features silently break. Genuine chat.db dep, stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_schema.c)
     # Phase 5 of docs/plans/2026-05-18-imessage-sota.md: per-balloon
     # payload decoders (URL preview, Apple Pay, Placemark, Music, Poll).
     # Privacy contracts pinned in tests: never reads amount/currency or
-    # latitude/longitude keys.
+    # latitude/longitude keys. Genuine chat.db dep, stays gated.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_balloon_decode.c)
-    # Tier 1 #3 from docs/plans/2026-05-19-better-than-human.md:
-    # conversation-gap detection — surfaces previously-active contacts
-    # who have gone silent, for proactive-outreach prompting. Pure
-    # classifier + SQL scanner (gated under HU_IS_TEST).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
-    # Tier 2 Sprint A — per-contact relationship signatures: TOD
-    # distribution, response latency, initiation ratio, frequency
-    # aggregates per contact. Pure helpers + SQL scanner (HU_IS_TEST stub).
-    list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
-    # Tier 1 Phase 2 (iMessage action surface): predicate that selects
-    # reply style per conversation (flat/threaded/tapback variants).
-    # Wired at send time before hu_imessage_send. Pure classifier.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
-    # Tier 1 Phase 2 (iMessage action surface F1): build facts struct from
-    # conversation state. Pure bridge between dispatcher (F2) and predicate (Phase A).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
-    # Threaded inline reply path (Tier 1: Cmd-R via AX, Tier 2/3 in C2/C3).
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 endif()
+# iMessage pure-logic / internally-Apple-guarded sources. Compiled
+# UNCONDITIONALLY (not under HU_HAS_IMESSAGE): each one either contains zero
+# chat.db / Apple deps or wraps its chat.db SQL in an internal
+# `#if !HU_IS_TEST && defined(__APPLE__) ...` guard with a non-Apple stub, so
+# they compile clean on every platform. Unconditional core callers
+# (src/daemon_reaction_poll.c, src/daemon_social_tick.c,
+# src/agent/reaction_handler.c) plus tests reference their exported symbols on
+# every platform, so gating them caused undefined-reference link breaks in the
+# minimal / no-sqlite / cross-arm64 / HU_HAS_IMESSAGE=OFF CI variants.
+#
+# Tier 2 Task 11 (RL SOTA): tapback inbound poll (hu_imessage_poll_reactions,
+# hu_imessage_lookup_latest_sent_guid). SQL behind internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+# Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
+# primitives that render iMessage events into canonical English for
+# personal-model ingestion (hu_reaction_ingest_personal_model,
+# hu_imessage_synth_attributed_message). No chat.db / Apple deps.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_ingest.c)
+# Tier 1 #3 from docs/plans/2026-05-19-better-than-human.md:
+# conversation-gap detection (hu_imessage_gap_classify_stale,
+# hu_imessage_scan_stale_contacts). Pure classifier + SQL scanner behind
+# internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
+# Tier 2 Sprint A — per-contact relationship signatures
+# (hu_contact_signature_compute, hu_contact_signature_top_n). Pure helpers +
+# SQL scanner behind internal Apple guard.
+list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
+# Threaded inline reply path (hu_imessage_reply + test stubs). External calls
+# only to unconditional symbols (hu_imessage_action_log_jsonl, log, time).
+list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
+# Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
+# facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
+# error.h/persona.h); core callers (src/daemon.c
+# hu_daemon_dispatch_imessage_reply) plus tests/test_imessage_reply_style.c
+# reference them on every platform.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
+list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
     set(HU_HAS_PWA_FLAG TRUE)
@@ -506,6 +515,7 @@ set(HU_CORE_SOURCES
     src/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
+    src/core/rand.c
     src/core/error.c
     src/core/arena.c
     src/core/string.c
@@ -991,6 +1001,18 @@ set(HU_CORE_SOURCES
     # rationale as the runner: subprocess + file I/O, no learner dep.
     src/ml/lora_ema.c
     src/ml/cli_adapter_rollback.c
+    # MLX-server admin HTTP client. Called UNCONDITIONALLY from core TUs
+    # (src/daemon.c personalization path, src/agent/agent.c adapter swap,
+    # src/daemon.c mlx-local health probe). Self-gates on HU_ENABLE_CURL
+    # (NOT_SUPPORTED stub when off); no learner dependency (http + json
+    # only). MUST link in HU_ENABLE_ML=OFF builds — previously gated under
+    # if(HU_ENABLE_ML) which broke build-and-test / minimal-build /
+    # feature-flags / cross-arm64 with undefined-reference on
+    # hu_mlx_admin_swap_adapter + hu_mlx_admin_swap_result_free. The
+    # matching test (tests/test_mlx_admin.c) stays HU_ENABLE_ML-gated and
+    # run_mlx_admin_tests() is #ifdef HU_ENABLE_ML in test_main.c, so the
+    # always-present symbols are a strict superset — no gate-symmetry break.
+    src/ml/mlx_admin.c
     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
     # are W13 learning-loop callers — they reference symbols defined only
     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
@@ -1303,11 +1325,15 @@ list(APPEND HU_CORE_SOURCES
     src/ml/lora_export.c
     src/ml/lora_subprocess.c
     # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
-    # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
-    # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
-    # minimal-build, design-tokens, completions, docs, static-analysis and
-    # ~30 other CI jobs across every open PR with an undefined-reference
-    # linker error on Ubuntu. Same shape as the dpo_miner fix below.
+    # it is an ML-only caller of hu_mlx_admin_swap_adapter, so gating it
+    # here is correct. (mlx_admin.c itself is now UNCONDITIONAL core — see
+    # the always-compiled block above — because core TUs daemon.c/agent.c
+    # call it too; only the ML-specific callers like lora_nightly live in
+    # this block.) Keeping lora_nightly in HU_CORE_SOURCES had broken
+    # local-check, minimal-build, design-tokens, completions, docs,
+    # static-analysis and ~30 other CI jobs across every open PR with an
+    # undefined-reference linker error on Ubuntu (its OTHER ML deps).
+    # Same shape as the dpo_miner fix below.
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -1617,7 +1643,16 @@ if(HU_ENABLE_ML)
         src/ml/m3_rewrite_capture.c
         src/ml/init_dpo_bridge.c
         src/ml/lora_nightly.c
-        src/ml/mlx_admin.c
+        # NOTE: src/ml/mlx_admin.c moved to the unconditional core sources
+        # block (alongside lora_ema.c / cli_adapter_rollback.c). It is
+        # called UNCONDITIONALLY from core TUs (src/daemon.c, src/agent/
+        # agent.c) that cannot be moved into this HU_ENABLE_ML block, so
+        # gating it here produced undefined-reference link errors in every
+        # HU_ENABLE_ML=OFF variant (build-and-test, minimal-build,
+        # feature-flags, cross-arm64). mlx_admin.c self-gates on
+        # HU_ENABLE_CURL (NOT_SUPPORTED stub when off) and depends only on
+        # http + json (core), so it must link regardless of HU_ENABLE_ML.
+        # Same rationale as PR #115 (lora_ema.c / cli_adapter_rollback.c).
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
         # RL architecture rework — main moved to a shared-config-struct
@@ -3159,6 +3194,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_rand.c
     tests/test_log_once.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
@@ -3336,6 +3372,10 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_imessage_diagnose.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
+    tests/test_doctor_prompt_budget.c
+    tests/test_outbound_sanitize.c
+    tests/test_daemon_follow_up_watcher.c
+    tests/test_cli_ctl.c
     tests/test_doctor_check_provider.c
     tests/test_doctor_local_voice.c
     tests/test_doctor_reaction_collection_wired.c
@@ -3788,6 +3828,11 @@ list(APPEND HU_TEST_SOURCES
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /
     # static-analysis / no-ML builds.
+    # NOTE: tests/test_molora_router.c (old Sprint-7 ml/molora router) was
+    # removed when its source (src/ml/molora.c, include/human/ml/molora.h)
+    # was deleted. The successor design lives in src/agent/molora_dispatcher.c
+    # on the molora-daemon-wiring track; this de-registration unblocks the
+    # configure step (the file no longer exists on disk).
     tests/test_contact_send_recency.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are

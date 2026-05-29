@@ -22,6 +22,7 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_rand_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
 void run_init_proposer_tests(void);
@@ -270,6 +271,10 @@ void run_doctor_check_provider_tests(void);
 void run_doctor_exit_codes_tests(void);
 void run_doctor_json_output_tests(void);
 void run_doctor_reaction_collection_wired_tests(void);
+void run_doctor_prompt_budget_tests(void);
+void run_outbound_sanitize_tests(void);
+void run_daemon_follow_up_watcher_tests(void);
+void run_cli_ctl_tests(void);
 void run_doctor_local_voice_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
@@ -966,6 +971,7 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_rand_tests();
     run_log_once_tests();
     run_vertex_adc_tests();
     run_init_proposer_tests();
@@ -1188,6 +1194,10 @@ int main(int argc, char **argv) {
     run_doctor_exit_codes_tests();
     run_doctor_json_output_tests();
     run_doctor_reaction_collection_wired_tests();
+    run_doctor_prompt_budget_tests();
+    run_outbound_sanitize_tests();
+    run_daemon_follow_up_watcher_tests();
+    run_cli_ctl_tests();
     run_doctor_local_voice_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();

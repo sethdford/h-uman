@@ -165,22 +165,24 @@ static hu_doctor_check_result_t check_reflection_loop_run(hu_doctor_check_t *sel
     uint64_t seven_days_ms = 7ULL * 86400000ULL;
     if (counts.ok > 0 && counts.latest_ok_completed_ms > 0 &&
         (uint64_t)counts.latest_ok_completed_ms > now_ms - seven_days_ms) {
-        snprintf(s_reason_buf, sizeof(s_reason_buf),
-                 "reflection_loop healthy: %d ok run%s in last 7d (total runs %d, "
-                 "provider_error=%d schema_invalid=%d). Latest ok run %" PRIu64 "h ago.",
-                 counts.ok, counts.ok == 1 ? "" : "s", counts.total, counts.provider_error,
-                 counts.schema_invalid,
-                 (now_ms - (uint64_t)counts.latest_ok_completed_ms) / (3600ULL * 1000ULL));
+        snprintf(
+            s_reason_buf, sizeof(s_reason_buf),
+            "reflection_loop healthy: %d ok run%s in last 7d (total runs %d, "
+            "provider_error=%d schema_invalid=%d). Latest ok run %" PRIu64 "h ago.",
+            counts.ok, counts.ok == 1 ? "" : "s", counts.total, counts.provider_error,
+            counts.schema_invalid,
+            (uint64_t)((now_ms - (uint64_t)counts.latest_ok_completed_ms) / (3600ULL * 1000ULL)));
         return (hu_doctor_check_result_t){HU_DOCTOR_PASS, s_reason_buf, s_detail_json_buf};
     }
 
     /* Otherwise: stale — runs exist but no recent ok. NA with detail. */
     if (counts.latest_ok_completed_ms > 0) {
-        snprintf(s_reason_buf, sizeof(s_reason_buf),
-                 "reflection_loop stale: last ok run %" PRIu64 "h ago (>7d). "
-                 "Subsystem may be paused or interval-gated for too long; check "
-                 "config.json min_interval_hours.",
-                 (now_ms - (uint64_t)counts.latest_ok_completed_ms) / (3600ULL * 1000ULL));
+        snprintf(
+            s_reason_buf, sizeof(s_reason_buf),
+            "reflection_loop stale: last ok run %" PRIu64 "h ago (>7d). "
+            "Subsystem may be paused or interval-gated for too long; check "
+            "config.json min_interval_hours.",
+            (uint64_t)((now_ms - (uint64_t)counts.latest_ok_completed_ms) / (3600ULL * 1000ULL)));
     } else {
         snprintf(s_reason_buf, sizeof(s_reason_buf),
                  "reflection_loop has %d run%s but none completed ok yet "

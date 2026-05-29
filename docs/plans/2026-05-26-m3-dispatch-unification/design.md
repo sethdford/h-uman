@@ -26,7 +26,7 @@ init_proposer.tick (orphan):
 
 ### New shape of `hu_init_proposer_tick_with_provider`
 
-Current signature ([init_proposer.h:234](../../include/human/agent/init_proposer.h)):
+Current signature ([init_proposer.h:234](../../../include/human/agent/init_proposer.h)):
 
 ```c
 hu_error_t hu_init_proposer_tick_with_provider(

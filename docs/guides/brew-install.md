@@ -1,3 +1,9 @@
+---
+title: Installing human via Homebrew
+created: 2026-05-24
+status: operator-facing
+---
+
 # Installing human via Homebrew
 
 The simplest way to install h-uman on macOS is via Homebrew.

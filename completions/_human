@@ -57,6 +57,12 @@ _human() {
                 eval:Run evaluation harness
                 feed:Feed management
                 ml:ML training and experiments
+                autoresponder:Manage the DND autoresponder
+                ctl:Runtime kill-switch inspector
+                export-dpo:Export collector dpo_pairs to JSONL
+                inference-status:Show effective inference throughput config
+                initiative:Inspect init_proposer JSONL
+                narrate:Generate a long-horizon narrative for a contact
             )'
             ;;
         args)
@@ -66,6 +72,20 @@ _human() {
                         list:List scheduled tasks
                         add:Add scheduled task
                         remove:Remove scheduled task
+                    )'
+                    ;;
+                ctl)
+                    _describe 'ctl subcommand' '(
+                        status:Show guard status
+                        disable-g9:Disable G9 guard
+                        enable-g9:Enable G9 guard
+                        list-channels:List channels
+                    )'
+                    ;;
+                initiative)
+                    _describe 'initiative subcommand' '(
+                        log:Show init_proposer log
+                        status:Show init_proposer status
                     )'
                     ;;
                 channel)

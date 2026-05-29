@@ -163,8 +163,9 @@ The persona stage is asking the LLM to retry. Some retry is healthy
 underlying provider model is producing consistently-off-voice output
 and the persona shape classifier is correctly catching it.
 
-**Action:** Consider switching providers or re-running fine-tuning
-per [../ai/persona-fidelity.md](../ai/persona-fidelity.md).
+**Action:** Consider switching providers or re-running persona
+fine-tuning (see the M3 fidelity eval harness,
+`scripts/eval_fidelity_nightly.py`).
 
 ## Counter lifecycle
 

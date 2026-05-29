@@ -1486,7 +1486,7 @@ If ≥ 20 of 100 feel off, revise the log-odds weights in `thread_logodds`. Re-r
 
 ## Execution Handoff
 
-Plan complete and saved to [`docs/plans/2026-05-25-imessage-action-surface/plan.md`](docs/plans/2026-05-25-imessage-action-surface/plan.md).
+Plan complete and saved to `docs/plans/2026-05-25-imessage-action-surface/plan.md`.
 
 Two execution options:
 

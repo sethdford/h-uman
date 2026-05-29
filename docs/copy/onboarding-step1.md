@@ -1,3 +1,9 @@
+---
+title: Onboarding Step 1 — Welcome
+created: 2026-05-25
+status: product-copy
+---
+
 # Welcome to human
 
 Your AI, locally owned.

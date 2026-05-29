@@ -1,3 +1,9 @@
+---
+title: M3 Frontier-Bridge Runbook
+created: 2026-05-24
+status: operator-facing
+---
+
 # M3 Frontier-Bridge Runbook
 
 How to fine-tune a LoRA adapter on YOUR data and serve it through the

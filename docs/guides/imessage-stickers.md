@@ -1,3 +1,9 @@
+---
+title: iMessage Stickers
+created: 2026-05-26
+status: operator-facing
+---
+
 # iMessage Stickers
 
 ## Overview

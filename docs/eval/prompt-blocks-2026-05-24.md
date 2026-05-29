@@ -1,3 +1,9 @@
+---
+title: "Eval Registry: Persona Prompt Blocks (Sprint B + A/B/C-loops)"
+created: 2026-05-24
+status: reference
+---
+
 # Eval Registry: Persona Prompt Blocks (Sprint B + A/B/C-loops)
 
 This document is the canonical registry of behavioral contracts pinned

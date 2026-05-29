@@ -1259,6 +1259,7 @@ static void test_config_parse_model_fallbacks_drops_malformed_entries(void) {
     hu_config_parse_json(cfg, j, strlen(j));
     HU_ASSERT_EQ(cfg->reliability.model_fallbacks_len, 1u);
     HU_ASSERT_STR_EQ(cfg->reliability.model_fallbacks[0].model, "good");
+    free_config(cfg);
 }
 
 static void test_config_parse_diagnostics_log_receipts(void) {

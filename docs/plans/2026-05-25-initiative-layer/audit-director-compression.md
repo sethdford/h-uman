@@ -6,7 +6,7 @@
 
 ## What the director actually does
 
-`hu_director_result_t` ([daemon.c:231–237](src/daemon.c:231)):
+`hu_director_result_t` ([daemon.c:231–237](../../../src/daemon.c:231)):
 ```c
 typedef struct {
     hu_director_action_t action;     // TEXT | TAPBACK | SILENCE
@@ -17,7 +17,7 @@ typedef struct {
 } hu_director_result_t;
 ```
 
-The director is called by a Flash-Lite Gemini classifier that parses the inbound and emits this structured verdict ([daemon.c:309–426](src/daemon.c:309)).
+The director is called by a Flash-Lite Gemini classifier that parses the inbound and emits this structured verdict ([daemon.c:309–426](../../../src/daemon.c:309)).
 
 ## Where the director's output flows
 
@@ -29,7 +29,7 @@ Two distinct outputs, two different sinks:
 | `delay_s`, `burst`, `reaction` | Daemon timing/transport | Inserts realistic latency, splits into multiple sends, fires a tapback |
 | `direction` (512 char meta-instruction) | **APPENDED to `conversation_context`** ([daemon.c:10395–10421]) with header `"--- Scene Direction (this message only) ---"` | Reaches the LLM as part of conversation_context |
 
-The director **does not modify or replace** the 25+ rich context fields. It adds a small block. The system prompt builder (`hu_prompt_build_system` at [prompt.c:109](src/agent/prompt.c:109)) injects:
+The director **does not modify or replace** the 25+ rich context fields. It adds a small block. The system prompt builder (`hu_prompt_build_system` at [prompt.c:109](../../../src/agent/prompt.c:109)) injects:
 
 ```
 memory_context             personal_model_context     moment_context
