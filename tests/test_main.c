@@ -603,6 +603,7 @@ void run_integration_tests(void);
 void run_agent_registry_tests(void);
 void run_pwa_tests(void);
 void run_music_tests(void);
+void run_inspiration_tests(void);
 #ifdef HU_ENABLE_CURL
 void run_paperclip_tests(void);
 #endif
@@ -1511,6 +1512,7 @@ int main(int argc, char **argv) {
     run_agent_registry_tests();
     run_pwa_tests();
     run_music_tests();
+    run_inspiration_tests();
 #ifdef HU_ENABLE_CURL
     run_paperclip_tests();
 #endif
