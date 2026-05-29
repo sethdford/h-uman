@@ -862,6 +862,7 @@ void run_audio_emotion_tests(void);
 void run_style_adapter_tests(void);
 void run_lora_export_tests(void);
 void run_lora_nightly_tests(void);
+void run_adapter_swap_tests(void);
 void run_lora_subprocess_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
@@ -1764,6 +1765,7 @@ int main(int argc, char **argv) {
     run_style_adapter_tests();
     run_lora_export_tests();
     run_lora_nightly_tests();
+    run_adapter_swap_tests();
     run_lora_subprocess_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();

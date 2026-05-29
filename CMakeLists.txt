@@ -3163,6 +3163,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
