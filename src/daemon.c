@@ -23,6 +23,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/belief_update.h"
 #include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
@@ -12185,6 +12186,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (op_db) {
                         (void)hu_evolved_opinions_extract_and_store(op_db, response, response_len,
                                                                     (int64_t)time(NULL));
+                    }
+                }
+
+                /* A1 conviction loop: close the belief-update wire. After capturing
+                 * any NEW opinions above, evaluate whether the USER's message this
+                 * turn carried genuine evidence that should move a HELD belief
+                 * (strengthen / weaken / flip). The reassertion veto
+                 * (&agent->pressure_history) keeps mere repetition from caving us;
+                 * belief_changes_this_convo enforces the per-conversation cap.
+                 * On a change, stash the shift directive so the NEXT turn can
+                 * acknowledge it ("I've been rethinking this...") — consumed +
+                 * freed in agent_turn.c. Guard against overwriting an unconsumed
+                 * directive (would leak). Spec: docs/plans/2026-05-29-conviction-loop/. */
+                if (err == HU_OK && response && response_len > 0 && agent->memory &&
+                    combined_len > 0 && !agent->belief_pending_directive) {
+                    sqlite3 *bel_db = hu_sqlite_memory_get_db(agent->memory);
+                    if (bel_db) {
+                        char *bel_dir = NULL;
+                        size_t bel_dir_len = 0;
+                        bool bel_changed = false;
+                        (void)hu_belief_update_evaluate_turn(
+                            alloc, bel_db, &agent->pressure_history, combined, combined_len,
+                            agent->belief_changes_this_convo, (int64_t)time(NULL), &bel_dir,
+                            &bel_dir_len, &bel_changed);
+                        if (bel_changed) {
+                            agent->belief_changes_this_convo++;
+                            if (bel_dir && bel_dir_len > 0) {
+                                agent->belief_pending_directive = bel_dir;
+                                agent->belief_pending_directive_len = bel_dir_len;
+                            } else if (bel_dir) {
+                                alloc->free(alloc->ctx, bel_dir, bel_dir_len + 1);
+                            }
+                        }
                     }
                 }
 #endif
