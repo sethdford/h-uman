@@ -21,9 +21,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build
-          key: ${{ runner.os }}-${{ github.repository }}-cmake-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**') }}
+          # cache version bumped to -v2- (2026-05-29) to evict build dirs
+          # poisoned by a concurrent branch: prefix restore-keys had been
+          # restoring stale .o files referencing symbols no longer in source
+          # (e.g. hu_imessage_desc_prefix_match), causing phantom link errors.
+          key: ${{ runner.os }}-${{ github.repository }}-cmake-v2-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**') }}
           restore-keys: |
-            ${{ runner.os }}-${{ github.repository }}-cmake-
+            ${{ runner.os }}-${{ github.repository }}-cmake-v2-
       - uses: ./.github/actions/setup-build
         with:
           enable-asan: "true"
