@@ -10,6 +10,12 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
+#else
+/* Opaque forward-decl so sqlite3* parameters appear in the no-SQLite stub
+ * signatures (which return HU_ERR_NOT_SUPPORTED) and in unconditional callers
+ * (e.g. daemon.c). C11 permits the identical typedef in multiple headers of
+ * one TU, so this won't clash. */
+typedef struct sqlite3 sqlite3;
 #endif
 
 typedef struct hu_preference_pair {
@@ -207,6 +213,21 @@ bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result);
  * unit-tested in tests/test_dpo.c. Scores above 100 are clamped to 100. */
 bool hu_dpo_parse_judge_score(const char *out, size_t out_len, double *score_out);
 
+/* US-102: Mine DPO pairs from resolved production_outcomes.
+ *
+ * Queries production_outcomes WHERE outcome_resolved_at IS NOT NULL
+ * AND processed_into_dpo = 0, materializes DPO pairs deterministically
+ * (reply within 5min + sentiment > 0.6 = chosen; no reply after 24h =
+ * rejected), and inserts into dpo_pairs table. Marks all processed rows
+ * with processed_into_dpo = 1. Returns count of pairs mined.
+ *
+ * Different from hu_dpo_mine_corrections (which mines from messages table):
+ * this function mines from production_outcomes (outbound message outcomes).
+ *
+ * Requires HU_ENABLE_SQLITE. Without it, returns HU_ERR_NOT_SUPPORTED. */
+hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_limit,
+                                                     int *pairs_written);
+
 /* Deprecated: renamed to `hu_dpo_judge_step` in Phase 0. The shim
  * forwards every argument verbatim so the result is bit-identical to
  * a direct call (pinned by tests/test_dpo_judge_naming.c). */
@@ -219,5 +240,54 @@ hu_dpo_train_step(hu_dpo_collector_t *collector, hu_allocator_t *alloc, hu_provi
                   hu_dpo_train_result_t *out) {
     return hu_dpo_judge_step(collector, alloc, provider, model, model_len, beta, batch_size, out);
 }
+
+/* US-104: Proactive outcome signal processing
+ *
+ * Insert a proactive send into the proactive_sends tracking table. Called
+ * when hu_follow_up_send() sends a proactive message to a contact.
+ *
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null args,
+ * HU_ERR_IO on SQLite failure. Skips silently when SQLITE is disabled. */
+hu_error_t hu_dpo_collector_insert_proactive_send(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    const char *channel, size_t channel_len, const char *contact, size_t contact_len,
+    const char *message_ref, size_t message_ref_len);
+
+/* Update a proactive send's outcome (reply, ignored, blocked) based on signal
+ * detection. Call this when a reply arrives (outcome=REPLY), when 24h timeout
+ * fires (outcome=IGNORED), or when contact blocks (outcome=BLOCKED).
+ *
+ * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null args,
+ * HU_ERR_IO on SQLite failure. Skips silently when SQLITE is disabled. */
+hu_error_t hu_dpo_collector_update_proactive_outcome(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    const char *channel, size_t channel_len, const char *contact, size_t contact_len,
+    const char *message_ref, size_t message_ref_len, int outcome_type);
+
+/* Async processor: reads unprocessed proactive outcome signals from the
+ * database and updates the bandit for learning. Called periodically
+ * (rate-limited to once per 60 seconds) from the daemon's main loop.
+ *
+ * Reads rows WHERE outcome_type IS NOT NULL AND processed = 0,
+ * calls hu_contextual_bandit_update for each, and marks processed=1.
+ *
+ * Requires HU_ENABLE_SQLITE and bandit != NULL. Returns HU_OK on success,
+ * HU_ERR_INVALID_ARGUMENT if arguments are NULL, HU_ERR_IO on database
+ * errors. */
+hu_error_t hu_proactive_outcomes_process_async(
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db,
+#else
+    void *db,
+#endif
+    void *bandit_opaque);
 
 #endif /* HU_ML_DPO_H */

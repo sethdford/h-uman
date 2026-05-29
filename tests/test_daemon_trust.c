@@ -1,8 +1,14 @@
+/* Exercises the per-contact trust-state functions (hu_daemon_get_trust_state /
+ * _set_trust_state / _trust_count / _trust_reset) implemented in
+ * src/daemon/daemon_identity.c. The filename reference satisfies
+ * scripts/check-untested.sh, whose basename matcher can't otherwise tie this
+ * test to that impl file (the exported symbols are named hu_daemon_trust_*,
+ * not for the daemon_identity translation unit). */
 #include "human/daemon.h"
 #include "human/intelligence/trust.h"
 #include "test_framework.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 /* ── hu_daemon_get_trust_state ──────────────────────────────────────── */
 

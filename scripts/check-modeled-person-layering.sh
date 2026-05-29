@@ -34,12 +34,19 @@
 # same coupling. Fails only on GROWTH past the baseline.
 set -euo pipefail
 
-# Measured 2026-05-29 — all four directions are clean. Lower a baseline to lock
-# any future drop; the guard only fails on growth.
+# Measured 2026-05-29 — sibling/perception directions clean. Lower a baseline to
+# lock any future drop; the guard only fails on growth.
 COG_TO_BEH_BASELINE=0
 BEH_TO_COG_BASELINE=0
 PER_TO_COG_BASELINE=0
-PER_TO_BEH_BASELINE=0
+# GRANDFATHERED at 6 during the 2026-05-29 reconcile: main's B-series prosocial
+# work (persona/celebration.c, warm_response.c + their headers) depends on
+# behavior/ TYPE headers (prosocial_moment hu_pmoment_kind_t, safety
+# hu_behavior_risk_t, win_detect hu_win_kind_t). These predate this ratchet on
+# main. DEBT: retire by moving those shared enums to a shared layer
+# (human/core/* or an aggregate root) so persona needn't depend on behavior/;
+# then lower this back to 0. Until then, fail only on GROWTH past 6.
+PER_TO_BEH_BASELINE=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

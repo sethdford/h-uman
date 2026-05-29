@@ -8,14 +8,19 @@
  * dynamically from the full message corpus by similarity to the INCOMING
  * message — the distinctive RAG-personalization move.
  *
- * Pure + allocation-free: callers provide the corpus and output buffers. Gated
- * in production behind cfg.agent.rag_grounding_enabled (default off) so the
- * LoRA-vs-RAG A/B decides when to flip it on, per "measure before optimize".
+ * The three core functions are pure + allocation-free: callers provide the
+ * corpus and output buffers. The hot-path convenience wrapper
+ * hu_persona_rag_ground_from_file() (bottom) is the one exception — it reads the
+ * corpus file and allocates internally. Gated in production behind
+ * cfg.agent.rag_grounding_enabled (default off) so the LoRA-vs-RAG A/B decides
+ * when to flip it on, per "measure before optimize".
  */
 #ifndef HU_PERSONA_RAG_H
 #define HU_PERSONA_RAG_H
 
 #include <stddef.h>
+
+#include "human/core/allocator.h"
 
 /* Content-word Jaccard relevance of `candidate` to `query` in [0.0, 1.0]
  * (lowercased tokens, length>2, stopwords excluded). 0 for NULL/empty. */
@@ -33,5 +38,15 @@ size_t hu_persona_rag_retrieve(const char *query, const char *const *corpus, siz
  * Never half-writes an example (stops cleanly at the buffer bound). Returns
  * bytes written (excluding NUL); 0 if nothing written. */
 size_t hu_persona_rag_build_block(const char *const *examples, size_t n, char *buf, size_t cap);
+
+/* Hot-path convenience wrapper (NOT pure — reads the corpus file + allocates):
+ * load the user's sent-message corpus from `corpus_path` (JSONL, one
+ * {"text": "..."} per line; plain-text lines also tolerated), retrieve the top
+ * `k` messages most relevant to `query`, and write the grounding block into
+ * `out_buf` (bounded by out_cap). Allocates working buffers via `alloc` and
+ * frees them all before returning. Returns bytes written (excluding NUL); 0 if
+ * the corpus is missing/empty/oversized or nothing relevant was found. */
+size_t hu_persona_rag_ground_from_file(const char *query, const char *corpus_path, size_t k,
+                                       char *out_buf, size_t out_cap, hu_allocator_t *alloc);
 
 #endif /* HU_PERSONA_RAG_H */

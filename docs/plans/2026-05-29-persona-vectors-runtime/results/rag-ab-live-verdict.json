@@ -1,0 +1,18 @@
+{
+  "casual": {
+    "rag_off": 0.704,
+    "rag_on": 0.626,
+    "delta": -0.078,
+    "empties_off": 0,
+    "empties_on": 0,
+    "n": 8
+  },
+  "substantive": {
+    "rag_off": 0.714,
+    "rag_on": 0.824,
+    "delta": 0.11,
+    "empties_off": 0,
+    "empties_on": 0,
+    "n": 4
+  }
+}

@@ -3026,8 +3026,12 @@ static void split_into_texts_blank_input_returns_zero(void) {
     HU_ASSERT_EQ(0, (int)n);
 }
 
-/* #5 regression: a hard cut must not split a multi-byte UTF-8 codepoint. */
+/* #5 regression: a hard cut must not split a multi-byte UTF-8 codepoint.
+ * Build a string whose byte at the cut boundary lands inside a 4-byte emoji,
+ * then assert every emitted chunk is valid UTF-8 (no trailing partial bytes). */
 static void split_into_texts_never_splits_utf8_codepoint(void) {
+    /* 8 'a' + rocket emoji (F0 9F 9A 80) repeated, so a max_chunk near a
+     * multiple lands mid-emoji if unguarded. */
     char msg[512];
     size_t len = 0;
     for (int rep = 0; rep < 40 && len + 5 < sizeof(msg); rep++) {
@@ -3042,9 +3046,16 @@ static void split_into_texts_never_splits_utf8_codepoint(void) {
     HU_ASSERT_TRUE(n >= 1);
     for (size_t c = 0; c < n; c++) {
         size_t clen = strlen(chunks[c]);
+        /* A valid chunk must not END on a UTF-8 continuation byte (0x80..0xBF)
+         * with an incomplete lead — verify the trailing codepoint is complete
+         * by re-running the safe-length check: it must equal clen. */
         size_t safe = clen;
         while (safe > 0 && ((unsigned char)chunks[c][safe - 1] & 0xC0) == 0x80)
             safe--;
+        /* Either the last byte is ASCII/lead with its full continuation run
+         * present, or it's a complete codepoint. The simplest invariant: the
+         * final byte is not a lone continuation, i.e. walking back over
+         * continuations reaches a lead byte whose width matches. */
         if (safe > 0) {
             unsigned char lead = (unsigned char)chunks[c][safe - 1];
             size_t cont = clen - safe;
@@ -4305,10 +4316,69 @@ static void double_text_suppresses_when_too_many_from_me(void) {
         hu_conversation_should_double_text(resp, strlen(resp), entries, 4, 14, 42, 1.0f));
 }
 
+/* ── Inspiration trigger: YouTube/TikTok cues must boost the share roll ──────
+ * The proactive media-share gate (hu_conversation_should_send_music) multiplies
+ * the probability 2.5x when a cue word is present. Historically only MUSIC words
+ * boosted; YouTube/TikTok asks under-triggered. These pin that video/tiktok cues
+ * elevate the roll the same way.
+ *
+ * Determinism: at base prob 0.4 a cue boosts effective prob to min(2.5*0.4,1.0)
+ * = 1.0 (fires for EVERY seed). A non-cue control at 0.4 fires only when the PRNG
+ * roll clears 4000/10000. We find a seed where the control is FALSE, then assert
+ * the cue message is TRUE at that same seed — impossible unless the cue boosted. */
+static void test_should_share_tiktok_cue_boosts_roll(void) {
+    int proved = 0;
+    for (uint32_t seed = 1; seed <= 100 && !proved; seed++) {
+        bool control = hu_conversation_should_send_music("just chatting about lunch plans", 31,
+                                                         NULL, 0, seed, 0.4f);
+        if (!control) {
+            proved = 1;
+            HU_ASSERT_TRUE(
+                hu_conversation_should_send_music("send me a tiktok", 16, NULL, 0, seed, 0.4f));
+        }
+    }
+    HU_ASSERT_TRUE(proved); /* sanity: base 0.4 is not certain, so the control varies */
+}
+
+static void test_should_share_youtube_cue_boosts_roll(void) {
+    int proved = 0;
+    for (uint32_t seed = 1; seed <= 100 && !proved; seed++) {
+        bool control = hu_conversation_should_send_music("just chatting about lunch plans", 31,
+                                                         NULL, 0, seed, 0.4f);
+        if (!control) {
+            proved = 1;
+            HU_ASSERT_TRUE(
+                hu_conversation_should_send_music("got a funny video?", 18, NULL, 0, seed, 0.4f));
+        }
+    }
+    HU_ASSERT_TRUE(proved);
+}
+
+/* Word-boundary safety: "trendy" must NOT count as the "trend" cue (substring-
+ * classifier-pitfalls.md). With NO real cue, "feeling trendy today" stays at base
+ * prob, so at a seed where the control is false it must also be false. */
+static void test_should_share_word_boundary_no_false_cue(void) {
+    int proved = 0;
+    for (uint32_t seed = 1; seed <= 100 && !proved; seed++) {
+        bool control = hu_conversation_should_send_music("just chatting about lunch plans", 31,
+                                                         NULL, 0, seed, 0.4f);
+        if (!control) {
+            proved = 1;
+            HU_ASSERT_FALSE(
+                hu_conversation_should_send_music("feeling trendy today", 20, NULL, 0, seed, 0.4f));
+        }
+    }
+    HU_ASSERT_TRUE(proved);
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
     HU_TEST_SUITE("Conversation Intelligence");
+
+    HU_RUN_TEST(test_should_share_tiktok_cue_boosts_roll);
+    HU_RUN_TEST(test_should_share_youtube_cue_boosts_roll);
+    HU_RUN_TEST(test_should_share_word_boundary_no_false_cue);
 
     /* Multi-message splitting */
     HU_RUN_TEST(split_short_response_stays_single);

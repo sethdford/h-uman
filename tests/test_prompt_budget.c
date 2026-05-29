@@ -84,6 +84,7 @@ static void test_dead_field_fires_after_threshold_with_zero_bytes(void) {
     for (int i = 0; i < 100; i++)
         hu_prompt_budget_observe(b, stats, HU_PROMPT_FIELD_COUNT);
     HU_ASSERT(hu_prompt_budget_field_is_dead(b, HU_PROMPT_FIELD_SOMATIC_CONTEXT, 16, 100));
+    hu_prompt_budget_free(b);
 }
 
 static void test_dead_field_skips_when_field_is_populated(void) {

@@ -681,6 +681,8 @@ set(HU_CORE_SOURCES
     src/persona/markdown_loader.c
     src/persona/somatic.c
     src/persona/taste.c
+    src/persona/celebration.c
+    src/persona/warm_response.c
     src/persona/narrative_self.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
@@ -748,6 +750,7 @@ set(HU_CORE_SOURCES
     src/agent/preferences.c
     src/agent/awareness.c
     src/agent/outcomes.c
+    src/agent/contextual_bandit.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
     src/agent/stop_sequence_registry.c
@@ -787,6 +790,9 @@ set(HU_CORE_SOURCES
     src/behavior/affect.c
     src/behavior/change.c
     src/behavior/safety.c
+    src/behavior/prosocial.c
+    src/behavior/win_detect.c
+    src/behavior/prosocial_moment.c
     src/behavior/policy.c
     src/behavior/prompt.c
     src/behavior/support_strategy.c
@@ -859,6 +865,7 @@ set(HU_CORE_SOURCES
     src/agent/autonomy.c
     src/behavior/belief_update.c
     src/cognition/intrinsic_drive.c
+    src/agent/prosocial_routine.c
     src/permission.c
     src/mcp_manager.c
     src/mcp_tool_wrapper.c
@@ -1187,6 +1194,10 @@ set(HU_CORE_SOURCES
     src/daemon_proactive.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
+    src/daemon/daemon_identity.c
+    src/daemon/daemon_peripheral_gov.c
+    src/daemon/daemon_message_router.c
+    src/daemon/daemon_proactive_policy.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
@@ -1497,6 +1508,12 @@ list(APPEND HU_CORE_SOURCES
 # Music preview integration (iTunes Search API + 30s preview download)
 list(APPEND HU_CORE_SOURCES src/music.c)
 
+# Media inspiration (conversation cues -> medium picker, per-medium prompts, voice hints, TikTok URLs)
+list(APPEND HU_CORE_SOURCES src/inspiration.c)
+
+# YouTube Data API v3 search (find and verify canonical watch URLs)
+list(APPEND HU_CORE_SOURCES src/youtube.c)
+
 # Paperclip integration (requires libcurl for API calls)
 if(HU_ENABLE_CURL)
     list(APPEND HU_CORE_SOURCES
@@ -1539,7 +1556,10 @@ endif()
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
         src/memory/repos/boundary_repo_sqlite.c
+        src/memory/repos/celebration_repo_sqlite.c
         src/memory/repos/emotional_residue_repo_sqlite.c
+        src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/memories_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3170,6 +3190,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
@@ -3223,6 +3244,7 @@ set(HU_TEST_SOURCES
     tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
+    tests/test_contextual_bandit.c
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
@@ -3285,6 +3307,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
+    tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
@@ -3609,6 +3632,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_narrative_self.c
     tests/test_attachment.c
     tests/test_intrinsic_drive.c
+    tests/test_prosocial_routine.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
     tests/test_skill_system.c
@@ -3680,7 +3704,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
@@ -3696,6 +3720,12 @@ endif()
 
 # Music preview tests (pure computation — always compiled)
 list(APPEND HU_TEST_SOURCES tests/test_music.c)
+
+# Media inspiration tests (medium picker, voice hints, TikTok URLs)
+list(APPEND HU_TEST_SOURCES tests/test_inspiration.c)
+
+# YouTube Data API tests (pure JSON parsing — always compiled)
+list(APPEND HU_TEST_SOURCES tests/test_youtube.c)
 
 # Paperclip tests (requires libcurl)
 if(HU_ENABLE_CURL)
@@ -3798,6 +3828,9 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_pipeline_perf.c)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
 endif()
 
 # SOTA capability tests
@@ -3850,6 +3883,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_dpo_collector.c
+    tests/test_proactive_outcomes.c
+    tests/test_e2e_learning_loop.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /
@@ -3943,6 +3979,7 @@ if(HU_ENABLE_ML)
         tests/test_dpo_real_mlx.c
         tests/test_value_head.c
         tests/test_cli_dpo.c
+        tests/test_reward_model_huml.c
         tests/test_reward_model_train.c
         tests/test_reward_model_inference.c
         tests/test_kto_loss.c

@@ -308,6 +308,8 @@ static void flat_style_routes_to_send(void) {
  * begins at a word boundary (kills the wrong-parent mid-token false match),
  * while still matching a prefix truncated mid-word (trailing unconstrained). */
 
+#if HU_HAS_IMESSAGE /* hu_imessage_desc_prefix_match is defined in the HU_HAS_IMESSAGE-gated \
+                       imessage.c */
 static void desc_prefix_match_at_string_start(void) {
     /* Prefix begins the haystack — trivially a boundary. */
     HU_ASSERT_TRUE(hu_imessage_desc_prefix_match("How's st. Pete?", "How's st"));
@@ -341,6 +343,7 @@ static void desc_prefix_match_null_and_empty_safe(void) {
 static void desc_prefix_no_match_absent(void) {
     HU_ASSERT_FALSE(hu_imessage_desc_prefix_match("totally different message", "How's st"));
 }
+#endif /* HU_HAS_IMESSAGE */
 
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
@@ -352,10 +355,12 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
+#if HU_HAS_IMESSAGE
     HU_RUN_TEST(desc_prefix_match_at_string_start);
     HU_RUN_TEST(desc_prefix_match_after_separator);
     HU_RUN_TEST(desc_prefix_no_match_mid_token);
     HU_RUN_TEST(desc_prefix_match_truncated_mid_word);
     HU_RUN_TEST(desc_prefix_match_null_and_empty_safe);
     HU_RUN_TEST(desc_prefix_no_match_absent);
+#endif
 }

@@ -73,6 +73,18 @@ const char *hu_config_get_provider_base_url(const hu_config_t *cfg, const char *
 bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *name);
 ```
 
+Provider keys are also used for optional integrations beyond the model
+provider, looked up by name via `hu_config_get_provider_key(cfg, "<name>")`:
+
+| Key name   | Enables |
+|------------|---------|
+| `spotify`  | Spotify share links for music inspirations (`client_id:client_secret`) |
+| `tenor`    | Tenor GIF search |
+| `youtube`  | YouTube video inspirations (YouTube Data API v3 key). When absent, YouTube inspirations are silently skipped and the picker falls back to music. |
+
+TikTok inspirations need no key — they resolve to public hashtag
+discovery URLs (`tiktok.com/tag/<keyword>`).
+
 ## Usage Example
 
 ```c

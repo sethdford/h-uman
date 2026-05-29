@@ -56,4 +56,39 @@ Reflexion notes:
 
 (none observed)
 
-RESULT_critic=HAS_FINDINGS_0_4
+# Critic findings — US-101 Bradley-Terry reward model (HUML)
+
+Status: COMPLETE — reviewed diff at commit 5dca845e..HEAD
+
+## Findings
+
+| Severity | file:line | concern | suggested fix |
+|----------|-----------|---------|---------------|
+| HIGH | tests/test_reward_model_huml.c:193 | Hardcoded stack buffer `float analytic[100]` assumes hidden_dim==100. If a future test uses hidden_dim≠100, buffer overflow. | Replace `float analytic[100]` with dynamic allocation: `float *analytic = alloc->alloc(alloc->ctx, V * sizeof(float));` and corresponding free in cleanup. Or assert at line 200 that V==100 before using the static buffer. |
+| MEDIUM | src/ml/reward_model_train.c:162-167 | OOM error path calls free() on potentially-NULL pointers (partial allocation failure). If h_w succeeds but h_l fails, then alloc->free(ctx, h_l, ...) is called on NULL, which may not be safe in a custom tracking allocator. | Guard: only call free() on pointers that actually allocated, or pre-zero all five pointers at line 156 and free ALL at end (already done at 192-196, so keep both cleanup paths). Safe in system allocator (free(NULL) is no-op), but defensive against custom allocators. |
+| MEDIUM | tests/test_reward_model_huml.c:215 | Gradient-check tolerance 2% (rel < 2e-2) is loose; could a sign error pass? Yes IF weights near zero, but the skip condition (line 212) bails out on both <1e-3. With typical sigmoid~0.7, sign error produces 100% rel error → test catches it. BUT the skip condition silently exempts ill-conditioned weights. Document why this tolerance was chosen (float32 rounding limits?), or tighten after confirming gradients are actually correct. | Add comment at line 215 explaining the 2% choice: "float32 rounding in value_head_backward adds ~0.5-1% error; 2% allows margin for accumulation. Ill-conditioned (a,fd both <1e-3) skipped because relative error undefined." Or: verify by hand one gradient computation on a non-trivial weight and document. |
+| LOW | src/ml/reward_model.c:199 | When out_h != NULL in huml_score_core, a memcpy copies the hidden vector. But the comment at line 112 says "no extra copy needed", contradicting the design intent that value_head_forward should receive the raw last-position logits without buffering. The memcpy is safe (it's to caller's buffer), but it's wasteful if the caller only needs the score. Optimize: pass out_h directly to value_head_forward when available? | Minor optimization: check if hu_value_head_forward can accept the hidden vector in-place (without copy). If value_head_forward doesn't mutate the input, pass the pointer directly. If copy is required for internal reasons, keep as-is and document. |
+| LOW | tests/test_reward_model_huml.c | AC-101.7 (batch scoring <100ms latency target) is not explicitly tested. The design specifies "manual run", but no assertion or benchmark exists. Future changes might regress latency silently. | Add a comment documenting the latency target (100ms/100 pairs on dev machine), or add a test that times batch scoring and logs the result (non-asserting, for visibility). |
+
+## Cross-agent regression risk
+
+None observed. The change is isolated to reward_model* modules and test suite. No changes to provider, channel, tool, or security boundaries.
+
+# Critic findings — US-101 Bradley-Terry reward model (HUML)
+
+Status: COMPLETE — reviewed diff at commit 5dca845e..HEAD
+
+## Findings
+
+| Severity | file:line | concern | suggested fix |
+|----------|-----------|---------|---------------|
+| HIGH | tests/test_reward_model_huml.c:193 | Hardcoded stack buffer `float analytic[100]` assumes hidden_dim==100 forever. Current code only calls gradient_check_against_fd via run_gradient_check_for_batch (line 235-240, which hardcodes hidden_dim=100), so NO BUFFER OVERFLOW TODAY. BUT latent bug: if future PR refactors to call gradient_check_against_fd directly with hidden_dim≠100, stack buffer overflows. Loop at line 200 unconditionally goes to j < 100, writing beyond buffer if V < 100 (safe) or if called with hidden_dim > 100 buffer is too small. | Replace stack buffer with dynamic allocation: line 193 change to `float *analytic = (float *)alloc->alloc(alloc->ctx, V * sizeof(float));` where V = ctx->value_head.hidden_dim. Add corresponding free() call in gradient_check_against_fd error/cleanup paths (before all returns at lines 218, or after loop at line 217). |
+| MEDIUM | src/ml/reward_model_train.c:162-167 | OOM error path calls free() on potentially-NULL pointers from partial allocation failures. If h_w succeeds but h_l fails (line 158), cleanup at line 164 calls alloc->free(ctx, h_l, ...) where h_l==NULL. While system allocator free(NULL) is safe (no-op), project's established pattern (src/ml/lora.c lines ~140) guards each free with `if (ptr)` before freeing. Inconsistency violates defensive coding discipline and may fail with custom tracking allocators. | Pre-zero all pointers at lines 157-161: change to `float *h_w = NULL, *h_l = NULL, *dW_w = NULL, *dW_l = NULL;` and `double *total_dW = NULL;` (before line 157). Then guard cleanup at 163-167: `if (h_w) alloc->free(ctx, h_w, ...); if (h_l) alloc->free(...);` etc. Matches lora.c pattern and defensive allocator contract. |
+| LOW | src/ml/reward_model.c:112-199 | Comment at line 112 claims "no extra copy needed for the hidden state", but line 199 does memcpy(out_h, h, V * sizeof(float)). The copy is safe (to caller's buffer) but contradicts comment. Clarity issue. | Clarify comment at line 112: document whether the copy is necessary (lifetime, mutability) or wasteful. If copy not needed, pass h directly to hu_value_head_forward (verify forward() doesn't mutate input). If copy is needed, update comment to explain why. |
+| LOW | tests/test_reward_model_huml.c | AC-101.7 latency target (100ms/100 pairs on dev machine per design:153) documented in spec but not tested. No assertion, benchmark, or comment in test code. Future changes might regress latency silently. | Add inline comment at top of test file or in test_score_batch_two_sided documenting the latency contract: "AC-101.7: batch scoring of 100 pairs should complete in <100ms on dev machine (manual verification only; no automated assertion)". Helps reviewers understand performance expectations. |
+
+## Cross-agent regression risk
+
+None observed. Changes isolated to reward_model{,_train,_priv}.[hc] and test_reward_model_huml.c. No changes to provider, channel, tool, security, or eval boundaries.
+
+RESULT_critic=HAS_FINDINGS severity=HIGH count=1

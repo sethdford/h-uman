@@ -400,13 +400,23 @@ struct hu_agent {
     char *belief_pending_directive; /* owned; freed + cleared on consume */
     size_t belief_pending_directive_len;
 
-    /* A3 intrinsic motivation: bounded internal curiosity/boredom drive,
-     * maintained across user (decay) and idle (rise) paths by the daemon. The
-     * config-gated, default-OFF runner (hu_intrinsic_run_tick) reads it to
-     * decide whether to originate an internal, propose-only goal. POD; zero-
-     * init via the struct memset. Spec: docs/plans/2026-05-29-intrinsic-motivation/. */
+    /* B1 prosocial: a pending celebration/affirmation directive (B0-gated)
+     * injected into the NEXT turn's prompt so h-uman acknowledges a win warmly.
+     * Owned; freed + cleared on consume. */
+    char *prosocial_pending_directive;
+    size_t prosocial_pending_directive_len;
+
+    /* A3 intrinsic motivation: bounded internal drive state. Ticked on each
+     * user turn (decay) and each idle service-loop tick (rise); the runner
+     * fires only when cfg.intrinsic.enabled. Zero-init via memset. */
     hu_intrinsic_drive_t intrinsic_drive;
 
+    /* C-series: per-routine last-run timestamps (unix s). In-memory like the
+     * intrinsic drive; conservative cadences bound any post-restart re-fire. */
+    int64_t routine_last_morning;
+    int64_t routine_last_evening;
+    int64_t routine_last_weekly;
+    int64_t routine_last_thinking;
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after
      * hu_w7_facade_open; ticked once per main-loop iteration; closed BEFORE
