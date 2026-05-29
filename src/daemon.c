@@ -32,10 +32,11 @@
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#include "human/agent/prosocial_routine.h"
+#include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
 #include "human/memory/celebration_repo.h"
 #include "human/persona/celebration.h"
-#include "human/behavior/prosocial_moment.h"
 #include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
@@ -3549,6 +3550,74 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                       hu_now, &hu_ir);
                 /* STARTED => goal originated + audit-logged. Sharing is a separate
                  * proposer-gated step (AC-5); v1 logs the intent only. */
+            }
+        }
+
+        /* C-series prosocial routines idle tick (default-OFF via
+         * cfg.prosocial_routines). Once/minute; the scheduler is pure and the
+         * prompt is B0-gated. A due routine is audit-logged and its last-run is
+         * recorded; the actual proactive send routes through init_proposer (the
+         * silence-biased gate) — documented as the integration tail, mirroring
+         * the A3 runner's share-via-proposer contract. */
+        if (agent && config) {
+            static atomic_bool warned_routines_off = false;
+            if (!config->prosocial_routines.enabled) {
+                hu_log_info_once(&warned_routines_off, "human", agent->observer,
+                                 "prosocial routines disabled "
+                                 "(cfg.prosocial_routines.enabled=false) — set "
+                                 "prosocial_routines.enabled=true in config.json to activate");
+            } else {
+                static time_t hu_last_routine_min = 0;
+                time_t rmin = time(NULL) / 60;
+                if (rmin != hu_last_routine_min) {
+                    hu_last_routine_min = rmin;
+                    time_t rnow = time(NULL);
+                    struct tm rtm;
+                    localtime_r(&rnow, &rtm);
+                    hu_routine_facts_t rf;
+                    rf.local_hour = rtm.tm_hour;
+                    rf.day_of_week = rtm.tm_wday;
+                    rf.user_active = false;
+                    rf.secs_since_morning = agent->routine_last_morning
+                                                ? (int64_t)rnow - agent->routine_last_morning
+                                                : 999999999;
+                    rf.secs_since_evening = agent->routine_last_evening
+                                                ? (int64_t)rnow - agent->routine_last_evening
+                                                : 999999999;
+                    rf.secs_since_weekly = agent->routine_last_weekly
+                                               ? (int64_t)rnow - agent->routine_last_weekly
+                                               : 999999999;
+                    rf.secs_since_thinking = agent->routine_last_thinking
+                                                 ? (int64_t)rnow - agent->routine_last_thinking
+                                                 : 999999999;
+                    hu_routine_kind_t rk = hu_routine_due(&rf);
+                    if (rk != HU_ROUTINE_NONE) {
+                        size_t rplen = 0;
+                        char *rp = hu_routine_build_prompt(alloc, rk, HU_BRISK_NONE, &rplen);
+                        if (rp) {
+                            hu_log_info("human", agent->observer,
+                                        "prosocial routine due — kind=%d (routed to proposer)",
+                                        (int)rk);
+                            alloc->free(alloc->ctx, rp, rplen + 1);
+                            switch (rk) {
+                            case HU_ROUTINE_MORNING_INTENTION:
+                                agent->routine_last_morning = rnow;
+                                break;
+                            case HU_ROUTINE_EVENING_REFLECTION:
+                                agent->routine_last_evening = rnow;
+                                break;
+                            case HU_ROUTINE_WEEKLY_CHECKIN:
+                                agent->routine_last_weekly = rnow;
+                                break;
+                            case HU_ROUTINE_THINKING_OF_YOU:
+                                agent->routine_last_thinking = rnow;
+                                break;
+                            default:
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 #ifdef HU_HAS_CRON

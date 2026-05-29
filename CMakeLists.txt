@@ -864,6 +864,7 @@ set(HU_CORE_SOURCES
     src/agent/autonomy.c
     src/agent/belief_update.c
     src/agent/intrinsic_drive.c
+    src/agent/prosocial_routine.c
     src/permission.c
     src/mcp_manager.c
     src/mcp_tool_wrapper.c
@@ -3609,6 +3610,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_belief_update.c
     tests/test_taste.c
     tests/test_intrinsic_drive.c
+    tests/test_prosocial_routine.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
     tests/test_skill_system.c

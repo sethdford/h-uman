@@ -175,6 +175,12 @@ typedef struct hu_intrinsic_config {
     uint32_t per_tick_token_budget; /* hard per-tick cap; 0 -> built-in default */
 } hu_intrinsic_config_t;
 
+/* C-series — scheduled prosocial routines (docs/plans/2026-05-29-prosocial-uplift/).
+ * Default-OFF: proactive reach-outs only run when an operator opts in. */
+typedef struct hu_prosocial_routines_config {
+    bool enabled; /* default false */
+} hu_prosocial_routines_config_t;
+
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100
 
 /* Reflection loop config (M2 closure, 2026-05-26-reflection-loop spec T3).
