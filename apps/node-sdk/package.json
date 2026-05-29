@@ -5,15 +5,22 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
-  },
-  "scripts": {
-    "test": "node --test test/smoke.test.js"
+    ".": "./src/index.js",
+    "./binary": "./src/binary.js"
   },
   "files": [
     "src/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sethdford/h-uman.git",
+    "directory": "apps/node-sdk"
+  },
+  "scripts": {
+    "test": "node --test test/smoke.test.js test/binary.test.js"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
@@ -21,7 +28,12 @@
     "human",
     "hula",
     "ai",
-    "agent"
+    "agent",
+    "language"
   ],
-  "license": "MIT"
+  "author": "Seth Ford <seth.ford@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }
