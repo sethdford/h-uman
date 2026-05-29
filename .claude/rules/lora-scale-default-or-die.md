@@ -1,9 +1,19 @@
-# LoRA Scale — Use mlx_lm's Default (2.0) Unless You Know Exactly Why
+# LoRA Scale — ALWAYS Set `scale=2.0` Explicitly; mlx_lm's Default (20.0) Is Catastrophic
 
-When fine-tuning with `mlx_lm.lora`, leave `lora_parameters.scale` at
-the framework default (2.0) unless you have an empirical reason to
-override it AND you've measured the downstream effect on the base
-model's instruction-following.
+When fine-tuning with `mlx_lm.lora`, **always set `lora_parameters.scale`
+to `2.0` explicitly via a config file, and verify `adapter_config.json`
+after every run.** Do NOT rely on the framework default — mlx_lm 0.31.2's
+default is **`20.0`**, the catastrophic over-amplification value that
+destroys the base model's instruction-following (see hazard below).
+
+> **Empirically verified 2026-05-29 (mlx_lm 0.31.2):** the source default
+> is `scale: float = 20.0` (in `mlx_lm.tuner.lora`), and a training run
+> with NO explicit scale produced `adapter_config.json` → `scale: 20.0`.
+> An earlier version of this rule wrongly claimed "the default is 2.0" —
+> that claim cost a wasted ~4-minute training run that collapsed to val
+> loss 0.825 (the over-amplification signature). The default has either
+> changed across mlx_lm versions or was never 2.0. Lesson: pin the scale,
+> never trust the default, and re-check `adapter_config.json` every time.
 
 ## The hazard
 
@@ -12,10 +22,13 @@ LoRA's forward pass is:
     output = x @ W + scale * (x @ A) @ B
 
 where `A`, `B` are the trainable low-rank matrices and `scale` is a
-multiplier baked into both training AND inference/fusion. The mlx_lm
-default is `scale=2.0`. Some HuggingFace-PEFT configs use `scale =
-alpha / rank` with `alpha = 2 * rank` (also yielding 2.0 for rank=8),
-but the spread of community configs runs from 0.5 to 32.
+multiplier baked into both training AND inference/fusion. **mlx_lm
+0.31.2's default is `scale=20.0`** — the catastrophic value. Some
+HuggingFace-PEFT configs use `scale = alpha / rank` with `alpha = 2 *
+rank` (yielding 2.0 for rank=8), which is the sane target; the spread
+of community configs runs from 0.5 to 32. The danger is that mlx_lm's
+own default sits at the top of that range, so omitting the field gives
+you the worst case, not a safe one.
 
 A few people in the community report "use scale = 16 or 20 for
 stronger adapter influence." Those reports usually concern
@@ -70,8 +83,10 @@ get multiplied by `scale` at fusion.
 
 ## The right shape
 
-1. **Default to `scale=2.0` (or omit the field entirely).** mlx_lm's
-   default is sensible for most chat-fine-tunes.
+1. **Set `scale=2.0` explicitly in a config file — NEVER omit the
+   field.** Omitting it inherits mlx_lm 0.31.2's `20.0` default, which
+   is the catastrophic value. After every run, `cat
+   adapter_config.json` and confirm `scale` reads `2.0`.
 
 2. **If you MUST override**, validate the chosen scale against a
    held-out base capability test BEFORE fusing into production:
@@ -95,7 +110,7 @@ The repair shipped as `seth-lora-v4-repair-<runid>`:
 # adapter_config.json equivalent
 lora_parameters:
   rank: 8
-  scale: 2.0      # mlx_lm default — DO NOT override without validation
+  scale: 2.0      # EXPLICIT — mlx_lm 0.31.2 default is 20.0 (catastrophic). Verify in adapter_config.json.
   dropout: 0.0
 ```
 
