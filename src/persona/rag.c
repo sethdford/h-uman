@@ -2,6 +2,8 @@
 
 #include "human/persona/rag.h"
 
+#include "human/core/json.h"
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -142,4 +144,97 @@ size_t hu_persona_rag_build_block(const char *const *examples, size_t n, char *b
         off += (size_t)w;
     }
     return off;
+}
+
+/* Bounds so a corrupt/huge corpus file can't blow memory or per-turn latency. */
+#define HU_RAG_MAX_CORPUS_BYTES (4 * 1024 * 1024) /* 4 MB */
+#define HU_RAG_MAX_CORPUS_MSGS  4000
+
+size_t hu_persona_rag_ground_from_file(const char *query, const char *corpus_path, size_t k,
+                                       char *out_buf, size_t out_cap, hu_allocator_t *alloc) {
+    if (out_buf && out_cap > 0)
+        out_buf[0] = '\0';
+    if (!query || !*query || !corpus_path || !out_buf || out_cap == 0 || !alloc || k == 0)
+        return 0;
+
+    FILE *f = fopen(corpus_path, "rb");
+    if (!f)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return 0;
+    }
+    long sz = ftell(f);
+    if (sz <= 0 || sz > HU_RAG_MAX_CORPUS_BYTES || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return 0;
+    }
+    char *data = alloc->alloc(alloc->ctx, (size_t)sz + 1);
+    if (!data) {
+        fclose(f);
+        return 0;
+    }
+    size_t rd = fread(data, 1, (size_t)sz, f);
+    fclose(f);
+    data[rd] = '\0';
+
+    char **corpus = alloc->alloc(alloc->ctx, HU_RAG_MAX_CORPUS_MSGS * sizeof(char *));
+    if (!corpus) {
+        alloc->free(alloc->ctx, data, (size_t)sz + 1);
+        return 0;
+    }
+
+    /* Parse JSONL: one {"text": "..."} per line; tolerate plain-text lines. */
+    size_t n = 0;
+    char *line = data;
+    while (line && *line && n < HU_RAG_MAX_CORPUS_MSGS) {
+        char *nl = strchr(line, '\n');
+        size_t llen = nl ? (size_t)(nl - line) : strlen(line);
+        while (llen > 0 && (line[llen - 1] == '\r' || line[llen - 1] == ' '))
+            llen--;
+        if (llen > 0) {
+            const char *msg = NULL;
+            hu_json_value_t *jv = NULL;
+            if (line[0] == '{' && hu_json_parse(alloc, line, llen, &jv) == HU_OK && jv) {
+                msg = hu_json_get_string(jv, "text");
+            }
+            if (msg && *msg) {
+                size_t mlen = strlen(msg);
+                char *dup = alloc->alloc(alloc->ctx, mlen + 1);
+                if (dup) {
+                    memcpy(dup, msg, mlen + 1);
+                    corpus[n++] = dup;
+                }
+            }
+            if (jv)
+                hu_json_free(alloc, jv);
+        }
+        line = nl ? nl + 1 : NULL;
+    }
+
+    size_t written = 0;
+    if (n > 0) {
+        size_t kk = k < n ? k : n;
+        size_t *idx = alloc->alloc(alloc->ctx, kk * sizeof(size_t));
+        if (idx) {
+            size_t got =
+                hu_persona_rag_retrieve(query, (const char *const *)corpus, n, kk, idx, kk);
+            if (got > 0) {
+                const char **ex = alloc->alloc(alloc->ctx, got * sizeof(char *));
+                if (ex) {
+                    for (size_t i = 0; i < got; i++)
+                        ex[i] = corpus[idx[i]];
+                    written = hu_persona_rag_build_block(ex, got, out_buf, out_cap);
+                    alloc->free(alloc->ctx, ex, got * sizeof(char *));
+                }
+            }
+            alloc->free(alloc->ctx, idx, kk * sizeof(size_t));
+        }
+    }
+
+    for (size_t i = 0; i < n; i++)
+        alloc->free(alloc->ctx, corpus[i], strlen(corpus[i]) + 1);
+    alloc->free(alloc->ctx, corpus, HU_RAG_MAX_CORPUS_MSGS * sizeof(char *));
+    alloc->free(alloc->ctx, data, (size_t)sz + 1);
+    return written;
 }
