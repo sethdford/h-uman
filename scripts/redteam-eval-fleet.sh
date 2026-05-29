@@ -66,6 +66,24 @@ skip() {
   echo "--- SKIP: $why"
 }
 
+# Like run(), but never fails the fleet. For diagnostics whose non-zero exit
+# reflects an UNCONFIGURED environment (a bare CI runner with no ~/.human
+# config, no chat.db, or a feature-flag-trimmed binary) rather than a code
+# regression — e.g. `human doctor`, which is a machine-health check meant for
+# a configured user machine. The real offline coverage (C test suites + eval
+# harness dry-run) still hard-gates via run().
+run_soft() {
+  local name="$1"
+  shift
+  echo ""
+  echo "=== redteam-eval-fleet: $name (non-fatal) ==="
+  if "$@"; then
+    echo "--- OK: $name"
+  else
+    echo "--- WARN (non-fatal): $name reported issues (expected in an unconfigured CI env)"
+  fi
+}
+
 echo "=============================="
 echo " redteam-eval-fleet"
 echo "  LIVE=${REDTEAM_FLEET_LIVE:-0} AGENT_SMOKE=${REDTEAM_FLEET_AGENT_SMOKE:-0}"
@@ -95,7 +113,7 @@ else
   EXIT_CODE=1
 fi
 
-run "human doctor" "$HUMAN_BIN" doctor
+run_soft "human doctor" "$HUMAN_BIN" doctor
 
 run "human eval list" "$HUMAN_BIN" eval list
 
