@@ -1,4 +1,5 @@
 #include "human/agent/app_config.h"
+#include "human/config.h" /* full hu_config_t definition — projected here, not in the header */
 #include <string.h>
 
 hu_agent_app_config_t hu_agent_app_config_from(const hu_config_t *cfg) {

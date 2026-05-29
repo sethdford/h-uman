@@ -1,11 +1,19 @@
 #ifndef HU_AGENT_APP_CONFIG_H
 #define HU_AGENT_APP_CONFIG_H
 
-#include "human/config.h"
 #include "human/provider.h"
 #include "human/tool.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+
+/* Forward declaration only. The builder below takes a `const hu_config_t *`
+ * (a pointer), so the full definition isn't needed in this header. Including
+ * human/config.h here would pull the 65-substruct god-DTO into every file that
+ * includes human/agent.h, defeating the decoupling this facade exists for
+ * (PR #159 review). The full include lives in src/agent/app_config.c. */
+struct hu_config;
+typedef struct hu_config hu_config_t;
 
 /* Narrow read-only projection of hu_config_t for the agent turn loop.
  *

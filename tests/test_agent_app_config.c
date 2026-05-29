@@ -1,4 +1,5 @@
 #include "human/agent/app_config.h"
+#include "human/config.h" /* full hu_config_t — the test constructs one on the stack */
 #include "test_framework.h"
 #include <string.h>
 
