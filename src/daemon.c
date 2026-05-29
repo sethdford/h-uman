@@ -126,6 +126,7 @@
 /* Phase 2 DDD refactor: cross-bucket daemon state */
 #include "human/daemon/common.h"
 #include "human/daemon/peripheral_gov.h"
+#include "human/daemon/message_router.h"
 #include "human/daemon/reply_dedup.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
@@ -357,93 +358,10 @@ bool gov_budget_inited = true;
  * Declared via human/daemon/peripheral_gov.h. */
 #endif /* !HU_IS_TEST */
 
-#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
-static void cross_channel_format_when(char *out, size_t out_sz, const char *ts) {
-    if (!out || out_sz == 0)
-        return;
-    out[0] = '\0';
-    if (!ts || !ts[0]) {
-        if (out_sz >= 7)
-            memcpy(out, "recent", 7);
-        return;
-    }
-    char ts_work[48];
-    size_t tl = strlen(ts);
-    if (tl >= sizeof(ts_work))
-        tl = sizeof(ts_work) - 1;
-    memcpy(ts_work, ts, tl);
-    ts_work[tl] = '\0';
-
-    struct tm tm_buf;
-    memset(&tm_buf, 0, sizeof(tm_buf));
-    static const char *const fmts[] = {"%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", NULL};
-    time_t msg_t = (time_t)-1;
-    for (int fi = 0; fmts[fi]; fi++) {
-        memset(&tm_buf, 0, sizeof(tm_buf));
-        if (strptime(ts_work, fmts[fi], &tm_buf)) {
-            msg_t = mktime(&tm_buf);
-            if (msg_t != (time_t)-1)
-                break;
-        }
-    }
-    if (msg_t == (time_t)-1) {
-        (void)snprintf(out, out_sz, "%s", ts_work);
-        return;
-    }
-    time_t now = time(NULL);
-    double diff = difftime(now, msg_t);
-    if (diff < 60.0)
-        (void)snprintf(out, out_sz, "just now");
-    else if (diff < 3600.0)
-        (void)snprintf(out, out_sz, "%dm ago", (int)(diff / 60.0));
-    else if (diff < 86400.0)
-        (void)snprintf(out, out_sz, "%dh ago", (int)(diff / 3600.0));
-    else if (diff < 86400.0 * 7.0)
-        (void)snprintf(out, out_sz, "%dd ago", (int)(diff / 86400.0));
-    else
-        (void)snprintf(out, out_sz, "%.10s", ts_work);
-}
-
-static void cross_channel_platform_label(const char *plat, char *out, size_t out_sz) {
-    if (!plat || !out || out_sz < 2) {
-        if (out && out_sz)
-            out[0] = '\0';
-        return;
-    }
-    size_t i = 0;
-    for (; plat[i] && i + 1 < out_sz; i++) {
-        if (i == 0 && plat[i] >= 'a' && plat[i] <= 'z')
-            out[i] = (char)(plat[i] - 'a' + 'A');
-        else
-            out[i] = plat[i];
-    }
-    out[i] = '\0';
-}
-
-static bool daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *buf_len,
-                                         const char *line, size_t line_len) {
-    if (!alloc || !buf || !buf_len || !line || line_len == 0)
-        return true;
-    size_t new_len = *buf_len ? *buf_len + 1 + line_len : line_len;
-    char *n = (char *)alloc->alloc(alloc->ctx, new_len + 1);
-    if (!n)
-        return false;
-    if (*buf && *buf_len > 0) {
-        memcpy(n, *buf, *buf_len);
-        n[*buf_len] = '\n';
-        memcpy(n + *buf_len + 1, line, line_len);
-        n[new_len] = '\0';
-        alloc->free(alloc->ctx, *buf, *buf_len + 1);
-    } else {
-        memcpy(n, line, line_len);
-        n[line_len] = '\0';
-        new_len = line_len;
-    }
-    *buf = n;
-    *buf_len = new_len;
-    return true;
-}
-#endif /* HU_ENABLE_SQLITE && !HU_IS_TEST */
+/* Cross-channel context formatters (hu_daemon_cross_channel_format_when /
+ * _platform_label / hu_daemon_cross_ctx_append_line) extracted to
+ * src/daemon/daemon_message_router.c — DDD Phase 2.5 follow-on.
+ * Declared in human/daemon/message_router.h. */
 
 /* GCC's warn_unused_result is not suppressed by (void) casts */
 #define HU_IGNORE_RESULT(expr)   \
@@ -6594,11 +6512,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         if (oh == HU_OK && oent && onc > 0) {
                                             size_t start = onc > 5 ? onc - 5 : 0;
                                             char plabel[64];
-                                            cross_channel_platform_label(oname, plabel,
+                                            hu_daemon_cross_channel_platform_label(oname, plabel,
                                                                          sizeof(plabel));
                                             for (size_t ei = start; ei < onc; ei++) {
                                                 char when[48];
-                                                cross_channel_format_when(when, sizeof(when),
+                                                hu_daemon_cross_channel_format_when(when, sizeof(when),
                                                                           oent[ei].timestamp);
                                                 const char *role = oent[ei].from_me ? " (you)" : "";
                                                 char line[768];
@@ -6606,7 +6524,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                   "[From %s, %s]%s %s", plabel,
                                                                   when, role, oent[ei].text);
                                                 if (lw > 0 && (size_t)lw < sizeof(line)) {
-                                                    (void)daemon_cross_ctx_append_line(
+                                                    (void)hu_daemon_cross_ctx_append_line(
                                                         alloc, &cross_channel_ctx,
                                                         &cross_channel_ctx_len, line, (size_t)lw);
                                                 }
