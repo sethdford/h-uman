@@ -10,6 +10,12 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
+#else
+/* Opaque forward-decl so sqlite3* parameters appear in the no-SQLite stub
+ * signatures (which return HU_ERR_NOT_SUPPORTED) and in unconditional callers
+ * (e.g. daemon.c). C11 permits the identical typedef in multiple headers of
+ * one TU, so this won't clash. */
+typedef struct sqlite3 sqlite3;
 #endif
 
 typedef struct hu_preference_pair {

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef HU_ENABLE_SQLITE
 /* Test fixture: create an in-memory SQLite database for proactive_sends testing. */
 static sqlite3 *test_create_db(void) {
     sqlite3 *db = NULL;
@@ -372,3 +373,7 @@ void run_proactive_outcomes_tests(void) {
     HU_RUN_TEST(test_proactive_outcomes_skip_unresolved);
     HU_RUN_TEST(test_proactive_outcomes_prevent_double_update);
 }
+
+#else
+void run_proactive_outcomes_tests(void) { /* no-op: requires HU_ENABLE_SQLITE */ }
+#endif
