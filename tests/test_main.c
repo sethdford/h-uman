@@ -493,7 +493,6 @@ void run_calibration_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_activation_steering_tests(void);
-void run_relationship_dynamics_tests(void);
 void run_model_router_tests(void);
 void run_model_router_health_tests(void);
 void run_humanness_context_tests(void);
@@ -1412,7 +1411,6 @@ int main(int argc, char **argv) {
     run_behavioral_clone_tests();
     run_governor_tests();
     run_activation_steering_tests();
-    run_relationship_dynamics_tests();
     run_model_router_tests();
     run_model_router_health_tests();
     run_humanness_context_tests();

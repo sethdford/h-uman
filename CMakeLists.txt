@@ -836,11 +836,10 @@ set(HU_CORE_SOURCES
     src/agent/timing.c
     src/agent/governor.c
     src/agent/activation_steering.c
-    src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
     src/agent/planning.c
     src/agent/collab_planning.c
-    src/agent/rel_dynamics.c
+    src/behavior/rel_dynamics.c
     src/context/rel_dynamics.c
     src/agent/conv_goals.c
     src/agent/superhuman.c
@@ -3564,7 +3563,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
-    tests/test_relationship_dynamics.c
     tests/test_arbitrator.c
     tests/test_planning.c
     tests/test_rel_dynamics.c

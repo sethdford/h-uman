@@ -1,4 +1,4 @@
-#include "human/agent/rel_dynamics.h"
+#include "human/behavior/rel_dynamics.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "test_framework.h"
@@ -59,38 +59,32 @@ static void rel_compute_velocity_zeroes(void) {
 }
 
 static void rel_classify_mode_deepening(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(0.2, 0.0, HU_REL_NORMAL);
+    hu_rel_mode_t m = hu_rel_classify_mode(0.2, 0.0, HU_REL_NORMAL);
     HU_ASSERT_EQ(m, HU_REL_DEEPENING);
 }
 
 static void rel_classify_mode_drifting_consecutive(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(-0.2, -0.15, HU_REL_NORMAL);
+    hu_rel_mode_t m = hu_rel_classify_mode(-0.2, -0.15, HU_REL_NORMAL);
     HU_ASSERT_EQ(m, HU_REL_DRIFTING);
 }
 
 static void rel_classify_mode_single_negative_stays_normal(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(-0.15, 0.1, HU_REL_NORMAL);
+    hu_rel_mode_t m = hu_rel_classify_mode(-0.15, 0.1, HU_REL_NORMAL);
     HU_ASSERT_EQ(m, HU_REL_NORMAL);
 }
 
 static void rel_classify_mode_clear_drift(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(-0.4, 0.5, HU_REL_NORMAL);
+    hu_rel_mode_t m = hu_rel_classify_mode(-0.4, 0.5, HU_REL_NORMAL);
     HU_ASSERT_EQ(m, HU_REL_DRIFTING);
 }
 
 static void rel_classify_mode_reconnecting(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(0.1, -0.2, HU_REL_DRIFTING);
+    hu_rel_mode_t m = hu_rel_classify_mode(0.1, -0.2, HU_REL_DRIFTING);
     HU_ASSERT_EQ(m, HU_REL_RECONNECTING);
 }
 
 static void rel_classify_mode_repair_stays(void) {
-    hu_rel_mode_t m =
-        hu_rel_classify_mode(0.2, 0.1, HU_REL_REPAIR);
+    hu_rel_mode_t m = hu_rel_classify_mode(0.2, 0.1, HU_REL_REPAIR);
     HU_ASSERT_EQ(m, HU_REL_REPAIR);
 }
 
@@ -107,8 +101,7 @@ static void rel_compute_state_updates_closeness(void) {
     };
     hu_rel_state_t out;
     memset(&out, 0, sizeof(out));
-    hu_error_t err =
-        hu_rel_compute_state(&s, 0.5, HU_REL_NORMAL, 0.0, &out);
+    hu_error_t err = hu_rel_compute_state(&s, 0.5, HU_REL_NORMAL, 0.0, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out.closeness > 0.5);
 }
@@ -126,8 +119,7 @@ static void rel_compute_state_clamps_closeness(void) {
     };
     hu_rel_state_t out;
     memset(&out, 0, sizeof(out));
-    hu_error_t err =
-        hu_rel_compute_state(&s, 0.95, HU_REL_NORMAL, 0.0, &out);
+    hu_error_t err = hu_rel_compute_state(&s, 0.95, HU_REL_NORMAL, 0.0, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out.closeness <= 1.0);
 }
@@ -191,8 +183,7 @@ static void rel_create_table_sql_valid(void) {
 
 static void rel_mode_str_roundtrip(void) {
     hu_rel_mode_t modes[] = {
-        HU_REL_NORMAL, HU_REL_DEEPENING, HU_REL_DRIFTING, HU_REL_REPAIR,
-        HU_REL_RECONNECTING,
+        HU_REL_NORMAL, HU_REL_DEEPENING, HU_REL_DRIFTING, HU_REL_REPAIR, HU_REL_RECONNECTING,
     };
     for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
         const char *str = hu_rel_mode_str(modes[i]);
