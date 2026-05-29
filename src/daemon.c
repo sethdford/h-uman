@@ -35,6 +35,8 @@
 #include "human/behavior/win_detect.h"
 #include "human/memory/celebration_repo.h"
 #include "human/persona/celebration.h"
+#include "human/behavior/prosocial_moment.h"
+#include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
 #endif
@@ -12102,12 +12104,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
-                        /* B1 prosocial: celebrate a genuine win the user just
-                         * shared — gated by B0 (prosocial integrity), never
-                         * re-celebrated (celebration_repo, 7-day window).
-                         * dependency_risk is NONE at this site; feeding a live
-                         * safety assessment is a documented follow-up. */
+                        /* B1/B2/B4/B5 prosocial: celebrate a win, or respond
+                         * warmly to an everyday prosocial moment. All gated by
+                         * B0; warmth is SUPPRESSED when the companion-safety
+                         * layer flags emotional-dependency language — this is
+                         * the live B1 loop close (over_attachment / isolation). */
                         if (combined_len > 0 && batch_key && key_len > 0) {
+                            hu_behavior_risk_t pdep = HU_BRISK_NONE;
+                            hu_companion_safety_result_t pcs;
+                            if (hu_companion_safety_check(alloc, combined, combined_len, NULL, 0,
+                                                          &pcs) == HU_OK &&
+                                (pcs.flagged || pcs.over_attachment >= 0.6 || pcs.isolation >= 0.6))
+                                pdep = HU_BRISK_DEPENDENCY_PATTERN;
+
+                            bool prosocial_set = false;
                             hu_win_signal_t cwin = hu_win_detect(combined, combined_len);
                             if (cwin.is_win) {
                                 uint64_t wkh = 1469598103934665603ULL;
@@ -12129,7 +12139,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (!celebrated) {
                                         size_t cdlen = 0;
                                         char *cdir = hu_celebration_build_directive(
-                                            alloc, cwin.kind, HU_BRISK_NONE, &cdlen);
+                                            alloc, cwin.kind, pdep, &cdlen);
                                         if (cdir) {
                                             hu_celebration_t cel = {0};
                                             cel.contact_id = batch_key;
@@ -12146,9 +12156,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             }
                                             agent->prosocial_pending_directive = cdir;
                                             agent->prosocial_pending_directive_len = cdlen;
+                                            prosocial_set = true;
                                         }
                                     }
                                     crepo.vtable->deinit(crepo.ctx);
+                                }
+                            }
+
+                            /* B2/B4/B5: everyday warm response — only when no win
+                             * was celebrated this turn (celebration wins). */
+                            if (!prosocial_set) {
+                                hu_pmoment_t pm = hu_pmoment_detect(combined, combined_len);
+                                if (pm.present) {
+                                    size_t wlen = 0;
+                                    char *wdir = hu_warm_response_build_directive(alloc, pm.kind,
+                                                                                  pdep, &wlen);
+                                    if (wdir) {
+                                        if (agent->prosocial_pending_directive) {
+                                            alloc->free(alloc->ctx,
+                                                        agent->prosocial_pending_directive,
+                                                        agent->prosocial_pending_directive_len + 1);
+                                        }
+                                        agent->prosocial_pending_directive = wdir;
+                                        agent->prosocial_pending_directive_len = wlen;
+                                    }
                                 }
                             }
                         }

@@ -221,6 +221,7 @@ void run_behavior_change_tests(void);
 void run_behavior_safety_tests(void);
 void run_behavior_prosocial_tests(void);
 void run_win_detect_tests(void);
+void run_prosocial_moment_tests(void);
 void run_celebration_tests(void);
 void run_celebration_repo_tests(void);
 void run_behavior_prompt_tests(void);
@@ -1162,6 +1163,7 @@ int main(int argc, char **argv) {
     run_behavior_prosocial_tests();
     run_win_detect_tests();
     run_celebration_tests();
+    run_prosocial_moment_tests();
     run_celebration_repo_tests();
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();

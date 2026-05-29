@@ -682,6 +682,7 @@ set(HU_CORE_SOURCES
     src/persona/somatic.c
     src/persona/taste.c
     src/persona/celebration.c
+    src/persona/warm_response.c
     src/persona/narrative_self.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
@@ -790,6 +791,7 @@ set(HU_CORE_SOURCES
     src/behavior/safety.c
     src/behavior/prosocial.c
     src/behavior/win_detect.c
+    src/behavior/prosocial_moment.c
     src/behavior/policy.c
     src/behavior/prompt.c
     src/behavior/support_strategy.c
@@ -3678,7 +3680,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
