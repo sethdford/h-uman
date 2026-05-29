@@ -14,6 +14,7 @@ void run_data_loader_tests(void);
 void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
+void run_agent_app_config_tests(void);
 void run_task_store_tests(void);
 void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
@@ -22,6 +23,7 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_string_ci_tests(void);
 void run_rand_tests(void);
 void run_log_once_tests(void);
 void run_vertex_adc_tests(void);
@@ -967,6 +969,7 @@ int main(int argc, char **argv) {
     run_agent_modules_tests();
     run_agent_definition_tests();
     run_agent_git_tests();
+    run_agent_app_config_tests();
     run_task_store_tests();
     run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
@@ -975,6 +978,7 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_string_ci_tests();
     run_rand_tests();
     run_log_once_tests();
     run_vertex_adc_tests();

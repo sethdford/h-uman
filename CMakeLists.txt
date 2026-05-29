@@ -707,6 +707,7 @@ set(HU_CORE_SOURCES
     src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
+    src/agent/app_config.c
     src/agent/dispatcher.c
     src/agent/compaction.c
     src/agent/spawn.c
@@ -3112,6 +3113,7 @@ set(HU_TEST_SOURCES
     tests/test_main.c
     tests/test_agent_definition.c
     tests/test_agent_git.c
+    tests/test_agent_app_config.c
     tests/test_bg_registry.c
     tests/test_canvas_render.c
     tests/test_canvas_e2e.c
@@ -3198,6 +3200,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
     tests/test_vertex_adc.c

@@ -1,6 +1,7 @@
 #ifndef HU_AGENT_H
 #define HU_AGENT_H
 
+#include "human/agent/app_config.h"
 #include "human/agent/approval_gate.h"
 #include "human/agent/chaos.h"
 #include "human/agent/checkpoint.h"
@@ -639,6 +640,16 @@ hu_error_t hu_agent_from_config(
     uint32_t max_tool_iterations, uint32_t max_history_messages, bool auto_save,
     uint8_t autonomy_level, const char *custom_instructions, size_t custom_instructions_len,
     const char *persona, size_t persona_len, const hu_agent_context_config_t *ctx_cfg);
+
+/* Phase 4A: Narrow facade over hu_config_t. Accepts app_config projection
+ * instead of full config, reducing agent-core coupling on the 65-substruct
+ * god-config. Provider and tools still injected (provider vtable is caller's
+ * responsibility to construct/pass). */
+hu_error_t hu_agent_from_app_config(hu_agent_t *out, hu_allocator_t *alloc, hu_provider_t provider,
+                                    const hu_tool_t *tools, size_t tools_count, hu_memory_t *memory,
+                                    hu_session_store_t *session_store, hu_observer_t *observer,
+                                    hu_security_policy_t *policy,
+                                    const hu_agent_app_config_t *app_cfg);
 
 void hu_agent_deinit(hu_agent_t *agent);
 
