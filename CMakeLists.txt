@@ -1446,7 +1446,7 @@ list(APPEND HU_CORE_SOURCES
     src/context/self_awareness.c
     src/context/anticipatory.c
     src/context/protective.c
-    src/context/humor.c
+    src/cognition/humor.c
     src/context/social_graph.c
     src/memory/degradation.c
     src/memory/opinions.c

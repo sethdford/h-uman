@@ -1,5 +1,5 @@
 /* Phase 6 — F69 Humor Generation Principles + Humor Engine */
-#include "human/context/humor.h"
+#include "human/cognition/humor.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -146,8 +146,7 @@ char *hu_humor_build_persona_directive(hu_allocator_t *alloc, const hu_humor_pro
         pos = hu_buf_appendf(buf, sizeof(buf), pos, ". ");
     }
 
-    pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                         "Rule of three, misdirection when appropriate.]");
+    pos = hu_buf_appendf(buf, sizeof(buf), pos, "Rule of three, misdirection when appropriate.]");
     if (pos >= sizeof(buf))
         pos = sizeof(buf) - 1;
 
@@ -325,7 +324,8 @@ bool hu_humor_check_appropriate(hu_humor_type_t type, const char *topic,
     /* No humor about grief or death topics regardless of type */
     if (topic) {
         size_t tlen = strlen(topic);
-        if (hu_str_contains_ci(topic, tlen, "grief", 5) || hu_str_contains_ci(topic, tlen, "death", 5) ||
+        if (hu_str_contains_ci(topic, tlen, "grief", 5) ||
+            hu_str_contains_ci(topic, tlen, "death", 5) ||
             hu_str_contains_ci(topic, tlen, "funeral", 7))
             return false;
     }
@@ -422,7 +422,7 @@ bool hu_humor_detect_failure(const char *user_response, size_t response_len) {
                                                   "ok...",  "um",        "uh"};
     for (size_t i = 0; i < sizeof(failure_signals) / sizeof(failure_signals[0]); i++) {
         if (hu_str_contains_ci(user_response, response_len, failure_signals[i],
-                            strlen(failure_signals[i])))
+                               strlen(failure_signals[i])))
             return true;
     }
 

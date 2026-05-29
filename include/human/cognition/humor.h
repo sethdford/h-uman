@@ -1,5 +1,5 @@
-#ifndef HU_CONTEXT_HUMOR_H
-#define HU_CONTEXT_HUMOR_H
+#ifndef HU_COGNITION_HUMOR_H
+#define HU_COGNITION_HUMOR_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -74,4 +74,4 @@ bool hu_humor_detect_failure(const char *user_response, size_t response_len);
 
 char *hu_humor_recover(hu_allocator_t *alloc, size_t *out_len);
 
-#endif /* HU_CONTEXT_HUMOR_H */
+#endif /* HU_COGNITION_HUMOR_H */
