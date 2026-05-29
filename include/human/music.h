@@ -17,10 +17,7 @@
  * and the user's preferred service link (detected from conversation history).
  * ────────────────────────────────────────────────────────────────────────── */
 
-typedef enum hu_music_source {
-    HU_MUSIC_SOURCE_ITUNES,
-    HU_MUSIC_SOURCE_SPOTIFY
-} hu_music_source_t;
+typedef enum hu_music_source { HU_MUSIC_SOURCE_ITUNES, HU_MUSIC_SOURCE_SPOTIFY } hu_music_source_t;
 
 typedef struct hu_music_result {
     char *track_name;     /* "Bohemian Rhapsody" */
@@ -48,18 +45,18 @@ hu_error_t hu_music_search_spotify(hu_allocator_t *alloc, const char *client_id,
                                    hu_music_result_t *out);
 
 /** Parse a Spotify search JSON response. Exposed for testing. */
-hu_error_t hu_music_parse_spotify_response(hu_allocator_t *alloc, const char *json,
-                                           size_t json_len, hu_music_result_t *out);
+hu_error_t hu_music_parse_spotify_response(hu_allocator_t *alloc, const char *json, size_t json_len,
+                                           hu_music_result_t *out);
 
 /* ── Downloads ───────────────────────────────────────────────────────── */
 
 /** Download the 30s preview .m4a to a temp file. Caller must unlink(). */
-hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url,
-                                     char *path_out, size_t path_cap);
+hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url, char *path_out,
+                                     size_t path_cap);
 
 /** Download album artwork to a temp file (.jpg). Caller must unlink(). */
-hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url,
-                                     char *path_out, size_t path_cap);
+hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url, char *path_out,
+                                     size_t path_cap);
 
 /* ── Utilities ───────────────────────────────────────────────────────── */
 
@@ -77,18 +74,26 @@ hu_error_t hu_music_parse_search_response(hu_allocator_t *alloc, const char *jso
 bool hu_music_parse_suggestion(const char *suggestion, size_t suggestion_len, char *query_out,
                                size_t query_cap, char *msg_out, size_t msg_cap);
 
+/** True if an iTunes/Spotify result plausibly matches the LLM-suggested
+ *  "Artist - Title" string. Normalizes both sides (lowercase; strip
+ *  punctuation, "feat."/"ft." segments, trailing parentheticals) then
+ *  requires BOTH a shared artist token AND a shared title token. Defends
+ *  against iTunes fuzzy-matching the wrong song from a hallucinated
+ *  suggestion. Returns false on NULL/empty inputs. */
+bool hu_music_result_matches(const char *suggested, const hu_music_result_t *result);
+
 /* ── Preference detection ────────────────────────────────────────────── */
 
 /** Scan conversation history for Spotify vs Apple Music URLs.
  *  Returns HU_MUSIC_SOURCE_SPOTIFY if user has shared more Spotify links,
  *  HU_MUSIC_SOURCE_ITUNES otherwise (default). */
 hu_music_source_t hu_music_detect_preference(const char *const *texts, const size_t *lens,
-                                              size_t count);
+                                             size_t count);
 
 /* ── Taste learning ──────────────────────────────────────────────────── */
 
 #define HU_MUSIC_TASTE_MAX_CONTACTS 32
-#define HU_MUSIC_TASTE_HISTORY 16
+#define HU_MUSIC_TASTE_HISTORY      16
 
 /** Record that we sent a music share to this contact. */
 void hu_music_taste_record_send(const char *contact_id, size_t cid_len, const char *artist,
