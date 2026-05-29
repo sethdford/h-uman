@@ -1535,6 +1535,7 @@ endif()
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
         src/memory/repos/boundary_repo_sqlite.c
+        src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
