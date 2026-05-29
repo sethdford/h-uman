@@ -1504,8 +1504,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * Only the OpenAI-compatible (local) provider serializes req.steer_*;
          * cloud providers never read these fields, so this is inert off-device.
          * Validated traits only (formality, verbosity); hu_persona_steering_coeffs
-         * and the server both clamp to the measured-safe [-1,1] envelope. */
-        if (agent->config && agent->config->agent.activation_steering_enabled && agent->persona) {
+         * and the server both clamp to the measured-safe [-1,1] envelope.
+         *
+         * Register-conditional (stack_eval_live.py, 2026-05-29): steering LIFTS
+         * the substantive register (+0.008 atop RAG, +0.101 stacked) but HURTS
+         * casual (-0.054 — added shaping fights curt brevity). Gate it to
+         * ANALYTICAL/DEEP turns, like RAG; casual/reflexive + unknown tier skip. */
+        if (agent->config && agent->config->agent.activation_steering_enabled && agent->persona &&
+            agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
             const hu_persona_overlay_t *steer_ov = hu_persona_find_overlay(
                 agent->persona, agent->active_channel, agent->active_channel_len);
             if (steer_ov) {
