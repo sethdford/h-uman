@@ -730,6 +730,7 @@ void run_self_rag_tests(void);
 void run_memory_tiers_tests(void);
 void run_process_reward_tests(void);
 void run_dpo_tests(void);
+void run_dpo_collector_tests(void);
 void run_sota_e2e_tests(void);
 void run_sota_adversarial_tests(void);
 void run_otel_tests(void);
@@ -1633,6 +1634,7 @@ int main(int argc, char **argv) {
     run_memory_tiers_tests();
     run_process_reward_tests();
     run_dpo_tests();
+    run_dpo_collector_tests();
     run_sota_e2e_tests();
     run_sota_adversarial_tests();
     run_otel_tests();

@@ -3835,6 +3835,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_dpo_collector.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
     # 11). Listing the test here would break audit-integrity /

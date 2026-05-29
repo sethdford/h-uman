@@ -207,6 +207,21 @@ bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result);
  * unit-tested in tests/test_dpo.c. Scores above 100 are clamped to 100. */
 bool hu_dpo_parse_judge_score(const char *out, size_t out_len, double *score_out);
 
+/* US-102: Mine DPO pairs from resolved production_outcomes.
+ *
+ * Queries production_outcomes WHERE outcome_resolved_at IS NOT NULL
+ * AND processed_into_dpo = 0, materializes DPO pairs deterministically
+ * (reply within 5min + sentiment > 0.6 = chosen; no reply after 24h =
+ * rejected), and inserts into dpo_pairs table. Marks all processed rows
+ * with processed_into_dpo = 1. Returns count of pairs mined.
+ *
+ * Different from hu_dpo_mine_corrections (which mines from messages table):
+ * this function mines from production_outcomes (outbound message outcomes).
+ *
+ * Requires HU_ENABLE_SQLITE. Without it, returns HU_ERR_NOT_SUPPORTED. */
+hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_limit,
+                                                     int *pairs_written);
+
 /* Deprecated: renamed to `hu_dpo_judge_step` in Phase 0. The shim
  * forwards every argument verbatim so the result is bit-identical to
  * a direct call (pinned by tests/test_dpo_judge_naming.c). */
