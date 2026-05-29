@@ -1458,18 +1458,18 @@ static void test_config_parse_persona_contacts_non_object_clears(void) {
  *     the established default — the parser guards with `if (budget > 0)`
  * ──────────────────────────────────────────────────────────────────── */
 
-static void test_config_mlx_local_streaming_defaults_false(void) {
+static void test_config_mlx_local_streaming_defaults_true(void) {
     char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
     setenv("HOME", "/nonexistent_human_mlx_local_default_test", 1);
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg = {0};
     HU_ASSERT_EQ(hu_config_load(&backing, &cfg), HU_OK);
-    /* Default per spec D6 REVISED (T3 2026-05-26): false. Matches the
-     * de-facto behavior of agent_stream.c's compatible-provider
-     * workaround that forced streaming OFF since 2026-05-25; operator
-     * opts IN once their mlx-server strips thought markers in
-     * streaming mode. */
-    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
+    /* Default REVISED 2026-05-28: TRUE. The B4 T3 default-false existed only
+     * until a client-side thinking-token filter shipped; it has (the streaming
+     * consumer wraps its callback in the tested hu_harmony_filter, and the
+     * streaming path buffers until the outbound guards clear). Streaming is the
+     * default UX now; operators opt OUT via {"mlx_local":{streaming_enabled:false}}. */
+    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
     hu_config_deinit(&cfg);
     if (old_home) {
         setenv("HOME", old_home, 1);
@@ -1526,9 +1526,9 @@ static void test_config_mlx_local_first_token_budget_override(void) {
     const char *json = "{\"mlx_local\":{\"first_token_budget_ms\":250}}";
     HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
     HU_ASSERT_EQ(cfg.mlx_local.first_token_budget_ms, 250);
-    /* streaming_enabled default (FALSE per T3) must survive an override
+    /* streaming_enabled default (TRUE as of 2026-05-28) must survive an override
      * that only sets the sibling field. */
-    HU_ASSERT_FALSE(cfg.mlx_local.streaming_enabled);
+    HU_ASSERT_TRUE(cfg.mlx_local.streaming_enabled);
     hu_config_deinit(&cfg);
     if (old_home) {
         setenv("HOME", old_home, 1);
@@ -1700,7 +1700,7 @@ void run_config_extended_tests(void) {
     HU_RUN_TEST(test_config_parse_persona_contacts_non_object_clears);
     /* M3 Bridge B Phase B4 T2 — mlx_local SSE-streaming config gate.
      * Defaults revised T3: streaming_enabled is FALSE by default. */
-    HU_RUN_TEST(test_config_mlx_local_streaming_defaults_false);
+    HU_RUN_TEST(test_config_mlx_local_streaming_defaults_true);
     HU_RUN_TEST(test_config_mlx_local_first_token_budget_defaults_500);
     HU_RUN_TEST(test_config_mlx_local_streaming_enabled_via_json);
     HU_RUN_TEST(test_config_mlx_local_first_token_budget_override);

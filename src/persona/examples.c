@@ -3,6 +3,7 @@
 #include "human/core/string.h"
 #include "human/ml/training_data_quality.h"
 #include "human/persona.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -190,10 +191,127 @@ static size_t keyword_overlap(const char *topic, size_t topic_len, const char *c
     return score;
 }
 
+/* Compute communication style fingerprint from response text.
+ * Returns style characteristics: lowercase_ratio, abbreviation_ratio, length.
+ * Scales are [0.0, 1.0] for ratios; length is raw character count.
+ */
+static void style_fingerprint_from_text(const char *text, float *out_lowercase_ratio,
+                                        float *out_abbreviation_ratio, uint32_t *out_length) {
+    *out_lowercase_ratio = 0.0f;
+    *out_abbreviation_ratio = 0.0f;
+    *out_length = 0;
+
+    if (!text || !text[0])
+        return;
+
+    size_t len = strlen(text);
+    if (len > UINT32_MAX)
+        len = UINT32_MAX;
+    *out_length = (uint32_t)len;
+
+    /* Count lowercase letters */
+    size_t lowercase_count = 0;
+    size_t letter_count = 0;
+    for (size_t i = 0; text[i]; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+            letter_count++;
+            if (c >= 'a' && c <= 'z')
+                lowercase_count++;
+        }
+    }
+    if (letter_count > 0)
+        *out_lowercase_ratio = (float)lowercase_count / (float)letter_count;
+
+    /* Count abbreviation hits: "u", "rn", "btw", "ty", "lmk", "yw" (case-insensitive, word-bounded)
+     */
+    const char *abbrev_list[] = {"u", "rn", "btw", "ty", "lmk", "yw"};
+    size_t abbrev_count = 0;
+    for (size_t ai = 0; ai < sizeof(abbrev_list) / sizeof(abbrev_list[0]); ai++) {
+        const char *needle = abbrev_list[ai];
+        size_t needle_len = strlen(needle);
+        const char *p = text;
+        while (*p) {
+            if (strncasecmp(p, needle, needle_len) == 0) {
+                /* Check word boundaries */
+                char before = (p == text) ? ' ' : *(p - 1);
+                char after = p[needle_len];
+                if ((before == ' ' || before == '\t' || before == '\n' || before == ',' ||
+                     before == '.' || before == '!' || before == '?') &&
+                    (after == '\0' || after == ' ' || after == '\t' || after == '\n' ||
+                     after == ',' || after == '.' || after == '!' || after == '?')) {
+                    abbrev_count++;
+                    p += needle_len;
+                    continue;
+                }
+            }
+            p++;
+        }
+    }
+    if (len > 0)
+        *out_abbreviation_ratio = (float)abbrev_count / (float)(len / 10.0f + 1.0f);
+    if (*out_abbreviation_ratio > 1.0f)
+        *out_abbreviation_ratio = 1.0f;
+}
+
+/* Compute style-affinity distance between example style and target style.
+ * Returns a score in [0.0, 1.0] where 1.0 is a perfect match and 0.0 is maximum dissimilarity.
+ * Compares: lowercase_ratio, abbreviation_ratio, and length (normalized).
+ */
+static float style_affinity_score(float example_lowercase, float example_abbrev,
+                                  uint32_t example_len, float target_lowercase, float target_abbrev,
+                                  uint32_t target_len) {
+    if (!isfinite(example_lowercase) || !isfinite(example_abbrev) || !isfinite(target_lowercase) ||
+        !isfinite(target_abbrev)) {
+        return 0.5f; /* fallback if NaN creeps in */
+    }
+
+    /* Clamp values to valid ranges to be safe */
+    if (example_lowercase < 0.0f)
+        example_lowercase = 0.0f;
+    if (example_lowercase > 1.0f)
+        example_lowercase = 1.0f;
+    if (example_abbrev < 0.0f)
+        example_abbrev = 0.0f;
+    if (example_abbrev > 1.0f)
+        example_abbrev = 1.0f;
+    if (target_lowercase < 0.0f)
+        target_lowercase = 0.0f;
+    if (target_lowercase > 1.0f)
+        target_lowercase = 1.0f;
+    if (target_abbrev < 0.0f)
+        target_abbrev = 0.0f;
+    if (target_abbrev > 1.0f)
+        target_abbrev = 1.0f;
+
+    /* Lowercase ratio distance (contribution: 1/3) */
+    float lc_diff = fabs(example_lowercase - target_lowercase);
+    float lc_score = 1.0f - lc_diff;
+
+    /* Abbreviation ratio distance (contribution: 1/3) */
+    float ab_diff = fabs(example_abbrev - target_abbrev);
+    float ab_score = 1.0f - ab_diff;
+
+    /* Length distance (contribution: 1/3). Normalize to avoid domination by large lengths.
+     * Treat length as percentage of target (capped at 2x for sensitivity). */
+    float len_ratio = target_len > 0 ? (float)example_len / (float)target_len : 1.0f;
+    if (len_ratio > 2.0f)
+        len_ratio = 2.0f;
+    if (len_ratio < 0.5f)
+        len_ratio = 0.5f;
+    float len_score = 1.0f - fabs(len_ratio - 1.0f) / 1.0f;
+    if (len_score < 0.0f)
+        len_score = 0.0f;
+
+    /* Equal-weight average of the three axes */
+    float affinity = (lc_score + ab_score + len_score) / 3.0f;
+    return affinity;
+}
+
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
                                       const hu_persona_example_t **out, size_t *out_count,
-                                      size_t max_examples) {
+                                      size_t max_examples, const hu_communication_style_t *style) {
     if (!persona || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
@@ -216,30 +334,93 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
     if (!bank || !bank->examples || bank->examples_count == 0)
         return HU_OK;
 
-    /* Score each example by keyword overlap */
+    /* Score each example by keyword overlap and optionally style affinity */
     size_t n = bank->examples_count;
     if (n > HU_PERSONA_EXAMPLES_MAX)
         n = HU_PERSONA_EXAMPLES_MAX;
+
+    /* Use double-precision float scores when style is present, size_t (integer) when not.
+     * This preserves byte-identical sorting behavior when style=NULL. */
+    if (style == NULL) {
+        /* Original path: topic-only scoring, identical to before */
+        struct {
+            size_t idx;
+            size_t score;
+        } scores[HU_PERSONA_EXAMPLES_MAX];
+
+        for (size_t i = 0; i < n; i++) {
+            scores[i].idx = i;
+            scores[i].score = 0;
+            if (topic && topic_len > 0 && bank->examples[i].context)
+                scores[i].score = keyword_overlap(topic, topic_len, bank->examples[i].context);
+            else
+                scores[i].score = 1;
+        }
+
+        /* Sort by score descending */
+        for (size_t i = 0; i < n; i++) {
+            for (size_t j = i + 1; j < n; j++) {
+                if (scores[j].score > scores[i].score) {
+                    size_t tmp_idx = scores[i].idx;
+                    size_t tmp_sc = scores[i].score;
+                    scores[i].idx = scores[j].idx;
+                    scores[i].score = scores[j].score;
+                    scores[j].idx = tmp_idx;
+                    scores[j].score = tmp_sc;
+                }
+            }
+        }
+
+        size_t take = max_examples < n ? max_examples : n;
+        for (size_t i = 0; i < take; i++)
+            out[i] = &bank->examples[scores[i].idx];
+        *out_count = take;
+        return HU_OK;
+    }
+
+    /* Style-aware path: combine topic overlap with style affinity */
     struct {
         size_t idx;
-        size_t score;
+        double score;
     } scores[HU_PERSONA_EXAMPLES_MAX];
+
+    float target_lowercase = style->lowercase_ratio;
+    float target_abbrev = style->abbreviation_ratio;
+    uint32_t target_len = style->avg_message_length;
 
     for (size_t i = 0; i < n; i++) {
         scores[i].idx = i;
-        scores[i].score = 0;
-        if (topic && topic_len > 0 && bank->examples[i].context)
-            scores[i].score = keyword_overlap(topic, topic_len, bank->examples[i].context);
-        else
-            scores[i].score = 1; /* No topic: give all equal weight so we still return some */
+        scores[i].score = 0.0;
+
+        /* Topic overlap: [0, large_int] → normalize to [0.0, 1.0] */
+        double topic_score = 0.0;
+        if (topic && topic_len > 0 && bank->examples[i].context) {
+            size_t overlap = keyword_overlap(topic, topic_len, bank->examples[i].context);
+            topic_score = (double)overlap / 5.0; /* assume max ~5 keywords */
+            if (topic_score > 1.0)
+                topic_score = 1.0;
+        } else {
+            topic_score = 0.5; /* neutral score when no topic */
+        }
+
+        /* Style affinity: compute fingerprint from response text */
+        float ex_lowercase = 0.0f, ex_abbrev = 0.0f;
+        uint32_t ex_len = 0;
+        style_fingerprint_from_text(bank->examples[i].response, &ex_lowercase, &ex_abbrev, &ex_len);
+
+        double style_score = (double)style_affinity_score(
+            ex_lowercase, ex_abbrev, ex_len, target_lowercase, target_abbrev, target_len);
+
+        /* Combined score: equal weight to topic and style axes */
+        scores[i].score = 0.5 * topic_score + 0.5 * style_score;
     }
 
-    /* Sort by score descending (simple bubble for small n) */
+    /* Sort by score descending */
     for (size_t i = 0; i < n; i++) {
         for (size_t j = i + 1; j < n; j++) {
             if (scores[j].score > scores[i].score) {
                 size_t tmp_idx = scores[i].idx;
-                size_t tmp_sc = scores[i].score;
+                double tmp_sc = scores[i].score;
                 scores[i].idx = scores[j].idx;
                 scores[i].score = scores[j].score;
                 scores[j].idx = tmp_idx;
@@ -282,9 +463,8 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
  * that the daemon's personalization block can then load via
  * hu_provider_load_adapter. Closes the loop end-to-end without
  * requiring llama.cpp to be vendored in-tree. */
-hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
-                                         const char *path, size_t path_len,
-                                         size_t *exported_count) {
+hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona, const char *path,
+                                        size_t path_len, size_t *exported_count) {
     if (!persona || !path || path_len == 0 || !exported_count)
         return HU_ERR_INVALID_ARGUMENT;
     *exported_count = 0;
@@ -300,21 +480,34 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
     if (!f)
         return HU_ERR_IO;
 
-    /* Inline JSON-string emitter — same escape set as the DPO exporter
-     * (matches RFC 8259 for the characters tooling will actually choke
-     * on). Walks the input byte-by-byte; no allocation. */
-    #define WRITE_JSON_STRING(s) do {                                   \
-        const char *_p = (s) ? (s) : "";                                \
-        for (; *_p; _p++) {                                             \
-            switch (*_p) {                                              \
-            case '"':  fputs("\\\"", f); break;                         \
-            case '\\': fputs("\\\\", f); break;                         \
-            case '\n': fputs("\\n", f);  break;                         \
-            case '\r': fputs("\\r", f);  break;                         \
-            case '\t': fputs("\\t", f);  break;                         \
-            default:   fputc(*_p, f);    break;                         \
-            }                                                           \
-        }                                                               \
+/* Inline JSON-string emitter — same escape set as the DPO exporter
+ * (matches RFC 8259 for the characters tooling will actually choke
+ * on). Walks the input byte-by-byte; no allocation. */
+#define WRITE_JSON_STRING(s)             \
+    do {                                 \
+        const char *_p = (s) ? (s) : ""; \
+        for (; *_p; _p++) {              \
+            switch (*_p) {               \
+            case '"':                    \
+                fputs("\\\"", f);        \
+                break;                   \
+            case '\\':                   \
+                fputs("\\\\", f);        \
+                break;                   \
+            case '\n':                   \
+                fputs("\\n", f);         \
+                break;                   \
+            case '\r':                   \
+                fputs("\\r", f);         \
+                break;                   \
+            case '\t':                   \
+                fputs("\\t", f);         \
+                break;                   \
+            default:                     \
+                fputc(*_p, f);           \
+                break;                   \
+            }                            \
+        }                                \
     } while (0)
 
     size_t total = 0;
@@ -342,7 +535,7 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
             total++;
         }
     }
-    #undef WRITE_JSON_STRING
+#undef WRITE_JSON_STRING
 
     int close_err = fclose(f);
     if (close_err != 0)
@@ -354,8 +547,7 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
 
 /* ── Phase A1.3 — example bank generator from history ──────────────────── */
 
-void hu_persona_example_banks_free(hu_allocator_t *alloc,
-                                   hu_persona_example_bank_t *banks,
+void hu_persona_example_banks_free(hu_allocator_t *alloc, hu_persona_example_bank_t *banks,
                                    size_t banks_count) {
     if (!alloc || !banks || banks_count == 0)
         return;
@@ -407,15 +599,11 @@ typedef struct hu_pbh_bank {
  * or when the per-extraction channel cap is exhausted (caller treats
  * NULL as "skip this pair"). `*banks_count_inout` advances when a
  * new slot is initialized. */
-static hu_pbh_bank_t *pbh_find_or_init_bank(hu_allocator_t *alloc,
-                                            hu_pbh_bank_t *banks,
-                                            size_t *banks_count_inout,
-                                            size_t banks_cap,
-                                            const char *channel,
-                                            size_t channel_len) {
+static hu_pbh_bank_t *pbh_find_or_init_bank(hu_allocator_t *alloc, hu_pbh_bank_t *banks,
+                                            size_t *banks_count_inout, size_t banks_cap,
+                                            const char *channel, size_t channel_len) {
     for (size_t i = 0; i < *banks_count_inout; i++) {
-        if (banks[i].channel &&
-            strlen(banks[i].channel) == channel_len &&
+        if (banks[i].channel && strlen(banks[i].channel) == channel_len &&
             memcmp(banks[i].channel, channel, channel_len) == 0) {
             return &banks[i];
         }
@@ -435,9 +623,8 @@ static hu_pbh_bank_t *pbh_find_or_init_bank(hu_allocator_t *alloc,
  * by doubling. Takes ownership of ctx_dup/inc_dup/resp_dup on
  * success; on failure the caller still owns them (and must free).
  * Returns HU_OK / HU_ERR_OUT_OF_MEMORY. */
-static hu_error_t pbh_bank_append(hu_allocator_t *alloc,
-                                  hu_pbh_bank_t *bank,
-                                  char *ctx_dup, char *inc_dup, char *resp_dup) {
+static hu_error_t pbh_bank_append(hu_allocator_t *alloc, hu_pbh_bank_t *bank, char *ctx_dup,
+                                  char *inc_dup, char *resp_dup) {
     if (bank->count >= bank->cap) {
         size_t new_cap = bank->cap == 0 ? 8 : bank->cap * 2;
         size_t old_size = bank->cap * sizeof(hu_persona_example_t);
@@ -464,8 +651,7 @@ static hu_error_t pbh_bank_append(hu_allocator_t *alloc,
 /* Free everything inside a scratch banks array (channel + examples +
  * vector). Safe on partially-initialized arrays. Does NOT free the
  * outer `banks` block — that's stack-allocated. */
-static void pbh_banks_free_contents(hu_allocator_t *alloc,
-                                    hu_pbh_bank_t *banks, size_t count) {
+static void pbh_banks_free_contents(hu_allocator_t *alloc, hu_pbh_bank_t *banks, size_t count) {
     if (!alloc || !banks || count == 0)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -483,8 +669,7 @@ static void pbh_banks_free_contents(hu_allocator_t *alloc,
                 if (ex->response)
                     alloc->free(alloc->ctx, ex->response, strlen(ex->response) + 1);
             }
-            alloc->free(alloc->ctx, banks[i].examples,
-                        banks[i].cap * sizeof(hu_persona_example_t));
+            alloc->free(alloc->ctx, banks[i].examples, banks[i].cap * sizeof(hu_persona_example_t));
             banks[i].examples = NULL;
         }
         banks[i].count = 0;
@@ -496,8 +681,7 @@ static void pbh_banks_free_contents(hu_allocator_t *alloc,
  * "<channel>:<id>". On hit, sets *out / *out_len to the prefix
  * (no trailing ':'). On miss (no ':'), falls back to "default".
  * Both pointers are guaranteed non-NULL with non-zero length. */
-static void pbh_channel_from_session(const char *session_id,
-                                     const char **out, size_t *out_len) {
+static void pbh_channel_from_session(const char *session_id, const char **out, size_t *out_len) {
     static const char DEFAULT_CHANNEL[] = "default";
     if (!session_id || !session_id[0]) {
         *out = DEFAULT_CHANNEL;
@@ -516,8 +700,7 @@ static void pbh_channel_from_session(const char *session_id,
 
 #endif /* HU_ENABLE_SQLITE && HU_ENABLE_ML — pbh_* helpers */
 
-hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
-                                                 const char *db_path,
+hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc, const char *db_path,
                                                  size_t max_per_channel,
                                                  hu_persona_example_bank_t **out_banks,
                                                  size_t *out_count) {
@@ -553,9 +736,8 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
      * change. Single statement keeps the SQL trivial and the I/O
      * pattern sequential. */
     sqlite3_stmt *stmt = NULL;
-    const char *sql =
-        "SELECT session_id, role, content FROM messages "
-        "ORDER BY session_id, id ASC";
+    const char *sql = "SELECT session_id, role, content FROM messages "
+                      "ORDER BY session_id, id ASC";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_close(db);
@@ -632,11 +814,9 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
          *    artifact and a future operator may share or export it. */
         size_t ured_len = 0, ared_len = 0;
         hu_pii_stats_t s_user = {0}, s_asst = {0};
-        if (hu_pii_redact(pending_user, strlen(pending_user),
-                          redacted_user, sizeof(redacted_user),
+        if (hu_pii_redact(pending_user, strlen(pending_user), redacted_user, sizeof(redacted_user),
                           &ured_len, &s_user) != HU_OK ||
-            hu_pii_redact(content, strlen(content),
-                          redacted_assistant, sizeof(redacted_assistant),
+            hu_pii_redact(content, strlen(content), redacted_assistant, sizeof(redacted_assistant),
                           &ared_len, &s_asst) != HU_OK) {
             have_pending_user = false;
             continue;
@@ -679,10 +859,9 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
         size_t channel_len = 0;
         pbh_channel_from_session(session_id, &channel, &channel_len);
 
-        hu_pbh_bank_t *bank = pbh_find_or_init_bank(
-            alloc, scratch, &scratch_count,
-            HU_PERSONA_BANKS_FROM_HIST_MAX_CHANNELS,
-            channel, channel_len);
+        hu_pbh_bank_t *bank =
+            pbh_find_or_init_bank(alloc, scratch, &scratch_count,
+                                  HU_PERSONA_BANKS_FROM_HIST_MAX_CHANNELS, channel, channel_len);
         if (!bank) {
             /* Channel cap exhausted, or alloc failed for the channel
              * string. Skip this pair — the next one may land in an
@@ -760,9 +939,8 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
      * scratch struct because the public type has no `cap` field —
      * and we want examples_count == cap (no slack) so future
      * `_free` calls don't over- or under-free. */
-    hu_persona_example_bank_t *out =
-        (hu_persona_example_bank_t *)alloc->alloc(alloc->ctx,
-                                                  kept * sizeof(hu_persona_example_bank_t));
+    hu_persona_example_bank_t *out = (hu_persona_example_bank_t *)alloc->alloc(
+        alloc->ctx, kept * sizeof(hu_persona_example_bank_t));
     if (!out) {
         pbh_banks_free_contents(alloc, scratch, scratch_count);
         return HU_ERR_OUT_OF_MEMORY;
@@ -777,16 +955,14 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
          * meaningful slack, so the freed size matches what the
          * public free function will compute (count * sizeof). */
         if (scratch[i].cap > scratch[i].count) {
-            hu_persona_example_t *tight =
-                (hu_persona_example_t *)alloc->alloc(
-                    alloc->ctx, scratch[i].count * sizeof(hu_persona_example_t));
+            hu_persona_example_t *tight = (hu_persona_example_t *)alloc->alloc(
+                alloc->ctx, scratch[i].count * sizeof(hu_persona_example_t));
             if (!tight) {
                 /* Roll back: free what we've materialized so far + the
                  * remaining scratch entries we haven't taken yet. */
                 for (size_t j = 0; j < i; j++) {
                     if (out[j].channel)
-                        alloc->free(alloc->ctx, out[j].channel,
-                                    strlen(out[j].channel) + 1);
+                        alloc->free(alloc->ctx, out[j].channel, strlen(out[j].channel) + 1);
                     if (out[j].examples) {
                         for (size_t k = 0; k < out[j].examples_count; k++) {
                             hu_persona_example_t *ex = &out[j].examples[k];
@@ -805,8 +981,7 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
                 /* `i..kept-1` still own their scratch storage. */
                 for (size_t j = i; j < kept; j++) {
                     if (scratch[j].channel)
-                        alloc->free(alloc->ctx, scratch[j].channel,
-                                    strlen(scratch[j].channel) + 1);
+                        alloc->free(alloc->ctx, scratch[j].channel, strlen(scratch[j].channel) + 1);
                     if (scratch[j].examples) {
                         for (size_t k = 0; k < scratch[j].count; k++) {
                             hu_persona_example_t *ex = &scratch[j].examples[k];
@@ -823,8 +998,7 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
                 }
                 return HU_ERR_OUT_OF_MEMORY;
             }
-            memcpy(tight, scratch[i].examples,
-                   scratch[i].count * sizeof(hu_persona_example_t));
+            memcpy(tight, scratch[i].examples, scratch[i].count * sizeof(hu_persona_example_t));
             alloc->free(alloc->ctx, scratch[i].examples,
                         scratch[i].cap * sizeof(hu_persona_example_t));
             out[i].examples = tight;

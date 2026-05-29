@@ -7,6 +7,7 @@
 
 #include "human/agent/output_validator_chain.h"
 #include "human/core/error.h"
+#include "human/memory/personal_model.h"
 #include "human/persona/circadian.h"
 #include "human/persona/relationship.h"
 
@@ -577,7 +578,7 @@ hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *bu
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
                                       const hu_persona_example_t **out, size_t *out_count,
-                                      size_t max_examples);
+                                      size_t max_examples, const hu_communication_style_t *style);
 
 /* M3 Bridge A.0 — export the persona's example banks to JSONL in the
  * Alpaca shape ({"instruction": ..., "input": ..., "output": ...}).
@@ -915,5 +916,18 @@ hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, struct hu_provider 
                                       size_t persona_name_len, const char *channel,
                                       size_t channel_len, const char *contact_id,
                                       size_t contact_id_len);
+
+/* Wave 3 — continuous persona learning. Re-mine example banks from conversation
+ * history at db_path and persist them into persona <persona_name>, keeping the
+ * few-shot voice signal current. Writes ONLY when extraction yields banks, so an
+ * empty/unreadable history never wipes authored banks. Returns HU_ERR_NOT_SUPPORTED
+ * on builds without SQLITE+ML. *out_total_examples (optional) gets the count written. */
+hu_error_t hu_persona_refresh_example_banks(hu_allocator_t *alloc, const char *persona_name,
+                                            size_t persona_name_len, const char *db_path,
+                                            size_t max_per_channel, size_t *out_total_examples);
+
+/* Pure cadence predicate for the daemon persona-refresh tick: run when enabled
+ * AND (never run before OR ≥24h since last run). */
+bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_run_unix);
 
 #endif /* HU_PERSONA_H */

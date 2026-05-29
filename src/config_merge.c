@@ -414,14 +414,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->personalization.m3_adapter_probe_path = NULL;
     cfg->personalization.m3_adapter_disabled = false;
     cfg->personalization.force_local_mlx = false; /* opt-in; preserves cloud-default */
-    /* US-7.8 — MoLoRA static per-channel router. Disabled by default;
-     * entries owned (parser-strdup, freed by hu_config_deinit). */
-    cfg->personalization.molora.enabled = false;
-    cfg->personalization.molora.count = 0;
-    for (size_t mi = 0; mi < HU_MOLORA_CONFIG_MAX_CHANNELS; mi++) {
-        cfg->personalization.molora.entries[mi].channel[0] = '\0';
-        cfg->personalization.molora.entries[mi].adapter_path = NULL;
-    }
     /* US-7.7 — best-of-N at inference. Defaults: disabled (n=1), no cap. */
     cfg->inference.best_of_n = 1;
     cfg->inference.best_of_n_cost_cap_ms = 0;
@@ -459,22 +451,24 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * `proactive_channel` config. */
 
     /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
-     * mlx_local streaming defaults. REVISED 2026-05-26 (T3): default is
-     * FALSE. Earlier T2 spec said default-true on the assumption that
-     * "the buffered fallback path is correct," but in reality the
-     * agent_stream.c workaround (line ~354) has been forcing the
-     * compatible/mlx_local stream path OFF since 2026-05-25 due to a
-     * known thinking-channel marker bug in mlx-server.py
-     * (strip_thought_channels postprocessor only runs in the non-
-     * streaming response shape). Defaulting to true would silently
-     * re-introduce that bug for every operator. Default-false matches
-     * the current de-facto behavior; operators opt IN once they've
-     * verified their mlx-server strips thought markers in streaming
-     * mode (or once a client-side filter ships in T4+).
+     * mlx_local streaming defaults. REVISED 2026-05-28: default is now TRUE.
      *
-     * first_token_budget_ms (default 500) is the warn-once threshold
-     * for first-token latency once streaming is enabled. */
-    cfg->mlx_local.streaming_enabled = false;
+     * History: B4 T3 set this FALSE because mlx-server.py's
+     * strip_thought_channels postprocessor only runs in the non-streaming
+     * shape, so streaming leaked raw `<|channel>thought` markers as visible
+     * text. The named precondition for flipping it on was "once a client-side
+     * filter ships in T4+." That filter HAS shipped: the streaming consumer
+     * wraps its callback in hu_harmony_filter (src/util/harmony_filter.c,
+     * pinned by tests/test_harmony_filter.c incl. the production-observed
+     * unclosed `<|channel>thought` leak shape), and the streaming path buffers
+     * provider text until the outbound guards clear (agent_stream.c) — so
+     * streamed content is both thinking-stripped AND voice-guarded. Streaming
+     * is the default UX now; operators can still opt OUT with
+     * {"mlx_local": {"streaming_enabled": false}} to diagnose regressions.
+     *
+     * first_token_budget_ms (default 500) is the warn-once threshold for
+     * first-token latency. */
+    cfg->mlx_local.streaming_enabled = true;
     cfg->mlx_local.first_token_budget_ms = 500;
 
     /* Reflection loop defaults (M2, T3). Default disabled — operator
@@ -489,6 +483,22 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
              HU_REFLECTION_DEFAULT_PROVIDER);
     snprintf(cfg->reflection_loop.local_provider, sizeof cfg->reflection_loop.local_provider, "%s",
              HU_REFLECTION_DEFAULT_LOCAL_PROVIDER);
+
+    /* AC-1: Seth-voice local routing tri-state. Default is AUTO: use local
+     * when it's healthy (adapter present + MLX server reachable), else cloud.
+     * Users can override to OFF (never local) or FORCE (strict local). */
+    cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_AUTO;
+
+    /* AC-4: Reaction collection for DPO pair generation. Default enabled
+     * in a fresh config so real user feedback (tapbacks, edits) flows
+     * through the training loop without explicit config. */
+    cfg->reaction_collection.enabled = true;
+}
+
+void hu_config_apply_defaults(hu_config_t *cfg, hu_allocator_t *a) {
+    if (!cfg || !a)
+        return;
+    set_defaults(cfg, a);
 }
 
 static void sync_autonomy_level_from_string(hu_config_t *cfg) {

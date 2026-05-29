@@ -4657,8 +4657,8 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
     if (persona->example_banks && persona->example_banks_count > 0) {
         const hu_persona_example_t *sel_buf[8];
         size_t selected_count = 0;
-        hu_error_t sel_err = hu_persona_select_examples(persona, channel, channel_len, topic,
-                                                        topic_len, sel_buf, &selected_count, 5);
+        hu_error_t sel_err = hu_persona_select_examples(
+            persona, channel, channel_len, topic, topic_len, sel_buf, &selected_count, 5, NULL);
         if (sel_err == HU_OK && selected_count > 0) {
             static const char examples_header[] = "Example conversations showing your style:\n";
             err = append_prompt(alloc, &buf, &len, &cap, examples_header,

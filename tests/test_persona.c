@@ -340,8 +340,8 @@ static void test_persona_select_examples_match(void) {
 
     const hu_persona_example_t *selected[2];
     size_t count = 0;
-    hu_error_t err =
-        hu_persona_select_examples(&p, "imessage", 8, "plans dinner", 12, selected, &count, 2);
+    hu_error_t err = hu_persona_select_examples(&p, "imessage", 8, "plans dinner", 12, selected,
+                                                &count, 2, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count <= 2);
     HU_ASSERT_TRUE(count > 0);
@@ -351,7 +351,7 @@ static void test_persona_select_examples_no_channel(void) {
     hu_persona_t p = {0};
     const hu_persona_example_t *selected[2];
     size_t count = 99;
-    hu_error_t err = hu_persona_select_examples(&p, "slack", 5, NULL, 0, selected, &count, 2);
+    hu_error_t err = hu_persona_select_examples(&p, "slack", 5, NULL, 0, selected, &count, 2, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0);
 }
@@ -744,7 +744,8 @@ static void test_persona_select_examples_no_match(void) {
 
     const hu_persona_example_t *selected[2];
     size_t count = 99;
-    hu_error_t err = hu_persona_select_examples(&p, "slack", 5, "greeting", 8, selected, &count, 2);
+    hu_error_t err =
+        hu_persona_select_examples(&p, "slack", 5, "greeting", 8, selected, &count, 2, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0);
 }
@@ -1510,7 +1511,7 @@ static void test_persona_select_examples_null_topic_returns_some(void) {
 
     const hu_persona_example_t *sel[4];
     size_t sel_count = 0;
-    hu_error_t e = hu_persona_select_examples(&p, "test", 4, NULL, 0, sel, &sel_count, 4);
+    hu_error_t e = hu_persona_select_examples(&p, "test", 4, NULL, 0, sel, &sel_count, 4, NULL);
     HU_ASSERT_EQ(e, HU_OK);
     HU_ASSERT_EQ(sel_count, 1);
 
@@ -1522,7 +1523,7 @@ static void test_persona_select_examples_max_zero(void) {
     memset(&p, 0, sizeof(p));
     const hu_persona_example_t *sel[1];
     size_t sel_count = 99;
-    hu_error_t e = hu_persona_select_examples(&p, "x", 1, NULL, 0, sel, &sel_count, 0);
+    hu_error_t e = hu_persona_select_examples(&p, "x", 1, NULL, 0, sel, &sel_count, 0, NULL);
     HU_ASSERT_EQ(e, HU_OK);
     HU_ASSERT_EQ(sel_count, 0);
 }
@@ -1564,7 +1565,7 @@ static void test_persona_extracted_imessage_bank_loads_and_selects(void) {
     const hu_persona_example_t *sel[3];
     size_t sel_count = 0;
     err = hu_persona_select_examples(&p, "imessage", 8, "lunch plans greeting", 20, sel, &sel_count,
-                                     3);
+                                     3, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(sel_count > 0);
     HU_ASSERT_TRUE(sel_count <= 3);
@@ -1572,7 +1573,7 @@ static void test_persona_extracted_imessage_bank_loads_and_selects(void) {
     const hu_persona_example_t *sel2[3];
     size_t sel2_count = 0;
     err = hu_persona_select_examples(&p, "imessage", 8, "sibling teasing banter", 22, sel2,
-                                     &sel2_count, 3);
+                                     &sel2_count, 3, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(sel2_count > 0);
 

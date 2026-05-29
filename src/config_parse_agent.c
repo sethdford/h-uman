@@ -1,6 +1,7 @@
 #include "config_internal.h"
 #include "config_parse_internal.h"
 #include "human/config.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <string.h>
@@ -387,8 +388,35 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         }
         cfg->agent.mr_on_device_enabled =
             hu_json_get_bool(mr_obj, "on_device_enabled", cfg->agent.mr_on_device_enabled);
-        /* Dermot C2: Seth-voice mlx_local LoRA routing. Opt-in; default
-         * false so the config edit is explicit. mlx_local_model names the
+        /* AC-1: Tri-state routing policy for Seth-voice mlx_local LoRA.
+         * Parse mlx_local_routing string ("OFF" / "AUTO" / "FORCE") into the enum.
+         * For backward compat, if mlx_local_enabled is true, map to FORCE.
+         * Default (AUTO) is seeded in config_merge.c. */
+        const char *mlx_local_routing_str = hu_json_get_string(mr_obj, "mlx_local_routing");
+        if (mlx_local_routing_str) {
+            if (strcasecmp(mlx_local_routing_str, "OFF") == 0) {
+                cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_OFF;
+            } else if (strcasecmp(mlx_local_routing_str, "FORCE") == 0) {
+                cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_FORCE;
+            } else if (strcasecmp(mlx_local_routing_str, "AUTO") == 0) {
+                cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_AUTO;
+            } else {
+                hu_log_warn("config", NULL, "unknown mlx_local_routing value '%s', using AUTO",
+                            mlx_local_routing_str);
+                cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_AUTO;
+            }
+        } else {
+            /* Legacy compat: if mlx_local_enabled is true, map to FORCE.
+             * Otherwise config_merge.c will seed AUTO as the default. */
+            bool mlx_local_enabled_val = hu_json_get_bool(mr_obj, "mlx_local_enabled", false);
+            if (mlx_local_enabled_val) {
+                cfg->agent.mlx_local_routing = HU_MLX_LOCAL_ROUTING_FORCE;
+            }
+            /* else: use the default from config_merge.c */
+        }
+        /* Dermot C2: Seth-voice mlx_local LoRA routing. This boolean is now DEPRECATED;
+         * mlx_local_routing is the canonical field. Kept for backward compat with
+         * existing configs that use mlx_local_enabled. mlx_local_model names the
          * adapter the local mlx server serves. */
         cfg->agent.mr_mlx_local_enabled =
             hu_json_get_bool(mr_obj, "mlx_local_enabled", cfg->agent.mr_mlx_local_enabled);

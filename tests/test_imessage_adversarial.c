@@ -20,8 +20,8 @@
 #include "human/core/error.h"
 #include "human/persona.h"
 #include "test_framework.h"
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -782,7 +782,7 @@ static void imessage_persona_example_selection_matches_topic(void) {
     const hu_persona_example_t *selected[4];
     size_t count = 0;
     hu_error_t err =
-        hu_persona_select_examples(&persona, S("imessage"), S("lunch"), selected, &count, 2);
+        hu_persona_select_examples(&persona, S("imessage"), S("lunch"), selected, &count, 2, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
 }
@@ -1819,21 +1819,21 @@ static void imessage_dm_msg_chat_id_empty(void) {
 
 #if HU_IS_TEST
 static void imessage_classify_known_codes(void) {
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(0),  HU_IMESSAGE_ERR_NONE);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(0), HU_IMESSAGE_ERR_NONE);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(23), HU_IMESSAGE_ERR_AUTH);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(14), HU_IMESSAGE_ERR_CANTOPEN);
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(5),  HU_IMESSAGE_ERR_BUSY);
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(6),  HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(5), HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(6), HU_IMESSAGE_ERR_BUSY);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(99), HU_IMESSAGE_ERR_OTHER);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(-1), HU_IMESSAGE_ERR_OTHER);
 }
 
 static void imessage_classify_name_roundtrip(void) {
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_NONE),     "NONE") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_AUTH),     "AUTH") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_NONE), "NONE") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_AUTH), "AUTH") == 0);
     HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_CANTOPEN), "CANTOPEN") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_BUSY),     "BUSY") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER),    "OTHER") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_BUSY), "BUSY") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER), "OTHER") == 0);
 }
 
 static void imessage_breaker_trips_after_threshold_auth(void) {

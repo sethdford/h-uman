@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
+#include "human/doctor/check_local_voice.h"
 #include "human/doctor/check_outbound_stats.h"
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
@@ -433,6 +434,14 @@ static hu_doctor_check_result_t run_reaction_collection_wired_check(hu_doctor_ch
     return hu_doctor_check_reaction_collection_wired.run(self, &rwctx);
 }
 
+static hu_doctor_check_result_t run_local_voice_check(hu_doctor_check_t *self, void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_local_voice_ctx_t lvctx = {
+        .cfg = uctx ? (const struct hu_config *)uctx->cfg : NULL,
+    };
+    return hu_doctor_check_local_voice.run(self, &lvctx);
+}
+
 /* Sprint 60 (sprint-59 STATUS.md item #5) — outbound pipeline stats.
  * The check is informational (always PASS); ctx is unused because
  * the snapshot reads from process-wide static state in
@@ -485,6 +494,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          "Catches reaction_collection.enabled=true but HU_ENABLE_RL_FULL=OFF "
          "(silent-failure guard)",
          run_reaction_collection_wired_check, NULL, NULL},
+        {"local_voice", "Reports local Gemma+LoRA voice-path readiness (routing/adapter/url/curl)",
+         run_local_voice_check, NULL, NULL},
         {"outbound_stats", "Per-stage × per-verdict counters for the outbound pipeline (Sprint 60)",
          run_outbound_stats_check, NULL, NULL},
         {"unified_dispatch",

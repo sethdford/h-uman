@@ -10,6 +10,17 @@
 #define HU_DEFAULT_AGENT_TOKEN_LIMIT 200000u
 #define HU_DEFAULT_MODEL_MAX_TOKENS  8192u
 
+/* Tri-state routing policy for local-voice MLX adapter (AC-1).
+ * - OFF: never route to local; always use cloud.
+ * - AUTO (default): route to local when healthy + adapter exists, else cloud.
+ * - FORCE: always prefer local, no cloud fallback (strict mode).
+ */
+typedef enum hu_mlx_local_routing {
+    HU_MLX_LOCAL_ROUTING_OFF = 0,
+    HU_MLX_LOCAL_ROUTING_AUTO = 1,
+    HU_MLX_LOCAL_ROUTING_FORCE = 2,
+} hu_mlx_local_routing_t;
+
 typedef struct hu_cron_config {
     bool enabled;
     uint32_t interval_minutes;
@@ -66,49 +77,6 @@ typedef struct hu_scheduler_config {
  * in production. Default false; the bridge stays opt-in via the
  * probe path config but kill-switchable independently.
  */
-/* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
- *
- * `enabled` is independent of `personalization.enabled` at the config level,
- * but the agent-turn hook in `src/agent/agent_turn.c` only consults the router
- * when both flags are true AND `HU_ENABLE_MOLORA` is compiled in. When this
- * block is absent from the JSON config, parser leaves `enabled = false` and
- * `count = 0`, which `hu_molora_router_init` treats as the disabled state
- * (identical to today's pre-story behavior).
- *
- * Channel ids are stored normalized (lowercase, no `:`-suffix, no whitespace)
- * — the parser applies `hu_molora_router_normalize_channel` before insertion.
- * Adapter paths are owned by this struct (parser strdups them); the router
- * borrows the pointers and asserts the config outlives it.
- *
- * Schema (Phase 1, flat map per design Q1):
- *   "molora": {
- *     "enabled": true,
- *     "channel_adapters": {
- *       "telegram":  "~/.human/adapters/seth/telegram.lora",
- *       "imessage":  "~/.human/adapters/seth/imessage.lora",
- *       "slack":     "~/.human/adapters/seth/slack.lora",
- *       "discord":   "~/.human/adapters/seth/discord.lora"
- *     }
- *   }
- *
- * Phase 2 will extend each entry to `{path, scale}` via a versioned schema
- * bump — Phase 1 stays flat for forward-compat. */
-#define HU_MOLORA_CONFIG_MAX_CHANNELS     16
-#define HU_MOLORA_CONFIG_CHANNEL_NAME_MAX 32
-
-typedef struct hu_molora_channel_entry {
-    /* Normalized channel id (parser-normalized; null-terminated). */
-    char channel[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
-    /* Adapter path; owned by this struct (parser-strdup, merge-free). */
-    char *adapter_path;
-} hu_molora_channel_entry_t;
-
-typedef struct hu_molora_config {
-    bool enabled;
-    size_t count;
-    hu_molora_channel_entry_t entries[HU_MOLORA_CONFIG_MAX_CHANNELS];
-} hu_molora_config_t;
-
 /* M3 Bridge B Phase B4 (docs/plans/2026-05-26-m3-b4-mlx-local-sse/) —
  * configuration for the production daemon's HTTP-based mlx_local
  * provider when it talks to a streaming mlx-server.
@@ -145,7 +113,6 @@ typedef struct hu_personalization_config {
     char *lora_adapter_id;
     char *m3_adapter_probe_path;
     bool m3_adapter_disabled;
-    hu_molora_config_t molora;
     /* When true, the model router prefers the on-device model at ALL
      * cognitive tiers (not just REFLEXIVE). Combined with a configured
      * mlx_local on-device provider, this routes EVERY contact's reply
@@ -190,6 +157,12 @@ typedef struct hu_learning_config {
      * false — opt-in like m3_frontier_auto_training, since the run blocks
      * the daemon loop for up to 30 min. */
     bool nightly_lora_enabled;
+    /* Wave 3 — continuous persona learning. When true, the daemon re-mines the
+     * persona's example banks from conversation history (~/.human/memory.db)
+     * once per 24h and persists them, keeping the few-shot voice signal current.
+     * Default false — opt-in, since it rewrites the persona JSON and reads the
+     * conversation DB. */
+    bool persona_refresh_enabled;
 } hu_learning_config_t;
 
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100

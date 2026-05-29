@@ -346,30 +346,6 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
             if (cfg->personalization.m3_adapter_disabled)
                 hu_json_object_set(&a, pers, "m3_adapter_disabled",
                                    hu_json_bool_new(&a, cfg->personalization.m3_adapter_disabled));
-            /* US-7.8 — MoLoRA per-channel router. Emit only when the block
-             * is non-default (enabled OR at least one channel mapped) so
-             * the canonical default config stays terse. */
-            if (cfg->personalization.molora.enabled || cfg->personalization.molora.count > 0) {
-                hu_json_value_t *mol = hu_json_object_new(&a);
-                if (mol) {
-                    hu_json_object_set(&a, mol, "enabled",
-                                       hu_json_bool_new(&a, cfg->personalization.molora.enabled));
-                    hu_json_value_t *ca = hu_json_object_new(&a);
-                    if (ca) {
-                        for (size_t mi = 0; mi < cfg->personalization.molora.count; mi++) {
-                            const hu_molora_channel_entry_t *e =
-                                &cfg->personalization.molora.entries[mi];
-                            if (!e->adapter_path || e->channel[0] == '\0')
-                                continue;
-                            hu_json_object_set(
-                                &a, ca, e->channel,
-                                hu_json_string_new(&a, e->adapter_path, strlen(e->adapter_path)));
-                        }
-                        hu_json_object_set(&a, mol, "channel_adapters", ca);
-                    }
-                    hu_json_object_set(&a, pers, "molora", mol);
-                }
-            }
             hu_json_object_set(&a, root, "personalization", pers);
         }
     }

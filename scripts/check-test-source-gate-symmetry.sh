@@ -44,20 +44,6 @@ def extract_flags(cond: str) -> set[str]:
     return set(re.findall(r"HU_ENABLE_[A-Z_]+", cond))
 
 
-def _norm(flag: str) -> str:
-    """Normalize HU_ENABLE_X and HU_HAS_X to a common key.
-
-    CMake declares features via `option(HU_ENABLE_X ...)` and the SAME
-    option emits a `HU_HAS_X=1` compile-define that C code consumes. So a
-    CMake-side `if(HU_ENABLE_DISCORD)` source gate and a C-side
-    `#ifdef HU_HAS_DISCORD` test guard refer to the identical feature.
-    Collapsing both to `HU_X` lets the gate-symmetry check treat them as
-    equivalent instead of false-flagging a correctly-guarded test (the
-    channel tests universally guard with HU_HAS_*; see the
-    test_imessage_schema.c note in BASELINE_ALLOWLIST)."""
-    return re.sub(r"^HU_(?:ENABLE|HAS)_", "HU_", flag)
-
-
 def parse_cmake(path: str) -> dict[str, set[str]]:
     """Return {file_path: set_of_required_HU_ENABLE_flags}.
 
@@ -190,14 +176,21 @@ def has_internal_guard(test_path: str, flags: set[str],
     else_re = re.compile(r"^\s*#\s*else\b")
     elif_re = re.compile(r"^\s*#\s*elif\b")
     endif_re = re.compile(r"^\s*#\s*endif\b")
-    # Recognize BOTH the HU_ENABLE_* (CMake option) and HU_HAS_*
-    # (compile-define) families; _norm() collapses them so an
-    # `#ifdef HU_HAS_DISCORD` guard satisfies an `if(HU_ENABLE_DISCORD)`
-    # source gate.
+    # Recognize BOTH the CMake option name (HU_ENABLE_X) and the
+    # C-visible compile-define (HU_HAS_X) the build emits for it
+    # (`if(HU_ENABLE_DISCORD) target_compile_definitions(... HU_HAS_DISCORD=1)`).
+    # Source under src/ is gated by HU_ENABLE_X in CMakeLists, but a test
+    # CAN ONLY guard its body with the HU_HAS_X macro that's actually
+    # passed to the C preprocessor — so both must count as the same gate.
     flag_re = re.compile(r"\bHU_(?:ENABLE|HAS)_[A-Z_]+\b")
     not_re = re.compile(r"\bNOT\b|!\s*defined\b")
 
-    # Compute, per line, the set of active (normalized) feature flags.
+    def _norm(tokens: list[str]) -> set[str]:
+        """Normalize HU_HAS_X → HU_ENABLE_X so guard flags match the
+        HU_ENABLE_* required-flag set parsed from CMakeLists.txt."""
+        return {t.replace("HU_HAS_", "HU_ENABLE_", 1) for t in tokens}
+
+    # Compute, per line, the set of active HU_ENABLE_* flags.
     stack: list[set[str]] = []
     active_per_line: list[set[str]] = []
     for raw in lines:
@@ -216,7 +209,7 @@ def has_internal_guard(test_path: str, flags: set[str],
             if kind == "ifndef" or not_re.search(raw):
                 stack.append(set())
             else:
-                stack.append({_norm(x) for x in flag_re.findall(expr)})
+                stack.append(_norm(flag_re.findall(expr)))
             active_per_line.append(set().union(*stack) if stack else set())
             continue
         active_per_line.append(set().union(*stack) if stack else set())
@@ -257,7 +250,7 @@ def has_internal_guard(test_path: str, flags: set[str],
         for f in flags:
             # At least one runner def must be inside this flag's gate
             # (the "real" def — the #else stub is outside it).
-            if any(_norm(f) in active_per_line[i] for i in runner_lines):
+            if any(f in active_per_line[i] for i in runner_lines):
                 return True
 
     # Path 2: gated bodies + ungated runner + gated HU_RUN_TEST calls.
@@ -269,7 +262,7 @@ def has_internal_guard(test_path: str, flags: set[str],
             if not combined.search(raw):
                 continue
             any_refs_seen = True
-            if _norm(f) not in active_per_line[i]:
+            if f not in active_per_line[i]:
                 all_refs_guarded = False
                 break
         if any_refs_seen and all_refs_guarded:

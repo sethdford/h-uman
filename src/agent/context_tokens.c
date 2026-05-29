@@ -23,6 +23,7 @@ static const ctx_entry_t MODEL_WINDOWS[] = {
     {"gpt-4.1-mini", 128000},
     {"o3-mini", 128000},
     {"gemini-3.1-pro-preview", 200000},
+    {"gemini-3.5-flash", 200000},
     {"gemini-3-flash-preview", 200000},
     {"gemini-3.1-flash-lite-preview", 200000},
     {"deepseek-v3.2", 128000},

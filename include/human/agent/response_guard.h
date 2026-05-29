@@ -130,6 +130,16 @@ typedef struct {
      * `hu_guard_length_anomaly_mult_for_channel`. */
     unsigned length_anomaly_mult;
 
+    /* Task 10 (AC-9) — learned per-contact baseline length from the personal
+     * model. When non-zero, G5 uses this as the baseline instead of
+     * recent_avg_len (falling back to recent_avg_len if this is 0). Populated
+     * from personal_model.style.avg_message_length when available. Enables
+     * Seth-normal length to a given contact to bypass the length anomaly
+     * detector (e.g. a contact Seth habitually sends 500-char msgs to can
+     * receive 500-char replies without triggering G5). 0 disables this check
+     * (falls back to recent_avg_len + multiplier). */
+    size_t learned_avg_message_length;
+
     /* The director's / scene-direction text for this turn (the
      * upstream prompt fragment that drove tone/style decisions).
      * The guard rejects if a 30+ char substring of director_text

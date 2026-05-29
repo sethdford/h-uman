@@ -2407,6 +2407,126 @@ static void g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed(voi
     hu_response_guard_set_g9_disabled_channels(NULL, 0);
 }
 
+/* ── Task 10 (AC-9): Learned per-contact G5 baseline ─────────────────── */
+
+static void g5_learned_baseline_within_normal_range_passes(void) {
+    /* AC-9: Seth-normal length to a contact should pass when within the
+     * learned baseline. If Seth habitually sends 500-char messages to a
+     * contact, a 400-char reply should not trip G5. */
+    hu_allocator_t alloc = A();
+    const char *response = "This is a reasonable message that Seth might send to a "
+                           "contact he talks to regularly. It's around 200 chars long "
+                           "and should be perfectly fine because the contact is used to "
+                           "getting messages of this length.";
+    size_t response_len = strlen(response);
+
+    hu_guard_context_t ctx = {0};
+    ctx.learned_avg_message_length = 250; /* Seth sends 250-char messages to this contact */
+    ctx.recent_avg_len = 50;              /* rolling avg would flag this as anomalous (4x) */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report = {0};
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_length_anomaly);
+}
+
+static void g5_learned_baseline_genuinely_anomalous_still_rejected(void) {
+    /* AC-9: a genuinely huge dump (5x learned baseline) should still be
+     * rejected, showing the learned baseline doesn't disable length checking,
+     * just relaxes it for normal contact behavior. */
+    hu_allocator_t alloc = A();
+    const char *response = "This is a deliberately enormous response designed to be way "
+                           "bigger than the learned baseline. " /* ~100 chars so far */
+                           "The contact usually gets 250-char messages, but we're sending "
+                           "800 characters here, which is 3x the learned baseline and should "
+                           "be rejected as a length anomaly. This simulates a context dump or "
+                           "prompt leak that happens to come from the model despite having a "
+                           "learned baseline context. The absolute floor (320 chars) allows "
+                           "legitimate but longish messages, but 800 is way outside normal. "
+                           "This entire string is designed to exceed 800 characters to trigger "
+                           "the anomaly rejection, even with the learned baseline in place. "
+                           "We pad it further to be certain the byte count clears the 800 mark: "
+                           "the guard must treat a payload of this magnitude as a clear outlier "
+                           "regardless of how chatty the contact normally is, because no human "
+                           "texting a friend dumps this many characters in a single turn. The "
+                           "learned baseline relaxes the threshold for normal variation, not for "
+                           "a wall of text like this one, which is unmistakably a context leak.";
+    size_t response_len = strlen(response);
+    HU_ASSERT(response_len > 800); /* verify test setup */
+
+    hu_guard_context_t ctx = {0};
+    ctx.learned_avg_message_length = 250; /* Seth sends 250-char messages to this contact */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report = {0};
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
+    HU_ASSERT_TRUE(report.detected_length_anomaly);
+}
+
+static void g5_without_learned_baseline_falls_back_to_rolling_avg(void) {
+    /* AC-9: when learned_avg_message_length is 0 (not available), fall back to
+     * the rolling average + multiplier. This ensures backward compatibility
+     * when no personal model data exists. */
+    hu_allocator_t alloc = A();
+    const char *response = "Short reply";
+    size_t response_len = strlen(response);
+
+    hu_guard_context_t ctx = {0};
+    ctx.learned_avg_message_length = 0; /* no learned baseline */
+    ctx.recent_avg_len = 50;
+    ctx.length_anomaly_mult = 8;
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report = {0};
+
+    /* 11 chars < 320 floor, so passes despite being above floor + mult calc */
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_length_anomaly);
+}
+
+static void g5_absolute_floor_prevents_death_spiral(void) {
+    /* AC-9: the absolute floor (320 chars) prevents the forced-short →
+     * low-avg → reject death-spiral. Even with a near-zero learned baseline,
+     * natural-length messages below 320 should not be rejected. */
+    hu_allocator_t alloc = A();
+    const char *response = "This is a completely normal response that's maybe 100 chars "
+                           "or so, which is a very reasonable message. It should definitely "
+                           "not be rejected even if the contact is used to super short msgs.";
+    size_t response_len = strlen(response);
+    HU_ASSERT(response_len < 320); /* verify floor */
+
+    hu_guard_context_t ctx = {0};
+    ctx.learned_avg_message_length = 10; /* contact sends VERY short messages */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report = {0};
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, response, response_len, &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_OK);
+    HU_ASSERT_FALSE(report.detected_length_anomaly);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -2580,4 +2700,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g9_disabled_for_channel_is_case_insensitive);
     HU_RUN_TEST(g9_disabled_for_channel_does_not_partial_match);
     HU_RUN_TEST(g9_disabled_for_channel_jordan_case_bypassed_when_channel_listed);
+
+    /* Task 10 (AC-9) — learned per-contact G5 baseline. */
+    HU_RUN_TEST(g5_learned_baseline_within_normal_range_passes);
+    HU_RUN_TEST(g5_learned_baseline_genuinely_anomalous_still_rejected);
+    HU_RUN_TEST(g5_without_learned_baseline_falls_back_to_rolling_avg);
+    HU_RUN_TEST(g5_absolute_floor_prevents_death_spiral);
 }

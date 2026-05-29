@@ -7,19 +7,22 @@
  * Output: JSON per-contact breakdown.
  */
 
-#include "test_framework.h"
-
-#ifdef HU_ENABLE_SQLITE
-
 #include "human/persona/eval_rubric.h"
 
-#include <sqlite3.h>
+#include "test_framework.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
+
 /* ── Fixture creation ──────────────────────────────────────────────── */
+
+#ifdef HU_ENABLE_SQLITE
 
 /* Create an in-memory SQLite DB with a minimal iMessage schema.
  * Schema: messages(contact_handle TEXT, ts INTEGER, is_from_me INTEGER, text TEXT)
@@ -127,6 +130,8 @@ static int populate_fixture(sqlite3 *db) {
     return conv_count;
 }
 
+#endif /* HU_ENABLE_SQLITE */
+
 /* ── Rubric scoring tests ───────────────────────────────────────────── */
 
 static void test_rubric_tone_match_excited_incoming(void) {
@@ -224,6 +229,8 @@ static void test_rubric_hash_order_matters(void) {
 
 /* ── Fixture loading tests ──────────────────────────────────────────── */
 
+#ifdef HU_ENABLE_SQLITE
+
 static void test_fixture_db_loads_conversations(void) {
     sqlite3 *db = create_fixture_db();
     HU_ASSERT_NOT_NULL(db);
@@ -268,6 +275,8 @@ static void test_fixture_db_contacts_exist(void) {
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 }
+
+#endif /* HU_ENABLE_SQLITE */
 
 /* ── Eval aggregation tests ────────────────────────────────────────── */
 
@@ -394,6 +403,8 @@ static void test_eval_json_output_round_trips(void) {
 
 /* ── Integration test: full eval cycle ────────────────────────────── */
 
+#ifdef HU_ENABLE_SQLITE
+
 static void test_autoresponder_eval_framework_valid(void) {
     /* This test validates the eval framework structure, even though
      * without real persona context (US-48-2), the win-rate signal will
@@ -427,6 +438,8 @@ static void test_autoresponder_eval_framework_valid(void) {
     sqlite3_close(db);
 }
 
+#endif /* HU_ENABLE_SQLITE */
+
 void run_autoresponder_eval_tests(void) {
     HU_TEST_SUITE("autoresponder_eval");
 
@@ -440,9 +453,11 @@ void run_autoresponder_eval_tests(void) {
     HU_RUN_TEST(test_rubric_hash_deterministic);
     HU_RUN_TEST(test_rubric_hash_order_matters);
 
-    /* Fixture tests */
+    /* Fixture tests (SQLite-backed) */
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_fixture_db_loads_conversations);
     HU_RUN_TEST(test_fixture_db_contacts_exist);
+#endif
 
     /* Aggregation tests */
     HU_RUN_TEST(test_eval_aggregates_scores);
@@ -453,14 +468,8 @@ void run_autoresponder_eval_tests(void) {
     HU_RUN_TEST(test_eval_json_output_has_per_contact_breakdown);
     HU_RUN_TEST(test_eval_json_output_round_trips);
 
-    /* Integration test */
+    /* Integration test (SQLite-backed) */
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_autoresponder_eval_framework_valid);
+#endif
 }
-
-#else /* !HU_ENABLE_SQLITE — stub runner so the symbol resolves at link time. */
-
-void run_autoresponder_eval_tests(void) {
-    (void)0;
-}
-
-#endif /* HU_ENABLE_SQLITE */

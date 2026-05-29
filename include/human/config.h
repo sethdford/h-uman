@@ -166,7 +166,12 @@ typedef struct hu_agent_config {
     char *mr_on_device_model; /* model router: on-device model name (default: apple-foundationmodel)
                                */
     bool mr_on_device_enabled; /* model router: enable on-device routing (default: true on macOS) */
-    bool mr_mlx_local_enabled; /* model router: route REFLEXIVE/CONVERSATIONAL to the Seth-voice
+    hu_mlx_local_routing_t
+        mlx_local_routing;     /* AC-1: tri-state routing policy (OFF/AUTO/FORCE).
+                                * AUTO is default: local when healthy, else cloud.
+                                * Legacy mlx_local_enabled maps: true→FORCE, false→AUTO. */
+    bool mr_mlx_local_enabled; /* DEPRECATED: for backward compat only. Prefer mlx_local_routing.
+                                * model router: route REFLEXIVE/CONVERSATIONAL to the Seth-voice
                                 * mlx_local LoRA when the local server probes healthy (Dermot C2).
                                 * Default false (opt-in). ANALYTICAL/DEEP always stay cloud. */
     char *mr_mlx_local_model;  /* model router: local adapter identifier the mlx provider serves
@@ -838,6 +843,12 @@ hu_error_t hu_config_load_from(hu_allocator_t *backing, const char *path, hu_con
 hu_error_t hu_config_migrate(hu_allocator_t *alloc, hu_json_value_t *root);
 void hu_config_deinit(hu_config_t *cfg);
 hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t len);
+
+/* Seed the static (non-JSON) defaults into a freshly memset config. The
+ * production load path (hu_config_load) calls this before overlaying parsed
+ * JSON; callers that drive hu_config_parse_json directly (e.g. tests) must
+ * call this first to get the same defaults real users see. */
+void hu_config_apply_defaults(hu_config_t *cfg, hu_allocator_t *a);
 void hu_config_apply_env_overrides(hu_config_t *cfg);
 hu_error_t hu_config_save(const hu_config_t *cfg);
 hu_error_t hu_config_validate(const hu_config_t *cfg);

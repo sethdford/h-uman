@@ -75,8 +75,23 @@ hu_shape_channel_t hu_shape_channel_from_string(const char *channel, size_t chan
  * be NULL (recorded as NULL_RESPONSE fail with score 0.0).
  * Never returns an error — populates result and returns HU_OK.
  *
+ * Task 11 (AC-10) — optional learned_length_cap parameter:
+ *   - If 0 (or NULL for the _ex variant): uses universal channel cap only.
+ *   - If >0: for "close" relationship contacts, allows responses up to the
+ *     learned cap (overriding the universal cap). Structural fails (markdown,
+ *     AI openers) are unchanged.
+ *
  * Safe to call from any context; no allocation, no I/O. */
 hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape_channel_t channel,
                              hu_shape_result_t *out);
+
+/* Extended variant: pass relationship_stage and learned_length_cap for per-
+ * contact shape rules. relationship_stage="close" + learned_length_cap>0 allows
+ * exceeding the universal channel cap up to the learned cap. Pass NULL
+ * relationship_stage or 0 learned_length_cap to use universal caps only. */
+hu_error_t hu_shape_classify_ex(const char *response, size_t response_len,
+                                hu_shape_channel_t channel, const char *relationship_stage,
+                                size_t relationship_stage_len, size_t learned_length_cap,
+                                hu_shape_result_t *out);
 
 #endif /* HU_EVAL_SHAPE_H */

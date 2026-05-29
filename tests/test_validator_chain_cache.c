@@ -95,7 +95,7 @@ static void chain_cache_pointer_stable_across_select_examples_calls(void) {
     /* hu_persona_select_examples must not reallocate or replace outbound_chain. */
     const hu_persona_example_t *examples = NULL;
     size_t example_count = 0;
-    hu_persona_select_examples(&p, "imessage", 8, NULL, 0, &examples, &example_count, 5);
+    hu_persona_select_examples(&p, "imessage", 8, NULL, 0, &examples, &example_count, 5, NULL);
 
     const hu_output_validator_chain_t *second_ptr = p.outbound_chain;
 
