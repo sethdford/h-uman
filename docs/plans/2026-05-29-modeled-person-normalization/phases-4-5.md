@@ -56,6 +56,20 @@ Sequence simplest first (fewest call sites): `emotional_residue` /
 concurrent DDD writer**: check `git log`/the ratchet baseline before each chip;
 stage by name; never rebase this branch.
 
+**Ground-truth sizing correction (read 2026-05-29 — DON'T under-scope):** each
+chip is bigger than "migrate the module" — it's "migrate the module AND its
+sqlite-soaked callers." Concrete: `emotional_residue.c` looks like the simplest
+chip (217 LOC, SQL already on an injected handle), but its only prod caller
+`src/agent/world_model.c` is ITSELF a raw-sqlite includer with its own embedded
+`negative_memory` SQL (`run_ddl_`, `ensure_negative_memory_schema`,
+`negative_memory_{list,add}_sqlite`, `hu_memory_facade_sqlite_db` in 6+ places)
+— so dropping the ratchet for emotional_residue leaves world_model.c raw, and a
+*clean* chip must also give world_model.c a `negative_memory_repo` + the
+`emotional_residue` repo, handle the `_add → hu_world_model_invalidate` cache
+coupling, the dual call sites, and the `#else !HU_ENABLE_SQLITE` NOT_SUPPORTED
+stub branch. Budget each chip accordingly; do it in a focused session, not as a
+deep-context add-on.
+
 ## Phase 5 — relocate into the layers (AFTER Phase 4)
 
 Do Phase 4 first so the modules are repo-backed (no `<sqlite3.h>` to drag across
