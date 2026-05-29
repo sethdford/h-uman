@@ -95,7 +95,16 @@ else
   EXIT_CODE=1
 fi
 
-run "human doctor" "$HUMAN_BIN" doctor
+# `human doctor` is a DIAGNOSTIC: it intentionally exits 1 whenever the install
+# isn't fully configured (no ~/.human config_dir, no paired channel, no running
+# daemon, build flags off). A fresh CI runner is never configured, so doctor
+# always exits 1 there — gating the offline fleet on doctor exit-0 made this
+# check permanently red in CI. The real smoke-test intent is "doctor runs to
+# completion without crashing": tolerate the diagnostic exit (0=clean, 1=issues
+# found) and fail only on a crash (>1, e.g. SIGSEGV=139 / SIGABRT=134). Output
+# stays visible for triage. For a strict environment check, run live locally.
+run "human doctor (smoke: runs without crashing; diagnostic exit tolerated)" \
+  sh -c '"$0" doctor; rc=$?; [ "$rc" -le 1 ]' "$HUMAN_BIN"
 
 run "human eval list" "$HUMAN_BIN" eval list
 
