@@ -8036,6 +8036,52 @@ hu_error_t hu_conversation_gif_cal_load(const char *path, size_t path_len) {
 
 /* ── Multi-message splitting (simple chunk-based) ────────────────────── */
 
+/* True when [buf, buf+len) is empty or contains only ASCII whitespace.
+ * Used to suppress blank/whitespace-only message bubbles. */
+static bool conv_is_blank(const char *buf, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v')
+            return false;
+    }
+    return true;
+}
+
+/* Largest prefix length of buf[0..want) that ends on a complete UTF-8
+ * codepoint (never splits a multi-byte sequence). Mirrors the contract of
+ * hu_mlx_utf8_safe_emit_len without crossing the providers layer boundary.
+ * For a prefix already ending on a boundary (or malformed input), returns
+ * want unchanged. */
+static size_t conv_utf8_safe_len(const char *buf, size_t want) {
+    if (want == 0)
+        return 0;
+    /* Walk back over trailing continuation bytes (0x80..0xBF). */
+    size_t i = want;
+    size_t cont = 0;
+    while (i > 0 && ((unsigned char)buf[i - 1] & 0xC0) == 0x80) {
+        i--;
+        cont++;
+    }
+    if (i == 0)
+        return want; /* all continuation bytes — malformed, leave as-is */
+    unsigned char lead = (unsigned char)buf[i - 1];
+    size_t need;
+    if ((lead & 0x80) == 0x00)
+        need = 1; /* ASCII */
+    else if ((lead & 0xE0) == 0xC0)
+        need = 2;
+    else if ((lead & 0xF0) == 0xE0)
+        need = 3;
+    else if ((lead & 0xF8) == 0xF0)
+        need = 4;
+    else
+        return want; /* malformed lead byte — leave as-is */
+    /* Bytes present for the tail codepoint: the lead plus its continuations. */
+    if (1 + cont >= need)
+        return want; /* complete codepoint at the tail */
+    return i - 1;    /* incomplete — cut before the lead byte */
+}
+
 size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, size_t max_chunk,
                                         char chunks[][512], size_t max_chunks) {
     if (!response || resp_len == 0 || !chunks || max_chunks == 0 || max_chunk == 0)
@@ -8046,6 +8092,9 @@ size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, s
     /* Short messages don't need splitting */
     if (resp_len <= max_chunk) {
         size_t n = resp_len > 511 ? 511 : resp_len;
+        n = conv_utf8_safe_len(response, n);
+        if (n == 0 || conv_is_blank(response, n))
+            return 0; /* blank/whitespace-only — never emit an empty bubble */
         memcpy(chunks[0], response, n);
         chunks[0][n] = '\0';
         return 1;
@@ -8088,14 +8137,18 @@ size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, s
         }
 
         size_t n = cut > 511 ? 511 : cut;
-        memcpy(chunks[count], response + pos, n);
-        chunks[count][n] = '\0';
+        /* Never sever a multi-byte UTF-8 codepoint at the cut point. */
+        n = conv_utf8_safe_len(response + pos, n);
+        if (n > 0 && !conv_is_blank(response + pos, n)) {
+            memcpy(chunks[count], response + pos, n);
+            chunks[count][n] = '\0';
+            count++;
+        }
 
         /* Skip leading whitespace in next chunk */
         pos += cut;
         while (pos < resp_len && response[pos] == ' ')
             pos++;
-        count++;
     }
     return count;
 }
@@ -8147,6 +8200,8 @@ static size_t split_by_sentence_boundaries(const char *text, size_t len, char ch
         if (chunk_len > 0) {
             if (chunk_len > 511)
                 chunk_len = 511;
+            /* Never sever a multi-byte UTF-8 codepoint at the 511 cap. */
+            chunk_len = conv_utf8_safe_len(text + start, chunk_len);
             /* Trim trailing whitespace (rare here, but safe). */
             while (chunk_len > 0 &&
                    (text[start + chunk_len - 1] == ' ' || text[start + chunk_len - 1] == '\t'))

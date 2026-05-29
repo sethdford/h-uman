@@ -29,6 +29,48 @@
 #include <time.h>
 #include <unistd.h>
 
+/* ── Threaded-reply parent matching (BUG #3) ─────────────────────────────
+ * Pure predicate, defined OUTSIDE the AX `#if` so it is compiled (and unit-
+ * testable) in every build, then called from ax_find_message_group() inside
+ * the macOS-only AX code.
+ *
+ * The AX accessibility tree exposes each message bubble's text via its
+ * description string (which also embeds sender/timestamp). To thread a reply
+ * we locate the bubble whose text contains the parent message's prefix
+ * (parent_guid_to_text_prefix: the first ~32 chars of the parent body).
+ *
+ * The original match used raw strstr(), which matches the prefix ANYWHERE —
+ * including mid-token inside an unrelated message — so it could resolve to the
+ * WRONG parent. This predicate instead requires the prefix to begin at a WORD
+ * BOUNDARY (string start, or after a non-alphanumeric byte).
+ *
+ * Critically, the TRAILING edge is left UNCONSTRAINED: the parent prefix is
+ * truncated at ~32 chars and routinely ends mid-word, so a both-sided
+ * word-boundary match (e.g. hu_str_contains_word_ci) would spuriously FAIL and
+ * break currently-working threading. Leading-boundary-only is the safe
+ * tightening: it kills the mid-token false match while still matching the real
+ * body (which begins at a boundary after the description's sender/timestamp
+ * separator).
+ *
+ * NOTE: the identical-32-char-prefix collision (two messages sharing the same
+ * leading 32 chars) is NOT solved here — both still match. That case is
+ * mitigated by ax_find_message_group walking children most-recent-first; the
+ * robust fix (longer prefix or GUID match) is future work. Live-macOS
+ * validation against a real AX tree is required before trusting this. */
+static inline bool imsg_is_alnum_byte(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+}
+
+bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix) {
+    if (!haystack || !prefix || !prefix[0])
+        return false;
+    for (const char *p = strstr(haystack, prefix); p != NULL; p = strstr(p + 1, prefix)) {
+        if (p == haystack || !imsg_is_alnum_byte(p[-1]))
+            return true; /* prefix begins at a word boundary */
+    }
+    return false;
+}
+
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 #include <ApplicationServices/ApplicationServices.h>
 #include <dlfcn.h>
@@ -3451,7 +3493,7 @@ static AXUIElementRef ax_find_message_group(AXUIElementRef elem, const char *con
             char dbuf[512] = {0};
             CFStringGetCString(desc, dbuf, (CFIndex)sizeof(dbuf), kCFStringEncodingUTF8);
             CFRelease(desc);
-            if (strstr(dbuf, content_prefix)) {
+            if (hu_imessage_desc_prefix_match(dbuf, content_prefix)) {
                 /* Check this element supports AXShowMenu (for context menu). */
                 CFArrayRef actions = NULL;
                 if (AXUIElementCopyActionNames(child, &actions) == kAXErrorSuccess && actions) {
@@ -3485,7 +3527,7 @@ static AXUIElementRef ax_find_message_group(AXUIElementRef elem, const char *con
                     char vbuf[512] = {0};
                     CFStringGetCString(val, vbuf, (CFIndex)sizeof(vbuf), kCFStringEncodingUTF8);
                     CFRelease(val);
-                    if (strstr(vbuf, content_prefix)) {
+                    if (hu_imessage_desc_prefix_match(vbuf, content_prefix)) {
                         /* Return the PARENT (which has AXShowMenu), not the text area. */
                         CFRetain(elem);
                         found = elem;

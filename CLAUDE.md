@@ -5,69 +5,20 @@ Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
 
-## Product Thesis
+## Product Thesis (summary)
 
-**The assistant that's actually yours.**
+**The assistant that's actually yours** — a private, personal AI that runs on
+your hardware, learns who you are locally, and never sends your identity to a
+cloud. We don't compete on task execution, channel count, or benchmark scores
+(table stakes). The honest moats are: **persona as compiled architecture** (41 C
+modules, not markdown templates), **privacy by architecture** (local-first, not a
+settings toggle), an **on-device personalization pipeline**, and **HuLa IR**
+(typed, compiled tool orchestration).
 
-Every other AI assistant in 2026 is someone else's product renting you access. Gemini is Google's agent that happens to know your Gmail. Siri is Apple's voice layer that outsources its brain to Google. Claude Cowork is Anthropic's operator working in your folder. OpenClaw is a framework — powerful, but personality-free.
-
-human is different: **a private, personal AI that runs on your hardware, learns who you are locally, and never sends your identity to a cloud.** The "every device" story is how we get there. The "actually yours" story is why someone chooses us.
-
-### Red-Teamed Reality Check (April 2026)
-
-This thesis was stress-tested. Here's what survived and what didn't.
-
-**The privacy paradox is real but solvable.** 81% of consumers say they care about AI privacy; only 8-12% will configure privacy settings (Pew/Cisco/McKinsey 2025-2026). Stated willingness to pay a privacy premium: 10-30%. Actual behavior lags far behind. **Implication:** privacy-by-architecture (the default is private, no settings needed) beats privacy-as-feature (toggle in settings). Our thesis survives only if privacy is structural, not optional.
-
-**AI app retention is brutal.** AI apps retain 21.1% of annual subscribers vs 30.7% for non-AI apps — 30% faster churn (RevenueCat 2026). Novelty exhaustion is the #1 killer. **But:** companion/personal AI shows 41% DAU/MAU vs 14% for utility AI. Personalization drives retention; task execution doesn't. This supports the persona thesis.
-
-**Gemini already personalizes.** Google launched "Personal Intelligence" — connecting Gmail, Photos, Search, YouTube for personalized responses. They even have an "Import Memory" feature to poach users from other AIs. **Our "knows you" claim must be about WHERE data lives and WHO controls it, not WHETHER personalization exists.**
-
-**OpenClaw already has persona plugins.** Multiple Personas (SOUL.md, PERSONALITY.md, MEMORY.md), personality-dynamics (mode switching, weekly auto-evolution), open-persona (meta-skill for persona packs). 6.2K stars. **Our persona depth is real (41 C modules vs markdown templates), but the moat is narrower than we claimed.**
-
-### What We're Not Competing On (Table Stakes)
-
-- **Task execution.** Commodity. Every framework does this.
-- **Channel count.** 31 channels is breadth, not a moat. OpenClaw has ClawHub.
-- **Chat interfaces.** Google has 2B+ devices. We can't out-distribute.
-- **Benchmark scores.** We call the same frontier models. Can't beat them at their layer.
-- **Binary size / startup time.** Developers appreciate it; users don't feel it.
-- **Dashboard aesthetics.** Hygiene, not differentiation.
-- **"We have persona."** OpenClaw has SOUL.md persona plugins. Existence of persona is no longer unique.
-
-### What Actually Makes Us Better (Honest Moats)
-
-1. **Persona as compiled architecture, not markdown templates.** 41 C modules with runtime integration (circadian timing, somatic markers, emotional cognition, humor bridging) vs OpenClaw's SOUL.md text files. The difference: our persona *changes how the agent behaves at the code level* — timing, tool selection, tone adaptation, proactive messaging. Theirs is a system prompt wrapper.
-2. **Privacy by architecture, not by settings.** Data never leaves the device as a structural property. No "opt-in to privacy" toggle. Gemini's Personal Intelligence processes your data in Google's cloud (their privacy doc confirms this). We can't match their data breadth (Gmail/Photos/YouTube), but we own the trust story.
-3. **On-device personalization pipeline (partial — see honest status below).** MLX LoRA fine-tuning on Apple Silicon is proven at 1B-7B models. Our ML subsystem has the training loop. **Gap:** our LoRA path currently trains a reference GPT, not the frontier model users chat with. Bridging this gap (via ggml/MLX integration) is the real technical challenge.
-4. **HuLa IR.** Typed tool-orchestration with compiler and emergence. Genuinely novel. **Gap:** tightly coupled to internal agent; not yet a platform.
-5. **Runs anywhere, owned by you.** Same binary from $5 board to data center. No subscription lock-in.
-
-### Strategic Missions (Red-Teamed)
-
-Every mission below includes an honest difficulty assessment from code-level red teaming.
-
-| # | Mission | Honest Difficulty | Success Metric |
-|---|---------|------------------|----------------|
-| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays AND Tier-1 example banks (telegram / discord / imessage / slack — 12 neutral examples shipped in `hu_starter_persona_json`, Sprint 2b Story A', commit 71de40e6, pinned by `persona_directive_starter_persona_loads_four_tier1_overlays` + `persona_directive_starter_persona_has_five_example_banks`). `human onboard` exists (`src/onboard.c`) and is auto-suggested on first run when no config exists. 12,800+ tests passing. Remaining: A/B validation. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅; Tier-1 example banks ✅ |
-| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Per-turn save call site landed in commit 3ee98ef9 (`feat(agent,memory): per-turn personal-model save for crash safety`); the underlying `hu_personal_model_save` was made **actually atomic** in Phase 0 (May 2026) via `tmp + fwrite + fflush + fsync + rename`, pinned by `tests/test_personal_model_atomic_save.c::test_personal_model_save_preserves_prior_state_when_tmp_blocked` — a deterministic adversary test that pre-blocks the `<path>.tmp` slot with a directory and confirms the prior file's contents survive a failed save. Fact extraction has been upgraded to **typed propositional/prescriptive triples** via `hu_fact_extract` (`include/human/memory/fact_extract.h`): subject/predicate/object + confidence + per-fact provenance + trust tier + 90-day exponential half-life decay (`hu_heuristic_fact_effective_confidence`). Wired into `hu_personal_model_ingest` (`src/memory/personal_model.c:957`). Learned-style adaptation still lives only in the prompt summary, not in a model checkpoint — bridging that requires the M3 frontier-bridge to land. | Measurable adaptation in tone/timing after 50 conversations |
-| **M3** | **Private Learning** — On-device ML personalization | **Bridge B production-streaming COMPLETE (2026-05-26).** All B4 acceptance criteria shipped: T0 namespace rename (commit 8e0f7d30), T2 config plumbing (`cfg->mlx_local.streaming_enabled` default false + `first_token_budget_ms` 500), T3 capability gate at `src/agent/agent_stream.c:366` (operator opt-in per "compatible" provider), T4 SSE consumption via `hu_provider_sse_parser_init` at `src/providers/compatible.c:1018` with harmony-filter callback wrap, T5 UTF-8 boundary safety via new `hu_mlx_utf8_carry_emit` helper (commit a5cd637d) — stitches multi-byte codepoints across SSE event boundaries so consumers never see partial bytes (5 pinned contracts in `tests/test_mlx_stream_utf8.c`), T6 cancellation via `stop_requested` field, T7 buffered fallback when server doesn't speak SSE (`compatible_stream_chat:1067`, one-shot `warned_buffered_fallback` log), T8 first-token-latency metric on `compatible_stream_ctx_t::first_token_latency_ms`. Earlier wins still in place: US-8 dynamic learning loop (commit 416e6c29) fires `training_loop.py` on DPO pair-count threshold → `hu_mlx_admin_swap_adapter` hot-loads the new adapter without daemon restart (cloud-provider safety regression guard at commit 028f4544); v4-repair adapter empirically lifted persona fidelity 0.586 → 0.856 (+27pp, commit 9ab9b86e). **Remaining trivia** (M3 mission delta essentially zero): (a) env→config plumbing is DONE (2026-05-26) — the nightly-LoRA gate is `cfg.learning.nightly_lora_enabled` (parsed at `src/config_parse.c:323`); the legacy `HU_NIGHTLY_LORA_ENABLED` env var still works but logs a deprecation warning (`src/daemon.c:4442-4449`) directing operators to the config key. (b) live Apple-Silicon re-validation of post-train swap with current adapter remains (the test mock already pins the wire). The reference HUML GPT path (`lora-persona` CLI) remains for offline experimentation but is no longer the primary M3 inference target. | LoRA adapter that measurably improves persona fidelity on inference (✅ achieved 2026-05-25: +27pp); Bridge B production-streaming complete (✅ 2026-05-26: T0-T8 shipped) |
-| **M4** | **Ship to Users** — 100 DAU | **Medium.** `human onboard` exists (interactive setup wizard). First-run code path checks for missing config and points the user at the wizard. Persona defaults still need to be richer per channel; config still assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
-| **M5** | **HuLa as Platform** — Developer-facing SDK | **Hard.** Public SDK header lives at `include/human/hula_sdk.h` with semver macros (`HU_HULA_SDK_VERSION_STRING "0.1.0"`); JSON wire format is documented in the header. **Language bindings now exist:** `apps/python-sdk/` (~1145 LOC: pyproject.toml + binary wrapper + tests + examples) and `apps/node-sdk/` (~602 LOC: package.json + binary wrapper + tests + examples). Still missing: published packages (PyPI/npm), hosted docs site. | External devs write and run HuLa programs |
-| **M6** | **Channel Focus** — Prioritize 4 Tier-1 (Telegram, Discord, iMessage, Slack) across 31 messaging channels | **Easy (strategy), Medium (execution).** 43 channel `.c` files. This is prioritization, not a code change. | Tier 1 score 8/10+ on naturalness eval |
-
-### Competitive Position (April 2026 — Honest)
-
-| Dimension | human | Gemini Agent | Claude Cowork | OpenClaw |
-|-----------|-------|-------------|---------------|----------|
-| Persona depth | **Deep** (41 compiled modules) | Basic (Personal Intelligence) | None | **Growing** (SOUL.md plugins, personality-dynamics) |
-| Personalization | Memory stack with typed propositional/prescriptive fact extraction + half-life decay | **Google apps data** (Gmail, Photos, YouTube) | Chat memory | SOUL.md + MEMORY.md |
-| On-device learning | Reference only (CPU, toy GPT) | No | No | No |
-| Privacy architecture | **Structural** (local-first) | Cloud (Google infra) | Cloud (Anthropic) | Self-hosted (Node.js) |
-| Tool orchestration | **HuLa IR** (compiled) | Prompt-chained | Prompt-chained | Prompt-chained |
-| Distribution | **None** (0 users) | **2B+ devices** | **Desktop + API** | **100K+ GitHub stars** |
-| Ecosystem | Small | **Google apps** | **Mac + tools** | **ClawHub** |
-| Runtime footprint | **~1750 KB / 6 MB** | Cloud | Cloud | ~180 MB / 120 MB |
+Full thesis, the red-teamed reality check, the M1–M6 strategic missions, and the
+competitive matrix live in **[`docs/PRODUCT.md`](docs/PRODUCT.md)** — kept out of
+this always-loaded file so CLAUDE.md stays lean and the dated mission status
+doesn't rot here.
 
 ## Build & Test
 
@@ -79,7 +30,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (12,800+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (13,000+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -160,7 +111,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 12,800+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 13,000+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -185,9 +136,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,034 files, ~421K lines)                              |
+| `src/`                            | All C source (~1,050 `.c` files, ~420K lines)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 743 test files, 12,800+ tests                                        |
+| `tests/`                          | 760+ test files, 13,000+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

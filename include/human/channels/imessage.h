@@ -491,6 +491,15 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
 hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target_len,
                                     const char *sticker_path, size_t sticker_path_len);
 
+/** Threaded-reply parent matching (BUG #3). Returns true iff `prefix` occurs in
+ * `haystack` beginning at a WORD BOUNDARY (string start or after a
+ * non-alphanumeric byte). The trailing edge is unconstrained because the
+ * iMessage parent prefix is truncated mid-word, so a both-sided word-boundary
+ * match would spuriously fail. Used by the macOS AX parent-bubble lookup to
+ * avoid resolving the wrong parent on a mid-token substring hit. Pure and
+ * NULL-safe; defined unconditionally so it is unit-testable in every build. */
+bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix);
+
 #ifdef HU_IS_TEST
 /** Test-only: set a callback function pointer that will be invoked instead of imsg send.
  * Callback receives (target, target_len, sticker_path) and should return HU_OK on success

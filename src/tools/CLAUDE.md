@@ -1,6 +1,6 @@
 # src/tools/ — Tool Implementations
 
-85 tools that the agent can execute. Each tool implements the `hu_tool_t` vtable.
+~90 tools that the agent can execute (registered in `factory.c`). Each tool implements the `hu_tool_t` vtable.
 
 ## Vtable Contract
 

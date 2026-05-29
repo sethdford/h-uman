@@ -22,7 +22,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~1750 KB binary · <30 ms startup · 11,924+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~1750 KB binary · <30 ms startup · 13,000+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features

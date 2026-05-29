@@ -1,6 +1,6 @@
 # src/channels/ — Messaging Channels
 
-38 channel implementations, each connecting the agent to an external messaging platform. Every channel implements the `hu_channel_t` vtable.
+Channel implementations connecting the agent to external messaging platforms (~60 source files; some platforms are split across multiple files). Every channel implements the `hu_channel_t` vtable.
 
 ## Production wiring status
 

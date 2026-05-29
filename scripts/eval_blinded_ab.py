@@ -96,10 +96,31 @@ SYNTHETIC_SCENARIOS = [
 ]
 
 
-def call_gemini(prompt, temperature=0.3):
+# Structured output schema for the blinded A/B judge (see eval_humanness.py
+# reference pattern). Constrains the model to bare JSON, removing the
+# fragile ```json fence-strip.
+_BLINDED_AB_JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "choice": {"type": "string", "enum": ["A", "B"]},
+        "confidence": {"type": "integer", "minimum": 1, "maximum": 10},
+        "reasoning": {"type": "string"},
+        "a_analysis": {"type": "string"},
+        "b_analysis": {"type": "string"},
+    },
+    "required": ["choice", "confidence", "reasoning", "a_analysis", "b_analysis"],
+    "propertyOrdering": ["choice", "confidence", "reasoning", "a_analysis", "b_analysis"],
+}
+
+
+def call_gemini(prompt, temperature=0.3, response_schema=None):
+    gen_cfg = {"temperature": temperature, "maxOutputTokens": 2048}
+    if response_schema is not None:
+        gen_cfg["responseMimeType"] = "application/json"
+        gen_cfg["responseSchema"] = response_schema
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": 2048}
+        "generationConfig": gen_cfg,
     }).encode()
     headers = {"Content-Type": "application/json"}
     if not API_KEY:
@@ -211,7 +232,10 @@ Return ONLY valid JSON:
   "b_analysis": "what makes B seem human or AI"
 }}"""
 
-    raw = call_gemini(prompt, temperature=0.2)
+    raw = call_gemini(prompt, temperature=0.2,
+                      response_schema=_BLINDED_AB_JUDGE_SCHEMA)
+    # responseSchema yields bare JSON; keep the fence strip as a defensive
+    # fallback for endpoints/models that ignore the schema.
     if "```json" in raw:
         raw = raw.split("```json")[1].split("```")[0].strip()
     elif "```" in raw:
