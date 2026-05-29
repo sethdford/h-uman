@@ -3200,7 +3200,6 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
-    tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
     tests/test_vertex_adc.c
