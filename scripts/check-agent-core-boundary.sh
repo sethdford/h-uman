@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Measured 2026-05-29 at the start of Phase 0.
 FACTORY_BASELINE=4   # Phase 4 (provider injection) drives this to 0.
-MEMCMP_BASELINE=11   # Phase 1 (channel behavior_class) drives this to 0.
+MEMCMP_BASELINE=0    # Phase 1 landed: channel memcmp removed from agent core.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
