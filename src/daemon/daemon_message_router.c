@@ -1,3 +1,10 @@
+/* strptime() is XSI — must request it before any include (glibc gates it
+ * behind _XOPEN_SOURCE; macOS exposes it by default). Matches daemon.c, the
+ * file this code was extracted from. */
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+
 /* iMessage reply-route dispatcher — DDD Phase 2.5 extraction from daemon.c.
  *
  * hu_daemon_dispatch_imessage_reply routes an outbound iMessage reply through
