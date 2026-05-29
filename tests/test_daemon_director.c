@@ -3,15 +3,16 @@
 #include <string.h>
 
 static void director_classifies_greeting(void) {
+    const char *msg = "hey, how are you?";
     char out_type[16];
-    hu_daemon_classify_comfort_response_type("hey, how are you?", 17, out_type, sizeof(out_type));
+    hu_daemon_classify_comfort_response_type(msg, strlen(msg), out_type, sizeof(out_type));
     HU_ASSERT_STR_EQ(out_type, "space");
 }
 
 static void director_classifies_comfort(void) {
+    const char *msg = "I'm so sorry you're going through that";
     char out_type[16];
-    hu_daemon_classify_comfort_response_type("I'm so sorry you're going through that", 38, out_type,
-                                             sizeof(out_type));
+    hu_daemon_classify_comfort_response_type(msg, strlen(msg), out_type, sizeof(out_type));
     HU_ASSERT_STR_EQ(out_type, "empathy");
 }
 

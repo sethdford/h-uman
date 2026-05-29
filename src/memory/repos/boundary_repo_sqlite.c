@@ -1,6 +1,7 @@
 /* src/memory/repos/boundary_repo_sqlite.c
- * The ONE place boundaries SQL + the raw sqlite3 handle live. Domain code
- * (protective.c) depends on hu_boundary_repo_t, never on this file. */
+ * The boundaries repository: the place this repo's boundaries SQL + the raw
+ * sqlite3 handle live. Domain code (protective.c) depends on
+ * hu_boundary_repo_t, never on this file. */
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/boundary_repo.h"
 #include <sqlite3.h>
@@ -29,7 +30,8 @@ static hu_error_t ensure_schema(sqlite3 *db) {
                         " topic TEXT NOT NULL,"
                         " type TEXT NOT NULL,"
                         " set_at INTEGER NOT NULL,"
-                        " source TEXT);");
+                        " source TEXT,"
+                        " UNIQUE(contact_id, topic));");
 }
 
 static hu_error_t repo_is_boundary(void *ctx, const char *cid, size_t cid_len, const char *topic,
@@ -51,7 +53,8 @@ static hu_error_t repo_add(void *ctx, const hu_boundary_t *b) {
     repo_ctx_t *c = ctx;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(c->db,
-                           "INSERT INTO boundaries (contact_id, topic, type, set_at, source) "
+                           "INSERT OR IGNORE INTO boundaries "
+                           "(contact_id, topic, type, set_at, source) "
                            "VALUES (?,?,?,?,?);",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_IO;

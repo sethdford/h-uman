@@ -37,9 +37,41 @@ static void test_boundary_repo_records_and_reads(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Contract: add() is idempotent — adding the same (contact_id, topic) twice
+ * must succeed both times and not change observable state. Pins the
+ * UNIQUE(contact_id, topic) + INSERT OR IGNORE fix (PR #159 review). */
+static void test_boundary_repo_add_is_idempotent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    hu_boundary_repo_t repo;
+    HU_ASSERT_EQ(hu_boundary_repo_create(&mem, &alloc, &repo), HU_OK);
+
+    hu_boundary_t b = {.contact_id = "bob",
+                       .contact_id_len = 3,
+                       .topic = "money",
+                       .topic_len = 5,
+                       .type = "hard",
+                       .type_len = 4,
+                       .source = "user",
+                       .source_len = 4,
+                       .created_at = 1};
+    HU_ASSERT_EQ(repo.vtable->add(repo.ctx, &b), HU_OK);
+    HU_ASSERT_EQ(repo.vtable->add(repo.ctx, &b), HU_OK); /* second add must not error */
+
+    bool is_b = false;
+    HU_ASSERT_EQ(repo.vtable->is_boundary(repo.ctx, "bob", 3, "money", 5, &is_b), HU_OK);
+    HU_ASSERT_TRUE(is_b);
+
+    repo.vtable->deinit(repo.ctx);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_boundary_repo_tests(void) {
     HU_TEST_SUITE("boundary_repo");
     HU_RUN_TEST(test_boundary_repo_records_and_reads);
+    HU_RUN_TEST(test_boundary_repo_add_is_idempotent);
 }
 #else
 void run_boundary_repo_tests(void) {
