@@ -25,6 +25,25 @@ bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result) {
     return result->alignment_score >= HU_RLAIF_MIN_ALIGNMENT_TO_PATCH;
 }
 
+bool hu_dpo_parse_judge_score(const char *out, size_t out_len, double *score_out) {
+    if (!out || out_len == 0 || !score_out)
+        return false;
+    for (size_t i = 0; i < out_len; i++) {
+        if (out[i] >= '0' && out[i] <= '9') {
+            double s = 0.0;
+            while (i < out_len && out[i] >= '0' && out[i] <= '9') {
+                s = s * 10.0 + (double)(out[i] - '0');
+                i++;
+            }
+            if (s > 100.0)
+                s = 100.0;
+            *score_out = s;
+            return true;
+        }
+    }
+    return false;
+}
+
 hu_error_t hu_dpo_collector_create(hu_allocator_t *alloc,
 #ifdef HU_ENABLE_SQLITE
                                    sqlite3 *db,
@@ -930,36 +949,23 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
             rn > 0 ? (size_t)rn : 0u, model ? model : "", model_len, 0.0, &rejected_out,
             &rejected_out_len);
 
-        double chosen_score = 50.0;
-        double rejected_score = 50.0;
-
-        if (e1 == HU_OK && chosen_out) {
-            for (size_t ci = 0; ci < chosen_out_len; ci++) {
-                if (chosen_out[ci] >= '0' && chosen_out[ci] <= '9') {
-                    chosen_score = 0;
-                    while (ci < chosen_out_len && chosen_out[ci] >= '0' && chosen_out[ci] <= '9') {
-                        chosen_score = chosen_score * 10.0 + (double)(chosen_out[ci] - '0');
-                        ci++;
-                    }
-                    break;
-                }
-            }
+        /* Parse the judge's numeric scores. A failed call OR a non-numeric /
+         * thinking-only / empty reply yields NO score — SKIP the pair rather
+         * than substitute a neutral 50, which fabricates a tie and manufactures
+         * alignment=0 / loss=ln(2) noise (the signature seen when slow 31B
+         * judge calls time out). An unscored pair is no evidence. */
+        double chosen_score = 0.0;
+        double rejected_score = 0.0;
+        bool chosen_ok =
+            (e1 == HU_OK) && hu_dpo_parse_judge_score(chosen_out, chosen_out_len, &chosen_score);
+        bool rejected_ok = (e2 == HU_OK) && hu_dpo_parse_judge_score(rejected_out, rejected_out_len,
+                                                                     &rejected_score);
+        if (chosen_out)
             alloc->free(alloc->ctx, chosen_out, chosen_out_len + 1u);
-        }
-        if (e2 == HU_OK && rejected_out) {
-            for (size_t ci = 0; ci < rejected_out_len; ci++) {
-                if (rejected_out[ci] >= '0' && rejected_out[ci] <= '9') {
-                    rejected_score = 0;
-                    while (ci < rejected_out_len && rejected_out[ci] >= '0' &&
-                           rejected_out[ci] <= '9') {
-                        rejected_score = rejected_score * 10.0 + (double)(rejected_out[ci] - '0');
-                        ci++;
-                    }
-                    break;
-                }
-            }
+        if (rejected_out)
             alloc->free(alloc->ctx, rejected_out, rejected_out_len + 1u);
-        }
+        if (!chosen_ok || !rejected_ok)
+            continue;
 
         /* Normalize scores to log-probability proxy */
         double log_ratio = (chosen_score - rejected_score) / 100.0;

@@ -197,6 +197,16 @@ typedef hu_dpo_judge_result_t hu_dpo_train_result_t;
  * non-empty batch whose alignment_score clears HU_RLAIF_MIN_ALIGNMENT_TO_PATCH. */
 bool hu_rlaif_should_apply_style_patch(const hu_dpo_judge_result_t *result);
 
+/* Parse the leading integer score (0-100) the judge LLM was asked to emit
+ * ("Output ONLY a number"). Returns true and sets *score_out only when a digit
+ * run is found; false for NULL/empty/no-digit output — which is what a failed
+ * judge call OR a thinking-only/empty reply produces. Callers MUST SKIP a pair
+ * when this returns false, never substitute a neutral 50: a fabricated tie
+ * manufactures alignment=0 / loss=ln(2) noise (the exact signature that
+ * polluted the nightly when slow 31B judge calls timed out). Pure (no I/O) —
+ * unit-tested in tests/test_dpo.c. Scores above 100 are clamped to 100. */
+bool hu_dpo_parse_judge_score(const char *out, size_t out_len, double *score_out);
+
 /* Deprecated: renamed to `hu_dpo_judge_step` in Phase 0. The shim
  * forwards every argument verbatim so the result is bit-identical to
  * a direct call (pinned by tests/test_dpo_judge_naming.c). */
