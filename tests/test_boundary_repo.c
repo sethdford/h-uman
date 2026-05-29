@@ -1,3 +1,8 @@
+/* Exercises the sqlite-backed hu_boundary_repo_t implementation in
+ * src/memory/repos/boundary_repo_sqlite.c (via hu_boundary_repo_create).
+ * The filename reference above satisfies scripts/check-untested.sh, whose
+ * basename matcher can't otherwise tie this test to that impl file (the
+ * exported symbol is named for the abstraction, not the _sqlite impl). */
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/boundary_repo.h"
 #include "human/memory/engines.h"
