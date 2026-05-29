@@ -1,3 +1,7 @@
+---
+title: Sentinel-Boundary Reply-First LoRA — Design
+---
+
 # Option A: Sentinel-Boundary Reply-First LoRA — Design
 
 **Date:** 2026-05-29
