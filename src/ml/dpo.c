@@ -1027,83 +1027,91 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
     }
     sqlite3_bind_int(select_stmt, 1, output_limit > 0 ? output_limit : INT_MAX);
 
+    /* One pair per contact: a "chosen" (we replied-to and got positive
+     * engagement) outcome paired with a "rejected" (no reply) outcome for the
+     * same contact. Order-independent — we accumulate both sides as the
+     * contact's resolved rows stream past (ORDER BY target,id keeps a contact's
+     * rows contiguous) and emit once both are present. "No reply" is detected
+     * by a NULL reply_latency_s column, NOT a sentinel value. */
     typedef struct {
         char channel[64];
         char target[256];
         char chosen_prompt[2048];
         char chosen_response[4096];
-        int id;
+        char rejected_response[4096];
         bool has_chosen;
         bool has_rejected;
-    } ContactState;
-    ContactState contact;
+        bool emitted;
+    } contact_state_t;
+    contact_state_t contact;
     memset(&contact, 0, sizeof(contact));
-    int pairs_this_contact = 0;
 
     while (sqlite3_step(select_stmt) == SQLITE_ROW) {
-        int id = sqlite3_column_int(select_stmt, 0);
         const char *channel = (const char *)sqlite3_column_text(select_stmt, 1);
         const char *target = (const char *)sqlite3_column_text(select_stmt, 2);
         const char *prompt = (const char *)sqlite3_column_text(select_stmt, 3);
         const char *chosen = (const char *)sqlite3_column_text(select_stmt, 4);
         double reply_sentiment = sqlite3_column_double(select_stmt, 5);
-        int reply_latency_s = sqlite3_column_int(select_stmt, 6);
+        bool has_reply = sqlite3_column_type(select_stmt, 6) != SQLITE_NULL;
+        int reply_latency_s = has_reply ? sqlite3_column_int(select_stmt, 6) : -1;
         int reply_length = sqlite3_column_int(select_stmt, 7);
-        int64_t send_timestamp = sqlite3_column_int64(select_stmt, 8);
-        int64_t outcome_resolved_at = sqlite3_column_int64(select_stmt, 9);
         int user_edited = sqlite3_column_int(select_stmt, 10);
 
+        /* Contact boundary → reset accumulator (rows are grouped by target). */
+        if ((contact.has_chosen || contact.has_rejected) &&
+            (strcmp(contact.channel, channel ? channel : "") != 0 ||
+             strcmp(contact.target, target ? target : "") != 0)) {
+            memset(&contact, 0, sizeof(contact));
+        }
+        if (!contact.has_chosen && !contact.has_rejected) {
+            strncpy(contact.channel, channel ? channel : "", sizeof(contact.channel) - 1);
+            strncpy(contact.target, target ? target : "", sizeof(contact.target) - 1);
+        }
+
+        /* Edited outbound messages aren't clean preference signal — skip for
+         * pairing. They are still marked processed by the UPDATE below. */
         if (user_edited)
             continue;
 
-        if (contact.has_chosen &&
-            (strcmp(contact.channel, channel) != 0 || strcmp(contact.target, target) != 0)) {
-            memset(&contact, 0, sizeof(contact));
-            pairs_this_contact = 0;
-        }
-
-        if (!contact.has_chosen && !contact.has_rejected) {
-            strncpy(contact.channel, channel, sizeof(contact.channel) - 1);
-            strncpy(contact.target, target, sizeof(contact.target) - 1);
-        }
-
-        bool is_chosen = (reply_latency_s > 0 && reply_latency_s <= 300 && reply_sentiment >= 0.6 &&
-                          reply_length > 0);
-        bool is_rejected = (reply_latency_s < 0 && (outcome_resolved_at - send_timestamp) >= 86400);
+        bool is_chosen = has_reply && reply_latency_s >= 0 && reply_latency_s <= 300 &&
+                         reply_sentiment >= 0.6 && reply_length > 0;
+        bool is_rejected = !has_reply;
 
         if (is_chosen && !contact.has_chosen) {
             contact.has_chosen = true;
             strncpy(contact.chosen_prompt, prompt ? prompt : "", sizeof(contact.chosen_prompt) - 1);
             strncpy(contact.chosen_response, chosen ? chosen : "",
                     sizeof(contact.chosen_response) - 1);
-            contact.id = id;
         } else if (is_rejected && !contact.has_rejected) {
             contact.has_rejected = true;
-            if (contact.has_chosen && pairs_this_contact == 0) {
-                sqlite3_stmt *insert_stmt = NULL;
-                rc = sqlite3_prepare_v2(
-                    db,
-                    "INSERT INTO dpo_pairs(prompt, chosen, rejected, margin, timestamp, source) "
-                    "VALUES(?, ?, ?, 0.0, ?, 'implicit_feedback')",
-                    -1, &insert_stmt, NULL);
-                if (rc != SQLITE_OK) {
-                    sqlite3_finalize(select_stmt);
-                    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
-                    return HU_ERR_IO;
-                }
-                sqlite3_bind_text(insert_stmt, 1, contact.chosen_prompt, -1, SQLITE_STATIC);
-                sqlite3_bind_text(insert_stmt, 2, contact.chosen_response, -1, SQLITE_STATIC);
-                sqlite3_bind_text(insert_stmt, 3, chosen, -1, SQLITE_STATIC);
-                sqlite3_bind_int64(insert_stmt, 4, (int64_t)time(NULL));
-                rc = sqlite3_step(insert_stmt);
-                sqlite3_finalize(insert_stmt);
-                if (rc != SQLITE_DONE) {
-                    sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
-                    return HU_ERR_IO;
-                }
-                (*pairs_written)++;
-                pairs_this_contact++;
+            strncpy(contact.rejected_response, chosen ? chosen : "",
+                    sizeof(contact.rejected_response) - 1);
+        }
+
+        if (contact.has_chosen && contact.has_rejected && !contact.emitted) {
+            sqlite3_stmt *insert_stmt = NULL;
+            rc = sqlite3_prepare_v2(
+                db,
+                "INSERT INTO dpo_pairs(prompt, chosen, rejected, margin, timestamp, source) "
+                "VALUES(?, ?, ?, 0.0, ?, 'implicit_feedback')",
+                -1, &insert_stmt, NULL);
+            if (rc != SQLITE_OK) {
+                sqlite3_finalize(select_stmt);
+                sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+                return HU_ERR_IO;
             }
+            sqlite3_bind_text(insert_stmt, 1, contact.chosen_prompt, -1, SQLITE_STATIC);
+            sqlite3_bind_text(insert_stmt, 2, contact.chosen_response, -1, SQLITE_STATIC);
+            sqlite3_bind_text(insert_stmt, 3, contact.rejected_response, -1, SQLITE_STATIC);
+            sqlite3_bind_int64(insert_stmt, 4, (int64_t)time(NULL));
+            rc = sqlite3_step(insert_stmt);
+            sqlite3_finalize(insert_stmt);
+            if (rc != SQLITE_DONE) {
+                sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+                return HU_ERR_IO;
+            }
+            contact.emitted = true;
+            (*pairs_written)++;
         }
     }
     sqlite3_finalize(select_stmt);

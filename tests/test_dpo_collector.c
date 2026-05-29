@@ -85,10 +85,11 @@ static int test_insert_outcome(sqlite3 *db, const char *channel, const char *tar
         sqlite3_bind_null(stmt, 8);
     sqlite3_bind_int(stmt, 9, user_edited);
 
-    if (reply_latency_s >= 0 || reply_sentiment >= 0.0)
-        sqlite3_bind_int64(stmt, 10, (int64_t)time(NULL));
-    else
-        sqlite3_bind_null(stmt, 10);
+    /* Every fixture row is a RESOLVED outcome (a reply arrived, or the 24h
+     * no-reply timeout elapsed), so outcome_resolved_at is always set. A
+     * no-reply row is signalled by a NULL reply_latency_s (above), not by an
+     * unresolved timestamp. */
+    sqlite3_bind_int64(stmt, 10, (int64_t)time(NULL));
 
     rc = sqlite3_step(stmt);
     int last_rowid = sqlite3_last_insert_rowid(db);
@@ -137,20 +138,24 @@ static void dpo_collector_mine_produces_expected_pairs(void) {
 
     int64_t base_time = (int64_t)time(NULL);
 
+    /* AC-102.8 fixture: 2 replied(+positive) + 2 no-reply + 1 edited = 5 rows.
+     * Pairs form per contact (chosen=good reply, rejected=no reply):
+     *   alice: chosen then rejected  -> pair 1
+     *   bob:   rejected then chosen  -> pair 2 (exercises order-independence)
+     *   charlie: edited -> skipped for pairing, still marked processed.
+     * Expect 2 pairs, all 5 rows processed. */
     test_insert_outcome(db, "imessage", "alice", "Hi alice", "How are you?", base_time - 200, 180,
-                        15, 0.8, 0);
-
+                        15, 0.8, 0); /* chosen: reply 180s, sentiment 0.8 */
     test_insert_outcome(db, "imessage", "alice", "Hey alice", "What's up?", base_time - 100000, -1,
-                        -1, 0.5, 0);
+                        -1, -1.0, 0); /* rejected: no reply (NULL latency) */
 
     test_insert_outcome(db, "imessage", "bob", "Hi bob", "Hello there", base_time - 100000, -1, -1,
-                        0.5, 0);
-
+                        -1.0, 0); /* rejected: no reply (NULL latency) */
     test_insert_outcome(db, "imessage", "bob", "Hey bob", "Good morning", base_time - 200, 120, 18,
-                        0.75, 0);
+                        0.75, 0); /* chosen: reply 120s, sentiment 0.75 */
 
-    test_insert_outcome(db, "imessage", "charlie", "Hi charlie", "Test message", base_time - 50, -1,
-                        -1, -1.0, 1);
+    test_insert_outcome(db, "imessage", "charlie", "Hi charlie", "Test message", base_time - 50, 90,
+                        12, 0.7, 1); /* edited: resolved but user_edited=1 -> skipped, processed */
 
     int pairs_written = 0;
     HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, INT_MAX, &pairs_written), HU_OK);
