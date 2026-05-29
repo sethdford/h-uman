@@ -39,6 +39,22 @@ while IFS= read -r src; do
         continue
     fi
 
+    # Directory-qualified symbol pattern. h-uman's convention exports
+    # hu_<parentdir>_<base> for files in subdirectories, e.g.:
+    #   src/doctor/check_chatdb.c        -> hu_doctor_check_chatdb
+    #   src/doctor/check_prompt_budget.c -> hu_doctor_check_prompt_budget
+    # The basename-only patterns above never match these because the symbol
+    # prefix carries the parent-directory name, not the file basename. The
+    # char-class boundary ([^A-Za-z0-9] OR end-of-line) matches the exact
+    # symbol as well as hu_<dir>_<base>_<suffix> helpers, but NOT a longer
+    # alnum run (so hu_doctor_check_chatdbX does not spuriously match).
+    dir=$(basename "$(dirname "$src")")
+    if [ "$dir" != "src" ] && [ -n "$dir" ]; then
+        if grep -rqE "hu_${dir}_${base}([^A-Za-z0-9]|$)" tests/ >/dev/null 2>&1; then
+            continue
+        fi
+    fi
+
     echo "  NO TEST: $src"
     FOUND=$((FOUND + 1))
 done < <(find src -name '*.c' | sort)

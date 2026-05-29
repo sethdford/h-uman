@@ -122,7 +122,7 @@ Estimate matches backlog: **~800 LoC (mostly markdown), 1 multi-session work uni
       Releases)
    2. **Setup**: `human` (auto-runs onboarding on first launch)
    3. **Verify**: `human doctor`
-   4. **Read more**: [Getting started →](docs/guides/getting-started.md)
+   4. **Read more**: [Getting started →](../../docs/guides/getting-started.md)
    ```
 2. Existing sections (philosophy, architecture, design decisions)
    move BELOW Quick start. They're not removed — just reordered.

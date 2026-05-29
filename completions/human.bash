@@ -9,7 +9,7 @@ _human() {
 
     # Global flags (before or as first argument)
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth calibrate capabilities channel config cron demo doctor drafts eval evaluation feed gateway hardware help hula init mcp memory migrate ml models onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
+        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth autoresponder calibrate capabilities channel config cron ctl demo doctor drafts eval evaluation export-dpo feed gateway hardware help hula inference-status init initiative mcp memory migrate ml models narrate onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
         return
     fi
 
@@ -19,6 +19,16 @@ _human() {
         cron)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=($(compgen -W 'list add remove' -- "$cur"))
+            fi
+            ;;
+        ctl)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=($(compgen -W 'status disable-g9 enable-g9 list-channels' -- "$cur"))
+            fi
+            ;;
+        initiative)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=($(compgen -W 'log status' -- "$cur"))
             fi
             ;;
         channel)

@@ -83,8 +83,44 @@ static void render_iso8601_utc(time_t epoch, char *buf, size_t cap) {
         return;
     }
 #endif
-    snprintf(buf, cap, "%04d-%02d-%02dT%02d:%02d:%02dZ", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
-             tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+    /* Clamp every field to its valid range before formatting. gmtime_r
+     * already produces in-range values, but GCC's -Wformat-truncation pass
+     * treats the struct tm int members as unbounded, so without explicit
+     * clamps it cannot prove the directives fit within cap (>= 21 from the
+     * guard above) and fails the arm64 -Werror build. Clamping both
+     * satisfies the analyzer (each directive now has a fixed width, total
+     * exactly 20 chars) and hardens against a corrupt tm struct. */
+    int year = tm_utc.tm_year + 1900;
+    if (year < 0)
+        year = 0;
+    if (year > 9999)
+        year = 9999;
+    int mon = tm_utc.tm_mon + 1;
+    if (mon < 1)
+        mon = 1;
+    if (mon > 12)
+        mon = 12;
+    int mday = tm_utc.tm_mday;
+    if (mday < 1)
+        mday = 1;
+    if (mday > 31)
+        mday = 31;
+    int hour = tm_utc.tm_hour;
+    if (hour < 0)
+        hour = 0;
+    if (hour > 23)
+        hour = 23;
+    int minute = tm_utc.tm_min;
+    if (minute < 0)
+        minute = 0;
+    if (minute > 59)
+        minute = 59;
+    int sec = tm_utc.tm_sec;
+    if (sec < 0)
+        sec = 0;
+    if (sec > 60) /* allow a leap second */
+        sec = 60;
+    snprintf(buf, cap, "%04d-%02d-%02dT%02d:%02d:%02dZ", year, mon, mday, hour, minute, sec);
 }
 
 /* Map a verdict enum to the schema's stable lowercase string.

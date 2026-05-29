@@ -31,6 +31,8 @@
 
 #include "human/util/typedstream.h"
 
+#include "human/channels/imessage.h"
+
 #include <stdint.h>
 #include <string.h>
 
@@ -451,4 +453,46 @@ const hu_attribute_run_t *hu_imessage_runs_first_mention(const hu_attribute_run_
             return &runs[i];
     }
     return NULL;
+}
+
+/* Pure plain-text extractor for the iOS attributedBody typedstream blob.
+ * Anchors on the 0x01 0x2B text-length-prefixed segment and copies out the
+ * plain text. Moved here from src/channels/imessage.c so the symbol lives in
+ * an unconditionally-compiled TU: it has zero Apple / chat.db / SQLite
+ * dependencies (only memcpy + byte arithmetic) yet is called from
+ * unconditional callers such as src/channels/imessage_ingest.c. Keeping the
+ * definition behind the HU_HAS_IMESSAGE gate broke the link on non-Apple /
+ * HU_HAS_IMESSAGE=OFF builds. */
+size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blob_len, char *out,
+                                           size_t out_cap) {
+    if (!blob || blob_len < 4 || !out || out_cap < 2)
+        return 0;
+
+    for (size_t i = 0; i + 3 < blob_len; i++) {
+        if (blob[i] == 0x01 && blob[i + 1] == 0x2B) {
+            size_t text_len = 0;
+            size_t text_start = 0;
+            unsigned char lb = blob[i + 2];
+            if (lb < 0x80) {
+                text_len = lb;
+                text_start = i + 3;
+            } else {
+                size_t len_bytes = lb & 0x7F;
+                if (len_bytes == 0 || len_bytes > 4 || i + 3 + len_bytes > blob_len)
+                    return 0;
+                for (size_t b = 0; b < len_bytes; b++)
+                    text_len |= (size_t)blob[i + 3 + b] << (8 * b);
+                text_start = i + 3 + len_bytes;
+            }
+
+            if (text_start + text_len > blob_len)
+                text_len = blob_len - text_start;
+            if (text_len >= out_cap)
+                text_len = out_cap - 1;
+            memcpy(out, blob + text_start, text_len);
+            out[text_len] = '\0';
+            return text_len;
+        }
+    }
+    return 0;
 }

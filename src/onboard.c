@@ -649,10 +649,18 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         autoresponder_enabled = false;
 
     if (autoresponder_enabled) {
-        /* Detect user's own iMessage handle for allowlist. */
+        /* Detect user's own iMessage handle for allowlist. The detector
+         * reads chat.db and is only compiled under HU_HAS_IMESSAGE; on
+         * builds without it (minimal / no-sqlite / non-Apple CI variants)
+         * fall through to manual handle entry below. */
         char detected_handle[256] = "";
+#ifdef HU_HAS_IMESSAGE
         hu_error_t detect_err =
             hu_imessage_detect_self_handle(alloc, detected_handle, sizeof(detected_handle));
+#else
+        hu_error_t detect_err = HU_ERR_NOT_SUPPORTED;
+        (void)alloc;
+#endif
 
         if (detect_err == HU_OK && detected_handle[0]) {
             printf("Detected your iMessage handle: %s\n", detected_handle);

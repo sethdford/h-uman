@@ -171,11 +171,48 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
         char ts[32];
         time_t t = time(NULL);
         struct tm *tm = gmtime(&t);
-        if (tm)
-            snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02dZ", tm->tm_year + 1900,
-                     tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-        else
+        if (tm) {
+            /* Clamp every field to its valid range before formatting. gmtime()
+             * already produces in-range values, but GCC's -Wformat-truncation
+             * pass treats struct tm int members as unbounded and cannot prove
+             * the ISO-8601 directives fit in ts[32], failing the arm64 -Werror
+             * build. Clamping fixes each directive's width (total 20 chars) and
+             * hardens against a corrupt tm struct. */
+            int year = tm->tm_year + 1900;
+            if (year < 0)
+                year = 0;
+            if (year > 9999)
+                year = 9999;
+            int mon = tm->tm_mon + 1;
+            if (mon < 1)
+                mon = 1;
+            if (mon > 12)
+                mon = 12;
+            int mday = tm->tm_mday;
+            if (mday < 1)
+                mday = 1;
+            if (mday > 31)
+                mday = 31;
+            int hour = tm->tm_hour;
+            if (hour < 0)
+                hour = 0;
+            if (hour > 23)
+                hour = 23;
+            int minute = tm->tm_min;
+            if (minute < 0)
+                minute = 0;
+            if (minute > 59)
+                minute = 59;
+            int sec = tm->tm_sec;
+            if (sec < 0)
+                sec = 0;
+            if (sec > 60) /* allow a leap second */
+                sec = 60;
+            snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02dZ", year, mon, mday, hour,
+                     minute, sec);
+        } else {
             snprintf(ts, sizeof(ts), "%ld", (long)t);
+        }
         e->timestamp = hu_strndup(self->alloc, ts, strlen(ts));
     }
     return HU_OK;

@@ -47,39 +47,10 @@
 #define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
 #define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
 
-size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blob_len, char *out,
-                                           size_t out_cap) {
-    if (!blob || blob_len < 4 || !out || out_cap < 2)
-        return 0;
-
-    for (size_t i = 0; i + 3 < blob_len; i++) {
-        if (blob[i] == 0x01 && blob[i + 1] == 0x2B) {
-            size_t text_len = 0;
-            size_t text_start = 0;
-            unsigned char lb = blob[i + 2];
-            if (lb < 0x80) {
-                text_len = lb;
-                text_start = i + 3;
-            } else {
-                size_t len_bytes = lb & 0x7F;
-                if (len_bytes == 0 || len_bytes > 4 || i + 3 + len_bytes > blob_len)
-                    return 0;
-                for (size_t b = 0; b < len_bytes; b++)
-                    text_len |= (size_t)blob[i + 3 + b] << (8 * b);
-                text_start = i + 3 + len_bytes;
-            }
-
-            if (text_start + text_len > blob_len)
-                text_len = blob_len - text_start;
-            if (text_len >= out_cap)
-                text_len = out_cap - 1;
-            memcpy(out, blob + text_start, text_len);
-            out[text_len] = '\0';
-            return text_len;
-        }
-    }
-    return 0;
-}
+/* hu_imessage_extract_attributed_body now lives in src/util/typedstream.c
+ * (unconditionally compiled) so unconditional callers like
+ * src/channels/imessage_ingest.c resolve it even when HU_HAS_IMESSAGE=OFF.
+ * The prototype remains in include/human/channels/imessage.h. */
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
 static void imessage_rowid_path(char *buf, size_t cap) {

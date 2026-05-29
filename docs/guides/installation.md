@@ -1,3 +1,9 @@
+---
+title: Installation Guide for Human
+created: 2026-05-24
+status: operator-facing
+---
+
 # Installation Guide for Human
 
 **Last updated:** May 2026 (human 0.1.0+)

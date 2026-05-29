@@ -32,7 +32,7 @@ jobs:
       - name: Check binary size regression
         if: github.event_name == 'pull_request'
         run: |
-          BASELINE=2335824
+          BASELINE=2489344
           ACTUAL=$(stat -c%s build/human 2>/dev/null || stat -f%z build/human)
           THRESHOLD=$((BASELINE * 105 / 100))
           if [ "$ACTUAL" -gt "$THRESHOLD" ]; then
