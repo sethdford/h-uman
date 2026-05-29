@@ -310,6 +310,20 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                            hu_json_number_new(alloc, (double)request->max_tokens));
     }
 
+    /* Activation-steering coefficients (on-device serving only). The agent
+     * computes these from the persona overlay; the provider just serializes
+     * them. Absent field => server no-op. Only the validated traits are sent. */
+    if (request->steering_present) {
+        hu_json_value_t *steering = hu_json_object_new(alloc);
+        if (steering) {
+            hu_json_object_set(alloc, steering, "formality",
+                               hu_json_number_new(alloc, request->steer_formality));
+            hu_json_object_set(alloc, steering, "verbosity",
+                               hu_json_number_new(alloc, request->steer_verbosity));
+            hu_json_object_set(alloc, root, "steering", steering);
+        }
+    }
+
     /* On-device streaming hint (gemma-realtime Option B). Tri-state: emit a
      * boolean only when the router has an opinion; omit otherwise so the
      * server falls through to its HU_STREAM_BUFFER_STRIP env / model default.

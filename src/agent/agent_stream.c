@@ -1463,6 +1463,27 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * server, which is the only consumer of stream_strip on the wire. */
         req.stream_strip = hu_model_tier_stream_strip(early_tier);
 
+        /* Activation steering (default off): map the active persona overlay's
+         * traits to residual-stream steering coefficients for the local model.
+         * Only the OpenAI-compatible (local) provider serializes req.steer_*;
+         * cloud providers never read these fields, so this is inert off-device.
+         * Validated traits only (formality, verbosity); hu_persona_steering_coeffs
+         * and the server both clamp to the measured-safe [-1,1] envelope. */
+        if (agent->config && agent->config->agent.activation_steering_enabled && agent->persona) {
+            const hu_persona_overlay_t *steer_ov = hu_persona_find_overlay(
+                agent->persona, agent->active_channel, agent->active_channel_len);
+            if (steer_ov) {
+                double sf = 0.0, sv = 0.0;
+                hu_persona_steering_coeffs(steer_ov->formality, steer_ov->avg_length, 1.0, &sf,
+                                           &sv);
+                if (sf != 0.0 || sv != 0.0) {
+                    req.steering_present = true;
+                    req.steer_formality = sf;
+                    req.steer_verbosity = sv;
+                }
+            }
+        }
+
         /* Buffer provider text until the final content clears guards. Tool
          * events still stream through stream_chunk_to_event_cb. */
         bool quality_buffered = (on_event != NULL);
