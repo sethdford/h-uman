@@ -786,6 +786,7 @@ void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+void run_daemon_director_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
  * gate here so the forward decl + call site don't reference a missing
@@ -1689,6 +1690,7 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+    run_daemon_director_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
 #endif
