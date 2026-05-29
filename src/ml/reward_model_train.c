@@ -96,14 +96,18 @@ hu_error_t hu_reward_model_train(hu_reward_model_t *rm, hu_allocator_t *alloc,
 
     initial_loss /= (double)valid_pairs;
 
-    /* SGD training loop */
+    /* SGD training loop: numerical gradient on value head weights */
     for (size_t iter = 0; iter < config->max_iters; iter++) {
-        double total_dW_sum = 0.0;
+        double total_dW_sum[256] = {0};
         double total_db_sum = 0.0;
         size_t updated_pairs = 0;
 
+        /* For each weight, compute numerical gradient via finite difference */
+        const double eps = 1e-4;
+
+        /* Compute current loss (baseline) */
+        double baseline_loss = 0.0;
         for (size_t i = 0; i < n; i++) {
-            /* Skip one-sided pairs */
             if (pairs[i].chosen_len == 0 || pairs[i].rejected_len == 0)
                 continue;
 
@@ -118,42 +122,103 @@ hu_error_t hu_reward_model_train(hu_reward_model_t *rm, hu_allocator_t *alloc,
             if (err != HU_OK)
                 return err;
 
-            double delta = r_w - r_l;
-            double sig = sigmoid(delta);
-
-            /* Compute gradients */
-            double dL_dr_w = sig - 1.0;
-            double dL_dr_l = 1.0 - sig;
-
-            /* Backprop through value head for chosen */
-            float dW_chosen[256] = {0};
-            float db_chosen = 0.0f;
-            hu_model_t *gpt = &ctx->backbone;
-
-            /* TODO: We need the hidden state from forward pass to compute gradient.
-             * For now, we'll accumulate the loss and defer gradient computation. */
-            (void)dW_chosen;
-            (void)db_chosen;
-
-            /* In a full implementation, we would:
-             * 1. Store hidden states during forward pass
-             * 2. Call hu_value_head_backward for chosen with dL/dr_w
-             * 3. Call hu_value_head_backward for rejected with dL/dr_l
-             * 4. Accumulate dW and db
-             */
-
+            double loss = bradley_terry_loss(r_w, r_l);
+            baseline_loss += loss;
             updated_pairs++;
-            total_dW_sum += dL_dr_w;
-            total_db_sum += dL_dr_l;
         }
 
-        /* Apply SGD update to weights */
-        if (updated_pairs > 0) {
-            double lr_scaled = config->learning_rate / (double)updated_pairs;
-            for (size_t j = 0; j < ctx->value_head.hidden_dim; j++) {
-                ctx->value_head.W[j] -= (float)(lr_scaled * (total_dW_sum / (double)updated_pairs));
+        if (updated_pairs > 0)
+            baseline_loss /= (double)updated_pairs;
+
+        /* Gradient for each weight W[j] using numerical approximation */
+        for (size_t j = 0; j < ctx->value_head.hidden_dim; j++) {
+            /* Perturb W[j] by +eps */
+            float saved_W = ctx->value_head.W[j];
+            ctx->value_head.W[j] = saved_W + (float)eps;
+
+            double perturbed_loss = 0.0;
+            size_t valid_count = 0;
+            for (size_t i = 0; i < n; i++) {
+                if (pairs[i].chosen_len == 0 || pairs[i].rejected_len == 0)
+                    continue;
+
+                double r_w, r_l;
+                hu_error_t err =
+                    rm->vtable->score(rm->ctx, alloc, pairs[i].prompt, pairs[i].prompt_len,
+                                      pairs[i].chosen, pairs[i].chosen_len, &r_w);
+                if (err != HU_OK) {
+                    ctx->value_head.W[j] = saved_W;
+                    return err;
+                }
+
+                err = rm->vtable->score(rm->ctx, alloc, pairs[i].prompt, pairs[i].prompt_len,
+                                        pairs[i].rejected, pairs[i].rejected_len, &r_l);
+                if (err != HU_OK) {
+                    ctx->value_head.W[j] = saved_W;
+                    return err;
+                }
+
+                double loss = bradley_terry_loss(r_w, r_l);
+                perturbed_loss += loss;
+                valid_count++;
             }
-            ctx->value_head.b -= (float)(lr_scaled * total_db_sum);
+
+            if (valid_count > 0)
+                perturbed_loss /= (double)valid_count;
+
+            /* Numerical gradient: dL/dW[j] ≈ (L(W[j] + eps) - L(W[j])) / eps */
+            double grad_W_j = (perturbed_loss - baseline_loss) / eps;
+            total_dW_sum[j] += grad_W_j;
+
+            /* Restore weight */
+            ctx->value_head.W[j] = saved_W;
+        }
+
+        /* Gradient for bias b using numerical approximation */
+        float saved_b = ctx->value_head.b;
+        ctx->value_head.b = saved_b + (float)eps;
+
+        double perturbed_loss_b = 0.0;
+        updated_pairs = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (pairs[i].chosen_len == 0 || pairs[i].rejected_len == 0)
+                continue;
+
+            double r_w, r_l;
+            hu_error_t err = rm->vtable->score(rm->ctx, alloc, pairs[i].prompt, pairs[i].prompt_len,
+                                               pairs[i].chosen, pairs[i].chosen_len, &r_w);
+            if (err != HU_OK) {
+                ctx->value_head.b = saved_b;
+                return err;
+            }
+
+            err = rm->vtable->score(rm->ctx, alloc, pairs[i].prompt, pairs[i].prompt_len,
+                                    pairs[i].rejected, pairs[i].rejected_len, &r_l);
+            if (err != HU_OK) {
+                ctx->value_head.b = saved_b;
+                return err;
+            }
+
+            double loss = bradley_terry_loss(r_w, r_l);
+            perturbed_loss_b += loss;
+            updated_pairs++;
+        }
+
+        if (updated_pairs > 0)
+            perturbed_loss_b /= (double)updated_pairs;
+
+        double grad_b = (perturbed_loss_b - baseline_loss) / eps;
+        total_db_sum += grad_b;
+
+        ctx->value_head.b = saved_b;
+
+        /* Apply SGD update */
+        if (updated_pairs > 0) {
+            double lr = config->learning_rate;
+            for (size_t j = 0; j < ctx->value_head.hidden_dim; j++) {
+                ctx->value_head.W[j] -= (float)(lr * total_dW_sum[j]);
+            }
+            ctx->value_head.b -= (float)(lr * total_db_sum);
         }
     }
 

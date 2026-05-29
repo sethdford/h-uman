@@ -655,7 +655,13 @@ void run_cli_dpo_tests(void);
 void run_value_head_tests(void);
 /* Phase 3 Task 2 (RL SOTA): HUML reward model factory + scoring +
  * batch scoring. */
+#ifdef HU_ENABLE_ML
 void run_reward_model_huml_tests(void);
+#else
+static inline void run_reward_model_huml_tests(void) {
+    (void)0;
+}
+#endif
 /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke +
  * M3 NaN contract for one-sided KTO pairs. Task 3 will APPEND
  * Bradley-Terry convergence + FD grad check to the same runner. */
