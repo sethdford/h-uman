@@ -3369,6 +3369,10 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_imessage_diagnose.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
+    tests/test_doctor_prompt_budget.c
+    tests/test_outbound_sanitize.c
+    tests/test_daemon_follow_up_watcher.c
+    tests/test_cli_ctl.c
     tests/test_doctor_check_provider.c
     tests/test_doctor_reaction_collection_wired.c
     tests/test_doctor_exit_codes.c
