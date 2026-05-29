@@ -370,6 +370,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/speculative.h"
 #include "human/agent/tree_of_thought.h"
 #include "human/agent/uncertainty.h"
+#include "human/channels/behavior_class.h"
 #if HU_HAS_PWA
 #include "human/pwa_context.h"
 #endif
@@ -379,29 +380,12 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include <string.h>
 #include <time.h>
 
-/* Map active channel name to hu_behavior_input_t.channel_class (policy.h). */
+/* Map active channel name to hu_behavior_input_t.channel_class (policy.h).
+ * Knowledge lives in the Channels context — see channels/behavior_class.c.
+ * Delegation (not inline memcmp) keeps channel identity out of the agent
+ * core; adding a channel is a table row, never an edit here. */
 static int at_behavior_channel_class(const char *cn, size_t cl) {
-    if (!cn || cl == 0) {
-        return 0;
-    }
-    if (cl >= 5 && memcmp(cn, "voice", 5) == 0) {
-        return 1;
-    }
-    if ((cl == 5 && memcmp(cn, "email", 5) == 0) || (cl == 4 && memcmp(cn, "imap", 4) == 0) ||
-        (cl >= 5 && memcmp(cn, "gmail", 5) == 0)) {
-        return 3;
-    }
-    if ((cl >= 8 && memcmp(cn, "telegram", 8) == 0) || (cl >= 7 && memcmp(cn, "discord", 7) == 0) ||
-        (cl >= 5 && memcmp(cn, "slack", 5) == 0) ||
-        (cl >= 10 && memcmp(cn, "mattermost", 10) == 0) ||
-        (cl >= 6 && memcmp(cn, "matrix", 6) == 0) || (cl >= 3 && memcmp(cn, "irc", 3) == 0) ||
-        (cl >= 4 && memcmp(cn, "line", 4) == 0) || (cl >= 4 && memcmp(cn, "lark", 4) == 0) ||
-        (cl >= 9 && memcmp(cn, "messenger", 9) == 0) ||
-        (cl >= 8 && memcmp(cn, "whatsapp", 8) == 0) ||
-        (cl >= 8 && memcmp(cn, "imessage", 8) == 0) || (cl >= 3 && memcmp(cn, "sms", 3) == 0)) {
-        return 2;
-    }
-    return 0;
+    return hu_channel_behavior_class_for_name(cn, cl);
 }
 
 static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, size_t msg_len,
