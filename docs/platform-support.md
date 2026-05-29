@@ -66,7 +66,7 @@ features are available on each platform and what happens when a feature is disab
 
 ### Channel Flags
 
-Each of the 38 channels has its own `HU_ENABLE_<CHANNEL>` flag (e.g.,
+Each channel has its own `HU_ENABLE_<CHANNEL>` flag (e.g.,
 `HU_ENABLE_TELEGRAM`, `HU_ENABLE_DISCORD`). CLI is always ON. Others default
 to OFF unless `HU_ENABLE_ALL_CHANNELS=ON` is set.
 

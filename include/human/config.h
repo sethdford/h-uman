@@ -818,8 +818,8 @@ typedef struct hu_config {
     hu_learning_config_t learning;   /* Spec 2026-05-19 — DPO pair-count training trigger */
     hu_intrinsic_config_t intrinsic; /* A3 — intrinsic motivation (default off) */
     hu_prosocial_routines_config_t prosocial_routines; /* C — scheduled routines (default off) */
-    hu_reflection_loop_config_t reflection_loop; /* M2 reflection-loop */
-    hu_inference_config_t inference;             /* US-7.7 — best-of-N at inference (default off) */
+    hu_reflection_loop_config_t reflection_loop;       /* M2 reflection-loop */
+    hu_inference_config_t inference; /* US-7.7 — best-of-N at inference (default off) */
     hu_behavior_config_t behavior;
     hu_node_entry_t nodes[HU_NODES_MAX];
     size_t nodes_len;

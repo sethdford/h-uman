@@ -4,7 +4,7 @@ title: Prompt Engineering
 
 # Prompt Engineering
 
-Standards for system prompt construction, persona-driven composition, context management, and RAG patterns across all 50+ providers supported by the human runtime.
+Standards for system prompt construction, persona-driven composition, context management, and RAG patterns across all 30+ providers supported by the human runtime.
 
 **Cross-references:** [agent-architecture.md](agent-architecture.md), [conversation-design.md](conversation-design.md), [hallucination-prevention.md](hallucination-prevention.md)
 

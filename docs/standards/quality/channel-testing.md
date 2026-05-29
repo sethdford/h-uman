@@ -4,7 +4,7 @@ title: Channel Testing Checklist
 
 # Channel Testing Checklist
 
-Standards for testing the 38 channel implementations in the human runtime.
+Standards for testing the messaging channel implementations in the human runtime.
 
 **Cross-references:** [../engineering/testing.md](../engineering/testing.md), [../engineering/naming.md](../engineering/naming.md)
 

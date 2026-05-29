@@ -1,4 +1,5 @@
 #include "human/channel.h"
+#include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
 #include "human/config.h"
@@ -302,6 +303,48 @@ static void flat_style_routes_to_send(void) {
     HU_ASSERT(send_calls >= 1);
 }
 
+/* ── BUG #3: threaded-reply parent-match predicate ──────────────────────
+ * hu_imessage_desc_prefix_match must match the parent prefix only when it
+ * begins at a word boundary (kills the wrong-parent mid-token false match),
+ * while still matching a prefix truncated mid-word (trailing unconstrained). */
+
+#if HU_HAS_IMESSAGE /* hu_imessage_desc_prefix_match is defined in the HU_HAS_IMESSAGE-gated \
+                       imessage.c */
+static void desc_prefix_match_at_string_start(void) {
+    /* Prefix begins the haystack — trivially a boundary. */
+    HU_ASSERT_TRUE(hu_imessage_desc_prefix_match("How's st. Pete?", "How's st"));
+}
+
+static void desc_prefix_match_after_separator(void) {
+    /* Real AX description shape: sender/timestamp then ": " then the body.
+     * The prefix begins at a boundary (after the space). */
+    HU_ASSERT_TRUE(hu_imessage_desc_prefix_match("From Alexis at 10:13 AM: How's st", "How's st"));
+}
+
+static void desc_prefix_no_match_mid_token(void) {
+    /* The prefix appears only as a fragment inside a longer word — the
+     * preceding byte is alphanumeric, so it must NOT match (the bug). */
+    HU_ASSERT_FALSE(hu_imessage_desc_prefix_match("everyoneHow's stuff", "How's st"));
+}
+
+static void desc_prefix_match_truncated_mid_word(void) {
+    /* Parent prefix is truncated mid-word ("st" cut from "st. Pete"); the
+     * trailing edge is unconstrained, so it must still match. A both-sided
+     * word-boundary matcher would WRONGLY reject this. */
+    HU_ASSERT_TRUE(hu_imessage_desc_prefix_match(": How's st", "How's st"));
+}
+
+static void desc_prefix_match_null_and_empty_safe(void) {
+    HU_ASSERT_FALSE(hu_imessage_desc_prefix_match(NULL, "x"));
+    HU_ASSERT_FALSE(hu_imessage_desc_prefix_match("hay", NULL));
+    HU_ASSERT_FALSE(hu_imessage_desc_prefix_match("hay", ""));
+}
+
+static void desc_prefix_no_match_absent(void) {
+    HU_ASSERT_FALSE(hu_imessage_desc_prefix_match("totally different message", "How's st"));
+}
+#endif /* HU_HAS_IMESSAGE */
+
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
     HU_RUN_TEST(invalid_args_short_circuit);
@@ -312,4 +355,12 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
+#if HU_HAS_IMESSAGE
+    HU_RUN_TEST(desc_prefix_match_at_string_start);
+    HU_RUN_TEST(desc_prefix_match_after_separator);
+    HU_RUN_TEST(desc_prefix_no_match_mid_token);
+    HU_RUN_TEST(desc_prefix_match_truncated_mid_word);
+    HU_RUN_TEST(desc_prefix_match_null_and_empty_safe);
+    HU_RUN_TEST(desc_prefix_no_match_absent);
+#endif
 }

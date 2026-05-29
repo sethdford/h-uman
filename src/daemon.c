@@ -125,6 +125,10 @@
 
 /* Phase 2 DDD refactor: cross-bucket daemon state */
 #include "human/daemon/common.h"
+#include "human/daemon/message_router.h"
+#include "human/daemon/peripheral_gov.h"
+#include "human/daemon/proactive_policy.h"
+#include "human/daemon/reply_dedup.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
@@ -192,6 +196,46 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 hu_identity_graph_t g_identity_graph;
 bool g_identity_graph_loaded = false;
 
+/* BUG #2: crash-resume outbound reply dedup. Per-contact "highest inbound rowid
+ * replied-to" watermark, persisted to ~/.human/reply_dedup.json. Loaded lazily
+ * on first use, recorded+saved after each successful reactive send, and checked
+ * before processing a batch so a daemon crash between send and poll-watermark
+ * persistence doesn't re-reply on restart. */
+static hu_reply_dedup_t g_reply_dedup;
+static bool g_reply_dedup_loaded;
+
+static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return 0;
+    int n = snprintf(buf, cap, "%s/.human/reply_dedup.json", home);
+    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+}
+
+static void daemon_reply_dedup_ensure_loaded(void) {
+    if (g_reply_dedup_loaded)
+        return;
+    g_reply_dedup_loaded = true; /* set first: absent file is fine, don't retry every batch */
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_load(&g_reply_dedup, path, plen);
+}
+
+/* Record that we replied to `rowid` for `chat_id` and persist immediately, so a
+ * crash before the next poll-watermark save can't cause a duplicate on restart.
+ * Persist is best-effort (a failed save just means at-least-once on that edge). */
+static void daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int64_t rowid) {
+    if (!chat_id || rowid <= 0)
+        return;
+    daemon_reply_dedup_ensure_loaded();
+    hu_reply_dedup_record(&g_reply_dedup, chat_id, chat_id_len, rowid);
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_save(&g_reply_dedup, path, plen);
+}
+
 /* Sprint B.3 D1 — daemon-loaded autoresponder config.
  *
  * Per-channel autoresponder wire-up is deferred (each channel's inbound
@@ -204,6 +248,7 @@ bool g_identity_graph_loaded = false;
  * first-run default (info-level log per silent-config-gated-subsystems
  * rule). */
 #include "human/autoresponder.h"
+#include "human/ml/dpo.h"          /* US-102 mining: production_outcomes → dpo_pairs */
 #include "human/ml/lora_nightly.h" /* N2: nightly LoRA export→train→swap tick */
 static hu_autoresponder_config_t g_autoresponder_cfg;
 static bool g_autoresponder_loaded = false;
@@ -309,118 +354,15 @@ hu_proactive_budget_t gov_budget = {
 };
 bool gov_budget_inited = true;
 
-/* Proactive-style budget for outbound visual attachments (separate from check-in governor). */
-static hu_proactive_budget_t hu_daemon_visual_attach_gov;
-static bool hu_daemon_visual_attach_gov_init;
-
-static bool hu_daemon_visual_attach_gov_allow(uint64_t now_ms) {
-    if (!hu_daemon_visual_attach_gov_init) {
-        hu_proactive_budget_config_t cfg = {
-            .daily_max = 4,
-            .weekly_max = 14,
-            .relationship_multiplier = 1.0,
-            .cool_off_after_unanswered = 255,
-            .cool_off_hours = 0,
-        };
-        hu_governor_init(&cfg, &hu_daemon_visual_attach_gov);
-        hu_daemon_visual_attach_gov_init = true;
-    }
-    return hu_governor_has_budget(&hu_daemon_visual_attach_gov, now_ms);
-}
-
-static void hu_daemon_visual_attach_gov_after_send(uint64_t now_ms) {
-    if (hu_daemon_visual_attach_gov_init)
-        (void)hu_governor_record_sent(&hu_daemon_visual_attach_gov, now_ms);
-}
+/* Visual-attachment send governor (hu_daemon_visual_attach_gov_allow/
+ * _after_send) extracted to src/daemon/daemon_peripheral_gov.c — DDD Phase 2.4.
+ * Declared via human/daemon/peripheral_gov.h. */
 #endif /* !HU_IS_TEST */
 
-#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
-static void cross_channel_format_when(char *out, size_t out_sz, const char *ts) {
-    if (!out || out_sz == 0)
-        return;
-    out[0] = '\0';
-    if (!ts || !ts[0]) {
-        if (out_sz >= 7)
-            memcpy(out, "recent", 7);
-        return;
-    }
-    char ts_work[48];
-    size_t tl = strlen(ts);
-    if (tl >= sizeof(ts_work))
-        tl = sizeof(ts_work) - 1;
-    memcpy(ts_work, ts, tl);
-    ts_work[tl] = '\0';
-
-    struct tm tm_buf;
-    memset(&tm_buf, 0, sizeof(tm_buf));
-    static const char *const fmts[] = {"%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", NULL};
-    time_t msg_t = (time_t)-1;
-    for (int fi = 0; fmts[fi]; fi++) {
-        memset(&tm_buf, 0, sizeof(tm_buf));
-        if (strptime(ts_work, fmts[fi], &tm_buf)) {
-            msg_t = mktime(&tm_buf);
-            if (msg_t != (time_t)-1)
-                break;
-        }
-    }
-    if (msg_t == (time_t)-1) {
-        (void)snprintf(out, out_sz, "%s", ts_work);
-        return;
-    }
-    time_t now = time(NULL);
-    double diff = difftime(now, msg_t);
-    if (diff < 60.0)
-        (void)snprintf(out, out_sz, "just now");
-    else if (diff < 3600.0)
-        (void)snprintf(out, out_sz, "%dm ago", (int)(diff / 60.0));
-    else if (diff < 86400.0)
-        (void)snprintf(out, out_sz, "%dh ago", (int)(diff / 3600.0));
-    else if (diff < 86400.0 * 7.0)
-        (void)snprintf(out, out_sz, "%dd ago", (int)(diff / 86400.0));
-    else
-        (void)snprintf(out, out_sz, "%.10s", ts_work);
-}
-
-static void cross_channel_platform_label(const char *plat, char *out, size_t out_sz) {
-    if (!plat || !out || out_sz < 2) {
-        if (out && out_sz)
-            out[0] = '\0';
-        return;
-    }
-    size_t i = 0;
-    for (; plat[i] && i + 1 < out_sz; i++) {
-        if (i == 0 && plat[i] >= 'a' && plat[i] <= 'z')
-            out[i] = (char)(plat[i] - 'a' + 'A');
-        else
-            out[i] = plat[i];
-    }
-    out[i] = '\0';
-}
-
-static bool daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *buf_len,
-                                         const char *line, size_t line_len) {
-    if (!alloc || !buf || !buf_len || !line || line_len == 0)
-        return true;
-    size_t new_len = *buf_len ? *buf_len + 1 + line_len : line_len;
-    char *n = (char *)alloc->alloc(alloc->ctx, new_len + 1);
-    if (!n)
-        return false;
-    if (*buf && *buf_len > 0) {
-        memcpy(n, *buf, *buf_len);
-        n[*buf_len] = '\n';
-        memcpy(n + *buf_len + 1, line, line_len);
-        n[new_len] = '\0';
-        alloc->free(alloc->ctx, *buf, *buf_len + 1);
-    } else {
-        memcpy(n, line, line_len);
-        n[line_len] = '\0';
-        new_len = line_len;
-    }
-    *buf = n;
-    *buf_len = new_len;
-    return true;
-}
-#endif /* HU_ENABLE_SQLITE && !HU_IS_TEST */
+/* Cross-channel context formatters (hu_daemon_cross_channel_format_when /
+ * _platform_label / hu_daemon_cross_ctx_append_line) extracted to
+ * src/daemon/daemon_message_router.c — DDD Phase 2.5 follow-on.
+ * Declared in human/daemon/message_router.h. */
 
 /* GCC's warn_unused_result is not suppressed by (void) casts */
 #define HU_IGNORE_RESULT(expr)   \
@@ -699,156 +641,9 @@ static void store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memor
 #include "human/core/time.h"
 #include "human/persona/pacing.h"
 
-/* Dispatcher: route iMessage reply through predicate (Phase A) to choose
- * between threaded / flat / tapback based on reply style facts. */
-hu_error_t hu_daemon_dispatch_imessage_reply(
-    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
-    const struct hu_config *config, const char *target, size_t target_len,
-    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
-    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
-    if (!ch || !ch->vtable || !target || !body) {
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    /* Check the action-surface-v2 config gate (A5).  If disabled, do a flat
-     * send and return predictably. Emit one-shot log on first disable. */
-    bool asv2_enabled = (config && config->channels.imessage.action_surface_v2.enabled);
-    if (!asv2_enabled) {
-        static bool warned_once = false;
-        if (!warned_once) {
-            warned_once = true;
-            hu_log_info("human", agent ? agent->observer : NULL,
-                        "action_surface_v2 disabled (iMessage.action_surface_v2.enabled=false); "
-                        "set true in config to enable threaded replies / tapback");
-        }
-        if (ch->vtable->send) {
-            return ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-        }
-        return HU_ERR_NOT_SUPPORTED;
-    }
-
-    /* Build facts from snapshot + persona. */
-    hu_reply_style_facts_t facts;
-    hu_imessage_build_reply_facts((const hu_conversation_snapshot_t *)snapshot, persona, &facts);
-
-    /* Pick style via predicate with seeded RNG. Mixing inferred_message_id
-     * lets tests pin a deterministic seed by varying that parameter; in
-     * production it's the inbound message rowid which varies naturally. */
-    uint64_t rng_seed = (uint64_t)time(NULL) * 1000ULL + (uint64_t)target_len +
-                        (uint64_t)inferred_message_id_for_react;
-    hu_reply_style_t style = hu_imessage_choose_reply_style(&facts, rng_seed);
-
-    /* Pacing (C5) — start. */
-    uint64_t pace_start = 0;
-    hu_persona_pace_reply_start(&pace_start);
-
-    /* Dispatch by style. */
-    hu_error_t err = HU_OK;
-    const char *tier_used = "flat_fallback";
-    switch (style) {
-    case HU_REPLY_STYLE_THREADED: {
-        bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
-        if (threaded_attempted) {
-            err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
-                                    body, body_len);
-            if (err == HU_OK) {
-                tier_used = "threaded";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: threaded reply sent");
-            }
-        }
-        /* Fall through to flat send if (a) reply slot was NULL or
-         * parent_msg_guid wasn't provided (threaded_attempted==false), or
-         * (b) the reply attempt returned non-OK. Always-do-something
-         * contract — never silently no-op. */
-        if (!threaded_attempted || err != HU_OK) {
-            if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-                if (err == HU_OK) {
-                    tier_used = "flat_fallback";
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: threaded unavailable, flat fallback");
-                }
-            }
-        }
-        break;
-    }
-
-    case HU_REPLY_STYLE_FLAT:
-        if (ch->vtable->send) {
-            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-            if (err == HU_OK) {
-                tier_used = "flat";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: flat send");
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK:
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "👍"; /* universal-positive default */
-            err = ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-            if (err == HU_OK) {
-                tier_used = "tapback";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback emoji sent");
-            }
-        }
-        if (err != HU_OK || !ch->vtable->react_emoji) {
-            if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-                if (err == HU_OK) {
-                    tier_used = "flat_fallback";
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: tapback unavailable, flat fallback");
-                }
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
-        /* Both: tapback first (best-effort), then text. */
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "❤️"; /* heart for emotional acknowledgment */
-            (void)ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-        }
-        if (ch->vtable->send) {
-            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-            if (err == HU_OK) {
-                tier_used = "tapback_plus_flat";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback + flat");
-            }
-        }
-        break;
-    }
-
-    /* Pacing — finish (sleep if elapsed < persona.min_reply_delay_ms * 1.2). */
-    if (persona) {
-        hu_persona_pace_reply_finish(persona, pace_start);
-    }
-
-    /* Telemetry: log the action-surface decision + outcome. */
-    if (config) {
-        hu_imessage_action_log_t log_entry = {0};
-        log_entry.ts_unix = (int64_t)time(NULL);
-        /* target_chat_id_hash: for tests, we pass target directly; in production,
-         * the caller would hash it for privacy. */
-        log_entry.target_chat_id_hash = target;
-        log_entry.facts = facts;
-        log_entry.style_chosen = style;
-        log_entry.send_result = (int)err;
-        log_entry.tier_used = tier_used;
-        uint64_t pace_end = hu_time_get_current_ms();
-        log_entry.elapsed_ms = (int)(pace_end - pace_start);
-        (void)hu_imessage_action_log_jsonl(&log_entry);
-    }
-
-    return err;
-}
+/* hu_daemon_dispatch_imessage_reply (iMessage reply-route dispatcher)
+ * extracted to src/daemon/daemon_message_router.c — DDD Phase 2.5.
+ * Public declaration remains in human/daemon.h. */
 
 /* hu_daemon_get_trust_state / _set_trust_state / _trust_count / _trust_reset
  * extracted to src/daemon/daemon_identity.c (Phase 2 DDD split). */
@@ -940,8 +735,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     localtime_r(&now, &tm_now);
     int hour = tm_now.tm_hour;
 
-    /* Only check in during social hours (9am-9pm) */
-    if (hour < 9 || hour > 21)
+    /* Only check in during social hours (9am-9pm) — predicate pinned by
+     * tests/test_proactive_policy.c (DDD Phase 2b scaffold). */
+    if (!hu_daemon_proactive_is_social_hour(hour))
         return;
 
     /* F119 (Pillar 19): Proactive volume governor — check budget before proceeding */
@@ -981,7 +777,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     static char g_sent_important_date_contacts[8][64];
     static int g_sent_important_date_count = 0;
     static int g_sent_important_date_ymd = -1;
-    int today_ymd = (tm_now.tm_year + 1900) * 10000 + (tm_now.tm_mon + 1) * 100 + tm_now.tm_mday;
+    int today_ymd = hu_daemon_proactive_ymd_from_tm(&tm_now);
     if (g_sent_important_date_ymd != today_ymd) {
         g_sent_important_date_ymd = today_ymd;
         g_sent_important_date_count = 0;
@@ -4257,6 +4053,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                   ? hu_sqlite_memory_get_db(agent->memory)
                                                   : NULL;
                                 if (db) {
+                                    /* AC-105.2 / AC-102.7: mine fresh production_outcomes into
+                                     * dpo_pairs BEFORE counting + training, so the nightly run
+                                     * trains on the latest implicit feedback. This closes the
+                                     * learning loop in production: outbound outcome → implicit
+                                     * signal → mining → dpo_pair → nightly train → hot-swap. */
+                                    int mined_pairs = 0;
+                                    hu_error_t mine_err = hu_dpo_collector_mine_pairs_from_outcomes(
+                                        db, INT_MAX, &mined_pairs);
+                                    if (mine_err == HU_OK && mined_pairs > 0) {
+                                        hu_log_info("lora-nightly", agent ? agent->observer : NULL,
+                                                    "mined %d DPO pair(s) from production_outcomes",
+                                                    mined_pairs);
+                                    }
+
                                     const char *count_sql = "SELECT COUNT(*) FROM dpo_pairs";
                                     sqlite3_stmt *stmt = NULL;
                                     if (sqlite3_prepare_v2(db, count_sql, -1, &stmt, NULL) ==
@@ -5454,6 +5264,31 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_log_error("human", agent ? agent->observer : NULL,
                                          "ignoring message from self: %.*s",
                                          (int)(key_len > 20 ? 20 : key_len), batch_key);
+                        continue;
+                    }
+                }
+
+                /* BUG #2: crash-resume dedup. If we already replied to this
+                 * inbound (rowid) for this contact in a prior daemon life, skip
+                 * to avoid a duplicate message. The watermark is persisted only
+                 * AFTER a successful send, so a brand-new inbound (rowid above
+                 * the watermark) always proceeds — no dropped replies.
+                 *
+                 * Key on batch_end (the HIGHEST rowid in the batch), matching
+                 * the "highest inbound rowid replied to" watermark contract in
+                 * reply_dedup.h. Using batch_start (lowest) would skip the whole
+                 * batch whenever its first message was already replied — silently
+                 * dropping any newer messages appended to the batch on a
+                 * crash-then-restart-with-new-tail replay. */
+                if (msgs[batch_end].message_id > 0) {
+                    daemon_reply_dedup_ensure_loaded();
+                    if (hu_daemon_already_replied(&g_reply_dedup, batch_key, key_len,
+                                                  (int64_t)msgs[batch_end].message_id)) {
+                        hu_log_info(
+                            "human", agent ? agent->observer : NULL,
+                            "reply-dedup: already replied to %.*s rowid=%lld — skip (crash replay)",
+                            (int)(key_len > 20 ? 20 : key_len), batch_key,
+                            (long long)msgs[batch_end].message_id);
                         continue;
                     }
                 }
@@ -6679,19 +6514,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         if (oh == HU_OK && oent && onc > 0) {
                                             size_t start = onc > 5 ? onc - 5 : 0;
                                             char plabel[64];
-                                            cross_channel_platform_label(oname, plabel,
-                                                                         sizeof(plabel));
+                                            hu_daemon_cross_channel_platform_label(oname, plabel,
+                                                                                   sizeof(plabel));
                                             for (size_t ei = start; ei < onc; ei++) {
                                                 char when[48];
-                                                cross_channel_format_when(when, sizeof(when),
-                                                                          oent[ei].timestamp);
+                                                hu_daemon_cross_channel_format_when(
+                                                    when, sizeof(when), oent[ei].timestamp);
                                                 const char *role = oent[ei].from_me ? " (you)" : "";
                                                 char line[768];
                                                 int lw = snprintf(line, sizeof(line),
                                                                   "[From %s, %s]%s %s", plabel,
                                                                   when, role, oent[ei].text);
                                                 if (lw > 0 && (size_t)lw < sizeof(line)) {
-                                                    (void)daemon_cross_ctx_append_line(
+                                                    (void)hu_daemon_cross_ctx_append_line(
                                                         alloc, &cross_channel_ctx,
                                                         &cross_channel_ctx_len, line, (size_t)lw);
                                                 }
@@ -12121,6 +11956,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     key_len > 0) {
                     hu_contact_send_recency_record(&agent->contact_send_recency, batch_key, key_len,
                                                    (int64_t)time(NULL), HU_SEND_PATH_REACTIVE);
+                    /* BUG #2: persist the replied-to inbound rowid AFTER a
+                     * successful send so a crash before the poll-watermark save
+                     * can't re-reply on restart. Persist-after-send keeps the
+                     * contract at-least-once + dedup-on-replay (no dropped
+                     * replies). Record batch_end (the HIGHEST rowid in the batch
+                     * we just replied to) so the monotonic watermark reflects the
+                     * whole batch — matching reply_dedup.h's "highest inbound
+                     * rowid replied to" contract and the dedup check above. */
+                    daemon_reply_dedup_mark(batch_key, key_len,
+                                            (int64_t)msgs[batch_end].message_id);
                 }
 
                 /* Store conversation summary as long-term memory */
@@ -12253,6 +12098,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         agent->prosocial_pending_directive_len = wlen;
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                /* A1 conviction loop: close the belief-update wire. After capturing
+                 * any NEW opinions above, evaluate whether the USER's message this
+                 * turn carried genuine evidence that should move a HELD belief
+                 * (strengthen / weaken / flip). The reassertion veto
+                 * (&agent->pressure_history) keeps mere repetition from caving us;
+                 * belief_changes_this_convo enforces the per-conversation cap.
+                 * On a change, stash the shift directive so the NEXT turn can
+                 * acknowledge it ("I've been rethinking this...") — consumed +
+                 * freed in agent_turn.c. Guard against overwriting an unconsumed
+                 * directive (would leak). Spec: docs/plans/2026-05-29-conviction-loop/. */
+                if (err == HU_OK && response && response_len > 0 && agent->memory &&
+                    combined_len > 0 && !agent->belief_pending_directive) {
+                    sqlite3 *bel_db = hu_sqlite_memory_get_db(agent->memory);
+                    if (bel_db) {
+                        char *bel_dir = NULL;
+                        size_t bel_dir_len = 0;
+                        bool bel_changed = false;
+                        (void)hu_belief_update_evaluate_turn(
+                            alloc, bel_db, &agent->pressure_history, combined, combined_len,
+                            agent->belief_changes_this_convo, (int64_t)time(NULL), &bel_dir,
+                            &bel_dir_len, &bel_changed);
+                        if (bel_changed) {
+                            agent->belief_changes_this_convo++;
+                            if (bel_dir && bel_dir_len > 0) {
+                                agent->belief_pending_directive = bel_dir;
+                                agent->belief_pending_directive_len = bel_dir_len;
+                            } else if (bel_dir) {
+                                alloc->free(alloc->ctx, bel_dir, bel_dir_len + 1);
                             }
                         }
                     }
@@ -13329,7 +13207,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     alloc->free(alloc->ctx, fragments[f].text,
                                                 fragments[f].text_len + 1);
                             }
-                        } else {
+                        } else if (hu_daemon_should_send_whole_reply_fallback(use_choreography,
+                                                                              frag_count)) {
+                            /* Whole-message fallback: only when neither the
+                             * choreography path NOR the fragment-split path has
+                             * already delivered the reply. Without this guard, a
+                             * choreography-planned reply (sent as N segments
+                             * above) was ALSO re-sent here in full, producing
+                             * duplicate messages to the recipient (the "Alexis"
+                             * double-reply bug). Predicate in
+                             * human/daemon/common.h, pinned by
+                             * tests/test_daemon_reply_fallback.c. */
 #ifndef HU_IS_TEST
                             {
                                 const char *eff =
@@ -13559,8 +13447,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : agent->provider.vtable;
                     void *dt_ctx = (llm_decides && g_classify_provider_ok) ? g_classify_provider.ctx
                                                                            : agent->provider.ctx;
+                    /* One-emission-per-turn (2026-05-29 policy): suppress the
+                     * double-text afterthought when a reactive reply already
+                     * fired for this contact this turn — same FU-1 defer gate
+                     * the proactive paths use, so the reply doesn't pile into a
+                     * multi-bubble burst. */
                     if (response && response_len > 0 && agent->persona &&
-                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system) {
+                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system &&
+                        !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                          key_len, (int64_t)time(NULL))) {
                         float dt_prob = agent->persona->humanization.double_text_probability;
                         uint32_t dt_seed = (uint32_t)time(NULL) * 1103515245u + 12345u +
                                            (uint32_t)(uintptr_t)response;
@@ -13630,7 +13525,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Self-reaction: occasionally haha/emphasize own message (~2%).
                  * Skip for groups: get_latest_sent_rowid uses handle.id SQL. */
                 if (response && response_len > 0 && ch->channel->vtable->react &&
-                    !msgs[batch_start].is_group) {
+                    !msgs[batch_start].is_group &&
+                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                      key_len, (int64_t)time(NULL))) {
                     hu_reaction_type_t self_r = hu_conversation_classify_self_reaction(
                         response, response_len, (uint32_t)time(NULL));
                     if (self_r != HU_REACTION_NONE) {
@@ -13716,7 +13613,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* GIF reaction: send a GIF when the moment calls for it */
                 bool gif_sent_this_turn = false;
-                if (combined_len > 0 && ch->channel->vtable->send) {
+                if (combined_len > 0 && ch->channel->vtable->send &&
+                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                      key_len, (int64_t)time(NULL))) {
                     float gif_prob = 0.10f;
                     const char *contact_rel = NULL;
                     size_t contact_rel_len = 0;

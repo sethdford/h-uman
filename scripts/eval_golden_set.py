@@ -9,6 +9,31 @@ import sys
 from pathlib import Path
 
 
+PROJECT_ID = (os.environ.get("GOOGLE_CLOUD_PROJECT")
+              or os.environ.get("GCLOUD_PROJECT")
+              or "johnb-2025")
+# GA default per CLAUDE.md canonical lineup. Vertex/ADC only — no API keys.
+EVAL_MODEL = "gemini-3.5-flash"
+
+
+def _get_adc_token():
+    """Application Default Credentials bearer token, or None if unavailable
+    (so the golden-set eval degrades gracefully to the smoke check in CI)."""
+    try:
+        out = subprocess.run(
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _vertex_url():
+    return (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/"
+            f"locations/global/publishers/google/models/{EVAL_MODEL}:generateContent")
+
+
 def load_golden_set(path: str) -> list:
     cases = []
     with open(path, encoding="utf-8") as f:
@@ -62,8 +87,8 @@ def smoke_check(response: str, expected_topics: list, min_relevance: int) -> dic
 
 def gemini_eval(response: str, input_text: str, expected_topics: list) -> dict | None:
     """Call Gemini API to score response. Returns dict with relevance, tone, factual or None on failure."""
-    key = os.environ.get("GEMINI_EVAL_KEY")
-    if not key:
+    token = _get_adc_token()
+    if not token:
         return None
     try:
         import urllib.request
@@ -75,14 +100,38 @@ def gemini_eval(response: str, input_text: str, expected_topics: list) -> dict |
             f"Response: {response[:2000]}\n"
             f"Return JSON: {{\"relevance\": N, \"tone\": N, \"factual\": N}}"
         )
+        # Structured output: constrain the judge to bare JSON instead of
+        # fence-stripping free text (see eval_humanness.py reference pattern).
+        score_schema = {
+            "type": "object",
+            "properties": {
+                "relevance": {"type": "integer", "minimum": 1, "maximum": 10},
+                "tone": {"type": "integer", "minimum": 1, "maximum": 10},
+                "factual": {"type": "integer", "minimum": 1, "maximum": 10},
+            },
+            "required": ["relevance", "tone", "factual"],
+            "propertyOrdering": ["relevance", "tone", "factual"],
+        }
         body = json.dumps({
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0, "maxOutputTokens": 64},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0,
+                "maxOutputTokens": 256,
+                # Gemini 3.x shares maxOutputTokens between invisible thinking
+                # and the visible reply; disable thinking so the small JSON
+                # score object is never starved (finishReason MAX_TOKENS).
+                "thinkingConfig": {"thinkingBudget": 0},
+                "responseMimeType": "application/json",
+                "responseSchema": score_schema,
+            },
         }).encode()
         req = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}",
+            _vertex_url(),
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=30) as resp:

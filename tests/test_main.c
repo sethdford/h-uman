@@ -39,6 +39,7 @@ void run_io_secure_tests(void);
 void run_config_banner_runtime_failfast_tests(void);
 void run_slice_tests(void);
 void run_tool_registry_honesty_tests(void);
+void run_contextual_bandit_tests(void);
 void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
 void run_mlx_load_adapter_tests(void);
@@ -223,7 +224,9 @@ void run_behavior_prosocial_tests(void);
 void run_win_detect_tests(void);
 void run_prosocial_moment_tests(void);
 void run_celebration_tests(void);
+#ifdef HU_ENABLE_SQLITE
 void run_celebration_repo_tests(void);
+#endif
 void run_behavior_prompt_tests(void);
 void run_behavior_support_strategy_tests(void);
 void run_behavior_trust_tests(void);
@@ -666,6 +669,15 @@ void run_cli_dpo_tests(void);
 /* Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
  * check + save/load round trip. */
 void run_value_head_tests(void);
+/* Phase 3 Task 2 (RL SOTA): HUML reward model factory + scoring +
+ * batch scoring. */
+#ifdef HU_ENABLE_ML
+void run_reward_model_huml_tests(void);
+#else
+static inline void run_reward_model_huml_tests(void) {
+    (void)0;
+}
+#endif
 /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke +
  * M3 NaN contract for one-sided KTO pairs. Task 3 will APPEND
  * Bradley-Terry convergence + FD grad check to the same runner. */
@@ -734,6 +746,9 @@ void run_self_rag_tests(void);
 void run_memory_tiers_tests(void);
 void run_process_reward_tests(void);
 void run_dpo_tests(void);
+void run_dpo_collector_tests(void);
+void run_proactive_outcomes_tests(void);
+void run_e2e_learning_loop_tests(void);
 void run_sota_e2e_tests(void);
 void run_sota_adversarial_tests(void);
 void run_otel_tests(void);
@@ -802,6 +817,9 @@ void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+void run_daemon_reply_fallback_tests(void);
+void run_reply_dedup_tests(void);
+void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
@@ -863,6 +881,7 @@ void run_audio_emotion_tests(void);
 void run_style_adapter_tests(void);
 void run_lora_export_tests(void);
 void run_lora_nightly_tests(void);
+void run_adapter_swap_tests(void);
 void run_lora_subprocess_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
@@ -1007,6 +1026,7 @@ int main(int argc, char **argv) {
     run_config_banner_runtime_failfast_tests();
     run_slice_tests();
     run_tool_registry_honesty_tests();
+    run_contextual_bandit_tests();
     run_memory_tests();
     run_w7_render_null_safety_tests();
     run_mlx_load_adapter_tests();
@@ -1168,7 +1188,7 @@ int main(int argc, char **argv) {
     run_celebration_tests();
     run_prosocial_moment_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_celebration_repo_tests(); /* defined in SQLITE-gated test_celebration_repo.c */
+    run_celebration_repo_tests();
 #endif
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();
@@ -1590,6 +1610,8 @@ int main(int argc, char **argv) {
     /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
      * backward (analytical + finite-diff grad check), save/load round trip. */
     run_value_head_tests();
+    /* Phase 3 Task 2 (RL SOTA): HUML reward model factory + scoring. */
+    run_reward_model_huml_tests();
     /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t vtable + HUML factory
      * (toy GPT + Task 1 value head). Smoke score-returns-finite + M3
      * NaN contract for one-sided KTO pairs in score_batch. */
@@ -1650,6 +1672,9 @@ int main(int argc, char **argv) {
     run_memory_tiers_tests();
     run_process_reward_tests();
     run_dpo_tests();
+    run_dpo_collector_tests();
+    run_proactive_outcomes_tests();
+    run_e2e_learning_loop_tests();
     run_sota_e2e_tests();
     run_sota_adversarial_tests();
     run_otel_tests();
@@ -1724,6 +1749,9 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+    run_daemon_reply_fallback_tests();
+    run_reply_dedup_tests();
+    run_proactive_policy_tests();
     run_daemon_director_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
@@ -1775,6 +1803,7 @@ int main(int argc, char **argv) {
     run_style_adapter_tests();
     run_lora_export_tests();
     run_lora_nightly_tests();
+    run_adapter_swap_tests();
     run_lora_subprocess_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();

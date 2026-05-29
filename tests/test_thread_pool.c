@@ -1,6 +1,5 @@
-/* glibc gates pthread_getattr_np (used in the Linux branch of probe_stack_size)
- * behind _GNU_SOURCE; define it before any include so the declaration is
- * visible on Linux. macOS ignores it and uses the __APPLE__ branch. */
+/* _GNU_SOURCE: declares pthread_getattr_np on glibc (Linux/nix non-Apple
+ * branch below). Must precede all includes. macOS uses pthread_get_stacksize_np. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
