@@ -610,11 +610,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     }
                 }
             }
-            /* RAG-over-own-messages voice grounding (A/B-gated, default off):
-             * retrieve Seth's most-similar real past messages to THIS incoming
-             * message and inject them as dynamic few-shot grounding — the SOTA
-             * RAG leg alongside the fine-tuned adapter + personal model. */
-            if (agent->config && agent->config->agent.rag_grounding_enabled) {
+            /* RAG-over-own-messages voice grounding (default off): retrieve
+             * Seth's most-similar real past messages to THIS incoming message and
+             * inject them as dynamic few-shot grounding — the SOTA RAG leg next to
+             * the fine-tuned adapter + personal model.
+             *
+             * Register-conditional (live A/B 2026-05-29, rag-ab-live-verdict.json):
+             * RAG grounding HELPS the substantive register (+0.110) but slightly
+             * hurts casual (-0.078, richer context fights curt brevity). So gate it
+             * on ANALYTICAL/DEEP turns only; REFLEXIVE/CONVERSATIONAL and unknown
+             * tier (turn_tier < 0) skip it. */
+            if (agent->config && agent->config->agent.rag_grounding_enabled &&
+                agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
                 const char *home = getenv("HOME");
                 if (home && *home) {
                     char qbuf[512];
