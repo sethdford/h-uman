@@ -88,6 +88,7 @@
 #include "human/inspiration.h"
 #include "human/tools/image_gen.h"
 #include "human/tools/validation.h"
+#include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
@@ -13743,14 +13744,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (uint32_t)time(NULL) * 16807u + (uint32_t)(uintptr_t)combined;
                     if (hu_conversation_should_send_music(combined, combined_len, history_entries,
                                                           history_count, music_seed, music_prob)) {
+                        const char *yt_key =
+                            config ? hu_config_get_provider_key(config, "youtube") : NULL;
+                        hu_inspiration_medium_t medium =
+                            hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);
+
                         /* Build taste-enriched prompt */
                         char taste_snippet[256] = {0};
                         size_t taste_len = hu_music_taste_build_prompt(
                             batch_key, key_len, taste_snippet, sizeof(taste_snippet));
 
                         char music_prompt[768];
-                        size_t mp_len = hu_conversation_build_music_prompt(
-                            combined, combined_len, music_prompt, sizeof(music_prompt));
+                        size_t mp_len;
+                        if (medium == HU_INSPIRATION_MUSIC) {
+                            mp_len = hu_conversation_build_music_prompt(
+                                combined, combined_len, music_prompt, sizeof(music_prompt));
+                        } else {
+                            size_t clip = combined_len > 200 ? 200 : combined_len;
+                            int pn =
+                                snprintf(music_prompt, sizeof(music_prompt),
+                                         "Recent message context: \"%.*s\"", (int)clip, combined);
+                            mp_len = (pn > 0 && (size_t)pn < sizeof(music_prompt)) ? (size_t)pn : 0;
+                        }
 
                         /* Append taste context to prompt if available */
                         if (taste_len > 0 && mp_len > 0 &&
@@ -13785,19 +13800,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->provider.vtable->chat_with_system) {
                             char *music_suggestion = NULL;
                             size_t music_suggestion_len = 0;
-                            static const char music_sys[] =
-                                "Suggest ONE song that fits the conversation mood. "
-                                "Return in this exact format:\n"
-                                "ARTIST - TITLE | your brief casual message\n"
-                                "Example: Radiohead - Everything In Its Right Place | "
-                                "this track is perfect for right now\n"
-                                "Keep the message under 80 chars. No quotes, no URLs.";
+                            const char *insp_sys = hu_inspiration_system_prompt(medium);
                             const char *music_model = agent->model_name
                                                           ? agent->model_name
                                                           : "gemini-3.1-flash-lite-preview";
                             size_t music_model_len = agent->model_name ? agent->model_name_len : 31;
                             (void)agent->provider.vtable->chat_with_system(
-                                agent->provider.ctx, alloc, music_sys, sizeof(music_sys) - 1,
+                                agent->provider.ctx, alloc, insp_sys, strlen(insp_sys),
                                 music_prompt, mp_len, music_model, music_model_len, 0.9,
                                 &music_suggestion, &music_suggestion_len);
 
@@ -13816,7 +13825,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     music_suggestion, music_suggestion_len, search_query,
                                     sizeof(search_query), casual_msg, sizeof(casual_msg));
 
-                                if (parsed && search_query[0] != '\0') {
+                                if (parsed && search_query[0] != '\0' &&
+                                    medium == HU_INSPIRATION_MUSIC) {
                                     /* Detect user's streaming preference from history */
                                     hu_music_source_t pref = HU_MUSIC_SOURCE_ITUNES;
                                     if (history_entries && history_count > 0) {
@@ -14027,6 +14037,58 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_music_result_free(alloc, &song);
                                     if (has_spotify)
                                         hu_music_result_free(alloc, &spotify_song);
+                                } else if (parsed && search_query[0] != '\0') {
+                                    /* YouTube / TikTok: resolve a VERIFIED url, then share it the
+                                     * same human two-bubble way (or a caption on non-unfurl
+                                     * channels). No verified url → silent skip. */
+                                    char share_url[1024] = {0};
+                                    bool have_url = false;
+                                    if (medium == HU_INSPIRATION_TIKTOK) {
+                                        have_url =
+                                            hu_tiktok_tag_url(search_query, strlen(search_query),
+                                                              share_url, sizeof(share_url)) > 0;
+                                    } else if (medium == HU_INSPIRATION_YOUTUBE) {
+                                        hu_youtube_result_t yt = {0};
+                                        if (hu_youtube_search(alloc, yt_key, search_query,
+                                                              strlen(search_query), &yt) == HU_OK &&
+                                            yt.watch_url) {
+                                            int un = snprintf(share_url, sizeof(share_url), "%s",
+                                                              yt.watch_url);
+                                            have_url = (un > 0 && (size_t)un < sizeof(share_url));
+                                        }
+                                        hu_youtube_result_free(alloc, &yt);
+                                    }
+
+                                    if (have_url) {
+                                        if (hu_channel_supports_link_unfurl(ch->channel)) {
+                                            usleep(3000000 + (music_seed % 4000000));
+                                            hu_inspiration_send_two_bubble(
+                                                ch->channel, batch_key, key_len, casual_msg,
+                                                share_url, 1500000u + (music_seed % 1500000u));
+                                        } else if (hu_tool_validate_url(share_url) == HU_OK) {
+                                            char cap[1280];
+                                            int cn =
+                                                (casual_msg[0] != '\0')
+                                                    ? snprintf(cap, sizeof(cap), "%s %s",
+                                                               casual_msg, share_url)
+                                                    : snprintf(cap, sizeof(cap), "%s", share_url);
+                                            if (cn > 0 && (size_t)cn < sizeof(cap))
+                                                ch->channel->vtable->send(ch->channel->ctx,
+                                                                          batch_key, key_len, cap,
+                                                                          (size_t)cn, NULL, 0);
+                                        }
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "sent %s inspiration: %s",
+                                                    medium == HU_INSPIRATION_YOUTUBE ? "youtube"
+                                                                                     : "tiktok",
+                                                    share_url);
+                                    } else {
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "inspiration skipped (no verified %s) for: %s",
+                                                    medium == HU_INSPIRATION_YOUTUBE ? "video"
+                                                                                     : "tiktok",
+                                                    search_query);
+                                    }
                                 }
                             }
                             if (music_suggestion)
