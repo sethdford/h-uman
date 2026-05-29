@@ -1417,6 +1417,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/training.c
     src/persona/life_sim.c
     src/persona/mood.c
+    src/memory/repos/mood_repo_sqlite.c
     src/persona/style_learner.c
     src/persona/micro_expression.c
     src/persona/creative_voice.c
