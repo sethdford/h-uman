@@ -23,7 +23,6 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
-#include "human/agent/belief_update.h"
 #include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
@@ -32,6 +31,7 @@
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#include "human/behavior/belief_update.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
 #endif

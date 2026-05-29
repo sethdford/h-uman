@@ -8,7 +8,7 @@
  * Spec: docs/plans/2026-05-29-intrinsic-motivation/ (ACs 1, 2, 4, 5, 6)
  * ───────────────────────────────────────────────────────────────────────── */
 
-#include "human/agent/intrinsic_drive.h"
+#include "human/cognition/intrinsic_drive.h"
 #include "test_framework.h"
 
 #include <string.h>

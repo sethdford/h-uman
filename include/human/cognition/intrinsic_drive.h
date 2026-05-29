@@ -1,5 +1,5 @@
-#ifndef HU_AGENT_INTRINSIC_DRIVE_H
-#define HU_AGENT_INTRINSIC_DRIVE_H
+#ifndef HU_COGNITION_INTRINSIC_DRIVE_H
+#define HU_COGNITION_INTRINSIC_DRIVE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -114,4 +114,4 @@ void hu_intrinsic_run_tick(hu_intrinsic_drive_t *drive, const hu_intrinsic_runti
                            const hu_intrinsic_start_facts_t *facts, hu_observer_t *obs, int64_t now,
                            hu_intrinsic_tick_result_t *out);
 
-#endif /* HU_AGENT_INTRINSIC_DRIVE_H */
+#endif /* HU_COGNITION_INTRINSIC_DRIVE_H */

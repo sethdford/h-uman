@@ -17,7 +17,7 @@
  *   - Per-conversation cap reached -> NO_CHANGE  (AC-4)
  * ───────────────────────────────────────────────────────────────────────── */
 
-#include "human/agent/belief_update.h"
+#include "human/behavior/belief_update.h"
 #include "test_framework.h"
 
 #include <string.h>

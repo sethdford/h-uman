@@ -856,8 +856,8 @@ set(HU_CORE_SOURCES
     src/agent/speculative.c
     src/agent/uncertainty.c
     src/agent/autonomy.c
-    src/agent/belief_update.c
-    src/agent/intrinsic_drive.c
+    src/behavior/belief_update.c
+    src/cognition/intrinsic_drive.c
     src/permission.c
     src/mcp_manager.c
     src/mcp_tool_wrapper.c
