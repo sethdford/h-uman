@@ -1193,6 +1193,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
+    src/daemon/daemon_peripheral_gov.c
+    src/daemon/daemon_message_router.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
