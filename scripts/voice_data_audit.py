@@ -130,10 +130,15 @@ def data_viability_verdict(stats):
         )
         if verdict == "viable":
             verdict = "thin"
-    if stats["assistant_messages"] and stats["type_token_ratio"] < LOW_DIVERSITY_TTR:
+    # TTR (unique/total tokens) is corpus-size-dependent: it mechanically falls
+    # as a corpus grows because common words saturate. So it's only a meaningful
+    # "repetitive/templated" signal on SMALL corpora — flagging it on thousands
+    # of messages is a false alarm (the artifact, not real repetition).
+    if (stats["assistant_messages"] and stats["assistant_messages"] < 500
+            and stats["type_token_ratio"] < LOW_DIVERSITY_TTR):
         reasons.append(
-            f"type-token ratio {stats['type_token_ratio']} (<{LOW_DIVERSITY_TTR}); text is "
-            f"repetitive/templated — low distinctive-voice signal."
+            f"type-token ratio {stats['type_token_ratio']} (<{LOW_DIVERSITY_TTR}) on a small "
+            f"corpus; text is repetitive/templated — low distinctive-voice signal."
         )
     if stats["assistant_messages"]:
         short_frac = stats["short_assistant_msgs"] / stats["assistant_messages"]
