@@ -7,8 +7,8 @@ channel's header.
 ## Why
 
 `providers/`, `channels/`, and `tools/` form the codebase's one genuinely clean
-hexagonal boundary (the anti-corruption layer for 30+ providers / 60+ channels /
-~100 tools). The audit verified it holds today. This guard keeps it that way —
+hexagonal boundary (the anti-corruption layer for dozens of providers, channels,
+and tools). The audit verified it holds today. This guard keeps it that way —
 the failure mode it prevents is `discord.c` quietly reaching into `slack.h`,
 which would couple two contexts that should only meet at the vtable.
 
