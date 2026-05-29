@@ -4,6 +4,15 @@
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
 #endif
+/* musl (alpine docker build) declares arc4random_uniform in <stdlib.h> only
+ * under `_BSD_SOURCE || _GNU_SOURCE` — NOT _DEFAULT_SOURCE — and strict
+ * -std=c11 (__STRICT_ANSI__) suppresses it. _GNU_SOURCE is the portable
+ * choice (enables it on musl and glibc without the -Werror deprecation
+ * warning bare _BSD_SOURCE triggers on glibc). macOS declares it
+ * unconditionally. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE
 #endif

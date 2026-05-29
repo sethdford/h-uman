@@ -1,10 +1,13 @@
 /* Feature-test macros must precede the first include so libc's <features.h>
- * exposes the right symbols. On musl (alpine docker build) both
- * arc4random_uniform (<stdlib.h>) and usleep (<unistd.h>) are gated behind
- * _DEFAULT_SOURCE/_BSD_SOURCE, which strict -std=c11 (__STRICT_ANSI__)
- * otherwise suppresses. Mirrors the proven block at the top of src/daemon.c. */
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE
+ * exposes the right symbols. On musl (alpine docker build) arc4random_uniform
+ * (<stdlib.h>) is declared only under `_BSD_SOURCE || _GNU_SOURCE` — NOT
+ * _DEFAULT_SOURCE — and usleep (<unistd.h>) likewise needs a BSD/XOPEN macro;
+ * strict -std=c11 (__STRICT_ANSI__) otherwise suppresses both. _GNU_SOURCE is
+ * the portable choice (enables them on musl and glibc without the -Werror
+ * deprecation warning bare _BSD_SOURCE triggers on glibc). macOS declares
+ * arc4random unconditionally. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
 #endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE

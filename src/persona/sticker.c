@@ -1,10 +1,12 @@
 /* Feature-test macros must precede the first include so libc's <features.h>
  * exposes the right symbols. On musl (alpine docker build) arc4random_uniform
- * and the dirent DT_* fields are gated behind _DEFAULT_SOURCE/_BSD_SOURCE,
- * which strict -std=c11 (__STRICT_ANSI__) otherwise suppresses. Mirrors the
- * proven block at the top of src/daemon.c. */
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE
+ * is declared in <stdlib.h> only under `_BSD_SOURCE || _GNU_SOURCE` — NOT
+ * _DEFAULT_SOURCE — and strict -std=c11 (__STRICT_ANSI__) otherwise suppresses
+ * it. _GNU_SOURCE is the portable choice: it enables arc4random on both musl
+ * and glibc (>=2.36) without the -Werror deprecation warning that bare
+ * _BSD_SOURCE triggers on glibc. macOS declares arc4random unconditionally. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
 #endif
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE
