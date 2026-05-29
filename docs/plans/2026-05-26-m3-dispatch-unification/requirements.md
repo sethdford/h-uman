@@ -6,13 +6,13 @@ The Jordan incident (2026-05-26: daemon sent "tbh morning. you awake yet?"
 to a real contact) exposed that h-uman has **two parallel proactive
 dispatch paths** that don't share the same composer:
 
-1. **`init_proposer.tick_with_provider`** ([src/agent/init_proposer.c:421](../../src/agent/init_proposer.c)) —
+1. **`init_proposer.tick_with_provider`** ([src/agent/init_proposer.c:421](../../../src/agent/init_proposer.c)) —
    the M3 deliverable. Asks "given everything I know about Seth's life
    right now, should I bring something up?" Runs governor gates, calls
    an analytical-tier LLM with a propose-or-skip prompt, parses a JSON
    decision, returns `HU_INIT_RESULT_FIRED` with a draft.
 
-2. **`daemon_proactive` composition + send** ([src/daemon.c:~2086](../../src/daemon.c)) —
+2. **`daemon_proactive` composition + send** ([src/daemon.c:~2086](../../../src/daemon.c)) —
    the older path. For each contact with a proactive schedule, builds
    a rich prompt via `hu_daemon_proactive_prompt_for_contact` (memory
    callbacks, weather, calendar, feeds), calls `hu_agent_turn`,

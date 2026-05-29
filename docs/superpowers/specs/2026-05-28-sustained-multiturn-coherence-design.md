@@ -1,3 +1,9 @@
+---
+title: Rung 3 — Sustained Multi-Turn Coherence On-Device
+created: 2026-05-28
+status: design
+---
+
 # Rung 3 — Sustained Multi-Turn Coherence On-Device
 
 **Date:** 2026-05-28

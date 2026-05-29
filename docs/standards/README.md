@@ -104,6 +104,7 @@ AGENTS.md                <- Full engineering protocol
 | [monitoring.md](operations/monitoring.md)               | Structured logging, health checks, alerting, AI-specific metrics    | All deployed services        |
 | [observability.md](operations/observability.md)         | SLI/SLO definitions, structured logging, metrics, trace propagation | Observability, SLOs, metrics |
 | [daemon.md](operations/daemon.md)                       | Daemon service loop, worker pooling, job scheduling, lifecycle      | Daemon operations, service loop  |
+| [outbound-pipeline-stats.md](operations/outbound-pipeline-stats.md) | Outbound pipeline counters, regenerate-rate signal, counter lifecycle | Outbound pipeline observability |
 
 ## Security
 

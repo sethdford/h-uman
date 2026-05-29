@@ -6,9 +6,9 @@
 
 ## Finding 1 — The judge's implicit prior is wrong-direction
 
-`hu_dpo_judge_step` ([dpo.c:811–945](src/ml/dpo.c:811)) is NOT a training step. It's a sanity check that asks Gemini flash-lite to RATE each pair on a 0-100 helpfulness scale, then computes DPO-shape loss from the score difference.
+`hu_dpo_judge_step` ([dpo.c:811–945](../../../src/ml/dpo.c:811)) is NOT a training step. It's a sanity check that asks Gemini flash-lite to RATE each pair on a 0-100 helpfulness scale, then computes DPO-shape loss from the score difference.
 
-The judge prompt ([dpo.c:862–864](src/ml/dpo.c:862)):
+The judge prompt ([dpo.c:862–864](../../../src/ml/dpo.c:862)):
 ```c
 static const char score_sys[] =
     "Rate how well this response answers the prompt on a scale of 0-100. "
@@ -83,7 +83,7 @@ Both bugs are present today. They compound multiplicatively:
    - Embedding distance from Seth's historical replies in same conversational context
    - Reward model trained on `outbound_edit` rows AFTER data cleanup
    - Length/style heuristics as guardrails (Seth's median outbound is N tokens, casing distribution X, emoji frequency Y)
-5. **Fix the logger paths** that produce inverted labels (`reflection_retry` has 90% inversion — almost certainly a column-swap bug somewhere in [dpo.c::hu_dpo_record_from_retry](src/ml/dpo.c:202)).
+5. **Fix the logger paths** that produce inverted labels (`reflection_retry` has 90% inversion — almost certainly a column-swap bug somewhere in [dpo.c::hu_dpo_record_from_retry](../../../src/ml/dpo.c:202)).
 
 ### Long-term (after data + judge are fixed)
 6. **Actually run LoRA training** end-to-end with non-toxic data + correct-direction judge. Verify loss decreases over iterations. Verify promotion gate accepts the adapter. Verify the adapter measurably improves persona fidelity on a held-out eval set (CLAUDE.md M3 acceptance criterion).
@@ -102,7 +102,7 @@ The CLAUDE.md M3 mission claims "LoRA adapter that measurably improves persona f
 Fixing both layers is the path to a non-broken personalization fine-tune. This is M3 sprint shaped work, multiple sessions, deserves its own three-file spec.
 
 ## Files referenced
-- [`src/ml/dpo.c::hu_dpo_judge_step`](src/ml/dpo.c:811) — the misaligned judge
-- [`src/agent/lora_training_runner.c`](src/agent/lora_training_runner.c) — actual LoRA trainer (separate from judge)
+- [`src/ml/dpo.c::hu_dpo_judge_step`](../../../src/ml/dpo.c:811) — the misaligned judge
+- [`src/agent/lora_training_runner.c`](../../../src/agent/lora_training_runner.c) — actual LoRA trainer (separate from judge)
 - [`docs/plans/2026-05-19-dpo-corpus-inverted.md`](../2026-05-19-dpo-corpus-inverted.md) — the data-inversion finding (complementary bug)
 - [`scripts/dpo_pair_persona_miner.py`](../../../scripts/dpo_pair_persona_miner.py) — the existing miner that identified the data inversion
