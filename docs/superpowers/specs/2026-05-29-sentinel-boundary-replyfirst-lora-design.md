@@ -205,6 +205,40 @@ Ship the v5 adapter (wire `personalization.lora_adapter_path`) **only if both pa
 2. Does v4-repair emit ANY marker natively, or is it always markerless? (Determines whether
    the splitter's marker branch ever fires, or it's fallback-only.)
 
+### Task-0 spike findings (2026-05-29) — PREMISE OVERTURNED
+
+The spike resolved both open questions AND invalidated the project's motivating
+measurement. Offline, model-loaded-once, mlx_lm Python API matching production
+sampler (`temp=0.7, top_p=0.95`, `repetition_penalty=1.1`):
+
+**Q1 — marker bytes:** open marker is `<|channel>thought` (NO middle pipe), close is
+`<channel|>`. The server discard regex (`mlx-server.py:895-896`) confirms this. The
+library constant `<|channel|>thought` (middle pipe) is WRONG and would never match.
+
+**Q2 — native markers:** When v4-repair is prompted with the **persona system prompt
+it was trained under** (first line of `finetune/train.jsonl`) and real conversation
+history, it emits **short, reply-first, in-voice output with ZERO `<|channel>` markers**:
+- "hey, you around?" → 5 tok: *"yeah im here. whats up?"*
+- "Did you have fun today" → 18 tok: *"not really. just spent five hours arguing with a vendor..."*
+- "What was Japan like?" → 15 tok: *"beautiful. chaotic but clean. lived there years..."*
+- Multi-turn casual replies: all 4–15 tokens, reply-first.
+- Markerless audit over 20 real prompts: **0/20 generations contained a `<|...|>` marker natively.**
+
+**The 151-token deliberation is PRIMER-INDUCED, not intrinsic to the LoRA.** It only
+reappears when (a) the persona system prompt is omitted, or (b) the Gemma-4 chat
+template's `enable_thinking=False` path force-prepends `<|channel>thought\n<channel|>`
+(documented in `mlx-server.py:prepare_prompt_lm` 764–773 — "primes the model into
+thinking mode REGARDLESS of any system instruction"). The spec's motivating measurement
+(line 21–22) came from that HF `processor.apply_chat_template(enable_thinking=False)`
+serving path, not from the weights.
+
+**Implication:** There is no front-loaded deliberation to reorder. `streaming_beneficial:true`
+on casual tiers is achievable by a **serving-config change** (skip the auto-primer on
+streamed REFLEXIVE/CONVERSATIONAL tiers, i.e. pass `enable_thinking=True`), NOT by training
+a v5 reply-first LoRA. Training v5 would risk regressing the validated +27pp fidelity
+(0.586 → 0.856, commit `9ab9b86e`) for no streaming benefit. **DECISION GATE TRIGGERED →
+escalated to user.**
+
 ## References
 
 - `~/.claude/rules/lora-scale-default-or-die.md` — scale=2.0 enforcement.
