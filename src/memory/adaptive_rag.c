@@ -1,4 +1,5 @@
 #include "human/memory/adaptive_rag.h"
+#include "human/core/string.h"
 #include <string.h>
 
 hu_error_t hu_adaptive_rag_create(hu_allocator_t *alloc,
@@ -21,30 +22,6 @@ hu_error_t hu_adaptive_rag_create(hu_allocator_t *alloc,
 void hu_adaptive_rag_deinit(hu_adaptive_rag_t *rag) {
     if (rag)
         memset(rag, 0, sizeof(*rag));
-}
-
-static bool contains_ci(const char *hay, size_t hay_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > hay_len)
-        return false;
-    for (size_t i = 0; i <= hay_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char a = hay[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a = (char)(a + 32);
-            if (b >= 'A' && b <= 'Z')
-                b = (char)(b + 32);
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
 }
 
 static bool starts_with_ci(const char *str, size_t str_len, const char *prefix) {
@@ -97,7 +74,7 @@ hu_error_t hu_adaptive_rag_extract_features(const char *query, size_t query_len,
 
     static const char *temporal[] = {"yesterday", "last week", "last month", "ago", "recently", "today"};
     for (size_t i = 0; i < sizeof(temporal) / sizeof(temporal[0]); i++) {
-        if (contains_ci(query, query_len, temporal[i])) {
+        if (hu_str_contains_ci_cstr(query, query_len, temporal[i])) {
             features->has_temporal_marker = true;
             break;
         }
@@ -105,7 +82,7 @@ hu_error_t hu_adaptive_rag_extract_features(const char *query, size_t query_len,
 
     static const char *relational[] = {"who knows", "related to", "connected", "friends with", "works with"};
     for (size_t i = 0; i < sizeof(relational) / sizeof(relational[0]); i++) {
-        if (contains_ci(query, query_len, relational[i])) {
+        if (hu_str_contains_ci_cstr(query, query_len, relational[i])) {
             features->has_relationship_query = true;
             break;
         }
@@ -121,7 +98,7 @@ hu_error_t hu_adaptive_rag_extract_features(const char *query, size_t query_len,
 
     static const char *personal[] = {"my ", "I ", "remember when", "you told me", "we discussed"};
     for (size_t i = 0; i < sizeof(personal) / sizeof(personal[0]); i++) {
-        if (contains_ci(query, query_len, personal[i])) {
+        if (hu_str_contains_ci_cstr(query, query_len, personal[i])) {
             features->is_personal = true;
             break;
         }

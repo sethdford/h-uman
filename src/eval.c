@@ -69,24 +69,6 @@ static void eval_free_task_strings(hu_allocator_t *alloc, hu_eval_task_t *t) {
     }
 }
 
-static int tolower_c(int c) {
-    return (c >= 'A' && c <= 'Z') ? (c + 32) : c;
-}
-
-static bool str_case_contains(const char *haystack, size_t hlen, const char *needle, size_t nlen) {
-    if (nlen == 0 || nlen > hlen)
-        return false;
-    for (size_t i = 0; i <= hlen - nlen; i++) {
-        size_t j = 0;
-        while (j < nlen &&
-               tolower_c((unsigned char)haystack[i + j]) == tolower_c((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
-
 static size_t count_expected_words_in_actual(const char *actual, size_t actual_len,
                                              const char *expected, size_t expected_len) {
     size_t count = 0;
@@ -104,7 +86,7 @@ static size_t count_expected_words_in_actual(const char *actual, size_t actual_l
         size_t word_len = (size_t)(p - word_start);
         if (word_len > 0) {
             total_expected++;
-            if (str_case_contains(actual, actual_len, word_start, word_len))
+            if (hu_str_contains_ci(actual, actual_len, word_start, word_len))
                 count++;
         }
     }
@@ -162,7 +144,7 @@ static double extract_double(const char *obj_start, const char *obj_end, const c
 
 static void hu_eval_heuristic_judge(const char *actual, size_t actual_len, const char *expected,
                                     size_t expected_len, bool *passed_out, double *score_out) {
-    if (str_case_contains(actual, actual_len, expected, expected_len)) {
+    if (hu_str_contains_ci(actual, actual_len, expected, expected_len)) {
         *passed_out = true;
         if (score_out)
             *score_out = 1.0;

@@ -1,4 +1,5 @@
 #include "human/voice/semantic_eot.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -23,20 +24,6 @@ static bool ends_with_str(const char *text, size_t len, const char *suffix) {
     while (len > 0 && isspace((unsigned char)text[len - 1]))
         len--;
     return len >= slen && memcmp(text + len - slen, suffix, slen) == 0;
-}
-
-static bool ci_contains(const char *s, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > len)
-        return false;
-    for (size_t i = 0; i + nlen <= len; i++) {
-        size_t j = 0;
-        while (j < nlen && tolower((unsigned char)s[i + j]) == tolower((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return true;
-    }
-    return false;
 }
 
 static size_t trimmed_len(const char *text, size_t len) {
@@ -66,16 +53,16 @@ static bool syntax_complete_clause(const char *text, size_t text_len) {
 }
 
 static bool is_backchannel_phrase(const char *text, size_t tlen) {
-    return ci_contains(text, tlen, "uh huh") || ci_contains(text, tlen, "uh-huh") ||
-           ci_contains(text, tlen, "mhm") || ci_contains(text, tlen, "mm-hmm") ||
-           ci_contains(text, tlen, "yeah") || ci_contains(text, tlen, "okay") ||
-           ci_contains(text, tlen, "ok ") || ci_contains(text, tlen, "right") ||
-           ci_contains(text, tlen, "i see") || ci_contains(text, tlen, "got it");
+    return hu_str_contains_ci_cstr(text, tlen, "uh huh") || hu_str_contains_ci_cstr(text, tlen, "uh-huh") ||
+           hu_str_contains_ci_cstr(text, tlen, "mhm") || hu_str_contains_ci_cstr(text, tlen, "mm-hmm") ||
+           hu_str_contains_ci_cstr(text, tlen, "yeah") || hu_str_contains_ci_cstr(text, tlen, "okay") ||
+           hu_str_contains_ci_cstr(text, tlen, "ok ") || hu_str_contains_ci_cstr(text, tlen, "right") ||
+           hu_str_contains_ci_cstr(text, tlen, "i see") || hu_str_contains_ci_cstr(text, tlen, "got it");
 }
 
 static bool has_hold_fillers(const char *text, size_t tlen) {
-    return ci_contains(text, tlen, " um") || ci_contains(text, tlen, " uh") ||
-           ci_contains(text, tlen, " like ") || ci_contains(text, tlen, "you know");
+    return hu_str_contains_ci_cstr(text, tlen, " um") || hu_str_contains_ci_cstr(text, tlen, " uh") ||
+           hu_str_contains_ci_cstr(text, tlen, " like ") || hu_str_contains_ci_cstr(text, tlen, "you know");
 }
 
 hu_error_t hu_semantic_eot_analyze(const hu_semantic_eot_config_t *cfg, const char *text,
@@ -113,8 +100,8 @@ hu_error_t hu_semantic_eot_analyze(const hu_semantic_eot_config_t *cfg, const ch
     }
 
     /* Lexical yielding phrases */
-    if (ci_contains(text, tlen, "what do you think") || ci_contains(text, tlen, "your thoughts") ||
-        ci_contains(text, tlen, "can you help") || ci_contains(text, tlen, "do you know"))
+    if (hu_str_contains_ci_cstr(text, tlen, "what do you think") || hu_str_contains_ci_cstr(text, tlen, "your thoughts") ||
+        hu_str_contains_ci_cstr(text, tlen, "can you help") || hu_str_contains_ci_cstr(text, tlen, "do you know"))
         conf += 0.25;
 
     /* Short complete utterance (under ~40 chars with punctuation) */
@@ -187,8 +174,8 @@ hu_error_t hu_semantic_eot_analyze_with_audio(const hu_semantic_eot_config_t *cf
             conf += 0.35;
     }
 
-    if (ci_contains(text, tlen, "what do you think") || ci_contains(text, tlen, "your thoughts") ||
-        ci_contains(text, tlen, "can you help") || ci_contains(text, tlen, "do you know"))
+    if (hu_str_contains_ci_cstr(text, tlen, "what do you think") || hu_str_contains_ci_cstr(text, tlen, "your thoughts") ||
+        hu_str_contains_ci_cstr(text, tlen, "can you help") || hu_str_contains_ci_cstr(text, tlen, "do you know"))
         conf += 0.25;
 
     if (tlen < 40 && conf >= 0.3)
@@ -315,8 +302,8 @@ hu_error_t hu_semantic_eot_extract_features(const char *text, size_t text_len, u
     out_features[1] = ends_with_char(text, text_len, '?') ? 1.0f : 0.0f;
     out_features[2] = ends_with_str(text, text_len, "...") ? 1.0f : 0.0f;
     out_features[3] =
-        (ci_contains(text, tlen, "what do you think") || ci_contains(text, tlen, "your thoughts") ||
-         ci_contains(text, tlen, "can you help") || ci_contains(text, tlen, "do you know"))
+        (hu_str_contains_ci_cstr(text, tlen, "what do you think") || hu_str_contains_ci_cstr(text, tlen, "your thoughts") ||
+         hu_str_contains_ci_cstr(text, tlen, "can you help") || hu_str_contains_ci_cstr(text, tlen, "do you know"))
             ? 1.0f
             : 0.0f;
     out_features[4] = is_backchannel_phrase(text, tlen) ? 1.0f : 0.0f;

@@ -1,4 +1,5 @@
 #include "human/mcp_context.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -63,20 +64,6 @@ bool hu_mcp_timeout_budget_has_remaining(const hu_mcp_timeout_budget_t *budget) 
     return budget->remaining_ms >= budget->per_call_min_ms;
 }
 
-static bool ci_contains(const char *s, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > len)
-        return false;
-    for (size_t i = 0; i + nlen <= len; i++) {
-        size_t j = 0;
-        while (j < nlen && tolower((unsigned char)s[i + j]) == tolower((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
-
 void hu_mcp_error_classify(const char *raw_error, size_t error_len,
                            hu_mcp_structured_error_t *out) {
     if (!out)
@@ -87,36 +74,36 @@ void hu_mcp_error_classify(const char *raw_error, size_t error_len,
         return;
     }
 
-    if (ci_contains(raw_error, error_len, "timeout") ||
-        ci_contains(raw_error, error_len, "timed out") ||
-        ci_contains(raw_error, error_len, "deadline")) {
+    if (hu_str_contains_ci_cstr(raw_error, error_len, "timeout") ||
+        hu_str_contains_ci_cstr(raw_error, error_len, "timed out") ||
+        hu_str_contains_ci_cstr(raw_error, error_len, "deadline")) {
         out->category = HU_MCP_ERR_TIMEOUT;
         out->retryable = true;
         out->retry_after_ms = 1000;
-    } else if (ci_contains(raw_error, error_len, "unauthorized") ||
-               ci_contains(raw_error, error_len, "forbidden") ||
-               ci_contains(raw_error, error_len, "auth")) {
+    } else if (hu_str_contains_ci_cstr(raw_error, error_len, "unauthorized") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "forbidden") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "auth")) {
         out->category = HU_MCP_ERR_AUTH;
         out->retryable = false;
-    } else if (ci_contains(raw_error, error_len, "not found") ||
-               ci_contains(raw_error, error_len, "404")) {
+    } else if (hu_str_contains_ci_cstr(raw_error, error_len, "not found") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "404")) {
         out->category = HU_MCP_ERR_NOT_FOUND;
         out->retryable = false;
-    } else if (ci_contains(raw_error, error_len, "rate limit") ||
-               ci_contains(raw_error, error_len, "429") ||
-               ci_contains(raw_error, error_len, "too many")) {
+    } else if (hu_str_contains_ci_cstr(raw_error, error_len, "rate limit") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "429") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "too many")) {
         out->category = HU_MCP_ERR_RATE_LIMITED;
         out->retryable = true;
         out->retry_after_ms = 5000;
-    } else if (ci_contains(raw_error, error_len, "500") ||
-               ci_contains(raw_error, error_len, "internal") ||
-               ci_contains(raw_error, error_len, "server error")) {
+    } else if (hu_str_contains_ci_cstr(raw_error, error_len, "500") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "internal") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "server error")) {
         out->category = HU_MCP_ERR_SERVER;
         out->retryable = true;
         out->retry_after_ms = 2000;
-    } else if (ci_contains(raw_error, error_len, "invalid") ||
-               ci_contains(raw_error, error_len, "bad request") ||
-               ci_contains(raw_error, error_len, "400")) {
+    } else if (hu_str_contains_ci_cstr(raw_error, error_len, "invalid") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "bad request") ||
+               hu_str_contains_ci_cstr(raw_error, error_len, "400")) {
         out->category = HU_MCP_ERR_INVALID_INPUT;
         out->retryable = false;
     } else {

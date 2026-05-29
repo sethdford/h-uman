@@ -14,35 +14,11 @@ static const char *const CLAIM_PATTERNS[] = {
     "I recall that you",     NULL,
 };
 
-static bool contains_ci(const char *haystack, size_t hay_len, const char *needle) {
-    size_t n_len = strlen(needle);
-    if (n_len > hay_len)
-        return false;
-    for (size_t i = 0; i <= hay_len - n_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < n_len; j++) {
-            char h = haystack[i + j];
-            char n = needle[j];
-            if (h >= 'A' && h <= 'Z')
-                h += 32;
-            if (n >= 'A' && n <= 'Z')
-                n += 32;
-            if (h != n) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 bool hu_memory_has_claim_language(const char *text, size_t text_len) {
     if (!text || text_len == 0)
         return false;
     for (size_t i = 0; CLAIM_PATTERNS[i] != NULL; i++) {
-        if (contains_ci(text, text_len, CLAIM_PATTERNS[i]))
+        if (hu_str_contains_ci_cstr(text, text_len, CLAIM_PATTERNS[i]))
             return true;
     }
     return false;
@@ -170,7 +146,7 @@ hu_error_t hu_memory_hedge_claim(hu_allocator_t *alloc, const char *text, size_t
     while (i < text_len && pos < max_len - 1) {
         /* Check for "I remember" pattern */
         if (!hedged && i + 10 <= text_len &&
-            contains_ci(text + i, 10, "I remember")) {
+            hu_str_contains_ci_cstr(text + i, 10, "I remember")) {
             const char *replacement = "I think I remember";
             size_t rep_len = 18;
             if (pos + rep_len < max_len) {
@@ -183,7 +159,7 @@ hu_error_t hu_memory_hedge_claim(hu_allocator_t *alloc, const char *text, size_t
         }
         /* Check for "you told me" */
         if (!hedged && i + 11 <= text_len &&
-            contains_ci(text + i, 11, "you told me")) {
+            hu_str_contains_ci_cstr(text + i, 11, "you told me")) {
             const char *replacement = "I believe you told me";
             size_t rep_len = 21;
             if (pos + rep_len < max_len) {

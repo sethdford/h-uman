@@ -973,21 +973,6 @@ static bool topic_is_word_char(unsigned char c) {
 }
 
 /* Case-insensitive substring search. */
-static bool topic_icase_contains_substr(const char *haystack, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        size_t j = 0;
-        for (; j < nlen; j++) {
-            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j]))
-                break;
-        }
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
 
 /* Case-insensitive whole-word search.  Guards against false positives like
  * "Italy" matching pronoun "i" or "swim" matching emotion word "miserable". */
@@ -1050,7 +1035,7 @@ bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len) {
         "(last:", "\n", "\r", "\t", "%", "i'm", NULL,
     };
     for (const char *const *p = toxic_subs; *p; p++) {
-        if (topic_icase_contains_substr(topic, topic_len, *p))
+        if (hu_str_contains_ci_cstr(topic, topic_len, *p))
             return false;
     }
 

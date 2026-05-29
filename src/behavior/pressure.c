@@ -1,43 +1,9 @@
 #include "human/behavior/pressure.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <stddef.h>
 #include <string.h>
-
-/* Case-insensitive substring match. Returns 1 if `needle` appears in
- * `[hay, hay+hay_len)`, 0 otherwise. Empty needle returns 1. */
-static int pr_icontains(const char *hay, size_t hay_len, const char *needle) {
-    if (!hay || !needle) {
-        return 0;
-    }
-    size_t nlen = strlen(needle);
-    if (nlen == 0) {
-        return 1;
-    }
-    if (hay_len < nlen) {
-        return 0;
-    }
-    for (size_t i = 0; i + nlen <= hay_len; i++) {
-        size_t j = 0;
-        for (; j < nlen; j++) {
-            char a = hay[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z') {
-                a = (char)(a + 32);
-            }
-            if (b >= 'A' && b <= 'Z') {
-                b = (char)(b + 32);
-            }
-            if (a != b) {
-                break;
-            }
-        }
-        if (j == nlen) {
-            return 1;
-        }
-    }
-    return 0;
-}
 
 static const char *const PR_AUTHORITY[] = {
     "everyone knows",
@@ -72,31 +38,13 @@ static const char *const PR_REASSERT[] = {
 };
 
 static const char *const PR_EMOTIONAL[] = {
-    "stupid",
-    "idiot",
-    "ridiculous",
-    "useless",
-    "pathetic",
-    "shut up",
-    "fuck",
-    "damn it",
-    "for god's sake",
-    "you're wrong",
-    "wrong again",
-    NULL,
+    "stupid", "idiot",   "ridiculous",     "useless",      "pathetic",    "shut up",
+    "fuck",   "damn it", "for god's sake", "you're wrong", "wrong again", NULL,
 };
 
 static const char *const PR_HEDGING[] = {
-    "i think",
-    "maybe",
-    "perhaps",
-    "kind of",
-    "sort of",
-    "i'm not sure",
-    "not sure",
-    "could be",
-    "might be",
-    NULL,
+    "i think",      "maybe",    "perhaps",  "kind of",  "sort of",
+    "i'm not sure", "not sure", "could be", "might be", NULL,
 };
 
 hu_error_t hu_pressure_detect(const char *user_message, size_t user_message_len,
@@ -110,14 +58,14 @@ hu_error_t hu_pressure_detect(const char *user_message, size_t user_message_len,
     }
 
     for (size_t i = 0; PR_AUTHORITY[i]; i++) {
-        if (pr_icontains(user_message, user_message_len, PR_AUTHORITY[i])) {
+        if (hu_str_contains_ci_cstr(user_message, user_message_len, PR_AUTHORITY[i])) {
             out->invoked_authority = true;
             break;
         }
     }
 
     for (size_t i = 0; PR_REASSERT[i]; i++) {
-        if (pr_icontains(user_message, user_message_len, PR_REASSERT[i])) {
+        if (hu_str_contains_ci_cstr(user_message, user_message_len, PR_REASSERT[i])) {
             out->reasserted_in_message = true;
             break;
         }
@@ -150,7 +98,7 @@ hu_error_t hu_pressure_detect(const char *user_message, size_t user_message_len,
 
     int has_emotional_word = 0;
     for (size_t i = 0; PR_EMOTIONAL[i]; i++) {
-        if (pr_icontains(user_message, user_message_len, PR_EMOTIONAL[i])) {
+        if (hu_str_contains_ci_cstr(user_message, user_message_len, PR_EMOTIONAL[i])) {
             has_emotional_word = 1;
             break;
         }
@@ -159,7 +107,7 @@ hu_error_t hu_pressure_detect(const char *user_message, size_t user_message_len,
     int has_hedging = 0;
     uint16_t hedging = 0;
     for (size_t i = 0; PR_HEDGING[i]; i++) {
-        if (pr_icontains(user_message, user_message_len, PR_HEDGING[i])) {
+        if (hu_str_contains_ci_cstr(user_message, user_message_len, PR_HEDGING[i])) {
             has_hedging = 1;
             hedging++;
         }
@@ -168,16 +116,14 @@ hu_error_t hu_pressure_detect(const char *user_message, size_t user_message_len,
 
     /* Emotional pressure: any emotional word, OR ≥2 exclamations, OR a caps
      * shout of 4+ letters, AND no hedging (hedging dampens the read). */
-    if (!has_hedging &&
-        (has_emotional_word || exclam >= 2 || max_run >= 4)) {
+    if (!has_hedging && (has_emotional_word || exclam >= 2 || max_run >= 4)) {
         out->emotional_pressure = true;
     }
 
     return HU_OK;
 }
 
-void hu_pressure_apply_to_trust_input(const hu_pressure_signals_t *p,
-                                      hu_trust_input_t *trust_in) {
+void hu_pressure_apply_to_trust_input(const hu_pressure_signals_t *p, hu_trust_input_t *trust_in) {
     if (!p || !trust_in) {
         return;
     }

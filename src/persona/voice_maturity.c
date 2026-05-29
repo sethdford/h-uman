@@ -2,6 +2,7 @@
  * Voice maturity — persona voice evolution based on conversation depth and relationship stage.
  */
 #include "human/persona/voice_maturity.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,30 +32,6 @@ hu_voice_stage_t hu_voice_compute_stage(uint32_t interactions, uint32_t emotiona
 
 /* ── Vulnerability content scoring ────────────────────────────────── */
 
-static bool ci_contains_vm(const char *text, size_t text_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > text_len)
-        return false;
-    for (size_t i = 0; i <= text_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char t = text[i + j];
-            char n = needle[j];
-            if (t >= 'A' && t <= 'Z')
-                t += 32;
-            if (n >= 'A' && n <= 'Z')
-                n += 32;
-            if (t != n) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 float hu_voice_vulnerability_from_content(const char *text, size_t text_len) {
     if (!text || text_len == 0)
         return 0.0f;
@@ -71,7 +48,7 @@ float hu_voice_vulnerability_from_content(const char *text, size_t text_len) {
 
     size_t hits = 0;
     for (size_t i = 0; i < marker_count; i++) {
-        if (ci_contains_vm(text, text_len, emotional_markers[i]))
+        if (hu_str_contains_ci_cstr(text, text_len, emotional_markers[i]))
             hits++;
     }
 

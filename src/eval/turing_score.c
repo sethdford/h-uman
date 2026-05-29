@@ -27,20 +27,6 @@ static const char *DIMENSION_NAMES[HU_TURING_DIM_COUNT] = {
     "paralinguistic_cues",
 };
 
-static int ci_has(const char *haystack, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > len)
-        return 0;
-    for (size_t i = 0; i + nlen <= len; i++) {
-        size_t j = 0;
-        while (j < nlen &&
-               tolower((unsigned char)haystack[i + j]) == tolower((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return 1;
-    }
-    return 0;
-}
 
 static int count_ai_tells(const char *s, size_t len) {
     static const char *tells[] = {
@@ -87,7 +73,7 @@ static int count_ai_tells(const char *s, size_t len) {
     };
     int count = 0;
     for (size_t i = 0; i < sizeof(tells) / sizeof(tells[0]); i++) {
-        if (ci_has(s, len, tells[i]))
+        if (hu_str_contains_ci_cstr(s, len, tells[i]))
             count++;
     }
     return count;
@@ -126,7 +112,7 @@ static int count_structural_tells(const char *s, size_t len, uint32_t max_channe
         if (s[i] == '\n' && (s[i + 1] == '-' || s[i + 1] == '*'))
             count += 2;
     }
-    if (ci_has(s, len, "```"))
+    if (hu_str_contains_ci_cstr(s, len, "```"))
         count += 3;
 
     int numbered_items = 0;
@@ -183,7 +169,7 @@ static int count_structural_tells(const char *s, size_t len, uint32_t max_channe
     }
 
     /* "First...Second...Third" enumeration */
-    if (ci_has(s, len, "first") && ci_has(s, len, "second"))
+    if (hu_str_contains_ci_cstr(s, len, "first") && hu_str_contains_ci_cstr(s, len, "second"))
         count += 2;
 
     return count;
@@ -193,7 +179,7 @@ static int has_contractions(const char *s, size_t len) {
     static const char *contrs[] = {"i'm",  "don't",  "can't",   "won't", "i'll",
                                    "it's", "that's", "they're", "we're", "you're"};
     for (size_t i = 0; i < sizeof(contrs) / sizeof(contrs[0]); i++) {
-        if (ci_has(s, len, contrs[i]))
+        if (hu_str_contains_ci_cstr(s, len, contrs[i]))
             return 1;
     }
     return 0;
@@ -213,7 +199,7 @@ static int has_casual_markers(const char *s, size_t len) {
     static const char *boundary_markers[] = {"rn"};
     int count = 0;
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
-        if (ci_has(s, len, markers[i]))
+        if (hu_str_contains_ci_cstr(s, len, markers[i]))
             count++;
     }
     for (size_t i = 0; i < sizeof(boundary_markers) / sizeof(boundary_markers[0]); i++) {
@@ -239,7 +225,7 @@ static int has_emotional_words(const char *s, size_t len) {
                                   "scared", "angry", "sorry",   "proud", "hurt", "grateful"};
     int count = 0;
     for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
-        if (ci_has(s, len, words[i]))
+        if (hu_str_contains_ci_cstr(s, len, words[i]))
             count++;
     }
     return count;
@@ -254,7 +240,7 @@ static int has_vulnerability_markers(const char *s, size_t len) {
     };
     int count = 0;
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
-        if (ci_has(s, len, markers[i]))
+        if (hu_str_contains_ci_cstr(s, len, markers[i]))
             count++;
     }
     return count;
@@ -267,7 +253,7 @@ static int has_humor_markers(const char *s, size_t len) {
     };
     int count = 0;
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
-        if (ci_has(s, len, markers[i]))
+        if (hu_str_contains_ci_cstr(s, len, markers[i]))
             count++;
     }
     return count;
@@ -281,7 +267,7 @@ static int has_opinion_markers(const char *s, size_t len) {
     };
     int count = 0;
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
-        if (ci_has(s, len, markers[i]))
+        if (hu_str_contains_ci_cstr(s, len, markers[i]))
             count++;
     }
     return count;
@@ -409,7 +395,7 @@ static int has_context_references(const char *response, size_t resp_len, const c
     };
     int count = 0;
     for (size_t i = 0; i < sizeof(ref_phrases) / sizeof(ref_phrases[0]); i++) {
-        if (ci_has(response, resp_len, ref_phrases[i]))
+        if (hu_str_contains_ci_cstr(response, resp_len, ref_phrases[i]))
             count++;
     }
 
@@ -421,7 +407,7 @@ static int has_context_references(const char *response, size_t resp_len, const c
                 while (wend < ctx_len && ctx[wend] != ' ' && ctx[wend] != '\n')
                     wend++;
                 size_t wlen = wend - wstart;
-                if (wlen >= 5 && wlen <= 20 && ci_has(response, resp_len, ctx + wstart))
+                if (wlen >= 5 && wlen <= 20 && hu_str_contains_ci_cstr(response, resp_len, ctx + wstart))
                     count++;
                 if (count >= 3)
                     break;
@@ -534,7 +520,7 @@ static int cross_turn_consistency(const char *response, size_t response_len, con
     const char *laugh_types[] = {"haha", "lol", "lmao", "hehe"};
     int resp_laugh = -1;
     for (int i = 0; i < 4; i++) {
-        if (ci_has(response, response_len, laugh_types[i])) {
+        if (hu_str_contains_ci_cstr(response, response_len, laugh_types[i])) {
             resp_laugh = i;
             break;
         }
@@ -585,7 +571,7 @@ static int cross_turn_consistency(const char *response, size_t response_len, con
             /* Laugh style consistency check */
             if (resp_laugh >= 0) {
                 for (int i = 0; i < 4; i++) {
-                    if (ci_has(msg_start, msg_len, laugh_types[i])) {
+                    if (hu_str_contains_ci_cstr(msg_start, msg_len, laugh_types[i])) {
                         laugh_checked++;
                         if (i == resp_laugh)
                             laugh_consistent++;
@@ -662,7 +648,7 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
         };
         int empathy = 0;
         for (size_t i = 0; i < sizeof(empathy_phrases) / sizeof(empathy_phrases[0]); i++) {
-            if (ci_has(response, response_len, empathy_phrases[i]))
+            if (hu_str_contains_ci_cstr(response, response_len, empathy_phrases[i]))
                 empathy++;
         }
         if (empathy > 0)
@@ -685,9 +671,9 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
         }
 
         /* Penalize robotic apology patterns */
-        if (ci_has(response, response_len, "sorry for any") ||
-            ci_has(response, response_len, "apologize for the") ||
-            ci_has(response, response_len, "sorry for the inconvenience"))
+        if (hu_str_contains_ci_cstr(response, response_len, "sorry for any") ||
+            hu_str_contains_ci_cstr(response, response_len, "apologize for the") ||
+            hu_str_contains_ci_cstr(response, response_len, "sorry for the inconvenience"))
             ei -= 2;
 
         if (vulnerability > 0)
@@ -783,12 +769,12 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
     out->dimensions[HU_TURING_OPINION_HAVING] = 6;
     if (opinions > 0)
         out->dimensions[HU_TURING_OPINION_HAVING] += opinions;
-    if (ci_has(response, response_len, "it depends") ||
-        ci_has(response, response_len, "on one hand") ||
-        ci_has(response, response_len, "there are many"))
+    if (hu_str_contains_ci_cstr(response, response_len, "it depends") ||
+        hu_str_contains_ci_cstr(response, response_len, "on one hand") ||
+        hu_str_contains_ci_cstr(response, response_len, "there are many"))
         out->dimensions[HU_TURING_OPINION_HAVING] -= 2;
-    if (ci_has(response, response_len, "both are great") ||
-        ci_has(response, response_len, "that's a good point"))
+    if (hu_str_contains_ci_cstr(response, response_len, "both are great") ||
+        hu_str_contains_ci_cstr(response, response_len, "that's a good point"))
         out->dimensions[HU_TURING_OPINION_HAVING] -= 1;
 
     /* energy_matching: compare response energy to last user turn energy */
@@ -836,7 +822,7 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
         if (conversation_context && context_len > 0) {
             score += ctx_refs;
             /* Reward 2nd-person references (either "you" or "your"), not requiring both */
-            if (ci_has(response, response_len, "you") || ci_has(response, response_len, "your"))
+            if (hu_str_contains_ci_cstr(response, response_len, "you") || hu_str_contains_ci_cstr(response, response_len, "your"))
                 score += 1;
         }
         if (emotional > 0 && contractions)
@@ -872,9 +858,9 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
             punct_variety++;
         if (memchr(response, '?', response_len))
             punct_variety++;
-        if (ci_has(response, response_len, "..."))
+        if (hu_str_contains_ci_cstr(response, response_len, "..."))
             punct_variety++;
-        if (ci_has(response, response_len, " — ") || ci_has(response, response_len, " - "))
+        if (hu_str_contains_ci_cstr(response, response_len, " — ") || hu_str_contains_ci_cstr(response, response_len, " - "))
             punct_variety++;
         int caps_emphasis = count_uppercase_words(response, response_len);
         int score = 6 + punct_variety;
@@ -909,19 +895,19 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
     /* filler_usage: natural hesitation markers and verbal tics */
     {
         int fillers = 0;
-        if (ci_has(response, response_len, " um ") || ci_has(response, response_len, " um,"))
+        if (hu_str_contains_ci_cstr(response, response_len, " um ") || hu_str_contains_ci_cstr(response, response_len, " um,"))
             fillers++;
-        if (ci_has(response, response_len, " uh ") || ci_has(response, response_len, "uh,"))
+        if (hu_str_contains_ci_cstr(response, response_len, " uh ") || hu_str_contains_ci_cstr(response, response_len, "uh,"))
             fillers++;
-        if (ci_has(response, response_len, " like ") || ci_has(response, response_len, " like,"))
+        if (hu_str_contains_ci_cstr(response, response_len, " like ") || hu_str_contains_ci_cstr(response, response_len, " like,"))
             fillers++;
-        if (ci_has(response, response_len, "hmm") || ci_has(response, response_len, "well,"))
+        if (hu_str_contains_ci_cstr(response, response_len, "hmm") || hu_str_contains_ci_cstr(response, response_len, "well,"))
             fillers++;
-        if (ci_has(response, response_len, "i guess") || ci_has(response, response_len, "ya know"))
+        if (hu_str_contains_ci_cstr(response, response_len, "i guess") || hu_str_contains_ci_cstr(response, response_len, "ya know"))
             fillers++;
-        if (ci_has(response, response_len, "you know") || ci_has(response, response_len, "i dunno"))
+        if (hu_str_contains_ci_cstr(response, response_len, "you know") || hu_str_contains_ci_cstr(response, response_len, "i dunno"))
             fillers++;
-        if (ci_has(response, response_len, "kinda") || ci_has(response, response_len, "sorta"))
+        if (hu_str_contains_ci_cstr(response, response_len, "kinda") || hu_str_contains_ci_cstr(response, response_len, "sorta"))
             fillers++;
         out->dimensions[HU_TURING_FILLER_USAGE] = 5 + fillers * 2;
         if (casual > 0)
@@ -949,22 +935,22 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
     /* conversational_repair: self-corrections, retractions, mid-thought pivots */
     {
         int repairs = 0;
-        if (ci_has(response, response_len, "i mean"))
+        if (hu_str_contains_ci_cstr(response, response_len, "i mean"))
             repairs++;
-        if (ci_has(response, response_len, "wait,") || ci_has(response, response_len, "wait "))
+        if (hu_str_contains_ci_cstr(response, response_len, "wait,") || hu_str_contains_ci_cstr(response, response_len, "wait "))
             repairs++;
-        if (ci_has(response, response_len, "actually,") ||
-            ci_has(response, response_len, "actually "))
+        if (hu_str_contains_ci_cstr(response, response_len, "actually,") ||
+            hu_str_contains_ci_cstr(response, response_len, "actually "))
             repairs++;
-        if (ci_has(response, response_len, "no wait") || ci_has(response, response_len, "sorry,"))
+        if (hu_str_contains_ci_cstr(response, response_len, "no wait") || hu_str_contains_ci_cstr(response, response_len, "sorry,"))
             repairs++;
-        if (ci_has(response, response_len, "or rather") ||
-            ci_has(response, response_len, "well no"))
+        if (hu_str_contains_ci_cstr(response, response_len, "or rather") ||
+            hu_str_contains_ci_cstr(response, response_len, "well no"))
             repairs++;
-        if (ci_has(response, response_len, "scratch that") || ci_has(response, response_len, "nvm"))
+        if (hu_str_contains_ci_cstr(response, response_len, "scratch that") || hu_str_contains_ci_cstr(response, response_len, "nvm"))
             repairs++;
-        if (ci_has(response, response_len, "let me rephrase") ||
-            ci_has(response, response_len, "what i meant"))
+        if (hu_str_contains_ci_cstr(response, response_len, "let me rephrase") ||
+            hu_str_contains_ci_cstr(response, response_len, "what i meant"))
             repairs++;
         out->dimensions[HU_TURING_CONVERSATIONAL_REPAIR] = 5 + repairs * 2;
         if (casual > 0)
@@ -974,11 +960,11 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
     /* paralinguistic_cues: laughter, sighs, breath, vocal sounds, expressive markers */
     {
         int para = 0;
-        if (ci_has(response, response_len, "haha") || ci_has(response, response_len, "lol"))
+        if (hu_str_contains_ci_cstr(response, response_len, "haha") || hu_str_contains_ci_cstr(response, response_len, "lol"))
             para++;
-        if (ci_has(response, response_len, "hehe") || ci_has(response, response_len, "lmao"))
+        if (hu_str_contains_ci_cstr(response, response_len, "hehe") || hu_str_contains_ci_cstr(response, response_len, "lmao"))
             para++;
-        if (ci_has(response, response_len, "*sigh*"))
+        if (hu_str_contains_ci_cstr(response, response_len, "*sigh*"))
             para++;
         else {
             size_t slen = 4;
@@ -993,13 +979,13 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
                 }
             }
         }
-        if (ci_has(response, response_len, "*laugh*") || ci_has(response, response_len, "ugh"))
+        if (hu_str_contains_ci_cstr(response, response_len, "*laugh*") || hu_str_contains_ci_cstr(response, response_len, "ugh"))
             para++;
-        if (ci_has(response, response_len, "aww") || ci_has(response, response_len, "ooh"))
+        if (hu_str_contains_ci_cstr(response, response_len, "aww") || hu_str_contains_ci_cstr(response, response_len, "ooh"))
             para++;
-        if (ci_has(response, response_len, "whew") || ci_has(response, response_len, "phew"))
+        if (hu_str_contains_ci_cstr(response, response_len, "whew") || hu_str_contains_ci_cstr(response, response_len, "phew"))
             para++;
-        if (ci_has(response, response_len, "mhm") || ci_has(response, response_len, "oof"))
+        if (hu_str_contains_ci_cstr(response, response_len, "mhm") || hu_str_contains_ci_cstr(response, response_len, "oof"))
             para++;
         out->dimensions[HU_TURING_PARALINGUISTIC_CUES] = 5 + para * 2;
         if (humor > 0)

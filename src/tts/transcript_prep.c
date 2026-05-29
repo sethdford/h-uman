@@ -11,13 +11,11 @@
  *   - Emotion-derived volume
  */
 #include "human/tts/transcript_prep.h"
+#include "human/core/string.h"
 #include "human/tts/emotion_map.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-
-/* Forward declaration (defined below) */
-static bool ci_has(const char *hay, size_t hlen, const char *needle);
 
 /* ── Strip junk from TTS transcript ──────────────────────────────────── */
 
@@ -91,8 +89,8 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
                         i += 3; /* variation selector */
                     } else if (p[0] == 0xE2 && p[1] == 0x80 && p[2] == 0x8D) {
                         i += 3; /* ZWJ */
-                        if (i < text_len && is_emoji_codepoint(
-                                (const unsigned char *)text + i, text_len - i)) {
+                        if (i < text_len &&
+                            is_emoji_codepoint((const unsigned char *)text + i, text_len - i)) {
                             i += ((unsigned char)text[i] >= 0xF0) ? 4 : 3;
                         }
                     } else {
@@ -137,10 +135,10 @@ typedef struct {
 
 static const consonant_fix_t CONSONANT_FIXES[] = {
     {"ngths", 5, "ng<break time=\"50ms\"/>ths", "ng ths"},
-    {"sths",  4, "s<break time=\"50ms\"/>ths",  "s ths"},
-    {"sts ",  4, "sts <break time=\"40ms\"/>",   "sts "},
-    {"ctly",  4, "ct<break time=\"30ms\"/>ly",   "ctly"},
-    {"mpts",  4, "mpts<break time=\"40ms\"/>",   "mpts "},
+    {"sths", 4, "s<break time=\"50ms\"/>ths", "s ths"},
+    {"sts ", 4, "sts <break time=\"40ms\"/>", "sts "},
+    {"ctly", 4, "ct<break time=\"30ms\"/>ly", "ctly"},
+    {"mpts", 4, "mpts<break time=\"40ms\"/>", "mpts "},
 };
 #define CONSONANT_FIX_COUNT (sizeof(CONSONANT_FIXES) / sizeof(CONSONANT_FIXES[0]))
 
@@ -176,9 +174,9 @@ size_t hu_transcript_smooth_consonants(const char *text, size_t text_len, char *
 /* ── Number-to-word tables ────────────────────────────────────────────── */
 
 static const char *const ONES[] = {
-    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
-    "seventeen", "eighteen", "nineteen",
+    "zero",     "one",     "two",     "three",     "four",     "five",     "six",
+    "seven",    "eight",   "nine",    "ten",       "eleven",   "twelve",   "thirteen",
+    "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
 };
 static const char *const TENS[] = {
     "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
@@ -189,22 +187,30 @@ static size_t number_to_words(int n, char *out, size_t cap) {
         return 0;
     if (n < 20) {
         size_t wlen = strlen(ONES[n]);
-        if (wlen < cap) { memcpy(out, ONES[n], wlen); return wlen; }
+        if (wlen < cap) {
+            memcpy(out, ONES[n], wlen);
+            return wlen;
+        }
         return 0;
     }
     if (n < 100) {
         size_t pos = 0;
         const char *t = TENS[n / 10];
         size_t tlen = strlen(t);
-        if (pos + tlen >= cap) return 0;
-        memcpy(out + pos, t, tlen); pos += tlen;
+        if (pos + tlen >= cap)
+            return 0;
+        memcpy(out + pos, t, tlen);
+        pos += tlen;
         if (n % 10 != 0) {
-            if (pos + 1 >= cap) return pos;
+            if (pos + 1 >= cap)
+                return pos;
             out[pos++] = '-';
             const char *o = ONES[n % 10];
             size_t olen = strlen(o);
-            if (pos + olen >= cap) return pos;
-            memcpy(out + pos, o, olen); pos += olen;
+            if (pos + olen >= cap)
+                return pos;
+            memcpy(out + pos, o, olen);
+            pos += olen;
         }
         return pos;
     }
@@ -213,11 +219,15 @@ static size_t number_to_words(int n, char *out, size_t cap) {
         size_t hlen = number_to_words(n / 100, out, cap);
         pos += hlen;
         const char *hund = " hundred";
-        if (pos + 8 >= cap) return pos;
-        memcpy(out + pos, hund, 8); pos += 8;
+        if (pos + 8 >= cap)
+            return pos;
+        memcpy(out + pos, hund, 8);
+        pos += 8;
         if (n % 100 != 0) {
-            if (pos + 5 >= cap) return pos;
-            memcpy(out + pos, " and ", 5); pos += 5;
+            if (pos + 5 >= cap)
+                return pos;
+            memcpy(out + pos, " and ", 5);
+            pos += 5;
             pos += number_to_words(n % 100, out + pos, cap - pos);
         }
         return pos;
@@ -226,17 +236,22 @@ static size_t number_to_words(int n, char *out, size_t cap) {
     size_t pos = 0;
     pos += number_to_words(n / 1000, out, cap);
     const char *thou = " thousand";
-    if (pos + 9 >= cap) return pos;
-    memcpy(out + pos, thou, 9); pos += 9;
+    if (pos + 9 >= cap)
+        return pos;
+    memcpy(out + pos, thou, 9);
+    pos += 9;
     if (n % 1000 != 0) {
-        if (pos + 1 >= cap) return pos;
+        if (pos + 1 >= cap)
+            return pos;
         out[pos++] = ' ';
         pos += number_to_words(n % 1000, out + pos, cap - pos);
     }
     return pos;
 }
 
-static bool is_digit(char c) { return c >= '0' && c <= '9'; }
+static bool is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
 
 /* Parse unsigned integer from text, returns chars consumed (0 if not a number). */
 static size_t parse_uint(const char *text, size_t len, int *out_val) {
@@ -255,14 +270,17 @@ static size_t parse_uint(const char *text, size_t len, int *out_val) {
 /* ── Month names ─────────────────────────────────────────────────────── */
 
 static const char *const MONTH_NAMES[] = {
-    "", "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "",     "January", "February",  "March",   "April",    "May",      "June",
+    "July", "August",  "September", "October", "November", "December",
 };
 
 static const char *ordinal_suffix(int day) {
-    if (day == 1 || day == 21 || day == 31) return "st";
-    if (day == 2 || day == 22) return "nd";
-    if (day == 3 || day == 23) return "rd";
+    if (day == 1 || day == 21 || day == 31)
+        return "st";
+    if (day == 2 || day == 22)
+        return "nd";
+    if (day == 3 || day == 23)
+        return "rd";
     return "th";
 }
 
@@ -278,54 +296,57 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
 
     while (i < text_len && pos < cap - 1) {
         /* Phone numbers: (XXX) XXX-XXXX or XXX-XXX-XXXX */
-        if (text[i] == '(' && i + 13 <= text_len &&
-            is_digit(text[i + 1]) && is_digit(text[i + 2]) && is_digit(text[i + 3]) &&
-            text[i + 4] == ')' && text[i + 5] == ' ' &&
-            is_digit(text[i + 6]) && is_digit(text[i + 7]) && is_digit(text[i + 8]) &&
-            text[i + 9] == '-' &&
-            is_digit(text[i + 10]) && is_digit(text[i + 11]) &&
-            is_digit(text[i + 12]) && is_digit(text[i + 13])) {
+        if (text[i] == '(' && i + 13 <= text_len && is_digit(text[i + 1]) &&
+            is_digit(text[i + 2]) && is_digit(text[i + 3]) && text[i + 4] == ')' &&
+            text[i + 5] == ' ' && is_digit(text[i + 6]) && is_digit(text[i + 7]) &&
+            is_digit(text[i + 8]) && text[i + 9] == '-' && is_digit(text[i + 10]) &&
+            is_digit(text[i + 11]) && is_digit(text[i + 12]) && is_digit(text[i + 13])) {
             if (!strip_ssml) {
                 int n = snprintf(out + pos, cap - pos,
-                    "<spell>%.3s</spell><break time=\"200ms\"/>"
-                    "<spell>%.3s</spell><break time=\"200ms\"/>"
-                    "<spell>%.4s</spell>",
-                    text + i + 1, text + i + 6, text + i + 10);
-                if (n > 0 && pos + (size_t)n < cap) pos += (size_t)n;
-            } else {
-                int n = snprintf(out + pos, cap - pos, "%.3s, %.3s, %.4s",
+                                 "<spell>%.3s</spell><break time=\"200ms\"/>"
+                                 "<spell>%.3s</spell><break time=\"200ms\"/>"
+                                 "<spell>%.4s</spell>",
                                  text + i + 1, text + i + 6, text + i + 10);
-                if (n > 0 && pos + (size_t)n < cap) pos += (size_t)n;
+                if (n > 0 && pos + (size_t)n < cap)
+                    pos += (size_t)n;
+            } else {
+                int n = snprintf(out + pos, cap - pos, "%.3s, %.3s, %.4s", text + i + 1,
+                                 text + i + 6, text + i + 10);
+                if (n > 0 && pos + (size_t)n < cap)
+                    pos += (size_t)n;
             }
             i += 14;
             continue;
         }
         /* XXX-XXX-XXXX (no parens) */
-        if (is_digit(text[i]) && i + 11 <= text_len &&
-            is_digit(text[i + 1]) && is_digit(text[i + 2]) && text[i + 3] == '-' &&
-            is_digit(text[i + 4]) && is_digit(text[i + 5]) && is_digit(text[i + 6]) &&
-            text[i + 7] == '-' &&
-            is_digit(text[i + 8]) && is_digit(text[i + 9]) &&
-            is_digit(text[i + 10]) && is_digit(text[i + 11])) {
+        if (is_digit(text[i]) && i + 11 <= text_len && is_digit(text[i + 1]) &&
+            is_digit(text[i + 2]) && text[i + 3] == '-' && is_digit(text[i + 4]) &&
+            is_digit(text[i + 5]) && is_digit(text[i + 6]) && text[i + 7] == '-' &&
+            is_digit(text[i + 8]) && is_digit(text[i + 9]) && is_digit(text[i + 10]) &&
+            is_digit(text[i + 11])) {
             /* Make sure it's not inside a longer number */
-            if (i > 0 && is_digit(text[i - 1])) goto not_phone;
-            if (i + 12 < text_len && is_digit(text[i + 12])) goto not_phone;
+            if (i > 0 && is_digit(text[i - 1]))
+                goto not_phone;
+            if (i + 12 < text_len && is_digit(text[i + 12]))
+                goto not_phone;
             if (!strip_ssml) {
                 int n = snprintf(out + pos, cap - pos,
-                    "<spell>%.3s</spell><break time=\"200ms\"/>"
-                    "<spell>%.3s</spell><break time=\"200ms\"/>"
-                    "<spell>%.4s</spell>",
-                    text + i, text + i + 4, text + i + 8);
-                if (n > 0 && pos + (size_t)n < cap) pos += (size_t)n;
-            } else {
-                int n = snprintf(out + pos, cap - pos, "%.3s, %.3s, %.4s",
+                                 "<spell>%.3s</spell><break time=\"200ms\"/>"
+                                 "<spell>%.3s</spell><break time=\"200ms\"/>"
+                                 "<spell>%.4s</spell>",
                                  text + i, text + i + 4, text + i + 8);
-                if (n > 0 && pos + (size_t)n < cap) pos += (size_t)n;
+                if (n > 0 && pos + (size_t)n < cap)
+                    pos += (size_t)n;
+            } else {
+                int n = snprintf(out + pos, cap - pos, "%.3s, %.3s, %.4s", text + i, text + i + 4,
+                                 text + i + 8);
+                if (n > 0 && pos + (size_t)n < cap)
+                    pos += (size_t)n;
             }
             i += 12;
             continue;
         }
-        not_phone:
+    not_phone:
 
         /* Currency: $XX.XX or $X,XXX */
         if (text[i] == '$' && i + 1 < text_len && is_digit(text[i + 1])) {
@@ -334,14 +355,15 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
             size_t dlen = parse_uint(text + i, text_len - i, &dollars);
             i += dlen;
             /* Skip comma-grouped thousands: $1,234 */
-            while (i + 3 < text_len && text[i] == ',' &&
-                   is_digit(text[i + 1]) && is_digit(text[i + 2]) && is_digit(text[i + 3])) {
-                dollars = dollars * 1000 + (text[i + 1] - '0') * 100 +
-                          (text[i + 2] - '0') * 10 + (text[i + 3] - '0');
+            while (i + 3 < text_len && text[i] == ',' && is_digit(text[i + 1]) &&
+                   is_digit(text[i + 2]) && is_digit(text[i + 3])) {
+                dollars = dollars * 1000 + (text[i + 1] - '0') * 100 + (text[i + 2] - '0') * 10 +
+                          (text[i + 3] - '0');
                 i += 4;
             }
             int cents = 0;
-            if (i + 2 < text_len && text[i] == '.' && is_digit(text[i + 1]) && is_digit(text[i + 2])) {
+            if (i + 2 < text_len && text[i] == '.' && is_digit(text[i + 1]) &&
+                is_digit(text[i + 2])) {
                 cents = (text[i + 1] - '0') * 10 + (text[i + 2] - '0');
                 i += 3;
             }
@@ -350,18 +372,22 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
             if (wpos > 0 && wpos + 20 < sizeof(word_buf)) {
                 const char *unit = dollars == 1 ? " dollar" : " dollars";
                 size_t ulen = strlen(unit);
-                memcpy(word_buf + wpos, unit, ulen); wpos += ulen;
+                memcpy(word_buf + wpos, unit, ulen);
+                wpos += ulen;
                 if (cents > 0) {
-                    memcpy(word_buf + wpos, " and ", 5); wpos += 5;
+                    memcpy(word_buf + wpos, " and ", 5);
+                    wpos += 5;
                     wpos += number_to_words(cents, word_buf + wpos, sizeof(word_buf) - wpos);
                     const char *cu = cents == 1 ? " cent" : " cents";
                     size_t culen = strlen(cu);
                     if (wpos + culen < sizeof(word_buf)) {
-                        memcpy(word_buf + wpos, cu, culen); wpos += culen;
+                        memcpy(word_buf + wpos, cu, culen);
+                        wpos += culen;
                     }
                 }
                 if (pos + wpos < cap) {
-                    memcpy(out + pos, word_buf, wpos); pos += wpos;
+                    memcpy(out + pos, word_buf, wpos);
+                    pos += wpos;
                 }
             }
             continue;
@@ -378,10 +404,12 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
                 if (wpos > 0) {
                     const char *pct = " percent";
                     if (wpos + 8 < sizeof(word_buf)) {
-                        memcpy(word_buf + wpos, pct, 8); wpos += 8;
+                        memcpy(word_buf + wpos, pct, 8);
+                        wpos += 8;
                     }
                     if (pos + wpos < cap) {
-                        memcpy(out + pos, word_buf, wpos); pos += wpos;
+                        memcpy(out + pos, word_buf, wpos);
+                        pos += wpos;
                     }
                     i += dlen + 1;
                     continue;
@@ -393,16 +421,17 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
                 text[i + dlen] == '-') {
                 int month = 0, day = 0;
                 size_t mlen = parse_uint(text + i + dlen + 1, text_len - i - dlen - 1, &month);
-                if (mlen > 0 && month >= 1 && month <= 12 &&
-                    i + dlen + 1 + mlen < text_len && text[i + dlen + 1 + mlen] == '-') {
+                if (mlen > 0 && month >= 1 && month <= 12 && i + dlen + 1 + mlen < text_len &&
+                    text[i + dlen + 1 + mlen] == '-') {
                     size_t dlen2 = parse_uint(text + i + dlen + 1 + mlen + 1,
                                               text_len - i - dlen - 1 - mlen - 1, &day);
                     if (dlen2 > 0 && day >= 1 && day <= 31) {
                         char dbuf[80];
-                        int dn = snprintf(dbuf, sizeof(dbuf), "%s %d%s, %d",
-                                          MONTH_NAMES[month], day, ordinal_suffix(day), val);
+                        int dn = snprintf(dbuf, sizeof(dbuf), "%s %d%s, %d", MONTH_NAMES[month],
+                                          day, ordinal_suffix(day), val);
                         if (dn > 0 && pos + (size_t)dn < cap) {
-                            memcpy(out + pos, dbuf, (size_t)dn); pos += (size_t)dn;
+                            memcpy(out + pos, dbuf, (size_t)dn);
+                            pos += (size_t)dn;
                         }
                         i += dlen + 1 + mlen + 1 + dlen2;
                         continue;
@@ -416,17 +445,18 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
                 int month = val;
                 int day = 0;
                 size_t dlen2 = parse_uint(text + i + dlen + 1, text_len - i - dlen - 1, &day);
-                if (dlen2 > 0 && day >= 1 && day <= 31 &&
-                    i + dlen + 1 + dlen2 < text_len && text[i + dlen + 1 + dlen2] == '/') {
+                if (dlen2 > 0 && day >= 1 && day <= 31 && i + dlen + 1 + dlen2 < text_len &&
+                    text[i + dlen + 1 + dlen2] == '/') {
                     int year = 0;
                     size_t ylen = parse_uint(text + i + dlen + 1 + dlen2 + 1,
                                              text_len - i - dlen - 1 - dlen2 - 1, &year);
                     if (ylen == 4 && year >= 1900 && year <= 2100) {
                         char dbuf[80];
-                        int dn = snprintf(dbuf, sizeof(dbuf), "%s %d%s, %d",
-                                          MONTH_NAMES[month], day, ordinal_suffix(day), year);
+                        int dn = snprintf(dbuf, sizeof(dbuf), "%s %d%s, %d", MONTH_NAMES[month],
+                                          day, ordinal_suffix(day), year);
                         if (dn > 0 && pos + (size_t)dn < cap) {
-                            memcpy(out + pos, dbuf, (size_t)dn); pos += (size_t)dn;
+                            memcpy(out + pos, dbuf, (size_t)dn);
+                            pos += (size_t)dn;
                         }
                         i += dlen + 1 + dlen2 + 1 + ylen;
                         continue;
@@ -444,7 +474,8 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
                 const char *ampm = "";
                 /* Skip optional space + AM/PM */
                 size_t after = i + consumed;
-                if (after < text_len && text[after] == ' ') after++;
+                if (after < text_len && text[after] == ' ')
+                    after++;
                 if (after + 1 < text_len) {
                     if ((text[after] == 'A' || text[after] == 'a') &&
                         (text[after + 1] == 'M' || text[after + 1] == 'm')) {
@@ -479,12 +510,14 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
                     size_t mwlen = number_to_words(minute, min_words, sizeof(min_words));
                     min_words[mwlen] = '\0';
                     if (minute < 10)
-                        tn = snprintf(tbuf, sizeof(tbuf), "%s oh %s%s", ONES[hour], min_words, ampm);
+                        tn =
+                            snprintf(tbuf, sizeof(tbuf), "%s oh %s%s", ONES[hour], min_words, ampm);
                     else
                         tn = snprintf(tbuf, sizeof(tbuf), "%s %s%s", ONES[hour], min_words, ampm);
                 }
                 if (tn > 0 && pos + (size_t)tn < cap) {
-                    memcpy(out + pos, tbuf, (size_t)tn); pos += (size_t)tn;
+                    memcpy(out + pos, tbuf, (size_t)tn);
+                    pos += (size_t)tn;
                 }
                 i += consumed;
                 continue;
@@ -492,20 +525,23 @@ size_t hu_transcript_normalize_for_speech(const char *text, size_t text_len, cha
 
             /* Small standalone integers (0-99) → words */
             if (dlen > 0 && val <= 99 && dlen <= 2) {
-                bool preceded_by_alnum = (digit_start > 0 &&
-                    ((text[digit_start - 1] >= 'a' && text[digit_start - 1] <= 'z') ||
-                     (text[digit_start - 1] >= 'A' && text[digit_start - 1] <= 'Z') ||
-                     is_digit(text[digit_start - 1])));
-                bool followed_by_alnum = (digit_start + dlen < text_len &&
-                    ((text[digit_start + dlen] >= 'a' && text[digit_start + dlen] <= 'z') ||
-                     (text[digit_start + dlen] >= 'A' && text[digit_start + dlen] <= 'Z') ||
-                     is_digit(text[digit_start + dlen])));
+                bool preceded_by_alnum =
+                    (digit_start > 0 &&
+                     ((text[digit_start - 1] >= 'a' && text[digit_start - 1] <= 'z') ||
+                      (text[digit_start - 1] >= 'A' && text[digit_start - 1] <= 'Z') ||
+                      is_digit(text[digit_start - 1])));
+                bool followed_by_alnum =
+                    (digit_start + dlen < text_len &&
+                     ((text[digit_start + dlen] >= 'a' && text[digit_start + dlen] <= 'z') ||
+                      (text[digit_start + dlen] >= 'A' && text[digit_start + dlen] <= 'Z') ||
+                      is_digit(text[digit_start + dlen])));
                 /* Only convert truly standalone numbers, not parts of larger tokens */
                 if (!preceded_by_alnum && !followed_by_alnum) {
                     char word_buf[32];
                     size_t wpos = number_to_words(val, word_buf, sizeof(word_buf));
                     if (wpos > 0 && pos + wpos < cap) {
-                        memcpy(out + pos, word_buf, wpos); pos += wpos;
+                        memcpy(out + pos, word_buf, wpos);
+                        pos += wpos;
                         i += dlen;
                         continue;
                     }
@@ -536,7 +572,8 @@ size_t hu_transcript_limit_breaks(char *buf, size_t len, int max_breaks_per_100_
     }
 
     int max_allowed = (int)((len * (size_t)max_breaks_per_100_chars) / 100);
-    if (max_allowed < 2) max_allowed = 2;
+    if (max_allowed < 2)
+        max_allowed = 2;
 
     if (total_breaks <= max_allowed)
         return len;
@@ -575,9 +612,9 @@ size_t hu_transcript_limit_breaks(char *buf, size_t len, int max_breaks_per_100_
 /* ── Abbreviation table (don't split on these periods) ────────────────── */
 
 static const char *const ABBREVIATIONS[] = {
-    "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.", "St.",
-    "vs.", "etc.", "i.e.", "e.g.", "a.m.", "p.m.", "Inc.", "Ltd.",
-    "Corp.", "Gen.", "Gov.", "Sgt.", "Capt.", "Lt.", "Col.",
+    "Mr.",   "Mrs.", "Ms.",  "Dr.",  "Prof.", "Sr.",  "Jr.",  "St.",
+    "vs.",   "etc.", "i.e.", "e.g.", "a.m.",  "p.m.", "Inc.", "Ltd.",
+    "Corp.", "Gen.", "Gov.", "Sgt.", "Capt.", "Lt.",  "Col.",
 };
 #define ABBREV_COUNT (sizeof(ABBREVIATIONS) / sizeof(ABBREVIATIONS[0]))
 
@@ -595,8 +632,8 @@ static bool ends_with_abbreviation(const char *text, size_t pos) {
 
 /* ── Sentence segmenter ──────────────────────────────────────────────── */
 
-size_t hu_transcript_segment(const char *text, size_t text_len,
-                             hu_prep_sentence_t *out, size_t max_sentences) {
+size_t hu_transcript_segment(const char *text, size_t text_len, hu_prep_sentence_t *out,
+                             size_t max_sentences) {
     if (!text || text_len == 0 || !out || max_sentences == 0)
         return 0;
 
@@ -648,8 +685,7 @@ size_t hu_transcript_segment(const char *text, size_t text_len,
                 }
             }
             sent_start = end;
-            while (sent_start < text_len &&
-                   (text[sent_start] == ' ' || text[sent_start] == '\n'))
+            while (sent_start < text_len && (text[sent_start] == ' ' || text[sent_start] == '\n'))
                 sent_start++;
             i = sent_start - 1;
         }
@@ -679,9 +715,8 @@ size_t hu_transcript_segment(const char *text, size_t text_len,
 
 /* ── Per-sentence emotion via context heuristics ─────────────────────── */
 
-static const char *emotion_for_sentence(const char *sentence, size_t len,
-                                        const char *incoming, size_t incoming_len,
-                                        uint8_t hour) {
+static const char *emotion_for_sentence(const char *sentence, size_t len, const char *incoming,
+                                        size_t incoming_len, uint8_t hour) {
     return hu_cartesia_emotion_from_context(incoming, incoming_len, sentence, len, hour);
 }
 
@@ -708,19 +743,19 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
     }
 
     /* Emotional keywords: slower for weight */
-    if (ci_has(sentence, len, "feel") || ci_has(sentence, len, "love") ||
-        ci_has(sentence, len, "care") || ci_has(sentence, len, "heart") ||
-        ci_has(sentence, len, "worry"))
+    if (hu_str_contains_ci_cstr(sentence, len, "feel") || hu_str_contains_ci_cstr(sentence, len, "love") ||
+        hu_str_contains_ci_cstr(sentence, len, "care") || hu_str_contains_ci_cstr(sentence, len, "heart") ||
+        hu_str_contains_ci_cstr(sentence, len, "worry"))
         return base_speed * 0.90f;
 
     /* Important/emphasis words: slower, deliberate */
-    if (ci_has(sentence, len, "important") || ci_has(sentence, len, "crucial") ||
-        ci_has(sentence, len, "remember"))
+    if (hu_str_contains_ci_cstr(sentence, len, "important") || hu_str_contains_ci_cstr(sentence, len, "crucial") ||
+        hu_str_contains_ci_cstr(sentence, len, "remember"))
         return base_speed * 0.92f;
 
     /* Conclusions: slower, more weight */
-    if (ci_has(sentence, len, "so ") || ci_has(sentence, len, "therefore") ||
-        ci_has(sentence, len, "the point is"))
+    if (hu_str_contains_ci_cstr(sentence, len, "so ") || hu_str_contains_ci_cstr(sentence, len, "therefore") ||
+        hu_str_contains_ci_cstr(sentence, len, "the point is"))
         return base_speed * 0.93f;
 
     /* Questions: slightly slower, thoughtful */
@@ -732,8 +767,8 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
         return base_speed * 0.92f;
 
     /* Lists/examples: slightly faster */
-    if (ci_has(sentence, len, "for example") || ci_has(sentence, len, "such as") ||
-        ci_has(sentence, len, "first") || ci_has(sentence, len, "second"))
+    if (hu_str_contains_ci_cstr(sentence, len, "for example") || hu_str_contains_ci_cstr(sentence, len, "such as") ||
+        hu_str_contains_ci_cstr(sentence, len, "first") || hu_str_contains_ci_cstr(sentence, len, "second"))
         return base_speed * 1.05f;
 
     /* Long compound sentences: slightly faster to stay natural */
@@ -796,8 +831,8 @@ static size_t inject_clause_breaks(const char *text, size_t len, float pause_fac
                 if (i + 2 < len) {
                     const char *after = text + i + 2;
                     size_t remain = len - (i + 2);
-                    if ((remain >= 4 && (memcmp(after, "but ", 4) == 0 ||
-                                         memcmp(after, "yet ", 4) == 0)) ||
+                    if ((remain >= 4 &&
+                         (memcmp(after, "but ", 4) == 0 || memcmp(after, "yet ", 4) == 0)) ||
                         (remain >= 8 && memcmp(after, "however ", 8) == 0) ||
                         (remain >= 9 && memcmp(after, "although ", 9) == 0))
                         ms = (int)(250 * pause_factor);
@@ -848,34 +883,10 @@ static const discourse_rule_t DISCOURSE_RULES[] = {
 };
 #define DISCOURSE_RULE_COUNT (sizeof(DISCOURSE_RULES) / sizeof(DISCOURSE_RULES[0]))
 
-static bool ci_has(const char *hay, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > hlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        bool ok = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char a = hay[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a += 32;
-            if (b >= 'A' && b <= 'Z')
-                b += 32;
-            if (a != b) {
-                ok = false;
-                break;
-            }
-        }
-        if (ok)
-            return true;
-    }
-    return false;
-}
-
 static const char *pick_discourse_marker(const char *sentence, size_t len, uint32_t seed) {
     for (size_t r = 0; r < DISCOURSE_RULE_COUNT; r++) {
         for (size_t t = 0; t < DISCOURSE_RULES[r].trigger_count; t++) {
-            if (ci_has(sentence, len, DISCOURSE_RULES[r].triggers[t])) {
+            if (hu_str_contains_ci_cstr(sentence, len, DISCOURSE_RULES[r].triggers[t])) {
                 /* Don't always inject — ~30% chance when trigger matches */
                 if ((seed ^ (uint32_t)(r * 31 + t * 17)) % 100 < 30)
                     return DISCOURSE_RULES[r].marker;
@@ -906,8 +917,8 @@ static const char *pick_nonverbal(const char *sentence, size_t len, const char *
         return NULL;
 
     /* Context-appropriate nonverbal */
-    if (ci_has(sentence, len, "lol") || ci_has(sentence, len, "haha") ||
-        ci_has(sentence, len, "funny"))
+    if (hu_str_contains_ci_cstr(sentence, len, "lol") || hu_str_contains_ci_cstr(sentence, len, "haha") ||
+        hu_str_contains_ci_cstr(sentence, len, "funny"))
         return "[laughter] ";
 
     if (emotion && (strcmp(emotion, "contemplative") == 0 || strcmp(emotion, "calm") == 0))
@@ -940,10 +951,10 @@ static const char *pick_thinking_sound(const char *transcript, size_t len, uint3
         if (transcript[i] == '?')
             has_question = true;
     }
-    if (ci_has(transcript, len > 200 ? 200 : len, "feel") ||
-        ci_has(transcript, len > 200 ? 200 : len, "think") ||
-        ci_has(transcript, len > 200 ? 200 : len, "believe") ||
-        ci_has(transcript, len > 200 ? 200 : len, "honestly"))
+    if (hu_str_contains_ci_cstr(transcript, len > 200 ? 200 : len, "feel") ||
+        hu_str_contains_ci_cstr(transcript, len > 200 ? 200 : len, "think") ||
+        hu_str_contains_ci_cstr(transcript, len > 200 ? 200 : len, "believe") ||
+        hu_str_contains_ci_cstr(transcript, len > 200 ? 200 : len, "honestly"))
         has_emotional = true;
 
     if (!is_complex && !has_question && !has_emotional)
@@ -968,8 +979,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
 
     /* Phase 0a: strip junk (stage directions, JSON blobs, emoji icons) */
     char cleaned[HU_PREP_MAX_OUTPUT];
-    size_t cleaned_len = hu_transcript_strip_junk(transcript, transcript_len,
-                                                   cleaned, sizeof(cleaned));
+    size_t cleaned_len =
+        hu_transcript_strip_junk(transcript, transcript_len, cleaned, sizeof(cleaned));
     const char *src = cleaned_len > 0 ? cleaned : transcript;
     size_t src_len = cleaned_len > 0 ? cleaned_len : transcript_len;
 
@@ -984,16 +995,16 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
 
     /* Phase 0c: consonant cluster smoothing */
     char smoothed[HU_PREP_MAX_OUTPUT];
-    size_t smoothed_len = hu_transcript_smooth_consonants(src, src_len, smoothed,
-                                                          sizeof(smoothed), config->strip_ssml);
+    size_t smoothed_len = hu_transcript_smooth_consonants(src, src_len, smoothed, sizeof(smoothed),
+                                                          config->strip_ssml);
     if (smoothed_len > 0) {
         src = smoothed;
         src_len = smoothed_len;
     }
 
     /* Segment into sentences */
-    result->sentence_count = hu_transcript_segment(
-        src, src_len, result->sentences, HU_PREP_MAX_SENTENCES);
+    result->sentence_count =
+        hu_transcript_segment(src, src_len, result->sentences, HU_PREP_MAX_SENTENCES);
 
     if (result->sentence_count == 0) {
         size_t cp = src_len < HU_PREP_MAX_OUTPUT - 1 ? src_len : HU_PREP_MAX_OUTPUT - 1;
@@ -1025,8 +1036,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
 
     /* Dominant emotion: blend with previous turn for emotional momentum */
     result->dominant_emotion = result->sentences[0].emotion;
-    if (config->prev_turn_emotion && config->prev_turn_emotion[0] &&
-        result->dominant_emotion &&
+    if (config->prev_turn_emotion && config->prev_turn_emotion[0] && result->dominant_emotion &&
         strcmp(config->prev_turn_emotion, result->dominant_emotion) != 0) {
         /* If previous turn was highly emotional, carry it forward for first sentence
          * unless the new emotion is strongly different. This creates continuity. */
@@ -1116,8 +1126,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         /* Speed tag if non-default (SSML mode only) */
         float speed_delta = s->speed_ratio - base_speed;
         if (!strip && (speed_delta > 0.03f || speed_delta < -0.03f)) {
-            int n = snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>",
-                             (double)s->speed_ratio);
+            int n =
+                snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", (double)s->speed_ratio);
             if (n > 0 && pos + (size_t)n < cap)
                 pos += (size_t)n;
         }
@@ -1135,8 +1145,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
 
         /* Nonverbal before sentence (context-dependent) */
         if (config->nonverbals_enabled) {
-            const char *nv = pick_nonverbal(s->text, s->len, s->emotion,
-                                            config->seed ^ (uint32_t)(i * 97));
+            const char *nv =
+                pick_nonverbal(s->text, s->len, s->emotion, config->seed ^ (uint32_t)(i * 97));
             if (nv) {
                 if (strip) {
                     /* In strip mode, only emit text nonverbals, not SSML breaks */
@@ -1159,8 +1169,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
 
         /* Discourse marker (sparse, contextual — opt-in via discourse_rate) */
         if (config->discourse_rate > 0.0f && i > 0) {
-            const char *marker = pick_discourse_marker(
-                s->text, s->len, config->seed ^ (uint32_t)(i * 53));
+            const char *marker =
+                pick_discourse_marker(s->text, s->len, config->seed ^ (uint32_t)(i * 53));
             if (marker) {
                 size_t mlen = strlen(marker);
                 if (pos + mlen < cap) {
@@ -1183,8 +1193,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         /* Sentence text with intra-clause breath-group pauses */
         if (pos + s->len + 256 < cap) {
             char clause_buf[4096];
-            size_t clen = inject_clause_breaks(s->text, s->len, pause_factor, strip,
-                                               clause_buf, sizeof(clause_buf));
+            size_t clen = inject_clause_breaks(s->text, s->len, pause_factor, strip, clause_buf,
+                                               sizeof(clause_buf));
             if (clen > 0 && pos + clen < cap) {
                 memcpy(out + pos, clause_buf, clen);
                 pos += clen;

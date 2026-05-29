@@ -1,29 +1,12 @@
 typedef int hu_anticipatory_unused_;
 
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
 /* Case-insensitive substring match (no SQLite dependency). */
-static bool contains_ci(const char *haystack, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || hlen < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 /* Keyword → emotion mapping. First match wins. */
 typedef struct {
     const char *keyword;
@@ -64,7 +47,7 @@ static void match_keyword_to_emotion(const char *text, size_t text_len, const ch
 
     for (size_t k = 0; k < KEYWORD_EMOTIONS_COUNT; k++) {
         const char *kw = KEYWORD_EMOTIONS[k].keyword;
-        if (contains_ci(text, text_len, kw)) {
+        if (hu_str_contains_ci_cstr(text, text_len, kw)) {
             *out_emotion = KEYWORD_EMOTIONS[k].emotion;
             *out_conf = KEYWORD_EMOTIONS[k].confidence;
             size_t copy = text_len < basis_cap - 1 ? text_len : basis_cap - 1;
@@ -281,13 +264,13 @@ char *hu_anticipatory_build_directive(hu_allocator_t *alloc, const hu_emotional_
         first = false;
 
         if (preds[i].basis[0]) {
-            pos = hu_buf_appendf(buf, sizeof(buf), pos, "%.*s",
-                                 (int)(sizeof(preds[i].basis) - 1), preds[i].basis);
+            pos = hu_buf_appendf(buf, sizeof(buf), pos, "%.*s", (int)(sizeof(preds[i].basis) - 1),
+                                 preds[i].basis);
         } else {
             pos = hu_buf_appendf(buf, sizeof(buf), pos, "upcoming event");
         }
-        pos = hu_buf_appendf(buf, sizeof(buf), pos, " — they may be %s.",
-                             preds[i].predicted_emotion);
+        pos =
+            hu_buf_appendf(buf, sizeof(buf), pos, " — they may be %s.", preds[i].predicted_emotion);
     }
 
     if (first) {

@@ -5,9 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static uint64_t judge_cache_key(const char *actual, size_t actual_len,
-                                const char *expected, size_t expected_len,
-                                const char *rubric, size_t rubric_len) {
+static uint64_t judge_cache_key(const char *actual, size_t actual_len, const char *expected,
+                                size_t expected_len, const char *rubric, size_t rubric_len) {
     uint64_t h = 14695981039346656037ULL;
     for (size_t i = 0; i < actual_len; i++) {
         h ^= (uint64_t)(unsigned char)actual[i];
@@ -30,8 +29,7 @@ static uint64_t judge_cache_key(const char *actual, size_t actual_len,
     return h;
 }
 
-static hu_eval_judge_result_t dup_result(hu_allocator_t *alloc,
-                                          const hu_eval_judge_result_t *src) {
+static hu_eval_judge_result_t dup_result(hu_allocator_t *alloc, const hu_eval_judge_result_t *src) {
     hu_eval_judge_result_t dst = *src;
     if (src->reasoning && src->reasoning_len > 0) {
         dst.reasoning = hu_strndup(alloc, src->reasoning, src->reasoning_len);
@@ -49,14 +47,12 @@ hu_error_t hu_eval_judge_cache_create(hu_allocator_t *alloc, hu_eval_judge_cache
     return HU_OK;
 }
 
-bool hu_eval_judge_cache_lookup(hu_eval_judge_cache_t *cache, const char *actual,
-                                 size_t actual_len, const char *expected,
-                                 size_t expected_len, const char *rubric,
-                                 size_t rubric_len, hu_eval_judge_result_t *out) {
+bool hu_eval_judge_cache_lookup(hu_eval_judge_cache_t *cache, const char *actual, size_t actual_len,
+                                const char *expected, size_t expected_len, const char *rubric,
+                                size_t rubric_len, hu_eval_judge_result_t *out) {
     if (!cache || !actual || !expected || !out)
         return false;
-    uint64_t h = judge_cache_key(actual, actual_len, expected, expected_len,
-                                  rubric, rubric_len);
+    uint64_t h = judge_cache_key(actual, actual_len, expected, expected_len, rubric, rubric_len);
     size_t slot = (size_t)(h % HU_EVAL_JUDGE_CACHE_SLOTS);
     if (cache->slots[slot].occupied && cache->slots[slot].hash == h) {
         *out = dup_result(cache->alloc, &cache->slots[slot].result);
@@ -65,14 +61,12 @@ bool hu_eval_judge_cache_lookup(hu_eval_judge_cache_t *cache, const char *actual
     return false;
 }
 
-static void cache_store(hu_eval_judge_cache_t *cache, const char *actual,
-                        size_t actual_len, const char *expected,
-                        size_t expected_len, const char *rubric,
+static void cache_store(hu_eval_judge_cache_t *cache, const char *actual, size_t actual_len,
+                        const char *expected, size_t expected_len, const char *rubric,
                         size_t rubric_len, const hu_eval_judge_result_t *result) {
     if (!cache)
         return;
-    uint64_t h = judge_cache_key(actual, actual_len, expected, expected_len,
-                                  rubric, rubric_len);
+    uint64_t h = judge_cache_key(actual, actual_len, expected, expected_len, rubric, rubric_len);
     size_t slot = (size_t)(h % HU_EVAL_JUDGE_CACHE_SLOTS);
     if (cache->slots[slot].occupied && cache->slots[slot].result.reasoning) {
         cache->alloc->free(cache->alloc->ctx, cache->slots[slot].result.reasoning,
@@ -118,7 +112,7 @@ static int parse_score_1to5(const char *start, const char *end) {
 }
 
 static char *parse_reasoning(hu_allocator_t *alloc, const char *start, const char *end,
-                              size_t *out_len) {
+                             size_t *out_len) {
     const char *key = "\"reasoning\"";
     const char *k = strstr(start, key);
     if (!k || k >= end) {
@@ -153,29 +147,6 @@ static char *parse_reasoning(hu_allocator_t *alloc, const char *start, const cha
 }
 #endif /* !HU_IS_TEST */
 
-static bool str_case_contains_judge(const char *haystack, size_t hlen,
-                                     const char *needle, size_t nlen) {
-    if (nlen == 0 || nlen > hlen)
-        return false;
-    for (size_t i = 0; i <= hlen - nlen; i++) {
-        size_t j = 0;
-        while (j < nlen) {
-            int hc = (unsigned char)haystack[i + j];
-            int nc = (unsigned char)needle[j];
-            if (hc >= 'A' && hc <= 'Z')
-                hc += 32;
-            if (nc >= 'A' && nc <= 'Z')
-                nc += 32;
-            if (hc != nc)
-                break;
-            j++;
-        }
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
-
 static size_t count_words_judge(const char *s, size_t len) {
     size_t c = 0;
     const char *p = s;
@@ -192,8 +163,8 @@ static size_t count_words_judge(const char *s, size_t len) {
     return c;
 }
 
-static size_t count_word_matches(const char *actual, size_t actual_len,
-                                  const char *expected, size_t expected_len) {
+static size_t count_word_matches(const char *actual, size_t actual_len, const char *expected,
+                                 size_t expected_len) {
     size_t count = 0;
     const char *p = expected;
     const char *end = expected + expected_len;
@@ -206,16 +177,15 @@ static size_t count_word_matches(const char *actual, size_t actual_len,
         while (p < end && !isspace((unsigned char)*p))
             p++;
         size_t wlen = (size_t)(p - ws);
-        if (wlen > 0 && str_case_contains_judge(actual, actual_len, ws, wlen))
+        if (wlen > 0 && hu_str_contains_ci(actual, actual_len, ws, wlen))
             count++;
     }
     return count;
 }
 
-static void heuristic_judge_1to5(const char *actual, size_t actual_len,
-                                  const char *expected, size_t expected_len,
-                                  int *score, double *raw) {
-    if (str_case_contains_judge(actual, actual_len, expected, expected_len)) {
+static void heuristic_judge_1to5(const char *actual, size_t actual_len, const char *expected,
+                                 size_t expected_len, int *score, double *raw) {
+    if (hu_str_contains_ci(actual, actual_len, expected, expected_len)) {
         *score = 5;
         *raw = 1.0;
         return;
@@ -241,15 +211,12 @@ static void heuristic_judge_1to5(const char *actual, size_t actual_len,
     *raw = ratio;
 }
 
-hu_error_t hu_eval_judge_check(hu_allocator_t *alloc, hu_provider_t *provider,
-                                const char *model, size_t model_len,
-                                const char *question, size_t question_len,
-                                const char *actual, size_t actual_len,
-                                const char *expected, size_t expected_len,
-                                const char *rubric, size_t rubric_len,
-                                int pass_threshold,
-                                hu_eval_judge_cache_t *cache,
-                                hu_eval_judge_result_t *out) {
+hu_error_t hu_eval_judge_check(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
+                               size_t model_len, const char *question, size_t question_len,
+                               const char *actual, size_t actual_len, const char *expected,
+                               size_t expected_len, const char *rubric, size_t rubric_len,
+                               int pass_threshold, hu_eval_judge_cache_t *cache,
+                               hu_eval_judge_result_t *out) {
     if (!alloc || !actual || !expected || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -257,8 +224,8 @@ hu_error_t hu_eval_judge_check(hu_allocator_t *alloc, hu_provider_t *provider,
     if (pass_threshold < 1 || pass_threshold > 5)
         pass_threshold = 3;
 
-    if (cache && hu_eval_judge_cache_lookup(cache, actual, actual_len, expected,
-                                             expected_len, rubric, rubric_len, out)) {
+    if (cache && hu_eval_judge_cache_lookup(cache, actual, actual_len, expected, expected_len,
+                                            rubric, rubric_len, out)) {
         out->passed = (out->score >= pass_threshold);
         return HU_OK;
     }
@@ -271,77 +238,73 @@ hu_error_t hu_eval_judge_check(hu_allocator_t *alloc, hu_provider_t *provider,
     (void)question_len;
     (void)rubric;
     (void)rubric_len;
-    heuristic_judge_1to5(actual, actual_len, expected, expected_len,
-                          &out->score, &out->raw_score);
+    heuristic_judge_1to5(actual, actual_len, expected, expected_len, &out->score, &out->raw_score);
     out->passed = (out->score >= pass_threshold);
     out->reasoning = hu_strndup(alloc, "heuristic", 9);
     out->reasoning_len = 9;
     if (cache)
-        cache_store(cache, actual, actual_len, expected, expected_len,
-                    rubric, rubric_len, out);
+        cache_store(cache, actual, actual_len, expected, expected_len, rubric, rubric_len, out);
     return HU_OK;
 #else
     if (!provider || !provider->vtable || !provider->vtable->chat_with_system) {
-        heuristic_judge_1to5(actual, actual_len, expected, expected_len,
-                              &out->score, &out->raw_score);
+        heuristic_judge_1to5(actual, actual_len, expected, expected_len, &out->score,
+                             &out->raw_score);
         out->passed = (out->score >= pass_threshold);
         out->reasoning = hu_strndup(alloc, "heuristic fallback", 18);
         out->reasoning_len = 18;
         if (cache)
-            cache_store(cache, actual, actual_len, expected, expected_len,
-                        rubric, rubric_len, out);
+            cache_store(cache, actual, actual_len, expected, expected_len, rubric, rubric_len, out);
         return HU_OK;
     }
     {
         const char *rubric_section = "";
         char rubric_buf[512];
         if (rubric && rubric_len > 0) {
-            int rl = snprintf(rubric_buf, sizeof(rubric_buf),
-                              "\n\nRubric:\n%.*s\n", (int)(rubric_len < 400 ? rubric_len : 400),
-                              rubric);
+            int rl = snprintf(rubric_buf, sizeof(rubric_buf), "\n\nRubric:\n%.*s\n",
+                              (int)(rubric_len < 400 ? rubric_len : 400), rubric);
             if (rl > 0 && (size_t)rl < sizeof(rubric_buf))
                 rubric_section = rubric_buf;
         }
 
-        char *user_msg = hu_sprintf(alloc,
-            "Evaluate the following response against the expected answer.%s\n\n"
-            "%s%.*s%s"
-            "Expected answer: %.*s\n\n"
-            "Actual response: %.*s\n\n"
-            "Score 1-5:\n"
-            "  5 = Fully correct, complete, well-articulated\n"
-            "  4 = Mostly correct with minor gaps\n"
-            "  3 = Partially correct, key elements present\n"
-            "  2 = Minimally relevant, major gaps\n"
-            "  1 = Incorrect or irrelevant\n\n"
-            "Respond with ONLY a JSON object:\n"
-            "{\"score\": <1-5>, \"reasoning\": \"<brief explanation>\"}",
-            rubric_section,
-            (question && question_len > 0) ? "Question: " : "",
-            (int)(question_len < 500 ? question_len : 500),
-            question ? question : "",
-            (question && question_len > 0) ? "\n\n" : "",
-            (int)(expected_len < 1000 ? expected_len : 1000), expected,
-            (int)(actual_len < 2000 ? actual_len : 2000), actual);
+        char *user_msg =
+            hu_sprintf(alloc,
+                       "Evaluate the following response against the expected answer.%s\n\n"
+                       "%s%.*s%s"
+                       "Expected answer: %.*s\n\n"
+                       "Actual response: %.*s\n\n"
+                       "Score 1-5:\n"
+                       "  5 = Fully correct, complete, well-articulated\n"
+                       "  4 = Mostly correct with minor gaps\n"
+                       "  3 = Partially correct, key elements present\n"
+                       "  2 = Minimally relevant, major gaps\n"
+                       "  1 = Incorrect or irrelevant\n\n"
+                       "Respond with ONLY a JSON object:\n"
+                       "{\"score\": <1-5>, \"reasoning\": \"<brief explanation>\"}",
+                       rubric_section, (question && question_len > 0) ? "Question: " : "",
+                       (int)(question_len < 500 ? question_len : 500), question ? question : "",
+                       (question && question_len > 0) ? "\n\n" : "",
+                       (int)(expected_len < 1000 ? expected_len : 1000), expected,
+                       (int)(actual_len < 2000 ? actual_len : 2000), actual);
 
         if (!user_msg) {
-            heuristic_judge_1to5(actual, actual_len, expected, expected_len,
-                                  &out->score, &out->raw_score);
+            heuristic_judge_1to5(actual, actual_len, expected, expected_len, &out->score,
+                                 &out->raw_score);
             out->passed = (out->score >= pass_threshold);
             return HU_OK;
         }
 
-        const char *sys = "You are a strict evaluation judge. Score responses 1-5 against the expected answer. Output only valid JSON.";
+        const char *sys = "You are a strict evaluation judge. Score responses 1-5 against the "
+                          "expected answer. Output only valid JSON.";
         char *response = NULL;
         size_t response_len = 0;
         hu_error_t err = provider->vtable->chat_with_system(
-            provider->ctx, alloc, sys, strlen(sys), user_msg, strlen(user_msg),
-            model ? model : "", model_len, 0.0, &response, &response_len);
+            provider->ctx, alloc, sys, strlen(sys), user_msg, strlen(user_msg), model ? model : "",
+            model_len, 0.0, &response, &response_len);
         alloc->free(alloc->ctx, user_msg, strlen(user_msg) + 1);
 
         if (err != HU_OK || !response) {
-            heuristic_judge_1to5(actual, actual_len, expected, expected_len,
-                                  &out->score, &out->raw_score);
+            heuristic_judge_1to5(actual, actual_len, expected, expected_len, &out->score,
+                                 &out->raw_score);
             out->passed = (out->score >= pass_threshold);
             if (response)
                 alloc->free(alloc->ctx, response, response_len + 1);
@@ -351,13 +314,12 @@ hu_error_t hu_eval_judge_check(hu_allocator_t *alloc, hu_provider_t *provider,
         out->score = parse_score_1to5(response, response + response_len);
         out->raw_score = (double)(out->score - 1) / 4.0;
         out->passed = (out->score >= pass_threshold);
-        out->reasoning = parse_reasoning(alloc, response, response + response_len,
-                                          &out->reasoning_len);
+        out->reasoning =
+            parse_reasoning(alloc, response, response + response_len, &out->reasoning_len);
         alloc->free(alloc->ctx, response, response_len + 1);
 
         if (cache)
-            cache_store(cache, actual, actual_len, expected, expected_len,
-                        rubric, rubric_len, out);
+            cache_store(cache, actual, actual_len, expected, expected_len, rubric, rubric_len, out);
         return HU_OK;
     }
 #endif

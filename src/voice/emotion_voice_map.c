@@ -1,4 +1,5 @@
 #include "human/voice/emotion_voice_map.h"
+#include "human/core/string.h"
 #include <string.h>
 
 hu_voice_params_t hu_voice_params_default(void) {
@@ -61,29 +62,6 @@ static const lexical_cue_t CUES[] = {
 };
 static const size_t CUE_COUNT = sizeof(CUES) / sizeof(CUES[0]);
 
-static bool ci_contains(const char *haystack, size_t hay_len, const char *needle, size_t n_len) {
-    if (n_len > hay_len)
-        return false;
-    for (size_t i = 0; i <= hay_len - n_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < n_len; j++) {
-            char a = haystack[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a += 32;
-            if (b >= 'A' && b <= 'Z')
-                b += 32;
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 hu_error_t hu_emotion_detect_from_text(const char *text, size_t text_len,
                                        hu_voice_emotion_t *out_emotion, float *out_confidence) {
     if (!text || !out_emotion || !out_confidence)
@@ -98,7 +76,7 @@ hu_error_t hu_emotion_detect_from_text(const char *text, size_t text_len,
     memset(scores, 0, sizeof(scores));
 
     for (size_t i = 0; i < CUE_COUNT; i++) {
-        if (ci_contains(text, text_len, CUES[i].keyword, CUES[i].len))
+        if (hu_str_contains_ci(text, text_len, CUES[i].keyword, CUES[i].len))
             scores[CUES[i].emotion] += CUES[i].weight;
     }
 

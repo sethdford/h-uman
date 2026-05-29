@@ -1,4 +1,5 @@
 #include "human/security/mcp_audit.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -19,20 +20,6 @@ static int risk_ord(hu_mcp_audit_risk_t r) {
 
 static hu_mcp_audit_risk_t max_risk(hu_mcp_audit_risk_t a, hu_mcp_audit_risk_t b) {
     return risk_ord(a) >= risk_ord(b) ? a : b;
-}
-
-static bool str_contains_ci(const char *haystack, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hlen)
-        return false;
-    for (size_t i = 0; i <= hlen - nlen; i++) {
-        size_t j = 0;
-        while (j < nlen && tolower((unsigned char)haystack[i + j]) == tolower((unsigned char)needle[j]))
-            j++;
-        if (j == nlen)
-            return true;
-    }
-    return false;
 }
 
 static void add_finding(hu_allocator_t *alloc, hu_mcp_audit_result_t *result,
@@ -103,7 +90,7 @@ static const char *INJECTION_PATTERNS[][2] = {
 static void run_checks(hu_allocator_t *alloc, hu_mcp_audit_result_t *result,
                       const char *description, size_t desc_len) {
     for (size_t i = 0; i < INJECTION_COUNT; i++) {
-        if (str_contains_ci(description, desc_len, INJECTION_PATTERNS[i][0])) {
+        if (hu_str_contains_ci_cstr(description, desc_len, INJECTION_PATTERNS[i][0])) {
             add_finding(alloc, result, HU_MCP_AUDIT_CRITICAL, INJECTION_PATTERNS[i][0], INJECTION_PATTERNS[i][1]);
         }
     }
@@ -113,7 +100,7 @@ static void run_checks(hu_allocator_t *alloc, hu_mcp_audit_result_t *result,
         add_finding(alloc, result, HU_MCP_AUDIT_MEDIUM, "excessive_length", "Description exceeds 2048 characters");
     if (has_invisible_unicode(description, desc_len))
         add_finding(alloc, result, HU_MCP_AUDIT_HIGH, "invisible_unicode", "Zero-width or invisible Unicode detected");
-    if (str_contains_ci(description, desc_len, "http://") || str_contains_ci(description, desc_len, "https://"))
+    if (hu_str_contains_ci_cstr(description, desc_len, "http://") || hu_str_contains_ci_cstr(description, desc_len, "https://"))
         add_finding(alloc, result, HU_MCP_AUDIT_MEDIUM, "url", "URL in description (exfiltration risk)");
 }
 

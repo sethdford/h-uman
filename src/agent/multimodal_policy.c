@@ -6,38 +6,15 @@
  * per ~/.claude/rules/substring-classifier-pitfalls.md so "lukewarm"
  * never trips "warm", "unfriendly" never trips "friend". */
 #include "human/agent/multimodal_policy.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stddef.h>
 #include <string.h>
 
-/* ── Word-boundary CI matcher (copy of src/follow_up.c::ci_contains_word).
- * Local copy rather than a shared helper because each module's
- * substring-hazard surface is narrow enough that inlining the matcher
- * keeps the dependency graph flat. See the substring-classifier-pitfalls
- * rule's "audit each call site" recipe. */
-static bool mm_ci_word(const char *haystack, size_t hlen, const char *needle) {
-    if (!haystack || !needle || !needle[0])
-        return false;
-    size_t nlen = strlen(needle);
-    if (nlen > hlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        size_t j = 0;
-        for (; j < nlen; j++) {
-            char a = (char)tolower((unsigned char)haystack[i + j]);
-            char b = (char)tolower((unsigned char)needle[j]);
-            if (a != b)
-                break;
-        }
-        if (j == nlen) {
-            bool left_ok = (i == 0) || !isalnum((unsigned char)haystack[i - 1]);
-            bool right_ok = (i + nlen == hlen) || !isalnum((unsigned char)haystack[i + nlen]);
-            if (left_ok && right_ok)
-                return true;
-        }
-    }
-    return false;
-}
+/* Word-boundary CI matching uses hu_str_contains_word_ci_n (human/core/string.h),
+ * the length-bounded variant — callers here pass a slice (incoming, incoming_len)
+ * that is not guaranteed NUL-terminated at incoming_len. See the
+ * substring-classifier-pitfalls rule for the word-boundary rationale. */
 
 /* True iff the entire stripped string equals one of the tokens (with
  * tolerant trailing punctuation .!?). Used for "the whole incoming is
@@ -132,7 +109,7 @@ static bool mm_check_appreciation(const char *s, size_t len, hu_mm_decision_t *o
         "lifesaver",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_TAPBACK;
             out->tapback_kind = HU_MM_TAPBACK_LOVE;
             out->confidence = 0.85f;
@@ -151,7 +128,7 @@ static bool mm_check_logistics(const char *s, size_t len, hu_mm_decision_t *out)
         "omw", "on my way", "be there", "running late", "arriving", "outside", "here",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_TAPBACK;
             out->tapback_kind = HU_MM_TAPBACK_LIKE;
             out->confidence = 0.80f;
@@ -169,7 +146,7 @@ static bool mm_check_vent(const char *s, size_t len, hu_mm_decision_t *out) {
         "hate this", "so done", "hate my job", "hate my boss",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_TAPBACK;
             out->tapback_kind = HU_MM_TAPBACK_EMPHASIZE;
             out->confidence = 0.70f;
@@ -186,7 +163,7 @@ static bool mm_check_hyped(const char *s, size_t len, hu_mm_decision_t *out) {
         "let's go", "lets go", "lfg", "yesss", "yesssss", "fire", "goat",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_GIF;
             out->tapback_kind = HU_MM_TAPBACK_NONE;
             out->confidence = 0.70f;
@@ -203,7 +180,7 @@ static bool mm_check_voice(const char *s, size_t len, hu_mm_decision_t *out) {
         "grief", "loss", "miss you", "love you", "missing you",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_VOICE;
             out->tapback_kind = HU_MM_TAPBACK_NONE;
             out->confidence = 0.65f;
@@ -218,8 +195,8 @@ static bool mm_check_voice(const char *s, size_t len, hu_mm_decision_t *out) {
 static bool mm_check_love_short(const char *s, size_t len, hu_mm_decision_t *out) {
     if (len >= 50)
         return false;
-    if (mm_ci_word(s, len, "love") || mm_ci_word(s, len, "proud of you") ||
-        mm_ci_word(s, len, "proud of u")) {
+    if (hu_str_contains_word_ci_n(s, len, "love") || hu_str_contains_word_ci_n(s, len, "proud of you") ||
+        hu_str_contains_word_ci_n(s, len, "proud of u")) {
         out->modality = HU_MM_MODALITY_TAPBACK;
         out->tapback_kind = HU_MM_TAPBACK_LOVE;
         out->confidence = 0.75f;
@@ -237,7 +214,7 @@ static bool mm_check_emphasis(const char *s, size_t len, hu_mm_decision_t *out) 
         "huge", "massive", "incredible", "wild", "insane", "crazy", "unbelievable", "amazing",
     };
     for (size_t i = 0; i < sizeof(phrases) / sizeof(phrases[0]); i++) {
-        if (mm_ci_word(s, len, phrases[i])) {
+        if (hu_str_contains_word_ci_n(s, len, phrases[i])) {
             out->modality = HU_MM_MODALITY_TAPBACK;
             out->tapback_kind = HU_MM_TAPBACK_EMPHASIZE;
             out->confidence = 0.60f;
@@ -307,7 +284,7 @@ hu_error_t hu_multimodal_decide(const char *incoming, size_t incoming_len, hu_mm
     /* Embedded laughter — text (build on the joke). */
     static const char *const laugh_tokens[] = {"lol", "lmao", "rofl", "haha", "hehe"};
     for (size_t i = 0; i < sizeof(laugh_tokens) / sizeof(laugh_tokens[0]); i++) {
-        if (mm_ci_word(incoming, incoming_len, laugh_tokens[i])) {
+        if (hu_str_contains_word_ci_n(incoming, incoming_len, laugh_tokens[i])) {
             out->modality = HU_MM_MODALITY_TEXT;
             out->tapback_kind = HU_MM_TAPBACK_NONE;
             out->confidence = 0.60f;

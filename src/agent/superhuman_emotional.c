@@ -1,46 +1,22 @@
 /*
  * Superhuman emotional first aid service — detects crisis and distress keywords.
  */
-#include "human/agent/superhuman.h"
 #include "human/agent/superhuman_emotional.h"
+#include "human/agent/superhuman.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const char *CRISIS_KEYWORDS[] = {"suicidal", "kill myself", "end it all", "can't go on",
-                                        "want to die", NULL};
+static const char *CRISIS_KEYWORDS[] = {"suicidal",    "kill myself", "end it all",
+                                        "can't go on", "want to die", NULL};
 
-static const char *DISTRESS_KEYWORDS[] = {"overwhelmed", "can't cope", "breaking down", "panic",
-                                           "crisis", NULL};
-
-static bool contains_keyword(const char *text, size_t text_len, const char *keyword) {
-    size_t klen = strlen(keyword);
-    if (klen > text_len)
-        return false;
-    for (size_t i = 0; i <= text_len - klen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < klen; j++) {
-            char a = (char)((unsigned char)text[i + j]);
-            char b = (char)((unsigned char)keyword[j]);
-            if (a >= 'A' && a <= 'Z')
-                a += 32;
-            if (b >= 'A' && b <= 'Z')
-                b += 32;
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
+static const char *DISTRESS_KEYWORDS[] = {"overwhelmed", "can't cope", "breaking down",
+                                          "panic",       "crisis",     NULL};
 
 static bool has_crisis(const char *text, size_t text_len) {
     for (size_t i = 0; CRISIS_KEYWORDS[i]; i++) {
-        if (contains_keyword(text, text_len, CRISIS_KEYWORDS[i]))
+        if (hu_str_contains_ci_cstr(text, text_len, CRISIS_KEYWORDS[i]))
             return true;
     }
     return false;
@@ -48,14 +24,14 @@ static bool has_crisis(const char *text, size_t text_len) {
 
 static bool has_distress(const char *text, size_t text_len) {
     for (size_t i = 0; DISTRESS_KEYWORDS[i]; i++) {
-        if (contains_keyword(text, text_len, DISTRESS_KEYWORDS[i]))
+        if (hu_str_contains_ci_cstr(text, text_len, DISTRESS_KEYWORDS[i]))
             return true;
     }
     return false;
 }
 
 static hu_error_t emotional_build_context(void *ctx, hu_allocator_t *alloc, char **out,
-                                           size_t *out_len) {
+                                          size_t *out_len) {
     hu_superhuman_emotional_ctx_t *ectx = (hu_superhuman_emotional_ctx_t *)ctx;
     if (!ectx || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
@@ -95,7 +71,7 @@ static hu_error_t emotional_build_context(void *ctx, hu_allocator_t *alloc, char
 }
 
 static hu_error_t emotional_observe(void *ctx, hu_allocator_t *alloc, const char *text,
-                                     size_t text_len, const char *role, size_t role_len) {
+                                    size_t text_len, const char *role, size_t role_len) {
     hu_superhuman_emotional_ctx_t *ectx = (hu_superhuman_emotional_ctx_t *)ctx;
     if (!ectx)
         return HU_ERR_INVALID_ARGUMENT;

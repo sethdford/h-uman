@@ -4,6 +4,7 @@
  */
 #include "human/context/voice_decision.h"
 #include "human/core/log.h"
+#include "human/core/string.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,31 +12,10 @@
 
 #if defined(HU_ENABLE_CARTESIA)
 
-static bool contains_substring_ci(const char *haystack, size_t hay_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || hay_len < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hay_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char h = (char)(haystack[i + j] >= 'A' && haystack[i + j] <= 'Z' ? haystack[i + j] + 32
-                                                                             : haystack[i + j]);
-            char nd = (char)(needle[j] >= 'A' && needle[j] <= 'Z' ? needle[j] + 32 : needle[j]);
-            if (h != nd) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 static bool is_logistics(const char *msg, size_t len) {
     static const char *patterns[] = {"what time", "where", "when", "address"};
     for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
-        if (contains_substring_ci(msg, len, patterns[i]))
+        if (hu_str_contains_ci_cstr(msg, len, patterns[i]))
             return true;
     }
     return false;
@@ -70,7 +50,7 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
         } else if (strcmp(p, "emotional") == 0) {
             static const char *emotional[] = {"love", "miss", "proud", "sorry", "worried"};
             for (size_t j = 0; j < sizeof(emotional) / sizeof(emotional[0]); j++) {
-                if (contains_substring_ci(response_text, response_len, emotional[j]))
+                if (hu_str_contains_ci_cstr(response_text, response_len, emotional[j]))
                     return true;
             }
         } else if (strcmp(p, "comfort") == 0) {
@@ -81,7 +61,7 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
             bool incoming_sad = false;
             if (incoming_msg && incoming_len > 0) {
                 for (size_t j = 0; j < sizeof(sad) / sizeof(sad[0]); j++) {
-                    if (contains_substring_ci(incoming_msg, incoming_len, sad[j])) {
+                    if (hu_str_contains_ci_cstr(incoming_msg, incoming_len, sad[j])) {
                         incoming_sad = true;
                         break;
                     }
@@ -89,7 +69,7 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
             }
             if (incoming_sad) {
                 for (size_t j = 0; j < sizeof(comfort) / sizeof(comfort[0]); j++) {
-                    if (contains_substring_ci(response_text, response_len, comfort[j]))
+                    if (hu_str_contains_ci_cstr(response_text, response_len, comfort[j]))
                         return true;
                 }
             }

@@ -1,29 +1,12 @@
 #include "human/agent/model_router.h"
 #include "human/config_types.h" /* hu_mlx_local_routing_t enum constants */
+#include "human/core/string.h"  /* hu_str_contains_ci_cstr */
 #include "human/provider.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
-
-static bool ci_contains(const char *haystack, size_t haystack_len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > haystack_len)
-        return false;
-    for (size_t i = 0; i <= haystack_len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
 
 static bool has_question(const char *msg, size_t len) {
     for (size_t i = 0; i < len; i++)
@@ -78,10 +61,10 @@ static int emotional_weight(const char *msg, size_t len) {
         "nervous",      "worried",     "sorry",     "ugh",     "hate",     "awful",
         "terrible",     "not working", "broken",    "failing"};
     for (size_t i = 0; i < sizeof(heavy) / sizeof(heavy[0]); i++)
-        if (ci_contains(msg, len, heavy[i]))
+        if (hu_str_contains_ci_cstr(msg, len, heavy[i]))
             score += 3;
     for (size_t i = 0; i < sizeof(moderate) / sizeof(moderate[0]); i++)
-        if (ci_contains(msg, len, moderate[i]))
+        if (hu_str_contains_ci_cstr(msg, len, moderate[i]))
             score += 1;
     return score;
 }
@@ -94,7 +77,7 @@ static bool needs_reasoning(const char *msg, size_t len) {
         "compared to",    "better option",     "worth it",       "trade-off",
         "explain",        "why does",          "how does",       "what if"};
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++)
-        if (ci_contains(msg, len, markers[i]))
+        if (hu_str_contains_ci_cstr(msg, len, markers[i]))
             return true;
     return false;
 }

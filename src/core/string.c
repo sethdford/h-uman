@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h> /* strncasecmp */
 
 char *hu_strdup(hu_allocator_t *alloc, const char *s) {
     if (!s)
@@ -165,6 +166,48 @@ char *hu_strcasestr(const char *haystack, const char *needle) {
             return (char *)haystack;
     }
     return NULL;
+}
+
+bool hu_str_contains_ci(const char *hay, size_t hlen, const char *needle, size_t nlen) {
+    if (!hay || !needle || nlen == 0 || nlen > hlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        size_t j = 0;
+        while (j < nlen && tolower((unsigned char)hay[i + j]) == tolower((unsigned char)needle[j]))
+            j++;
+        if (j == nlen)
+            return true;
+    }
+    return false;
+}
+
+bool hu_str_contains_ci_cstr(const char *hay, size_t hlen, const char *needle) {
+    if (!needle)
+        return false;
+    return hu_str_contains_ci(hay, hlen, needle, strlen(needle));
+}
+
+bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle) {
+    if (!hay || !needle || !needle[0])
+        return false;
+    size_t nlen = strlen(needle);
+    if (hlen < nlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        if (strncasecmp(hay + i, needle, nlen) != 0)
+            continue;
+        bool left_ok = (i == 0) || !isalnum((unsigned char)hay[i - 1]);
+        bool right_ok = (i + nlen == hlen) || !isalnum((unsigned char)hay[i + nlen]);
+        if (left_ok && right_ok)
+            return true;
+    }
+    return false;
+}
+
+bool hu_str_contains_word_ci(const char *s, const char *needle) {
+    if (!s)
+        return false;
+    return hu_str_contains_word_ci_n(s, strlen(s), needle);
 }
 
 size_t hu_buf_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...) {

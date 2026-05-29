@@ -18,16 +18,6 @@ static bool str_eq_case_insensitive(const char *a, size_t a_len, const char *b, 
     return true;
 }
 
-static bool str_contains_ci(const char *haystack, size_t h_len, const char *needle, size_t n_len) {
-    if (n_len == 0 || n_len > h_len)
-        return false;
-    for (size_t i = 0; i <= h_len - n_len; i++) {
-        if (str_eq_case_insensitive(haystack + i, n_len, needle, n_len))
-            return true;
-    }
-    return false;
-}
-
 static bool stage_is_deep(const char *relationship_stage) {
     if (!relationship_stage)
         return false;
@@ -327,7 +317,7 @@ bool hu_humor_check_appropriate(hu_humor_type_t type, const char *topic,
         static const char *const sensitive[] = {"health", "death",      "loss",
                                                 "trauma", "disability", "mental"};
         for (size_t i = 0; i < sizeof(sensitive) / sizeof(sensitive[0]); i++) {
-            if (str_contains_ci(topic, tlen, sensitive[i], strlen(sensitive[i])))
+            if (hu_str_contains_ci(topic, tlen, sensitive[i], strlen(sensitive[i])))
                 return false;
         }
     }
@@ -335,8 +325,8 @@ bool hu_humor_check_appropriate(hu_humor_type_t type, const char *topic,
     /* No humor about grief or death topics regardless of type */
     if (topic) {
         size_t tlen = strlen(topic);
-        if (str_contains_ci(topic, tlen, "grief", 5) || str_contains_ci(topic, tlen, "death", 5) ||
-            str_contains_ci(topic, tlen, "funeral", 7))
+        if (hu_str_contains_ci(topic, tlen, "grief", 5) || hu_str_contains_ci(topic, tlen, "death", 5) ||
+            hu_str_contains_ci(topic, tlen, "funeral", 7))
             return false;
     }
 
@@ -431,7 +421,7 @@ bool hu_humor_detect_failure(const char *user_response, size_t response_len) {
                                                   "anyway", "moving on", "let's talk about",
                                                   "ok...",  "um",        "uh"};
     for (size_t i = 0; i < sizeof(failure_signals) / sizeof(failure_signals[0]); i++) {
-        if (str_contains_ci(user_response, response_len, failure_signals[i],
+        if (hu_str_contains_ci(user_response, response_len, failure_signals[i],
                             strlen(failure_signals[i])))
             return true;
     }

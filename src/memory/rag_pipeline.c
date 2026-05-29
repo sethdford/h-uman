@@ -148,26 +148,6 @@ static bool starts_with_ci(const char *msg, size_t len, const char *prefix) {
     return true;
 }
 
-static bool contains_ci(const char *msg, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (len < nlen)
-        return false;
-    for (size_t i = 0; i <= len - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char c = (char)((unsigned char)msg[i + j] | 0x20);
-            char n = (char)((unsigned char)needle[j] | 0x20);
-            if (c != n) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 hu_classify_result_t hu_classify_message(const char *message, size_t msg_len,
                                          double *confidence_out) {
     if (!message || msg_len == 0) {
@@ -186,45 +166,45 @@ hu_classify_result_t hu_classify_message(const char *message, size_t msg_len,
         return HU_CLASS_GREETING;
     }
 
-    if (contains_ci(message, msg_len, "did you know") ||
-        contains_ci(message, msg_len, "apparently")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "did you know") ||
+        hu_str_contains_ci_cstr(message, msg_len, "apparently")) {
         if (confidence_out)
             *confidence_out = conf;
         return HU_CLASS_INFORMATIONAL;
     }
 
-    if (contains_ci(message, msg_len, "?")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "?")) {
         if (confidence_out)
             *confidence_out = conf;
         return HU_CLASS_QUESTION;
     }
 
-    if (contains_ci(message, msg_len, "asap") || contains_ci(message, msg_len, "emergency") ||
-        contains_ci(message, msg_len, "need help") || contains_ci(message, msg_len, "urgent")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "asap") || hu_str_contains_ci_cstr(message, msg_len, "emergency") ||
+        hu_str_contains_ci_cstr(message, msg_len, "need help") || hu_str_contains_ci_cstr(message, msg_len, "urgent")) {
         if (confidence_out)
             *confidence_out = conf;
         return HU_CLASS_URGENT;
     }
 
-    if (contains_ci(message, msg_len, "sad") || contains_ci(message, msg_len, "angry") ||
-        contains_ci(message, msg_len, "happy") || contains_ci(message, msg_len, "excited") ||
-        contains_ci(message, msg_len, "frustrated") || contains_ci(message, msg_len, "worried") ||
-        contains_ci(message, msg_len, "anxious") || contains_ci(message, msg_len, "love") ||
-        contains_ci(message, msg_len, "hate") || contains_ci(message, msg_len, "miss")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "sad") || hu_str_contains_ci_cstr(message, msg_len, "angry") ||
+        hu_str_contains_ci_cstr(message, msg_len, "happy") || hu_str_contains_ci_cstr(message, msg_len, "excited") ||
+        hu_str_contains_ci_cstr(message, msg_len, "frustrated") || hu_str_contains_ci_cstr(message, msg_len, "worried") ||
+        hu_str_contains_ci_cstr(message, msg_len, "anxious") || hu_str_contains_ci_cstr(message, msg_len, "love") ||
+        hu_str_contains_ci_cstr(message, msg_len, "hate") || hu_str_contains_ci_cstr(message, msg_len, "miss")) {
         if (confidence_out)
             *confidence_out = 0.75;
         return HU_CLASS_EMOTIONAL;
     }
 
-    if (contains_ci(message, msg_len, "when") || contains_ci(message, msg_len, "where") ||
-        contains_ci(message, msg_len, "let's") || contains_ci(message, msg_len, "should we")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "when") || hu_str_contains_ci_cstr(message, msg_len, "where") ||
+        hu_str_contains_ci_cstr(message, msg_len, "let's") || hu_str_contains_ci_cstr(message, msg_len, "should we")) {
         if (confidence_out)
             *confidence_out = conf;
         return HU_CLASS_PLANNING;
     }
 
-    if (contains_ci(message, msg_len, "lol") || contains_ci(message, msg_len, "haha") ||
-        contains_ci(message, msg_len, "lmao") || contains_ci(message, msg_len, "hahaha")) {
+    if (hu_str_contains_ci_cstr(message, msg_len, "lol") || hu_str_contains_ci_cstr(message, msg_len, "haha") ||
+        hu_str_contains_ci_cstr(message, msg_len, "lmao") || hu_str_contains_ci_cstr(message, msg_len, "hahaha")) {
         if (confidence_out)
             *confidence_out = conf;
         return HU_CLASS_HUMOR;

@@ -3,29 +3,6 @@
 #include "human/core/string.h"
 #include <string.h>
 
-static bool contains_ci(const char *s, size_t slen, const char *needle, size_t nlen) {
-    if (nlen > slen)
-        return false;
-    for (size_t i = 0; i <= slen - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char a = s[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a += 32;
-            if (b >= 'A' && b <= 'Z')
-                b += 32;
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 static void reflection_result_init_axes(hu_reflection_result_t *r) {
     memset(r, 0, sizeof(*r));
     r->accuracy = -1.0;
@@ -46,11 +23,11 @@ static double reflection_clamp_axis(double v) {
 static hu_reflection_quality_t reflection_quality_from_string(const char *q) {
     if (!q)
         return HU_QUALITY_ACCEPTABLE;
-    if (contains_ci(q, strlen(q), "needs_retry", 11))
+    if (hu_str_contains_ci(q, strlen(q), "needs_retry", 11))
         return HU_QUALITY_NEEDS_RETRY;
-    if (contains_ci(q, strlen(q), "acceptable", 10))
+    if (hu_str_contains_ci(q, strlen(q), "acceptable", 10))
         return HU_QUALITY_ACCEPTABLE;
-    if (contains_ci(q, strlen(q), "good", 4))
+    if (hu_str_contains_ci(q, strlen(q), "good", 4))
         return HU_QUALITY_GOOD;
     return HU_QUALITY_ACCEPTABLE;
 }
@@ -75,10 +52,10 @@ hu_reflection_quality_t hu_reflection_evaluate(const char *user_query, size_t us
         return HU_QUALITY_NEEDS_RETRY;
 
     /* Check for known failure patterns */
-    if (contains_ci(response, response_len, "i cannot", 8) ||
-        contains_ci(response, response_len, "i can't", 7) ||
-        contains_ci(response, response_len, "i'm unable", 10) ||
-        contains_ci(response, response_len, "as an ai", 8))
+    if (hu_str_contains_ci(response, response_len, "i cannot", 8) ||
+        hu_str_contains_ci(response, response_len, "i can't", 7) ||
+        hu_str_contains_ci(response, response_len, "i'm unable", 10) ||
+        hu_str_contains_ci(response, response_len, "as an ai", 8))
         return HU_QUALITY_ACCEPTABLE;
 
     /* If user asked a question, check response addresses it */

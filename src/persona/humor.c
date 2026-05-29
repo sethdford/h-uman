@@ -1,4 +1,5 @@
 #include "human/persona/humor.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,24 +19,6 @@ static const char *light_markers[] = {
 };
 static const size_t light_count = sizeof(light_markers) / sizeof(light_markers[0]);
 
-static bool ci_contains(const char *text, size_t text_len, const char *pat) {
-    size_t plen = strlen(pat);
-    if (text_len < plen)
-        return false;
-    for (size_t i = 0; i + plen <= text_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < plen; j++) {
-            if (tolower((unsigned char)text[i + j]) != tolower((unsigned char)pat[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 hu_error_t hu_humor_fw_evaluate_context(const char *conversation, size_t conv_len,
                                      const hu_humor_context_t *ctx,
                                      hu_humor_evaluation_t *eval) {
@@ -46,14 +29,14 @@ hu_error_t hu_humor_fw_evaluate_context(const char *conversation, size_t conv_le
     /* Check for serious context markers */
     size_t serious_hits = 0;
     for (size_t i = 0; i < serious_count; i++) {
-        if (ci_contains(conversation, conv_len, serious_markers[i]))
+        if (hu_str_contains_ci_cstr(conversation, conv_len, serious_markers[i]))
             serious_hits++;
     }
 
     /* Check for light/humor-receptive markers */
     size_t light_hits = 0;
     for (size_t i = 0; i < light_count; i++) {
-        if (ci_contains(conversation, conv_len, light_markers[i]))
+        if (hu_str_contains_ci_cstr(conversation, conv_len, light_markers[i]))
             light_hits++;
     }
 
@@ -186,14 +169,14 @@ hu_error_t hu_humor_fw_score_response(const char *response, size_t response_len,
     float s = 0.0f;
 
     /* Positive: contains humor signals */
-    if (ci_contains(response, response_len, "haha") ||
-        ci_contains(response, response_len, "😂") ||
-        ci_contains(response, response_len, "lol"))
+    if (hu_str_contains_ci_cstr(response, response_len, "haha") ||
+        hu_str_contains_ci_cstr(response, response_len, "😂") ||
+        hu_str_contains_ci_cstr(response, response_len, "lol"))
         s += 0.3f;
 
     /* Positive: self-deprecation signals */
-    if (ci_contains(response, response_len, "i'm terrible at") ||
-        ci_contains(response, response_len, "my bad"))
+    if (hu_str_contains_ci_cstr(response, response_len, "i'm terrible at") ||
+        hu_str_contains_ci_cstr(response, response_len, "my bad"))
         s += 0.2f;
 
     /* Moderate length suggests effort (not just a one-liner) */

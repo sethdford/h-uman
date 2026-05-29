@@ -2,29 +2,12 @@
  * degradation, then produce directives for the next response.
  * See arXiv:2505.06120 — LLMs compound errors rather than recovering. */
 #include "human/context/repair.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <string.h>
 
 /* ── case-insensitive substring search ────────────────────────────── */
-
-static bool contains_ci(const char *hay, size_t hay_len, const char *needle) {
-    if (!needle || !hay || hay_len == 0)
-        return false;
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hay_len)
-        return false;
-    for (size_t i = 0; i + nlen <= hay_len; i++) {
-        size_t j;
-        for (j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)hay[i + j]) != tolower((unsigned char)needle[j]))
-                break;
-        }
-        if (j == nlen)
-            return true;
-    }
-    return false;
-}
 
 /* ── pattern tables ───────────────────────────────────────────────── */
 
@@ -114,7 +97,7 @@ static size_t count_matches(const char *msg, size_t msg_len,
                             const char *const *patterns) {
     size_t hits = 0;
     for (size_t i = 0; patterns[i]; i++) {
-        if (contains_ci(msg, msg_len, patterns[i]))
+        if (hu_str_contains_ci_cstr(msg, msg_len, patterns[i]))
             hits++;
     }
     return hits;

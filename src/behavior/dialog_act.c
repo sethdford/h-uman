@@ -1,4 +1,5 @@
 #include "human/behavior/dialog_act.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -34,27 +35,6 @@ static bool dact_starts_with_ci(const char *t, size_t len, const char *needle) {
     return true;
 }
 
-static bool dact_contains_ci(const char *t, size_t len, const char *needle) {
-    size_t n = strlen(needle);
-    if (n == 0 || len < n) {
-        return false;
-    }
-    for (size_t i = 0; i + n <= len; i++) {
-        bool ok = true;
-        for (size_t j = 0; j < n; j++) {
-            unsigned char a = (unsigned char)t[i + j];
-            unsigned char b = (unsigned char)needle[j];
-            if (tolower(a) != tolower(b)) {
-                ok = false;
-                break;
-            }
-        }
-        if (ok) {
-            return true;
-        }
-    }
-    return false;
-}
 
 static size_t dact_strip_leading_ws(const char *t, size_t len, size_t *start) {
     size_t i = 0;
@@ -105,11 +85,11 @@ bool hu_dialog_act_is_repair_initiation(const char *text, size_t len) {
     if (!dact_ends_with_question(t, l)) {
         return false;
     }
-    if (dact_contains_ci(t, l, "you mean") || dact_contains_ci(t, l, "do you mean") ||
-        dact_contains_ci(t, l, "i don't follow") || dact_contains_ci(t, l, "i dont follow") ||
-        dact_contains_ci(t, l, "didn't catch") || dact_contains_ci(t, l, "didnt catch") ||
-        dact_contains_ci(t, l, "what was that") || dact_contains_ci(t, l, "what do you mean") ||
-        dact_contains_ci(t, l, "say that one more time")) {
+    if (hu_str_contains_ci_cstr(t, l, "you mean") || hu_str_contains_ci_cstr(t, l, "do you mean") ||
+        hu_str_contains_ci_cstr(t, l, "i don't follow") || hu_str_contains_ci_cstr(t, l, "i dont follow") ||
+        hu_str_contains_ci_cstr(t, l, "didn't catch") || hu_str_contains_ci_cstr(t, l, "didnt catch") ||
+        hu_str_contains_ci_cstr(t, l, "what was that") || hu_str_contains_ci_cstr(t, l, "what do you mean") ||
+        hu_str_contains_ci_cstr(t, l, "say that one more time")) {
         return true;
     }
     return false;
@@ -155,42 +135,42 @@ hu_dialog_act_t hu_dialog_act_classify(const char *text, size_t len) {
     }
 
     /* Boundary / abstention. */
-    if (dact_contains_ci(t, l, "i'd rather not") || dact_contains_ci(t, l, "i would rather not") ||
-        dact_contains_ci(t, l, "i can't share") || dact_contains_ci(t, l, "i cant share") ||
-        dact_contains_ci(t, l, "let's not go there") || dact_contains_ci(t, l, "lets not go there")) {
+    if (hu_str_contains_ci_cstr(t, l, "i'd rather not") || hu_str_contains_ci_cstr(t, l, "i would rather not") ||
+        hu_str_contains_ci_cstr(t, l, "i can't share") || hu_str_contains_ci_cstr(t, l, "i cant share") ||
+        hu_str_contains_ci_cstr(t, l, "let's not go there") || hu_str_contains_ci_cstr(t, l, "lets not go there")) {
         return HU_DACT_BOUNDARY;
     }
-    if (dact_contains_ci(t, l, "i don't know") || dact_contains_ci(t, l, "i dont know") ||
-        dact_contains_ci(t, l, "i'm not sure") || dact_contains_ci(t, l, "im not sure")) {
+    if (hu_str_contains_ci_cstr(t, l, "i don't know") || hu_str_contains_ci_cstr(t, l, "i dont know") ||
+        hu_str_contains_ci_cstr(t, l, "i'm not sure") || hu_str_contains_ci_cstr(t, l, "im not sure")) {
         return HU_DACT_ABSTENTION;
     }
 
     /* Disagreement. */
-    if (dact_contains_ci(t, l, "i disagree") || dact_contains_ci(t, l, "that's not right") ||
-        dact_contains_ci(t, l, "thats not right") || dact_contains_ci(t, l, "actually,")) {
+    if (hu_str_contains_ci_cstr(t, l, "i disagree") || hu_str_contains_ci_cstr(t, l, "that's not right") ||
+        hu_str_contains_ci_cstr(t, l, "thats not right") || hu_str_contains_ci_cstr(t, l, "actually,")) {
         return HU_DACT_DISAGREEMENT;
     }
 
     /* Reminder / advice / reflection / validation cues. */
-    if (dact_contains_ci(t, l, "remember to") || dact_contains_ci(t, l, "don't forget")) {
+    if (hu_str_contains_ci_cstr(t, l, "remember to") || hu_str_contains_ci_cstr(t, l, "don't forget")) {
         return HU_DACT_REMINDER;
     }
-    if (dact_contains_ci(t, l, "you should") || dact_contains_ci(t, l, "you might want")) {
+    if (hu_str_contains_ci_cstr(t, l, "you should") || hu_str_contains_ci_cstr(t, l, "you might want")) {
         return HU_DACT_ADVICE;
     }
-    if (dact_contains_ci(t, l, "that sounds") || dact_contains_ci(t, l, "it sounds like")) {
+    if (hu_str_contains_ci_cstr(t, l, "that sounds") || hu_str_contains_ci_cstr(t, l, "it sounds like")) {
         return HU_DACT_REFLECTION;
     }
-    if (dact_contains_ci(t, l, "that makes sense") || dact_contains_ci(t, l, "that's valid") ||
-        dact_contains_ci(t, l, "thats valid")) {
+    if (hu_str_contains_ci_cstr(t, l, "that makes sense") || hu_str_contains_ci_cstr(t, l, "that's valid") ||
+        hu_str_contains_ci_cstr(t, l, "thats valid")) {
         return HU_DACT_VALIDATION;
     }
 
     /* Question vs answer. */
     if (dact_ends_with_question(t, l)) {
-        if (dact_contains_ci(t, l, "what do you mean") ||
-            dact_contains_ci(t, l, "can you clarify") ||
-            dact_contains_ci(t, l, "could you clarify")) {
+        if (hu_str_contains_ci_cstr(t, l, "what do you mean") ||
+            hu_str_contains_ci_cstr(t, l, "can you clarify") ||
+            hu_str_contains_ci_cstr(t, l, "could you clarify")) {
             return HU_DACT_CLARIFY_QUESTION;
         }
         return HU_DACT_QUESTION;

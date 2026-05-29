@@ -70,25 +70,6 @@ void hu_visual_proactive_media_governor_record(uint64_t now_ms) {
 #endif
 }
 
-static bool visual_haystack_contains_ci(const char *hay, size_t hay_len, const char *needle) {
-    if (!hay || !needle || hay_len == 0)
-        return false;
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || hay_len < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hay_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            if (tolower((unsigned char)hay[i + j]) != tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
 
 bool hu_visual_should_send_media(const char *conversation_context, size_t context_len,
                                  hu_visual_proactive_media_kind_t *out_kind,
@@ -113,7 +94,7 @@ bool hu_visual_should_send_media(const char *conversation_context, size_t contex
         "full screen", "my desktop", "the desktop",  "share my screen",
     };
     for (size_t i = 0; i < sizeof(shot_needles) / sizeof(shot_needles[0]); i++) {
-        if (visual_haystack_contains_ci(conversation_context, context_len, shot_needles[i])) {
+        if (hu_str_contains_ci_cstr(conversation_context, context_len, shot_needles[i])) {
             *out_kind = HU_VISUAL_MEDIA_SCREENSHOT;
             *out_reason = "screen or screenshot referenced";
             return true;
@@ -126,7 +107,7 @@ bool hu_visual_should_send_media(const char *conversation_context, size_t contex
         "what it looks", "looks like",    "visual",         "illustration",
     };
     for (size_t i = 0; i < sizeof(img_needles) / sizeof(img_needles[0]); i++) {
-        if (visual_haystack_contains_ci(conversation_context, context_len, img_needles[i])) {
+        if (hu_str_contains_ci_cstr(conversation_context, context_len, img_needles[i])) {
             *out_kind = HU_VISUAL_MEDIA_IMAGE_SEARCH;
             *out_reason = "visual or sharing cue in message";
             return true;

@@ -1,4 +1,5 @@
 #include "human/music.h"
+#include "human/core/string.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
@@ -271,30 +272,6 @@ bool hu_music_parse_suggestion(const char *suggestion, size_t suggestion_len, ch
 
 /* ── Preference detection (pure, always compiled) ────────────────────── */
 
-static bool ci_contains(const char *haystack, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen > hlen)
-        return false;
-    for (size_t i = 0; i <= hlen - nlen; i++) {
-        bool match = true;
-        for (size_t j = 0; j < nlen; j++) {
-            char a = haystack[i + j];
-            char b = needle[j];
-            if (a >= 'A' && a <= 'Z')
-                a += 32;
-            if (b >= 'A' && b <= 'Z')
-                b += 32;
-            if (a != b) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
 hu_music_source_t hu_music_detect_preference(const char *const *texts, const size_t *lens,
                                               size_t count) {
     if (!texts || !lens || count == 0)
@@ -307,10 +284,10 @@ hu_music_source_t hu_music_detect_preference(const char *const *texts, const siz
         if (!texts[i])
             continue;
         size_t tlen = lens[i];
-        if (ci_contains(texts[i], tlen, "open.spotify.com") ||
-            ci_contains(texts[i], tlen, "spotify.link"))
+        if (hu_str_contains_ci_cstr(texts[i], tlen, "open.spotify.com") ||
+            hu_str_contains_ci_cstr(texts[i], tlen, "spotify.link"))
             spotify_count++;
-        if (ci_contains(texts[i], tlen, "music.apple.com"))
+        if (hu_str_contains_ci_cstr(texts[i], tlen, "music.apple.com"))
             apple_count++;
     }
 
