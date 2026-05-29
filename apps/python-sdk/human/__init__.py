@@ -34,10 +34,11 @@ surface this wraps.
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 # Mirrored from include/human/hula_sdk.h. Bumped in lock-step with the C
 # macros so Python consumers can detect API breaks.
@@ -68,6 +69,43 @@ class HulaResult:
     stderr: str
 
 
+def resolve_binary(
+    explicit: bool,
+    human_bin: str,
+    which: Callable[[str], Optional[str]],
+    ensure: Callable[[], str],
+) -> str:
+    """Pure resolver for which `human` binary to invoke.
+
+    Decision order (no I/O of its own — `which` and `ensure` are
+    injected so this is unit-testable without PATH lookups or a real
+    download):
+
+      1. An explicitly-chosen binary (constructor arg or HUMAN_BIN) is
+         returned as-is — NEVER triggers a download, even if the path
+         turns out not to exist. The user asked for it; respect it.
+      2. Otherwise, if `which(human_bin)` finds a copy on PATH, use it.
+      3. Otherwise (nothing explicit, nothing on PATH) fall back to
+         `ensure()` — the platform-matched auto-download.
+
+    Args:
+        explicit: True if the caller passed `human_bin` or set HUMAN_BIN.
+        human_bin: The configured binary name/path (default "human").
+        which: PATH-lookup function (e.g. shutil.which).
+        ensure: Last-resort downloader returning an absolute path
+            (e.g. ensure_binary).
+
+    Returns:
+        The resolved binary path to invoke.
+    """
+    if explicit:
+        return human_bin
+    found = which(human_bin)
+    if found:
+        return found
+    return ensure()
+
+
 class HuLa:
     """Subprocess-based binding to the `human hula` CLI.
 
@@ -75,14 +113,48 @@ class HuLa:
     `compile` spawns a fresh `human` process. Thread-safe (no shared
     state across calls).
 
+    Binary resolution is LAZY: construction never touches the network.
+    The binary is resolved on first use (`validate`/`run`/etc.) via
+    `resolve_binary`, and the result is cached for subsequent calls.
+
     Args:
         human_bin: Path to the `human` binary. Defaults to the
-            HUMAN_BIN env var if set, otherwise the first `human`
-            on PATH.
+            HUMAN_BIN env var if set, otherwise the first `human` on
+            PATH. If neither is set and nothing is on PATH, a
+            platform-matched binary is auto-downloaded on first use
+            (see human._binary.ensure_binary). An explicitly-passed
+            `human_bin` or HUMAN_BIN always wins and never downloads.
     """
 
     def __init__(self, human_bin: Optional[str] = None):
+        # Whether the caller explicitly chose a binary. Captured at
+        # construction so a later os.environ mutation can't retroactively
+        # flip an implicit default into an "explicit" choice mid-session.
+        self._explicit = human_bin is not None or "HUMAN_BIN" in os.environ
         self.human_bin = human_bin or os.environ.get("HUMAN_BIN", "human")
+        # Lazily resolved on first use; cached thereafter.
+        self._resolved_bin: Optional[str] = None
+
+    def _resolve_bin(self) -> str:
+        """Resolve (and cache) the binary path, downloading as a last resort.
+
+        Cheap and side-effect-free on the common path (binary on PATH or
+        explicitly configured). Only the genuinely-missing case performs
+        network I/O, and only once.
+        """
+        if self._resolved_bin is not None:
+            return self._resolved_bin
+        # Import lazily so merely constructing a HuLa never imports the
+        # download machinery, and offline/air-gapped users who supply a
+        # binary explicitly never pay for it.
+        from ._binary import ensure_binary
+        self._resolved_bin = resolve_binary(
+            self._explicit,
+            self.human_bin,
+            shutil.which,
+            lambda: str(ensure_binary()),
+        )
+        return self._resolved_bin
 
     def _run_with_program(self, verb: str, program: dict) -> HulaResult:
         """Spawn `human hula <verb> <tmpfile>` with `program` as JSON."""
@@ -97,7 +169,7 @@ class HuLa:
             tmp_path = tf.name
         try:
             proc = subprocess.run(
-                [self.human_bin, "hula", verb, tmp_path],
+                [self._resolve_bin(), "hula", verb, tmp_path],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -140,7 +212,7 @@ class HuLa:
         against the published schema before calling `validate`.
         """
         proc = subprocess.run(
-            [self.human_bin, "hula", "schema"],
+            [self._resolve_bin(), "hula", "schema"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -171,7 +243,7 @@ class HuLa:
             vars_path = tv.name
         try:
             proc = subprocess.run(
-                [self.human_bin, "hula", "expand", tmpl_path, vars_path],
+                [self._resolve_bin(), "hula", "expand", tmpl_path, vars_path],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -208,7 +280,7 @@ class HuLa:
             tf.write(source)
             tmp_path = tf.name
         try:
-            argv = [self.human_bin, "hula", "compile"]
+            argv = [self._resolve_bin(), "hula", "compile"]
             if lite:
                 argv.append("--lite")
             argv.append(tmp_path)
@@ -247,7 +319,7 @@ class HuLa:
             json.dump(trace, tf)
             tmp_path = tf.name
         try:
-            argv = [self.human_bin, "hula", "replay"]
+            argv = [self._resolve_bin(), "hula", "replay"]
             if config_path:
                 argv.extend(["--config", config_path])
             argv.append(tmp_path)
@@ -273,6 +345,7 @@ class HuLa:
 __all__ = [
     "HuLa",
     "HulaResult",
+    "resolve_binary",
     "HULA_SDK_VERSION_STRING",
     "__version__",
 ]
