@@ -104,6 +104,8 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         hu_json_get_bool(obj, "self_rag_streaming", cfg->agent.self_rag_streaming);
     cfg->agent.rag_grounding_enabled =
         hu_json_get_bool(obj, "rag_grounding_enabled", cfg->agent.rag_grounding_enabled);
+    cfg->agent.activation_steering_enabled = hu_json_get_bool(
+        obj, "activation_steering_enabled", cfg->agent.activation_steering_enabled);
 
     hu_json_value_t *mc_obj = hu_json_object_get(obj, "metacognition");
     if (mc_obj && mc_obj->type == HU_JSON_OBJECT) {

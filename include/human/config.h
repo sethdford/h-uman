@@ -203,6 +203,11 @@ typedef struct hu_agent_config {
      * Default off — flip on for the LoRA-vs-RAG A/B ("measure before optimize").
      * Corpus = ~/.human/voice_corpus.jsonl (the harvested sent-message corpus). */
     bool rag_grounding_enabled;
+    /* Activation steering: when true, the agent maps the active persona overlay's
+     * traits to residual-stream steering coefficients and sends them to the local
+     * model (mlx_local) as a "steering" field. Default off; the local server
+     * clamps to the measured-safe range and treats absent/zero as a no-op. */
+    bool activation_steering_enabled;
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {
