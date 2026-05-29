@@ -177,6 +177,16 @@ void hu_route_log_tier_counts(const hu_route_decision_log_t *log, size_t counts[
 const char *hu_cognitive_tier_str(hu_cognitive_tier_t tier);
 const char *hu_route_source_str(hu_route_source_t source);
 
+/* Map a cognitive tier to a streaming strip preference for on-device serving.
+ * Casual tiers (REFLEXIVE, CONVERSATIONAL) favor incremental raw streaming for
+ * a realtime feel; heavier tiers (ANALYTICAL, DEEP) stay buffered/cleaned so the
+ * model's bare-markdown deliberation never leaks. Tri-state, matching
+ * hu_chat_request_t.stream_strip:
+ *   -1 = incremental (do not strip),
+ *   +1 = buffer + strip,
+ *    0 = no opinion (caller/server decides). */
+int hu_model_tier_stream_strip(hu_cognitive_tier_t tier);
+
 /* Global decision log singleton — threadsafe reads from gateway.
  * For thread-safe iteration, bracket reads with lock/unlock. */
 hu_route_decision_log_t *hu_route_global_log(void);

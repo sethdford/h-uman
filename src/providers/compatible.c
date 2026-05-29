@@ -310,6 +310,16 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                            hu_json_number_new(alloc, (double)request->max_tokens));
     }
 
+    /* On-device streaming hint (gemma-realtime Option B). Tri-state: emit a
+     * boolean only when the router has an opinion; omit otherwise so the
+     * server falls through to its HU_STREAM_BUFFER_STRIP env / model default.
+     * Harmless on non-stream requests — the server only reads it on the
+     * stream path. */
+    if (request->stream_strip != 0) {
+        hu_json_object_set(alloc, root, "stream_strip",
+                           hu_json_bool_new(alloc, request->stream_strip > 0));
+    }
+
     if (request->stop_sequences && request->stop_sequences_count > 0) {
         hu_json_value_t *stop_arr = hu_json_array_new(alloc);
         if (stop_arr) {

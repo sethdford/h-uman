@@ -214,6 +214,9 @@ typedef struct hu_chat_request {
     size_t prompt_cache_id_len;
     const char *const *stop_sequences; /* optional; NULL = none */
     size_t stop_sequences_count;
+    int stream_strip; /* on-device streaming hint: -1 = incremental (don't strip),
+                       * +1 = buffer + strip deliberation, 0 = omit (server/env decides).
+                       * Only consulted by OpenAI-compatible local serving on the stream path. */
 } hu_chat_request_t;
 
 /* ──────────────────────────────────────────────────────────────────────────

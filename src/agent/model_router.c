@@ -785,6 +785,19 @@ const char *hu_cognitive_tier_str(hu_cognitive_tier_t tier) {
     }
 }
 
+int hu_model_tier_stream_strip(hu_cognitive_tier_t tier) {
+    switch (tier) {
+    case HU_TIER_REFLEXIVE:
+    case HU_TIER_CONVERSATIONAL:
+        return -1; /* incremental: realtime feel for casual turns */
+    case HU_TIER_ANALYTICAL:
+    case HU_TIER_DEEP:
+        return 1; /* buffer + strip: keep heavy-tier deliberation from leaking */
+    default:
+        return 0; /* no opinion: server/env decides */
+    }
+}
+
 const char *hu_route_source_str(hu_route_source_t source) {
     switch (source) {
     case HU_ROUTE_HEURISTIC:
