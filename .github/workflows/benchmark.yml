@@ -32,12 +32,10 @@ jobs:
       - name: Check binary size regression
         if: github.event_name == 'pull_request'
         run: |
-          # Baseline = MinSizeRel+LTO+curl binary size. Bumped 2026-05-29
-          # (2489344 -> 2645408) to reflect feature growth merged via the
-          # sprint-60 (#173) + ddd-phase2 (#175/#176) work now on main; the
-          # prior value predated those features and produced a false 6.3%
-          # regression. The 5% threshold still guards against new growth.
-          BASELINE=2645408
+          # Bumped 2026-05-29: binary grew with the media-inspiration feature
+          # (music/YouTube/TikTok) + accumulated main features. 2641312 is the
+          # measured size at that point; 5% headroom is preserved for growth.
+          BASELINE=2641312
           ACTUAL=$(stat -c%s build/human 2>/dev/null || stat -f%z build/human)
           THRESHOLD=$((BASELINE * 105 / 100))
           if [ "$ACTUAL" -gt "$THRESHOLD" ]; then

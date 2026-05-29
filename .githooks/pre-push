@@ -20,12 +20,16 @@ if [ -f "CMakeLists.txt" ]; then
         echo "Build failed. Fix before pushing."
         exit 1
     fi
-    ./human_tests
+    # Run from the repo root: a number of tests open fixtures by repo-relative
+    # path (docs/, scripts/release/, .github/workflows/, Formula/). Running
+    # ./human_tests from inside the build dir made those ~44 tests fail
+    # spuriously (CWD couldn't resolve the relative paths).
+    cd ..
+    "$BUILD_DIR/human_tests"
     if [ $? -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1
     fi
-    cd ..
 
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
     if [ -x "scripts/update-stats.sh" ]; then
