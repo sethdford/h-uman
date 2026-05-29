@@ -550,6 +550,7 @@ void run_media_gen_tests(void);
 void run_opinions_tests(void);
 void run_belief_update_tests(void);
 void run_taste_tests(void);
+void run_somatic_tests(void);
 void run_intrinsic_drive_tests(void);
 void run_life_chapters_tests(void);
 void run_social_graph_tests(void);
@@ -1470,6 +1471,7 @@ int main(int argc, char **argv) {
     run_opinions_tests();
     run_belief_update_tests();
     run_taste_tests();
+    run_somatic_tests();
     run_intrinsic_drive_tests();
     run_life_chapters_tests();
     run_social_graph_tests();
