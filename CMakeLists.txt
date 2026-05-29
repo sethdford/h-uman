@@ -992,6 +992,7 @@ set(HU_CORE_SOURCES
     # so the public symbols resolve at link time in both build variants.
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
+    src/memory/repos/self_model_repo_sqlite.c
     src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
