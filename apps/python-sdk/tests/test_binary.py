@@ -31,28 +31,60 @@ class TestPlatformToAssetName(unittest.TestCase):
     @patch("platform.machine", return_value="x86_64")
     def test_linux_x86_64(self, mock_machine, mock_system):
         """Linux x86_64 maps to human-linux-x86_64.bin."""
-        asset_name, url = _platform_to_asset_name("0.1.0")
+        asset_name, url, ref = _platform_to_asset_name("0.1.0")
         self.assertEqual(asset_name, "human-linux-x86_64.bin")
-        self.assertIn("v0.1.0", url)
+        self.assertEqual(ref, "latest")
+        self.assertIn("/latest/download/", url)
         self.assertTrue(url.startswith("https://"))
 
     @patch("platform.system", return_value="Linux")
     @patch("platform.machine", return_value="aarch64")
     def test_linux_aarch64(self, mock_machine, mock_system):
         """Linux aarch64 maps to human-linux-aarch64.bin."""
-        asset_name, url = _platform_to_asset_name("0.1.0")
+        asset_name, url, ref = _platform_to_asset_name("0.1.0")
         self.assertEqual(asset_name, "human-linux-aarch64.bin")
-        self.assertIn("v0.1.0", url)
+        self.assertEqual(ref, "latest")
+        self.assertIn("/latest/download/", url)
         self.assertTrue(url.startswith("https://"))
 
     @patch("platform.system", return_value="Darwin")
     @patch("platform.machine", return_value="aarch64")
     def test_macos_aarch64(self, mock_machine, mock_system):
         """macOS aarch64 maps to human-macos-aarch64.bin."""
-        asset_name, url = _platform_to_asset_name("0.1.0")
+        asset_name, url, ref = _platform_to_asset_name("0.1.0")
         self.assertEqual(asset_name, "human-macos-aarch64.bin")
-        self.assertIn("v0.1.0", url)
+        self.assertEqual(ref, "latest")
+        self.assertIn("/latest/download/", url)
         self.assertTrue(url.startswith("https://"))
+
+    @patch.dict(os.environ, {"HUMAN_BINARY_RELEASE": "v2026.3.3"})
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    def test_pinned_release_ref(self, mock_machine, mock_system):
+        """HUMAN_BINARY_RELEASE pins an explicit tag and uses /download/{ref}/."""
+        asset_name, url, ref = _platform_to_asset_name("0.1.0")
+        self.assertEqual(asset_name, "human-linux-x86_64.bin")
+        self.assertEqual(ref, "v2026.3.3")
+        self.assertIn("/releases/download/v2026.3.3/", url)
+        self.assertNotIn("/latest/", url)
+        self.assertTrue(url.startswith("https://"))
+
+    @patch.dict(os.environ, {"HUMAN_BINARY_RELEASE": ""})
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    def test_empty_release_ref_falls_back_to_latest(self, mock_machine, mock_system):
+        """An empty HUMAN_BINARY_RELEASE falls back to the 'latest' alias."""
+        _, url, ref = _platform_to_asset_name("0.1.0")
+        self.assertEqual(ref, "latest")
+        self.assertIn("/latest/download/", url)
+
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    def test_version_does_not_appear_in_url(self, mock_machine, mock_system):
+        """SDK version is decoupled: it must NOT be baked into the asset URL."""
+        _, url, _ = _platform_to_asset_name("0.1.0")
+        self.assertNotIn("v0.1.0", url)
+        self.assertNotIn("0.1.0", url)
 
     @patch("platform.system", return_value="Windows")
     @patch("platform.machine", return_value="x86_64")
@@ -83,7 +115,7 @@ class TestPlatformToAssetName(unittest.TestCase):
     @patch("platform.machine", return_value="x86_64")
     def test_url_uses_https(self, mock_machine, mock_system):
         """The returned URL always uses HTTPS, never HTTP."""
-        _, url = _platform_to_asset_name("0.1.0")
+        _, url, _ = _platform_to_asset_name("0.1.0")
         self.assertTrue(url.startswith("https://"),
                         f"URL must use HTTPS: {url}")
         self.assertNotIn("http://", url,
@@ -117,12 +149,13 @@ class TestEnsureBinary(unittest.TestCase):
 
         path = ensure_binary("0.1.0")
 
-        self.assertEqual(path, self.cache_dir / "human-0.1.0")
+        self.assertEqual(path, self.cache_dir / "human-latest")
         self.assertTrue(path.exists())
         self.assertTrue(os.access(path, os.X_OK))
         # Verify urlopen was called with an HTTPS URL
         called_url = mock_urlopen.call_args[0][0]
         self.assertTrue(called_url.startswith("https://"))
+        self.assertIn("/latest/download/", called_url)
 
     @patch("platform.system", return_value="Linux")
     @patch("platform.machine", return_value="x86_64")
@@ -132,7 +165,7 @@ class TestEnsureBinary(unittest.TestCase):
                                        mock_machine, mock_system):
         """If cached binary exists, ensure_binary returns it without download."""
         mock_cache_dir.return_value = self.cache_dir
-        cache_path = self.cache_dir / "human-0.1.0"
+        cache_path = self.cache_dir / "human-latest"
         cache_path.write_bytes(b"\x7fELF")
         cache_path.chmod(0o755)
 
@@ -188,6 +221,26 @@ class TestEnsureBinary(unittest.TestCase):
         stat_info = path.stat()
         self.assertTrue(stat_info.st_mode & 0o100,
                         "Binary missing user execute bit")
+
+    @patch.dict(os.environ, {"HUMAN_BINARY_RELEASE": "v2026.3.3"})
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    @patch("human._binary._get_cache_dir")
+    @patch("urllib.request.urlopen")
+    def test_pinned_ref_keys_cache_on_ref(self, mock_urlopen, mock_cache_dir,
+                                          mock_machine, mock_system):
+        """A pinned HUMAN_BINARY_RELEASE caches under human-{ref}, not latest."""
+        mock_cache_dir.return_value = self.cache_dir
+        mock_response = MagicMock()
+        mock_response.read.return_value = b"\x7fELF"
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+
+        path = ensure_binary("0.1.0")
+
+        self.assertEqual(path, self.cache_dir / "human-v2026.3.3")
+        called_url = mock_urlopen.call_args[0][0]
+        self.assertIn("/releases/download/v2026.3.3/", called_url)
 
 
 if __name__ == "__main__":

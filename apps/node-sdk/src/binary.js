@@ -42,6 +42,25 @@ function getCacheDir() {
 
 
 /**
+ * Resolve which binary release to download from.
+ *
+ * The SDK's own semver (e.g. 0.1.0) is DECOUPLED from the h-uman binary
+ * releases, which are date-tagged (e.g. v2026.3.3). Building a tag from the
+ * SDK version (v0.1.0) points at a release that does not carry the
+ * human-*.bin assets and 404s. So we default to the "latest" published
+ * release, which always carries the current human-*.bin assets. Operators
+ * who need a reproducible pin can set HUMAN_BINARY_RELEASE to an explicit
+ * tag (e.g. "v2026.3.3").
+ *
+ * @returns {string} the release ref ("latest" or an explicit tag)
+ */
+function releaseRef() {
+  const ref = (process.env.HUMAN_BINARY_RELEASE || "").trim();
+  return ref || "latest";
+}
+
+
+/**
  * Map the current platform to the release asset name and download URL.
  *
  * The h-uman release workflow produces binaries named:
@@ -49,8 +68,9 @@ function getCacheDir() {
  *   human-linux-aarch64.bin
  *   human-macos-aarch64.bin
  *
- * @param {string} version - The SDK version (e.g., "0.1.0")
- * @returns {{assetName: string, assetUrl: string}}
+ * @param {string} version - The SDK version (accepted for API compatibility;
+ *   the binary release is selected by releaseRef(), not this value)
+ * @returns {{assetName: string, assetUrl: string, ref: string}}
  * @throws {Error} if the platform is not supported
  */
 function platformToAssetName(version) {
@@ -77,23 +97,36 @@ function platformToAssetName(version) {
     );
   }
 
-  // Release assets are published to GitHub Releases
-  const baseUrl = "https://github.com/sethdford/h-uman/releases/download";
-  const tag = `v${version}`;
-  const assetUrl = `${baseUrl}/${tag}/${assetName}`;
+  // Release assets are published to GitHub Releases. SDK semver is decoupled
+  // from the binary release tag, so resolve the ref independently.
+  //   latest : https://github.com/{owner}/{repo}/releases/latest/download/{asset}
+  //   pinned : https://github.com/{owner}/{repo}/releases/download/{ref}/{asset}
+  const repoBase = "https://github.com/sethdford/h-uman/releases";
+  const ref = releaseRef();
+  const assetUrl = ref === "latest"
+    ? `${repoBase}/latest/download/${assetName}`
+    : `${repoBase}/download/${ref}/${assetName}`;
 
-  return { assetName, assetUrl };
+  return { assetName, assetUrl, ref };
 }
 
 
+// GitHub release-asset URLs 302-redirect to a signed CDN host
+// (release-assets.githubusercontent.com), and the /latest/download/ alias
+// 302-redirects to the current tag's asset. Node's https.get does NOT follow
+// redirects automatically (unlike Python urllib), so we follow them ourselves.
+// Each hop is re-validated as HTTPS to preserve the HTTPS-only project rule.
+const MAX_REDIRECTS = 5;
+
 /**
- * Download from HTTPS URL with built-in error handling.
+ * Download from an HTTPS URL, following redirects (HTTPS-only at each hop).
  *
- * @param {string} url - Must be HTTPS only
+ * @param {string} url - Must be HTTPS only (enforced on every hop)
+ * @param {number} [redirectsLeft] - Remaining redirect budget
  * @returns {Promise<Buffer>} The downloaded data
- * @throws {Error} if download fails or URL is not HTTPS
+ * @throws {Error} if download fails, URL is not HTTPS, or too many redirects
  */
-function downloadHttps(url) {
+function downloadHttps(url, redirectsLeft = MAX_REDIRECTS) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     if (parsedUrl.protocol !== "https:") {
@@ -104,10 +137,25 @@ function downloadHttps(url) {
     }
 
     const request = https.get(url, (response) => {
-      if (response.statusCode !== 200) {
-        reject(new Error(
-          `HTTP ${response.statusCode} downloading ${url}`
-        ));
+      const status = response.statusCode;
+
+      // Follow 3xx redirects (301/302/303/307/308) to the Location header.
+      if (status >= 300 && status < 400 && response.headers.location) {
+        // Drain the redirect response so the socket can be reused/closed.
+        response.resume();
+        if (redirectsLeft <= 0) {
+          reject(new Error(`Too many redirects downloading ${url}`));
+          return;
+        }
+        // Location may be relative; resolve against the current URL.
+        const nextUrl = new URL(response.headers.location, url).toString();
+        downloadHttps(nextUrl, redirectsLeft - 1).then(resolve, reject);
+        return;
+      }
+
+      if (status !== 200) {
+        response.resume();
+        reject(new Error(`HTTP ${status} downloading ${url}`));
         return;
       }
 
@@ -134,14 +182,18 @@ function downloadHttps(url) {
  * to be executable before return. Subsequent calls for the same version
  * use the cached copy (no re-download).
  *
- * @param {string} version - The SDK version to download (default: "0.1.0")
+ * @param {string} version - The SDK version (default: "0.1.0"). Accepted for
+ *   API compatibility; the binary release is selected by HUMAN_BINARY_RELEASE
+ *   (default "latest"), NOT this value.
  * @returns {Promise<string>} Absolute path to the cached binary
  * @throws {Error} if the platform is unsupported or download fails
  */
 export async function ensureBinary(version = "0.1.0") {
-  const { assetName, assetUrl } = platformToAssetName(version);
+  const { assetUrl, ref } = platformToAssetName(version);
   const cacheDir = getCacheDir();
-  const cachePath = path.join(cacheDir, `human-${version}`);
+  // Cache is keyed on the release ref (not the SDK version) because the binary
+  // is selected by the ref. Pinned refs each get an immutable cache slot.
+  const cachePath = path.join(cacheDir, `human-${ref}`);
 
   // Create cache directory if it doesn't exist
   try {
@@ -197,3 +249,8 @@ export async function ensureBinary(version = "0.1.0") {
 
   return cachePath;
 }
+
+
+// Internal helpers exported for unit testing. Not part of the public API;
+// consumers should use ensureBinary().
+export const __testing = { platformToAssetName, releaseRef, downloadHttps };

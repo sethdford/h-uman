@@ -42,8 +42,22 @@ def _get_cache_dir():
     return cache_dir
 
 
+def _release_ref():
+    """Resolve which binary release to download from.
+
+    The SDK's own semver (e.g. 0.1.0) is DECOUPLED from the h-uman binary
+    releases, which are date-tagged (e.g. v2026.3.3). Building a tag from the
+    SDK version (v0.1.0) points at a release that does not carry the
+    human-*.bin assets and 404s. So we default to the "latest" published
+    release, which always carries the current human-*.bin assets. Operators
+    who need a reproducible pin can set HUMAN_BINARY_RELEASE to an explicit
+    tag (e.g. "v2026.3.3").
+    """
+    return os.environ.get("HUMAN_BINARY_RELEASE", "latest").strip() or "latest"
+
+
 def _platform_to_asset_name(version):
-    """Map the current platform to the release asset name.
+    """Map the current platform to the release asset name and download URL.
 
     The h-uman release workflow produces binaries named:
       human-linux-x86_64.bin
@@ -51,10 +65,14 @@ def _platform_to_asset_name(version):
       human-macos-aarch64.bin
 
     Args:
-        version: The SDK version (e.g., "0.1.0").
+        version: The SDK version (accepted for API compatibility; the binary
+                 release is selected by _release_ref(), not this value).
 
     Returns:
-        A tuple of (asset_name, asset_url).
+        A tuple of (asset_name, asset_url, release_ref). When the release ref
+        is "latest", asset_url uses GitHub's /releases/latest/download/ alias,
+        which redirects to the current release's asset. When pinned, it points
+        at /releases/download/{ref}/.
 
     Raises:
         RuntimeError: if the platform is not supported.
@@ -82,13 +100,19 @@ def _platform_to_asset_name(version):
             "https://github.com/sethdford/h-uman"
         )
 
-    # Release assets are published to GitHub Releases
-    # Format: https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}
-    base_url = "https://github.com/sethdford/h-uman/releases/download"
-    tag = f"v{version}"
-    asset_url = f"{base_url}/{tag}/{asset_name}"
+    # Release assets are published to GitHub Releases. The SDK version is
+    # DECOUPLED from the binary release tag (see _release_ref docstring), so we
+    # resolve the ref independently rather than building a tag from `version`.
+    #   latest : https://github.com/{owner}/{repo}/releases/latest/download/{asset}
+    #   pinned : https://github.com/{owner}/{repo}/releases/download/{ref}/{asset}
+    repo_base = "https://github.com/sethdford/h-uman/releases"
+    ref = _release_ref()
+    if ref == "latest":
+        asset_url = f"{repo_base}/latest/download/{asset_name}"
+    else:
+        asset_url = f"{repo_base}/download/{ref}/{asset_name}"
 
-    return asset_name, asset_url
+    return asset_name, asset_url, ref
 
 
 def ensure_binary(version="0.1.0"):
@@ -100,8 +124,10 @@ def ensure_binary(version="0.1.0"):
     use the cached copy (no re-download).
 
     Args:
-        version: The SDK version to download binaries for (default: "0.1.0").
-                 Must match a released tag in the h-uman repo.
+        version: The SDK version (default: "0.1.0"). Accepted for API
+                 compatibility; the binary release is selected by the
+                 HUMAN_BINARY_RELEASE env var (default "latest"), NOT this
+                 value. The SDK semver is decoupled from binary release tags.
 
     Returns:
         The absolute Path to the cached binary, ready to execute.
@@ -111,7 +137,7 @@ def ensure_binary(version="0.1.0"):
         IOError: if the cache directory cannot be created or the binary
                  cannot be written to disk.
     """
-    asset_name, asset_url = _platform_to_asset_name(version)
+    asset_name, asset_url, ref = _platform_to_asset_name(version)
 
     # HTTPS-only: hard project rule for all outbound. Refuse any non-HTTPS URL
     # (defends against a misconfigured base_url or an http:// redirect target).
@@ -121,7 +147,11 @@ def ensure_binary(version="0.1.0"):
         )
 
     cache_dir = _get_cache_dir()
-    cache_path = cache_dir / f"human-{version}"
+    # Cache is keyed on the release ref (not the SDK version) because the binary
+    # is selected by the ref. A "latest" cache entry is refreshed whenever the
+    # cached copy is missing/invalid; operators who need reproducibility pin
+    # HUMAN_BINARY_RELEASE so each pinned ref gets its own immutable cache slot.
+    cache_path = cache_dir / f"human-{ref}"
 
     # If the cached binary exists and is executable, return it.
     if cache_path.exists() and os.access(cache_path, os.X_OK):
