@@ -146,6 +146,40 @@ def decompose(ref_messages, model_messages):
     }
 
 
+def contrastive_uniqueness(target_ref, other_ref, model_responses):
+    """SOTA eval (Eval4Sim 'uniqueness'): is the model closer to the TARGET than
+    to a generic / other-author baseline? Pure similarity rewards bland fluency;
+    this rewards capturing what's DISTINCTIVE about the target's voice.
+
+    uniqueness = 0.5 when the model is equally close to target and others; →1 as
+    it leans toward the target, →0 as it leans toward the generic baseline.
+    """
+    t = decompose(target_ref, model_responses)["aggregate"]
+    o = decompose(other_ref, model_responses)["aggregate"]
+    uniqueness = max(0.0, min(1.0, 0.5 + (t - o) / 2.0))
+    return {
+        "target_sim": t,
+        "other_sim": o,
+        "distinctive": t > o,
+        "uniqueness": round(uniqueness, 3),
+    }
+
+
+def multiturn_consistency(model_turns):
+    """SOTA eval (PICon multi-turn consistency): how stable is the voice
+    fingerprint across a conversation? 1.0 = no drift. A model that's in-voice
+    turn 1 but drifts to generic by turn 10 fails this even with a high aggregate.
+    Uses the ratio axes (already normalized to [0,1])."""
+    n = len(model_turns)
+    if n < 2:
+        return {"consistency": 1.0, "turns": n}
+    feats = [message_features(t) for t in model_turns]
+    keys = ["lower_ratio", "abbrev_ratio", "hedge_ratio", "emoji_ratio"]
+    avg_drift = statistics.mean(statistics.pstdev([f[k] for f in feats]) for k in keys)
+    consistency = max(0.0, 1.0 - min(1.0, avg_drift * 2.0))
+    return {"consistency": round(consistency, 3), "turns": n}
+
+
 def load_messages(path):
     out = []
     for line in Path(path).read_text().splitlines():

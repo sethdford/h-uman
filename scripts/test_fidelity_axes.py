@@ -64,6 +64,41 @@ def test_load_messages_jsonl_and_plain():
     assert fx.load_messages(p) == ["plain line one", "plain line two"]
 
 
+def test_contrastive_uniqueness_rewards_target_match():
+    # model echoes the casual target → distinctive vs the formal "other" baseline
+    u = fx.contrastive_uniqueness(CASUAL, FORMAL, CASUAL)
+    assert u["distinctive"] is True, u
+    assert u["uniqueness"] > 0.5, u
+
+
+def test_contrastive_uniqueness_penalizes_generic():
+    # model talks like the FORMAL "other" baseline → not distinctive to the casual target
+    u = fx.contrastive_uniqueness(CASUAL, FORMAL, FORMAL)
+    assert u["distinctive"] is False, u
+    assert u["uniqueness"] < 0.5, u
+
+
+def test_multiturn_consistency_stable_vs_drift():
+    # Stable: uniform lowercase, no emoji/abbrev variance → near-zero drift.
+    stable = [
+        "that sounds great thanks so much",
+        "really sounds great thanks",
+        "great that sounds really nice",
+        "thanks that sounds great",
+    ]
+    # Drift: voice swings across turns (casing, abbreviation, emoji all vary wildly).
+    drift = [
+        "sounds great",
+        "WOW THAT IS TRULY AMAZING",
+        "lol 😂😂😂 idk tbh ngl fr",
+        "I remain quite formal in this matter.",
+    ]
+    s = fx.multiturn_consistency(stable)
+    d = fx.multiturn_consistency(drift)
+    assert s["consistency"] > d["consistency"], (s, d)
+    assert fx.multiturn_consistency(["one turn"])["consistency"] == 1.0
+
+
 def main():
     tests = [
         test_message_features_casual_vs_formal,
@@ -71,6 +106,9 @@ def main():
         test_formal_model_against_casual_ref_flags_axes,
         test_vocabulary_axis_rewards_shared_content_words,
         test_load_messages_jsonl_and_plain,
+        test_contrastive_uniqueness_rewards_target_match,
+        test_contrastive_uniqueness_penalizes_generic,
+        test_multiturn_consistency_stable_vs_drift,
     ]
     print("Testing fidelity_axes.py")
     print("=" * 60)
