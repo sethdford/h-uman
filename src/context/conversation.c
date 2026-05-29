@@ -8049,10 +8049,13 @@ static bool conv_is_blank(const char *buf, size_t len) {
 
 /* Largest prefix length of buf[0..want) that ends on a complete UTF-8
  * codepoint (never splits a multi-byte sequence). Mirrors the contract of
- * hu_mlx_utf8_safe_emit_len without crossing the providers layer boundary. */
+ * hu_mlx_utf8_safe_emit_len without crossing the providers layer boundary.
+ * For a prefix already ending on a boundary (or malformed input), returns
+ * want unchanged. */
 static size_t conv_utf8_safe_len(const char *buf, size_t want) {
     if (want == 0)
         return 0;
+    /* Walk back over trailing continuation bytes (0x80..0xBF). */
     size_t i = want;
     size_t cont = 0;
     while (i > 0 && ((unsigned char)buf[i - 1] & 0xC0) == 0x80) {
@@ -8064,7 +8067,7 @@ static size_t conv_utf8_safe_len(const char *buf, size_t want) {
     unsigned char lead = (unsigned char)buf[i - 1];
     size_t need;
     if ((lead & 0x80) == 0x00)
-        need = 1;
+        need = 1; /* ASCII */
     else if ((lead & 0xE0) == 0xC0)
         need = 2;
     else if ((lead & 0xF0) == 0xE0)
@@ -8073,9 +8076,10 @@ static size_t conv_utf8_safe_len(const char *buf, size_t want) {
         need = 4;
     else
         return want; /* malformed lead byte — leave as-is */
+    /* Bytes present for the tail codepoint: the lead plus its continuations. */
     if (1 + cont >= need)
-        return want;
-    return i - 1; /* incomplete — cut before the lead byte */
+        return want; /* complete codepoint at the tail */
+    return i - 1;    /* incomplete — cut before the lead byte */
 }
 
 size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, size_t max_chunk,

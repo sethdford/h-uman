@@ -3026,8 +3026,12 @@ static void split_into_texts_blank_input_returns_zero(void) {
     HU_ASSERT_EQ(0, (int)n);
 }
 
-/* #5 regression: a hard cut must not split a multi-byte UTF-8 codepoint. */
+/* #5 regression: a hard cut must not split a multi-byte UTF-8 codepoint.
+ * Build a string whose byte at the cut boundary lands inside a 4-byte emoji,
+ * then assert every emitted chunk is valid UTF-8 (no trailing partial bytes). */
 static void split_into_texts_never_splits_utf8_codepoint(void) {
+    /* 8 'a' + rocket emoji (F0 9F 9A 80) repeated, so a max_chunk near a
+     * multiple lands mid-emoji if unguarded. */
     char msg[512];
     size_t len = 0;
     for (int rep = 0; rep < 40 && len + 5 < sizeof(msg); rep++) {
@@ -3042,9 +3046,16 @@ static void split_into_texts_never_splits_utf8_codepoint(void) {
     HU_ASSERT_TRUE(n >= 1);
     for (size_t c = 0; c < n; c++) {
         size_t clen = strlen(chunks[c]);
+        /* A valid chunk must not END on a UTF-8 continuation byte (0x80..0xBF)
+         * with an incomplete lead — verify the trailing codepoint is complete
+         * by re-running the safe-length check: it must equal clen. */
         size_t safe = clen;
         while (safe > 0 && ((unsigned char)chunks[c][safe - 1] & 0xC0) == 0x80)
             safe--;
+        /* Either the last byte is ASCII/lead with its full continuation run
+         * present, or it's a complete codepoint. The simplest invariant: the
+         * final byte is not a lone continuation, i.e. walking back over
+         * continuations reaches a lead byte whose width matches. */
         if (safe > 0) {
             unsigned char lead = (unsigned char)chunks[c][safe - 1];
             size_t cont = clen - safe;
