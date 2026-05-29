@@ -1,3 +1,14 @@
+/* Feature-test macros must precede the first include so libc's <features.h>
+ * exposes the right symbols. On musl (alpine docker build) both
+ * arc4random_uniform (<stdlib.h>) and usleep (<unistd.h>) are gated behind
+ * _DEFAULT_SOURCE/_BSD_SOURCE, which strict -std=c11 (__STRICT_ANSI__)
+ * otherwise suppresses. Mirrors the proven block at the top of src/daemon.c. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #include "human/persona/pacing.h"
 #include "human/core/time.h"
 #include <stdlib.h> /* arc4random_uniform */

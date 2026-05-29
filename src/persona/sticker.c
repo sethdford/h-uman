@@ -1,3 +1,14 @@
+/* Feature-test macros must precede the first include so libc's <features.h>
+ * exposes the right symbols. On musl (alpine docker build) arc4random_uniform
+ * and the dirent DT_* fields are gated behind _DEFAULT_SOURCE/_BSD_SOURCE,
+ * which strict -std=c11 (__STRICT_ANSI__) otherwise suppresses. Mirrors the
+ * proven block at the top of src/daemon.c. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #include "human/persona/sticker.h"
 #include "human/core/log.h"
 #include <dirent.h>
