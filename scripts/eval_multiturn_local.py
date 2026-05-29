@@ -353,15 +353,21 @@ def main(argv=None):
     verdict["judge"] = "OK" if judge_on else "SKIPPED"
     write_verdict(verdict, args.output_json)
 
-    print(f"Run verdict: {'PASS' if verdict['run_passed'] else 'FAIL'} "
-          f"({verdict['scenarios_passed']}/{verdict['scenarios_total']} scenarios) "
-          f"judge={verdict['judge']}")
-
     if not judge_on:
         # SKIPPED only if the one axis we could measure (latency) held. A latency
         # regression must surface as FAIL even when qualitative axes are skipped.
+        # The run-level run_passed is meaningless here (retention is vetoed by the
+        # hard floor because it was skipped), so report the latency-only disposition.
         latency_all_pass = all(sv["latency"]["passed"] for sv in scenario_verdicts)
+        lat_passed = sum(1 for sv in scenario_verdicts if sv["latency"]["passed"])
+        print(f"Run verdict: {'SKIPPED' if latency_all_pass else 'FAIL'} "
+              f"(latency {lat_passed}/{len(scenario_verdicts)} scenarios) "
+              f"judge=SKIPPED — qualitative axes not scored")
         return 3 if latency_all_pass else 1
+
+    print(f"Run verdict: {'PASS' if verdict['run_passed'] else 'FAIL'} "
+          f"({verdict['scenarios_passed']}/{verdict['scenarios_total']} scenarios) "
+          f"judge={verdict['judge']}")
     return 0 if verdict["run_passed"] else 1
 
 
