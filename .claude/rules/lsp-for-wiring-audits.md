@@ -22,7 +22,7 @@ query, not a grep-and-infer read.
    read each to confirm it's a real call vs a comment vs a decl. LSP answers
    precisely.
 2. **Trusting LSP on a vtable field.** `findReferences` on a function-*pointer
-   field* returns ~1 hit (the declaration) even when 30 channels assign and
+   field* returns ~1 hit (the declaration) even when dozens of channels assign and
    invoke it — and a naive reading of "1 reference" looks exactly like
    "unwired." That false negative is the dangerous one.
 
@@ -30,7 +30,7 @@ query, not a grep-and-infer read.
 
 | Query | Tool | Result | Truth |
 |---|---|---|---|
-| `send` **field** decl, `channel.h:101` | `findReferences` | **1 hit** (decl only) | wired in ~30 channels via `.send =` + invoked via `vtable->send(...)` — clangd sees none of it |
+| `send` **field** decl, `channel.h:101` | `findReferences` | **1 hit** (decl only) | wired in dozens of channels via `.send =` + invoked via `vtable->send(...)` — clangd sees none of it |
 | `hu_channel_behavior_class_for_name`, `behavior_class.h:22` | `findReferences` | **6 hits / 4 files** | correct |
 | same function | `incomingCalls` | `at_behavior_channel_class` → `agent_turn.c:389` | **proved** the agent core reaches channel identity only through the delegation wrapper — the `agent-core-boundary.md` contract, in one call |
 
