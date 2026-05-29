@@ -4722,6 +4722,52 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif /* HU_ENABLE_ML */
 #ifdef HU_ENABLE_SQLITE
+                /* Wave 3 — continuous persona learning: re-mine the persona's
+                 * example banks from conversation history once per 24h when
+                 * enabled, so the few-shot voice signal stays current with how
+                 * the user actually writes. Same first-tick-defer pattern as the
+                 * ML/DPO blocks so a slow first extraction never blocks dispatch.
+                 * Safe: hu_persona_refresh_example_banks only writes when banks
+                 * are mined, never wiping the authored persona. */
+                {
+                    static int64_t last_persona_refresh = 0;
+                    static bool persona_refresh_logged_disabled = false;
+                    bool pr_enabled = config && config->learning.persona_refresh_enabled;
+                    if (!pr_enabled) {
+                        if (!persona_refresh_logged_disabled) {
+                            hu_log_info(
+                                "human", agent ? agent->observer : NULL,
+                                "persona example-bank refresh disabled by config "
+                                "(learning.persona_refresh_enabled=false); set it true to keep "
+                                "few-shot voice examples current");
+                            persona_refresh_logged_disabled = true;
+                        }
+                    } else if (last_persona_refresh == 0) {
+                        last_persona_refresh = (int64_t)t; /* defer first run */
+                    } else if (agent && agent->persona_name && agent->persona_name_len > 0 &&
+                               hu_persona_refresh_should_run(true, (int64_t)t,
+                                                             last_persona_refresh)) {
+                        last_persona_refresh = (int64_t)t;
+                        const char *pr_home = getenv("HOME");
+                        char pr_db[512];
+                        if (pr_home && pr_home[0])
+                            snprintf(pr_db, sizeof(pr_db), "%s/.human/memory.db", pr_home);
+                        else
+                            snprintf(pr_db, sizeof(pr_db), ".human/memory.db");
+                        size_t pr_total = 0;
+                        hu_error_t pr_err = hu_persona_refresh_example_banks(
+                            alloc, agent->persona_name, agent->persona_name_len, pr_db,
+                            /*max_per_channel=*/0, &pr_total);
+                        if (pr_err == HU_OK && pr_total > 0)
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "persona refresh: re-mined %zu example(s) from history",
+                                        pr_total);
+                        else if (pr_err != HU_OK && pr_err != HU_ERR_NOT_SUPPORTED)
+                            hu_log_warn("human", agent ? agent->observer : NULL,
+                                        "persona refresh failed: %s", hu_error_string(pr_err));
+                    }
+                }
+
                 /* DPO consolidation — train on preference pairs every 24 hours.
                  *
                  * BUGFIX 2026-05-25: Same first-tick blocking issue as the ML

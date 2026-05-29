@@ -3455,6 +3455,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_unified_dispatch.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
+    tests/test_persona_refresh.c
     tests/test_agent.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c

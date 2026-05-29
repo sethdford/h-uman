@@ -157,6 +157,12 @@ typedef struct hu_learning_config {
      * false — opt-in like m3_frontier_auto_training, since the run blocks
      * the daemon loop for up to 30 min. */
     bool nightly_lora_enabled;
+    /* Wave 3 — continuous persona learning. When true, the daemon re-mines the
+     * persona's example banks from conversation history (~/.human/memory.db)
+     * once per 24h and persists them, keeping the few-shot voice signal current.
+     * Default false — opt-in, since it rewrites the persona JSON and reads the
+     * conversation DB. */
+    bool persona_refresh_enabled;
 } hu_learning_config_t;
 
 #define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100

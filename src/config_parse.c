@@ -322,6 +322,9 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
      * HU_NIGHTLY_LORA_ENABLED env var. See daemon.c:4430. */
     cfg->learning.nightly_lora_enabled =
         hu_json_get_bool(obj, "nightly_lora_enabled", cfg->learning.nightly_lora_enabled);
+    /* Wave 3 — continuous persona learning (example-bank re-mining). */
+    cfg->learning.persona_refresh_enabled =
+        hu_json_get_bool(obj, "persona_refresh_enabled", cfg->learning.persona_refresh_enabled);
     return HU_OK;
 }
 

@@ -19,10 +19,11 @@
     "patterns, and style rules in JSON format."
 
 hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, hu_provider_t *provider,
-                                      const char *model, size_t model_len, hu_legacy_memory_t *memory,
-                                      const char *persona_name, size_t persona_name_len,
-                                      const char *channel, size_t channel_len,
-                                      const char *contact_id, size_t contact_id_len) {
+                                      const char *model, size_t model_len,
+                                      hu_legacy_memory_t *memory, const char *persona_name,
+                                      size_t persona_name_len, const char *channel,
+                                      size_t channel_len, const char *contact_id,
+                                      size_t contact_id_len) {
     if (!alloc || !persona_name || persona_name_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -154,4 +155,71 @@ hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, hu_provider_t *prov
     hu_persona_deinit(alloc, &partial);
     return HU_OK;
 #endif
+}
+
+/* Wave 3 — continuous persona learning: re-mine example banks from conversation
+ * history and persist them, keeping the few-shot voice signal current (the
+ * strongest voice signal is real message pairs, not authored traits which
+ * hu_persona_style_reanalyze already handles).
+ *
+ * Safe by construction: writes ONLY when extraction produced banks, so an empty
+ * or unreadable history never wipes the user's authored example banks. Needs
+ * SQLITE + ML; on builds without them hu_persona_banks_extract_from_history
+ * returns HU_ERR_NOT_SUPPORTED, which we pass through so the caller no-ops. */
+hu_error_t hu_persona_refresh_example_banks(hu_allocator_t *alloc, const char *persona_name,
+                                            size_t persona_name_len, const char *db_path,
+                                            size_t max_per_channel, size_t *out_total_examples) {
+    if (out_total_examples)
+        *out_total_examples = 0;
+    if (!alloc || !persona_name || persona_name_len == 0 || !db_path || !db_path[0])
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_persona_example_bank_t *new_banks = NULL;
+    size_t new_count = 0;
+    hu_error_t ex_err = hu_persona_banks_extract_from_history(alloc, db_path, max_per_channel,
+                                                              &new_banks, &new_count);
+    if (ex_err != HU_OK)
+        return ex_err; /* incl. HU_ERR_NOT_SUPPORTED on non-ML/SQLITE builds */
+
+    if (new_count == 0) {
+        /* Nothing mined (empty history after quality gates) — leave the authored
+         * persona untouched rather than wiping its banks. */
+        hu_persona_example_banks_free(alloc, new_banks, new_count);
+        return HU_OK;
+    }
+
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    hu_error_t load_err = hu_persona_load(alloc, persona_name, persona_name_len, &persona);
+    if (load_err != HU_OK) {
+        hu_persona_example_banks_free(alloc, new_banks, new_count);
+        return load_err;
+    }
+
+    /* Replace the loaded banks with the freshly mined ones (same allocator owns
+     * both), then persist. The persona takes ownership of new_banks, so deinit
+     * frees them. */
+    hu_persona_example_banks_free(alloc, persona.example_banks, persona.example_banks_count);
+    persona.example_banks = new_banks;
+    persona.example_banks_count = new_count;
+
+    size_t total = 0;
+    for (size_t i = 0; i < new_count; i++)
+        total += new_banks[i].examples_count;
+
+    hu_error_t w_err = hu_persona_creator_write(alloc, &persona);
+    hu_persona_deinit(alloc, &persona);
+    if (w_err != HU_OK)
+        return w_err;
+    if (out_total_examples)
+        *out_total_examples = total;
+    return HU_OK;
+}
+
+bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_run_unix) {
+    if (!enabled)
+        return false;
+    if (last_run_unix <= 0)
+        return true; /* never run before */
+    return (now_unix - last_run_unix) >= (int64_t)(24 * 3600);
 }
