@@ -59,6 +59,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/humor.h"
 #include "human/persona/narrative_self.h"
+#include "human/persona/rag.h"
 #include "human/persona/somatic.h"
 #include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
@@ -605,6 +606,41 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                          exs[ei]->incoming, exs[ei]->response);
                             if (n > 0 && lpo + (size_t)n < sizeof(lp))
                                 lpo += (size_t)n;
+                        }
+                    }
+                }
+            }
+            /* RAG-over-own-messages voice grounding (default off): retrieve
+             * Seth's most-similar real past messages to THIS incoming message and
+             * inject them as dynamic few-shot grounding — the SOTA RAG leg next to
+             * the fine-tuned adapter + personal model.
+             *
+             * Register-conditional (live A/B 2026-05-29, rag-ab-live-verdict.json):
+             * RAG grounding HELPS the substantive register (+0.110) but slightly
+             * hurts casual (-0.078, richer context fights curt brevity). So gate it
+             * on ANALYTICAL/DEEP turns only; REFLEXIVE/CONVERSATIONAL and unknown
+             * tier (turn_tier < 0) skip it. */
+            if (agent->config && agent->config->agent.rag_grounding_enabled &&
+                agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
+                const char *home = getenv("HOME");
+                if (home && *home) {
+                    char qbuf[512];
+                    size_t qn = msg_len < sizeof(qbuf) - 1 ? msg_len : sizeof(qbuf) - 1;
+                    if (msg && qn > 0) {
+                        memcpy(qbuf, msg, qn);
+                        qbuf[qn] = '\0';
+                        char cpath[768];
+                        int pn =
+                            snprintf(cpath, sizeof(cpath), "%s/.human/voice_corpus.jsonl", home);
+                        if (pn > 0 && (size_t)pn < sizeof(cpath)) {
+                            char rag_buf[2048];
+                            size_t rn = hu_persona_rag_ground_from_file(
+                                qbuf, cpath, 3, rag_buf, sizeof(rag_buf), agent->alloc);
+                            if (rn > 0) {
+                                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n%s", rag_buf);
+                                if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                                    lpo += (size_t)n;
+                            }
                         }
                     }
                 }
@@ -1462,6 +1498,33 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * is operator-enabled and the provider is the OpenAI-compatible local
          * server, which is the only consumer of stream_strip on the wire. */
         req.stream_strip = hu_model_tier_stream_strip(early_tier);
+
+        /* Activation steering (default off): map the active persona overlay's
+         * traits to residual-stream steering coefficients for the local model.
+         * Only the OpenAI-compatible (local) provider serializes req.steer_*;
+         * cloud providers never read these fields, so this is inert off-device.
+         * Validated traits only (formality, verbosity); hu_persona_steering_coeffs
+         * and the server both clamp to the measured-safe [-1,1] envelope.
+         *
+         * Register-conditional (stack_eval_live.py, 2026-05-29): steering LIFTS
+         * the substantive register (+0.008 atop RAG, +0.101 stacked) but HURTS
+         * casual (-0.054 — added shaping fights curt brevity). Gate it to
+         * ANALYTICAL/DEEP turns, like RAG; casual/reflexive + unknown tier skip. */
+        if (agent->config && agent->config->agent.activation_steering_enabled && agent->persona &&
+            agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
+            const hu_persona_overlay_t *steer_ov = hu_persona_find_overlay(
+                agent->persona, agent->active_channel, agent->active_channel_len);
+            if (steer_ov) {
+                double sf = 0.0, sv = 0.0;
+                hu_persona_steering_coeffs(steer_ov->formality, steer_ov->avg_length, 1.0, &sf,
+                                           &sv);
+                if (sf != 0.0 || sv != 0.0) {
+                    req.steering_present = true;
+                    req.steer_formality = sf;
+                    req.steer_verbosity = sv;
+                }
+            }
+        }
 
         /* Buffer provider text until the final content clears guards. Tool
          * events still stream through stream_chunk_to_event_cb. */
