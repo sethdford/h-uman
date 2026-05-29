@@ -417,6 +417,12 @@ void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *me
         return;
     if (!user_msg || user_msg_len == 0)
         return;
+    /* The director can record non-text turns (tapback/silence) with a NULL
+     * response; never feed NULL into the "%.*s" formatter below. */
+    if (!response) {
+        response = "";
+        response_len = 0;
+    }
 #ifndef HU_ENABLE_SQLITE
     (void)graph;
 #endif

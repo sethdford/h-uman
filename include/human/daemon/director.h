@@ -5,6 +5,7 @@
 #include "human/channel.h"
 #include "human/core/error.h"
 #include "human/provider.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 

@@ -62,13 +62,16 @@ bool hu_protective_is_boundary(hu_memory_t *memory, const char *contact_id, size
     hu_allocator_t alloc = hu_system_allocator();
     hu_boundary_repo_t repo;
     hu_error_t err = hu_boundary_repo_create(memory, &alloc, &repo);
+    /* Fail CLOSED: if we cannot determine boundary state (repo unavailable or
+     * lookup error), treat the topic AS a boundary. A protective guard must
+     * not fail open on transient storage failures (deny-by-default). */
     if (err != HU_OK)
-        return false;
+        return true;
 
     bool is_b = false;
     err = repo.vtable->is_boundary(repo.ctx, contact_id, contact_id_len, topic, topic_len, &is_b);
     repo.vtable->deinit(repo.ctx);
-    return (err == HU_OK) ? is_b : false;
+    return (err == HU_OK) ? is_b : true;
 }
 
 hu_error_t hu_protective_add_boundary(hu_allocator_t *alloc, hu_memory_t *memory,
