@@ -1733,9 +1733,11 @@ hu_narrative_phase_t hu_conversation_detect_narrative(const hu_channel_history_e
         }
         if (hu_str_contains_ci_cstr(t, tl, "love") || hu_str_contains_ci_cstr(t, tl, "hate") ||
             hu_str_contains_ci_cstr(t, tl, "scared") || hu_str_contains_ci_cstr(t, tl, "angry") ||
-            hu_str_contains_ci_cstr(t, tl, "can't believe") || hu_str_contains_ci_cstr(t, tl, "so happy") ||
+            hu_str_contains_ci_cstr(t, tl, "can't believe") ||
+            hu_str_contains_ci_cstr(t, tl, "so happy") ||
             hu_str_contains_ci_cstr(t, tl, "so sad") || hu_str_contains_ci_cstr(t, tl, "hurt") ||
-            hu_str_contains_ci_cstr(t, tl, "need to tell") || hu_str_contains_ci_cstr(t, tl, "important"))
+            hu_str_contains_ci_cstr(t, tl, "need to tell") ||
+            hu_str_contains_ci_cstr(t, tl, "important"))
             emotional_words++;
     }
 
@@ -1743,11 +1745,14 @@ hu_narrative_phase_t hu_conversation_detect_narrative(const hu_channel_history_e
     if (count >= 2) {
         const char *last = entries[count - 1].text;
         size_t ll = strlen(last);
-        if (!entries[count - 1].from_me &&
-            (hu_str_contains_ci_cstr(last, ll, "gotta go") || hu_str_contains_ci_cstr(last, ll, "talk later") ||
-             hu_str_contains_ci_cstr(last, ll, "bye") || hu_str_contains_ci_cstr(last, ll, "night") ||
-             hu_str_contains_ci_cstr(last, ll, "ttyl") || hu_str_contains_ci_cstr(last, ll, "heading out") ||
-             (ll < 10 && (hu_str_contains_ci_cstr(last, ll, "ok") || hu_str_contains_ci_cstr(last, ll, "k")))))
+        if (!entries[count - 1].from_me && (hu_str_contains_ci_cstr(last, ll, "gotta go") ||
+                                            hu_str_contains_ci_cstr(last, ll, "talk later") ||
+                                            hu_str_contains_ci_cstr(last, ll, "bye") ||
+                                            hu_str_contains_ci_cstr(last, ll, "night") ||
+                                            hu_str_contains_ci_cstr(last, ll, "ttyl") ||
+                                            hu_str_contains_ci_cstr(last, ll, "heading out") ||
+                                            (ll < 10 && (hu_str_contains_ci_cstr(last, ll, "ok") ||
+                                                         hu_str_contains_ci_cstr(last, ll, "k")))))
             return HU_NARRATIVE_CLOSING;
     }
 
@@ -2282,40 +2287,51 @@ hu_energy_level_t hu_conversation_detect_energy(const char *msg, size_t msg_len,
     /* Common neutral acknowledgments — return NEUTRAL before other heuristics */
     if (hu_str_contains_ci_cstr(msg, msg_len, "ok sounds good") ||
         hu_str_contains_ci_cstr(msg, msg_len, "sounds good") ||
-        (msg_len <= 4 &&
-         (hu_str_contains_ci_cstr(msg, msg_len, "ok") || hu_str_contains_ci_cstr(msg, msg_len, "k"))))
+        (msg_len <= 4 && (hu_str_contains_ci_cstr(msg, msg_len, "ok") ||
+                          hu_str_contains_ci_cstr(msg, msg_len, "k"))))
         return HU_ENERGY_NEUTRAL;
 
     /* Excited: positive valence, exclamation marks (3+), "omg", "amazing", "love", "so happy" */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "omg") || hu_str_contains_ci_cstr(msg, msg_len, "amazing") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "love") || hu_str_contains_ci_cstr(msg, msg_len, "so happy") ||
-        count_exclamations(msg, msg_len) >= 3)
+    if (hu_str_contains_ci_cstr(msg, msg_len, "omg") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "amazing") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "love") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "so happy") || count_exclamations(msg, msg_len) >= 3)
         return HU_ENERGY_EXCITED;
 
     /* Sad: "sad", "depressed", "hurt", "lonely", "crying", "miss you", "broken" */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") || hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "hurt") || hu_str_contains_ci_cstr(msg, msg_len, "lonely") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "crying") || hu_str_contains_ci_cstr(msg, msg_len, "miss you") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "hurt") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lonely") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "crying") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "miss you") ||
         hu_str_contains_ci_cstr(msg, msg_len, "broken"))
         return HU_ENERGY_SAD;
 
     /* Playful: "lol", "haha", "lmao", teasing, "you're ridiculous", "dead 💀" */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") || hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
         hu_str_contains_ci_cstr(msg, msg_len, "lmao") ||
         hu_str_contains_ci_cstr(msg, msg_len, "you're ridiculous") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "youre ridiculous") || hu_str_contains_ci_cstr(msg, msg_len, "dead"))
+        hu_str_contains_ci_cstr(msg, msg_len, "youre ridiculous") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "dead"))
         return HU_ENERGY_PLAYFUL;
 
     /* Anxious: "worried", "stressed", "anxious", "scared", "nervous", "freaking out" */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "worried") || hu_str_contains_ci_cstr(msg, msg_len, "stressed") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "anxious") || hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "nervous") || hu_str_contains_ci_cstr(msg, msg_len, "freaking out"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "worried") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "stressed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "anxious") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "nervous") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "freaking out"))
         return HU_ENERGY_ANXIOUS;
 
     /* Calm: low intensity, neutral, short messages with no strong keywords */
     if (msg_len < 30 && !hu_str_contains_ci_cstr(msg, msg_len, "!") &&
-        !hu_str_contains_ci_cstr(msg, msg_len, "?") && !hu_str_contains_ci_cstr(msg, msg_len, "omg") &&
-        !hu_str_contains_ci_cstr(msg, msg_len, "love") && !hu_str_contains_ci_cstr(msg, msg_len, "hate"))
+        !hu_str_contains_ci_cstr(msg, msg_len, "?") &&
+        !hu_str_contains_ci_cstr(msg, msg_len, "omg") &&
+        !hu_str_contains_ci_cstr(msg, msg_len, "love") &&
+        !hu_str_contains_ci_cstr(msg, msg_len, "hate"))
         return HU_ENERGY_CALM;
 
     return HU_ENERGY_NEUTRAL;
@@ -2555,45 +2571,61 @@ const char *hu_conversation_classify_emotional_tone(const char *msg, size_t msg_
     /* Neutral: short acknowledgments */
     if (hu_str_contains_ci_cstr(msg, msg_len, "ok sounds good") ||
         hu_str_contains_ci_cstr(msg, msg_len, "sounds good") ||
-        (msg_len <= 4 &&
-         (hu_str_contains_ci_cstr(msg, msg_len, "ok") || hu_str_contains_ci_cstr(msg, msg_len, "k"))))
+        (msg_len <= 4 && (hu_str_contains_ci_cstr(msg, msg_len, "ok") ||
+                          hu_str_contains_ci_cstr(msg, msg_len, "k"))))
         return "neutral";
 
     /* Stressed: overwhelmed, burnt out */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "stressed") || hu_str_contains_ci_cstr(msg, msg_len, "overwhelmed") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "burnt out") || hu_str_contains_ci_cstr(msg, msg_len, "burned out"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "stressed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "overwhelmed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "burnt out") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "burned out"))
         return "stressed";
 
     /* Excited: omg, amazing, love, so happy, yay, 3+ exclamations */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "omg") || hu_str_contains_ci_cstr(msg, msg_len, "amazing") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "love") || hu_str_contains_ci_cstr(msg, msg_len, "so happy") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "yay") || hu_str_contains_ci_cstr(msg, msg_len, "excited") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "omg") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "amazing") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "love") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "so happy") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "yay") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "excited") ||
         count_exclamations_tone(msg, msg_len) >= 3)
         return "excited";
 
     /* Sad: depressed, hurt, lonely, crying, broken */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") || hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "hurt") || hu_str_contains_ci_cstr(msg, msg_len, "lonely") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "crying") || hu_str_contains_ci_cstr(msg, msg_len, "cry") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "miss you") || hu_str_contains_ci_cstr(msg, msg_len, "broken"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "hurt") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lonely") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "crying") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "cry") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "miss you") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "broken"))
         return "sad";
 
     /* Anxious: worried, nervous, scared */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "anxious") || hu_str_contains_ci_cstr(msg, msg_len, "worried") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "nervous") || hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "anxious") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "worried") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "nervous") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
         hu_str_contains_ci_cstr(msg, msg_len, "freaking out"))
         return "anxious";
 
     /* Frustrated: angry, ugh, damn, hate */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "frustrated") || hu_str_contains_ci_cstr(msg, msg_len, "angry") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "ugh") || hu_str_contains_ci_cstr(msg, msg_len, "damn") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "frustrated") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "angry") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "ugh") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "damn") ||
         hu_str_contains_ci_cstr(msg, msg_len, "hate"))
         return "frustrated";
 
     /* Happy: great, awesome, lol, haha */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "happy") || hu_str_contains_ci_cstr(msg, msg_len, "great") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "awesome") || hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "haha") || hu_str_contains_ci_cstr(msg, msg_len, "lmao"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "happy") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "great") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "awesome") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lmao"))
         return "happy";
 
     return "neutral";
@@ -2768,26 +2800,37 @@ static float compute_valence(const char *text, size_t text_len) {
         return 0.0f;
 
     /* Reset signals: "i'm fine", "just kidding", "lol", "haha" → reset consecutive */
-    if (hu_str_contains_ci_cstr(text, text_len, "i'm fine") || hu_str_contains_ci_cstr(text, text_len, "im fine") ||
-        hu_str_contains_ci_cstr(text, text_len, "just kidding") || hu_str_contains_ci_cstr(text, text_len, "jk") ||
-        hu_str_contains_ci_cstr(text, text_len, "lol") || hu_str_contains_ci_cstr(text, text_len, "haha"))
+    if (hu_str_contains_ci_cstr(text, text_len, "i'm fine") ||
+        hu_str_contains_ci_cstr(text, text_len, "im fine") ||
+        hu_str_contains_ci_cstr(text, text_len, "just kidding") ||
+        hu_str_contains_ci_cstr(text, text_len, "jk") ||
+        hu_str_contains_ci_cstr(text, text_len, "lol") ||
+        hu_str_contains_ci_cstr(text, text_len, "haha"))
         return 0.0f; /* neutral for reset purposes */
 
     float valence = 0.0f;
 
     /* Negative keywords */
-    if (hu_str_contains_ci_cstr(text, text_len, "sad") || hu_str_contains_ci_cstr(text, text_len, "angry") ||
-        hu_str_contains_ci_cstr(text, text_len, "frustrated") || hu_str_contains_ci_cstr(text, text_len, "upset") ||
-        hu_str_contains_ci_cstr(text, text_len, "stressed") || hu_str_contains_ci_cstr(text, text_len, "worse") ||
+    if (hu_str_contains_ci_cstr(text, text_len, "sad") ||
+        hu_str_contains_ci_cstr(text, text_len, "angry") ||
+        hu_str_contains_ci_cstr(text, text_len, "frustrated") ||
+        hu_str_contains_ci_cstr(text, text_len, "upset") ||
+        hu_str_contains_ci_cstr(text, text_len, "stressed") ||
+        hu_str_contains_ci_cstr(text, text_len, "worse") ||
         hu_str_contains_ci_cstr(text, text_len, "can't deal") ||
-        hu_str_contains_ci_cstr(text, text_len, "cant deal") || hu_str_contains_ci_cstr(text, text_len, "hate") ||
-        hu_str_contains_ci_cstr(text, text_len, "horrible") || hu_str_contains_ci_cstr(text, text_len, "terrible"))
+        hu_str_contains_ci_cstr(text, text_len, "cant deal") ||
+        hu_str_contains_ci_cstr(text, text_len, "hate") ||
+        hu_str_contains_ci_cstr(text, text_len, "horrible") ||
+        hu_str_contains_ci_cstr(text, text_len, "terrible"))
         valence -= 1.0f;
 
     /* Positive keywords */
-    if (hu_str_contains_ci_cstr(text, text_len, "happy") || hu_str_contains_ci_cstr(text, text_len, "great") ||
-        hu_str_contains_ci_cstr(text, text_len, "amazing") || hu_str_contains_ci_cstr(text, text_len, "love") ||
-        hu_str_contains_ci_cstr(text, text_len, "thanks") || hu_str_contains_ci_cstr(text, text_len, "better"))
+    if (hu_str_contains_ci_cstr(text, text_len, "happy") ||
+        hu_str_contains_ci_cstr(text, text_len, "great") ||
+        hu_str_contains_ci_cstr(text, text_len, "amazing") ||
+        hu_str_contains_ci_cstr(text, text_len, "love") ||
+        hu_str_contains_ci_cstr(text, text_len, "thanks") ||
+        hu_str_contains_ci_cstr(text, text_len, "better"))
         valence += 1.0f;
 
     return valence;
@@ -2861,17 +2904,21 @@ static bool is_logistics_or_casual(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return true;
     /* Logistics: quick scheduling, where, when, etc. */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "what time") || hu_str_contains_ci_cstr(msg, msg_len, "meet at") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "where are") || hu_str_contains_ci_cstr(msg, msg_len, "when are") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "pick up") || hu_str_contains_ci_cstr(msg, msg_len, "pickup"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "what time") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "meet at") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "where are") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "when are") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "pick up") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "pickup"))
         return true;
     /* Quick questions / casual: "what's for dinner", short greetings */
     if (hu_str_contains_ci_cstr(msg, msg_len, "what's for dinner") ||
         hu_str_contains_ci_cstr(msg, msg_len, "whats for dinner"))
         return true;
-    if (msg_len < 25 &&
-        (hu_str_contains_ci_cstr(msg, msg_len, "hey") || hu_str_contains_ci_cstr(msg, msg_len, "hi ") ||
-         hu_str_contains_ci_cstr(msg, msg_len, "lol") || hu_str_contains_ci_cstr(msg, msg_len, "nice")))
+    if (msg_len < 25 && (hu_str_contains_ci_cstr(msg, msg_len, "hey") ||
+                         hu_str_contains_ci_cstr(msg, msg_len, "hi ") ||
+                         hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+                         hu_str_contains_ci_cstr(msg, msg_len, "nice")))
         return true;
     return false;
 }
@@ -2894,8 +2941,10 @@ hu_conversation_should_escalate_to_call(const char *msg, size_t msg_len,
 
     /* Crisis keywords (weight 0.4): → 1.0 if any match */
     float crisis = 0.0f;
-    if (hu_str_contains_ci_cstr(msg, msg_len, "i need you") || hu_str_contains_ci_cstr(msg, msg_len, "help me") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "can't deal") || hu_str_contains_ci_cstr(msg, msg_len, "cant deal") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "i need you") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "help me") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "can't deal") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "cant deal") ||
         hu_str_contains_ci_cstr(msg, msg_len, "breaking down") ||
         hu_str_contains_ci_cstr(msg, msg_len, "i can't do this") ||
         hu_str_contains_ci_cstr(msg, msg_len, "i cant do this") ||
@@ -2932,14 +2981,18 @@ hu_conversation_should_escalate_to_call(const char *msg, size_t msg_len,
     for (size_t i = 0; i < msg_len; i++)
         if (msg[i] == '!')
             excl++;
-    if (hu_str_contains_ci_cstr(msg, msg_len, "crying") || hu_str_contains_ci_cstr(msg, msg_len, "freaking out") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "crying") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "freaking out") ||
         hu_str_contains_ci_cstr(msg, msg_len, "losing it") ||
         hu_str_contains_ci_cstr(msg, msg_len, "don't know what to do"))
         emotion = 0.8f;
-    else if (hu_str_contains_ci_cstr(msg, msg_len, "sad") || hu_str_contains_ci_cstr(msg, msg_len, "overwhelmed") ||
+    else if (hu_str_contains_ci_cstr(msg, msg_len, "sad") ||
+             hu_str_contains_ci_cstr(msg, msg_len, "overwhelmed") ||
              hu_str_contains_ci_cstr(msg, msg_len, "stressed") ||
-             hu_str_contains_ci_cstr(msg, msg_len, "anxious") || hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
-             hu_str_contains_ci_cstr(msg, msg_len, "hurt") || hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
+             hu_str_contains_ci_cstr(msg, msg_len, "anxious") ||
+             hu_str_contains_ci_cstr(msg, msg_len, "scared") ||
+             hu_str_contains_ci_cstr(msg, msg_len, "hurt") ||
+             hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
              hu_str_contains_ci_cstr(msg, msg_len, "lonely"))
         emotion = 0.5f;
     if (excl >= 2)
@@ -3553,8 +3606,10 @@ int hu_conversation_max_response_chars_relational(size_t incoming_len,
         if (contact->relationship_stage && contact->relationship_stage[0]) {
             const char *rs = contact->relationship_stage;
             size_t rsl = strlen(rs);
-            if (hu_str_contains_ci_cstr(rs, rsl, "close") || hu_str_contains_ci_cstr(rs, rsl, "best") ||
-                hu_str_contains_ci_cstr(rs, rsl, "intimate") || hu_str_contains_ci_cstr(rs, rsl, "friend")) {
+            if (hu_str_contains_ci_cstr(rs, rsl, "close") ||
+                hu_str_contains_ci_cstr(rs, rsl, "best") ||
+                hu_str_contains_ci_cstr(rs, rsl, "intimate") ||
+                hu_str_contains_ci_cstr(rs, rsl, "friend")) {
                 if (mult < 2.7)
                     mult = 2.7;
             }
@@ -3603,10 +3658,13 @@ uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_
         if (contact->relationship_stage && contact->relationship_stage[0]) {
             const char *rs = contact->relationship_stage;
             size_t rsl = strlen(rs);
-            if (hu_str_contains_ci_cstr(rs, rsl, "close") || hu_str_contains_ci_cstr(rs, rsl, "best") ||
-                hu_str_contains_ci_cstr(rs, rsl, "intimate") || hu_str_contains_ci_cstr(rs, rsl, "friend"))
+            if (hu_str_contains_ci_cstr(rs, rsl, "close") ||
+                hu_str_contains_ci_cstr(rs, rsl, "best") ||
+                hu_str_contains_ci_cstr(rs, rsl, "intimate") ||
+                hu_str_contains_ci_cstr(rs, rsl, "friend"))
                 return 195u;
-            if (hu_str_contains_ci_cstr(rs, rsl, "work") || hu_str_contains_ci_cstr(rs, rsl, "acquaint") ||
+            if (hu_str_contains_ci_cstr(rs, rsl, "work") ||
+                hu_str_contains_ci_cstr(rs, rsl, "acquaint") ||
                 hu_str_contains_ci_cstr(rs, rsl, "new"))
                 return 85u;
         }
@@ -4407,15 +4465,18 @@ hu_response_action_t hu_conversation_classify_response(const char *msg, size_t m
         bool incoming_is_farewell =
             hu_str_contains_ci_cstr(msg, msg_len, "goodnight") ||
             hu_str_contains_ci_cstr(msg, msg_len, "good night") ||
-            hu_str_contains_ci_cstr(msg, msg_len, "gotta go") || hu_str_contains_ci_cstr(msg, msg_len, "ttyl") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "gotta go") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "ttyl") ||
             hu_str_contains_ci_cstr(msg, msg_len, "heading out") ||
-            hu_str_contains_ci_cstr(msg, msg_len, "peace out") || hu_str_contains_ci_cstr(msg, msg_len, "see ya") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "peace out") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "see ya") ||
             hu_str_contains_ci_cstr(msg, msg_len, "catch you later") ||
             hu_str_contains_ci_cstr(msg, msg_len, "i'm out") ||
-            (msg_len <= 10 &&
-             (hu_str_contains_ci_cstr(msg, msg_len, "bye") || hu_str_contains_ci_cstr(msg, msg_len, "night") ||
-              hu_str_contains_ci_cstr(msg, msg_len, "later") || hu_str_contains_ci_cstr(msg, msg_len, "gn") ||
-              hu_str_contains_ci_cstr(msg, msg_len, "cya")));
+            (msg_len <= 10 && (hu_str_contains_ci_cstr(msg, msg_len, "bye") ||
+                               hu_str_contains_ci_cstr(msg, msg_len, "night") ||
+                               hu_str_contains_ci_cstr(msg, msg_len, "later") ||
+                               hu_str_contains_ci_cstr(msg, msg_len, "gn") ||
+                               hu_str_contains_ci_cstr(msg, msg_len, "cya")));
 
         if (incoming_is_farewell) {
             /* Check if our last message was also a farewell */
@@ -4423,12 +4484,15 @@ hu_response_action_t hu_conversation_classify_response(const char *msg, size_t m
                 if (entries[i - 1].from_me) {
                     const char *t = entries[i - 1].text;
                     size_t tl = strlen(t);
-                    bool our_was_farewell =
-                        hu_str_contains_ci_cstr(t, tl, "night") || hu_str_contains_ci_cstr(t, tl, "bye") ||
-                        hu_str_contains_ci_cstr(t, tl, "later") || hu_str_contains_ci_cstr(t, tl, "ttyl") ||
-                        hu_str_contains_ci_cstr(t, tl, "see ya") || hu_str_contains_ci_cstr(t, tl, "cya") ||
-                        hu_str_contains_ci_cstr(t, tl, "gn") || hu_str_contains_ci_cstr(t, tl, "peace") ||
-                        hu_str_contains_ci_cstr(t, tl, "take care");
+                    bool our_was_farewell = hu_str_contains_ci_cstr(t, tl, "night") ||
+                                            hu_str_contains_ci_cstr(t, tl, "bye") ||
+                                            hu_str_contains_ci_cstr(t, tl, "later") ||
+                                            hu_str_contains_ci_cstr(t, tl, "ttyl") ||
+                                            hu_str_contains_ci_cstr(t, tl, "see ya") ||
+                                            hu_str_contains_ci_cstr(t, tl, "cya") ||
+                                            hu_str_contains_ci_cstr(t, tl, "gn") ||
+                                            hu_str_contains_ci_cstr(t, tl, "peace") ||
+                                            hu_str_contains_ci_cstr(t, tl, "take care");
                     if (our_was_farewell)
                         return HU_RESPONSE_SKIP;
                     break;
@@ -4480,18 +4544,21 @@ hu_response_action_t hu_conversation_classify_response(const char *msg, size_t m
         /* No history — use original farewell logic */
         if (hu_str_contains_ci_cstr(msg, msg_len, "goodnight") ||
             hu_str_contains_ci_cstr(msg, msg_len, "good night") ||
-            hu_str_contains_ci_cstr(msg, msg_len, "gotta go") || hu_str_contains_ci_cstr(msg, msg_len, "ttyl") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "gotta go") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "ttyl") ||
             hu_str_contains_ci_cstr(msg, msg_len, "heading out") ||
-            hu_str_contains_ci_cstr(msg, msg_len, "peace out") || hu_str_contains_ci_cstr(msg, msg_len, "see ya") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "peace out") ||
+            hu_str_contains_ci_cstr(msg, msg_len, "see ya") ||
             hu_str_contains_ci_cstr(msg, msg_len, "catch you later") ||
             hu_str_contains_ci_cstr(msg, msg_len, "i'm out")) {
             *delay_extra_ms = 1500;
             return HU_RESPONSE_BRIEF;
         }
-        if (msg_len <= 10 &&
-            (hu_str_contains_ci_cstr(msg, msg_len, "bye") || hu_str_contains_ci_cstr(msg, msg_len, "night") ||
-             hu_str_contains_ci_cstr(msg, msg_len, "later") || hu_str_contains_ci_cstr(msg, msg_len, "gn") ||
-             hu_str_contains_ci_cstr(msg, msg_len, "cya"))) {
+        if (msg_len <= 10 && (hu_str_contains_ci_cstr(msg, msg_len, "bye") ||
+                              hu_str_contains_ci_cstr(msg, msg_len, "night") ||
+                              hu_str_contains_ci_cstr(msg, msg_len, "later") ||
+                              hu_str_contains_ci_cstr(msg, msg_len, "gn") ||
+                              hu_str_contains_ci_cstr(msg, msg_len, "cya"))) {
             *delay_extra_ms = 1500;
             return HU_RESPONSE_BRIEF;
         }
@@ -4503,19 +4570,24 @@ hu_response_action_t hu_conversation_classify_response(const char *msg, size_t m
 
     /* Bad news: extended pause — show you're absorbing it */
     if (hu_str_contains_ci_cstr(msg, msg_len, "passed away") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "got fired") || hu_str_contains_ci_cstr(msg, msg_len, "broke up") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "got fired") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "broke up") ||
         hu_str_contains_ci_cstr(msg, msg_len, "bad news") ||
         hu_str_contains_ci_cstr(msg, msg_len, "didn't make it") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "got rejected") || hu_str_contains_ci_cstr(msg, msg_len, "lost my")) {
+        hu_str_contains_ci_cstr(msg, msg_len, "got rejected") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lost my")) {
         *delay_extra_ms = 12000;
         return HU_RESPONSE_DELAY;
     }
 
     /* Good news: short pause then celebrate */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "got the job") || hu_str_contains_ci_cstr(msg, msg_len, "got in") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "i passed") || hu_str_contains_ci_cstr(msg, msg_len, "got engaged") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "got the job") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "got in") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i passed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "got engaged") ||
         hu_str_contains_ci_cstr(msg, msg_len, "got promoted") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "good news") || hu_str_contains_ci_cstr(msg, msg_len, "i did it") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "good news") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i did it") ||
         hu_str_contains_ci_cstr(msg, msg_len, "we did it")) {
         *delay_extra_ms = 3000;
         return HU_RESPONSE_DELAY;
@@ -4642,9 +4714,10 @@ static bool is_narrative_or_venting(const char *msg, size_t msg_len,
         return false;
     if (memchr(msg, '?', msg_len) != NULL)
         return false;
-    bool has_narrative_phrase =
-        hu_str_contains_ci_cstr(msg, msg_len, "and then") || hu_str_contains_ci_cstr(msg, msg_len, "so i") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "anyway") || hu_str_contains_ci_cstr(msg, msg_len, "long story");
+    bool has_narrative_phrase = hu_str_contains_ci_cstr(msg, msg_len, "and then") ||
+                                hu_str_contains_ci_cstr(msg, msg_len, "so i") ||
+                                hu_str_contains_ci_cstr(msg, msg_len, "anyway") ||
+                                hu_str_contains_ci_cstr(msg, msg_len, "long story");
     bool has_first_person = hu_str_contains_ci_cstr(msg, msg_len, "i ") ||
                             hu_str_contains_ci_cstr(msg, msg_len, "my ") ||
                             hu_str_contains_ci_cstr(msg, msg_len, "me ");
@@ -4720,12 +4793,14 @@ size_t hu_conversation_pick_backchannel(uint32_t seed, char *buf, size_t cap) {
 /* ── Burst messaging (F45) ────────────────────────────────────────────── */
 
 static bool has_urgency_keywords(const char *msg, size_t msg_len) {
-    return hu_str_contains_ci_cstr(msg, msg_len, "omg") || hu_str_contains_ci_cstr(msg, msg_len, "oh my god") ||
+    return hu_str_contains_ci_cstr(msg, msg_len, "omg") ||
+           hu_str_contains_ci_cstr(msg, msg_len, "oh my god") ||
            hu_str_contains_ci_cstr(msg, msg_len, "just saw") ||
            hu_str_contains_ci_cstr(msg, msg_len, "did you see") ||
            hu_str_contains_ci_cstr(msg, msg_len, "holy shit") ||
            hu_str_contains_ci_cstr(msg, msg_len, "emergency") ||
-           hu_str_contains_ci_cstr(msg, msg_len, "are you okay") || count_exclamations(msg, msg_len) >= 3;
+           hu_str_contains_ci_cstr(msg, msg_len, "are you okay") ||
+           count_exclamations(msg, msg_len) >= 3;
 }
 
 bool hu_conversation_should_burst(const char *msg, size_t msg_len,
@@ -4801,13 +4876,16 @@ int hu_conversation_parse_burst_response(const char *response, size_t resp_len,
 /* ── Natural conversation drop-off classifier (F11) ──────────────────── */
 
 static bool is_farewell_text(const char *t, size_t tl) {
-    return hu_str_contains_ci_cstr(t, tl, "night") || hu_str_contains_ci_cstr(t, tl, "sleep well") ||
-           hu_str_contains_ci_cstr(t, tl, "bye") || hu_str_contains_ci_cstr(t, tl, "goodnight") ||
-           hu_str_contains_ci_cstr(t, tl, "good night") || hu_str_contains_ci_cstr(t, tl, "later") ||
-           hu_str_contains_ci_cstr(t, tl, "ttyl") || hu_str_contains_ci_cstr(t, tl, "see ya") ||
-           hu_str_contains_ci_cstr(t, tl, "cya") || hu_str_contains_ci_cstr(t, tl, "gn") ||
-           hu_str_contains_ci_cstr(t, tl, "peace") || hu_str_contains_ci_cstr(t, tl, "take care") ||
-           hu_str_contains_ci_cstr(t, tl, "gotta go") || hu_str_contains_ci_cstr(t, tl, "heading out");
+    return hu_str_contains_ci_cstr(t, tl, "night") ||
+           hu_str_contains_ci_cstr(t, tl, "sleep well") || hu_str_contains_ci_cstr(t, tl, "bye") ||
+           hu_str_contains_ci_cstr(t, tl, "goodnight") ||
+           hu_str_contains_ci_cstr(t, tl, "good night") ||
+           hu_str_contains_ci_cstr(t, tl, "later") || hu_str_contains_ci_cstr(t, tl, "ttyl") ||
+           hu_str_contains_ci_cstr(t, tl, "see ya") || hu_str_contains_ci_cstr(t, tl, "cya") ||
+           hu_str_contains_ci_cstr(t, tl, "gn") || hu_str_contains_ci_cstr(t, tl, "peace") ||
+           hu_str_contains_ci_cstr(t, tl, "take care") ||
+           hu_str_contains_ci_cstr(t, tl, "gotta go") ||
+           hu_str_contains_ci_cstr(t, tl, "heading out");
 }
 
 static bool is_low_energy_ack(const char *t, size_t tl) {
@@ -4901,7 +4979,8 @@ bool hu_conversation_should_leave_on_read(const char *msg, size_t msg_len,
         return false;
 
     /* Never for emotional crisis */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "help me") || hu_str_contains_ci_cstr(msg, msg_len, "i need you"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "help me") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i need you"))
         return false;
 
     /* Never for concerning emotion in recent history */
@@ -4912,14 +4991,16 @@ bool hu_conversation_should_leave_on_read(const char *msg, size_t msg_len,
     }
 
     /* Never for high emotional content in message itself */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "emergency") || hu_str_contains_ci_cstr(msg, msg_len, "urgent"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "emergency") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "urgent"))
         return false;
 
     bool trigger = false;
 
     /* Disagreement */
     if (hu_str_contains_ci_cstr(msg, msg_len, "agree to disagree") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "whatever") || hu_str_contains_ci_cstr(msg, msg_len, "fine.") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "whatever") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "fine.") ||
         hu_str_contains_ci_cstr(msg, msg_len, "i don't agree") ||
         hu_str_contains_ci_cstr(msg, msg_len, "you're wrong") ||
         hu_str_contains_ci_cstr(msg, msg_len, "youre wrong"))
@@ -5248,19 +5329,22 @@ size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
                          "RELATIONSHIP: Close. You can be fully yourself — inside jokes, "
                          "mild roasting, deep honesty, comfortable silence. "
                          "Don't over-explain or be overly polite.\n");
-        } else if (hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage), "friend")) {
+        } else if (hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage),
+                                           "friend")) {
             w = snprintf(buf + pos, cap - pos,
                          "RELATIONSHIP: Friend. Warm and genuine but with some boundaries. "
                          "Banter is fine. Personal topics ok if they bring them up first.\n");
-        } else if (hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage), "acquaint") ||
+        } else if (hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage),
+                                           "acquaint") ||
                    hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage), "new")) {
             w = snprintf(buf + pos, cap - pos,
                          "RELATIONSHIP: Acquaintance/new. Keep it lighter. "
                          "Don't assume familiarity. Match their formality level. "
                          "No inside jokes. No unsolicited deep topics.\n");
         } else if (hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage),
-                                   "professional") ||
-                   hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage), "work")) {
+                                           "professional") ||
+                   hu_str_contains_ci_cstr(relationship_stage, strlen(relationship_stage),
+                                           "work")) {
             w = snprintf(buf + pos, cap - pos,
                          "RELATIONSHIP: Professional. Stay on topic. "
                          "Friendly but not casual. No slang, minimal emoji.\n");
@@ -5292,8 +5376,10 @@ size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
             vw = snprintf(buf + pos, cap - pos,
                           "VULNERABILITY: Open. You can share real feelings and be honest "
                           "about struggles. This person can handle depth.\n");
-        } else if (hu_str_contains_ci_cstr(vulnerability_level, strlen(vulnerability_level), "low") ||
-                   hu_str_contains_ci_cstr(vulnerability_level, strlen(vulnerability_level), "guarded")) {
+        } else if (hu_str_contains_ci_cstr(vulnerability_level, strlen(vulnerability_level),
+                                           "low") ||
+                   hu_str_contains_ci_cstr(vulnerability_level, strlen(vulnerability_level),
+                                           "guarded")) {
             vw = snprintf(buf + pos, cap - pos,
                           "VULNERABILITY: Guarded. Keep emotional sharing surface-level. "
                           "Don't dump feelings. Stay light.\n");
@@ -5635,7 +5721,8 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     uint32_t s = seed;
 
     /* GIFs: usually haha (they're sent to be funny), sometimes no reaction */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "[GIF]") || hu_str_contains_ci_cstr(msg, msg_len, ".gif")) {
+    if (hu_str_contains_ci_cstr(msg, msg_len, "[GIF]") ||
+        hu_str_contains_ci_cstr(msg, msg_len, ".gif")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 40u)
             return HU_REACTION_HAHA;
@@ -5649,7 +5736,8 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
         return HU_REACTION_NONE;
 
     /* Photos/media placeholders: 50% chance of heart */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "[image") || hu_str_contains_ci_cstr(msg, msg_len, "[attachment")) {
+    if (hu_str_contains_ci_cstr(msg, msg_len, "[image") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "[attachment")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 50u)
             return HU_REACTION_HEART;
@@ -5657,9 +5745,12 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     }
 
     /* Funny messages → HAHA */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") || hu_str_contains_ci_cstr(msg, msg_len, "lmao") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "haha") || hu_str_contains_ci_cstr(msg, msg_len, "hahaha") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "😂") || hu_str_contains_ci_cstr(msg, msg_len, "hilarious") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lmao") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "hahaha") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "😂") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "hilarious") ||
         hu_str_contains_ci_cstr(msg, msg_len, "that's funny") ||
         hu_str_contains_ci_cstr(msg, msg_len, "so funny")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
@@ -5685,7 +5776,8 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     }
 
     /* Loving/sweet messages → HEART */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "love you") || hu_str_contains_ci_cstr(msg, msg_len, "miss you") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "love you") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "miss you") ||
         hu_str_contains_ci_cstr(msg, msg_len, "❤") || hu_str_contains_ci_cstr(msg, msg_len, "💕") ||
         hu_str_contains_ci_cstr(msg, msg_len, "you're amazing") ||
         hu_str_contains_ci_cstr(msg, msg_len, "you're the best") ||
@@ -5698,9 +5790,12 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     }
 
     /* Agreement/affirmation → THUMBS_UP */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "absolutely") || hu_str_contains_ci_cstr(msg, msg_len, "exactly") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "yes!") || hu_str_contains_ci_cstr(msg, msg_len, "👍") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "for sure") || hu_str_contains_ci_cstr(msg, msg_len, "definitely")) {
+    if (hu_str_contains_ci_cstr(msg, msg_len, "absolutely") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "exactly") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "yes!") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "👍") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "for sure") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "definitely")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 30u)
             return HU_REACTION_THUMBS_UP;
@@ -5708,9 +5803,12 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     }
 
     /* Impressive/exciting news → EMPHASIS */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "got the job") || hu_str_contains_ci_cstr(msg, msg_len, "i did it") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "we won") || hu_str_contains_ci_cstr(msg, msg_len, "we did it") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "got in") || hu_str_contains_ci_cstr(msg, msg_len, "i passed") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "got the job") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i did it") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "we won") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "we did it") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "got in") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i passed") ||
         hu_str_contains_ci_cstr(msg, msg_len, "got engaged") ||
         hu_str_contains_ci_cstr(msg, msg_len, "got promoted")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
@@ -5720,9 +5818,12 @@ hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg
     }
 
     /* Messages that need a real text response → NONE */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "what time") || hu_str_contains_ci_cstr(msg, msg_len, "where") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "how do") || hu_str_contains_ci_cstr(msg, msg_len, "can you") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "could you") || hu_str_contains_ci_cstr(msg, msg_len, "why") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "what time") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "where") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "how do") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "can you") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "could you") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "why") ||
         hu_str_contains_ci_cstr(msg, msg_len, "when") || hu_str_contains_ci_cstr(msg, msg_len, "?"))
         return HU_REACTION_NONE;
 
@@ -6887,7 +6988,8 @@ const char *hu_conversation_classify_effect(const char *msg, size_t msg_len) {
         return "confetti";
     if (hu_str_contains_ci_cstr(msg, msg_len, "happy easter"))
         return "confetti";
-    if (hu_str_contains_ci_cstr(msg, msg_len, "selamat") || hu_str_contains_ci_cstr(msg, msg_len, "felicidades") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "selamat") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "felicidades") ||
         hu_str_contains_ci_cstr(msg, msg_len, "joyeux"))
         return "confetti";
 
@@ -7086,16 +7188,22 @@ hu_reaction_type_t hu_conversation_classify_self_reaction(const char *msg, size_
         return HU_REACTION_NONE;
 
     /* Self-deprecating humor: haha on own jokes / awkward messages */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") || hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "sorry") || hu_str_contains_ci_cstr(msg, msg_len, "oops") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "my bad") || hu_str_contains_ci_cstr(msg, msg_len, "whoops") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "nvm") || hu_str_contains_ci_cstr(msg, msg_len, "jk")) {
+    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "sorry") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "oops") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "my bad") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "whoops") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "nvm") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "jk")) {
         return HU_REACTION_HAHA;
     }
 
     /* Emphasis on own strong statements */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "!!!") || hu_str_contains_ci_cstr(msg, msg_len, "i swear") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "no way") || hu_str_contains_ci_cstr(msg, msg_len, "deadass")) {
+    if (hu_str_contains_ci_cstr(msg, msg_len, "!!!") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i swear") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "no way") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "deadass")) {
         return HU_REACTION_EMPHASIS;
     }
 
@@ -7150,26 +7258,39 @@ bool hu_conversation_should_send_gif(const char *msg, size_t msg_len,
     /* Never send GIFs for questions, emotional/serious content, or short greetings */
     if (hu_str_contains_ci_cstr(msg, msg_len, "?"))
         return false;
-    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") || hu_str_contains_ci_cstr(msg, msg_len, "sorry") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "died") || hu_str_contains_ci_cstr(msg, msg_len, "funeral") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "depressed") || hu_str_contains_ci_cstr(msg, msg_len, "anxious") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "help me") || hu_str_contains_ci_cstr(msg, msg_len, "crying"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "sad") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "sorry") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "died") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "funeral") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "depressed") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "anxious") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "help me") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "crying"))
         return false;
 
     /* GIF-worthy triggers: humor, excitement, reactions */
     bool gif_worthy = false;
-    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") || hu_str_contains_ci_cstr(msg, msg_len, "lmao") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "haha") || hu_str_contains_ci_cstr(msg, msg_len, "omg") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "no way") || hu_str_contains_ci_cstr(msg, msg_len, "bruh") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "i can't") || hu_str_contains_ci_cstr(msg, msg_len, "dead") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "mood") || hu_str_contains_ci_cstr(msg, msg_len, "same") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "😂") || hu_str_contains_ci_cstr(msg, msg_len, "💀") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "exactly") || hu_str_contains_ci_cstr(msg, msg_len, "yesss"))
+    if (hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "lmao") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "haha") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "omg") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "no way") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "bruh") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "i can't") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "dead") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "mood") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "same") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "😂") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "💀") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "exactly") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "yesss"))
         gif_worthy = true;
 
     /* Celebration triggers */
-    if (hu_str_contains_ci_cstr(msg, msg_len, "let's go") || hu_str_contains_ci_cstr(msg, msg_len, "wooo") ||
-        hu_str_contains_ci_cstr(msg, msg_len, "hell yeah") || hu_str_contains_ci_cstr(msg, msg_len, "we did it") ||
+    if (hu_str_contains_ci_cstr(msg, msg_len, "let's go") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "wooo") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "hell yeah") ||
+        hu_str_contains_ci_cstr(msg, msg_len, "we did it") ||
         hu_str_contains_ci_cstr(msg, msg_len, "finally"))
         gif_worthy = true;
 
@@ -7384,8 +7505,8 @@ hu_seen_action_t hu_conversation_classify_seen_behavior(const char *msg, size_t 
 
     /* Non-urgent messages during busy hours: 5% chance of delay */
     if (busy_hours && !hu_str_contains_ci_cstr(msg, msg_len, "?") &&
-        !hu_str_contains_ci_cstr(msg, msg_len, "urgent") && !hu_str_contains_ci_cstr(msg, msg_len, "asap") &&
-        roll < 5) {
+        !hu_str_contains_ci_cstr(msg, msg_len, "urgent") &&
+        !hu_str_contains_ci_cstr(msg, msg_len, "asap") && roll < 5) {
         if (out_delay_ms)
             *out_delay_ms = 180000 + (reaction_prng_next(&s) % 420000); /* 3-10 min */
         return HU_SEEN_DELAY_THEN_RESPOND;
@@ -7683,7 +7804,8 @@ static bool history_has_recent_music_url(const hu_channel_history_entry_t *entri
         const char *t = entries[i].text;
         size_t tl = strlen(t);
         if (hu_str_contains_ci_cstr(t, tl, "music.apple.com") ||
-            hu_str_contains_ci_cstr(t, tl, "open.spotify.com") || hu_str_contains_ci_cstr(t, tl, "spotify.link"))
+            hu_str_contains_ci_cstr(t, tl, "open.spotify.com") ||
+            hu_str_contains_ci_cstr(t, tl, "spotify.link"))
             return true;
     }
     return false;
@@ -7728,7 +7850,24 @@ bool hu_conversation_should_send_music(const char *incoming, size_t incoming_len
                        hu_str_contains_ci_cstr(incoming, incoming_len, "band") ||
                        hu_str_contains_ci_cstr(incoming, incoming_len, "sing") ||
                        hu_str_contains_ci_cstr(incoming, incoming_len, "karaoke") ||
-                       hu_str_contains_ci_cstr(incoming, incoming_len, "what are you listening");
+                       hu_str_contains_ci_cstr(incoming, incoming_len, "what are you listening") ||
+                       /* YouTube / TikTok cues — keep in sync with the cue lists in
+                        * hu_inspiration_pick_medium (src/inspiration.c). Word-boundary
+                        * matched so "trendy" != "trend", "watchdog" != "watch", etc.
+                        * (see ~/.claude/rules/substring-classifier-pitfalls.md). */
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "tiktok") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "fyp") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "for you") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trend") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trending") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "reel") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "video") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "watch") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "clip") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "youtube") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "tutorial") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "trailer") ||
+                       hu_str_contains_word_ci_n(incoming, incoming_len, "funny");
 
     float effective = probability;
     if (keyword_hit && effective < 1.0f) {

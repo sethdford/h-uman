@@ -198,6 +198,16 @@ typedef struct hu_agent_config {
     bool compaction_use_structured; /* use XML structured summaries */
     char *self_rag_mode;     /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
     bool self_rag_streaming; /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
+    /* RAG-over-own-messages voice grounding: retrieve the user's most-similar
+     * past sent messages and inject them as per-turn few-shot grounding.
+     * Default off — flip on for the LoRA-vs-RAG A/B ("measure before optimize").
+     * Corpus = ~/.human/voice_corpus.jsonl (the harvested sent-message corpus). */
+    bool rag_grounding_enabled;
+    /* Activation steering: when true, the agent maps the active persona overlay's
+     * traits to residual-stream steering coefficients and sends them to the local
+     * model (mlx_local) as a "steering" field. Default off; the local server
+     * clamps to the measured-safe range and treats absent/zero as a no-op. */
+    bool activation_steering_enabled;
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {
@@ -806,8 +816,10 @@ typedef struct hu_config {
     hu_personalization_config_t personalization;
     hu_mlx_local_config_t mlx_local; /* B4: streaming gate + first-token budget */
     hu_learning_config_t learning;   /* Spec 2026-05-19 — DPO pair-count training trigger */
-    hu_reflection_loop_config_t reflection_loop; /* M2 reflection-loop */
-    hu_inference_config_t inference;             /* US-7.7 — best-of-N at inference (default off) */
+    hu_intrinsic_config_t intrinsic; /* A3 — intrinsic motivation (default off) */
+    hu_prosocial_routines_config_t prosocial_routines; /* C — scheduled routines (default off) */
+    hu_reflection_loop_config_t reflection_loop;       /* M2 reflection-loop */
+    hu_inference_config_t inference; /* US-7.7 — best-of-N at inference (default off) */
     hu_behavior_config_t behavior;
     hu_node_entry_t nodes[HU_NODES_MAX];
     size_t nodes_len;

@@ -7,6 +7,7 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
+#include "human/persona/taste.h"
 
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
@@ -4152,6 +4153,75 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_reasoning_traces_free(agent->alloc, recalled, recalled_count);
             }
         }
+    }
+#endif
+
+    /* A1 conviction loop (AC-5): if a belief flipped on the previous turn, the
+     * daemon stashed a shift directive. Inject it once so the model can
+     * acknowledge changing its mind ("I've been rethinking this..."), then
+     * consume it (free + clear) so it never repeats. */
+    if (system_prompt && agent->belief_pending_directive &&
+        agent->belief_pending_directive_len > 0) {
+        size_t bd_len = agent->belief_pending_directive_len;
+        size_t new_len = system_prompt_len + 1 + bd_len;
+        char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, system_prompt,
+                                                     system_prompt_len + 1, new_len + 1);
+        if (new_sp) {
+            new_sp[system_prompt_len] = '\n';
+            memcpy(new_sp + system_prompt_len + 1, agent->belief_pending_directive, bd_len);
+            new_sp[new_len] = '\0';
+            system_prompt = new_sp;
+            system_prompt_len = new_len;
+        }
+        agent->alloc->free(agent->alloc->ctx, agent->belief_pending_directive,
+                           agent->belief_pending_directive_len + 1);
+        agent->belief_pending_directive = NULL;
+        agent->belief_pending_directive_len = 0;
+    }
+
+    /* B1 prosocial: if the daemon detected a win last turn, inject the B0-gated
+     * celebration directive once so the model acknowledges it warmly, then
+     * consume it (free + clear). */
+    if (system_prompt && agent->prosocial_pending_directive &&
+        agent->prosocial_pending_directive_len > 0) {
+        size_t pd_len = agent->prosocial_pending_directive_len;
+        size_t new_len = system_prompt_len + 1 + pd_len;
+        char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, system_prompt,
+                                                     system_prompt_len + 1, new_len + 1);
+        if (new_sp) {
+            new_sp[system_prompt_len] = '\n';
+            memcpy(new_sp + system_prompt_len + 1, agent->prosocial_pending_directive, pd_len);
+            new_sp[new_len] = '\0';
+            system_prompt = new_sp;
+            system_prompt_len = new_len;
+        }
+        agent->alloc->free(agent->alloc->ctx, agent->prosocial_pending_directive,
+                           agent->prosocial_pending_directive_len + 1);
+        agent->prosocial_pending_directive = NULL;
+        agent->prosocial_pending_directive_len = 0;
+    }
+
+#ifdef HU_ENABLE_SQLITE
+    /* A2 independent taste: let a relevant held taste leak into the voice. Pure
+     * expression colour — never overrides helpfulness, never a sentience claim. */
+    if (system_prompt && agent->memory && msg && msg_len > 0) {
+        sqlite3 *taste_db = hu_sqlite_memory_get_db(agent->memory);
+        size_t tdir_len = 0;
+        char *tdir = hu_taste_turn_directive(agent->alloc, taste_db, msg, msg_len, &tdir_len);
+        if (tdir && tdir_len > 0) {
+            size_t new_len = system_prompt_len + 1 + tdir_len;
+            char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, system_prompt,
+                                                         system_prompt_len + 1, new_len + 1);
+            if (new_sp) {
+                new_sp[system_prompt_len] = '\n';
+                memcpy(new_sp + system_prompt_len + 1, tdir, tdir_len);
+                new_sp[new_len] = '\0';
+                system_prompt = new_sp;
+                system_prompt_len = new_len;
+            }
+        }
+        if (tdir)
+            agent->alloc->free(agent->alloc->ctx, tdir, tdir_len + 1);
     }
 #endif
 

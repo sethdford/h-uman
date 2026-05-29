@@ -23,6 +23,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/belief_update.h"
 #include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
@@ -31,6 +32,12 @@
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#include "human/agent/prosocial_routine.h"
+#include "human/behavior/prosocial_moment.h"
+#include "human/behavior/win_detect.h"
+#include "human/memory/celebration_repo.h"
+#include "human/persona/celebration.h"
+#include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
 #endif
@@ -85,7 +92,10 @@
 #include "human/music.h"
 #include "human/persona/persona_deltas.h"
 /* Proactive image generation */
+#include "human/inspiration.h"
 #include "human/tools/image_gen.h"
+#include "human/tools/validation.h"
+#include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
@@ -717,60 +727,10 @@ static void store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memor
  * Public API: hu_cron_schedule_matches (daemon.h), hu_service_run_agent_cron (daemon.h).
  * Internal: hu_daemon_cron_tick (daemon_cron.h). */
 
-/* ── Per-contact trust state (thread-safe, LRU-evicted) ─────────────── */
-
-/* TRUST-006: Per-contact trust state tracking
- * Expanded from 256 to 4096 with LRU eviction and mutex for thread safety. */
-#define HU_DAEMON_TRUST_CAP 4096
-
-static hu_daemon_contact_trust_t g_contact_trust[HU_DAEMON_TRUST_CAP];
-static size_t g_contact_trust_count;
-
-#if !defined(_WIN32) && !defined(__CYGWIN__)
-static pthread_mutex_t g_trust_mutex = PTHREAD_MUTEX_INITIALIZER;
-#define TRUST_LOCK()   pthread_mutex_lock(&g_trust_mutex)
-#define TRUST_UNLOCK() pthread_mutex_unlock(&g_trust_mutex)
-#else
-#define TRUST_LOCK()   ((void)0)
-#define TRUST_UNLOCK() ((void)0)
-#endif
-
-static hu_error_t trust_find_or_create_slot(const char *contact_id, size_t cid_len,
-                                            size_t *slot_out) {
-    if (!contact_id || cid_len == 0 || !slot_out)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    for (size_t i = 0; i < g_contact_trust_count; i++) {
-        if (strlen(g_contact_trust[i].contact_id) == cid_len &&
-            memcmp(g_contact_trust[i].contact_id, contact_id, cid_len) == 0) {
-            *slot_out = i;
-            return HU_OK;
-        }
-    }
-
-    size_t slot;
-    if (g_contact_trust_count < HU_DAEMON_TRUST_CAP) {
-        slot = g_contact_trust_count++;
-    } else {
-        slot = 0;
-        int64_t oldest = g_contact_trust[0].state.last_updated_at;
-        for (size_t i = 1; i < g_contact_trust_count; i++) {
-            if (g_contact_trust[i].state.last_updated_at < oldest) {
-                oldest = g_contact_trust[i].state.last_updated_at;
-                slot = i;
-            }
-        }
-    }
-
-    size_t copy_len = cid_len;
-    if (copy_len >= sizeof(g_contact_trust[slot].contact_id))
-        copy_len = sizeof(g_contact_trust[slot].contact_id) - 1;
-    memcpy(g_contact_trust[slot].contact_id, contact_id, copy_len);
-    g_contact_trust[slot].contact_id[copy_len] = '\0';
-    hu_trust_init(&g_contact_trust[slot].state);
-    *slot_out = slot;
-    return HU_OK;
-}
+/* Per-contact trust state (HU_DAEMON_TRUST_CAP table, mutex, LRU eviction,
+ * trust_find_or_create_slot) extracted to src/daemon/daemon_identity.c
+ * (Phase 2 DDD bounded-context split). Public accessors declared in
+ * human/daemon.h. */
 
 /* ──────────────────────────────────────────────────────────────────────────
  * iMessage Action Surface Dispatcher (F2) — Phase A–E integration
@@ -932,43 +892,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     return err;
 }
 
-hu_error_t hu_daemon_get_trust_state(const char *contact_id, size_t cid_len,
-                                     hu_trust_state_t *out) {
-    if (!out)
-        return HU_ERR_INVALID_ARGUMENT;
-    TRUST_LOCK();
-    size_t slot;
-    hu_error_t err = trust_find_or_create_slot(contact_id, cid_len, &slot);
-    if (err == HU_OK)
-        *out = g_contact_trust[slot].state;
-    TRUST_UNLOCK();
-    return err;
-}
-
-hu_error_t hu_daemon_set_trust_state(const char *contact_id, size_t cid_len,
-                                     const hu_trust_state_t *state) {
-    if (!state)
-        return HU_ERR_INVALID_ARGUMENT;
-    TRUST_LOCK();
-    size_t slot;
-    hu_error_t err = trust_find_or_create_slot(contact_id, cid_len, &slot);
-    if (err == HU_OK)
-        g_contact_trust[slot].state = *state;
-    TRUST_UNLOCK();
-    return err;
-}
-
-#ifdef HU_IS_TEST
-size_t hu_daemon_trust_count(void) {
-    return g_contact_trust_count;
-}
-void hu_daemon_trust_reset(void) {
-    TRUST_LOCK();
-    g_contact_trust_count = 0;
-    memset(g_contact_trust, 0, sizeof(g_contact_trust));
-    TRUST_UNLOCK();
-}
-#endif
+/* hu_daemon_get_trust_state / _set_trust_state / _trust_count / _trust_reset
+ * extracted to src/daemon/daemon_identity.c (Phase 2 DDD split). */
 
 /* ── US-7.3 — Honesty gate: LoRA adapter ignored by cloud provider ───
  *
@@ -3640,6 +3565,106 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
     while (!HU_STOP_FLAG) {
+        /* A3 intrinsic motivation idle tick (default-off via cfg.intrinsic). Runs
+         * at most once/minute so the drive rises on a human timescale, not the
+         * ~1s loop cadence. The runner self-gates on enabled + budget + quiet +
+         * rate + drive, and is internal/propose-only (no action surface). */
+        if (agent && config) {
+            static time_t hu_last_intrinsic_min = 0;
+            time_t hu_now_min = time(NULL) / 60;
+            if (hu_now_min != hu_last_intrinsic_min) {
+                hu_last_intrinsic_min = hu_now_min;
+                int64_t hu_now = (int64_t)time(NULL);
+                hu_intrinsic_drive_tick(&agent->intrinsic_drive, false, hu_now);
+                hu_intrinsic_runtime_cfg_t hu_icfg = {.enabled = config->intrinsic.enabled,
+                                                      .per_tick_token_budget =
+                                                          config->intrinsic.per_tick_token_budget};
+                hu_intrinsic_start_facts_t hu_if;
+                hu_if.drive_level = hu_intrinsic_drive_level(&agent->intrinsic_drive);
+                hu_if.secs_since_user = agent->intrinsic_drive.last_user_ts
+                                            ? (hu_now - agent->intrinsic_drive.last_user_ts)
+                                            : 999999;
+                hu_if.secs_since_intrinsic =
+                    agent->intrinsic_drive.last_intrinsic_ts
+                        ? (hu_now - agent->intrinsic_drive.last_intrinsic_ts)
+                        : 999999;
+                hu_if.budget_tokens_remaining = HU_INTRINSIC_DEFAULT_TICK_BUDGET;
+                hu_if.user_active = false;
+                hu_intrinsic_tick_result_t hu_ir;
+                hu_intrinsic_run_tick(&agent->intrinsic_drive, &hu_icfg, &hu_if, agent->observer,
+                                      hu_now, &hu_ir);
+                /* STARTED => goal originated + audit-logged. Sharing is a separate
+                 * proposer-gated step (AC-5); v1 logs the intent only. */
+            }
+        }
+
+        /* C-series prosocial routines idle tick (default-OFF via
+         * cfg.prosocial_routines). Once/minute; the scheduler is pure and the
+         * prompt is B0-gated. A due routine is audit-logged and its last-run is
+         * recorded; the actual proactive send routes through init_proposer (the
+         * silence-biased gate) — documented as the integration tail, mirroring
+         * the A3 runner's share-via-proposer contract. */
+        if (agent && config) {
+            static atomic_bool warned_routines_off = false;
+            if (!config->prosocial_routines.enabled) {
+                hu_log_info_once(&warned_routines_off, "human", agent->observer,
+                                 "prosocial routines disabled "
+                                 "(cfg.prosocial_routines.enabled=false) — set "
+                                 "prosocial_routines.enabled=true in config.json to activate");
+            } else {
+                static time_t hu_last_routine_min = 0;
+                time_t rmin = time(NULL) / 60;
+                if (rmin != hu_last_routine_min) {
+                    hu_last_routine_min = rmin;
+                    time_t rnow = time(NULL);
+                    struct tm rtm;
+                    localtime_r(&rnow, &rtm);
+                    hu_routine_facts_t rf;
+                    rf.local_hour = rtm.tm_hour;
+                    rf.day_of_week = rtm.tm_wday;
+                    rf.user_active = false;
+                    rf.secs_since_morning = agent->routine_last_morning
+                                                ? (int64_t)rnow - agent->routine_last_morning
+                                                : 999999999;
+                    rf.secs_since_evening = agent->routine_last_evening
+                                                ? (int64_t)rnow - agent->routine_last_evening
+                                                : 999999999;
+                    rf.secs_since_weekly = agent->routine_last_weekly
+                                               ? (int64_t)rnow - agent->routine_last_weekly
+                                               : 999999999;
+                    rf.secs_since_thinking = agent->routine_last_thinking
+                                                 ? (int64_t)rnow - agent->routine_last_thinking
+                                                 : 999999999;
+                    hu_routine_kind_t rk = hu_routine_due(&rf);
+                    if (rk != HU_ROUTINE_NONE) {
+                        size_t rplen = 0;
+                        char *rp = hu_routine_build_prompt(alloc, rk, HU_BRISK_NONE, &rplen);
+                        if (rp) {
+                            hu_log_info("human", agent->observer,
+                                        "prosocial routine due — kind=%d (routed to proposer)",
+                                        (int)rk);
+                            alloc->free(alloc->ctx, rp, rplen + 1);
+                            switch (rk) {
+                            case HU_ROUTINE_MORNING_INTENTION:
+                                agent->routine_last_morning = rnow;
+                                break;
+                            case HU_ROUTINE_EVENING_REFLECTION:
+                                agent->routine_last_evening = rnow;
+                                break;
+                            case HU_ROUTINE_WEEKLY_CHECKIN:
+                                agent->routine_last_weekly = rnow;
+                                break;
+                            case HU_ROUTINE_THINKING_OF_YOU:
+                                agent->routine_last_thinking = rnow;
+                                break;
+                            default:
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 #ifdef HU_HAS_CRON
         {
             time_t t = time(NULL);
@@ -12200,6 +12225,117 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (op_db) {
                         (void)hu_evolved_opinions_extract_and_store(op_db, response, response_len,
                                                                     (int64_t)time(NULL));
+                        /* A3: a completed user turn is user activity — decay the drive. */
+                        hu_intrinsic_drive_tick(&agent->intrinsic_drive, true, (int64_t)time(NULL));
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            uint64_t kh = 1469598103934665603ULL;
+                            for (size_t bi = 0; bi < key_len; bi++) {
+                                kh ^= (uint64_t)(unsigned char)batch_key[bi];
+                                kh *= 1099511628211ULL;
+                            }
+                            if (kh != agent->belief_convo_key_hash) {
+                                agent->belief_convo_key_hash = kh;
+                                agent->belief_changes_this_convo = 0;
+                            }
+                            char *bdir = NULL;
+                            size_t bdlen = 0;
+                            bool bchanged = false;
+                            (void)hu_belief_update_evaluate_turn(
+                                alloc, op_db, &agent->pressure_history, combined, combined_len,
+                                agent->belief_changes_this_convo, (int64_t)time(NULL), &bdir,
+                                &bdlen, &bchanged);
+                            if (bchanged) {
+                                agent->belief_changes_this_convo++;
+                                if (agent->belief_pending_directive) {
+                                    alloc->free(alloc->ctx, agent->belief_pending_directive,
+                                                agent->belief_pending_directive_len + 1);
+                                }
+                                agent->belief_pending_directive = bdir;
+                                agent->belief_pending_directive_len = bdlen;
+                            } else if (bdir) {
+                                alloc->free(alloc->ctx, bdir, bdlen + 1);
+                            }
+                        }
+
+                        /* B1/B2/B4/B5 prosocial: celebrate a win, or respond
+                         * warmly to an everyday prosocial moment. All gated by
+                         * B0; warmth is SUPPRESSED when the companion-safety
+                         * layer flags emotional-dependency language — this is
+                         * the live B1 loop close (over_attachment / isolation). */
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            hu_behavior_risk_t pdep = HU_BRISK_NONE;
+                            hu_companion_safety_result_t pcs;
+                            if (hu_companion_safety_check(alloc, combined, combined_len, NULL, 0,
+                                                          &pcs) == HU_OK &&
+                                (pcs.flagged || pcs.over_attachment >= 0.6 || pcs.isolation >= 0.6))
+                                pdep = HU_BRISK_DEPENDENCY_PATTERN;
+
+                            bool prosocial_set = false;
+                            hu_win_signal_t cwin = hu_win_detect(combined, combined_len);
+                            if (cwin.is_win) {
+                                uint64_t wkh = 1469598103934665603ULL;
+                                for (size_t wi = 0; wi < combined_len; wi++) {
+                                    wkh ^= (uint64_t)(unsigned char)combined[wi];
+                                    wkh *= 1099511628211ULL;
+                                }
+                                char cwin_key[17];
+                                snprintf(cwin_key, sizeof(cwin_key), "%016llx",
+                                         (unsigned long long)wkh);
+                                hu_celebration_repo_t crepo;
+                                if (hu_celebration_repo_create(agent->memory, alloc, &crepo) ==
+                                    HU_OK) {
+                                    int64_t cnow = (int64_t)time(NULL);
+                                    bool celebrated = false;
+                                    crepo.vtable->was_recent(crepo.ctx, batch_key, key_len,
+                                                             cwin_key, strlen(cwin_key), cnow,
+                                                             (int64_t)7 * 24 * 3600, &celebrated);
+                                    if (!celebrated) {
+                                        size_t cdlen = 0;
+                                        char *cdir = hu_celebration_build_directive(
+                                            alloc, cwin.kind, pdep, &cdlen);
+                                        if (cdir) {
+                                            hu_celebration_t cel = {0};
+                                            cel.contact_id = batch_key;
+                                            cel.contact_id_len = key_len;
+                                            cel.win_key = cwin_key;
+                                            cel.win_key_len = strlen(cwin_key);
+                                            cel.kind = (int)cwin.kind;
+                                            cel.celebrated_at = cnow;
+                                            crepo.vtable->record(crepo.ctx, &cel);
+                                            if (agent->prosocial_pending_directive) {
+                                                alloc->free(
+                                                    alloc->ctx, agent->prosocial_pending_directive,
+                                                    agent->prosocial_pending_directive_len + 1);
+                                            }
+                                            agent->prosocial_pending_directive = cdir;
+                                            agent->prosocial_pending_directive_len = cdlen;
+                                            prosocial_set = true;
+                                        }
+                                    }
+                                    crepo.vtable->deinit(crepo.ctx);
+                                }
+                            }
+
+                            /* B2/B4/B5: everyday warm response — only when no win
+                             * was celebrated this turn (celebration wins). */
+                            if (!prosocial_set) {
+                                hu_pmoment_t pm = hu_pmoment_detect(combined, combined_len);
+                                if (pm.present) {
+                                    size_t wlen = 0;
+                                    char *wdir = hu_warm_response_build_directive(alloc, pm.kind,
+                                                                                  pdep, &wlen);
+                                    if (wdir) {
+                                        if (agent->prosocial_pending_directive) {
+                                            alloc->free(alloc->ctx,
+                                                        agent->prosocial_pending_directive,
+                                                        agent->prosocial_pending_directive_len + 1);
+                                        }
+                                        agent->prosocial_pending_directive = wdir;
+                                        agent->prosocial_pending_directive_len = wlen;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 #endif
@@ -13843,14 +13979,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (uint32_t)time(NULL) * 16807u + (uint32_t)(uintptr_t)combined;
                     if (hu_conversation_should_send_music(combined, combined_len, history_entries,
                                                           history_count, music_seed, music_prob)) {
+                        const char *yt_key =
+                            config ? hu_config_get_provider_key(config, "youtube") : NULL;
+                        hu_inspiration_medium_t medium =
+                            hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);
+
                         /* Build taste-enriched prompt */
                         char taste_snippet[256] = {0};
                         size_t taste_len = hu_music_taste_build_prompt(
                             batch_key, key_len, taste_snippet, sizeof(taste_snippet));
 
                         char music_prompt[768];
-                        size_t mp_len = hu_conversation_build_music_prompt(
-                            combined, combined_len, music_prompt, sizeof(music_prompt));
+                        size_t mp_len;
+                        if (medium == HU_INSPIRATION_MUSIC) {
+                            mp_len = hu_conversation_build_music_prompt(
+                                combined, combined_len, music_prompt, sizeof(music_prompt));
+                        } else {
+                            size_t clip = combined_len > 200 ? 200 : combined_len;
+                            int pn =
+                                snprintf(music_prompt, sizeof(music_prompt),
+                                         "Recent message context: \"%.*s\"", (int)clip, combined);
+                            mp_len = (pn > 0 && (size_t)pn < sizeof(music_prompt)) ? (size_t)pn : 0;
+                        }
 
                         /* Append taste context to prompt if available */
                         if (taste_len > 0 && mp_len > 0 &&
@@ -13861,23 +14011,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             music_prompt[mp_len] = '\0';
                         }
 
+                        /* Persona voice hint → the human line sounds like the user */
+                        if (agent && agent->persona) {
+                            char vh[256];
+                            const char *form =
+                                agent->persona->overlays && agent->persona->overlays_count > 0
+                                    ? agent->persona->overlays[0].formality
+                                    : NULL;
+                            const char *trait = (agent->persona->traits_count > 0)
+                                                    ? agent->persona->traits[0]
+                                                    : NULL;
+                            size_t vlen =
+                                hu_inspiration_build_voice_hint(form, trait, vh, sizeof(vh));
+                            if (vlen > 0 && mp_len + vlen + 2 < sizeof(music_prompt)) {
+                                music_prompt[mp_len++] = '\n';
+                                memcpy(music_prompt + mp_len, vh, vlen);
+                                mp_len += vlen;
+                                music_prompt[mp_len] = '\0';
+                            }
+                        }
+
                         if (mp_len > 0 && agent->provider.vtable &&
                             agent->provider.vtable->chat_with_system) {
                             char *music_suggestion = NULL;
                             size_t music_suggestion_len = 0;
-                            static const char music_sys[] =
-                                "Suggest ONE song that fits the conversation mood. "
-                                "Return in this exact format:\n"
-                                "ARTIST - TITLE | your brief casual message\n"
-                                "Example: Radiohead - Everything In Its Right Place | "
-                                "this track is perfect for right now\n"
-                                "Keep the message under 80 chars. No quotes, no URLs.";
+                            const char *insp_sys = hu_inspiration_system_prompt(medium);
                             const char *music_model = agent->model_name
                                                           ? agent->model_name
                                                           : "gemini-3.1-flash-lite-preview";
                             size_t music_model_len = agent->model_name ? agent->model_name_len : 31;
                             (void)agent->provider.vtable->chat_with_system(
-                                agent->provider.ctx, alloc, music_sys, sizeof(music_sys) - 1,
+                                agent->provider.ctx, alloc, insp_sys, strlen(insp_sys),
                                 music_prompt, mp_len, music_model, music_model_len, 0.9,
                                 &music_suggestion, &music_suggestion_len);
 
@@ -13896,7 +14060,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     music_suggestion, music_suggestion_len, search_query,
                                     sizeof(search_query), casual_msg, sizeof(casual_msg));
 
-                                if (parsed && search_query[0] != '\0') {
+                                if (parsed && search_query[0] != '\0' &&
+                                    medium == HU_INSPIRATION_MUSIC) {
                                     /* Detect user's streaming preference from history */
                                     hu_music_source_t pref = HU_MUSIC_SOURCE_ITUNES;
                                     if (history_entries && history_count > 0) {
@@ -13952,7 +14117,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_music_result_t *link_song =
                                         has_spotify ? &spotify_song : &song;
 
-                                    if (search_err == HU_OK &&
+                                    bool song_verified =
+                                        hu_music_result_matches(search_query, &song) ||
+                                        (has_spotify &&
+                                         hu_music_result_matches(search_query, &spotify_song));
+                                    if (search_err == HU_OK && song_verified &&
                                         (song.track_view_url ||
                                          (has_spotify && spotify_song.track_view_url))) {
                                         /* Rich-link mode: when the channel auto-unfurls bare URLs
@@ -13971,40 +14140,46 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                                         if (rich_link) {
                                             const char *url = link_song->track_view_url;
-                                            size_t url_len = strlen(url);
 
                                             /* Same human-pacing delay as the legacy path so the
                                              * share lands in a natural conversational rhythm. */
                                             usleep(3000000 + (music_seed % 4000000));
 
-                                            ch->channel->vtable->send(ch->channel->ctx, batch_key,
-                                                                      key_len, url, url_len, NULL,
-                                                                      0);
+                                            if (hu_inspiration_send_two_bubble(
+                                                    ch->channel, batch_key, key_len, casual_msg,
+                                                    url, 1500000u + (music_seed % 1500000u))) {
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "sent music rich-link: %s - %s [%s]",
+                                                            song.artist_name ? song.artist_name
+                                                                             : "?",
+                                                            song.track_name ? song.track_name : "?",
+                                                            has_spotify ? "spotify" : "itunes");
 
-                                            hu_log_info("human", agent ? agent->observer : NULL,
-                                                        "sent music rich-link: %s - %s [%s]",
-                                                        song.artist_name ? song.artist_name : "?",
-                                                        song.track_name ? song.track_name : "?",
-                                                        has_spotify ? "spotify" : "itunes");
-
-                                            hu_music_taste_record_send(batch_key, key_len,
-                                                                       song.artist_name,
-                                                                       song.track_name);
-                                            {
-                                                static uint64_t last_taste_save_ms;
-                                                uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
-                                                if (tnow - last_taste_save_ms > 30000) {
-                                                    last_taste_save_ms = tnow;
-                                                    const char *th = getenv("HOME");
-                                                    if (th) {
-                                                        char tp[512];
-                                                        int tn2 = snprintf(
-                                                            tp, sizeof(tp),
-                                                            "%s/.human/music_taste.json", th);
-                                                        if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                            hu_music_taste_save(tp, (size_t)tn2);
+                                                hu_music_taste_record_send(batch_key, key_len,
+                                                                           song.artist_name,
+                                                                           song.track_name);
+                                                {
+                                                    static uint64_t last_taste_save_ms;
+                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
+                                                    if (tnow - last_taste_save_ms > 30000) {
+                                                        last_taste_save_ms = tnow;
+                                                        const char *th = getenv("HOME");
+                                                        if (th) {
+                                                            char tp[512];
+                                                            int tn2 = snprintf(
+                                                                tp, sizeof(tp),
+                                                                "%s/.human/music_taste.json", th);
+                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                                hu_music_taste_save(tp,
+                                                                                    (size_t)tn2);
+                                                        }
                                                     }
                                                 }
+                                            } else {
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "music rich-link rejected by url "
+                                                            "validation: %s",
+                                                            url ? url : "(null)");
                                             }
                                         } else {
                                             /* Legacy: channel doesn't unfurl URLs (SMS etc.).
@@ -14089,12 +14264,66 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 (void)unlink(artwork_path);
                                         }
                                     } else {
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "music search failed for: %s", search_query);
+                                        hu_log_info(
+                                            "human", agent ? agent->observer : NULL,
+                                            "music share skipped (no verified match) for: %s",
+                                            search_query);
                                     }
                                     hu_music_result_free(alloc, &song);
                                     if (has_spotify)
                                         hu_music_result_free(alloc, &spotify_song);
+                                } else if (parsed && search_query[0] != '\0') {
+                                    /* YouTube / TikTok: resolve a VERIFIED url, then share it the
+                                     * same human two-bubble way (or a caption on non-unfurl
+                                     * channels). No verified url → silent skip. */
+                                    char share_url[1024] = {0};
+                                    bool have_url = false;
+                                    if (medium == HU_INSPIRATION_TIKTOK) {
+                                        have_url =
+                                            hu_tiktok_tag_url(search_query, strlen(search_query),
+                                                              share_url, sizeof(share_url)) > 0;
+                                    } else if (medium == HU_INSPIRATION_YOUTUBE) {
+                                        hu_youtube_result_t yt = {0};
+                                        if (hu_youtube_search(alloc, yt_key, search_query,
+                                                              strlen(search_query), &yt) == HU_OK &&
+                                            yt.watch_url) {
+                                            int un = snprintf(share_url, sizeof(share_url), "%s",
+                                                              yt.watch_url);
+                                            have_url = (un > 0 && (size_t)un < sizeof(share_url));
+                                        }
+                                        hu_youtube_result_free(alloc, &yt);
+                                    }
+
+                                    if (have_url) {
+                                        if (hu_channel_supports_link_unfurl(ch->channel)) {
+                                            usleep(3000000 + (music_seed % 4000000));
+                                            hu_inspiration_send_two_bubble(
+                                                ch->channel, batch_key, key_len, casual_msg,
+                                                share_url, 1500000u + (music_seed % 1500000u));
+                                        } else if (hu_tool_validate_url(share_url) == HU_OK) {
+                                            char cap[1280];
+                                            int cn =
+                                                (casual_msg[0] != '\0')
+                                                    ? snprintf(cap, sizeof(cap), "%s %s",
+                                                               casual_msg, share_url)
+                                                    : snprintf(cap, sizeof(cap), "%s", share_url);
+                                            if (cn > 0 && (size_t)cn < sizeof(cap))
+                                                ch->channel->vtable->send(ch->channel->ctx,
+                                                                          batch_key, key_len, cap,
+                                                                          (size_t)cn, NULL, 0);
+                                        }
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "sent %s inspiration: %s",
+                                                    medium == HU_INSPIRATION_YOUTUBE ? "youtube"
+                                                                                     : "tiktok",
+                                                    share_url);
+                                    } else {
+                                        hu_log_info("human", agent ? agent->observer : NULL,
+                                                    "inspiration skipped (no verified %s) for: %s",
+                                                    medium == HU_INSPIRATION_YOUTUBE ? "video"
+                                                                                     : "tiktok",
+                                                    search_query);
+                                    }
                                 }
                             }
                             if (music_suggestion)
