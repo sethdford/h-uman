@@ -3601,6 +3601,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_belief_update.c
     tests/test_taste.c
     tests/test_somatic.c
+    tests/test_narrative_self.c
+    tests/test_attachment.c
     tests/test_intrinsic_drive.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
