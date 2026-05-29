@@ -102,6 +102,28 @@ static void save_load_round_trip_survives_restart(void) {
     remove(path);
 }
 
+/* Crash-resume with a NEW TAIL appended to the batch must NOT be deduped.
+ *
+ * Pins the contract that the daemon keys dedup on the batch's HIGHEST rowid
+ * (batch_end), not the lowest (batch_start). Scenario: a batch [1000..1002] is
+ * replied to (watermark recorded at the highest = 1002). The daemon crashes
+ * before the poll watermark saves; on restart the user has appended msg 1003,
+ * so the re-polled batch is [1000..1002, 1003]. Keying on the highest rowid
+ * (1003) correctly reports NOT-already-replied so the new tail gets a reply;
+ * keying on the lowest (1000) would report already-replied and silently drop
+ * the new message. */
+static void crash_resume_with_new_tail_not_deduped(void) {
+    hu_reply_dedup_t r;
+    memset(&r, 0, sizeof(r));
+    /* Replied to batch [1000..1002] -> record the HIGHEST rowid in the batch. */
+    hu_reply_dedup_record(&r, chat_a, strlen(chat_a), 1002);
+    /* Exact replay of the same batch (highest rowid 1002) -> skip. */
+    HU_ASSERT_TRUE(hu_daemon_already_replied(&r, chat_a, strlen(chat_a), 1002));
+    /* Replay-plus-new-tail: the batch's highest rowid is now 1003 (the new
+     * message). Must NOT be deduped — otherwise 1003 is silently dropped. */
+    HU_ASSERT_FALSE(hu_daemon_already_replied(&r, chat_a, strlen(chat_a), 1003));
+}
+
 /* Absent file -> HU_ERR_IO and the store is left usable as empty. */
 static void load_missing_file_returns_io_error(void) {
     hu_reply_dedup_t r;
@@ -119,6 +141,7 @@ void run_reply_dedup_tests(void) {
     HU_RUN_TEST(already_replied_per_contact_isolation);
     HU_RUN_TEST(record_is_monotonic);
     HU_RUN_TEST(already_replied_null_and_zero_safe);
+    HU_RUN_TEST(crash_resume_with_new_tail_not_deduped);
     HU_RUN_TEST(save_load_round_trip_survives_restart);
     HU_RUN_TEST(load_missing_file_returns_io_error);
 }

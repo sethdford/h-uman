@@ -5503,16 +5503,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * inbound (rowid) for this contact in a prior daemon life, skip
                  * to avoid a duplicate message. The watermark is persisted only
                  * AFTER a successful send, so a brand-new inbound (rowid above
-                 * the watermark) always proceeds — no dropped replies. */
-                if (msgs[batch_start].message_id > 0) {
+                 * the watermark) always proceeds — no dropped replies.
+                 *
+                 * Key on batch_end (the HIGHEST rowid in the batch), matching
+                 * the "highest inbound rowid replied to" watermark contract in
+                 * reply_dedup.h. Using batch_start (lowest) would skip the whole
+                 * batch whenever its first message was already replied — silently
+                 * dropping any newer messages appended to the batch on a
+                 * crash-then-restart-with-new-tail replay. */
+                if (msgs[batch_end].message_id > 0) {
                     daemon_reply_dedup_ensure_loaded();
                     if (hu_daemon_already_replied(&g_reply_dedup, batch_key, key_len,
-                                                  (int64_t)msgs[batch_start].message_id)) {
+                                                  (int64_t)msgs[batch_end].message_id)) {
                         hu_log_info(
                             "human", agent ? agent->observer : NULL,
                             "reply-dedup: already replied to %.*s rowid=%lld — skip (crash replay)",
                             (int)(key_len > 20 ? 20 : key_len), batch_key,
-                            (long long)msgs[batch_start].message_id);
+                            (long long)msgs[batch_end].message_id);
                         continue;
                     }
                 }
@@ -12184,9 +12191,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * successful send so a crash before the poll-watermark save
                      * can't re-reply on restart. Persist-after-send keeps the
                      * contract at-least-once + dedup-on-replay (no dropped
-                     * replies). */
+                     * replies). Record batch_end (the HIGHEST rowid in the batch
+                     * we just replied to) so the monotonic watermark reflects the
+                     * whole batch — matching reply_dedup.h's "highest inbound
+                     * rowid replied to" contract and the dedup check above. */
                     daemon_reply_dedup_mark(batch_key, key_len,
-                                            (int64_t)msgs[batch_start].message_id);
+                                            (int64_t)msgs[batch_end].message_id);
                 }
 
                 /* Store conversation summary as long-term memory */
