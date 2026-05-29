@@ -10,6 +10,7 @@
 #include "human/agent/degradation.h"
 #include "human/agent/gvr.h"
 #include "human/agent/instruction_discover.h"
+#include "human/agent/intrinsic_drive.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/mailbox.h"
 #include "human/agent/mar.h"
@@ -398,6 +399,13 @@ struct hu_agent {
     uint64_t belief_convo_key_hash;
     char *belief_pending_directive; /* owned; freed + cleared on consume */
     size_t belief_pending_directive_len;
+
+    /* A3 intrinsic motivation: bounded internal curiosity/boredom drive,
+     * maintained across user (decay) and idle (rise) paths by the daemon. The
+     * config-gated, default-OFF runner (hu_intrinsic_run_tick) reads it to
+     * decide whether to originate an internal, propose-only goal. POD; zero-
+     * init via the struct memset. Spec: docs/plans/2026-05-29-intrinsic-motivation/. */
+    hu_intrinsic_drive_t intrinsic_drive;
 
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after

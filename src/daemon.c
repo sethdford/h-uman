@@ -4067,6 +4067,46 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+                /* A3 intrinsic motivation: bounded, default-OFF curiosity loop.
+                 * On a 5-min idle cadence, age the drive (rises while quiet) and
+                 * let the already-built, fully-gated runner decide whether to
+                 * originate an INTERNAL, propose-only goal. The runner has no
+                 * action surface, is hard-bounded (per-tick budget), preemptible
+                 * (user_active⇒no), audited, and disabled by default (emits a
+                 * one-shot disabled log naming the config key). Sharing (T5)
+                 * routes through init_proposer in a later layer behind this same
+                 * gate. Spec: docs/plans/2026-05-29-intrinsic-motivation/. */
+                if (agent) {
+                    static int64_t last_intrinsic_tick_secs = 0;
+                    const int64_t now_secs = (int64_t)t;
+                    if (now_secs - last_intrinsic_tick_secs >= 300) {
+                        last_intrinsic_tick_secs = now_secs;
+                        hu_intrinsic_drive_tick(&agent->intrinsic_drive, false, now_secs);
+                        hu_intrinsic_runtime_cfg_t icfg = {
+                            .enabled = config && config->intrinsic.enabled,
+                            .per_tick_token_budget =
+                                config ? config->intrinsic.per_tick_token_budget : 0,
+                        };
+                        uint32_t tick_budget = icfg.per_tick_token_budget
+                                                   ? icfg.per_tick_token_budget
+                                                   : HU_INTRINSIC_DEFAULT_TICK_BUDGET;
+                        hu_intrinsic_start_facts_t ifacts = {
+                            .drive_level = hu_intrinsic_drive_level(&agent->intrinsic_drive),
+                            .secs_since_user = now_secs - agent->intrinsic_drive.last_user_ts,
+                            .secs_since_intrinsic =
+                                now_secs - agent->intrinsic_drive.last_intrinsic_ts,
+                            .budget_tokens_remaining = tick_budget,
+                            .user_active = false,
+                        };
+                        hu_intrinsic_tick_result_t ires;
+                        hu_intrinsic_run_tick(&agent->intrinsic_drive, &icfg, &ifacts,
+                                              agent->observer, now_secs, &ires);
+                        /* STARTED originates an internal goal only; run_tick emits
+                         * the audit line. No egress here (propose-only is a later
+                         * layer through init_proposer). */
+                    }
+                }
+
                 /* W2 AutoDream + W5 persona evolver — daily housekeeping.
                  * Both prefer the W14 scheduler (paced, idle-gated) with
                  * sync fallback for graceful degradation. Runs once per
@@ -12156,6 +12196,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     key_len > 0) {
                     hu_contact_send_recency_record(&agent->contact_send_recency, batch_key, key_len,
                                                    (int64_t)time(NULL), HU_SEND_PATH_REACTIVE);
+                    /* A3 intrinsic motivation: real user activity decays the
+                     * curiosity/boredom drive and stamps last_user_ts (the idle
+                     * loop ages it back up). Pure arithmetic on an agent field —
+                     * harmless when the intrinsic loop is disabled (default). */
+                    hu_intrinsic_drive_tick(&agent->intrinsic_drive, true, (int64_t)time(NULL));
                     /* BUG #2: persist the replied-to inbound rowid AFTER a
                      * successful send so a crash before the poll-watermark save
                      * can't re-reply on restart. Persist-after-send keeps the
