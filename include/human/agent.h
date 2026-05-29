@@ -50,6 +50,7 @@
 #include "human/intelligence/meta_learning.h"
 #endif
 #include "human/agent/growth_narrative.h"
+#include "human/agent/intrinsic_drive.h"
 #include "human/agent/process_reward.h"
 #include "human/agent/reflection.h"
 #include "human/cognition/attachment.h"
@@ -68,7 +69,6 @@
 #include "human/ml/dpo.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observer.h"
-#include "human/agent/intrinsic_drive.h"
 #include "human/permission.h"
 #include "human/persona.h"
 #include "human/persona/circadian.h"
@@ -399,6 +399,12 @@ struct hu_agent {
     uint64_t belief_convo_key_hash;
     char *belief_pending_directive; /* owned; freed + cleared on consume */
     size_t belief_pending_directive_len;
+
+    /* B1 prosocial: a pending celebration/affirmation directive (B0-gated)
+     * injected into the NEXT turn's prompt so h-uman acknowledges a win warmly.
+     * Owned; freed + cleared on consume. */
+    char *prosocial_pending_directive;
+    size_t prosocial_pending_directive_len;
 
     /* A3 intrinsic motivation: bounded internal drive state. Ticked on each
      * user turn (decay) and each idle service-loop tick (rise); the runner
