@@ -773,7 +773,7 @@ set(HU_CORE_SOURCES
     src/context/style_tracker.c
     src/context/theory_of_mind.c
     src/context/mood.c
-    src/context/emotional_state.c
+    src/memory/repos/emotional_state_repo_sqlite.c
     src/context/event_extract.c
     src/context/temporal_events.c
     src/context/vision.c
