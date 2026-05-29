@@ -115,6 +115,7 @@
 
 /* Phase 2 DDD refactor: cross-bucket daemon state */
 #include "human/daemon/common.h"
+#include "human/daemon/reply_dedup.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
@@ -181,6 +182,46 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
  * "no canonicalization" behavior for unconfigured deployments). */
 hu_identity_graph_t g_identity_graph;
 bool g_identity_graph_loaded = false;
+
+/* BUG #2: crash-resume outbound reply dedup. Per-contact "highest inbound rowid
+ * replied-to" watermark, persisted to ~/.human/reply_dedup.json. Loaded lazily
+ * on first use, recorded+saved after each successful reactive send, and checked
+ * before processing a batch so a daemon crash between send and poll-watermark
+ * persistence doesn't re-reply on restart. */
+static hu_reply_dedup_t g_reply_dedup;
+static bool g_reply_dedup_loaded;
+
+static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return 0;
+    int n = snprintf(buf, cap, "%s/.human/reply_dedup.json", home);
+    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+}
+
+static void daemon_reply_dedup_ensure_loaded(void) {
+    if (g_reply_dedup_loaded)
+        return;
+    g_reply_dedup_loaded = true; /* set first: absent file is fine, don't retry every batch */
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_load(&g_reply_dedup, path, plen);
+}
+
+/* Record that we replied to `rowid` for `chat_id` and persist immediately, so a
+ * crash before the next poll-watermark save can't cause a duplicate on restart.
+ * Persist is best-effort (a failed save just means at-least-once on that edge). */
+static void daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int64_t rowid) {
+    if (!chat_id || rowid <= 0)
+        return;
+    daemon_reply_dedup_ensure_loaded();
+    hu_reply_dedup_record(&g_reply_dedup, chat_id, chat_id_len, rowid);
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_save(&g_reply_dedup, path, plen);
+}
 
 /* Sprint B.3 D1 — daemon-loaded autoresponder config.
  *
@@ -5444,6 +5485,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_log_error("human", agent ? agent->observer : NULL,
                                          "ignoring message from self: %.*s",
                                          (int)(key_len > 20 ? 20 : key_len), batch_key);
+                        continue;
+                    }
+                }
+
+                /* BUG #2: crash-resume dedup. If we already replied to this
+                 * inbound (rowid) for this contact in a prior daemon life, skip
+                 * to avoid a duplicate message. The watermark is persisted only
+                 * AFTER a successful send, so a brand-new inbound (rowid above
+                 * the watermark) always proceeds — no dropped replies. */
+                if (msgs[batch_start].message_id > 0) {
+                    daemon_reply_dedup_ensure_loaded();
+                    if (hu_daemon_already_replied(&g_reply_dedup, batch_key, key_len,
+                                                  (int64_t)msgs[batch_start].message_id)) {
+                        hu_log_info(
+                            "human", agent ? agent->observer : NULL,
+                            "reply-dedup: already replied to %.*s rowid=%lld — skip (crash replay)",
+                            (int)(key_len > 20 ? 20 : key_len), batch_key,
+                            (long long)msgs[batch_start].message_id);
                         continue;
                     }
                 }
@@ -12111,6 +12170,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     key_len > 0) {
                     hu_contact_send_recency_record(&agent->contact_send_recency, batch_key, key_len,
                                                    (int64_t)time(NULL), HU_SEND_PATH_REACTIVE);
+                    /* BUG #2: persist the replied-to inbound rowid AFTER a
+                     * successful send so a crash before the poll-watermark save
+                     * can't re-reply on restart. Persist-after-send keeps the
+                     * contract at-least-once + dedup-on-replay (no dropped
+                     * replies). */
+                    daemon_reply_dedup_mark(batch_key, key_len,
+                                            (int64_t)msgs[batch_start].message_id);
                 }
 
                 /* Store conversation summary as long-term memory */
@@ -13208,7 +13274,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     alloc->free(alloc->ctx, fragments[f].text,
                                                 fragments[f].text_len + 1);
                             }
-                        } else {
+                        } else if (hu_daemon_should_send_whole_reply_fallback(use_choreography,
+                                                                              frag_count)) {
+                            /* Whole-message fallback: only when neither the
+                             * choreography path NOR the fragment-split path has
+                             * already delivered the reply. Without this guard, a
+                             * choreography-planned reply (sent as N segments
+                             * above) was ALSO re-sent here in full, producing
+                             * duplicate messages to the recipient (the "Alexis"
+                             * double-reply bug). Predicate in
+                             * human/daemon/common.h, pinned by
+                             * tests/test_daemon_reply_fallback.c. */
 #ifndef HU_IS_TEST
                             {
                                 const char *eff =
@@ -13438,8 +13514,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : agent->provider.vtable;
                     void *dt_ctx = (llm_decides && g_classify_provider_ok) ? g_classify_provider.ctx
                                                                            : agent->provider.ctx;
+                    /* One-emission-per-turn (2026-05-29 policy): suppress the
+                     * double-text afterthought when a reactive reply already
+                     * fired for this contact this turn — same FU-1 defer gate
+                     * the proactive paths use, so the reply doesn't pile into a
+                     * multi-bubble burst. */
                     if (response && response_len > 0 && agent->persona &&
-                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system) {
+                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system &&
+                        !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                          key_len, (int64_t)time(NULL))) {
                         float dt_prob = agent->persona->humanization.double_text_probability;
                         uint32_t dt_seed = (uint32_t)time(NULL) * 1103515245u + 12345u +
                                            (uint32_t)(uintptr_t)response;
@@ -13509,7 +13592,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Self-reaction: occasionally haha/emphasize own message (~2%).
                  * Skip for groups: get_latest_sent_rowid uses handle.id SQL. */
                 if (response && response_len > 0 && ch->channel->vtable->react &&
-                    !msgs[batch_start].is_group) {
+                    !msgs[batch_start].is_group &&
+                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                      key_len, (int64_t)time(NULL))) {
                     hu_reaction_type_t self_r = hu_conversation_classify_self_reaction(
                         response, response_len, (uint32_t)time(NULL));
                     if (self_r != HU_REACTION_NONE) {
@@ -13595,7 +13680,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* GIF reaction: send a GIF when the moment calls for it */
                 bool gif_sent_this_turn = false;
-                if (combined_len > 0 && ch->channel->vtable->send) {
+                if (combined_len > 0 && ch->channel->vtable->send &&
+                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
+                                                      key_len, (int64_t)time(NULL))) {
                     float gif_prob = 0.10f;
                     const char *contact_rel = NULL;
                     size_t contact_rel_len = 0;

@@ -1,10 +1,11 @@
 #include "human/music.h"
-#include "human/core/string.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/string.h"
 #include "human/platform.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -120,7 +121,8 @@ hu_error_t hu_music_parse_spotify_response(hu_allocator_t *alloc, const char *js
     if (err != HU_OK)
         return err;
 
-    /* Spotify: { tracks: { items: [ { name, artists: [{name}], album: {name, images}, ... } ] } } */
+    /* Spotify: { tracks: { items: [ { name, artists: [{name}], album: {name, images}, ... } ] } }
+     */
     hu_json_value_t *tracks = hu_json_object_get(root, "tracks");
     if (!tracks) {
         hu_json_free(alloc, root);
@@ -273,7 +275,7 @@ bool hu_music_parse_suggestion(const char *suggestion, size_t suggestion_len, ch
 /* ── Preference detection (pure, always compiled) ────────────────────── */
 
 hu_music_source_t hu_music_detect_preference(const char *const *texts, const size_t *lens,
-                                              size_t count) {
+                                             size_t count) {
     if (!texts || !lens || count == 0)
         return HU_MUSIC_SOURCE_ITUNES;
 
@@ -491,8 +493,8 @@ hu_error_t hu_music_taste_save(const char *path, size_t path_len) {
         music_taste_entry_t *e = &s_taste[i];
         fprintf(f, "  {\"contact\":\"");
         taste_write_escaped(f, e->contact_id);
-        fprintf(f, "\",\"sends\":%d,\"reactions\":%d,\"head\":%d,\"artists\":[",
-                e->sends, e->reactions, e->head);
+        fprintf(f, "\",\"sends\":%d,\"reactions\":%d,\"head\":%d,\"artists\":[", e->sends,
+                e->reactions, e->head);
         int total = e->head < HU_MUSIC_TASTE_HISTORY ? e->head : HU_MUSIC_TASTE_HISTORY;
         bool first = true;
         for (int j = 0; j < total; j++) {
@@ -534,7 +536,8 @@ hu_error_t hu_music_taste_load(const char *path, size_t path_len) {
 
     s_taste_count = 0;
     const char *p = buf;
-    while ((p = strstr(p, "\"contact\":\"")) != NULL && s_taste_count < HU_MUSIC_TASTE_MAX_CONTACTS) {
+    while ((p = strstr(p, "\"contact\":\"")) != NULL &&
+           s_taste_count < HU_MUSIC_TASTE_MAX_CONTACTS) {
         p += 11;
         const char *end = strchr(p, '"');
         if (!end)
@@ -611,6 +614,87 @@ void hu_music_result_free(hu_allocator_t *alloc, hu_music_result_t *r) {
     free_str(alloc, &r->track_view_url);
     free_str(alloc, &r->artwork_url);
     free_str(alloc, &r->genre);
+}
+
+/* ── Result matching (pure, always compiled) ────────────────────────── */
+
+/* Lowercase-copy `src` into `dst`, dropping anything from the first '('
+ * and any "feat"/"ft" segment, mapping non-alnum to spaces. */
+static void music_norm(const char *src, char *dst, size_t cap) {
+    size_t j = 0;
+    if (!src || cap == 0) {
+        if (cap)
+            dst[0] = '\0';
+        return;
+    }
+    for (size_t i = 0; src[i] && j + 1 < cap; i++) {
+        char c = src[i];
+        if (c == '(' || c == '[')
+            break;
+        if ((c == 'f' || c == 'F') &&
+            (strncasecmp(src + i, "feat", 4) == 0 || strncasecmp(src + i, "ft ", 3) == 0 ||
+             strncasecmp(src + i, "ft.", 3) == 0))
+            break;
+        unsigned char u = (unsigned char)c;
+        /* Split branches so clang-tidy sees no int->char narrowing: the
+         * tolower() result is explicitly cast, and ' ' is a char-fitting
+         * constant (constant narrowing is not flagged). */
+        if (isalnum(u))
+            dst[j++] = (char)tolower(u);
+        else
+            dst[j++] = ' ';
+    }
+    dst[j] = '\0';
+}
+
+/* True if any whitespace-delimited token of len>=2 in `a` also appears in `b`. */
+static bool music_share_token(const char *a, const char *b) {
+    char tmp[256];
+    size_t n = strlen(a);
+    if (n >= sizeof(tmp))
+        n = sizeof(tmp) - 1;
+    memcpy(tmp, a, n);
+    tmp[n] = '\0';
+    char *save = NULL;
+    for (char *t = strtok_r(tmp, " ", &save); t; t = strtok_r(NULL, " ", &save)) {
+        if (strlen(t) < 2)
+            continue;
+        char needle[128];
+        int m = snprintf(needle, sizeof(needle), " %s ", t);
+        if (m <= 0 || (size_t)m >= sizeof(needle))
+            continue;
+        char padded[512];
+        int p = snprintf(padded, sizeof(padded), " %s ", b);
+        if (p <= 0 || (size_t)p >= sizeof(padded))
+            continue;
+        if (strstr(padded, needle))
+            return true;
+    }
+    return false;
+}
+
+bool hu_music_result_matches(const char *suggested, const hu_music_result_t *result) {
+    if (!suggested || !*suggested || !result || !result->artist_name || !result->track_name)
+        return false;
+    const char *dash = strstr(suggested, " - ");
+    if (!dash)
+        return false;
+
+    char sug_artist[256], sug_title[256];
+    size_t alen = (size_t)(dash - suggested);
+    if (alen >= sizeof(sug_artist))
+        alen = sizeof(sug_artist) - 1;
+    memcpy(sug_artist, suggested, alen);
+    sug_artist[alen] = '\0';
+    snprintf(sug_title, sizeof(sug_title), "%s", dash + 3);
+
+    char na_sug[256], nt_sug[256], na_res[256], nt_res[256];
+    music_norm(sug_artist, na_sug, sizeof(na_sug));
+    music_norm(sug_title, nt_sug, sizeof(nt_sug));
+    music_norm(result->artist_name, na_res, sizeof(na_res));
+    music_norm(result->track_name, nt_res, sizeof(nt_res));
+
+    return music_share_token(na_sug, na_res) && music_share_token(nt_sug, nt_res);
 }
 
 /* ── Network functions ───────────────────────────────────────────────── */
@@ -762,8 +846,8 @@ hu_error_t hu_music_search_spotify(hu_allocator_t *alloc, const char *client_id,
         return HU_ERR_INVALID_ARGUMENT;
 
     char url[768];
-    int n = snprintf(url, sizeof(url),
-                     "https://api.spotify.com/v1/search?q=%s&type=track&limit=1", encoded);
+    int n = snprintf(url, sizeof(url), "https://api.spotify.com/v1/search?q=%s&type=track&limit=1",
+                     encoded);
     if (n < 0 || (size_t)n >= sizeof(url))
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -857,13 +941,13 @@ static hu_error_t download_to_temp(hu_allocator_t *alloc, const char *url, const
     return HU_OK;
 }
 
-hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url,
-                                     char *path_out, size_t path_cap) {
+hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url, char *path_out,
+                                     size_t path_cap) {
     return download_to_temp(alloc, preview_url, ".m4a", path_out, path_cap);
 }
 
-hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url,
-                                     char *path_out, size_t path_cap) {
+hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url, char *path_out,
+                                     size_t path_cap) {
     return download_to_temp(alloc, artwork_url, ".jpg", path_out, path_cap);
 }
 
@@ -890,8 +974,8 @@ hu_error_t hu_music_search_spotify(hu_allocator_t *alloc, const char *client_id,
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url,
-                                     char *path_out, size_t path_cap) {
+hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_url, char *path_out,
+                                     size_t path_cap) {
     (void)alloc;
     (void)preview_url;
     (void)path_out;
@@ -899,8 +983,8 @@ hu_error_t hu_music_download_preview(hu_allocator_t *alloc, const char *preview_
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url,
-                                     char *path_out, size_t path_cap) {
+hu_error_t hu_music_download_artwork(hu_allocator_t *alloc, const char *artwork_url, char *path_out,
+                                     size_t path_cap) {
     (void)alloc;
     (void)artwork_url;
     (void)path_out;
