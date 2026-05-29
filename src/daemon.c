@@ -23,6 +23,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/belief_update.h"
 #include "human/agent/burst_egress.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
@@ -31,6 +32,12 @@
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
+#include "human/agent/prosocial_routine.h"
+#include "human/behavior/prosocial_moment.h"
+#include "human/behavior/win_detect.h"
+#include "human/memory/celebration_repo.h"
+#include "human/persona/celebration.h"
+#include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
 #endif
@@ -716,60 +723,10 @@ static void store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memor
  * Public API: hu_cron_schedule_matches (daemon.h), hu_service_run_agent_cron (daemon.h).
  * Internal: hu_daemon_cron_tick (daemon_cron.h). */
 
-/* ── Per-contact trust state (thread-safe, LRU-evicted) ─────────────── */
-
-/* TRUST-006: Per-contact trust state tracking
- * Expanded from 256 to 4096 with LRU eviction and mutex for thread safety. */
-#define HU_DAEMON_TRUST_CAP 4096
-
-static hu_daemon_contact_trust_t g_contact_trust[HU_DAEMON_TRUST_CAP];
-static size_t g_contact_trust_count;
-
-#if !defined(_WIN32) && !defined(__CYGWIN__)
-static pthread_mutex_t g_trust_mutex = PTHREAD_MUTEX_INITIALIZER;
-#define TRUST_LOCK()   pthread_mutex_lock(&g_trust_mutex)
-#define TRUST_UNLOCK() pthread_mutex_unlock(&g_trust_mutex)
-#else
-#define TRUST_LOCK()   ((void)0)
-#define TRUST_UNLOCK() ((void)0)
-#endif
-
-static hu_error_t trust_find_or_create_slot(const char *contact_id, size_t cid_len,
-                                            size_t *slot_out) {
-    if (!contact_id || cid_len == 0 || !slot_out)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    for (size_t i = 0; i < g_contact_trust_count; i++) {
-        if (strlen(g_contact_trust[i].contact_id) == cid_len &&
-            memcmp(g_contact_trust[i].contact_id, contact_id, cid_len) == 0) {
-            *slot_out = i;
-            return HU_OK;
-        }
-    }
-
-    size_t slot;
-    if (g_contact_trust_count < HU_DAEMON_TRUST_CAP) {
-        slot = g_contact_trust_count++;
-    } else {
-        slot = 0;
-        int64_t oldest = g_contact_trust[0].state.last_updated_at;
-        for (size_t i = 1; i < g_contact_trust_count; i++) {
-            if (g_contact_trust[i].state.last_updated_at < oldest) {
-                oldest = g_contact_trust[i].state.last_updated_at;
-                slot = i;
-            }
-        }
-    }
-
-    size_t copy_len = cid_len;
-    if (copy_len >= sizeof(g_contact_trust[slot].contact_id))
-        copy_len = sizeof(g_contact_trust[slot].contact_id) - 1;
-    memcpy(g_contact_trust[slot].contact_id, contact_id, copy_len);
-    g_contact_trust[slot].contact_id[copy_len] = '\0';
-    hu_trust_init(&g_contact_trust[slot].state);
-    *slot_out = slot;
-    return HU_OK;
-}
+/* Per-contact trust state (HU_DAEMON_TRUST_CAP table, mutex, LRU eviction,
+ * trust_find_or_create_slot) extracted to src/daemon/daemon_identity.c
+ * (Phase 2 DDD bounded-context split). Public accessors declared in
+ * human/daemon.h. */
 
 /* ──────────────────────────────────────────────────────────────────────────
  * iMessage Action Surface Dispatcher (F2) — Phase A–E integration
@@ -931,43 +888,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     return err;
 }
 
-hu_error_t hu_daemon_get_trust_state(const char *contact_id, size_t cid_len,
-                                     hu_trust_state_t *out) {
-    if (!out)
-        return HU_ERR_INVALID_ARGUMENT;
-    TRUST_LOCK();
-    size_t slot;
-    hu_error_t err = trust_find_or_create_slot(contact_id, cid_len, &slot);
-    if (err == HU_OK)
-        *out = g_contact_trust[slot].state;
-    TRUST_UNLOCK();
-    return err;
-}
-
-hu_error_t hu_daemon_set_trust_state(const char *contact_id, size_t cid_len,
-                                     const hu_trust_state_t *state) {
-    if (!state)
-        return HU_ERR_INVALID_ARGUMENT;
-    TRUST_LOCK();
-    size_t slot;
-    hu_error_t err = trust_find_or_create_slot(contact_id, cid_len, &slot);
-    if (err == HU_OK)
-        g_contact_trust[slot].state = *state;
-    TRUST_UNLOCK();
-    return err;
-}
-
-#ifdef HU_IS_TEST
-size_t hu_daemon_trust_count(void) {
-    return g_contact_trust_count;
-}
-void hu_daemon_trust_reset(void) {
-    TRUST_LOCK();
-    g_contact_trust_count = 0;
-    memset(g_contact_trust, 0, sizeof(g_contact_trust));
-    TRUST_UNLOCK();
-}
-#endif
+/* hu_daemon_get_trust_state / _set_trust_state / _trust_count / _trust_reset
+ * extracted to src/daemon/daemon_identity.c (Phase 2 DDD split). */
 
 /* ── US-7.3 — Honesty gate: LoRA adapter ignored by cloud provider ───
  *
@@ -3639,6 +3561,106 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
     while (!HU_STOP_FLAG) {
+        /* A3 intrinsic motivation idle tick (default-off via cfg.intrinsic). Runs
+         * at most once/minute so the drive rises on a human timescale, not the
+         * ~1s loop cadence. The runner self-gates on enabled + budget + quiet +
+         * rate + drive, and is internal/propose-only (no action surface). */
+        if (agent && config) {
+            static time_t hu_last_intrinsic_min = 0;
+            time_t hu_now_min = time(NULL) / 60;
+            if (hu_now_min != hu_last_intrinsic_min) {
+                hu_last_intrinsic_min = hu_now_min;
+                int64_t hu_now = (int64_t)time(NULL);
+                hu_intrinsic_drive_tick(&agent->intrinsic_drive, false, hu_now);
+                hu_intrinsic_runtime_cfg_t hu_icfg = {.enabled = config->intrinsic.enabled,
+                                                      .per_tick_token_budget =
+                                                          config->intrinsic.per_tick_token_budget};
+                hu_intrinsic_start_facts_t hu_if;
+                hu_if.drive_level = hu_intrinsic_drive_level(&agent->intrinsic_drive);
+                hu_if.secs_since_user = agent->intrinsic_drive.last_user_ts
+                                            ? (hu_now - agent->intrinsic_drive.last_user_ts)
+                                            : 999999;
+                hu_if.secs_since_intrinsic =
+                    agent->intrinsic_drive.last_intrinsic_ts
+                        ? (hu_now - agent->intrinsic_drive.last_intrinsic_ts)
+                        : 999999;
+                hu_if.budget_tokens_remaining = HU_INTRINSIC_DEFAULT_TICK_BUDGET;
+                hu_if.user_active = false;
+                hu_intrinsic_tick_result_t hu_ir;
+                hu_intrinsic_run_tick(&agent->intrinsic_drive, &hu_icfg, &hu_if, agent->observer,
+                                      hu_now, &hu_ir);
+                /* STARTED => goal originated + audit-logged. Sharing is a separate
+                 * proposer-gated step (AC-5); v1 logs the intent only. */
+            }
+        }
+
+        /* C-series prosocial routines idle tick (default-OFF via
+         * cfg.prosocial_routines). Once/minute; the scheduler is pure and the
+         * prompt is B0-gated. A due routine is audit-logged and its last-run is
+         * recorded; the actual proactive send routes through init_proposer (the
+         * silence-biased gate) — documented as the integration tail, mirroring
+         * the A3 runner's share-via-proposer contract. */
+        if (agent && config) {
+            static atomic_bool warned_routines_off = false;
+            if (!config->prosocial_routines.enabled) {
+                hu_log_info_once(&warned_routines_off, "human", agent->observer,
+                                 "prosocial routines disabled "
+                                 "(cfg.prosocial_routines.enabled=false) — set "
+                                 "prosocial_routines.enabled=true in config.json to activate");
+            } else {
+                static time_t hu_last_routine_min = 0;
+                time_t rmin = time(NULL) / 60;
+                if (rmin != hu_last_routine_min) {
+                    hu_last_routine_min = rmin;
+                    time_t rnow = time(NULL);
+                    struct tm rtm;
+                    localtime_r(&rnow, &rtm);
+                    hu_routine_facts_t rf;
+                    rf.local_hour = rtm.tm_hour;
+                    rf.day_of_week = rtm.tm_wday;
+                    rf.user_active = false;
+                    rf.secs_since_morning = agent->routine_last_morning
+                                                ? (int64_t)rnow - agent->routine_last_morning
+                                                : 999999999;
+                    rf.secs_since_evening = agent->routine_last_evening
+                                                ? (int64_t)rnow - agent->routine_last_evening
+                                                : 999999999;
+                    rf.secs_since_weekly = agent->routine_last_weekly
+                                               ? (int64_t)rnow - agent->routine_last_weekly
+                                               : 999999999;
+                    rf.secs_since_thinking = agent->routine_last_thinking
+                                                 ? (int64_t)rnow - agent->routine_last_thinking
+                                                 : 999999999;
+                    hu_routine_kind_t rk = hu_routine_due(&rf);
+                    if (rk != HU_ROUTINE_NONE) {
+                        size_t rplen = 0;
+                        char *rp = hu_routine_build_prompt(alloc, rk, HU_BRISK_NONE, &rplen);
+                        if (rp) {
+                            hu_log_info("human", agent->observer,
+                                        "prosocial routine due — kind=%d (routed to proposer)",
+                                        (int)rk);
+                            alloc->free(alloc->ctx, rp, rplen + 1);
+                            switch (rk) {
+                            case HU_ROUTINE_MORNING_INTENTION:
+                                agent->routine_last_morning = rnow;
+                                break;
+                            case HU_ROUTINE_EVENING_REFLECTION:
+                                agent->routine_last_evening = rnow;
+                                break;
+                            case HU_ROUTINE_WEEKLY_CHECKIN:
+                                agent->routine_last_weekly = rnow;
+                                break;
+                            case HU_ROUTINE_THINKING_OF_YOU:
+                                agent->routine_last_thinking = rnow;
+                                break;
+                            default:
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 #ifdef HU_HAS_CRON
         {
             time_t t = time(NULL);
@@ -12185,6 +12207,117 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (op_db) {
                         (void)hu_evolved_opinions_extract_and_store(op_db, response, response_len,
                                                                     (int64_t)time(NULL));
+                        /* A3: a completed user turn is user activity — decay the drive. */
+                        hu_intrinsic_drive_tick(&agent->intrinsic_drive, true, (int64_t)time(NULL));
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            uint64_t kh = 1469598103934665603ULL;
+                            for (size_t bi = 0; bi < key_len; bi++) {
+                                kh ^= (uint64_t)(unsigned char)batch_key[bi];
+                                kh *= 1099511628211ULL;
+                            }
+                            if (kh != agent->belief_convo_key_hash) {
+                                agent->belief_convo_key_hash = kh;
+                                agent->belief_changes_this_convo = 0;
+                            }
+                            char *bdir = NULL;
+                            size_t bdlen = 0;
+                            bool bchanged = false;
+                            (void)hu_belief_update_evaluate_turn(
+                                alloc, op_db, &agent->pressure_history, combined, combined_len,
+                                agent->belief_changes_this_convo, (int64_t)time(NULL), &bdir,
+                                &bdlen, &bchanged);
+                            if (bchanged) {
+                                agent->belief_changes_this_convo++;
+                                if (agent->belief_pending_directive) {
+                                    alloc->free(alloc->ctx, agent->belief_pending_directive,
+                                                agent->belief_pending_directive_len + 1);
+                                }
+                                agent->belief_pending_directive = bdir;
+                                agent->belief_pending_directive_len = bdlen;
+                            } else if (bdir) {
+                                alloc->free(alloc->ctx, bdir, bdlen + 1);
+                            }
+                        }
+
+                        /* B1/B2/B4/B5 prosocial: celebrate a win, or respond
+                         * warmly to an everyday prosocial moment. All gated by
+                         * B0; warmth is SUPPRESSED when the companion-safety
+                         * layer flags emotional-dependency language — this is
+                         * the live B1 loop close (over_attachment / isolation). */
+                        if (combined_len > 0 && batch_key && key_len > 0) {
+                            hu_behavior_risk_t pdep = HU_BRISK_NONE;
+                            hu_companion_safety_result_t pcs;
+                            if (hu_companion_safety_check(alloc, combined, combined_len, NULL, 0,
+                                                          &pcs) == HU_OK &&
+                                (pcs.flagged || pcs.over_attachment >= 0.6 || pcs.isolation >= 0.6))
+                                pdep = HU_BRISK_DEPENDENCY_PATTERN;
+
+                            bool prosocial_set = false;
+                            hu_win_signal_t cwin = hu_win_detect(combined, combined_len);
+                            if (cwin.is_win) {
+                                uint64_t wkh = 1469598103934665603ULL;
+                                for (size_t wi = 0; wi < combined_len; wi++) {
+                                    wkh ^= (uint64_t)(unsigned char)combined[wi];
+                                    wkh *= 1099511628211ULL;
+                                }
+                                char cwin_key[17];
+                                snprintf(cwin_key, sizeof(cwin_key), "%016llx",
+                                         (unsigned long long)wkh);
+                                hu_celebration_repo_t crepo;
+                                if (hu_celebration_repo_create(agent->memory, alloc, &crepo) ==
+                                    HU_OK) {
+                                    int64_t cnow = (int64_t)time(NULL);
+                                    bool celebrated = false;
+                                    crepo.vtable->was_recent(crepo.ctx, batch_key, key_len,
+                                                             cwin_key, strlen(cwin_key), cnow,
+                                                             (int64_t)7 * 24 * 3600, &celebrated);
+                                    if (!celebrated) {
+                                        size_t cdlen = 0;
+                                        char *cdir = hu_celebration_build_directive(
+                                            alloc, cwin.kind, pdep, &cdlen);
+                                        if (cdir) {
+                                            hu_celebration_t cel = {0};
+                                            cel.contact_id = batch_key;
+                                            cel.contact_id_len = key_len;
+                                            cel.win_key = cwin_key;
+                                            cel.win_key_len = strlen(cwin_key);
+                                            cel.kind = (int)cwin.kind;
+                                            cel.celebrated_at = cnow;
+                                            crepo.vtable->record(crepo.ctx, &cel);
+                                            if (agent->prosocial_pending_directive) {
+                                                alloc->free(
+                                                    alloc->ctx, agent->prosocial_pending_directive,
+                                                    agent->prosocial_pending_directive_len + 1);
+                                            }
+                                            agent->prosocial_pending_directive = cdir;
+                                            agent->prosocial_pending_directive_len = cdlen;
+                                            prosocial_set = true;
+                                        }
+                                    }
+                                    crepo.vtable->deinit(crepo.ctx);
+                                }
+                            }
+
+                            /* B2/B4/B5: everyday warm response — only when no win
+                             * was celebrated this turn (celebration wins). */
+                            if (!prosocial_set) {
+                                hu_pmoment_t pm = hu_pmoment_detect(combined, combined_len);
+                                if (pm.present) {
+                                    size_t wlen = 0;
+                                    char *wdir = hu_warm_response_build_directive(alloc, pm.kind,
+                                                                                  pdep, &wlen);
+                                    if (wdir) {
+                                        if (agent->prosocial_pending_directive) {
+                                            alloc->free(alloc->ctx,
+                                                        agent->prosocial_pending_directive,
+                                                        agent->prosocial_pending_directive_len + 1);
+                                        }
+                                        agent->prosocial_pending_directive = wdir;
+                                        agent->prosocial_pending_directive_len = wlen;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 #endif

@@ -217,6 +217,14 @@ typedef struct hu_chat_request {
     int stream_strip; /* on-device streaming hint: -1 = incremental (don't strip),
                        * +1 = buffer + strip deliberation, 0 = omit (server/env decides).
                        * Only consulted by OpenAI-compatible local serving on the stream path. */
+    /* Activation-steering coefficients for on-device serving (residual-stream
+     * trait control). When steering_present is false, no "steering" field is
+     * sent (server treats absent as a no-op). Coeffs are in the measured-safe
+     * range [-1, 1]; the local server also clamps. Only the validated traits
+     * (formality, verbosity) are carried. */
+    bool steering_present;
+    double steer_formality;
+    double steer_verbosity;
 } hu_chat_request_t;
 
 /* ──────────────────────────────────────────────────────────────────────────

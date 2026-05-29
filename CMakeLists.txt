@@ -680,6 +680,9 @@ set(HU_CORE_SOURCES
     src/persona/humor.c
     src/persona/markdown_loader.c
     src/persona/somatic.c
+    src/persona/taste.c
+    src/persona/celebration.c
+    src/persona/warm_response.c
     src/persona/narrative_self.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
@@ -786,6 +789,9 @@ set(HU_CORE_SOURCES
     src/behavior/affect.c
     src/behavior/change.c
     src/behavior/safety.c
+    src/behavior/prosocial.c
+    src/behavior/win_detect.c
+    src/behavior/prosocial_moment.c
     src/behavior/policy.c
     src/behavior/prompt.c
     src/behavior/support_strategy.c
@@ -856,6 +862,9 @@ set(HU_CORE_SOURCES
     src/agent/speculative.c
     src/agent/uncertainty.c
     src/agent/autonomy.c
+    src/agent/belief_update.c
+    src/agent/intrinsic_drive.c
+    src/agent/prosocial_routine.c
     src/permission.c
     src/mcp_manager.c
     src/mcp_tool_wrapper.c
@@ -1182,6 +1191,7 @@ set(HU_CORE_SOURCES
     src/daemon_proactive.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
+    src/daemon/daemon_identity.c
     src/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
@@ -1533,6 +1543,9 @@ endif()
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_CORE_SOURCES
         src/memory/repos/boundary_repo_sqlite.c
+        src/memory/repos/celebration_repo_sqlite.c
+        src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/memories_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3597,6 +3610,10 @@ tests/test_imessage_action_telemetry.c
     tests/test_visual_content.c
     tests/test_media_gen.c
     tests/test_opinions.c
+    tests/test_belief_update.c
+    tests/test_taste.c
+    tests/test_intrinsic_drive.c
+    tests/test_prosocial_routine.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
     tests/test_skill_system.c
@@ -3668,7 +3685,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
@@ -3786,6 +3803,9 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_pipeline_perf.c)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
 endif()
 
 # SOTA capability tests

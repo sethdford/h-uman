@@ -1,8 +1,8 @@
 #include "human/memory/inbox.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
-#include "human/memory/ingest.h"
 #include "human/memory.h"
+#include "human/memory/ingest.h"
 #include "human/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,29 +15,7 @@
 #include <unistd.h>
 #endif
 
-#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
-#include <sqlite3.h>
-
-static void inbox_record_feed_item(sqlite3 *db, const char *path, size_t path_len,
-                                   const char *filename, size_t filename_len) {
-    if (!db || !path || path_len == 0)
-        return;
-    const char *sql = "INSERT OR IGNORE INTO feed_items (source, contact_id, content_type, "
-                     "content, url, ingested_at) VALUES (?1, '', 'text/plain', ?2, '', ?3)";
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
-        return;
-    sqlite3_bind_text(stmt, 1, path, (int)path_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, filename && filename_len > 0 ? filename : path,
-                      (int)(filename && filename_len > 0 ? filename_len : path_len),
-                      SQLITE_STATIC);
-    sqlite3_bind_int64(stmt, 3, (sqlite3_int64)time(NULL));
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE)
-        hu_log_error("inbox", NULL, "feed_items insert failed: %s", sqlite3_errmsg(db));
-}
-#endif
+#include "human/memory/feed_items_repo.h"
 
 hu_error_t hu_inbox_init(hu_inbox_watcher_t *watcher, hu_allocator_t *alloc, hu_memory_t *memory,
                          const char *inbox_dir, size_t inbox_dir_len) {
@@ -153,9 +131,18 @@ hu_error_t hu_inbox_poll(hu_inbox_watcher_t *watcher, size_t *processed_count) {
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
         {
-            sqlite3 *db = hu_sqlite_memory_get_db(watcher->memory);
-            if (db)
-                inbox_record_feed_item(db, path, (size_t)n, ent->d_name, strlen(ent->d_name));
+            hu_feed_items_repo_t repo;
+            if (hu_feed_items_repo_create(watcher->memory, watcher->alloc, &repo) == HU_OK) {
+                hu_feed_item_t fi = {
+                    .source = path,
+                    .source_len = (size_t)n,
+                    .content = ent->d_name[0] ? ent->d_name : path,
+                    .content_len = ent->d_name[0] ? strlen(ent->d_name) : (size_t)n,
+                    .ingested_at = (int64_t)time(NULL),
+                };
+                repo.vtable->record(repo.ctx, &fi);
+                repo.vtable->deinit(repo.ctx);
+            }
         }
 #endif
 

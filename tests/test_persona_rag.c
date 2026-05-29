@@ -1,9 +1,13 @@
 /* Tests for src/persona/rag.c — RAG-over-own-messages voice grounding. */
 
+#include "human/core/allocator.h"
 #include "human/persona/rag.h"
 #include "test_framework.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void rag_relevance_identical_is_high(void) {
     double s =
@@ -86,6 +90,46 @@ static void rag_build_block_tiny_buffer_no_half_write(void) {
     HU_ASSERT_EQ(buf[0], '\0');
 }
 
+/* --- hu_persona_rag_ground_from_file: the hot-path I/O wrapper --- */
+
+static void rag_ground_from_file_injects_relevant(void) {
+    hu_allocator_t a = hu_system_allocator();
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_rag_corpus_%d.jsonl", (int)getpid());
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"text\": \"lunch tomorrow sounds great, downtown works\"}\n", f);
+    fputs("{\"text\": \"quantum entanglement violates local realism\"}\n", f);
+    fputs("{\"text\": \"yeah grabbing lunch downtown is good for me\"}\n", f);
+    fclose(f);
+
+    char buf[1024];
+    size_t n = hu_persona_rag_ground_from_file("are we getting lunch downtown tomorrow", path, 2,
+                                               buf, sizeof(buf), &a);
+    remove(path);
+    HU_ASSERT(n > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "lunch"));  /* relevant real message retrieved */
+    HU_ASSERT(strstr(buf, "quantum") == NULL); /* off-topic message excluded */
+}
+
+static void rag_ground_from_file_missing_corpus_is_zero(void) {
+    hu_allocator_t a = hu_system_allocator();
+    char buf[256] = {'x', 0};
+    size_t n = hu_persona_rag_ground_from_file("anything", "/tmp/hu_rag_absent_zzz.jsonl", 3, buf,
+                                               sizeof(buf), &a);
+    HU_ASSERT_EQ((int)n, 0);
+    HU_ASSERT_EQ((int)buf[0], 0); /* buffer cleared even on miss */
+}
+
+static void rag_ground_from_file_null_safe(void) {
+    hu_allocator_t a = hu_system_allocator();
+    char buf[64];
+    HU_ASSERT_EQ((int)hu_persona_rag_ground_from_file(NULL, "/x", 3, buf, sizeof(buf), &a), 0);
+    HU_ASSERT_EQ((int)hu_persona_rag_ground_from_file("q", NULL, 3, buf, sizeof(buf), &a), 0);
+    HU_ASSERT_EQ((int)hu_persona_rag_ground_from_file("q", "/x", 3, NULL, 10, &a), 0);
+    HU_ASSERT_EQ((int)hu_persona_rag_ground_from_file("q", "/x", 0, buf, sizeof(buf), &a), 0);
+}
+
 void run_persona_rag_tests(void) {
     HU_TEST_SUITE("persona RAG grounding");
     HU_RUN_TEST(rag_relevance_identical_is_high);
@@ -98,4 +142,7 @@ void run_persona_rag_tests(void) {
     HU_RUN_TEST(rag_build_block_contains_examples);
     HU_RUN_TEST(rag_build_block_empty_is_zero);
     HU_RUN_TEST(rag_build_block_tiny_buffer_no_half_write);
+    HU_RUN_TEST(rag_ground_from_file_injects_relevant);
+    HU_RUN_TEST(rag_ground_from_file_missing_corpus_is_zero);
+    HU_RUN_TEST(rag_ground_from_file_null_safe);
 }
