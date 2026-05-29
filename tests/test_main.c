@@ -219,6 +219,7 @@ void run_behavior_dialog_act_tests(void);
 void run_behavior_affect_tests(void);
 void run_behavior_change_tests(void);
 void run_behavior_safety_tests(void);
+void run_behavior_prosocial_tests(void);
 void run_behavior_prompt_tests(void);
 void run_behavior_support_strategy_tests(void);
 void run_behavior_trust_tests(void);
@@ -1153,6 +1154,7 @@ int main(int argc, char **argv) {
     run_behavior_affect_tests();
     run_behavior_change_tests();
     run_behavior_safety_tests();
+    run_behavior_prosocial_tests();
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();
     run_behavior_trust_tests();
