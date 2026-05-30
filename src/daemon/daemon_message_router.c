@@ -17,6 +17,7 @@
 #endif
 #include "human/agent.h"
 #include "human/channel.h"
+#include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
 #include "human/channels/imessage_reply.h"
@@ -82,10 +83,41 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     hu_reply_style_t actual_style = style;
     switch (style) {
     case HU_REPLY_STYLE_THREADED: {
+        /* Native inline threading is unreachable via automation: there is no
+         * public API, and the private IMCore path needs SIP-off + dylib
+         * injection (broken on macOS 26 by XPC entitlement gating). When we
+         * intend to reference the parent, QUOTE it inline in the body — a
+         * working, honest substitute for a native thread. The quoted body is
+         * used for BOTH the (best-effort) reply attempt and the flat fallback,
+         * so the quote is present whether the AX reply flat-commits or we fall
+         * straight through. Falls back to the plain body if the parent text
+         * can't be looked up or no allocator is available — never a regression. */
+        const char *send_body = body;
+        size_t send_len = body_len;
+        char *quoted = NULL;
+        size_t quoted_cap = 0;
+        if (agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
+            char ptext[256];
+            size_t plen = 0;
+            if (hu_imessage_lookup_message_by_guid(agent->alloc, parent_msg_guid, parent_guid_len,
+                                                   ptext, sizeof(ptext), &plen) == HU_OK &&
+                plen > 0) {
+                quoted_cap = body_len + 128; /* snippet (≤~66B) + body + framing */
+                quoted = (char *)agent->alloc->alloc(agent->alloc->ctx, quoted_cap);
+                if (quoted) {
+                    size_t qn = hu_imessage_reply_format_quoted(ptext, plen, body, body_len, quoted,
+                                                                quoted_cap);
+                    if (qn > 0) {
+                        send_body = quoted;
+                        send_len = qn;
+                    }
+                }
+            }
+        }
         bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
         if (threaded_attempted) {
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
-                                    body, body_len);
+                                    send_body, send_len);
             if (err == HU_OK) {
                 /* The reply returned OK, but on macOS 26+ the AX value-inject +
                  * Return path can commit a FLAT message even on success. Read
@@ -114,14 +146,18 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
          * contract — never silently no-op. */
         if (!threaded_attempted || err != HU_OK) {
             if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+                err = ch->vtable->send(ch->ctx, target, target_len, send_body, send_len, NULL, 0);
                 if (err == HU_OK) {
                     tier_used = "flat_fallback";
                     actual_style = HU_REPLY_STYLE_FLAT;
                     hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: threaded unavailable, flat fallback");
+                                "imessage_dispatch: threaded unavailable, flat fallback (parent "
+                                "quoted inline)");
                 }
             }
+        }
+        if (quoted) {
+            agent->alloc->free(agent->alloc->ctx, quoted, quoted_cap);
         }
         break;
     }

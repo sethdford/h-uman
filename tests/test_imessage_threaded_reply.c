@@ -90,11 +90,83 @@ static bool verify_false_stub(const char *target, size_t target_len, int64_t sin
     return false;
 }
 
+/* Parent-is-last gate stubs. Tier 1 (Cmd-R = "Reply to Last Message") is only
+ * attempted when the parent IS the newest message in the conversation. */
+static bool parent_is_last_stub(const char *target, size_t target_len, const char *guid,
+                                size_t guid_len) {
+    (void)target;
+    (void)target_len;
+    (void)guid;
+    (void)guid_len;
+    return true;
+}
+
+static bool parent_not_last_stub(const char *target, size_t target_len, const char *guid,
+                                 size_t guid_len) {
+    (void)target;
+    (void)target_len;
+    (void)guid;
+    (void)guid_len;
+    return false;
+}
+
 static void reset_counts(void) {
     tier1_call_count = 0;
     tier2_call_count = 0;
     flat_send_call_count = 0;
     verify_call_count = 0;
+}
+
+/* AC: When the parent IS the last message, Tier 1 (Cmd-R) is attempted. */
+static void parent_is_last_attempts_tier1(void) {
+    reset_counts();
+    hu_imessage_set_test_reply_parent_last_stub(parent_is_last_stub);
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, tier2_succeeds_stub, NULL);
+
+    hu_error_t err = hu_imessage_reply(NULL, "+15555551212", 12, "ABC-PARENT-GUID", 15, "Hey", 3);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_EQ(tier1_call_count, 1);
+    HU_ASSERT_EQ(tier2_call_count, 0);
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "cmdR");
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_parent_last_stub(NULL);
+}
+
+/* AC: When the parent is NOT the last message, Tier 1 (Cmd-R) is SKIPPED and
+ * we go straight to Tier 2 (specific-message context menu). Cmd-R would thread
+ * to the wrong (newest) message, so it must not fire. */
+static void parent_not_last_skips_tier1_uses_tier2(void) {
+    reset_counts();
+    hu_imessage_set_test_reply_parent_last_stub(parent_not_last_stub);
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, tier2_succeeds_stub, NULL);
+
+    hu_error_t err = hu_imessage_reply(NULL, "+15555551212", 12, "OLD-PARENT-GUID", 15, "Hey", 3);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_EQ(tier1_call_count, 0); /* Cmd-R skipped — would mis-thread */
+    HU_ASSERT_EQ(tier2_call_count, 1);
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "ax_menu");
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_parent_last_stub(NULL);
+}
+
+/* AC (anti-mis-thread contract): even when Tier 1 WOULD succeed, a non-last
+ * parent with no Tier 2 must NOT use Cmd-R — it falls through to flat-send
+ * rather than threading to the wrong message. */
+static void parent_not_last_no_tier2_falls_to_flat_not_cmdr(void) {
+    reset_counts();
+    hu_imessage_set_test_reply_parent_last_stub(parent_not_last_stub);
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, NULL, flat_send_succeeds_stub);
+
+    hu_error_t err = hu_imessage_reply(NULL, "+15555551212", 12, "OLD-PARENT-GUID", 15, "Hey", 3);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_EQ(tier1_call_count, 0); /* Cmd-R never fires for a non-last parent */
+    HU_ASSERT_EQ(flat_send_call_count, 1);
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "flat_fallback");
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_parent_last_stub(NULL);
 }
 
 /* AC: Tier 1 (Cmd-R) is attempted first; on success, returns HU_OK
@@ -440,8 +512,77 @@ static void verified_flag_resets_per_call(void) {
     hu_imessage_set_test_reply_verify_stub(NULL);
 }
 
+/* ── flat + quote-the-parent formatter ──────────────────────────────────────
+ * When native threading is unavailable (macOS reality), an outbound reply
+ * quotes the parent so the recipient has context. */
+
+/* AC: empty/NULL parent → body unchanged (no quote, no regression). */
+static void quote_empty_parent_returns_body_only(void) {
+    char out[64];
+    size_t n = hu_imessage_reply_format_quoted("", 0, "yes 7pm", 7, out, sizeof(out));
+    HU_ASSERT_EQ((int)n, 7);
+    HU_ASSERT_STR_EQ(out, "yes 7pm");
+    n = hu_imessage_reply_format_quoted(NULL, 0, "yes 7pm", 7, out, sizeof(out));
+    HU_ASSERT_STR_EQ(out, "yes 7pm");
+}
+
+/* AC: normal parent → ↩ "<snippet>"\n<body>. */
+static void quote_normal_prefixes_arrow_and_snippet(void) {
+    char out[128];
+    size_t n = hu_imessage_reply_format_quoted("dinner?", 7, "yes", 3, out, sizeof(out));
+    HU_ASSERT_STR_EQ(out, "↩ \"dinner?\"\nyes");
+    HU_ASSERT_EQ((int)n, (int)strlen("↩ \"dinner?\"\nyes"));
+}
+
+/* AC: parent's first line only (newlines in parent don't leak into snippet). */
+static void quote_uses_first_line_only(void) {
+    char out[128];
+    const char *p = "line one\nline two";
+    hu_imessage_reply_format_quoted(p, strlen(p), "ok", 2, out, sizeof(out));
+    HU_ASSERT_STR_EQ(out, "↩ \"line one\"\nok");
+}
+
+/* AC: long parent snippet is truncated with an ellipsis; body is preserved. */
+static void quote_truncates_long_parent(void) {
+    char out[256];
+    char longp[120];
+    memset(longp, 'a', sizeof(longp));
+    /* not NUL-terminated intentionally; pass explicit length */
+    hu_imessage_reply_format_quoted(longp, sizeof(longp), "ok", 2, out, sizeof(out));
+    HU_ASSERT(strstr(out, "…") != NULL);    /* ellipsis present */
+    HU_ASSERT(strstr(out, "\nok") != NULL); /* body preserved on its own line */
+    /* snippet must be bounded — far shorter than the 120-char input */
+    HU_ASSERT(strlen(out) < 90);
+}
+
+/* AC: when the quoted form won't fit out_cap, fall back to body alone — never
+ * drop the actual reply for the sake of the quote. */
+static void quote_tiny_cap_falls_back_to_body(void) {
+    char out[5]; /* fits "yes\0" but not the quote */
+    size_t n = hu_imessage_reply_format_quoted("dinner?", 7, "yes", 3, out, sizeof(out));
+    HU_ASSERT_EQ((int)n, 3);
+    HU_ASSERT_STR_EQ(out, "yes");
+}
+
+/* AC: invalid out/cap or empty body → 0. */
+static void quote_invalid_args_return_zero(void) {
+    char out[64];
+    HU_ASSERT_EQ((int)hu_imessage_reply_format_quoted("p", 1, "b", 1, NULL, 10), 0);
+    HU_ASSERT_EQ((int)hu_imessage_reply_format_quoted("p", 1, "b", 1, out, 0), 0);
+    HU_ASSERT_EQ((int)hu_imessage_reply_format_quoted("p", 1, "", 0, out, sizeof(out)), 0);
+}
+
 void run_imessage_threaded_reply_tests(void) {
     HU_TEST_SUITE("imessage_threaded_reply");
+    HU_RUN_TEST(quote_empty_parent_returns_body_only);
+    HU_RUN_TEST(quote_normal_prefixes_arrow_and_snippet);
+    HU_RUN_TEST(quote_uses_first_line_only);
+    HU_RUN_TEST(quote_truncates_long_parent);
+    HU_RUN_TEST(quote_tiny_cap_falls_back_to_body);
+    HU_RUN_TEST(quote_invalid_args_return_zero);
+    HU_RUN_TEST(parent_is_last_attempts_tier1);
+    HU_RUN_TEST(parent_not_last_skips_tier1_uses_tier2);
+    HU_RUN_TEST(parent_not_last_no_tier2_falls_to_flat_not_cmdr);
     HU_RUN_TEST(tier1_cmd_r_succeeds_returns_ok);
     HU_RUN_TEST(tier1_fails_with_no_tier2_returns_not_supported);
     HU_RUN_TEST(invalid_args_short_circuit);

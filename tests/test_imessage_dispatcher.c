@@ -4,11 +4,13 @@
  * check-untested.sh recognize the file as tested: its exported symbols use
  * the hu_daemon_dispatch and hu_daemon_cross_channel prefixes rather than
  * hu_daemon_message_router, so the basename heuristic alone would miss it. */
+#include "human/agent.h"
 #include "human/channel.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
 #include "human/config.h"
+#include "human/core/allocator.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/persona.h"
@@ -21,6 +23,16 @@ static int reply_calls = 0;
 static int send_calls = 0;
 static int react_emoji_calls = 0;
 
+/* Capture the most recent body passed to reply()/send() so tests can assert on
+ * the quoted-parent substitution. */
+static char last_reply_body[512] = {0};
+static char last_send_body[512] = {0};
+static void capture_body(char *dst, const char *body, size_t body_len) {
+    size_t n = body_len < sizeof(last_reply_body) - 1 ? body_len : sizeof(last_reply_body) - 1;
+    memcpy(dst, body, n);
+    dst[n] = '\0';
+}
+
 /* Mock vtable functions. */
 static hu_error_t mock_reply(void *ctx, const char *target, size_t target_len,
                              const char *parent_msg_guid, size_t parent_guid_len, const char *body,
@@ -30,8 +42,7 @@ static hu_error_t mock_reply(void *ctx, const char *target, size_t target_len,
     (void)target_len;
     (void)parent_msg_guid;
     (void)parent_guid_len;
-    (void)body;
-    (void)body_len;
+    capture_body(last_reply_body, body, body_len);
     reply_calls++;
     return HU_OK;
 }
@@ -55,10 +66,9 @@ static hu_error_t mock_send(void *ctx, const char *target, size_t target_len, co
     (void)ctx;
     (void)target;
     (void)target_len;
-    (void)message;
-    (void)message_len;
     (void)media;
     (void)media_count;
+    capture_body(last_send_body, message, message_len);
     send_calls++;
     return HU_OK;
 }
@@ -388,6 +398,42 @@ static void desc_prefix_no_match_absent(void) {
 }
 #endif /* HU_HAS_IMESSAGE */
 
+/* AC: when the dispatcher picks THREADED and a parent GUID resolves to text,
+ * the body sent is the QUOTED form (↩ "<parent>"\n<body>) — the working
+ * substitute for native threading, which is unreachable via automation.
+ * Same loop-until-THREADED pattern as reply_failure_falls_back_to_flat. With a
+ * non-NULL agent+allocator and an injected parent lookup, the reply attempt
+ * receives the quoted body (mock_reply returns OK → threaded_flat path). */
+static void threaded_reply_quotes_parent_inline(void) {
+    hu_allocator_t sys = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &sys;
+
+    hu_imessage_test_set_guid_lookup("QUOTE-PARENT-GUID", "dinner tonight?");
+
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 300;
+    snap.parent_is_question = true;
+    snap.other_threaded_replies_recent = 4;
+    snap.conv_density_msgs_per_min = 1.0f;
+
+    bool hit = false;
+    for (int64_t mid = 1; mid <= 50 && !hit; mid++) {
+        setup_mocks();
+        last_reply_body[0] = '\0';
+        hu_error_t err = hu_daemon_dispatch_imessage_reply(
+            &mock_ch, &mock_persona, &agent, &mock_config, "+15555551212", 12, "QUOTE-PARENT-GUID",
+            17, "hi", 2, (const struct hu_conversation_snapshot *)&snap, mid);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        if (reply_calls > 0) {
+            hit = true;
+            HU_ASSERT_STR_EQ(last_reply_body, "↩ \"dinner tonight?\"\nhi");
+        }
+    }
+    HU_ASSERT(hit);
+}
+
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
     HU_RUN_TEST(invalid_args_short_circuit);
@@ -399,6 +445,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
+    HU_RUN_TEST(threaded_reply_quotes_parent_inline);
 #if HU_HAS_IMESSAGE
     HU_RUN_TEST(desc_prefix_match_at_string_start);
     HU_RUN_TEST(desc_prefix_match_after_separator);
