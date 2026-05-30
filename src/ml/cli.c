@@ -1141,16 +1141,17 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         lcfg.save_every = save_every;
         lcfg.budget_ms = -1;
 
-        char default_adapter[512];
         if (output_path) {
             snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s", output_path);
         } else {
+            /* Build directly into the destination — previously copied a
+             * default_adapter[512] into adapter_output_path[256] via "%s",
+             * which GCC -Werror=format-truncation rejects. home/persona_name
+             * are unbounded char* so GCC cannot prove truncation here. */
             const char *home = getenv("HOME");
-            snprintf(default_adapter, sizeof(default_adapter),
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
                      "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
                      persona_name);
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s",
-                     default_adapter);
         }
 
         if (data_dir) {

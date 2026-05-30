@@ -172,7 +172,8 @@ hu_error_t hu_plugin_discover_and_load(hu_allocator_t *alloc, const char *dir,
             cap = new_cap;
         }
 
-        char full_path[1024];
+        char full_path[4096]; /* 4096: dir + "/" + dirent name can exceed 1024 (GCC
+                                 -Werror=format-truncation). */
         snprintf(full_path, sizeof(full_path), "%s/%s", dir, ent->d_name);
 
         hu_plugin_discovery_result_t *r = &(*results)[*result_count];

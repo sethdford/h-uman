@@ -30,10 +30,10 @@
 #ifdef HU_IS_TEST
 #include "human/provider_test_seam.h"
 #endif
-#include <stdbool.h>
 #include "human/ml/dpo.h"
 #include "human/ml/dpo_real.h"
 #include "human/ml/rl_trainer.h"
+#include <stdbool.h>
 
 #include <errno.h>
 #include <math.h>
@@ -142,17 +142,19 @@ static int format_scores_json(char *buf, size_t cap, const char *kind, double me
                               const double *scores, size_t n) {
     int off = 0;
     int w = snprintf(buf + off, cap - (size_t)off,
-                     "{\"kind\":\"%s\",\"n\":%zu,\"mean\":%.6f,\"scores\":[",
-                     kind, n, mean);
-    if (w < 0 || (size_t)w >= cap - (size_t)off) return -1;
+                     "{\"kind\":\"%s\",\"n\":%zu,\"mean\":%.6f,\"scores\":[", kind, n, mean);
+    if (w < 0 || (size_t)w >= cap - (size_t)off)
+        return -1;
     off += w;
     for (size_t i = 0; i < n; i++) {
         w = snprintf(buf + off, cap - (size_t)off, "%s%.6f", i ? "," : "", scores[i]);
-        if (w < 0 || (size_t)w >= cap - (size_t)off) return -1;
+        if (w < 0 || (size_t)w >= cap - (size_t)off)
+            return -1;
         off += w;
     }
     w = snprintf(buf + off, cap - (size_t)off, "]}\n");
-    if (w < 0 || (size_t)w >= cap - (size_t)off) return -1;
+    if (w < 0 || (size_t)w >= cap - (size_t)off)
+        return -1;
     off += w;
     return off;
 }
@@ -186,10 +188,11 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "\"synthetic_reactions\":true,"
              "\"persona_rollout_prompts\":20,"
              "\"note\":\"reactions are synthetic; persona scores from hu_persona_rollout_run\"}\n",
-             created_at, run->pairs_consumed, run->reactions_emitted,
-             run->persona_delta, run->trainer_name,
-             run->trainer_metrics.final_loss, run->trainer_metrics.iters_completed);
-    if (write_stub(path, manifest) != HU_OK) return HU_ERR_IO;
+             created_at, run->pairs_consumed, run->reactions_emitted, run->persona_delta,
+             run->trainer_name, run->trainer_metrics.final_loss,
+             run->trainer_metrics.iters_completed);
+    if (write_stub(path, manifest) != HU_OK)
+        return HU_ERR_IO;
 
     /* training_curves.json: real trainer metrics (no longer `{}`). */
     snprintf(path, sizeof(path), "%s/training_curves.json", dir);
@@ -202,11 +205,10 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "\"rejected_logprob_delta\":%.6f,"
              "\"adapter_path\":\"%s\"}\n",
              run->trainer_name, run->trainer_metrics.iters_completed,
-             run->trainer_metrics.final_loss,
-             run->trainer_metrics.chosen_logprob_delta,
-             run->trainer_metrics.rejected_logprob_delta,
-             run->trainer_metrics.adapter_path);
-    if (write_stub(path, curves) != HU_OK) return HU_ERR_IO;
+             run->trainer_metrics.final_loss, run->trainer_metrics.chosen_logprob_delta,
+             run->trainer_metrics.rejected_logprob_delta, run->trainer_metrics.adapter_path);
+    if (write_stub(path, curves) != HU_OK)
+        return HU_ERR_IO;
 
     /* eval_before.json / eval_after.json: real per-conversation
      * score arrays (no longer `{}`). */
@@ -215,13 +217,15 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
     if (format_scores_json(scores_buf, sizeof(scores_buf), "persona_fidelity_before",
                            run->before_mean, run->before_scores, run->score_n) < 0)
         return HU_ERR_IO;
-    if (write_stub(path, scores_buf) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, scores_buf) != HU_OK)
+        return HU_ERR_IO;
 
     snprintf(path, sizeof(path), "%s/eval_after.json", dir);
     if (format_scores_json(scores_buf, sizeof(scores_buf), "persona_fidelity_after",
                            run->after_mean, run->after_scores, run->score_n) < 0)
         return HU_ERR_IO;
-    if (write_stub(path, scores_buf) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, scores_buf) != HU_OK)
+        return HU_ERR_IO;
 
     /* eval_delta.json: real bootstrap-derived delta + p-value (no
      * longer `{}`). */
@@ -234,10 +238,10 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "\"bootstrap_p_value\":%.6f,"
              "\"n_before\":%zu,"
              "\"n_after\":%zu}\n",
-             run->before_mean, run->after_mean,
-             run->after_mean - run->before_mean,
+             run->before_mean, run->after_mean, run->after_mean - run->before_mean,
              run->bootstrap_p_value, run->score_n, run->score_n);
-    if (write_stub(path, delta) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, delta) != HU_OK)
+        return HU_ERR_IO;
 
     /* delta_responses.md (already mostly real — preserved). */
     snprintf(path, sizeof(path), "%s/delta_responses.md", dir);
@@ -247,10 +251,10 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "Before adapter: %s\n\n"
              "After adapter:  %s\n\n"
              "Persona-fidelity delta: %.4f (after %.4f - before %.4f, bootstrap p=%.4f)\n",
-             run->before_response, run->after_response,
-             run->after_mean - run->before_mean,
+             run->before_response, run->after_response, run->after_mean - run->before_mean,
              run->after_mean, run->before_mean, run->bootstrap_p_value);
-    if (write_stub(path, md) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, md) != HU_OK)
+        return HU_ERR_IO;
 
     /* gate_decision.json: real verdict from hu_eval_gate (or an
      * honest "not run" marker when the bootstrap floor n>=10 isn't
@@ -264,8 +268,8 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
                  "\"persona_ci_upper\":%.6f,"
                  "\"reason\":\"%s\","
                  "\"source\":\"hu_eval_gate_decide_from_arrays_for_test\"}\n",
-                 run->gate_promote ? "true" : "false",
-                 run->gate_persona_ci_lower, run->gate_persona_ci_upper,
+                 run->gate_promote ? "true" : "false", run->gate_persona_ci_lower,
+                 run->gate_persona_ci_upper,
                  run->gate_reason[0] ? run->gate_reason : "(all checks passed)");
     } else {
         snprintf(gate, sizeof(gate),
@@ -274,12 +278,15 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
                  "\"fallback_check\":\"after_mean - before_mean >= 0.05\"}\n",
                  run->delta_passed ? "true" : "false", run->score_n);
     }
-    if (write_stub(path, gate) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, gate) != HU_OK)
+        return HU_ERR_IO;
 
     /* adversarial_review.md: structured automated review covering
      * what the demo actually checked. No longer `{}`. */
     snprintf(path, sizeof(path), "%s/adversarial_review.md", dir);
-    char review[2048];
+    char review[4096]; /* 4096: ~1.3KB markdown body + adapter_path[512] +
+                        * gate_reason[512] + numerics can exceed 2048 (GCC
+                        * -Werror=format-truncation). */
     snprintf(review, sizeof(review),
              "# Automated adversarial review\n\n"
              "_This is an offline automated review. No external LLM critic was run.\n"
@@ -312,15 +319,13 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "- See `reproduce.sh` for the exact command to re-run.\n",
              run->reactions_emitted, run->pairs_consumed, run->trainer_name,
              run->trainer_metrics.iters_completed, run->trainer_metrics.final_loss,
-             run->trainer_metrics.chosen_logprob_delta,
-             run->trainer_metrics.rejected_logprob_delta,
-             run->trainer_metrics.adapter_path,
-             run->score_n, run->before_mean, run->after_mean,
-             run->bootstrap_p_value,
-             run->gate_ran ? "yes" : "no",
+             run->trainer_metrics.chosen_logprob_delta, run->trainer_metrics.rejected_logprob_delta,
+             run->trainer_metrics.adapter_path, run->score_n, run->before_mean, run->after_mean,
+             run->bootstrap_p_value, run->gate_ran ? "yes" : "no",
              run->gate_ran ? (run->gate_promote ? "true" : "false") : "n/a",
              run->gate_reason[0] ? run->gate_reason : "(none)");
-    if (write_stub(path, review) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, review) != HU_OK)
+        return HU_ERR_IO;
 
     /* reproduce.sh: real shell snippet that re-runs the demo with
      * the same args. No longer `echo reproduce`. */
@@ -341,7 +346,8 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "    --out \"$1\"\n",
              (long)t, run->repro_persona, run->repro_method, run->repro_backend,
              run->repro_reaction_count, run->repro_prompt);
-    if (write_stub(path, repro) != HU_OK) return HU_ERR_IO;
+    if (write_stub(path, repro) != HU_OK)
+        return HU_ERR_IO;
     return HU_OK;
 }
 
@@ -447,10 +453,9 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
      * derived from the trainer's chosen_logprob_delta. The synthetic
      * derivation is documented in adversarial_review.md so a reviewer
      * never mistakes it for a real-corpus measurement. */
-    const char *tname = (trainer.vtable && trainer.vtable->name)
-                        ? trainer.vtable->name(trainer.ctx) : "dpo";
-    snprintf(run->trainer_name, sizeof(run->trainer_name), "%s",
-             tname ? tname : "dpo");
+    const char *tname =
+        (trainer.vtable && trainer.vtable->name) ? trainer.vtable->name(trainer.ctx) : "dpo";
+    snprintf(run->trainer_name, sizeof(run->trainer_name), "%s", tname ? tname : "dpo");
 
     /* CF-2-R: 20-prompt fixture (spec §8); falls back to repeated --prompt. */
     char **loaded_prompts = NULL;
@@ -526,9 +531,9 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
     for (size_t i = 0; i < score_n; i++) {
         run->before_scores[i] =
             (base_rr.persona_scores && i < base_rr.n_scored) ? base_rr.persona_scores[i] : 0.5;
-        run->after_scores[i] =
-            (cand_rr.persona_scores && i < cand_rr.n_scored) ? cand_rr.persona_scores[i]
-                                                             : run->before_scores[i];
+        run->after_scores[i] = (cand_rr.persona_scores && i < cand_rr.n_scored)
+                                   ? cand_rr.persona_scores[i]
+                                   : run->before_scores[i];
         before_sum += run->before_scores[i];
         after_sum += run->after_scores[i];
     }
@@ -556,10 +561,8 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
      * n_a, n_b >= 2 per hu_bootstrap_compare_means. */
     if (score_n >= 2) {
         double ma = 0.0, mb = 0.0;
-        if (hu_bootstrap_compare_means(run->before_scores, score_n,
-                                       run->after_scores, score_n,
-                                       1000, 42, &ma, &mb,
-                                       &run->bootstrap_p_value) != HU_OK) {
+        if (hu_bootstrap_compare_means(run->before_scores, score_n, run->after_scores, score_n,
+                                       1000, 42, &ma, &mb, &run->bootstrap_p_value) != HU_OK) {
             run->bootstrap_p_value = -1.0;
         }
     } else {
@@ -589,8 +592,7 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
                 }
             }
         }
-        hu_leaderboard_config_t lbc = {.canned_path = canned_lb[0] ? canned_lb : NULL,
-                                       .seed = 42};
+        hu_leaderboard_config_t lbc = {.canned_path = canned_lb[0] ? canned_lb : NULL, .seed = 42};
         (void)hu_leaderboard_create_mt_bench(alloc, &lbc, &mt_runner);
         (void)hu_leaderboard_create_ifeval(alloc, &lbc, &if_runner);
 
@@ -614,8 +616,8 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
                 mt_ptr = mt_scores;
         }
         if (if_runner.vtable && resp_for_lb && lb_n > 0) {
-            if (if_runner.vtable->run(&if_runner, alloc, prompts, resp_for_lb, lb_n,
-                                      if_scores) == HU_OK)
+            if (if_runner.vtable->run(&if_runner, alloc, prompts, resp_for_lb, lb_n, if_scores) ==
+                HU_OK)
                 if_ptr = if_scores;
         }
 
@@ -634,14 +636,13 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
             .ifeval = (if_runner.vtable && if_ptr) ? &if_runner : NULL,
         };
         hu_eval_gate_verdict_t verdict = {0};
-        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, mt_ptr, if_ptr,
-                                                     NULL, score_n, 100.0, &verdict) == HU_OK) {
+        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, mt_ptr, if_ptr, NULL,
+                                                     score_n, 100.0, &verdict) == HU_OK) {
             run->gate_ran = true;
             run->gate_promote = verdict.promote;
             run->gate_persona_ci_lower = verdict.persona_ci_lower;
             run->gate_persona_ci_upper = verdict.persona_ci_upper;
-            snprintf(run->gate_reason, sizeof(run->gate_reason), "%s",
-                     verdict.reason);
+            snprintf(run->gate_reason, sizeof(run->gate_reason), "%s", verdict.reason);
         }
         if (mt_runner.vtable && mt_runner.vtable->deinit)
             mt_runner.vtable->deinit(&mt_runner, alloc);
