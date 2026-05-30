@@ -11,22 +11,15 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# LeakSanitizer gate: relaxed for this nightly, ASan memory-error detection KEPT.
-#
-# The rl_sota preset is the ONLY build in CI that runs under Linux ASan+LSan;
-# the primary (clang/AppleClang) build-and-test matrix has no LSan at all
-# (LeakSanitizer is unsupported on macOS), so leak-gating here is an
-# accidentally-stricter gate than the rest of CI enforces. Two dominant leak
-# classes were genuinely FIXED (dpo-bridge :memory: db close, m3 agent
-# teardown) — a 1406 -> ~58 allocation reduction. The residual ~58 (a
-# reward-model + GPT backbone created on a Linux-FP-divergent assert path that
-# longjmps past its deinit, plus a small lora_ab cli leak) is NOT reproducible
-# under macOS `leaks` and is tracked as debt to finish on a Linux/LSan box.
-#
-# detect_leaks=0 disables ONLY leak reporting; use-after-free / heap-overflow /
-# double-free detection stays on. Re-enable (delete this line) once the residual
-# Linux-only leaks are fixed. Preserve any inherited ASAN_OPTIONS.
-export ASAN_OPTIONS="${ASAN_OPTIONS:+${ASAN_OPTIONS},}detect_leaks=0"
+# LeakSanitizer gate is FULLY ENABLED. The rl_sota preset is the only CI build
+# that runs under Linux ASan+LSan (LeakSanitizer is unsupported on macOS), so it
+# is the canonical leak gate for the RL stack. The 1406-allocation backlog was
+# driven to zero across three fixes: dpo-bridge :memory: db close, m3 agent
+# teardown, and the final residual 58 (reward-model GPT backbone leaked via an
+# undertrained 5-seed test whose Linux-FP-divergent assert longjmped past deinit
+# — fixed by 200-iter convergence + deinit-before-assert — plus a lora_ab CLI
+# dangling-else that skipped freeing strs_before on the promote path).
+# Do NOT add `detect_leaks=0` here: fix the leak instead.
 
 pass() { printf '\033[0;32mPASS\033[0m  %s\n' "$1"; }
 fail() { printf '\033[0;31mFAIL\033[0m  %s\n' "$1"; exit 1; }

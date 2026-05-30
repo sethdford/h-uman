@@ -2157,20 +2157,35 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
         hu_eval_gate_verdict_t verdict = {0};
         hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(&gate, persona_after, NULL, NULL,
                                                                  NULL, n_gate, 0.0, &verdict);
-        if (ge != HU_OK) {
-            fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
-            return ge;
+        if (ge != HU_OK || !verdict.promote) {
+            if (ge != HU_OK)
+                fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
+            else
+                fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n",
+                        verdict.reason);
+            /* Fail-fast: free every loader allocation before returning so the
+             * gate-reject path doesn't leak (was previously a bare `return`). */
+            if (strs_before)
+                alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+            if (lens_before)
+                alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+            if (strs_after)
+                alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+            if (lens_after)
+                alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+            hu_json_free(alloc, json_before);
+            hu_json_free(alloc, json_after);
+            hu_persona_deinit(alloc, &persona);
+            return ge != HU_OK ? ge : HU_ERR_INVALID_ARGUMENT;
         }
-        if (!verdict.promote) {
-            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n", verdict.reason);
-            return HU_ERR_INVALID_ARGUMENT;
-        }
-    } else
+    }
 #endif
 
-        /* Free loaders before reporting so a fail-fast exit doesn't leak. */
-        if (strs_before)
-            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    /* Free loaders before reporting so a fail-fast exit doesn't leak. This MUST
+     * run unconditionally — a prior `else` here bound only to the first free,
+     * leaking strs_before whenever the --require-positive gate promoted. */
+    if (strs_before)
+        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
     if (lens_before)
         alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
     if (strs_after)
