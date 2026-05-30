@@ -50,7 +50,7 @@ const char *hu_imessage_test_last_reply_tier(void);
  * Returns true to simulate a verified native thread, false otherwise.
  * Pass NULL to clear. */
 typedef bool (*hu_imessage_reply_verify_fn)(const char *target, size_t target_len,
-                                            int64_t since_unix);
+                                            int64_t since_rowid);
 void hu_imessage_set_test_reply_verify_stub(hu_imessage_reply_verify_fn verify);
 
 /* Cross-platform wrapper around the post-send chat.db threading check.
@@ -62,12 +62,23 @@ void hu_imessage_set_test_reply_verify_stub(hu_imessage_reply_verify_fn verify);
  * only honest way to know whether a reply actually threaded is to read it
  * back from chat.db AFTER the send.
  *
- * Polls chat.db for the newest outbound row in `target` with date >=
- * `since_unix` and returns true iff its `thread_originator_guid` is
- * populated. In test builds, delegates to the verify stub (false if unset);
- * on non-macOS or non-SQLite builds, returns false. Best-effort: any lookup
- * failure returns false (we never claim a thread we couldn't confirm). */
-bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, int64_t since_unix);
+ * Identifies our reply by ROWID, not a coarse timestamp: the caller captures
+ * a pre-send boundary (the chat.db MAX(ROWID), via
+ * hu_imessage_reply_newest_rowid) and this looks up the FIRST outbound row to
+ * `target` with `ROWID > since_rowid` — uniquely our send, even if another
+ * message lands in the same wall-clock second. Returns true iff that row's
+ * `thread_originator_guid` is populated. In test builds, delegates to the
+ * verify stub (false if unset); on non-macOS or non-SQLite builds, returns
+ * false. Best-effort: any lookup failure returns false (we never claim a
+ * thread we couldn't confirm). */
+bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, int64_t since_rowid);
+
+/* Capture the current chat.db MAX(ROWID) as a pre-send boundary for
+ * hu_imessage_reply_verify_threaded. Returns the boundary, or 0 if it can't
+ * be read (test / non-macOS / non-SQLite builds, or any lookup failure) — a
+ * 0 boundary is safe: the post-send query then matches any outbound row, so
+ * verification stays best-effort and never over-claims. */
+int64_t hu_imessage_reply_newest_rowid(void);
 
 /* Whether the MOST RECENT hu_imessage_reply call produced a verified native
  * iMessage thread (thread_originator_guid populated), as distinct from a
@@ -99,11 +110,14 @@ bool hu_imessage_ax_reply_tier1_cmd_r(const char *target, size_t target_len,
 bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
                                           const char *parent_guid, size_t parent_guid_len,
                                           const char *body, size_t body_len);
-/* Post-send chat.db threading check (production impl). Polls the newest
- * outbound row in `target` with date >= since_unix and returns whether its
+/* Post-send chat.db threading check (production impl). Looks up the first
+ * outbound row to `target` with ROWID > since_rowid and returns whether its
  * thread_originator_guid is populated. Best-effort; false on any failure. */
 bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
-                                          int64_t since_unix);
+                                          int64_t since_rowid);
+/* Production impl of hu_imessage_reply_newest_rowid — SELECT MAX(ROWID) FROM
+ * message. Returns the boundary, or 0 on any failure. */
+int64_t hu_imessage_ax_reply_newest_rowid(void);
 #endif
 
 #endif

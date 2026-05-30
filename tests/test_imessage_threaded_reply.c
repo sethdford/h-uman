@@ -74,18 +74,18 @@ static hu_error_t flat_send_fails_stub(const char *target, size_t target_len, co
 /* Post-send chat.db threading verify stubs. */
 static int verify_call_count = 0;
 
-static bool verify_true_stub(const char *target, size_t target_len, int64_t since_unix) {
+static bool verify_true_stub(const char *target, size_t target_len, int64_t since_rowid) {
     (void)target;
     (void)target_len;
-    (void)since_unix;
+    (void)since_rowid;
     verify_call_count++;
     return true;
 }
 
-static bool verify_false_stub(const char *target, size_t target_len, int64_t since_unix) {
+static bool verify_false_stub(const char *target, size_t target_len, int64_t since_rowid) {
     (void)target;
     (void)target_len;
-    (void)since_unix;
+    (void)since_rowid;
     verify_call_count++;
     return false;
 }

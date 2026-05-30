@@ -153,6 +153,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                 err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
                 if (err == HU_OK) {
                     tier_used = "flat_fallback";
+                    actual_style = HU_REPLY_STYLE_FLAT;
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "imessage_dispatch: tapback unavailable, flat fallback");
                 }

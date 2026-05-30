@@ -1,16 +1,16 @@
 # Human — Project Status
 
-Last updated: 2026-03-26
+Last updated: 2026-05-29
 
 ## Summary
 
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **1,093**              |
-| Lines of C/H/ASM code          | **~290K**              |
+| Lines of C/H/ASM code          | **~473K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **7104/7104 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~1750 KB**           |
+| Tests passing                  | **13,163/13,163 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **~23147 KB**           |
 | Peak RSS (test suite)          | **~6.0 MB**            |
 
 ## Channels — Honest Status
@@ -54,7 +54,7 @@ Last updated: 2026-03-26
 | -------- | ------------------------ |
 | Dispatch | Forwards to sub-channels |
 
-## Tools — All 83 Real (with all feature flags)
+## Tools — All 99 Real (with all feature flags)
 
 Every tool has a real implementation. In test mode (`HU_IS_TEST`), they return mock
 data to avoid side effects. Highlights:

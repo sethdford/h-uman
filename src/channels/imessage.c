@@ -3921,7 +3921,7 @@ bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
  * any lookup failure returns false (we never claim a thread we couldn't
  * confirm). */
 bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
-                                          int64_t since_unix) {
+                                          int64_t since_rowid) {
     if (!target || target_len == 0)
         return false;
 #ifdef HU_ENABLE_SQLITE
@@ -3933,23 +3933,25 @@ bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return false;
 
-    /* chat.db stores message.date in nanoseconds since the Mac epoch
-     * (2001-01-01). Convert the Unix-epoch floor to that frame. */
-    int64_t since_mac_ns = (since_unix - 978307200LL) * 1000000000LL;
-
     char target_buf[256];
     size_t tlen = target_len < sizeof(target_buf) - 1 ? target_len : sizeof(target_buf) - 1;
     memcpy(target_buf, target, tlen);
     target_buf[tlen] = '\0';
 
-    /* The send is asynchronous: Messages writes the outbound row a moment
-     * after the AX Return. Poll ~5×400ms before giving up. */
+    /* Identify OUR reply by ROWID, not a coarse timestamp. since_rowid is the
+     * pre-send MAX(ROWID); the first outbound row to this handle with a higher
+     * ROWID is the message we just sent — unaffected by any other send that
+     * lands in the same wall-clock second. ORDER BY ROWID ASC takes that first
+     * new row (not the newest, which could be a later unrelated send).
+     * The send is asynchronous: Messages writes the row a moment after the AX
+     * Return, so poll ~5×400ms before giving up. */
     const char *sql = "SELECT m.thread_originator_guid FROM message m "
                       "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE h.id = ?1 AND m.is_from_me = 1 AND m.date >= ?2 "
-                      "ORDER BY m.date DESC LIMIT 1";
+                      "WHERE h.id = ?1 AND m.is_from_me = 1 AND m.ROWID > ?2 "
+                      "ORDER BY m.ROWID ASC LIMIT 1";
     bool threaded = false;
-    for (int attempt = 0; attempt < 5 && !threaded; attempt++) {
+    bool found = false;
+    for (int attempt = 0; attempt < 5 && !found; attempt++) {
         if (attempt > 0)
             usleep(400000);
         sqlite3 *db = NULL;
@@ -3961,8 +3963,9 @@ bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
             continue;
         }
         sqlite3_bind_text(stmt, 1, target_buf, -1, NULL);
-        sqlite3_bind_int64(stmt, 2, since_mac_ns);
+        sqlite3_bind_int64(stmt, 2, since_rowid);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
+            found = true; /* our row materialized — stop polling */
             const unsigned char *tog = sqlite3_column_text(stmt, 0);
             if (tog && tog[0])
                 threaded = true;
@@ -3974,8 +3977,34 @@ bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
 #else
     (void)target;
     (void)target_len;
-    (void)since_unix;
+    (void)since_rowid;
     return false;
+#endif
+}
+
+int64_t hu_imessage_ax_reply_newest_rowid(void) {
+#ifdef HU_ENABLE_SQLITE
+    const char *home = getenv("HOME");
+    if (!home)
+        return 0;
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return 0;
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return 0;
+    int64_t max_rowid = 0;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            max_rowid = sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return max_rowid;
+#else
+    return 0;
 #endif
 }
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */

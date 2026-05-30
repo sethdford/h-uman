@@ -20,8 +20,14 @@ static hu_imessage_reply_verify_fn g_test_verify = NULL;
  * iMessage thread. Reset to false at the start of every call; set true only
  * when the post-send chat.db read-back confirms thread_originator_guid is
  * populated. The daemon dispatcher reads this via the getter to report the
- * reply outcome honestly instead of assuming THREADED on any HU_OK. */
-static bool g_last_verified_threaded = false;
+ * reply outcome honestly instead of assuming THREADED on any HU_OK.
+ *
+ * Thread-local: the dispatcher invokes hu_imessage_reply and then reads the
+ * getter synchronously on the SAME thread, so a per-thread slot ties the
+ * result to that thread's in-flight reply. This prevents a concurrent reply
+ * on another thread (e.g. a second gateway worker) from clobbering the flag
+ * between this thread's set and read. */
+static _Thread_local bool g_last_verified_threaded = false;
 
 void hu_imessage_set_test_reply_stubs(hu_imessage_reply_tier_fn tier1,
                                       hu_imessage_reply_tier_fn tier2,
@@ -47,17 +53,29 @@ bool hu_imessage_reply_last_verified_threaded(void) {
  * In test builds, delegates to g_test_verify (false if unset). On macOS
  * with TAPBACK wiring, delegates to the production chat.db poll. Otherwise
  * returns false — we never claim a native thread we couldn't confirm. */
-bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, int64_t since_unix) {
+bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, int64_t since_rowid) {
     if (g_test_verify) {
-        return g_test_verify(target, target_len, since_unix);
+        return g_test_verify(target, target_len, since_rowid);
     }
 #if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
-    return hu_imessage_ax_reply_verify_threaded(target, target_len, since_unix);
+    return hu_imessage_ax_reply_verify_threaded(target, target_len, since_rowid);
 #else
     (void)target;
     (void)target_len;
-    (void)since_unix;
+    (void)since_rowid;
     return false;
+#endif
+}
+
+/* Cross-platform wrapper: capture the pre-send chat.db ROWID boundary. In test
+ * or non-macOS builds there is no chat.db, so return 0 (a 0 boundary keeps
+ * verification best-effort — it matches any outbound row rather than over-
+ * claiming). */
+int64_t hu_imessage_reply_newest_rowid(void) {
+#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+    return hu_imessage_ax_reply_newest_rowid();
+#else
+    return 0;
 #endif
 }
 
@@ -122,11 +140,12 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
         return HU_ERR_INVALID_ARGUMENT;
     }
 
-    /* Record start time for elapsed_ms, and a wall-clock floor for the
-     * post-send chat.db read-back: the verified outbound row must be newer
-     * than the instant we began the send. */
+    /* Record start time for elapsed_ms, and a pre-send ROWID boundary for the
+     * post-send chat.db read-back: the verified outbound row is the first one
+     * to this handle with ROWID greater than this boundary — uniquely our
+     * send, even if another message lands in the same wall-clock second. */
     int64_t ts_start_ms = hu_time_get_current_ms();
-    int64_t since_unix = (int64_t)time(NULL);
+    int64_t since_rowid = hu_imessage_reply_newest_rowid();
 
     /* Tier 1: Cmd-R via AX. */
     bool t1_ok = false;
@@ -144,7 +163,7 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
          * "true" return (IMCore is entitlement-locked on macOS 26+). Read
          * back from chat.db to know whether it actually threaded. */
         g_last_verified_threaded =
-            hu_imessage_reply_verify_threaded(target, target_len, since_unix);
+            hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
         int64_t ts_end_ms = hu_time_get_current_ms();
         emit_telemetry("cmdR",
                        g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
@@ -165,7 +184,7 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     if (t2_ok) {
         snprintf(g_last_tier, sizeof(g_last_tier), "ax_menu");
         g_last_verified_threaded =
-            hu_imessage_reply_verify_threaded(target, target_len, since_unix);
+            hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
         int64_t ts_end_ms = hu_time_get_current_ms();
         emit_telemetry("ax_menu",
                        g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
