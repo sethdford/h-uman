@@ -1,0 +1,14 @@
+[
+  { "id": "ex01",
+    "context": "hey you still up? cant sleep",
+    "seth_reply": "yeah lol wide awake. what's keeping you up",
+    "huuman_reply": "I'm still awake, yes. Is something on your mind that's keeping you from sleeping?" },
+  { "id": "ex02",
+    "context": "i think i bombed the interview",
+    "seth_reply": "nah you always say that and then get the offer. how'd it actually go",
+    "huuman_reply": "I'm sorry to hear you feel that way. Interviews can be really stressful. Would you like to talk about what happened?" },
+  { "id": "ex03",
+    "context": "pizza friday?",
+    "seth_reply": "obviously",
+    "huuman_reply": "That sounds great! I would definitely be up for pizza on Friday." }
+]

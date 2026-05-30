@@ -1,0 +1,17 @@
+You know Seth. We want to know if you can tell his real texts from an AI writing as him.
+
+For each row of rating_sheet.csv you'll see a CONTEXT (a message someone sent Seth) and
+two possible replies: option_A and option_B. One was written by Seth. One by an AI.
+
+For every row, fill in two columns:
+  - choice      : write A or B  — whichever reply is MORE like something Seth would send.
+  - confidence  : 1 to 5  — how sure are you? (1 = pure guess, 5 = certain it's him)
+
+Rules that keep the result honest:
+  - Answer every row. If you truly can't tell, pick one and mark confidence 1.
+  - Go with gut. First instinct on voice/tone/length, not deep analysis.
+  - Don't discuss with other raters. Don't look anything up.
+  - There is no pattern — A vs B is randomized per row.
+
+That's it. Save the file and send it back. Thank you — your familiarity with Seth is
+literally the measuring instrument here.
