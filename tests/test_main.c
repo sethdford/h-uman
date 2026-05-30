@@ -410,6 +410,12 @@ void run_outbound_crosstalk_tests(void);
 void run_boundary_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
+void run_emotional_moments_repo_tests(void);
+void run_emotional_residue_repo_tests(void);
+void run_emotional_state_repo_tests(void);
+void run_mood_repo_tests(void);
+void run_self_model_repo_tests(void);
+void run_theory_of_mind_repo_tests(void);
 void run_outbound_crosstalk_sqlite_tests(void);
 /* Sprint 60 E2E SOTA proof — full pipeline through a file-based db. */
 void run_outbound_e2e_sota_proof_tests(void);
@@ -1367,6 +1373,12 @@ int main(int argc, char **argv) {
     run_boundary_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
+    run_emotional_moments_repo_tests();
+    run_emotional_residue_repo_tests();
+    run_emotional_state_repo_tests();
+    run_mood_repo_tests();
+    run_self_model_repo_tests();
+    run_theory_of_mind_repo_tests();
     run_outbound_crosstalk_sqlite_tests();
     run_outbound_e2e_sota_proof_tests();
     run_burst_egress_tests();

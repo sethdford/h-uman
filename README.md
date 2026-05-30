@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~23147 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
+  <strong>~23123 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -22,12 +22,12 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~23147 KB binary · <30 ms startup · 13,163+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~23123 KB binary · <30 ms startup · 13,172+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** ~23147 KB static binary — no runtime, no VM, no framework overhead.
+- **Impossibly Small:** ~23123 KB static binary — no runtime, no VM, no framework overhead.
 - **Near-Zero Memory:** < 6 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
 - **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
@@ -65,7 +65,7 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
 | **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~23147 KB**      |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~23123 KB**      |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. Human's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
@@ -73,7 +73,7 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 Human's verified numbers (measured on macOS arm64, March 2026):
 
 ```
-Binary size:   ~23147 KB (MinSizeRel + LTO, all channels)
+Binary size:   ~23123 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
 Tests:         11,924+ passing, 0 ASan errors
@@ -655,7 +655,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 13,163+ tests
+./human_tests                             # 13,172+ tests
 cd ..
 ```
 
@@ -674,7 +674,7 @@ cmake --preset integration && cmake --build --preset integration
 ./build-integration/human_integration_tests
 ```
 
-Release build (~23147 KB):
+Release build (~23123 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
@@ -699,9 +699,9 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 Language: C11 + ASM (aarch64, x86_64)
 Source files: 1,093
 Lines of code: ~473K
-Test files: 792
+Test files: 798
 Tests: 6374+
-Binary: ~23147 KB (MinSizeRel + LTO, all channels)
+Binary: ~23123 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
@@ -734,7 +734,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 580+ test files, 13,163+ tests
+tests/ 580+ test files, 13,172+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)
