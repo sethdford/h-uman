@@ -150,8 +150,29 @@ static void eval_compare_detects_regression(void) {
     alloc.free(alloc.ctx, report, rlen + 1);
 }
 
+/* 2026-05-30: guard the empty-output footgun. fidelity.json / longitudinal silently
+ * produced empty model output (a post-hoc timeout discarded valid slow generations)
+ * and the runner scored them 0.00 — a generation failure masquerading as a humanness
+ * regression, blinding `eval baseline` / `check-regression`. The pure predicate flags
+ * a run INVALID when >50% of tasks are empty. The exactly-50% boundary is pinned so a
+ * future `>`/`>=` slip is caught. */
+static void eval_run_empty_invalid_flags_majority_empty(void) {
+    /* strict majority empty -> INVALID */
+    HU_ASSERT_TRUE(hu_eval_run_empty_invalid(18, 18)); /* all empty (the fidelity case) */
+    HU_ASSERT_TRUE(hu_eval_run_empty_invalid(10, 18)); /* 56% */
+    HU_ASSERT_TRUE(hu_eval_run_empty_invalid(5, 9));   /* 55% (the longitudinal case) */
+    /* exactly 50% or fewer -> VALID (not auto-invalidated) */
+    HU_ASSERT_FALSE(hu_eval_run_empty_invalid(9, 18)); /* exactly 50% boundary */
+    HU_ASSERT_FALSE(hu_eval_run_empty_invalid(0, 18)); /* none empty */
+    HU_ASSERT_FALSE(hu_eval_run_empty_invalid(2, 6));  /* 2 of 6 empty (multi_turn), <50% */
+    /* defensive: zero tasks is never invalid (no division, no false alarm) */
+    HU_ASSERT_FALSE(hu_eval_run_empty_invalid(0, 0));
+    HU_ASSERT_FALSE(hu_eval_run_empty_invalid(1, 0));
+}
+
 void run_eval_runner_tests(void) {
     HU_TEST_SUITE("eval_runner");
+    HU_RUN_TEST(eval_run_empty_invalid_flags_majority_empty);
     HU_RUN_TEST(test_eval_suite_system_prompt_set_and_free);
     HU_RUN_TEST(test_eval_suite_null_system_prompt_is_legal);
     HU_RUN_TEST(eval_run_suite_null_args_returns_error);
