@@ -34,7 +34,12 @@ pass "Phase 5 eval suites"
 
 info "v1 fidelity + lora baseline"
 ./build-rl-sota/human_tests --suite=personal-model-fidelity-v2 >/dev/null
-bash scripts/check-lora-baseline.sh
+# Point the baseline gate at the rl_sota binary we just built. Without this it
+# defaults to ./build/human, which the rl_sota preset never produces (we build
+# into ./build-rl-sota) — so it would trigger a second, default-config rebuild
+# of ./build whose stdout is swallowed, and any failure there surfaced only as
+# an opaque non-zero exit from this step (the original RL-nightly red).
+LORA_BASELINE_BIN="${ROOT}/build-rl-sota/human" bash scripts/check-lora-baseline.sh
 
 if [ "$QUICK" -eq 0 ]; then
     info "Full test suite"
