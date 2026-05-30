@@ -30,12 +30,16 @@ while IFS= read -r src; do
     #   - hu_<base>_<rest>        (typical helper)
     #   - hu_<base>(              (function whose name IS the base, called as fn(...))
     #   - hu_<base>;              (declaration / assignment to function pointer)
+    #   - hu_ml_<base>_<rest>     (ML CLI subcommand convention — `human ml <x>`
+    #                              maps to `hu_ml_cli_<x>`, see src/ml/cli.h)
     #   - test_<base>_<rest>      (direct test wrapper)
     #   - TEST.*<base>            (named test case)
     # Without this, modules like src/evaluation/evaluation_dmr.c whose only
     # tested symbol is `hu_evaluation_dmr` (no trailing underscore) are
-    # falsely reported as untested.
-    if grep -rqE "hu_${base}_|hu_${base}\(|hu_${base};|test_${base}_|TEST.*${base}" tests/ >/dev/null 2>&1; then
+    # falsely reported as untested. The hu_ml_ prefix variant was added
+    # 2026-05-17 for src/ml/cli_adapter_rollback.c — tested via
+    # `hu_ml_cli_adapter_rollback(...)` calls in tests/test_w14_dual_lora.c.
+    if grep -rqE "hu_${base}_|hu_${base}\(|hu_${base};|hu_ml_${base}_|hu_ml_${base}\(|test_${base}_|TEST.*${base}" tests/ >/dev/null 2>&1; then
         continue
     fi
 
