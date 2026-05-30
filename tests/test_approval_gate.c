@@ -1,7 +1,9 @@
-#include "test_framework.h"
 #include "human/agent/approval_gate.h"
 #include "human/core/allocator.h"
+#include "test_framework.h"
+#include "test_tmpdir.h"
 #include <dirent.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,31 +25,31 @@ static void test_free_wrapper(void *ctx, void *ptr, size_t size) {
 
 /* Test allocator */
 static hu_allocator_t test_alloc = {
-    .ctx = NULL,
-    .alloc = test_alloc_wrapper,
-    .free = test_free_wrapper,
-    .realloc = NULL
-};
+    .ctx = NULL, .alloc = test_alloc_wrapper, .free = test_free_wrapper, .realloc = NULL};
 
-/* Return a per-pid, per-tag tmp path so cross-run state can't leak.
- * Walks the directory and unlinks every entry before returning so the
- * test starts with a guaranteed-empty directory. Two binaries running
- * concurrently use different pids → no collision. */
-static const char *gates_path(int tag) {
-    static char buf[128];
-    snprintf(buf, sizeof(buf), "/tmp/hu_test_gates_%d_%d", (int)getpid(), tag);
-    DIR *d = opendir(buf);
-    if (d) {
-        struct dirent *de;
-        while ((de = readdir(d)) != NULL) {
-            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
-                continue;
-            char path[256];
-            snprintf(path, sizeof(path), "%s/%s", buf, de->d_name);
-            unlink(path);
-        }
-        closedir(d);
+/* A unique base temp dir for this process, created once via mkdtemp. The old
+ * /tmp/hu_test_gates_<pid>_<tag> naming reused paths once PIDs recycled, so a
+ * prior run's leftover gate files inflated the pending count (test failed with
+ * count==4 instead of 2). A random mkdtemp suffix makes cross-run collisions
+ * impossible; run_approval_gate_tests() rm_rf's it at the end. */
+static const char *gates_base(void) {
+    static char base[96];
+    static bool init = false;
+    if (!init) {
+        if (!hu_test_mkdtemp("/tmp/hu_test_gates_", base, sizeof(base)))
+            snprintf(base, sizeof(base), "/tmp/hu_test_gates_%d", (int)getpid());
+        init = true;
     }
+    return base;
+}
+
+/* Return a per-tag tmp path under the unique base. rm_rf the per-tag dir first
+ * so each test starts with a guaranteed-empty directory even if a tag is
+ * reused within a run. */
+static const char *gates_path(int tag) {
+    static char buf[160];
+    snprintf(buf, sizeof(buf), "%s/%d", gates_base(), tag);
+    hu_test_rm_rf(buf);
     return buf;
 }
 
@@ -116,8 +118,8 @@ static void test_gate_resolve_approve(void) {
     hu_gate_create(mgr, &test_alloc, "Approve?", 8, NULL, 0, 0, gate_id);
 
     const char *response = "Approved by user123";
-    hu_error_t err = hu_gate_resolve(mgr, &test_alloc, gate_id, HU_GATE_APPROVED, response,
-                                     strlen(response));
+    hu_error_t err =
+        hu_gate_resolve(mgr, &test_alloc, gate_id, HU_GATE_APPROVED, response, strlen(response));
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_gate_status_t status;
@@ -143,8 +145,8 @@ static void test_gate_resolve_reject(void) {
     hu_gate_create(mgr, &test_alloc, "Reject test?", 12, NULL, 0, 0, gate_id);
 
     const char *reason = "Not ready for deployment";
-    hu_error_t err = hu_gate_resolve(mgr, &test_alloc, gate_id, HU_GATE_REJECTED, reason,
-                                     strlen(reason));
+    hu_error_t err =
+        hu_gate_resolve(mgr, &test_alloc, gate_id, HU_GATE_REJECTED, reason, strlen(reason));
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_gate_status_t status;
@@ -298,4 +300,6 @@ void run_approval_gate_tests(void) {
     HU_RUN_TEST(test_gate_persistence);
     HU_RUN_TEST(test_gate_status_names);
     HU_RUN_TEST(test_gate_memory_cleanup);
+
+    hu_test_rm_rf(gates_base()); /* leave nothing behind in /tmp */
 }

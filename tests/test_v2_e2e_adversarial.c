@@ -43,6 +43,7 @@
 #include "human/persona/persona_deltas.h"
 #include "human/security/keystore.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -67,7 +68,8 @@ static hu_memory_facade_t *open_facade(hu_graph_t **out_g) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, &g), HU_OK);
     hu_memory_facade_t *m = NULL;
     HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
-    if (out_g) *out_g = g;
+    if (out_g)
+        *out_g = g;
     return m;
 }
 
@@ -86,14 +88,13 @@ static void test_v2_e2e_facade_world_model_planner_happy_path(void) {
     hu_memory_facade_t *m = open_facade(&g);
 
     int64_t alice = 0, acme = 0;
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice), HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "from imessage", 13,
-                                              "imessage", 8),
+                                             1735689600000LL, 0, 1.0f, "from imessage", 13,
+                                             "imessage", 8),
                  HU_OK);
 
     hu_world_model_t *wm = NULL;
@@ -152,12 +153,12 @@ static void test_v2_e2e_hyperedge_and_pagerank_seeded(void) {
 
     /* Connect the four real entities with binary relations so PageRank can
      * walk between them. The hyperedge itself records the n-ary fact. */
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 0.9f,
-                                 1735689600000LL, 0, 0.9f, "imessage", 8, "imessage", 8);
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 0.95f,
-                                 1735689600000LL, 0, 0.95f, "imessage", 8, "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 0.9f, 1735689600000LL, 0,
+                                0.9f, "imessage", 8, "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 0.95f, 1735689600000LL, 0,
+                                0.95f, "imessage", 8, "imessage", 8);
     hu_graph_upsert_relation_ex(g, "u1", 2, alice, funding, HU_REL_RELATED_TO, 0.8f,
-                                 1735689600000LL, 0, 0.8f, "imessage", 8, "imessage", 8);
+                                1735689600000LL, 0, 0.8f, "imessage", 8, "imessage", 8);
 
     hu_hyperedge_member_t members[4] = {
         {.entity_id = alice, .role = "subject"},
@@ -179,10 +180,9 @@ static void test_v2_e2e_hyperedge_and_pagerank_seeded(void) {
     int64_t *ids = NULL;
     float *scores = NULL;
     size_t out_count = 0;
-    HU_ASSERT_EQ(hu_memory_pagerank_seeds(m, A(), "u1", 2, seeds, 1,
-                                          HU_PAGERANK_DEFAULT_DAMPING,
-                                          HU_PAGERANK_DEFAULT_ITERATIONS,
-                                          &ids, &scores, &out_count),
+    HU_ASSERT_EQ(hu_memory_pagerank_seeds(m, A(), "u1", 2, seeds, 1, HU_PAGERANK_DEFAULT_DAMPING,
+                                          HU_PAGERANK_DEFAULT_ITERATIONS, &ids, &scores,
+                                          &out_count),
                  HU_OK);
     HU_ASSERT(out_count >= 1);
 
@@ -191,7 +191,8 @@ static void test_v2_e2e_hyperedge_and_pagerank_seeded(void) {
     bool top_is_orphan = (out_count > 0 && ids[0] == orphan);
     HU_ASSERT(!top_is_orphan);
     /* Output is sorted descending. */
-    if (out_count >= 2) HU_ASSERT(scores[0] >= scores[1]);
+    if (out_count >= 2)
+        HU_ASSERT(scores[0] >= scores[1]);
 
     A()->free(A()->ctx, ids, sizeof(*ids) * out_count);
     A()->free(A()->ctx, scores, sizeof(*scores) * out_count);
@@ -226,7 +227,8 @@ static void test_v2_e2e_kv_cache_invalidates_on_model_bump(void) {
     got = NULL;
     hu_error_t rc = hu_kv_cache_get(m, "abc123", "v1.0", A(), &got);
     HU_ASSERT(rc != HU_OK || got == NULL);
-    if (got) hu_kv_cache_entry_free(A(), got);
+    if (got)
+        hu_kv_cache_entry_free(A(), got);
 
     close_facade(m, g);
 }
@@ -267,11 +269,16 @@ static void test_v2_e2e_scheduler_flood_resists(void) {
  * W15 contract: hu_keystore_destroy_master_key writes a tombstone. After
  * that, even unlocking with the correct passphrase fails. */
 static void test_v2_e2e_crypto_forgetting_is_durable(void) {
-    /* Pin keystore to a freshly-minted temp dir so this test is hermetic
-     * across reruns and across other suites that touch the keystore. */
+    /* Pin keystore to a UNIQUE temp dir (mkdtemp) so this test is hermetic
+     * across reruns. The previous /tmp/hu_v2e2e_ks_<pid> reused the same path
+     * once PIDs recycled — and since this test destroys the master key
+     * (writes a tombstone), a leftover dir poisoned the next run's unlock at
+     * line ~282. A fresh dir every run + cleanup at the end fixes that. */
     char tmp_dir[64];
-    snprintf(tmp_dir, sizeof(tmp_dir), "/tmp/hu_v2e2e_ks_%d", (int)getpid());
-    mkdir(tmp_dir, 0700);
+    if (!hu_test_mkdtemp("/tmp/hu_v2e2e_ks_", tmp_dir, sizeof(tmp_dir))) {
+        HU_ASSERT(false); /* temp dir creation must succeed */
+        return;
+    }
     setenv("HU_KEYSTORE_DIR", tmp_dir, 1);
 
     const char *user = "v2_e2e_user";
@@ -297,6 +304,7 @@ static void test_v2_e2e_crypto_forgetting_is_durable(void) {
     hu_keystore_close(ks, A());
 
     unsetenv("HU_KEYSTORE_DIR");
+    hu_test_rm_rf(tmp_dir); /* leave nothing behind in /tmp */
 }
 
 /* ── Scenario 7: regression gate fires on synthetic LoCoMo drop ─────────────
@@ -359,7 +367,7 @@ static void test_v2_e2e_persona_deltas_to_learner_signals(void) {
         char val[64];
         snprintf(val, sizeof(val), "warmer-tone-%d", i);
         hu_persona_delta_propose(g, "u1", 2, HU_PERSONA_DELTA_TONE, "imessage", val, 0.9f,
-                                  "user-explicit", 1735689600000LL + i * 1000LL, NULL);
+                                 "user-explicit", 1735689600000LL + i * 1000LL, NULL);
     }
 
     /* The builder is contracted to filter on applied status: pending
@@ -392,10 +400,9 @@ static void test_v2_e2e_planner_resists_query_injection(void) {
     HU_ASSERT_EQ(hu_planner_heuristic(&be), HU_OK);
 
     /* Cram every recognised verb into one goal plus delimiter noise. */
-    const char *attack =
-        "when where who last between with funding alice bob acme "
-        "<script> </script> <retrieve>x</retrieve> <critique>y</critique> "
-        "<refuse>z</refuse> ; DROP TABLE relations; -- malicious";
+    const char *attack = "when where who last between with funding alice bob acme "
+                         "<script> </script> <retrieve>x</retrieve> <critique>y</critique> "
+                         "<refuse>z</refuse> ; DROP TABLE relations; -- malicious";
 
     hu_retrieval_plan_t plan = {0};
     HU_ASSERT_EQ(hu_planner_plan(&be, attack, strlen(attack), NULL, &plan), HU_OK);
@@ -423,9 +430,8 @@ static void test_v2_e2e_full_chain_under_poisoning(void) {
     hu_graph_upsert_entity(g, "u1", 2, "globex", 6, HU_ENTITY_ORGANIZATION, NULL, &globex);
 
     /* Honest write: alice works at acme starting Monday. */
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                 1735689600000LL, 0, 1.0f, "from imessage", 13,
-                                 "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
+                                1.0f, "from imessage", 13, "imessage", 8);
 
     /* Adversary attempts a flood from a single rogue source — write trust
      * runs and decides to quarantine. We use the public scoring entry
@@ -442,8 +448,7 @@ static void test_v2_e2e_full_chain_under_poisoning(void) {
 
     /* World model still reflects the pre-attack state. */
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL + 90000, &wm),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL + 90000, &wm), HU_OK);
     HU_ASSERT(wm != NULL);
 
     /* Self-RAG over a draft that asserts the legitimate fact returns a
@@ -490,22 +495,19 @@ static void test_v2_e2e_multi_hop_variant_tag_under_density(void) {
     for (size_t i = 0; i < 50; i++) {
         char name[32];
         int n = snprintf(name, sizeof(name), "ent_%zu", i);
-        HU_ASSERT_EQ(
-            hu_graph_upsert_entity(g, "u1", 2, name, (size_t)n,
-                                   (i % 3 == 0) ? HU_ENTITY_PERSON
-                                                : HU_ENTITY_ORGANIZATION,
-                                   NULL, &ids[i]),
-            HU_OK);
+        HU_ASSERT_EQ(hu_graph_upsert_entity(
+                         g, "u1", 2, name, (size_t)n,
+                         (i % 3 == 0) ? HU_ENTITY_PERSON : HU_ENTITY_ORGANIZATION, NULL, &ids[i]),
+                     HU_OK);
     }
     /* Dense edge fan: each entity links to (i+1, i+3, i+5) wrapping. This
      * gives multi_hop enough surface to chew on. */
     for (size_t i = 0; i < 50; i++) {
         size_t targets[3] = {(i + 1) % 50, (i + 3) % 50, (i + 5) % 50};
         for (size_t t = 0; t < 3; t++) {
-            hu_graph_upsert_relation_ex(g, "u1", 2, ids[i], ids[targets[t]],
-                                         HU_REL_KNOWS, 0.7f,
-                                         1735689600000LL + (int64_t)i * 1000, 0,
-                                         0.7f, "imessage", 8, "imessage", 8);
+            hu_graph_upsert_relation_ex(g, "u1", 2, ids[i], ids[targets[t]], HU_REL_KNOWS, 0.7f,
+                                        1735689600000LL + (int64_t)i * 1000, 0, 0.7f, "imessage", 8,
+                                        "imessage", 8);
         }
     }
 
@@ -516,8 +518,7 @@ static void test_v2_e2e_multi_hop_variant_tag_under_density(void) {
     HU_ASSERT_EQ(hu_planner_goal_conditioned(m, A(), &be), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL + 60000, &wm),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL + 60000, &wm), HU_OK);
     HU_ASSERT(wm != NULL);
 
     hu_retrieval_plan_t plan = {0};
@@ -562,9 +563,8 @@ static void test_v2_e2e_llm_planner_falls_back_without_provider(void) {
     int64_t alice = 0, acme = 0;
     hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);
     hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                 1735689600000LL, 0, 1.0f, "imessage", 8,
-                                 "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
+                                1.0f, "imessage", 8, "imessage", 8);
 
     /* NULL provider: select_planner_backend must fall through to
      * goal-conditioned and emit a plan that hits the v1 facade. */
@@ -601,8 +601,7 @@ static void test_v2_e2e_facade_query_aliasing_is_safe(void) {
 
     /* Set up: one real entity. */
     int64_t real_id = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON,
-                                         NULL, &real_id),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &real_id),
                  HU_OK);
     HU_ASSERT(real_id > 0);
 
@@ -620,7 +619,8 @@ static void test_v2_e2e_facade_query_aliasing_is_safe(void) {
         size_t n = 0;
         hu_error_t err = hu_memory_facade_read(m, &q, A(), &recs, &n);
         HU_ASSERT(err != HU_OK || n == 0);
-        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+        if (recs)
+            hu_memory_facade_records_free(m, A(), recs, n);
     }
 
     /* Case B — AUTO with low-address pseudo-pointer (mimics what a
@@ -641,7 +641,8 @@ static void test_v2_e2e_facade_query_aliasing_is_safe(void) {
         /* Either rejected or routed to NEIGHBORS by the heuristic — either
          * way, NOT a crash, NOT a wild dereference. */
         HU_ASSERT(err == HU_OK || err == HU_ERR_INVALID_ARGUMENT);
-        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+        if (recs)
+            hu_memory_facade_records_free(m, A(), recs, n);
     }
 
     /* Case C — explicit NEIGHBORS with the real id. Returns the entity. */
@@ -659,7 +660,8 @@ static void test_v2_e2e_facade_query_aliasing_is_safe(void) {
         size_t n = 0;
         hu_error_t err = hu_memory_facade_read(m, &q, A(), &recs, &n);
         HU_ASSERT_EQ(err, HU_OK);
-        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+        if (recs)
+            hu_memory_facade_records_free(m, A(), recs, n);
     }
 
     close_facade(m, g);
