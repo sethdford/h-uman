@@ -202,6 +202,43 @@ static void reply_failure_falls_back_to_flat(void) {
     HU_ASSERT(threaded_hit);
 }
 
+/* AC (regression): An EMPTY/NULL parent_guid must suppress the threaded
+ * reply attempt, even when vtable->reply is present AND the predicate picks
+ * THREADED. This pins the production bug fixed in daemon.c: all four
+ * dispatcher call sites hardcoded parent_msg_guid = NULL, so the dispatcher's
+ * guard `threaded_attempted = (vtable->reply && parent_msg_guid &&
+ * parent_guid_len > 0)` was always false → threaded AX path was structurally
+ * dead. The fix plumbs the inbound msgs[batch_start].guid through; if a future
+ * refactor reverts a call site to NULL (or passes an empty-string guid with
+ * len 0), this test catches it.
+ *
+ * Same THREADED-favorable facts as reply_failure_falls_back_to_flat, which
+ * hits the reply path within 50 iterations when the guid is non-empty. Here
+ * the guid is empty, so reply must NEVER be attempted across all 50 — any
+ * reply_call is a regression (the empty-guard stopped working). react_emoji is
+ * nulled so every non-flat style collapses to send, keeping the always-do-
+ * something assertion deterministic. */
+static void empty_parent_guid_never_attempts_threaded_reply(void) {
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 300;
+    snap.parent_is_question = true;
+    snap.other_threaded_replies_recent = 4;
+    snap.conv_density_msgs_per_min = 1.0f;
+
+    for (int64_t mid = 1; mid <= 50; mid++) {
+        setup_mocks();
+        mock_vtable.react_emoji = NULL; /* force any non-flat style onto send */
+
+        /* NULL guid, len 0 — the production-bug shape. */
+        hu_error_t err = hu_daemon_dispatch_imessage_reply(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+            (const struct hu_conversation_snapshot *)&snap, mid);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_EQ(reply_calls, 0); /* threaded reply must never be attempted */
+        HU_ASSERT(send_calls >= 1);   /* always-do-something: it still sends */
+    }
+}
+
 /* AC: When vtable->reply is NULL, ANY style routes through send (either as
  * primary or as fallback). We null reply AND react_emoji so the only
  * possible action is send — regardless of which style the predicate picks. */
@@ -356,6 +393,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(invalid_args_short_circuit);
     HU_RUN_TEST(disabled_feature_falls_back_to_flat);
     HU_RUN_TEST(reply_failure_falls_back_to_flat);
+    HU_RUN_TEST(empty_parent_guid_never_attempts_threaded_reply);
     HU_RUN_TEST(no_reply_vtable_falls_back_to_flat);
     HU_RUN_TEST(no_react_emoji_vtable_falls_back_to_flat);
     HU_RUN_TEST(pacing_enforces_minimum_delay);

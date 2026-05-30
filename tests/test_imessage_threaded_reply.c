@@ -71,10 +71,30 @@ static hu_error_t flat_send_fails_stub(const char *target, size_t target_len, co
     return HU_ERR_INTERNAL;
 }
 
+/* Post-send chat.db threading verify stubs. */
+static int verify_call_count = 0;
+
+static bool verify_true_stub(const char *target, size_t target_len, int64_t since_rowid) {
+    (void)target;
+    (void)target_len;
+    (void)since_rowid;
+    verify_call_count++;
+    return true;
+}
+
+static bool verify_false_stub(const char *target, size_t target_len, int64_t since_rowid) {
+    (void)target;
+    (void)target_len;
+    (void)since_rowid;
+    verify_call_count++;
+    return false;
+}
+
 static void reset_counts(void) {
     tier1_call_count = 0;
     tier2_call_count = 0;
     flat_send_call_count = 0;
+    verify_call_count = 0;
 }
 
 /* AC: Tier 1 (Cmd-R) is attempted first; on success, returns HU_OK
@@ -328,6 +348,98 @@ static void flat_fallback_warn_reset_hook_clears_counter(void) {
     hu_imessage_test_reset_reply_warn();
 }
 
+/* AC: When the post-send chat.db read-back confirms a native thread, the
+ * reply is reported as verified-threaded (getter true) AND telemetry records
+ * style THREADED. The tier_used is still the AX tier that fired ("cmdR"). */
+static void verified_threaded_reports_threaded_style(void) {
+    char tmpdir[] = "/tmp/human-c4-XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    setenv("HU_IMESSAGE_ACTION_LOG_DIR", tmpdir, 1);
+
+    reset_counts();
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, NULL, NULL);
+    hu_imessage_set_test_reply_verify_stub(verify_true_stub);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "GUID", 4, "hi", 2), (int)HU_OK);
+    HU_ASSERT_EQ(verify_call_count, 1);
+    HU_ASSERT_TRUE(hu_imessage_reply_last_verified_threaded());
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "cmdR");
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/imessage_action.jsonl", tmpdir);
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[1024];
+    HU_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), f));
+    fclose(f);
+    HU_ASSERT(strstr(buf, "\"style\":\"THREADED\"") != NULL);
+    HU_ASSERT(strstr(buf, "\"tier\":\"cmdR\"") != NULL);
+
+    unlink(path);
+    rmdir(tmpdir);
+    unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_verify_stub(NULL);
+}
+
+/* AC: When the AX tier returns "true" but the chat.db read-back shows the
+ * message committed FLAT (thread_originator_guid NULL), the reply is reported
+ * truthfully — getter false AND telemetry style FLAT — WITHOUT a double-send.
+ * The tier_used still reflects the AX tier that fired ("cmdR"). */
+static void unverified_threaded_reports_flat_style_no_double_send(void) {
+    char tmpdir[] = "/tmp/human-c4-XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    setenv("HU_IMESSAGE_ACTION_LOG_DIR", tmpdir, 1);
+
+    reset_counts();
+    /* flat_send stub present so we'd notice a double-send: it must NOT fire. */
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, NULL, flat_send_succeeds_stub);
+    hu_imessage_set_test_reply_verify_stub(verify_false_stub);
+
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "GUID", 4, "hi", 2), (int)HU_OK);
+    HU_ASSERT_EQ(verify_call_count, 1);
+    HU_ASSERT_EQ(flat_send_call_count, 0); /* no double-send */
+    HU_ASSERT(!hu_imessage_reply_last_verified_threaded());
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "cmdR");
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/imessage_action.jsonl", tmpdir);
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[1024];
+    HU_ASSERT_NOT_NULL(fgets(buf, sizeof(buf), f));
+    fclose(f);
+    HU_ASSERT(strstr(buf, "\"style\":\"FLAT\"") != NULL);
+
+    unlink(path);
+    rmdir(tmpdir);
+    unsetenv("HU_IMESSAGE_ACTION_LOG_DIR");
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_verify_stub(NULL);
+}
+
+/* AC: the verified-threaded flag is reset at the start of every call, so a
+ * stale "true" from a prior verified reply never leaks into a later call that
+ * falls through to flat-fallback (no verify attempted). */
+static void verified_flag_resets_per_call(void) {
+    reset_counts();
+    /* First call: verified threaded → flag true. */
+    hu_imessage_set_test_reply_stubs(tier1_succeeds_stub, NULL, NULL);
+    hu_imessage_set_test_reply_verify_stub(verify_true_stub);
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "G", 1, "hi", 2), (int)HU_OK);
+    HU_ASSERT_TRUE(hu_imessage_reply_last_verified_threaded());
+
+    /* Second call: both AX tiers fail → flat fallback, verify never runs,
+     * flag must be back to false. */
+    hu_imessage_set_test_reply_stubs(tier1_fails_stub, tier2_fails_stub, flat_send_succeeds_stub);
+    HU_ASSERT_EQ((int)hu_imessage_reply(NULL, "+15555551212", 12, "G", 1, "hi", 2), (int)HU_OK);
+    HU_ASSERT_STR_EQ(hu_imessage_test_last_reply_tier(), "flat_fallback");
+    HU_ASSERT(!hu_imessage_reply_last_verified_threaded());
+
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_set_test_reply_verify_stub(NULL);
+}
+
 void run_imessage_threaded_reply_tests(void) {
     HU_TEST_SUITE("imessage_threaded_reply");
     HU_RUN_TEST(tier1_cmd_r_succeeds_returns_ok);
@@ -344,4 +456,7 @@ void run_imessage_threaded_reply_tests(void) {
     HU_RUN_TEST(no_telemetry_on_invalid_args);
     HU_RUN_TEST(flat_fallback_warn_emitted_once_across_repeated_failures);
     HU_RUN_TEST(flat_fallback_warn_reset_hook_clears_counter);
+    HU_RUN_TEST(verified_threaded_reports_threaded_style);
+    HU_RUN_TEST(unverified_threaded_reports_flat_style_no_double_send);
+    HU_RUN_TEST(verified_flag_resets_per_call);
 }

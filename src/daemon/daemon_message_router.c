@@ -19,6 +19,7 @@
 #include "human/channel.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
+#include "human/channels/imessage_reply.h"
 #include "human/config.h"
 #include "human/core/log.h"
 #include "human/core/time.h"
@@ -72,9 +73,13 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     uint64_t pace_start = 0;
     hu_persona_pace_reply_start(&pace_start);
 
-    /* Dispatch by style. */
+    /* Dispatch by style. `actual_style` tracks what was ACTUALLY sent (which
+     * can differ from the chosen `style` — e.g. a THREADED attempt that the AX
+     * Return silently committed flat). Telemetry records the actual outcome,
+     * not the intent. */
     hu_error_t err = HU_OK;
     const char *tier_used = "flat_fallback";
+    hu_reply_style_t actual_style = style;
     switch (style) {
     case HU_REPLY_STYLE_THREADED: {
         bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
@@ -82,9 +87,25 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
                                     body, body_len);
             if (err == HU_OK) {
-                tier_used = "threaded";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: threaded reply sent");
+                /* The reply returned OK, but on macOS 26+ the AX value-inject +
+                 * Return path can commit a FLAT message even on success. Read
+                 * the verified-threaded result back from the reply layer rather
+                 * than assuming THREADED on any HU_OK. (When vtable->reply is a
+                 * mock in tests, the getter stays false — inert, no test pins
+                 * it.) */
+                bool verified = hu_imessage_reply_last_verified_threaded();
+                if (verified) {
+                    tier_used = "threaded";
+                    actual_style = HU_REPLY_STYLE_THREADED;
+                    hu_log_info("human", agent ? agent->observer : NULL,
+                                "imessage_dispatch: threaded reply sent (native thread verified)");
+                } else {
+                    tier_used = "threaded_flat";
+                    actual_style = HU_REPLY_STYLE_FLAT;
+                    hu_log_info(
+                        "human", agent ? agent->observer : NULL,
+                        "imessage_dispatch: reply sent but not natively threaded (flat commit)");
+                }
             }
         }
         /* Fall through to flat send if (a) reply slot was NULL or
@@ -96,6 +117,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                 err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
                 if (err == HU_OK) {
                     tier_used = "flat_fallback";
+                    actual_style = HU_REPLY_STYLE_FLAT;
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "imessage_dispatch: threaded unavailable, flat fallback");
                 }
@@ -131,6 +153,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                 err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
                 if (err == HU_OK) {
                     tier_used = "flat_fallback";
+                    actual_style = HU_REPLY_STYLE_FLAT;
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "imessage_dispatch: tapback unavailable, flat fallback");
                 }
@@ -169,7 +192,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
          * the caller would hash it for privacy. */
         log_entry.target_chat_id_hash = target;
         log_entry.facts = facts;
-        log_entry.style_chosen = style;
+        log_entry.style_chosen = actual_style;
         log_entry.send_result = (int)err;
         log_entry.tier_used = tier_used;
         uint64_t pace_end = hu_time_get_current_ms();

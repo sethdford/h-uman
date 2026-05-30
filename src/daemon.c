@@ -2427,6 +2427,21 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
     if (!msg || msg_len == 0)
         return true;
 
+    /* iMessage owns its final delivery in the post-turn action-surface
+     * dispatcher (threaded reply via Cmd-R / Show-Menu, with a documented
+     * flat fallback). iMessage exposes no send_event, so a generic bus
+     * delivery here would fall back to a FLAT vtable->send — stripping all
+     * threading intent — and then set text_delivered_via_bus=true, which
+     * makes the post-turn guard skip the dispatcher entirely. Every reply
+     * would land as a free-floating new message instead of a native thread
+     * reply. Defer: return without sending so text_delivered_via_bus stays
+     * false and the dispatcher region owns delivery. */
+    if (sch->channel->vtable->name) {
+        const char *cn = sch->channel->vtable->name(sch->channel->ctx);
+        if (cn && strcmp(cn, "imessage") == 0)
+            return true;
+    }
+
     hu_error_t se = HU_OK;
     bool sent_via_embed = false;
     if (sch->channel->vtable->name && sch->channel->vtable->send) {
