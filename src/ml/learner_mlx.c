@@ -199,8 +199,9 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
 
     memset(out_report, 0, sizeof(*out_report));
     out_report->signals_consumed = signals_count;
-    snprintf(out_report->adapter_path, sizeof(out_report->adapter_path), "%s",
-             cfg->adapter_output_path);
+    snprintf(out_report->adapter_path, sizeof(out_report->adapter_path), "%.255s",
+             cfg->adapter_output_path); /* %.255s: both fields are 256 (GCC
+                                           -Werror=format-truncation). */
 
     /* Compute a model_version hash from training data for KV-cache
      * invalidation. Combines the configured version with a hash of the
@@ -250,7 +251,9 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
     hu_error_t we = write_training_jsonl(jsonl_path, signals, signals_count);
     if (we != HU_OK) {
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write training data at %.95s", jsonl_path);
+                 "failed to write training data at %.92s",
+                 jsonl_path); /* %.92s: fixed prefix + path must fit last_error (GCC
+                                 -Werror=format-truncation). */
         return we;
     }
 

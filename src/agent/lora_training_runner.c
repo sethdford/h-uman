@@ -379,7 +379,8 @@ static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const ch
      * implementation would use posix_spawn + pipe for stdout capture
      * (per lora_retrain_runner.c pattern), but for this phase we log
      * the command and let Python's stderr go to the daemon log. */
-    char cmd_buf[1024];
+    char cmd_buf[2048]; /* 2048: multi-path shell command exceeds 1024 (GCC
+                           -Werror=format-truncation). */
     snprintf(cmd_buf, sizeof(cmd_buf),
              "python3 %s/scripts/training_loop.py --source-jsonl %s --adapter-out %s "
              ">> %s/.human/logs/training-loop-%s.log 2>&1",

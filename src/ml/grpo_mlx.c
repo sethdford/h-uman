@@ -32,10 +32,10 @@
  */
 #define HU_GRPO_HAVE_MLX_IMPL 1
 
-#include "human/ml/grpo.h"
-#include "human/ml/rl_trainer.h"
-#include "human/ml/ml_scripts_dir.h"
 #include "human/core/error.h"
+#include "human/ml/grpo.h"
+#include "human/ml/ml_scripts_dir.h"
+#include "human/ml/rl_trainer.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -68,13 +68,11 @@ typedef struct {
  * target_include_directories(human_tests PRIVATE ${HU_ROOT}/src/ml)
  * (see CMakeLists.txt:3082 — the same mechanism Phase 3 RM and Phase 4
  * GRPO-loss tests use). */
-hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
-                                             const hu_preference_pair_t *pairs,
-                                             size_t n_pairs);
+hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path, const hu_preference_pair_t *pairs,
+                                            size_t n_pairs);
 #if HU_IS_TEST
-hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc,
-                                        const hu_rl_trainer_config_t *config,
-                                        hu_rl_trainer_t *out);
+hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc, const hu_rl_trainer_config_t *config,
+                                       hu_rl_trainer_t *out);
 #endif
 
 /* Canonical specific-symbol probe — matches the
@@ -110,27 +108,65 @@ static int mlx_lm_lora_grpo_available(void) {
  * value-add proposal is over-abstraction). */
 static size_t grpo_json_escape(char *dst, size_t cap, const char *src) {
     size_t w = 0;
-    if (cap == 0) return 0;
+    if (cap == 0)
+        return 0;
     for (const unsigned char *p = (const unsigned char *)src; *p && w + 7 < cap; p++) {
         switch (*p) {
-            case '"':  if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='"'; } break;
-            case '\\': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='\\'; } break;
-            case '\n': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='n'; } break;
-            case '\r': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='r'; } break;
-            case '\t': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='t'; } break;
-            case '\b': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='b'; } break;
-            case '\f': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='f'; } break;
-            default:
-                if (*p < 0x20) {
-                    int n = snprintf(dst + w, cap - w, "\\u%04x", *p);
-                    if (n < 0 || (size_t)n >= cap - w) return w;
-                    w += (size_t)n;
-                } else {
-                    dst[w++] = (char)*p;
-                }
+        case '"':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = '"';
+            }
+            break;
+        case '\\':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = '\\';
+            }
+            break;
+        case '\n':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'n';
+            }
+            break;
+        case '\r':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'r';
+            }
+            break;
+        case '\t':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 't';
+            }
+            break;
+        case '\b':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'b';
+            }
+            break;
+        case '\f':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'f';
+            }
+            break;
+        default:
+            if (*p < 0x20) {
+                int n = snprintf(dst + w, cap - w, "\\u%04x", *p);
+                if (n < 0 || (size_t)n >= cap - w)
+                    return w;
+                w += (size_t)n;
+            } else {
+                dst[w++] = (char)*p;
+            }
         }
     }
-    if (w < cap) dst[w] = '\0';
+    if (w < cap)
+        dst[w] = '\0';
     return w;
 }
 
@@ -149,17 +185,18 @@ static size_t grpo_json_escape(char *dst, size_t cap, const char *src) {
  * (test_grpo_mlx_jsonl_write_uses_secure_perms validates the 0600
  * mode contract unconditionally — even without HU_HAVE_MLX_LM_GRPO,
  * the hardening must be in effect). */
-hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
-                                             const hu_preference_pair_t *pairs,
-                                             size_t n_pairs) {
-    if (!out_path || (!pairs && n_pairs > 0)) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path, const hu_preference_pair_t *pairs,
+                                            size_t n_pairs) {
+    if (!out_path || (!pairs && n_pairs > 0))
+        return HU_ERR_INVALID_ARGUMENT;
     int fd = open(out_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) {
         /* Stale file from a prior PID-collision run — unlink and retry
          * once. Matches kto_write_jsonl's single-retry contract. */
         unlink(out_path);
         fd = open(out_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-        if (fd < 0) return HU_ERR_IO;
+        if (fd < 0)
+            return HU_ERR_IO;
     }
     FILE *f = fdopen(fd, "w");
     if (!f) {
@@ -173,7 +210,8 @@ hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
         return HU_ERR_IO;
     }
     for (size_t i = 0; i < n_pairs; i++) {
-        if (pairs[i].prompt_len == 0) continue;
+        if (pairs[i].prompt_len == 0)
+            continue;
         char p_esc[8192];
         grpo_json_escape(p_esc, sizeof(p_esc), pairs[i].prompt);
         /* ONLY prompt — chosen/rejected ignored. */
@@ -185,22 +223,23 @@ hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
 
 /* Internal alias for the production call site — folds the indirection
  * at compile time. */
-static hu_error_t grpo_write_jsonl(const char *out_path,
-                                    const hu_preference_pair_t *pairs,
-                                    size_t n_pairs) {
+static hu_error_t grpo_write_jsonl(const char *out_path, const hu_preference_pair_t *pairs,
+                                   size_t n_pairs) {
     return hu_grpo_mlx_write_jsonl_for_test(out_path, pairs, n_pairs);
 }
 
 static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
-                                 const hu_preference_pair_t *pairs, size_t n_pairs,
-                                 hu_rl_trainer_metrics_t *out) {
-    if (!vctx || !alloc || !pairs || n_pairs == 0 || !out) return HU_ERR_INVALID_ARGUMENT;
+                                const hu_preference_pair_t *pairs, size_t n_pairs,
+                                hu_rl_trainer_metrics_t *out) {
+    if (!vctx || !alloc || !pairs || n_pairs == 0 || !out)
+        return HU_ERR_INVALID_ARGUMENT;
     grpo_mlx_ctx_t *c = (grpo_mlx_ctx_t *)vctx;
 
     char jsonl_path[256];
     snprintf(jsonl_path, sizeof(jsonl_path), "/tmp/hu_grpo_mlx_%d.jsonl", getpid());
     hu_error_t werr = grpo_write_jsonl(jsonl_path, pairs, n_pairs);
-    if (werr != HU_OK) return werr;
+    if (werr != HU_OK)
+        return werr;
 
     /* F5 (end-gate audit): the unchecked mkdir return previously
      * masked filesystem errors (EACCES, ENOSPC, ENAMETOOLONG, …) as a
@@ -226,9 +265,12 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
      * attacker-supplied scripts/grpo_mlx_train.py if the daemon was started
      * from an attacker-controlled directory. */
     char script_path[512];
-    hu_error_t serr = hu_ml_resolve_script_path("grpo_mlx_train.py", script_path,
-                                                  sizeof(script_path));
-    if (serr != HU_OK) { unlink(jsonl_path); return serr; }
+    hu_error_t serr =
+        hu_ml_resolve_script_path("grpo_mlx_train.py", script_path, sizeof(script_path));
+    if (serr != HU_OK) {
+        unlink(jsonl_path);
+        return serr;
+    }
 
     char cmd[2048];
     /* The script forwards --n-rollouts, --clip-eps, --kl-beta, --iters
@@ -246,8 +288,8 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
              "--iters %zu "
              "--reward-fn synthetic "
              "2>&1",
-             script_path, jsonl_path, c->adapter_dir, c->model_id,
-             c->n_rollouts, c->clip_eps, c->kl_beta, c->max_iters);
+             script_path, jsonl_path, c->adapter_dir, c->model_id, c->n_rollouts, c->clip_eps,
+             c->kl_beta, c->max_iters);
 
     /* Push HU_E2E_TEST_MODE=1 into the popen environment under HU_IS_TEST
      * (but NOT under HU_HAVE_MLX_LM_GRPO — that test runs real training).
@@ -275,7 +317,10 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 #endif
 #endif
 
-    if (!fp) { unlink(jsonl_path); return HU_ERR_IO; }
+    if (!fp) {
+        unlink(jsonl_path);
+        return HU_ERR_IO;
+    }
 
     char buf[1024];
     double last_loss = 0.0;
@@ -295,16 +340,19 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
     }
     int status = pclose(fp);
     unlink(jsonl_path);
-    if (status != 0) return HU_ERR_PROVIDER_RESPONSE;
+    if (status != 0)
+        return HU_ERR_PROVIDER_RESPONSE;
 
     /* Populate output metrics. adapter_path is the canonical mlx-lm-lora
      * artifact name (adapter_model.safetensors — note the "_model"
      * infix; this matches the Python wrapper's output contract and
      * differs from Phase 3 KTO which writes "adapters.safetensors"). */
-    snprintf(out->adapter_path, sizeof(out->adapter_path),
-             "%s/adapter_model.safetensors", c->adapter_dir);
+    snprintf(out->adapter_path, sizeof(out->adapter_path), "%.483s/adapter_model.safetensors",
+             c->adapter_dir); /* %.483s: dir + 28-byte suffix fits adapter_path[512] (GCC
+                                 -Werror=format-truncation). */
     struct stat st;
-    if (stat(out->adapter_path, &st) != 0) return HU_ERR_PROVIDER_RESPONSE;
+    if (stat(out->adapter_path, &st) != 0)
+        return HU_ERR_PROVIDER_RESPONSE;
     /* Under HU_IS_TEST + HU_E2E_TEST_MODE shortcut we accept the 0-byte
      * sentinel; the real-MLX path (HU_HAVE_MLX_LM_GRPO=1) validates
      * non-zero st_size at the test level (see
@@ -315,20 +363,26 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 }
 
 static hu_error_t grpo_mlx_save(void *vctx, hu_allocator_t *alloc, const char *path) {
-    if (!vctx || !alloc || !path) return HU_ERR_INVALID_ARGUMENT;
+    if (!vctx || !alloc || !path)
+        return HU_ERR_INVALID_ARGUMENT;
     grpo_mlx_ctx_t *c = (grpo_mlx_ctx_t *)vctx;
     if (strchr(c->adapter_dir, '\'') || strchr(path, '\''))
         return HU_ERR_INVALID_ARGUMENT;
     char cmd[1024];
     int n = snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", c->adapter_dir, path);
-    if (n < 0 || (size_t)n >= sizeof(cmd)) return HU_ERR_INVALID_ARGUMENT;
+    if (n < 0 || (size_t)n >= sizeof(cmd))
+        return HU_ERR_INVALID_ARGUMENT;
     return system(cmd) == 0 ? HU_OK : HU_ERR_IO;
 }
 
-static const char *grpo_mlx_name(void *vctx) { (void)vctx; return "grpo_mlx"; }
+static const char *grpo_mlx_name(void *vctx) {
+    (void)vctx;
+    return "grpo_mlx";
+}
 
 static void grpo_mlx_deinit(void *vctx, hu_allocator_t *alloc) {
-    if (!vctx) return;
+    if (!vctx)
+        return;
     alloc->free(alloc->ctx, vctx, sizeof(grpo_mlx_ctx_t));
 }
 
@@ -343,10 +397,11 @@ static const hu_rl_trainer_vtable_t grpo_mlx_vtable = {
  * test-only seam below populate the ctx identically; only the probe
  * gate differs. */
 static hu_error_t grpo_mlx_construct_ctx(hu_allocator_t *alloc,
-                                          const hu_rl_trainer_config_t *config,
-                                          hu_rl_trainer_t *out) {
+                                         const hu_rl_trainer_config_t *config,
+                                         hu_rl_trainer_t *out) {
     grpo_mlx_ctx_t *c = (grpo_mlx_ctx_t *)alloc->alloc(alloc->ctx, sizeof(grpo_mlx_ctx_t));
-    if (!c) return HU_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     snprintf(c->model_id, sizeof(c->model_id), "%s",
              config->model_id ? config->model_id : "mlx-community/gemma-3-4b-it-bf16");
@@ -366,10 +421,10 @@ static hu_error_t grpo_mlx_construct_ctx(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
-                               const hu_rl_trainer_config_t *config,
-                               hu_rl_trainer_t *out) {
-    if (!alloc || !config || !out) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc, const hu_rl_trainer_config_t *config,
+                              hu_rl_trainer_t *out) {
+    if (!alloc || !config || !out)
+        return HU_ERR_INVALID_ARGUMENT;
 #if !defined(__APPLE__)
     return HU_ERR_NOT_SUPPORTED;
 #endif
@@ -377,7 +432,8 @@ hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
      * test_grpo_mlx_factory_unavailable_when_python_probe_fails pins
      * this contract. Tests that need step() exercise it via the
      * for-test seam below. */
-    if (!mlx_lm_lora_grpo_available()) return HU_ERR_NOT_SUPPORTED;
+    if (!mlx_lm_lora_grpo_available())
+        return HU_ERR_NOT_SUPPORTED;
     return grpo_mlx_construct_ctx(alloc, config, out);
 }
 
@@ -388,10 +444,10 @@ hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
  * step() sets via setenv when !HU_HAVE_MLX_LM_GRPO) writes a 0-byte
  * sentinel instead of running real training; the test asserts the
  * sentinel exists. Never compiled into production binaries. */
-hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc,
-                                        const hu_rl_trainer_config_t *config,
-                                        hu_rl_trainer_t *out) {
-    if (!alloc || !config || !out) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc, const hu_rl_trainer_config_t *config,
+                                       hu_rl_trainer_t *out) {
+    if (!alloc || !config || !out)
+        return HU_ERR_INVALID_ARGUMENT;
 #if !defined(__APPLE__)
     return HU_ERR_NOT_SUPPORTED;
 #endif
