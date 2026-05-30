@@ -155,6 +155,13 @@ jobs:
     name: macOS app · Archive + codesign
     runs-on: macos-14
     timeout-minutes: 25
+    # The `secrets` context is NOT permitted inside step-level `if:` conditions
+    # — referencing it there fails the ENTIRE workflow at startup
+    # ("Unrecognized named-value: 'secrets'"), which is why this fleet showed
+    # 0 jobs / conclusion=failure. Map the presence check into a job-level env
+    # var here (env MAY reference secrets) and gate steps on `env.HAS_SIGNING_CERT`.
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -188,14 +195,14 @@ jobs:
       # NOT key off the prior step's `outcome`, which would silently mask a
       # real cert-import infra failure (prior critic catch).
       - name: Import signing certificate
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ env.HAS_SIGNING_CERT == 'true' }}
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: bash scripts/ci/import-macos-cert.sh
 
       - name: Archive (signed)
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ env.HAS_SIGNING_CERT == 'true' }}
         # Identity by NAME ("Apple Development"), NOT SHA-1 (AC-45.1.3).
         # `--deep` is intentionally NOT passed here — it would re-sign every
         # nested framework with our identity, which is wrong for vendored
@@ -211,7 +218,7 @@ jobs:
               CODE_SIGN_STYLE=Manual
 
       - name: Verify codesign
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ env.HAS_SIGNING_CERT == 'true' }}
         # `--deep` here walks the bundle tree to verify every nested
         # signature is intact — distinct from the archive step above.
         run: |
@@ -224,7 +231,7 @@ jobs:
       # use `swift build -c release` here, NOT `xcodebuild build` — the
       # acceptance criterion is explicit.
       - name: Unsigned fallback (no secrets)
-        if: ${{ secrets.MACOS_CERT_P12 == '' }}
+        if: ${{ env.HAS_SIGNING_CERT != 'true' }}
         run: cd apps/macos && swift build -c release
 
   fleet-sota-gate:
