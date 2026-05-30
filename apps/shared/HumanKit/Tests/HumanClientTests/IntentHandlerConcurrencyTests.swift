@@ -54,9 +54,14 @@ final class IntentHandlerConcurrencyTests: XCTestCase {
             }
         }
 
-        // The default URL is `wss://localhost:3000/ws`, ensureConnected's
-        // 15s polling loop will give up if no listener exists. Wait long
-        // enough for that path to fail.
-        wait(for: [exp], timeout: 20.0)
+        // The default URL is `wss://localhost:3000/ws`; with no listener,
+        // ensureConnected's ~15s polling loop must give up before the
+        // completion fires. That ~15s lower bound raced the old 20s deadline:
+        // locally the completion lands at ~15.4s (pass), but on the slower,
+        // loaded CI runner the same path exceeds 20s and the wait times out —
+        // even though the completion *does* fire on the main actor (the
+        // contract under test). Give ample headroom (~3x the connect-poll
+        // bound) so the assertion, not wall-clock, decides the result.
+        wait(for: [exp], timeout: 45.0)
     }
 }
