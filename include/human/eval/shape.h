@@ -60,11 +60,17 @@ typedef struct hu_shape_result {
 #define HU_SHAPE_FAIL_GREAT_QUESTION  0x2000
 #define HU_SHAPE_FAIL_I_UNDERSTAND    0x4000
 #define HU_SHAPE_FAIL_EXCESSIVE_EMOJI 0x8000 /* M5: seth.json says ZERO emoji on most msgs */
+/* 2026-05-29: persona-break — the reply self-identifies as an AI or disclaims
+ * capabilities ("as an AI", "I don't have access to", "as a language model").
+ * A hard tell that the model dropped the Seth persona; fatal on every channel
+ * except email (which allows AI-assistant register). Surfaced by the humanness
+ * north-star nightly, where such replies wrongly scored anti_ai 1.0. */
+#define HU_SHAPE_FAIL_AI_SELF_DISCLOSURE 0x10000
 
 /* M9: compile-time guard against bit-flag exhaustion. If the highest
  * fail flag exceeds 31 bits we'd silently corrupt masking in shape.c.
  * Update this bound when adding a flag. */
-_Static_assert(HU_SHAPE_FAIL_EXCESSIVE_EMOJI < (1u << 31),
+_Static_assert(HU_SHAPE_FAIL_AI_SELF_DISCLOSURE < (1u << 31),
                "HU_SHAPE_FAIL_* exhausted 31-bit range — widen shape_fails or split");
 
 /* Map a channel name string (case-insensitive) to the enum. Falls

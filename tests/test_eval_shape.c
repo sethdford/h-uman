@@ -232,6 +232,47 @@ static void test_shape_non_close_relationship_ignores_learned_cap(void) {
     HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_WAY_TOO_LONG) != 0);
 }
 
+/* 2026-05-29: AI self-disclosure / persona-break (HU_SHAPE_FAIL_AI_SELF_DISCLOSURE). */
+
+static void test_shape_ai_self_disclosure_fails_imessage(void) {
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp = "yeah, as an AI I can't do that";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE) != 0);
+    HU_ASSERT_EQ((int)r.passed, 0); /* fatal persona-break */
+}
+
+static void test_shape_ai_no_access_disclaimer_fails_imessage(void) {
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp = "I don't have access to your internal files.";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE) != 0);
+    HU_ASSERT_EQ((int)r.passed, 0);
+}
+
+static void test_shape_ai_self_disclosure_allowed_on_email(void) {
+    /* email allows AI-assistant register, so self-disclosure is NOT flagged. */
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp = "As an AI, I would be happy to assist with your request.";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_EMAIL, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE) == 0);
+    HU_ASSERT_EQ((int)r.passed, 1);
+}
+
+static void test_shape_no_self_disclosure_false_positive(void) {
+    /* A normal Seth reply that merely contains "ai" inside a word must NOT
+     * trip the flag (word-boundary discipline). */
+    hu_shape_result_t r;
+    memset(&r, 0, sizeof(r));
+    const char *resp = "wait what time again";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE) == 0);
+    HU_ASSERT_EQ((int)r.passed, 1);
+}
+
 void run_eval_shape_tests(void) {
     HU_TEST_SUITE("eval shape classifier");
     HU_RUN_TEST(test_shape_null_response_fails);
@@ -251,4 +292,10 @@ void run_eval_shape_tests(void) {
     HU_RUN_TEST(test_shape_close_contact_with_learned_cap_bullet_list_still_fails);
     HU_RUN_TEST(test_shape_without_learned_cap_reverts_to_universal);
     HU_RUN_TEST(test_shape_non_close_relationship_ignores_learned_cap);
+
+    /* 2026-05-29 — AI self-disclosure / persona-break. */
+    HU_RUN_TEST(test_shape_ai_self_disclosure_fails_imessage);
+    HU_RUN_TEST(test_shape_ai_no_access_disclaimer_fails_imessage);
+    HU_RUN_TEST(test_shape_ai_self_disclosure_allowed_on_email);
+    HU_RUN_TEST(test_shape_no_self_disclosure_false_positive);
 }

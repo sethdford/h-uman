@@ -18,9 +18,11 @@
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/eval.h"
-#ifdef HU_ENABLE_RL_FULL
+/* Unconditional: declares hu_eval_cli_score (always built via src/eval/eval_score.c)
+ * alongside the RL_FULL-gated competitive/leaderboard/gate handlers. The gated
+ * handlers are only *called* under HU_ENABLE_RL_FULL, so an unconditional
+ * declaration is safe and keeps `human eval score` available in every build. */
 #include "human/eval/cli_eval.h"
-#endif
 #include "human/eval/turing_adversarial.h"
 #include "human/eval_benchmarks.h"
 #include "human/eval_dashboard.h"

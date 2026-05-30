@@ -53,6 +53,21 @@ AI_ASSISTANT_PATTERNS = [
     (re.compile(r"\bgreat question\b", re.IGNORECASE), "great-question"),
 ]
 
+# 2026-05-29: AI self-disclosure / persona-break. The reply admits it's an AI
+# or disclaims capabilities — a hard Seth-persona break the opener/length/
+# markdown checks miss. FATAL on every channel except email. Mirrors
+# src/eval/shape.c::ai_self_tells — keep in sync.
+AI_SELF_DISCLOSURE_PATTERNS = [
+    (re.compile(r"\bas an ai\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bi'?m an ai\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bi am an ai\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bas a language model\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bi do(n'?t| not) have access to\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bi (cannot|can'?t) access your\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bi do(n'?t| not) have personal\b", re.IGNORECASE), "ai-self-disclosure"),
+    (re.compile(r"\bas a virtual assistant\b", re.IGNORECASE), "ai-self-disclosure"),
+]
+
 # Markdown that real iMessage texts never contain.
 MARKDOWN_PATTERNS = [
     (re.compile(r"^\s*[\*\-]\s+", re.MULTILINE), "bullet-list"),
@@ -138,6 +153,11 @@ def classify(response: str, channel: str = "imessage") -> dict:
         for pat, name in AI_ASSISTANT_PATTERNS:
             if pat.search(response):
                 fails.append(name)
+        # Persona-break: self-identifying as an AI / disclaiming capabilities.
+        for pat, name in AI_SELF_DISCLOSURE_PATTERNS:
+            if pat.search(response):
+                fails.append(name)
+                break
 
     # Markdown tells (skip for channels that natively support markdown)
     if not markdown_allowed:
@@ -166,7 +186,8 @@ def classify(response: str, channel: str = "imessage") -> dict:
     # Score: start at 1.0, subtract per-fail penalty, clamp to [0, 1]
     # Heavy violations (way-too-long, markdown lists) get 0.3 each.
     # Light violations (mild openers) get 0.15 each.
-    heavy = {"way-too-long", "bullet-list", "numbered-list", "header", "code-fence"}
+    heavy = {"way-too-long", "bullet-list", "numbered-list", "header", "code-fence",
+             "ai-self-disclosure"}
     score = 1.0
     for f in fails:
         if any(f.startswith(h) for h in heavy):
@@ -176,8 +197,9 @@ def classify(response: str, channel: str = "imessage") -> dict:
     score = max(0.0, score)
 
     return {
-        "pass": score >= 0.7 and not any(f.startswith(("bullet-list", "numbered-list", "way-too-long"))
-                                          for f in fails),
+        "pass": score >= 0.7 and not any(
+            f.startswith(("bullet-list", "numbered-list", "way-too-long", "ai-self-disclosure"))
+            for f in fails),
         "score": round(score, 3),
         "fails": fails,
         "len": n,
