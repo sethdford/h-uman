@@ -13038,7 +13038,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_conversation_snapshot_t snap = {0};
                                     (void)hu_daemon_dispatch_imessage_reply(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, NULL, 0,
+                                        send_target, send_target_len,
+                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
+                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
+                                                                  : 0,
                                         choreo_plan.segments[seg].text,
                                         choreo_plan.segments[seg].text_len,
                                         (const struct hu_conversation_snapshot *)&snap,
@@ -13153,7 +13156,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                  * chat.db if needed for richer context. */
                                                 (void)hu_daemon_dispatch_imessage_reply(
                                                     ch->channel, agent ? agent->persona : NULL,
-                                                    agent, config, batch_key, key_len, NULL, 0,
+                                                    agent, config, batch_key, key_len,
+                                                    msgs[batch_start].guid[0]
+                                                        ? msgs[batch_start].guid
+                                                        : NULL,
+                                                    msgs[batch_start].guid[0]
+                                                        ? strlen(msgs[batch_start].guid)
+                                                        : 0,
                                                     dt_chunks[dt], dt_len,
                                                     (const struct hu_conversation_snapshot *)&snap,
                                                     (int64_t)msgs[batch_start].message_id);
@@ -13186,8 +13195,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                          * needed for richer context. */
                                         (void)hu_daemon_dispatch_imessage_reply(
                                             ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len, NULL, 0, fragments[f].text,
-                                            fragments[f].text_len,
+                                            config, batch_key, key_len,
+                                            msgs[batch_start].guid[0] ? msgs[batch_start].guid
+                                                                      : NULL,
+                                            msgs[batch_start].guid[0]
+                                                ? strlen(msgs[batch_start].guid)
+                                                : 0,
+                                            fragments[f].text, fragments[f].text_len,
                                             (const struct hu_conversation_snapshot *)&snap,
                                             (int64_t)msgs[batch_start].message_id);
                                     } else {
@@ -13306,8 +13320,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_conversation_snapshot_t snap = {0};
                                     (void)hu_daemon_dispatch_imessage_reply(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, NULL, 0, send_text,
-                                        send_text_len,
+                                        send_target, send_target_len,
+                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
+                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
+                                                                  : 0,
+                                        send_text, send_text_len,
                                         (const struct hu_conversation_snapshot *)&snap,
                                         (int64_t)msgs[batch_start].message_id);
                                 } else {
