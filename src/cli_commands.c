@@ -1244,6 +1244,11 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
     }
     const char *sub = argv[2];
 
+    /* `score` is unconditional — its scorers (shape/fidelity/register) are
+     * always built, unlike the RL_FULL-gated competitive/leaderboard/gate. */
+    if (strcmp(sub, "score") == 0)
+        return hu_eval_cli_score(alloc, argc - 2, argv + 2);
+
 #ifdef HU_ENABLE_RL_FULL
     if (strcmp(sub, "competitive") == 0)
         return hu_eval_cli_competitive(alloc, argc - 2, argv + 2);

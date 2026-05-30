@@ -1313,6 +1313,8 @@ list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
     src/eval/shape.c
+    src/eval/register.c
+    src/eval/eval_score.c
     src/eval/consistency.c
     src/eval/persona_fidelity.c
     src/memory/fact_extract_llm.c
@@ -3883,6 +3885,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_eval_runner.c
     tests/test_eval_history.c
     tests/test_eval_shape.c
+    tests/test_register.c
+    tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
     tests/test_self_rag.c
