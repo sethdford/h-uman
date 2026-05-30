@@ -338,7 +338,7 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
      * of an N-token cache record where the new prompt is also exactly
      * N tokens (no user portion to decode) — the chat path always
      * needs at least one token to sample from. */
-    bool skip_decode = hu_llamacpp_should_skip_decode(sys_hit, config->kvcache_skip_decode,
+    bool skip_decode = hu_llamacpp_should_skip_decode(sys_hit, c->config.kvcache_skip_decode,
                                                       cached_n_past, n_tokens);
     if (sys_hit) {
         hu_llamacpp_kvcache_record_hit_savings(&c->kv_cache, cached_n_past);
@@ -745,12 +745,16 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc, const hu_llamacpp_
                 /* Leave at llama_context_default_params() — GGML_TYPE_F16. */
                 break;
             }
-            /* Phase 4 — Flash Attention on Metal. Free 15-30% TPS when
-             * the linked libllama version exposes the field (b3500+).
-             * Older builds where llama_context_params lacks flash_attn
-             * will fail to compile — that's the desired signal: bump
-             * vendored llama.cpp or build the FA support in. */
-            cp.flash_attn = config->flash_attn;
+            /* Phase 4 — Flash Attention on Metal. Free 15-30% TPS.
+             * Upstream llama.cpp replaced the old `bool flash_attn` field
+             * with `enum llama_flash_attn_type flash_attn_type`
+             * (AUTO=-1 / DISABLED=0 / ENABLED=1). Map our boolean opt-in
+             * faithfully: explicit on → ENABLED, otherwise → DISABLED
+             * (preserving the prior `cp.flash_attn = false` semantics).
+             * Use LLAMA_FLASH_ATTN_TYPE_AUTO instead if we later want
+             * llama.cpp to decide based on hardware. */
+            cp.flash_attn_type =
+                config->flash_attn ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
             c->ctx = llama_init_from_model(c->model, cp);
         }
     }

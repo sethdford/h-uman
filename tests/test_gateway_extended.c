@@ -411,6 +411,21 @@ static void test_ws_server_is_upgrade_invalid(void) {
     HU_ASSERT_FALSE(ok);
 }
 
+/* Regression: extract_header() used to spin forever when the request held an
+ * embedded NUL before req_end and the target header was absent — its
+ * line-advance loop stopped on '\0' and then never advanced past it, so the
+ * outer scan looped without progress. The fuzzer surfaced this as a libFuzzer
+ * timeout in fuzz_http_parse (Human CI fuzz job). This buffer is >=20 bytes,
+ * carries an embedded NUL, and has no Upgrade header; the call MUST return
+ * (false) instead of hanging. The test simply COMPLETING proves the fix —
+ * req_len is now authoritative and the scan always makes forward progress. */
+static void test_ws_server_is_upgrade_embedded_nul_terminates(void) {
+    static const char req[] =
+        "GET / HTTP/1.1\r\nHost: x\r\n\0 trailing bytes past the embedded nul";
+    bool ok = hu_ws_server_is_upgrade(req, sizeof(req) - 1);
+    HU_ASSERT_FALSE(ok);
+}
+
 static void test_ws_server_send_null_conn(void) {
     hu_error_t err = hu_ws_server_send(NULL, NULL, "x", 1);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -1744,6 +1759,7 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_ws_server_upgrade_null_args);
     HU_RUN_TEST(test_ws_server_is_upgrade_valid);
     HU_RUN_TEST(test_ws_server_is_upgrade_invalid);
+    HU_RUN_TEST(test_ws_server_is_upgrade_embedded_nul_terminates);
     HU_RUN_TEST(test_ws_server_send_null_conn);
     HU_RUN_TEST(test_ws_server_broadcast_empty);
     HU_RUN_TEST(test_cp_admin_metrics_snapshot_omits_prompt_budget_when_no_agent);
