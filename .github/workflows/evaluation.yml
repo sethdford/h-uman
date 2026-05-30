@@ -59,9 +59,15 @@ jobs:
           if [ -f docs/evaluation/baseline.json ]; then
             BASELINE_ARG="--baseline docs/evaluation/baseline.json"
           fi
+          # --skip-unavailable: CI has no LLM provider configured, so the
+          # `frontier` suite (which needs a real provider/API key) would
+          # otherwise error and fail the whole bench. Skip suites whose
+          # backend is unavailable; the regression gate still covers every
+          # suite that runs offline.
           ./build/human evaluation bench $BASELINE_ARG \
               --write-baseline build/evaluation-reports/fresh_baseline.json \
               --fail-on-regression \
+              --skip-unavailable \
               | tee build/evaluation-reports/bench.json
 
       - name: Verify per-suite regression thresholds

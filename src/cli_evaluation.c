@@ -36,25 +36,23 @@ typedef struct evaluation_factory_entry {
 } evaluation_factory_entry_t;
 
 static const evaluation_factory_entry_t kEvaluationFactories[] = {
-    {"locomo", "Long-conversation recall (Snap LoCoMo, synthetic dataset)",
-     hu_evaluation_locomo},
+    {"locomo", "Long-conversation recall (Snap LoCoMo, synthetic dataset)", hu_evaluation_locomo},
     {"longmemeval", "Five-task long-memory benchmark (synthetic dataset)",
      hu_evaluation_longmemeval},
-    {"dmr", "Deep memory retrieval (vector recall on synthetic corpus)",
-     hu_evaluation_dmr},
-    {"minja", "Memory poisoning red-team (W1 write-trust gate)",
-     hu_evaluation_minja},
+    {"dmr", "Deep memory retrieval (vector recall on synthetic corpus)", hu_evaluation_dmr},
+    {"minja", "Memory poisoning red-team (W1 write-trust gate)", hu_evaluation_minja},
     {"memoryagentbench", "Multi-agent shared-memory coordination (stub)",
      hu_evaluation_memoryagentbench},
-    {"frontier", "h-uman vs frontier no-memory baseline (stub)",
-     hu_evaluation_frontier_compare},
+    {"frontier", "h-uman vs frontier no-memory baseline (stub)", hu_evaluation_frontier_compare},
     {"legacy-bridge", "Legacy task-list framework adapted to W16 vtable",
      hu_evaluation_legacy_bridge},
-    {"facade-recall", "Production v2 stack (facade + planner + executor) "
-                     "scored against LoCoMo-style fact recall",
+    {"facade-recall",
+     "Production v2 stack (facade + planner + executor) "
+     "scored against LoCoMo-style fact recall",
      hu_evaluation_facade_recall},
-    {"locomo-facade", "Production v2 stack scored against the real 1542-prompt "
-                     "LoCoMo corpus (requires real dataset on disk)",
+    {"locomo-facade",
+     "Production v2 stack scored against the real 1542-prompt "
+     "LoCoMo corpus (requires real dataset on disk)",
      hu_evaluation_locomo_facade},
 };
 
@@ -73,14 +71,16 @@ static void print_usage(void) {
     printf("Usage: human evaluation <list|run|bench> [args]\n");
     printf("  list                              Print available suites\n");
     printf("  run <suite>                       Run one suite, print JSON report on stdout\n");
-    printf("  bench [--baseline FILE]           Run all six suites; aggregate JSON to stdout\n");
+    printf("  bench [--baseline FILE]           Run all suites; aggregate JSON to stdout\n");
     printf("        [--write-baseline FILE]     After run, save current scores as new baseline\n");
     printf("        [--fail-on-regression]      Exit non-zero if regression gate fails\n");
+    printf("        [--skip-unavailable]        Skip suites whose backend is not configured\n");
+    printf("                                    (e.g. frontier needs an LLM provider) instead of "
+           "failing\n");
     printf("\n");
     printf("Suites:\n");
     for (size_t i = 0; i < kEvaluationFactoriesCount; i++)
-        printf("  %-20s %s\n", kEvaluationFactories[i].id,
-               kEvaluationFactories[i].description);
+        printf("  %-20s %s\n", kEvaluationFactories[i].id, kEvaluationFactories[i].description);
     printf("\n");
     printf("Notes:\n");
     printf("  - All synthetic-dataset suites run offline. No API key needed.\n");
@@ -91,17 +91,15 @@ static void print_usage(void) {
 static hu_error_t cmd_list(void) {
     printf("[\n");
     for (size_t i = 0; i < kEvaluationFactoriesCount; i++) {
-        printf("  {\"id\": \"%s\", \"description\": \"%s\"}%s\n",
-               kEvaluationFactories[i].id,
-               kEvaluationFactories[i].description,
-               (i + 1 < kEvaluationFactoriesCount) ? "," : "");
+        printf("  {\"id\": \"%s\", \"description\": \"%s\"}%s\n", kEvaluationFactories[i].id,
+               kEvaluationFactories[i].description, (i + 1 < kEvaluationFactoriesCount) ? "," : "");
     }
     printf("]\n");
     return HU_OK;
 }
 
 static hu_error_t run_one(hu_allocator_t *alloc, const evaluation_factory_entry_t *entry,
-                         char **out_json, size_t *out_len) {
+                          char **out_json, size_t *out_len) {
     hu_evaluation_t e;
     memset(&e, 0, sizeof(e));
     hu_error_t err = entry->factory(alloc, &e);
@@ -192,6 +190,7 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
     const char *baseline_path = NULL;
     const char *write_baseline_path = NULL;
     bool fail_on_regression = false;
+    bool skip_unavailable = false;
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--baseline") == 0 && i + 1 < argc) {
             baseline_path = argv[++i];
@@ -199,6 +198,12 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
             write_baseline_path = argv[++i];
         } else if (strcmp(argv[i], "--fail-on-regression") == 0) {
             fail_on_regression = true;
+        } else if (strcmp(argv[i], "--skip-unavailable") == 0) {
+            /* Skip suites whose backend cannot run in this environment
+             * (e.g. the `frontier` suite needs a configured LLM provider/API
+             * key, absent in offline CI). Skipped suites do NOT fail the run;
+             * the regression gate still covers every suite that CAN run. */
+            skip_unavailable = true;
         } else {
             fprintf(stderr, "Unknown bench arg: %s\n", argv[i]);
             return HU_ERR_INVALID_ARGUMENT;
@@ -219,8 +224,7 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
             alloc->free(alloc->ctx, bjson, blen + 1);
             have_baseline = (bl == HU_OK);
             if (!have_baseline) {
-                fprintf(stderr, "warning: baseline parse failed: %s\n",
-                        hu_error_string(bl));
+                fprintf(stderr, "warning: baseline parse failed: %s\n", hu_error_string(bl));
             }
         } else {
             fprintf(stderr, "warning: baseline file not readable (%s); proceeding without\n",
@@ -243,15 +247,25 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
 
     bool any_regression = false;
     int exit_code = 0;
+    bool emitted_any = false; /* robust comma separation: emit ",\n" before
+                               * each suite after the first, so skipped/errored
+                               * suites never leave a trailing comma. */
     printf("{\n  \"suites\": [\n");
     for (size_t i = 0; i < kEvaluationFactoriesCount; i++) {
         hu_evaluation_t e;
         memset(&e, 0, sizeof(e));
         hu_error_t err = kEvaluationFactories[i].factory(alloc, &e);
         if (err != HU_OK) {
-            fprintf(stderr, "factory failed for '%s': %s\n",
-                    kEvaluationFactories[i].id, hu_error_string(err));
+            fprintf(stderr, "factory failed for '%s': %s\n", kEvaluationFactories[i].id,
+                    hu_error_string(err));
             exit_code = 1;
+            continue;
+        }
+        /* Skip backends that cannot run in this environment when opted in. */
+        if (skip_unavailable && !hu_evaluation_is_available(&e)) {
+            fprintf(stderr, "skipping unavailable suite '%s' (backend not configured)\n",
+                    kEvaluationFactories[i].id);
+            hu_evaluation_close(&e);
             continue;
         }
         hu_evaluation_run_report_t report;
@@ -259,6 +273,13 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
         err = hu_evaluation_run_suite(&e, &report);
         hu_evaluation_close(&e);
         if (err != HU_OK) {
+            /* Under --skip-unavailable, a config-not-found at run time (a
+             * backend that slipped past available()) is a skip, not a fail. */
+            if (skip_unavailable && err == HU_ERR_CONFIG_NOT_FOUND) {
+                fprintf(stderr, "skipping unconfigured suite '%s'\n", kEvaluationFactories[i].id);
+                hu_evaluation_report_free(alloc, &report);
+                continue;
+            }
             fprintf(stderr, "run failed for '%s': %s\n", kEvaluationFactories[i].id,
                     hu_error_string(err));
             hu_evaluation_report_free(alloc, &report);
@@ -269,10 +290,10 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
         char *rjson = NULL;
         size_t rlen = 0;
         if (hu_evaluation_report_to_json(alloc, &report, &rjson, &rlen) == HU_OK) {
+            if (emitted_any)
+                fputs(",\n", stdout);
             fwrite(rjson, 1, rlen, stdout);
-            if (i + 1 < kEvaluationFactoriesCount)
-                fputs(",", stdout);
-            fputs("\n", stdout);
+            emitted_any = true;
             alloc->free(alloc->ctx, rjson, rlen + 1);
         }
 
@@ -299,8 +320,9 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
         }
         hu_evaluation_report_free(alloc, &report);
     }
-    printf("  ],\n  \"regression\": %s\n}\n",
-           any_regression ? "\"FAILED\"" : "\"PASSED\"");
+    if (emitted_any)
+        fputs("\n", stdout);
+    printf("  ],\n  \"regression\": %s\n}\n", any_regression ? "\"FAILED\"" : "\"PASSED\"");
 
     /* Persist fresh baseline if requested. */
     if (write_baseline_path) {
@@ -309,8 +331,7 @@ static hu_error_t cmd_bench(hu_allocator_t *alloc, int argc, char **argv) {
         hu_error_t err = hu_evaluation_baseline_save(alloc, &fresh_baseline, &out_json, &out_len);
         if (err == HU_OK) {
             if (write_file(write_baseline_path, out_json, out_len) != HU_OK) {
-                fprintf(stderr, "warning: failed to write baseline to %s\n",
-                        write_baseline_path);
+                fprintf(stderr, "warning: failed to write baseline to %s\n", write_baseline_path);
                 exit_code = 1;
             }
             alloc->free(alloc->ctx, out_json, out_len + 1);
