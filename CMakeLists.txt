@@ -843,6 +843,7 @@ set(HU_CORE_SOURCES
     src/agent/governor.c
     src/agent/activation_steering.c
     src/agent/arbitrator.c
+    src/agent/salience.c
     src/agent/planning.c
     src/agent/collab_planning.c
     src/behavior/rel_dynamics.c
@@ -3595,6 +3596,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_governor.c
     tests/test_activation_steering.c
     tests/test_arbitrator.c
+    tests/test_salience.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
     tests/test_prospective.c
