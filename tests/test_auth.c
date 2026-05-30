@@ -4,18 +4,30 @@
 #include "human/core/error.h"
 #include "human/core/string.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
-/* Setup writable auth dir: create /tmp/human_auth_test_<pid>_<n>/.human and set HOME.
+/* All temp HOMEs created here share this prefix; restore matches on it to
+ * know which dir to recursively remove. */
+#define HU_AUTH_TEST_HOME_PREFIX "/tmp/human_auth_test_"
+
+/* Setup writable auth dir: create a UNIQUE /tmp/human_auth_test_XXXXXX/.human
+ * (via mkdtemp) and set HOME to it.
  *
  * Returns a non-NULL pointer on success — the caller must pass it to
- * `restore_auth_test_home`. An empty string ("") sentinel means "prior
- * HOME was unset"; the restore helper distinguishes the two. NULL means
- * setup itself failed (mkdir refused).
+ * `restore_auth_test_home`, which both restores HOME and removes the temp dir.
+ * An empty string ("") sentinel means "prior HOME was unset"; the restore
+ * helper distinguishes the two. NULL means setup itself failed.
+ *
+ * Why mkdtemp: the previous `/tmp/human_auth_test_<pid>_<counter>` naming
+ * collided with leftover dirs once PIDs recycled across runs — `mkdir` then
+ * failed with EEXIST and this helper returned NULL, flaking the per-test
+ * `HU_ASSERT_NOT_NULL(saved)`. mkdtemp's random suffix makes collisions
+ * impossible, and restore now removes the dir so nothing leaks into /tmp.
  *
  * Why the sentinel: earlier the helper returned NULL when there was no
  * prior HOME — but other suites (test_e2e.c) call `unsetenv("HOME")`,
@@ -23,22 +35,17 @@
  * per-test `HU_ASSERT_NOT_NULL(saved)` flaked when test_auth happened
  * to run after test_e2e in the same binary. */
 static char *setup_auth_test_home(hu_allocator_t *alloc) {
-    static int counter = 0;
     char tmpdir[128];
-    int n =
-        snprintf(tmpdir, sizeof(tmpdir), "/tmp/human_auth_test_%d_%d", (int)getpid(), counter++);
-    if (n <= 0 || (size_t)n >= sizeof(tmpdir))
-        return NULL;
-    if (mkdir(tmpdir, 0755) != 0)
+    if (!hu_test_mkdtemp(HU_AUTH_TEST_HOME_PREFIX, tmpdir, sizeof(tmpdir)))
         return NULL;
     char subdir[256];
-    n = snprintf(subdir, sizeof(subdir), "%s/.human", tmpdir);
+    int n = snprintf(subdir, sizeof(subdir), "%s/.human", tmpdir);
     if (n <= 0 || (size_t)n >= sizeof(subdir)) {
-        rmdir(tmpdir);
+        hu_test_rm_rf(tmpdir);
         return NULL;
     }
     if (mkdir(subdir, 0755) != 0) {
-        rmdir(tmpdir);
+        hu_test_rm_rf(tmpdir);
         return NULL;
     }
     const char *old = getenv("HOME");
@@ -50,6 +57,16 @@ static char *setup_auth_test_home(hu_allocator_t *alloc) {
 static void restore_auth_test_home(hu_allocator_t *alloc, char *saved) {
     if (!saved)
         return;
+    /* HOME currently points at the temp dir setup created — remove it before
+     * restoring, so the suite leaves nothing behind in /tmp. Copy the path
+     * out of the environment first (setenv below would invalidate it). */
+    const char *cur = getenv("HOME");
+    if (cur && strncmp(cur, HU_AUTH_TEST_HOME_PREFIX, strlen(HU_AUTH_TEST_HOME_PREFIX)) == 0) {
+        char doomed[256];
+        int n = snprintf(doomed, sizeof(doomed), "%s", cur);
+        if (n > 0 && (size_t)n < sizeof(doomed))
+            hu_test_rm_rf(doomed);
+    }
     if (saved[0] != '\0') {
         setenv("HOME", saved, 1);
     } else {
