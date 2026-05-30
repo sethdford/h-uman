@@ -1,0 +1,14 @@
+{"prompt":"hey did you eat yet","channel":"imessage","contact_id":"partner","target_register":{"formality":0.1,"warmth":0.9},"source":"hand"}
+{"prompt":"miss you, how was your day","channel":"imessage","contact_id":"partner","target_register":{"formality":0.1,"warmth":0.95},"source":"hand"}
+{"prompt":"you up? cant sleep","channel":"imessage","contact_id":"partner","target_register":{"formality":0.05,"warmth":0.9},"source":"hand"}
+{"prompt":"wanna grab dinner tonight","channel":"imessage","contact_id":"partner","target_register":{"formality":0.1,"warmth":0.85},"source":"hand"}
+{"prompt":"yo you watching the game later","channel":"imessage","contact_id":"close_friend","target_register":{"formality":0.15,"warmth":0.8},"source":"hand"}
+{"prompt":"that meeting was rough lol","channel":"imessage","contact_id":"close_friend","target_register":{"formality":0.15,"warmth":0.75},"source":"hand"}
+{"prompt":"can you send the q3 deck when you get a sec","channel":"slack","contact_id":"colleague","target_register":{"formality":0.5,"warmth":0.5},"source":"hand"}
+{"prompt":"are we still on for the 2pm sync","channel":"slack","contact_id":"colleague","target_register":{"formality":0.5,"warmth":0.45},"source":"hand"}
+{"prompt":"quick question about the staging deploy","channel":"slack","contact_id":"colleague","target_register":{"formality":0.55,"warmth":0.4},"source":"hand"}
+{"prompt":"thanks for jumping on that ticket","channel":"slack","contact_id":"colleague","target_register":{"formality":0.45,"warmth":0.6},"source":"hand"}
+{"prompt":"is this the correct address for the return","channel":"imessage","contact_id":"stranger","target_register":{"formality":0.7,"warmth":0.3},"source":"hand"}
+{"prompt":"following up on my inquiry from yesterday","channel":"email","contact_id":"stranger","target_register":{"formality":0.8,"warmth":0.3},"source":"hand"}
+{"prompt":"can you confirm receipt of the documents","channel":"email","contact_id":"vendor","target_register":{"formality":0.75,"warmth":0.35},"source":"hand"}
+{"prompt":"what are your hours on saturday","channel":"imessage","contact_id":"business","target_register":{"formality":0.6,"warmth":0.4},"source":"hand"}

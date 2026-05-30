@@ -87,6 +87,26 @@ static bool starts_with_ci(const char *s, size_t s_len, const char *prefix) {
     return true;
 }
 
+/* Case-insensitive word-boundary match: needle must be flanked by start/end of
+ * buffer or a non-alphanumeric char. Mirrors the Python classifier's \b...\b
+ * regexes so "as an ai" does NOT match "as an airplane" (substring-classifier
+ * pitfall). The needle may itself contain spaces/apostrophes; only its outer
+ * edges are boundary-checked. */
+static bool contains_word_ci(const char *s, size_t s_len, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || s_len < nlen)
+        return false;
+    for (size_t i = 0; i + nlen <= s_len; i++) {
+        if (strncasecmp(s + i, needle, nlen) != 0)
+            continue;
+        bool left_ok = (i == 0) || !isalnum((unsigned char)s[i - 1]);
+        bool right_ok = (i + nlen == s_len) || !isalnum((unsigned char)s[i + nlen]);
+        if (left_ok && right_ok)
+            return true;
+    }
+    return false;
+}
+
 /* Detect a bullet list (lines starting with '*' or '-' followed by space).
  * Walks line starts; flags if any line begins with bullet marker. */
 static bool contains_bullet_list(const char *s, size_t s_len) {
@@ -250,6 +270,7 @@ static hu_error_t shape_classify_impl(const char *response, size_t response_len,
 
     /* AI-assistant tells (skip if channel allows them, e.g. email) */
     bool fatal_opener = false;
+    bool fatal_self_disclosure = false;
     if (!rules->ai_openers_allowed) {
         if (starts_with_ci(r, trimmed_len, "Depending on")) {
             out->fail_flags |= HU_SHAPE_FAIL_DEPENDING_ON;
@@ -276,6 +297,29 @@ static hu_error_t shape_classify_impl(const char *response, size_t response_len,
         for (size_t i = 0; i + 14 < trimmed_len; i++) {
             if (strncasecmp(r + i, "great question", 14) == 0) {
                 out->fail_flags |= HU_SHAPE_FAIL_GREAT_QUESTION;
+                break;
+            }
+        }
+        /* 2026-05-29: AI self-disclosure / persona-break (FATAL). The reply
+         * admits it's an AI or disclaims capabilities — a hard Seth-persona
+         * break that the opener/length/markdown checks miss. Only inspected on
+         * channels that disallow AI openers (email is exempt). */
+        static const char *const ai_self_tells[] = {
+            "as an ai",
+            "i'm an ai",
+            "i am an ai",
+            "as a language model",
+            "i don't have access to",
+            "i do not have access to",
+            "i cannot access your",
+            "i can't access your",
+            "i don't have personal",
+            "as a virtual assistant",
+        };
+        for (size_t t = 0; t < sizeof(ai_self_tells) / sizeof(ai_self_tells[0]); t++) {
+            if (contains_word_ci(r, trimmed_len, ai_self_tells[t])) {
+                out->fail_flags |= HU_SHAPE_FAIL_AI_SELF_DISCLOSURE;
+                fatal_self_disclosure = true;
                 break;
             }
         }
@@ -360,12 +404,14 @@ static hu_error_t shape_classify_impl(const char *response, size_t response_len,
         score -= 0.15;
     if (f & HU_SHAPE_FAIL_EXCESSIVE_EMOJI)
         score -= 0.15;
+    if (f & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE)
+        score -= 0.3; /* heavy: it's a hard persona-break */
     if (score < 0.0)
         score = 0.0;
     if (score > 1.0)
         score = 1.0;
     out->score = score;
-    out->passed = (score >= 0.7) && !fatal_md && !way_too_long;
+    out->passed = (score >= 0.7) && !fatal_md && !way_too_long && !fatal_self_disclosure;
 
     /* Suppress unused variable warning if fatal_opener isn't used in the
      * pass logic. We track it for future weighting changes. */

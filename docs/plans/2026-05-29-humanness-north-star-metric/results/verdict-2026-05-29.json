@@ -1,0 +1,33 @@
+{
+  "composite": 0.7625215624999999,
+  "weights": {
+    "fidelity": 0.37499999999999994,
+    "anti_ai": 0.3125,
+    "relationship": 0.3125
+  },
+  "axes": {
+    "anti_ai": {
+      "mean": 1.0,
+      "stderr": 0.0,
+      "n": 14
+    },
+    "relationship": {
+      "mean": 0.778929,
+      "stderr": 0.039406,
+      "n": 14
+    },
+    "fidelity": {
+      "mean": 0.55095,
+      "stderr": 0.017138,
+      "n": 14,
+      "available": true
+    }
+  },
+  "humanness_verdict": "SKIP",
+  "gate": {
+    "verdict": "SKIP",
+    "reason": "no baseline yet (bootstrap window not filled)",
+    "per_axis": {}
+  },
+  "n": 14
+}
