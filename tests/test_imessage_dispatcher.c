@@ -403,7 +403,13 @@ static void desc_prefix_no_match_absent(void) {
  * substitute for native threading, which is unreachable via automation.
  * Same loop-until-THREADED pattern as reply_failure_falls_back_to_flat. With a
  * non-NULL agent+allocator and an injected parent lookup, the reply attempt
- * receives the quoted body (mock_reply returns OK → threaded_flat path). */
+ * receives the quoted body (mock_reply returns OK → threaded_flat path).
+ *
+ * Guarded by HU_HAS_IMESSAGE: the parent lookup + its test-injection helper
+ * (hu_imessage_test_set_guid_lookup) live in imessage.c, compiled only on
+ * platforms with the iMessage channel. The dispatcher's quote block is gated
+ * the same way, so off-platform there is nothing to assert. */
+#if HU_HAS_IMESSAGE
 static void threaded_reply_quotes_parent_inline(void) {
     hu_allocator_t sys = hu_system_allocator();
     hu_agent_t agent;
@@ -433,6 +439,7 @@ static void threaded_reply_quotes_parent_inline(void) {
     }
     HU_ASSERT(hit);
 }
+#endif /* HU_HAS_IMESSAGE */
 
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
@@ -445,8 +452,8 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
-    HU_RUN_TEST(threaded_reply_quotes_parent_inline);
 #if HU_HAS_IMESSAGE
+    HU_RUN_TEST(threaded_reply_quotes_parent_inline);
     HU_RUN_TEST(desc_prefix_match_at_string_start);
     HU_RUN_TEST(desc_prefix_match_after_separator);
     HU_RUN_TEST(desc_prefix_no_match_mid_token);

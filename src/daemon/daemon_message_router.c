@@ -96,6 +96,11 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
         size_t send_len = body_len;
         char *quoted = NULL;
         size_t quoted_cap = 0;
+#if defined(HU_HAS_IMESSAGE)
+        /* The parent-text lookup lives in imessage.c, which is compiled only on
+         * platforms where the iMessage channel exists (HU_HAS_IMESSAGE). Off
+         * that platform there is no iMessage channel to reply to, so the quote
+         * is simply skipped and the plain body is sent. */
         if (agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
             char ptext[256];
             size_t plen = 0;
@@ -114,6 +119,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                 }
             }
         }
+#endif /* HU_HAS_IMESSAGE */
         bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
         if (threaded_attempted) {
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
