@@ -1,5 +1,5 @@
-#include "human/core/log.h"
 #include "human/gateway/ws_server.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/websocket/websocket.h"
 #include <stdint.h>
@@ -193,9 +193,16 @@ static bool extract_header(const char *req, size_t req_len, const char *name, ch
             out[vlen] = '\0';
             return true;
         }
-        while (p < req_end && *p && *p != '\n')
+        /* Advance to the next line. Bound the scan by req_end ONLY — do not
+         * stop on a NUL byte. req_len is authoritative here (the request may
+         * contain embedded NULs from untrusted/crafted input); if the scan
+         * stopped on '\0' and the byte was not '\n', p would never advance and
+         * the outer loop would spin forever. Scanning to req_end guarantees
+         * forward progress: either p reaches req_end (loop exits) or lands on
+         * '\n' and steps past it. */
+        while (p < req_end && *p != '\n')
             p++;
-        if (p < req_end && *p == '\n')
+        if (p < req_end) /* *p == '\n' */
             p++;
     }
     return false;
@@ -341,8 +348,7 @@ hu_error_t hu_ws_server_upgrade(hu_ws_server_t *srv, int fd, const char *req, si
             memcpy(hostname, host, hlen);
         }
         hostname[hlen] = '\0';
-        if (strcmp(hostname, "localhost") != 0 &&
-            strcmp(hostname, "127.0.0.1") != 0 &&
+        if (strcmp(hostname, "localhost") != 0 && strcmp(hostname, "127.0.0.1") != 0 &&
             strcmp(hostname, "[::1]") != 0) {
             const char *r403 = "HTTP/1.1 403 Forbidden\r\n\r\n";
             send(fd, r403, strlen(r403), 0);
@@ -434,7 +440,7 @@ static size_t build_server_frame(char *buf, size_t buf_size, const char *payload
 }
 
 hu_error_t hu_ws_server_send(hu_ws_server_t *srv, hu_ws_conn_t *conn, const char *data,
-                            size_t data_len) {
+                             size_t data_len) {
     if (!srv || !conn || !conn->active || conn->fd < 0 || !data)
         return HU_ERR_INVALID_ARGUMENT;
 #ifndef HU_GATEWAY_POSIX
@@ -483,8 +489,7 @@ hu_error_t hu_ws_server_send_binary(hu_ws_server_t *srv, hu_ws_conn_t *conn, con
     char *buf = (char *)alloc->alloc(alloc->ctx, frame_cap);
     if (!buf)
         return HU_ERR_OUT_OF_MEMORY;
-    size_t frame_len =
-        build_server_frame_opcode(buf, frame_cap, HU_WS_OP_BINARY, data, data_len);
+    size_t frame_len = build_server_frame_opcode(buf, frame_cap, HU_WS_OP_BINARY, data, data_len);
     if (frame_len == 0) {
         alloc->free(alloc->ctx, buf, frame_cap);
         return HU_ERR_INVALID_ARGUMENT;
@@ -517,7 +522,8 @@ void hu_ws_server_broadcast(hu_ws_server_t *srv, const char *data, size_t data_l
 }
 
 #ifdef HU_GATEWAY_POSIX
-/* status_code 0: empty close payload; else 2-byte network-order status (e.g. 1002 protocol error). */
+/* status_code 0: empty close payload; else 2-byte network-order status (e.g. 1002 protocol error).
+ */
 static void ws_server_send_close_frame(int fd, uint16_t status_code) {
     if (status_code == 0) {
         char close_frame[2];
@@ -666,7 +672,7 @@ hu_error_t hu_ws_server_process(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
             ssize_t wn = send(conn->fd, pong, 2 + plen, MSG_NOSIGNAL);
             if (wn < 0 || (size_t)wn < 2 + plen) {
                 hu_log_error("ws", NULL, "pong send failed: %s",
-                              wn < 0 ? strerror(errno) : "partial write");
+                             wn < 0 ? strerror(errno) : "partial write");
                 hu_ws_server_close_conn(srv, conn);
                 return HU_ERR_IO;
             }
