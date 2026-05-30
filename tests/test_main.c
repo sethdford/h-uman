@@ -408,6 +408,7 @@ void run_outbound_crosstalk_tests(void);
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
+void run_opinions_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
@@ -1371,6 +1372,7 @@ int main(int argc, char **argv) {
     run_outbound_crosstalk_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
+    run_opinions_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
     run_emotional_moments_repo_tests();
