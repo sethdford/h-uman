@@ -21,7 +21,8 @@ set -euo pipefail
 # Updated 2026-05-29 reconcile: + 6 Modeled-Person person-module repo migrations
 # (emotional_residue/moments, mood, emotional_state, self_model, theory_of_mind).
 # Recomputed against the merged tree.
-BASELINE=101
+# Updated 2026-05-29 after opinions aggregate migration (opinions.c): 101 -> 100
+BASELINE=100
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
