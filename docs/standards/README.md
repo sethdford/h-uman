@@ -72,6 +72,7 @@ AGENTS.md                <- Full engineering protocol
 | [naming.md](engineering/naming.md)                           | Identifier conventions, type naming, constant naming            | All code changes                  |
 | [anti-patterns.md](engineering/anti-patterns.md)             | Prohibited patterns with reasons and alternatives               | Code review, design decisions     |
 | [bounded-contexts.md](engineering/bounded-contexts.md)       | DDD bounded-context map, Modeled-Person layering, edge ACL, guards | Architecture, module boundaries   |
+| [modeled-person-module-shape.md](engineering/modeled-person-module-shape.md) | Canonical module shape for persona / cognition / behavior layers | Modeled-Person module changes     |
 | [testing.md](engineering/testing.md)                         | Test structure, naming, mocking, coverage, quality rules        | Writing or modifying tests        |
 | [workflow.md](engineering/workflow.md)                       | Branching, commits, versioning, releases, hotfixes              | All development work              |
 | [memory-management.md](engineering/memory-management.md)     | Allocator types, ownership rules, cleanup patterns, ASan        | Allocation and cleanup code       |

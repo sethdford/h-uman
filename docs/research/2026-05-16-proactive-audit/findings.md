@@ -85,7 +85,7 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 | ID | Severity | File:Line | Fix |
 | --- | --- | --- | --- |
 | P2-1 | CRITICAL | [daemon.c:8178-8183](../../../src/daemon.c) | Remove `combined` raw-fallback for topic; if extraction fails, use emotion keyword or skip |
-| P2-2 | CRITICAL | [emotional_state.c:181-188](../../../src/context/emotional_state.c) | Replace 60-char window with LLM-extracted noun phrase OR emotion keyword |
+| P2-2 | CRITICAL | `emotional_state.c:181-188` (src/context/ at audit time; since relocated by the DDD refactor) | Replace 60-char window with LLM-extracted noun phrase OR emotion keyword |
 | P2-3 | CRITICAL | [daemon.c:9976-9984](../../../src/daemon.c) | Inner-thought store must store extracted topic, not raw 127-byte memcpy; this is a prompt-injection vector |
 | P2-4 | HIGH | [proactive.c:552-574](../../../src/agent/proactive.c) | `hu_proactive_build_starter` must LLM-rephrase memory content before prompt injection |
 | P2-5 | HIGH | [daemon_proactive.c:227-241](../../../src/daemon_proactive.c) | `hu_daemon_build_callback_context` must not inject raw `content` bytes |
@@ -93,7 +93,7 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 | P2-7 | HIGH | [conversation.c:2420](../../../src/context/conversation.c) | Expand stopword list: add `hey, doing, you, me, my, feel, feeling, lost, lonely, sad, ok, omg`; reject single-word topics under 5 chars |
 | P2-8 | HIGH | [humanness.c:437-439](../../../src/humanness.c) | Curiosity template ("How is the %s going?") must take a structured noun phrase, not raw substring |
 | P2-9 | MED | [superhuman.c:957 vs :1807](../../../src/memory/superhuman.c), [emotional_moments.c:27 vs :209](../../../src/memory/emotional_moments.c) | Remove duplicate function definitions; collapse to single impl |
-| P2-10 | MED | [sqlite.c:186](../../../src/memory/engines/sqlite.c) vs [emotional_state.c:126](../../../src/context/emotional_state.c) | Resolve `mood_log` schema conflict (silently broken right now) |
+| P2-10 | MED | [sqlite.c:186](../../../src/memory/engines/sqlite.c) vs `emotional_state.c:126` (src/context/ at audit time; since relocated) | Resolve `mood_log` schema conflict (silently broken right now) |
 | P2-11 | MED | [memory_degradation.c] | Stop applying degradation to content that is later injected into outbound prompts; degradation is a UX-of-recall concept, not a content-corruption tool |
 
 ### Phase 3 — Contact scoping (every table)
