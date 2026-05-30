@@ -84,6 +84,14 @@ typedef struct hu_eval_run {
     double pass_rate;
     int64_t total_elapsed_ms;
     int total_tokens;
+    /* 2026-05-30: distinguish "model produced a bad answer" (a real 0.0 score)
+     * from "harness failed to obtain an answer" (timeout discard / provider
+     * error -> empty output). empty_outputs counts the latter; invalid is true
+     * when they dominate the run, meaning pass_rate is NOT a trustworthy signal.
+     * Guards eval baseline / check-regression from reading a generation failure
+     * as a humanness regression. See hu_eval_run_empty_invalid. */
+    size_t empty_outputs;
+    bool invalid;
 } hu_eval_run_t;
 
 typedef struct hu_eval_validate_stats {
@@ -103,6 +111,11 @@ hu_error_t hu_eval_suites_validate_dir(hu_allocator_t *alloc, const char *dir, F
 hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                              size_t model_len, hu_eval_suite_t *suite, hu_eval_match_mode_t mode,
                              hu_eval_run_t *out);
+/** True when an eval run should be treated as INVALID because too many tasks produced
+ *  EMPTY output (a generation/harness failure such as a too-tight timeout or provider
+ *  error), making pass_rate meaningless. Pure predicate: empty_outputs * 2 > total_tasks
+ *  (> 50%). Returns false when total_tasks == 0. */
+bool hu_eval_run_empty_invalid(size_t empty_outputs, size_t total_tasks);
 hu_error_t hu_eval_check(hu_allocator_t *alloc, const char *actual, size_t actual_len,
                          const char *expected, size_t expected_len, hu_eval_match_mode_t mode,
                          bool *passed);

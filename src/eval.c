@@ -508,6 +508,13 @@ hu_error_t hu_eval_suites_validate_dir(hu_allocator_t *alloc, const char *dir, F
 }
 #endif
 
+bool hu_eval_run_empty_invalid(size_t empty_outputs, size_t total_tasks) {
+    /* > 50% of tasks produced empty output -> the run is a generation/harness
+     * failure, not a humanness score. Strict majority so an even split (exactly
+     * 50%) is NOT auto-invalidated. */
+    return total_tasks > 0 && empty_outputs * 2 > total_tasks;
+}
+
 hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                              size_t model_len, hu_eval_suite_t *suite, hu_eval_match_mode_t mode,
                              hu_eval_run_t *out) {
@@ -531,6 +538,8 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         out->passed = 0;
         out->failed = 0;
         out->pass_rate = 1.0;
+        out->empty_outputs = 0;
+        out->invalid = false;
         return HU_OK;
     }
     out->results = alloc->alloc(alloc->ctx, suite->tasks_count * sizeof(hu_eval_result_t));
@@ -587,8 +596,18 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
             int64_t task_end_ms = eval_monotonic_ms();
             int64_t task_elapsed = task_end_ms - task_start_ms;
 
-            /* Timeout enforcement: if task exceeded timeout_ms, treat as failure */
-            if (task->timeout_ms > 0 && task_elapsed > task->timeout_ms) {
+            /* Post-hoc timeout: generation has ALREADY completed here, so the
+             * wall-clock was already spent — discarding a valid non-empty response
+             * is pure loss AND silently scores good output 0.0, blinding the eval
+             * gate. (fidelity.json omits timeout_ms -> inherited the 5000ms default
+             * -> all 18 real ~21s outputs were discarded and recorded as a 0.00
+             * humanness pass_rate; longitudinal's 10-15s limits did the same to its
+             * ~30s generations.) Only fail-with-NULL when the output is actually
+             * empty; keep and score a slow-but-non-empty response (elapsed_ms still
+             * records the slowness, and the empty-output guard below catches genuine
+             * generation failures). */
+            if (task->timeout_ms > 0 && task_elapsed > task->timeout_ms &&
+                (!response || response_len == 0)) {
                 res->task_id = task->id ? hu_strdup(alloc, task->id) : NULL;
                 res->passed = false;
                 res->score = 0.0;
@@ -716,6 +735,28 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
 
     out->pass_rate =
         (out->results_count > 0) ? (double)out->passed / (double)out->results_count : 1.0;
+
+    /* Empty-output guard: a task with empty/NULL output is a generation/harness
+     * failure (timeout discard, provider error), NOT a legitimate 0.0 humanness
+     * score. If empties dominate the run, flag it INVALID and warn loudly so
+     * `human eval baseline` / `eval check-regression` don't read a broken
+     * generation path as a humanness regression. */
+    {
+        size_t empty = 0;
+        for (size_t i = 0; i < out->results_count; i++) {
+            if (!out->results[i].actual_output || out->results[i].actual_output_len == 0)
+                empty++;
+        }
+        out->empty_outputs = empty;
+        out->invalid = hu_eval_run_empty_invalid(empty, out->results_count);
+        if (out->invalid) {
+            fprintf(stderr,
+                    "[eval] INVALID RUN: %zu/%zu tasks produced EMPTY output for suite "
+                    "'%s' (generation/harness failure, e.g. timeouts or provider errors) "
+                    "- pass_rate=%.2f is NOT a trustworthy humanness signal.\n",
+                    empty, out->results_count, suite->name ? suite->name : "?", out->pass_rate);
+        }
+    }
 
     /* 2026-05-18 (B2 fix): aggregate per-task elapsed_ms into
      * total_elapsed_ms. Previously this field was always 0 in reports
