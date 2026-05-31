@@ -1740,6 +1740,17 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                  guard_report.detected_persona_identity_echo ? 1 : 0,
                                  guard_report.detected_naked_discourse_opener ? 1 : 0,
                                  guard_report.max_repetition_run);
+                    /* B2 (2026-05-31): update last_rejected_draft so production tapback
+                     * pairing uses the guard-rejected text for complete DPO pairs. */
+                    if (agent->sota.sota_initialized && sresp.content && sresp.content_len > 0) {
+                        if (agent->sota.last_rejected_draft)
+                            agent->alloc->free(agent->alloc->ctx,
+                                               agent->sota.last_rejected_draft,
+                                               agent->sota.last_rejected_draft_len + 1);
+                        agent->sota.last_rejected_draft =
+                            hu_strndup(agent->alloc, sresp.content, sresp.content_len);
+                        agent->sota.last_rejected_draft_len = sresp.content_len;
+                    }
                     /* Sprint 41 follow-up — capture this rejection as a DPO
                      * negative pair for the next LoRA training pass. No-op
                      * under HU_IS_TEST. Complements the E1 pair-builder
@@ -2708,6 +2719,17 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         guard_report.detected_persona_identity_echo ? 1 : 0,
                         guard_report.detected_naked_discourse_opener ? 1 : 0,
                         guard_report.max_repetition_run);
+                    /* B2 (2026-05-31): update last_rejected_draft so production tapback
+                     * pairing uses the guard-rejected text for complete DPO pairs. */
+                    if (agent->sota.sota_initialized && final_content && final_content_len > 0) {
+                        if (agent->sota.last_rejected_draft)
+                            agent->alloc->free(agent->alloc->ctx,
+                                               agent->sota.last_rejected_draft,
+                                               agent->sota.last_rejected_draft_len + 1);
+                        agent->sota.last_rejected_draft =
+                            hu_strndup(agent->alloc, final_content, final_content_len);
+                        agent->sota.last_rejected_draft_len = final_content_len;
+                    }
                     /* Sprint 41 follow-up — capture rejection as DPO negative
                      * pair. Complements the E1 pair-builder below. */
                     {

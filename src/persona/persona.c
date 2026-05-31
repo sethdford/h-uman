@@ -5312,6 +5312,16 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         break;
     }
 
+    /* 7. Closing imperative: shape constraints + anti-pattern guards. */
+    err = persona_compact_append_str(
+        alloc, &buf, &len, &cap,
+        "Reply as yourself. ONE message. No markdown, no bullet lists, no headers. "
+        "Never start with \"Depending on\", \"Here are\", \"Certainly\", \"Absolutely\", "
+        "\"I appreciate\", \"That sounds like\", \"great question\". "
+        "Match the energy of what they said.\n");
+    if (err != HU_OK)
+        goto fail;
+
     /* 6.5. Formality-aware absolute rules — the SAME block the live reactive
      * path appends (src/agent/agent_stream.c via
      * hu_persona_build_absolute_rules_fmt). Without it, the eval/A-B
@@ -5330,21 +5340,8 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
             err = persona_compact_append(alloc, &buf, &len, &cap, rules_buf, rules_len);
             if (err != HU_OK)
                 goto fail;
-            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
-            if (err != HU_OK)
-                goto fail;
         }
     }
-
-    /* 7. Closing imperative: shape constraints + anti-pattern guards. */
-    err = persona_compact_append_str(
-        alloc, &buf, &len, &cap,
-        "Reply as yourself. ONE message. No markdown, no bullet lists, no headers. "
-        "Never start with \"Depending on\", \"Here are\", \"Certainly\", \"Absolutely\", "
-        "\"I appreciate\", \"That sounds like\", \"great question\". "
-        "Match the energy of what they said.");
-    if (err != HU_OK)
-        goto fail;
 
     *out = buf;
     *out_len = len;

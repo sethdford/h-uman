@@ -6782,6 +6782,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 guard_report.detected_persona_identity_echo ? 1 : 0,
                                 guard_report.detected_naked_discourse_opener ? 1 : 0,
                                 guard_report.max_repetition_run);
+                            /* B2 (2026-05-31): update last_rejected_draft so production tapback
+                             * pairing uses the guard-rejected text, not a stale reflection rejection.
+                             * This captures the actual rejected draft for complete DPO pairs. */
+                            if (agent->sota.sota_initialized && final_content && final_len > 0) {
+                                if (agent->sota.last_rejected_draft)
+                                    agent->alloc->free(agent->alloc->ctx,
+                                                       agent->sota.last_rejected_draft,
+                                                       agent->sota.last_rejected_draft_len + 1);
+                                agent->sota.last_rejected_draft =
+                                    hu_strndup(agent->alloc, final_content, final_len);
+                                agent->sota.last_rejected_draft_len = final_len;
+                            }
                             /* Sprint 41 follow-up — capture this rejection as a
                              * DPO negative pair so future LoRA training learns
                              * not to produce it. No-op under HU_IS_TEST. The
