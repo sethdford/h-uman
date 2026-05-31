@@ -143,16 +143,26 @@ static hu_error_t append_texting_shape_rules(hu_allocator_t *alloc, char **buf, 
 /* Phase 2: trim gate. Returns true iff (a) the budget trim feature is
  * enabled in config AND (b) the budget has observed this field as DEAD
  * (mean bytes below threshold over enough samples) AND (c) the field is
- * not in the allowlist (fields that should always be included despite
- * being DEAD). NULL budget = false (no trim) so legacy callers keep
- * current behavior. */
+ * not protected. NULL budget = false (no trim) so legacy callers keep
+ * current behavior.
+ *
+ * Protected-core fields (graph_context, memory_context) are ALWAYS preserved
+ * regardless of whether they're tagged DEAD — they carry grounded relationship
+ * and personal memory context that survive even light turns. Additional fields
+ * can be protected via the configurable allowlist. */
 static inline bool should_skip_field(const hu_prompt_config_t *config,
                                      const struct hu_prompt_budget *budget,
                                      hu_prompt_field_t field_idx) {
     if (!config || !budget || !config->prompt_budget_trim_enabled)
         return false;
 
-    /* Check if this field is in the allowlist. If it is, never skip it. */
+    /* Protected-core set: always keep these fields, even if DEAD. These carry
+     * high-value grounded context (relationship graph, personal memory) that
+     * should never be dropped. This protection does NOT depend on config. */
+    if (field_idx == HU_PROMPT_FIELD_GRAPH_CONTEXT || field_idx == HU_PROMPT_FIELD_MEMORY_CONTEXT)
+        return false; /* never skip protected-core fields */
+
+    /* Check if this field is in the configurable allowlist. If it is, never skip it. */
     if (config->prompt_budget_field_allowlist && config->prompt_budget_field_allowlist_count > 0) {
         const char *field_name = hu_prompt_field_name(field_idx);
         if (field_name) {

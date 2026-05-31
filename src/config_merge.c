@@ -496,14 +496,11 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
 
     /* Prompt-budget compression (L4): budget-aware trimming instead of blind
      * end-truncation. When enabled, DEAD fields (mean bytes below threshold
-     * over sufficient samples) are skipped during prompt assembly, preventing
-     * graph_context and memory_context from being blindly truncated at the
-     * 16 KB MLX backend cap. Default enabled; operators opt out with
-     * {"prompt_budget": {"enabled": false}} in config.json.
-     *
-     * The field_allowlist is initialized empty; it's populated from config
-     * at parse time. Default behavior: allowlist memory_context and
-     * graph_context so they survive trimming even if occasionally light. */
+     * over sufficient samples) are skipped during prompt assembly. graph_context
+     * and memory_context are ALWAYS protected (hardcoded protected-core set in
+     * should_skip_field), so they survive trimming even if tagged DEAD. Additional
+     * fields can be protected via the configurable field_allowlist. Default enabled;
+     * operators opt out with {"prompt_budget": {"enabled": false}} in config.json. */
     cfg->prompt_budget.enabled = true;
     cfg->prompt_budget.dead_field_min_bytes = 16;
     cfg->prompt_budget.min_samples_before_tag = 100;
