@@ -253,6 +253,11 @@ hu_error_t hu_agent_cli_parse_args(const char *const *argv, size_t argc,
                 out->session_id = argv[i + 1];
                 i++;
             }
+        } else if (strcmp(a, "--contact") == 0) {
+            if (i + 1 < argc) {
+                out->contact_id = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "--provider") == 0) {
             if (i + 1 < argc) {
                 out->provider_override = argv[i + 1];
