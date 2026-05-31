@@ -111,4 +111,38 @@ context, channel array, agent, config). Thread these as an explicit
 `pthread_create=0` here, so likely safe stack-passing). Define the ctx struct in
 `daemon/common.h` in the FIRST carve chip.
 
-See [phase-E2-daemon-service-lifecycle.md](phase-E2-daemon-service-lifecycle.md) for the full plan; this inventory + Task 0.1 complete its Task 0.
+## Task 0.2 — per-channel body (`inbound_pump`) sub-map
+
+The 9,300-LOC per-channel `for`-loop body (L5039–14340) is a **numbered
+context-assembly pipeline → `hu_agent_turn` → post-process**. The inline comments
+already number the stages — these are the sub-function seams:
+
+| Stage | Line | Future sub-function |
+|---|---|---|
+| 1. Per-contact profile (persona) | L6309 | `inbound_build_contact_profile` |
+| 2. Conversation history (channel vtable) | L6507 | `inbound_load_history` |
+| Phase 6: prefix context | L6621 | `inbound_build_prefix_ctx` |
+| 3. Awareness context (shared analyzer) | L7873 | `inbound_build_awareness` |
+| 6. Attachment context | L8706 | `inbound_build_attachment_ctx` |
+| 4. Response constraints (channel vtable) | L9187 | `inbound_build_constraints` |
+| 5. Anti-repetition | L9248 | `inbound_anti_repetition` |
+| 6. Relationship-tier calibration | L9275 | `inbound_calibrate_tier` |
+| 7. Emotional topic map | L9404 | `inbound_build_emotion_map` |
+| → agent turn | (5× `hu_agent_turn`) | the call into `src/agent/` |
+| Phase 7: post-conversation episode | L11835 | `inbound_record_episode` |
+| Phase 9: interaction quality | L11859 | `inbound_record_quality` |
+
+So `inbound_pump.c` itself decomposes into ~10 single-purpose context-builders +
+the agent call + 2 post-processors. Each builder is independently characterizable
+(input: history/profile; output: a context struct field). **This is the E2
+end-game** — but only after the cohesive edges (ticks, setup, teardown) are out
+and the characterization harness is green.
+
+---
+
+**E2 Task 0 status: COMPLETE.** Function inventory ✓, static map ✓, threading
+model ✓, `hu_service_run` phase map (0.1) ✓, `inbound_pump` sub-map (0.2) ✓.
+**Next: E2 Task 1 (characterization harness) — requires the post-E1 `main` base +
+a build, so it begins after PR #218 merges.**
+
+See [phase-E2-daemon-service-lifecycle.md](phase-E2-daemon-service-lifecycle.md) for the full plan.
