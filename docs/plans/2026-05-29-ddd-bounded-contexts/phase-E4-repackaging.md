@@ -1,4 +1,10 @@
-# Phase 4 — Internal Repackaging: Config Facade + `agent/` Sub-Packages
+# Phase E4 — Internal Repackaging: Config Facade + `agent/` Sub-Packages
+
+> **Program v2 note (2026-05-31):** carried forward from v1 Phase 4. Lowest-severity,
+> runs last/ongoing. **Updated baseline:** `agent/` is now **157 flat files** (was
+> 154); `config_*.c` are relocated to `src/config/` by E1, so Part A's facade is
+> built *over* the co-located config module. Retires the `FACTORY_BASELINE` ratchet
+> (4 → 0) on provider injection. See [README.md](README.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 

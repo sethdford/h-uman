@@ -11,8 +11,8 @@ created: 2026-05-29
 > dedup+relocate; somatic/narrative_self/attachment tests). Plan:
 > `~/.claude/plans/curried-discovering-treehouse.md`. Phases 4–5 are the heavy
 > lifts. They are intentionally captured here as **chips** rather than executed
-> in one pass because (a) Phase 4 IS the existing DDD Phase-3 repository program
-> (`docs/plans/2026-05-29-ddd-bounded-contexts/phase-3-memory-query-interface.md`),
+> in one pass because (a) Phase 4 IS the existing DDD Phase-E3 repository program
+> (`docs/plans/2026-05-29-ddd-bounded-contexts/phase-E3-memory-query-interface.md`),
 > which has a **concurrent writer on this branch** — a parallel migration would
 > collide; and (b) each relocation is cross-context churn that interacts with
 > the agent-core-boundary + sqlite-includer ratchets. Sequence, don't sprint.

@@ -4,7 +4,7 @@
 # T1 guard (DDD bounded-context refactor, Phase 0). The number of src/ files
 # that directly `#include <sqlite3.h>` must only ever DECREASE. New domain code
 # must reach SQLite through a memory repository (see
-# docs/plans/2026-05-29-ddd-bounded-contexts/phase-3-memory-query-interface.md),
+# docs/plans/2026-05-29-ddd-bounded-contexts/phase-E3-memory-query-interface.md),
 # never by grabbing the raw sqlite3* handle via hu_sqlite_memory_get_db().
 #
 # The engine + repository layers are the ONLY places sqlite3 is legal, so

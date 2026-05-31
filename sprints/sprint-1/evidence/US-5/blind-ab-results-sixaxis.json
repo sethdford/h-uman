@@ -1,0 +1,21 @@
+{
+  "n": 5,
+  "detect": 0.6,
+  "ci_lo": 0.23071993220883708,
+  "ci_hi": 0.8823817688407467,
+  "weighted_detect": 0.5652173913043478,
+  "per_rater": {
+    "rating_sheet": [
+      0.6,
+      5
+    ]
+  },
+  "axes": {
+    "opinion": 0.9,
+    "memory": 0.7,
+    "reasoning": 0.8,
+    "lexical": 0.95,
+    "tone": 0.9,
+    "syntax": 0.9
+  }
+}

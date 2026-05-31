@@ -6,6 +6,7 @@
 #include "human/agent/chaos.h"
 #include "human/agent/checkpoint.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/contextual_bandit.h"
 #include "human/agent/data_quality.h"
 #include "human/agent/degradation.h"
 #include "human/agent/gvr.h"
@@ -118,6 +119,8 @@ typedef struct hu_agent_extensions {
     hu_tier_manager_t tier_manager;
     hu_prm_config_t prm_config;
     hu_dpo_collector_t dpo_collector;
+    hu_contextual_bandit_t
+        *bandit; /* Contextual bandit for per-contact humanization param selection */
     int64_t current_trajectory_id; /* ML trajectory for RL training (0 = inactive) */
     bool sota_initialized;
 

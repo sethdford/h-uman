@@ -218,6 +218,36 @@ if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
     fi
 fi
 
+# E0 erosion-brake gates (DDD Program v2): file-size ceiling, no-new-root-files,
+# clone-detection. Ratchets at their 2026-05-31 baselines; fail only on growth.
+# See docs/plans/2026-05-29-ddd-bounded-contexts/phase-E0-erosion-brake-gates.md.
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-file-size-ceiling.sh" ]; then
+    if ! bash scripts/check-file-size-ceiling.sh; then
+        echo ""
+        echo "Pre-commit blocked: a src/*.c file exceeds the size ratchet."
+        echo "Split it — see .claude/rules/file-size-ceiling.md."
+        exit 1
+    fi
+fi
+
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-no-new-root-files.sh" ]; then
+    if ! bash scripts/check-no-new-root-files.sh; then
+        echo ""
+        echo "Pre-commit blocked: a new loose .c file at src/ root."
+        echo "Put it in a bounded context — see .claude/rules/no-new-root-files.md."
+        exit 1
+    fi
+fi
+
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ]; then
+    if ! bash scripts/check-clone-ratchet.sh; then
+        echo ""
+        echo "Pre-commit blocked: code duplication increased past the ratchet."
+        echo "Extract a shared helper — see .claude/rules/clone-ratchet.md."
+        exit 1
+    fi
+fi
+
 # Modeled-Person layering: persona -> cognition -> behavior is unidirectional;
 # no cognition<->behavior cross-talk and no persona dependency on either.
 staged_mperson=$(git diff --cached --name-only --diff-filter=ACM -- \

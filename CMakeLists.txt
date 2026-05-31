@@ -773,6 +773,7 @@ set(HU_CORE_SOURCES
     src/agent/awareness.c
     src/agent/outcomes.c
     src/agent/contextual_bandit.c
+    src/agent/humanization_bandit.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
     src/agent/stop_sequence_registry.c
@@ -866,6 +867,7 @@ set(HU_CORE_SOURCES
     src/agent/activation_steering.c
     src/agent/arbitrator.c
     src/agent/salience.c
+    src/agent/intent.c
     src/agent/planning.c
     src/agent/collab_planning.c
     src/behavior/rel_dynamics.c
@@ -3274,6 +3276,7 @@ set(HU_TEST_SOURCES
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
     tests/test_contextual_bandit.c
+    tests/test_humanization_bandit.c
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
@@ -3650,6 +3653,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_workflow_event.c
     tests/test_sota_features.c
     tests/test_mood.c
+    tests/test_intent.c
     tests/test_bth_e2e.c
     tests/test_style_tracker.c
     tests/test_theory_of_mind.c

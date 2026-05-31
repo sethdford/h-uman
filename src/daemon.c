@@ -24,6 +24,7 @@
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
 #include "human/agent/burst_egress.h"
+#include "human/agent/humanization_bandit.h"
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
@@ -5641,8 +5642,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * narrative/venting detected and probability roll passes. */
                 {
                     float bc_prob = 0.3f;
-                    if (agent && agent->persona)
+                    if (agent && agent->persona) {
                         bc_prob = agent->persona->humanization.backchannel_probability;
+
+                        /* US-2: Apply bandit-based humanization override if gated ON */
+                        if (agent->sota.bandit && batch_key && key_len > 0) {
+                            /* Canonical hash — must match the trainer in dpo.c so we
+                             * read the same Beta arm the outcomes trained. */
+                            uint64_t contact_handle = hu_contact_handle_hash(batch_key);
+
+                            hu_humanization_config_t humanization_params;
+                            humanization_params.disfluency_frequency =
+                                agent->persona->humanization.disfluency_frequency;
+                            humanization_params.backchannel_probability = bc_prob;
+
+                            if (hu_humanization_apply_bandit_override(
+                                    agent->sota.bandit, contact_handle, &humanization_params)) {
+                                bc_prob = humanization_params.backchannel_probability;
+                            }
+                        }
+                    }
                     uint32_t bc_seed =
                         (uint32_t)time(NULL) * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
                     if (hu_conversation_should_backchannel(combined, combined_len, early_history,
@@ -13264,7 +13283,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         }
                                         hu_reaction_handler_register_assistant_message_for_production(
                                             ch_name, batch_key, msg_ref,
-                                            combined[0] ? combined : "", fragments[f].text);
+                                            combined[0] ? combined : "", fragments[f].text,
+                                            /* TODO(B2-wire): thread dpo_rejected_resp from the turn
+                                               here to populate the alternative */
+                                            "");
                                     }
                                 }
 #endif

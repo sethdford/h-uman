@@ -1,4 +1,12 @@
-# Phase 3 — Make the Memory Vtable Real (Repository Pattern, Close T1)
+# Phase E3 — Make the Memory Vtable Real (Repository Pattern, Close T1)
+
+> **Program v2 note (2026-05-31):** carried forward unchanged from v1 Phase 3 — it
+> is still the correct plan and the SOTA-critical "moat" phase. Sequenced AFTER
+> E0 (gates), E1 (root sprawl), and E2 (daemon carve) so the migration resumes on
+> a *fenced* baseline. **Updated baseline:** the blast radius has grown since
+> authoring — now **~146 sites across 41 files** (was 33). The E0 sqlite ratchet
+> (`check-sqlite-includer-ratchet.sh`) plus a new `get_db`-caller ratchet must be
+> green before this phase begins. See [README.md](README.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 

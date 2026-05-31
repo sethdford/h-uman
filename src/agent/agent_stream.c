@@ -700,8 +700,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             {
                 char rules_buf[2048];
                 size_t rules_len = 0;
-                if (hu_persona_build_absolute_rules(p, rules_buf, sizeof(rules_buf), &rules_len) ==
-                        HU_OK &&
+                /* Formality-aware: professional contacts get capitalized/punctuated
+                 * register, not the casual friend-voice (fixes register mismatch). */
+                if (hu_persona_build_absolute_rules_fmt(p, ov ? ov->formality : NULL, rules_buf,
+                                                        sizeof(rules_buf), &rules_len) == HU_OK &&
                     rules_len > 0) {
                     int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", rules_buf);
                     if (n > 0 && lpo + (size_t)n < sizeof(lp))
