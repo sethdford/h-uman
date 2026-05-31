@@ -80,6 +80,8 @@ def main():
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--limit", type=int, default=150, help="max triples to emit")
     ap.add_argument("--min-len", type=int, default=8, help="skip replies shorter than this")
+    ap.add_argument("--max-per-contact", type=int, default=25,
+                    help="cap pairs per contact so one thread can't dominate (0 = no cap)")
     ap.add_argument("--out", default="seth_triples.json")
     ap.add_argument("--keep-handles", action="store_true",
                     help="write real contact handles instead of aliases (NOT for raters)")
@@ -104,10 +106,9 @@ def main():
         """
     ).fetchall()
 
-    triples = []
+    by_chat = {}           # chat_id -> [ {context, seth_reply, handle} ] in time order
     seen_replies = set()
     last_inbound = {}      # chat_id -> (text, handle)
-    alias = {}             # real handle -> contact_N
     decoded_fail = 0
     sent_seen = 0
 
@@ -135,21 +136,30 @@ def main():
         if key in seen_replies:
             continue
         seen_replies.add(key)
-
-        if a.keep_handles:
-            cname = ctx_handle
-        else:
-            cname = alias.setdefault(ctx_handle, f"contact_{len(alias) + 1}")
-
-        triples.append({
-            "contact_name": cname,
-            "context": context_text,
-            "seth_reply": content,
-        })
-        if len(triples) >= a.limit:
-            break
+        by_chat.setdefault(chat_id, []).append(
+            {"context": context_text, "seth_reply": content, "handle": ctx_handle})
 
     con.close()
+
+    # Interleave round-robin across contacts for diversity; cap per contact so
+    # one big thread can't dominate the sheet.
+    cap = a.max_per_contact if a.max_per_contact and a.max_per_contact > 0 else None
+    buckets = [(v[:cap] if cap else v) for v in by_chat.values()]
+    alias = {}
+    triples = []
+    depth = 0
+    while len(triples) < a.limit and any(depth < len(b) for b in buckets):
+        for b in buckets:
+            if depth < len(b) and len(triples) < a.limit:
+                item = b[depth]
+                cname = item["handle"] if a.keep_handles \
+                    else alias.setdefault(item["handle"], f"contact_{len(alias) + 1}")
+                triples.append({
+                    "contact_name": cname,
+                    "context": item["context"],
+                    "seth_reply": item["seth_reply"],
+                })
+        depth += 1
     with open(a.out, "w") as f:
         json.dump(triples, f, indent=2, ensure_ascii=False)
 
