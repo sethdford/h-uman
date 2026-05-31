@@ -70,8 +70,9 @@ Canonical reference for every iMessage platform capability, our implementation s
 
 | Investigation | File | Conclusion | Changed Since? |
 | --- | --- | --- | --- |
-| Edit messages | `imessage-edit-feasibility.md` (2026-03-08) | Not feasible via public APIs | No — imsg still has no edit |
-| Unsend messages | `imessage-unsend-feasibility.md` (2026-03-08) | Partially feasible (AX automation) | No — imsg has no unsend |
+| Edit messages | `imessage-edit-feasibility.md` (2026-03-08) | Not feasible via public APIs | Re-confirmed 2026-05-31 (`imessage-imcore-private-api-spike.md`): IMCore `editMessage:atPartIndex:…` works but needs SIP-off + dylib, broken on Tahoe. NO-GO. |
+| Unsend messages | `imessage-unsend-feasibility.md` (2026-03-08) | Partially feasible (AX automation) | Re-confirmed 2026-05-31: IMCore `retractMessagePart:` is the reliable path but Tier-2-only (SIP-off). AX path unchanged. |
+| IMCore private-API spike | `imessage-imcore-private-api-spike.md` (2026-05-31) | Feasible via IMCore dylib; NO-GO for default-on (SIP + closing Tahoe window) | New — re-evaluated edit/unsend/reply; hardened Tier-1 fallback quote instead |
 | Abandoned typing | `imessage-abandoned-typing-feasibility.md` (2026-03-10) | Not feasible | Minor — imsg v0.5.0 had typing but broken on macOS 26 |
 | Typing indicators (AX) | `imessage-abandoned-typing-feasibility.md` (updated 2026-04) | AX workaround now implemented | Yes — AX typing works; abandoned typing still not feasible |
 

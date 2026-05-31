@@ -117,6 +117,51 @@ hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *fa
     return HU_REPLY_STYLE_FLAT;
 }
 
+/* Should the threaded-intent FALLBACK carry an explicit inline quote?
+ *
+ * When the predicate picks THREADED but native AX threading isn't available or
+ * didn't verify (the common case on macOS 26+, where IMCore is entitlement-
+ * locked), the dispatcher degrades to a flat send. Today it ALWAYS prefixes
+ * that flat send with an `↩ "snippet"` quote block. That over-quoting is the
+ * single most bot-like artifact on the reply path: a human does NOT quote-block
+ * a reply to the message they were just sent five seconds ago — they only
+ * reference the parent when context is genuinely ambiguous.
+ *
+ * This pure predicate gates the quote on the SAME signals thread_logodds uses,
+ * so the fallback mirrors when a human would actually reference:
+ *   - parent is not the newest inbound message  → reference disambiguates
+ *   - parent is stale (conversation moved on)    → reference reorients
+ *   - multiple unresolved questions are pending   → reference says which one
+ * Otherwise (fresh, last, single-thread context) a plain reply is what a human
+ * sends, so we suppress the quote glyph entirely.
+ *
+ * Pure. No I/O. Deterministic given facts. NULL facts → false (no quote; the
+ * plain body is always a safe send and never a regression). */
+bool hu_imessage_reply_should_quote_on_fallback(const hu_reply_style_facts_t *f) {
+    if (!f)
+        return false;
+
+    /* Parent scrolled off / not the freshest inbound → a bare reply could be
+     * read as answering the newest message; an explicit reference
+     * disambiguates which message we mean. */
+    if (f->parent_position_from_bottom >= 1)
+        return true;
+
+    /* Stale parent: > 3 min since it arrived. The thread may have drifted, so a
+     * human reorients the recipient by quoting what they're responding to. */
+    if (f->seconds_since_parent > 180)
+        return true;
+
+    /* Two or more unresolved questions in the window → the quote says which one
+     * this reply answers. */
+    if (f->pending_questions_in_window >= 2)
+        return true;
+
+    /* Fresh, last, single-thread context: a plain reply is the natural human
+     * shape. Suppress the quote glyph — it would read as a bot. */
+    return false;
+}
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

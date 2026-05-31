@@ -3409,6 +3409,7 @@ set(HU_TEST_SOURCES
     tests/test_gmail.c
     tests/test_imessage_extended.c
     tests/test_imessage_reply_style.c
+    tests/test_imessage_reply_fallback_quote.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
