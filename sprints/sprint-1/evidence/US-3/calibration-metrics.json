@@ -1,0 +1,8 @@
+{
+  "contact_id": "test_contact",
+  "total_turns": 5,
+  "suppressed_count": 15,
+  "kept_count": 10,
+  "suppression_rate": 0.600,
+  "timestamp": "2026-05-31T03:42:23Z"
+}
