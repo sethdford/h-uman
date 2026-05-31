@@ -35,7 +35,7 @@ static void test_prompt_build_basic(void) {
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
-    HU_ASSERT_TRUE(strstr(out, "Human") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "real person") != NULL); /* base identity present */
     HU_ASSERT_TRUE(strstr(out, "ollama") != NULL);
     HU_ASSERT_TRUE(strstr(out, "llama3") != NULL);
     HU_ASSERT_TRUE(strstr(out, "/home/user") != NULL);
