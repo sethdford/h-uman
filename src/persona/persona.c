@@ -7,6 +7,7 @@
 #include "human/persona/circadian.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
+#include "human/persona/terseness.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3237,6 +3238,27 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
         if (err != HU_OK)
             goto fail;
+    }
+
+    /* Terseness calibration gated on the blind A/B (scripts/blind_ab): the
+     * measurement showed h-uman reads as DISTINGUISHABLE because it is too
+     * verbose / endearing vs the person's real terseness. Do NOT flip to
+     * default-ON without a measurement showing the change is judged MORE human.
+     * See include/human/persona/terseness.h and
+     * .claude/rules/feature-gate-requires-measurement.md. */
+    {
+        hu_terse_mode_t terse_mode = hu_terse_mode_from_env();
+        if (terse_mode == HU_TERSE_LIVE) {
+            const char *td = hu_terse_directive();
+            err = append_prompt(alloc, &buf, &len, &cap, td, strlen(td));
+            if (err != HU_OK)
+                goto fail;
+        } else if (terse_mode == HU_TERSE_SHADOW) {
+            hu_log_info("human", NULL,
+                        "terseness SHADOW: would inject %zu-byte terseness directive; "
+                        "prompt unchanged",
+                        strlen(hu_terse_directive()));
+        }
     }
 
     /* Behavioral calibration: inject measured communication patterns */
