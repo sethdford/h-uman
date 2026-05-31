@@ -241,16 +241,22 @@ static void test_bandit_override_gate_off_unchanged(void) {
     float orig_dis = params.disfluency_frequency;
     float orig_bc = params.backchannel_probability;
 
-    /* Ensure gate is OFF */
-    unsetenv("HU_BANDIT_HUMANIZATION");
+    /* Activated 2026-05-31 after blind A/B: ENABLED by default. The OFF path is
+     * now reached via the EXPLICIT disable value, not by unsetting the env. */
+    setenv("HU_BANDIT_HUMANIZATION", "off", 1);
 
-    /* Apply override — gate off, so should NOT change params */
+    /* Apply override — gate explicitly off, so should NOT change params */
     bool applied = hu_humanization_apply_bandit_override(bandit, contact, &params);
     HU_ASSERT_FALSE(applied);
 
     /* Params should remain unchanged */
     HU_ASSERT_EQ(params.disfluency_frequency, orig_dis);
     HU_ASSERT_EQ(params.backchannel_probability, orig_bc);
+
+    /* Default (env unset) is now ON: a real bandit applies the override. */
+    unsetenv("HU_BANDIT_HUMANIZATION");
+    bool applied_default = hu_humanization_apply_bandit_override(bandit, contact, &params);
+    HU_ASSERT_TRUE(applied_default);
 
     hu_contextual_bandit_destroy(bandit);
 }
