@@ -192,16 +192,33 @@ hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapt
 
     /* adapter_dir may be a directory OR a file path: production swap callers
      * pass the weights file (".../adapters.safetensors"), but adapter_config.json
-     * lives in the adapter DIRECTORY. Resolve to the parent directory when given
-     * a regular file so the guard actually finds the config on the swap path. */
+     * lives in the adapter DIRECTORY. Resolve to the parent directory when the
+     * path denotes a file so the guard finds the config on the swap path —
+     * including when the weights file is missing/unreadable (the guard runs
+     * BEFORE the swap, so the file may not exist yet / anymore). */
     char dir[1200];
     if (adapter_dir_len >= sizeof(dir))
         return HU_ERR_INVALID_ARGUMENT;
     memcpy(dir, adapter_dir, adapter_dir_len);
     dir[adapter_dir_len] = '\0';
 
+    const char *base = strrchr(dir, '/');
+    base = base ? base + 1 : dir;
+    bool treat_as_file;
     struct stat st;
-    if (stat(dir, &st) == 0 && S_ISREG(st.st_mode)) {
+    if (stat(dir, &st) == 0) {
+        /* Path exists: the filesystem is authoritative about file vs dir. */
+        treat_as_file = S_ISREG(st.st_mode);
+    } else {
+        /* Path does not exist (weights file already removed, or about to be
+         * written): a '.' extension in the last component (".safetensors",
+         * ".npz", ".bin") means it's a file, so look in the parent dir. A
+         * component with no extension is treated as a directory — it reads
+         * its OWN (possibly absent) config, never a sibling's, so a missing
+         * directory can't pick up a stray config from its parent. */
+        treat_as_file = (strchr(base, '.') != NULL);
+    }
+    if (treat_as_file) {
         char *slash = strrchr(dir, '/');
         if (slash)
             *slash = '\0'; /* ".../adapters.safetensors" -> ".../" */

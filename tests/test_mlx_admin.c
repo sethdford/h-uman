@@ -251,12 +251,40 @@ static void lora_scale_guard_refuses_over_scaled_adapter_by_file_path(void) {
     hu_test_rm_rf(dir);
 }
 
+/* The guard runs BEFORE the swap, so the weights file may not exist yet (about
+ * to be written) or anymore. With a ".safetensors" path whose file is ABSENT,
+ * the reader must still resolve to the parent dir via the basename heuristic and
+ * find the over-scaled config beside it — otherwise it fail-opens (cursor review,
+ * PR #207, comment 3330095857). */
+static void lora_scale_guard_refuses_over_scaled_adapter_missing_weights_file(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu-lora-nofile", dir, sizeof(dir)));
+
+    /* Over-scaled config present; the .safetensors file is NEVER created. */
+    seed_adapter_config(dir, "{\"lora_parameters\": {\"rank\": 8, \"scale\": 10.0}}");
+    char missing_file[1200];
+    snprintf(missing_file, sizeof(missing_file), "%s/adapters.safetensors", dir);
+
+    /* stat() fails on the missing file; the '.safetensors' extension still
+     * resolves it to the parent dir, so scale=10.0 is read and BLOCKED. */
+    double sc = 0.0;
+    HU_ASSERT_EQ(hu_lora_adapter_config_scale(&alloc, missing_file, strlen(missing_file), &sc),
+                 HU_OK);
+    HU_ASSERT_TRUE(sc > 9.9 && sc < 10.1);
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, missing_file, strlen(missing_file)),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    hu_test_rm_rf(dir);
+}
+
 void run_mlx_admin_tests(void);
 void run_mlx_admin_tests(void) {
     HU_TEST_SUITE("MLXAdmin");
     HU_RUN_TEST(lora_scale_classify_truth_table);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_by_file_path);
+    HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_missing_weights_file);
     HU_RUN_TEST(lora_scale_guard_fails_open_without_config);
     HU_RUN_TEST(swap_null_alloc_returns_invalid_argument);
     HU_RUN_TEST(swap_null_base_url_returns_invalid_argument);
