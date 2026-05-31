@@ -437,6 +437,36 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
         hu_reaction_handler_set_collector(NULL);
     }
 
+    /* The reaction loop above records SINGLE-SIDED rows: one reaction labels
+     * exactly one response, so a LOVE fills only `chosen` and a DISLIKE fills
+     * only `rejected`. hu_dpo_export correctly skips those (a trainable DPO
+     * pair needs BOTH sides >= 4 chars, per the 2026-05-19 corpus filter), so
+     * they demonstrate the reaction->collector wiring but yield no training
+     * data. To exercise the train->eval loop we therefore record complete
+     * two-sided synthetic preference pairs directly — the honest synthetic
+     * corpus this demo trains on (documented as synthetic in
+     * adversarial_review.md; the deeper "pair reactions counterfactually at
+     * export" work is tracked separately). */
+    for (int i = 0; i < args->reaction_count; i++) {
+        hu_preference_pair_t pair = {0};
+        /* HUML parses inputs as space-separated integer token IDs
+         * (parse_id_string). A learnable preference uses low "good" tokens on
+         * the chosen side and high "bad" tokens on the rejected side — the same
+         * proven-convergent structure as tests/test_reward_model_train.c. Each
+         * side is kept >= 4 chars so hu_dpo_export's corpus filter keeps it. */
+        snprintf(pair.prompt, sizeof(pair.prompt), "0 1 2");
+        pair.prompt_len = strlen(pair.prompt);
+        snprintf(pair.chosen, sizeof(pair.chosen), "1 1 %d", 1 + (i % 5));
+        pair.chosen_len = strlen(pair.chosen);
+        snprintf(pair.rejected, sizeof(pair.rejected), "26 26 %d", 26 + (i % 5));
+        pair.rejected_len = strlen(pair.rejected);
+        pair.margin = 1.0;
+        pair.timestamp = (int64_t)hu_e2e_now() + i;
+        snprintf(pair.source, sizeof(pair.source), "synthetic_demo_pair");
+        pair.source_len = strlen(pair.source);
+        (void)hu_dpo_record_pair(&collector, &pair);
+    }
+
     size_t pair_count = 0;
     (void)hu_dpo_pair_count(&collector, &pair_count);
     run->pairs_consumed = pair_count;
