@@ -5,7 +5,86 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HU_LOCAL_STT_DEFAULT_MODEL "whisper-large-v3"
+/* Append one curl multipart field "key=prefixvalue" to req, recording the heap
+ * buffer in req->owned so hu_local_stt_request_free can release it. */
+static hu_error_t stt_add_field(hu_allocator_t *alloc, hu_local_stt_request_t *req, const char *key,
+                                const char *prefix, const char *value) {
+    if (req->owned_count >= HU_LOCAL_STT_MAX_OWNED)
+        return HU_ERR_INVALID_ARGUMENT;
+    size_t cap = strlen(key) + 1 /* '=' */ + strlen(prefix) + strlen(value) + 1 /* NUL */;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    int n = snprintf(buf, cap, "%s=%s%s", key, prefix, value);
+    if (n < 0 || (size_t)n >= cap) {
+        alloc->free(alloc->ctx, buf, cap);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    req->owned[req->owned_count] = buf;
+    req->owned_sizes[req->owned_count] = cap;
+    req->owned_count++;
+    return HU_OK;
+}
+
+hu_error_t hu_local_stt_build_request(hu_allocator_t *alloc, const hu_local_stt_config_t *config,
+                                      const char *audio_path, hu_local_stt_request_t *out_req) {
+    if (!alloc || !config || !config->endpoint || !config->endpoint[0] || !audio_path ||
+        !audio_path[0] || !out_req)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out_req, 0, sizeof(*out_req));
+
+    hu_error_t err;
+    /* file=@<path> — the whisper.cpp /inference (and OpenAI-compatible) field. */
+    if ((err = stt_add_field(alloc, out_req, "file", "@", audio_path)) != HU_OK)
+        goto fail;
+    /* Pin json so the response is {"text": ...}; don't depend on the server's
+     * default response_format. Valid for whisper.cpp and OpenAI-compatible. */
+    if ((err = stt_add_field(alloc, out_req, "response_format", "", "json")) != HU_OK)
+        goto fail;
+    /* whisper.cpp loads its model at startup (-m) and ignores a per-request
+     * model; only OpenAI-compatible servers need it. Emit it only when set. */
+    if (config->model && config->model[0]) {
+        if ((err = stt_add_field(alloc, out_req, "model", "", config->model)) != HU_OK)
+            goto fail;
+    }
+    if (config->language && config->language[0]) {
+        if ((err = stt_add_field(alloc, out_req, "language", "", config->language)) != HU_OK)
+            goto fail;
+    }
+
+    /* curl -s -X POST {-F <field>}... <endpoint> NULL. owned_count is bounded by
+     * HU_LOCAL_STT_MAX_OWNED, so this never exceeds HU_LOCAL_STT_MAX_ARGV. */
+    size_t argc = 0;
+    out_req->argv[argc++] = "curl";
+    out_req->argv[argc++] = "-s";
+    out_req->argv[argc++] = "-X";
+    out_req->argv[argc++] = "POST";
+    for (size_t i = 0; i < out_req->owned_count; i++) {
+        out_req->argv[argc++] = "-F";
+        out_req->argv[argc++] = out_req->owned[i];
+    }
+    out_req->argv[argc++] = config->endpoint;
+    out_req->argv[argc] = NULL;
+    out_req->argc = argc;
+    return HU_OK;
+
+fail:
+    hu_local_stt_request_free(alloc, out_req);
+    return err;
+}
+
+void hu_local_stt_request_free(hu_allocator_t *alloc, hu_local_stt_request_t *req) {
+    if (!alloc || !req)
+        return;
+    for (size_t i = 0; i < req->owned_count; i++) {
+        if (req->owned[i])
+            alloc->free(alloc->ctx, req->owned[i], req->owned_sizes[i]);
+        req->owned[i] = NULL;
+        req->owned_sizes[i] = 0;
+    }
+    req->owned_count = 0;
+    req->argc = 0;
+}
 
 hu_error_t hu_local_stt_transcribe(hu_allocator_t *alloc, const hu_local_stt_config_t *config,
                                    const char *audio_path, char **out_text, size_t *out_len) {
@@ -26,82 +105,14 @@ hu_error_t hu_local_stt_transcribe(hu_allocator_t *alloc, const hu_local_stt_con
     *out_len = mlen;
     return HU_OK;
 #else /* !HU_IS_TEST */
-    const char *model =
-        (config->model && config->model[0]) ? config->model : HU_LOCAL_STT_DEFAULT_MODEL;
-
-    size_t file_cap = 64 + strlen(audio_path);
-    char *file_arg = (char *)alloc->alloc(alloc->ctx, file_cap);
-    if (!file_arg)
-        return HU_ERR_OUT_OF_MEMORY;
-    int n = snprintf(file_arg, file_cap, "file=@%s", audio_path);
-    if (n < 0 || (size_t)n >= file_cap) {
-        alloc->free(alloc->ctx, file_arg, file_cap);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    size_t model_cap = 32 + strlen(model);
-    char *model_arg = (char *)alloc->alloc(alloc->ctx, model_cap);
-    if (!model_arg) {
-        alloc->free(alloc->ctx, file_arg, file_cap);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    n = snprintf(model_arg, model_cap, "model=%s", model);
-    if (n < 0 || (size_t)n >= model_cap) {
-        alloc->free(alloc->ctx, file_arg, file_cap);
-        alloc->free(alloc->ctx, model_arg, model_cap);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    char *lang_arg = NULL;
-    size_t lang_cap = 0;
-    if (config->language && config->language[0]) {
-        lang_cap = 32 + strlen(config->language);
-        lang_arg = (char *)alloc->alloc(alloc->ctx, lang_cap);
-        if (!lang_arg) {
-            alloc->free(alloc->ctx, file_arg, file_cap);
-            alloc->free(alloc->ctx, model_arg, model_cap);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-        n = snprintf(lang_arg, lang_cap, "language=%s", config->language);
-        if (n < 0 || (size_t)n >= lang_cap) {
-            alloc->free(alloc->ctx, file_arg, file_cap);
-            alloc->free(alloc->ctx, model_arg, model_cap);
-            alloc->free(alloc->ctx, lang_arg, lang_cap);
-            return HU_ERR_INVALID_ARGUMENT;
-        }
-    }
-
-    const char *argv[16];
-    size_t argc = 0;
-    argv[argc++] = "curl";
-    argv[argc++] = "-s";
-    argv[argc++] = "-X";
-    argv[argc++] = "POST";
-    argv[argc++] = "-F";
-    argv[argc++] = file_arg;
-    argv[argc++] = "-F";
-    argv[argc++] = model_arg;
-    if (lang_arg) {
-        argv[argc++] = "-F";
-        argv[argc++] = lang_arg;
-    }
-    argv[argc++] = config->endpoint;
-    argv[argc] = NULL;
-
-    if (argc >= 16) {
-        alloc->free(alloc->ctx, file_arg, file_cap);
-        alloc->free(alloc->ctx, model_arg, model_cap);
-        if (lang_arg)
-            alloc->free(alloc->ctx, lang_arg, lang_cap);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
+    hu_local_stt_request_t req;
+    hu_error_t err = hu_local_stt_build_request(alloc, config, audio_path, &req);
+    if (err != HU_OK)
+        return err;
 
     hu_run_result_t result = {0};
-    hu_error_t err = hu_process_run(alloc, argv, NULL, 4 * 1024 * 1024, &result);
-    alloc->free(alloc->ctx, file_arg, file_cap);
-    alloc->free(alloc->ctx, model_arg, model_cap);
-    if (lang_arg)
-        alloc->free(alloc->ctx, lang_arg, lang_cap);
+    err = hu_process_run(alloc, req.argv, NULL, 4 * 1024 * 1024, &result);
+    hu_local_stt_request_free(alloc, &req);
 
     if (err != HU_OK) {
         hu_run_result_free(alloc, &result);
