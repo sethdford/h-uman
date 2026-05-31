@@ -24,7 +24,18 @@ macOS jobs were consistently the long pole, and an LSan abort silently ate the
 Phase 1 alone roughly **halves** runner load on PRs (no double-run) and removes
 the churn-rebuild waste (cancel-in-progress). All edits `actionlint`-clean.
 
-## Phase 2 — affected-only CI (needs a throwaway-branch CI dry-run)
+## Phase 2 — affected-only CI (frontend/docs jobs) — SHIPPED
+
+A `changes` job (`dorny/paths-filter`) sets `ui`/`web`/`docs`/`tokens` booleans;
+the frontend/docs jobs (`ui`, `ui-e2e`, `website`, `design-tokens`, `docs`,
+`visual-regression`) gate on `if: <area> || github.event_name != 'pull_request'`.
+A pure-backend PR skips all of them; main/nightly always run full. Job-level
+`if:` skips report "skipped" → **satisfy required checks** (no deadlock), so no
+branch-protection change is needed — verified on this PR's own run. The C/build
+matrix still always runs (a docs-only PR skipping the C suite is a future,
+higher-risk extension — see below).
+
+### Original notes (kept for the backend-skip extension)
 
 The repo already ships `scripts/what-to-test.sh` (changed-files → suites). Wire
 it in WITHOUT deadlocking required checks:
@@ -53,11 +64,12 @@ validated against a real PR's check accounting, not edited blind.
 
 ## Phase 4 — caching depth
 
-- `ccache`/`sccache` via `CMAKE_C_COMPILER_LAUNCHER` in `.github/actions/setup-build`
-  (keyed on compiler+flags) — complements the existing whole-`build`-dir cache,
-  which fully misses on any `src/**` change.
-- Cache the **llama.cpp / mlx** build trees for the rl_sota nightly (its long
-  pole is a from-scratch llama.cpp build every run).
+- ~~`ccache` via `CMAKE_C_COMPILER_LAUNCHER`~~ **ALREADY PRESENT** in
+  `.github/actions/setup-build` (installs ccache, caches `~/.cache/ccache`
+  content-addressed keyed on src hash + prefix restore-keys, sets the launcher).
+  Verified 2026-05-31 — no work needed; the original note here was wrong.
+- Remaining: cache the **llama.cpp / mlx** build trees for the rl_sota nightly
+  (its long pole is a from-scratch llama.cpp build every run).
 
 ## Phase 5 — intelligent / self-healing (wire existing assets)
 

@@ -22,6 +22,35 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Detect which areas a PR touches so frontend/docs jobs skip on pure-backend
+  # PRs (and vice-versa). A job skipped via job-level `if:` reports "skipped",
+  # which SATISFIES required status checks — no merge deadlock (unlike an
+  # on:-level paths filter, which would leave the context permanently pending).
+  # On push/schedule/dispatch every consumer forces a full run via
+  # `github.event_name != 'pull_request'`, so main + nightly never skip.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ui: ${{ steps.f.outputs.ui }}
+      web: ${{ steps.f.outputs.web }}
+      docs: ${{ steps.f.outputs.docs }}
+      tokens: ${{ steps.f.outputs.tokens }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            ui:
+              - 'ui/**'
+            web:
+              - 'website/**'
+            docs:
+              - 'docs/**'
+              - '**/*.md'
+            tokens:
+              - 'design-tokens/**'
+
   build-and-test:
     strategy:
       matrix:
@@ -287,6 +316,8 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     defaults:
       run:
         working-directory: ui
@@ -328,6 +359,8 @@ jobs:
 
   ui-e2e:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -430,6 +463,8 @@ jobs:
 
   visual-regression:
     runs-on: macos-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -599,6 +634,8 @@ jobs:
 
   website:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -652,6 +689,8 @@ jobs:
 
   design-tokens:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.tokens == 'true' || needs.changes.outputs.ui == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -699,6 +738,8 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - name: Check for stale branding
