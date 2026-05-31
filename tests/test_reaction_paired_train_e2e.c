@@ -43,6 +43,10 @@ static void reaction_stream_becomes_trainable_pairs_e2e(void) {
     const char *good = "ship the small fix now";
     const char *bad = "rewrite the whole module";
 
+    /* The reaction handler keeps GLOBAL message-lookup + per-turn state. Reset
+     * it before the stream so this test is isolated and order-independent (it
+     * may run after other suites that exercised the handler). */
+    hu_reaction_handler_reset_for_test();
     hu_reaction_handler_set_collector(&col);
     for (int i = 0; i < 6; i++) {
         char thread[64], msg[64];
@@ -64,6 +68,8 @@ static void reaction_stream_becomes_trainable_pairs_e2e(void) {
         (void)hu_reaction_handler_handle_event(&evt);
     }
     hu_reaction_handler_set_collector(NULL);
+    /* Leave the handler's global state clean for any later suite. */
+    hu_reaction_handler_reset_for_test();
 
     /* The handler wrote 6 SINGLE-SIDED rows (3 chosen-only, 3 rejected-only). */
     size_t rows = 0;

@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -189,9 +190,28 @@ hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapt
         return HU_ERR_INVALID_ARGUMENT;
     *out_scale = 0.0;
 
-    char path[1200];
-    int n =
-        snprintf(path, sizeof(path), "%.*s/adapter_config.json", (int)adapter_dir_len, adapter_dir);
+    /* adapter_dir may be a directory OR a file path: production swap callers
+     * pass the weights file (".../adapters.safetensors"), but adapter_config.json
+     * lives in the adapter DIRECTORY. Resolve to the parent directory when given
+     * a regular file so the guard actually finds the config on the swap path. */
+    char dir[1200];
+    if (adapter_dir_len >= sizeof(dir))
+        return HU_ERR_INVALID_ARGUMENT;
+    memcpy(dir, adapter_dir, adapter_dir_len);
+    dir[adapter_dir_len] = '\0';
+
+    struct stat st;
+    if (stat(dir, &st) == 0 && S_ISREG(st.st_mode)) {
+        char *slash = strrchr(dir, '/');
+        if (slash)
+            *slash = '\0'; /* ".../adapters.safetensors" -> ".../" */
+        else
+            dir[0] = '\0'; /* bare filename -> current directory */
+    }
+
+    char path[1300];
+    int n = dir[0] ? snprintf(path, sizeof(path), "%s/adapter_config.json", dir)
+                   : snprintf(path, sizeof(path), "adapter_config.json");
     if (n <= 0 || (size_t)n >= sizeof(path))
         return HU_ERR_NOT_FOUND;
 
@@ -246,8 +266,10 @@ hu_error_t hu_lora_scale_guard_serveable(hu_allocator_t *alloc, const char *adap
                                          size_t adapter_path_len) {
     double scale = 0.0;
     hu_error_t e = hu_lora_adapter_config_scale(alloc, adapter_path, adapter_path_len, &scale);
+    if (e == HU_ERR_NOT_FOUND)
+        return HU_OK; /* no readable config — adapter predates the scale field; fail-open */
     if (e != HU_OK)
-        return HU_OK; /* fail-open: no readable config (matches swap-path posture) */
+        return e; /* OOM / invalid-arg are real errors — do NOT silently serve over-scaled */
     if (hu_lora_scale_classify(scale) == HU_LORA_SCALE_REJECT) {
         hu_log_warn("mlx_admin", NULL,
                     "refusing to serve adapter at %.*s: lora scale=%.1f exceeds the 8.0 "

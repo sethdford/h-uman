@@ -219,11 +219,44 @@ static void lora_scale_guard_fails_open_without_config(void) {
     hu_test_rm_rf(dir);
 }
 
+/* Production swap callers pass the WEIGHTS FILE path (".../adapters.safetensors"),
+ * not the adapter directory. The guard must resolve to the parent dir's
+ * adapter_config.json — otherwise it fail-opens and never blocks over-scaled
+ * adapters on the real swap path (cursor/Copilot review, PR #207). */
+static void lora_scale_guard_refuses_over_scaled_adapter_by_file_path(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu-lora-filepath", dir, sizeof(dir)));
+
+    seed_adapter_config(dir, "{\"lora_parameters\": {\"rank\": 8, \"scale\": 10.0}}");
+    char file_path[1200];
+    snprintf(file_path, sizeof(file_path), "%s/adapters.safetensors", dir);
+    FILE *wf = fopen(file_path, "wb");
+    HU_ASSERT_NOT_NULL(wf);
+    fputs("weights", wf);
+    fclose(wf);
+
+    /* reader resolves the file path to the adapter dir and reads scale=10.0 */
+    double sc = 0.0;
+    HU_ASSERT_EQ(hu_lora_adapter_config_scale(&alloc, file_path, strlen(file_path), &sc), HU_OK);
+    HU_ASSERT_TRUE(sc > 9.9 && sc < 10.1);
+    /* the guard BLOCKS the over-scaled adapter even when given the file path */
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, file_path, strlen(file_path)),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* a safe (2.0) adapter is serveable by file path too */
+    seed_adapter_config(dir, "{\"lora_parameters\": {\"rank\": 8, \"scale\": 2.0}}");
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, file_path, strlen(file_path)), HU_OK);
+
+    hu_test_rm_rf(dir);
+}
+
 void run_mlx_admin_tests(void);
 void run_mlx_admin_tests(void) {
     HU_TEST_SUITE("MLXAdmin");
     HU_RUN_TEST(lora_scale_classify_truth_table);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter);
+    HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_by_file_path);
     HU_RUN_TEST(lora_scale_guard_fails_open_without_config);
     HU_RUN_TEST(swap_null_alloc_returns_invalid_argument);
     HU_RUN_TEST(swap_null_base_url_returns_invalid_argument);

@@ -25,6 +25,8 @@ Exit codes:
     0  Success — adapters.safetensors exists at args.adapter_path.
     2  mlx_lm_lora package not installed (import probe failed).
     3  Subprocess succeeded but adapters.safetensors missing/empty.
+    4  Refusing: --scale > 8.0 (lora-scale-default-or-die rule). Distinct from
+       code 2 so automation can tell "bad scale" from "missing dependency".
     other  CLI's own non-zero exit (training/model load failure).
 
 Usage:
@@ -82,7 +84,7 @@ def main():
             f"instruction-following (lora-scale-default-or-die rule). Use <=2.0.",
             file=sys.stderr,
         )
-        return 2
+        return 4  # distinct from code 2 (missing dependency)
 
     # Probe import. We don't touch any internal symbol — just verify the
     # package is on sys.path before spawning the CLI subprocess.

@@ -9,9 +9,12 @@
 #     → mlx_lm_lora DPO fuse   (LoRA scale pinned to 2.0)
 #     → a real LoRA adapter on disk, verified to exist AND be scale-safe.
 #
-# Runs entirely locally on Apple Silicon. Uses a throwaway $HOME so the
-# user's real ~/.human is never touched. Defaults to the smallest cached
-# MLX model + 1 iteration so the whole chain finishes in a few minutes.
+# Runs entirely locally on Apple Silicon. All run artifacts go to a throwaway
+# mktemp dir (GOLD_DIR); NOTE: $HOME is intentionally NOT redirected, because
+# mlx_lm_lora lives in the user's Python site-packages and is invisible under a
+# fake HOME — so a stray `human` invocation here could read/write the real
+# ~/.human. Defaults to the smallest cached MLX model + 1 iteration so the whole
+# chain finishes in a few minutes.
 #
 # Usage:  bash scripts/e2e-reaction-to-adapter-gold.sh
 # Env:    GOLD_MODEL (default mlx-community/gemma-4-e2b-it-4bit)
