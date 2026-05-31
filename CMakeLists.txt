@@ -443,6 +443,11 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 # reference them on every platform.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
+# iMessage private-API transport protocol (Phase 1): pure port math + newline
+# line framing + OFF/SHADOW/LIVE mode parsing. No sockets/Apple/SIP deps; the
+# daemon TCP server (Phase 3) and tests/test_imessage_private_protocol.c
+# reference it on every platform.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_private/protocol.c)
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
     set(HU_HAS_PWA_FLAG TRUE)
@@ -3410,6 +3415,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_reply_style.c
     tests/test_imessage_reply_fallback_quote.c
+    tests/test_imessage_private_protocol.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c

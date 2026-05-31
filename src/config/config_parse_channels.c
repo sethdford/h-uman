@@ -192,6 +192,15 @@ static void parse_imessage_channel(hu_allocator_t *a, hu_config_t *cfg,
         }
     }
 
+    hu_json_value_t *pa_obj = hu_json_object_get(obj, "private_api");
+    if (pa_obj && pa_obj->type == HU_JSON_OBJECT) {
+        cfg->channels.imessage.private_api.enabled =
+            hu_json_get_bool(pa_obj, "enabled", cfg->channels.imessage.private_api.enabled);
+        const char *mode = hu_json_get_string(pa_obj, "mode");
+        if (mode)
+            cfg->channels.imessage.private_api.mode = hu_imessage_private_mode_from_string(mode);
+    }
+
     parse_daemon_config(a, &cfg->channels.imessage.daemon, obj);
     if (!cfg->channels.imessage.daemon.response_mode && cfg->channels.imessage.response_mode)
         cfg->channels.imessage.daemon.response_mode =
