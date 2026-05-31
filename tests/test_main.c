@@ -555,6 +555,7 @@ void run_mood_tests(void);
 void run_style_tracker_tests(void);
 void run_theory_of_mind_tests(void);
 void run_tom_activation_tests(void);
+void run_tom_wiring_tests(void);
 void run_anticipatory_tests(void);
 void run_context_engine_tests(void);
 void run_exec_env_tests(void);
@@ -1520,6 +1521,7 @@ int main(int argc, char **argv) {
     run_style_tracker_tests();
     run_theory_of_mind_tests();
     run_tom_activation_tests();
+    run_tom_wiring_tests();
     run_anticipatory_tests();
     run_context_engine_tests();
     run_exec_env_tests();

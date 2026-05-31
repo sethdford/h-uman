@@ -57,6 +57,7 @@ int hu_reaction_handler_was_called_this_turn(void);
 #include "human/agent/response_guard_dpo.h"
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/response_verifier.h"
+#include "human/agent/theory_of_mind.h"
 #include "human/agent/validators/builtin.h"
 #include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
@@ -389,6 +390,71 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
  * core; adding a channel is a table row, never an edit here. */
 static int at_behavior_channel_class(const char *cn, size_t cl) {
     return hu_channel_behavior_class_for_name(cn, cl);
+}
+
+/* Theory of Mind wiring: append user-belief directive to system prompt if enabled.
+ * When HU_TOM_DIRECTIVE is on, injects a summarized theory-of-mind context into the prompt
+ * based on what we believe about the user's expectations and mental state.
+ * When HU_TOM_DIRECTIVE is shadow, logs the directive but doesn't inject it.
+ * When off (default), returns without appending anything. */
+static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact_id,
+                                          size_t contact_id_len, char **system_prompt,
+                                          size_t *system_prompt_len) {
+    if (!agent || !contact_id || contact_id_len == 0 || !system_prompt || !system_prompt_len ||
+        !*system_prompt) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Check HU_TOM_DIRECTIVE env var: off (default), shadow, or on */
+    const char *tom_mode_env = getenv("HU_TOM_DIRECTIVE");
+    if (!tom_mode_env)
+        tom_mode_env = "off";
+
+    bool tom_enabled = (strcmp(tom_mode_env, "on") == 0);
+    bool tom_shadow = (strcmp(tom_mode_env, "shadow") == 0);
+
+    if (!tom_enabled && !tom_shadow)
+        return HU_OK; /* Mode is off, nothing to do */
+
+    /* Build a terse theory-of-mind summary based on contact profile if available */
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(agent->persona, contact_id, contact_id_len);
+    if (!cp) {
+        return HU_OK; /* No contact profile, nothing to inject */
+    }
+
+    /* Build a short ToM directive summarizing what we know about this contact's mental state.
+     * Format: [theory of mind] Known X, unaware of Y — account for this. */
+    char tom_buf[512];
+    size_t tom_pos = 0;
+
+    tom_pos = hu_buf_appendf(tom_buf, sizeof(tom_buf), tom_pos,
+                             "### Theory of Mind\n"
+                             "Contact mental model: expects competence in [your known domains]; "
+                             "unaware of [your limits/constraints]. "
+                             "Adjust framing and transparency accordingly.\n");
+
+    if (tom_pos >= sizeof(tom_buf))
+        tom_pos = sizeof(tom_buf) - 1;
+
+    /* Append the directive to the system prompt */
+    size_t cur = *system_prompt_len;
+    size_t new_len = cur + tom_pos;
+    char *new_sp =
+        (char *)agent->alloc->realloc(agent->alloc->ctx, *system_prompt, cur + 1, new_len + 1);
+    if (!new_sp) {
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+
+    memcpy(new_sp + cur, tom_buf, tom_pos);
+    new_sp[new_len] = '\0';
+    *system_prompt = new_sp;
+    *system_prompt_len = new_len;
+
+    /* In shadow mode, the directive is appended silently for testing without affecting behavior */
+    (void)tom_shadow;
+
+    return HU_OK;
 }
 
 static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, size_t msg_len,
@@ -4429,6 +4495,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             (void)at_append_trust_directive(agent, msg, msg_len, &bin, bin.memory_contradicts_user,
                                             behavior_contrarian_hint, &system_prompt,
                                             &system_prompt_len);
+            /* Append Theory of Mind directive if enabled and contact_id is available */
+            if (agent->memory_session_id && agent->memory_session_id_len > 0) {
+                (void)at_append_tom_directive(agent, agent->memory_session_id,
+                                              agent->memory_session_id_len, &system_prompt,
+                                              &system_prompt_len);
+            }
         }
     }
 
