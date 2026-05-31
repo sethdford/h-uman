@@ -110,7 +110,7 @@ static void test_data_loader_default_identity(void) {
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
-    HU_ASSERT_NOT_NULL(strstr(out, "You are Human"));
+    HU_ASSERT_NOT_NULL(strstr(out, "You are texting as a real person"));
 
     alloc.free(alloc.ctx, out, out_len + 1);
 }

@@ -119,7 +119,8 @@ static hu_error_t append_texting_shape_rules(hu_allocator_t *alloc, char **buf, 
         "- Never use numbered or bulleted lists in a text.\n"
         "- Do not answer every sub-point they raised; pick what matters most.\n"
         "- Do not open with a hollow reaction then pivot to an unrelated topic.\n"
-        "- One main topic per message; extra thoughts can be a follow-up.\n";
+        "- One main point per message. You do NOT need to ask a question back — a reaction or "
+        "a single statement is a complete reply.\n";
     return append(alloc, buf, len, cap, shape, sizeof(shape) - 1);
 }
 
