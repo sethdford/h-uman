@@ -13283,7 +13283,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         }
                                         hu_reaction_handler_register_assistant_message_for_production(
                                             ch_name, batch_key, msg_ref,
-                                            combined[0] ? combined : "", fragments[f].text);
+                                            combined[0] ? combined : "", fragments[f].text,
+                                            /* TODO(B2-wire): thread dpo_rejected_resp from the turn
+                                               here to populate the alternative */
+                                            "");
                                     }
                                 }
 #endif

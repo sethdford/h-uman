@@ -443,8 +443,8 @@ static void test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs(void) 
         const hu_reaction_event_t *e = &loaded.events[i];
         hu_reaction_handler_register_assistant_message_for_test(
             e->channel_id, e->target_thread_id, e->target_message_ref, aux[i].prompt,
-            e->polarity == HU_REACTION_POSITIVE ? aux[i].response_chosen
-                                                : aux[i].response_rejected);
+            e->polarity == HU_REACTION_POSITIVE ? aux[i].response_chosen : aux[i].response_rejected,
+            "");
     }
     hu_reaction_handler_set_collector(&bundle.collector);
     for (size_t i = 0; i < loaded.n; i++)
@@ -579,8 +579,8 @@ static void test_e2e_closed_loop_pair_count_trigger_closes_the_loop(void) {
         const hu_reaction_event_t *e = &loaded.events[i];
         hu_reaction_handler_register_assistant_message_for_test(
             e->channel_id, e->target_thread_id, e->target_message_ref, aux[i].prompt,
-            e->polarity == HU_REACTION_POSITIVE ? aux[i].response_chosen
-                                                : aux[i].response_rejected);
+            e->polarity == HU_REACTION_POSITIVE ? aux[i].response_chosen : aux[i].response_rejected,
+            "");
     }
     hu_reaction_handler_set_collector(&bundle.collector);
     for (size_t i = 0; i < loaded.n; i++)

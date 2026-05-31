@@ -91,20 +91,18 @@ void hu_reaction_handler_clear_turn(void);
 int hu_reaction_handler_was_called_this_turn(void);
 
 /* Production + demo path: pre-register an assistant message before reactions
- * are replayed (Phase 5 H8 / Phase 6 demo). */
-void hu_reaction_handler_register_assistant_message_for_production(const char *channel,
-                                                                   const char *thread,
-                                                                   const char *msg_ref,
-                                                                   const char *prompt,
-                                                                   const char *response);
+ * are replayed (Phase 5 H8 / Phase 6 demo). The alternative parameter (if non-NULL
+ * and >= 4 bytes) is the rejected draft that becomes the "other side" of a complete
+ * DPO pair on tapback. Pass NULL or empty string if no alternative is available. */
+void hu_reaction_handler_register_assistant_message_for_production(
+    const char *channel, const char *thread, const char *msg_ref, const char *prompt,
+    const char *response, const char *alternative);
 
 #if HU_IS_TEST
 /* Test seam: same lookup store as production registration. */
-void hu_reaction_handler_register_assistant_message_for_test(const char *channel,
-                                                             const char *thread,
-                                                             const char *msg_ref,
-                                                             const char *prompt,
-                                                             const char *response);
+void hu_reaction_handler_register_assistant_message_for_test(
+    const char *channel, const char *thread, const char *msg_ref, const char *prompt,
+    const char *response, const char *alternative);
 void hu_reaction_handler_reset_for_test(void);
 #endif
 
