@@ -12,6 +12,7 @@
 #include "human/tts/cartesia.h"
 #include "human/voice/local_stt.h"
 #include "human/voice/local_tts.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,28 @@ const char *hu_voice_privacy_disclosure(hu_voice_tts_backend_t backend) {
     }
 }
 
+/*
+ * Process-global privacy kill-switch (ADR 2026-05-31). Set once at config load
+ * (bootstrap) from voice.privacy_mode. The egress functions honor this IN ADDITION
+ * to per-config privacy_mode, so callers that build a partial hu_voice_config_t (e.g.
+ * multimodal audio/video, which have no app-config handle) cannot bypass privacy.
+ */
+static atomic_bool g_voice_privacy_enforced = false;
+
+void hu_voice_set_privacy_enforced(bool enforced) {
+    atomic_store_explicit(&g_voice_privacy_enforced, enforced, memory_order_relaxed);
+}
+
+bool hu_voice_privacy_enforced(void) {
+    return atomic_load_explicit(&g_voice_privacy_enforced, memory_order_relaxed);
+}
+
+/* Effective privacy for one egress decision: per-config privacy_mode OR the global
+ * kill-switch. `config` may be NULL. */
+static bool voice_privacy_active(const hu_voice_config_t *config) {
+    return (config && config->privacy_mode) || hu_voice_privacy_enforced();
+}
+
 hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *config,
                              const char *file_path, char **out_text, size_t *out_len) {
     if (!alloc || !config || !out_text || !out_len)
@@ -84,7 +107,7 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
                                     .language = config->language};
         return hu_local_stt_transcribe(alloc, &lc, file_path, out_text, out_len);
     }
-    if (config->privacy_mode)
+    if (voice_privacy_active(config))
         return HU_ERR_NOT_SUPPORTED; /* privacy mode: STT is local-only; no cloud egress */
     if (config->stt_provider && strcmp(config->stt_provider, "cartesia") == 0) {
         const char *ckey = config->cartesia_api_key;
@@ -129,7 +152,7 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
         }
     }
 
-    if (config->privacy_mode)
+    if (voice_privacy_active(config))
         return HU_ERR_NOT_SUPPORTED; /* privacy mode: STT is local-only; no cloud egress */
 
     if (config->stt_provider && strcmp(config->stt_provider, "cartesia") == 0) {
@@ -344,7 +367,7 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
     *out_audio_len = 0;
 
 #if HU_IS_TEST
-    bool egress_t = hu_voice_cloud_egress_allowed(config->privacy_mode);
+    bool egress_t = !voice_privacy_active(config);
     /* Cartesia is the default cloud TTS when privacy mode is off and it is the selected
      * provider (ADR 2026-05-31). Attempt first; on failure fall through to local. */
     if (egress_t && config->tts_provider && strcmp(config->tts_provider, "cartesia") == 0) {
@@ -406,7 +429,7 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
         return HU_OK;
     }
 #else
-    bool egress = hu_voice_cloud_egress_allowed(config->privacy_mode);
+    bool egress = !voice_privacy_active(config);
     /* Cartesia is the default cloud TTS when privacy mode is off and it is the selected
      * provider (ADR 2026-05-31). Attempt first; on missing key or failure, fall through to
      * the local/cloud chain below (graceful, privacy-safe fallback). */
@@ -625,7 +648,7 @@ hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *c
     *out_text = NULL;
     *out_len = 0;
 
-    if (config->privacy_mode)
+    if (voice_privacy_active(config))
         return HU_ERR_NOT_SUPPORTED; /* privacy mode: transcription is local-only; no cloud egress
                                       */
 

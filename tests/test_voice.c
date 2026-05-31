@@ -455,6 +455,35 @@ static void voice_stt_gemini_privacy_mode_blocks_cloud(void) {
     HU_ASSERT_NULL(text);
 }
 
+/* The process-global kill-switch blocks cloud egress even when the per-call config does
+ * NOT carry privacy_mode — i.e. the exact partial-config bypass that multimodal
+ * audio/video callers hit (they build vcfg with only an api_key). */
+static void voice_global_privacy_kill_switch_blocks_partial_config(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0}; /* privacy_mode is false here, mirroring multimodal vcfg */
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+
+    hu_voice_set_privacy_enforced(true);
+    HU_ASSERT_TRUE(hu_voice_privacy_enforced());
+
+    char *text = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_voice_stt_gemini(&alloc, &cfg, "AAAA", 4, "audio/webm", &text, &len),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(text);
+
+    cfg.tts_provider = "cartesia";
+    void *audio = NULL;
+    size_t alen = 0;
+    HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(audio);
+
+    /* reset so later tests observe the default (cloud-allowed) behavior */
+    hu_voice_set_privacy_enforced(false);
+    HU_ASSERT_FALSE(hu_voice_privacy_enforced());
+}
+
 void run_voice_tests(void) {
     HU_TEST_SUITE("Voice");
     HU_RUN_TEST(test_voice_stt_file_mock);
@@ -499,4 +528,5 @@ void run_voice_tests(void) {
     HU_RUN_TEST(voice_tts_privacy_mode_uses_local);
     HU_RUN_TEST(voice_stt_privacy_mode_blocks_cloud);
     HU_RUN_TEST(voice_stt_gemini_privacy_mode_blocks_cloud);
+    HU_RUN_TEST(voice_global_privacy_kill_switch_blocks_partial_config);
 }

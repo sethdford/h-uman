@@ -58,6 +58,16 @@ hu_voice_tts_backend_t hu_voice_preferred_tts_backend(bool privacy_mode,
 /* Static, human-readable privacy disclosure for the active backend (ADR mitigation M4). */
 const char *hu_voice_privacy_disclosure(hu_voice_tts_backend_t backend);
 
+/*
+ * Process-global privacy kill-switch. When enforced, ALL voice/multimodal cloud egress
+ * (STT, TTS, Gemini transcription/description) is blocked regardless of the per-call
+ * config — so callers that build a partial hu_voice_config_t (e.g. multimodal audio/video,
+ * which have no app-config handle) cannot bypass privacy_mode. Set once at config load
+ * (bootstrap) from voice.privacy_mode.
+ */
+void hu_voice_set_privacy_enforced(bool enforced);
+bool hu_voice_privacy_enforced(void);
+
 struct hu_config;
 /* Build hu_voice_config_t from config settings + provider keys.
  * Does not allocate — all pointers reference config-owned strings.
