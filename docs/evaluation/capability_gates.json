@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "comment": "Flipping a capability `state` to LIVE is the reviewable action the CI registry check gates against docs/evaluation/blind_ab_gate.json. Seeded to current reality; this file changes no runtime behavior.",
+  "capabilities": [
+    {"id": "graph_grounding",  "env": "HU_GRAPH_GROUNDING", "state": "OFF",    "required_gate": "pass"},
+    {"id": "salience",         "env": "HU_SALIENCE_SHADOW",  "state": "SHADOW", "required_gate": "pass"},
+    {"id": "theory_of_mind",   "env": "HU_TOM",              "state": "OFF",    "required_gate": "pass"},
+    {"id": "intent_response",  "env": "HU_INTENT_RESPONSE",  "state": "OFF",    "required_gate": "pass"}
+  ]
+}
