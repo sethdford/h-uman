@@ -523,17 +523,17 @@ find_package(Threads QUIET)
 set(HU_CORE_SOURCES
     src/platform.c
     src/platform/calendar_macos.c
-    src/terminal.c
-    src/util.c
-    src/json_util.c
+    src/peripherals/terminal.c
+    src/util/util.c
+    src/util/json_util.c
     src/bus.c
     src/session.c
     src/channel_loop.c
     src/channel_manager.c
-    src/auth.c
-    src/identity.c
+    src/security/auth.c
+    src/security/identity.c
     src/state.c
-    src/heartbeat.c
+    src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
     src/core/rand.c
@@ -574,7 +574,7 @@ set(HU_CORE_SOURCES
     src/core/process_util.c
     src/sse/sse_client.c
     src/websocket/websocket.c
-    src/net_security.c
+    src/security/net_security.c
     src/config/config.c
     src/config/config_schema.c
     src/config/config_merge.c
@@ -592,7 +592,7 @@ set(HU_CORE_SOURCES
     src/capabilities.c
     src/channel_catalog.c
     src/channel_adapters.c
-    src/doctor.c
+    src/doctor/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
@@ -605,13 +605,13 @@ set(HU_CORE_SOURCES
     src/doctor/exit_code.c
     src/doctor/json_output.c
     src/doctor/ws_consumer.c
-    src/doctor_fix.c
+    src/doctor/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
-    src/status.c
-    src/http_util.c
+    src/observability/status.c
+    src/util/http_util.c
     src/mcp/mcp.c
     src/mcp/mcp_jsonrpc.c
     src/mcp/mcp_transport_stdio.c
@@ -624,17 +624,17 @@ set(HU_CORE_SOURCES
     src/multimodal/audio.c
     src/multimodal/video.c
     src/multimodal/multimodal.c
-    src/rag.c
+    src/memory/rag.c
     src/service.c
-    src/skill_registry.c
+    src/skills/skill_registry.c
     src/subagent.c
-    src/voice.c
-    src/voice_config.c
+    src/voice/voice.c
+    src/voice/voice_config.c
     src/voice/local_stt.c
     src/voice/local_tts.c
-    src/portable_atomic.c
+    src/util/portable_atomic.c
     src/agent_routing.c
-    src/health.c
+    src/observability/health.c
     src/security/security.c
     src/security/sycophancy_guard.c
     src/security/mcp_audit.c
@@ -658,7 +658,7 @@ set(HU_CORE_SOURCES
     src/security/skill_trust.c
     src/security/keystore.c
     src/security/audit_log.c
-    src/observability.c
+    src/observability/observability.c
     src/observability/log_observer.c
     src/observability/metrics_observer.c
     src/observability/multi_observer.c
@@ -891,7 +891,7 @@ set(HU_CORE_SOURCES
     src/behavior/belief_update.c
     src/cognition/intrinsic_drive.c
     src/agent/prosocial_routine.c
-    src/permission.c
+    src/security/permission.c
     src/mcp/mcp_manager.c
     src/mcp/mcp_tool_wrapper.c
     src/agent/compaction_structured.c
@@ -1200,13 +1200,13 @@ set(HU_CORE_SOURCES
     src/security/policy_engine.c
     src/security/replay.c
     src/plugins/registry.c
-    src/plugin_loader.c
-    src/plugin_discovery.c
+    src/plugins/plugin_loader.c
+    src/plugins/plugin_discovery.c
     src/skills/skill_scaffold.c
     src/context/context_engine.c
     src/context/context_engine_rag.c
     src/mcp/mcp_registry.c
-    src/onboard.c
+    src/onboard/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
     src/onboard/step_welcome.c
@@ -1231,11 +1231,11 @@ set(HU_CORE_SOURCES
     src/version.c
     src/cli_commands.c
     src/cli_ctl.c
-    src/cli_evaluation.c
-    src/cost.c
-    src/usage.c
-    src/oauth.c
-    src/vertex_adc.c
+    src/eval/cli_evaluation.c
+    src/observability/cost.c
+    src/observability/usage.c
+    src/security/oauth.c
+    src/security/vertex_adc.c
     src/agent/init_proposer.c
     src/agent/init_outcome.c
     src/agent/prompt_budget.c
@@ -1267,7 +1267,7 @@ if(HU_ENABLE_PERIPHERALS)
         src/peripherals/stm32.c
         src/peripherals/rpi.c
         src/peripherals/factory.c
-        src/hardware.c
+        src/peripherals/hardware.c
         src/tools/hardware_info.c
         src/tools/hardware_memory.c
         src/tools/i2c.c
@@ -1336,7 +1336,7 @@ list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
-    src/eval.c
+    src/eval/eval.c
     src/eval/shape.c
     src/eval/register.c
     src/eval/eval_score.c
@@ -1359,10 +1359,10 @@ list(APPEND HU_CORE_SOURCES
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
     src/eval/longmemeval.c
-    src/eval_judge.c
-    src/eval_benchmarks.c
+    src/eval/eval_judge.c
+    src/eval/eval_benchmarks.c
     src/mcp/mcp_resources.c
-    src/eval_dashboard.c
+    src/eval/eval_dashboard.c
     src/memory/corrective_rag.c
     src/memory/adaptive_rag.c
     src/memory/self_rag.c
@@ -1533,13 +1533,13 @@ list(APPEND HU_CORE_SOURCES
 )
 
 # Music preview integration (iTunes Search API + 30s preview download)
-list(APPEND HU_CORE_SOURCES src/music.c)
+list(APPEND HU_CORE_SOURCES src/multimodal/music.c)
 
 # Media inspiration (conversation cues -> medium picker, per-medium prompts, voice hints, TikTok URLs)
 list(APPEND HU_CORE_SOURCES src/inspiration.c)
 
 # YouTube Data API v3 search (find and verify canonical watch URLs)
-list(APPEND HU_CORE_SOURCES src/youtube.c)
+list(APPEND HU_CORE_SOURCES src/multimodal/youtube.c)
 
 # Paperclip integration (requires libcurl for API calls)
 if(HU_ENABLE_CURL)
@@ -1647,8 +1647,8 @@ endif()
 # Skillforge + Phase 8 intelligence (skills, reflection, feedback, meta-learning, cycle)
 if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES
-        src/skillforge.c
-        src/skills.c
+        src/skills/skillforge.c
+        src/skills/skills.c
         src/skills/skill_scaffold.c
         src/tools/skill_run.c
         src/intelligence/reflection.c
@@ -2204,12 +2204,12 @@ endif()
 # --- Size optimization: function/data sections for link-time dead code elimination ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(human_core PRIVATE -ffunction-sections -fdata-sections)
-    # src/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
+    # src/onboard/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
     # required 4095-byte minimum string-literal length. The compiler we ship with
     # supports much longer literals; -Wno-overlength-strings just silences the
     # diagnostic so -Werror doesn't reject it. Scoped to this one file so the
     # global posture stays -Werror -Wall -Wextra -Wpedantic.
-    set_source_files_properties(src/onboard.c PROPERTIES
+    set_source_files_properties(src/onboard/onboard.c PROPERTIES
         COMPILE_OPTIONS "-Wno-overlength-strings")
 endif()
 
@@ -2571,11 +2571,11 @@ if(HU_ENABLE_ASAN)
     target_link_options(human_core PRIVATE -fsanitize=address)
 endif()
 
-# src/onboard.c carries the starter persona JSON as a C string literal that
+# src/onboard/onboard.c carries the starter persona JSON as a C string literal that
 # exceeds the 4095-byte ISO C99 maximum. This is intentional (the literal is
 # the single source of truth shared by `human init` and `human onboard`);
 # disable the warning for that file only.
-set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
+set_source_files_properties(src/onboard/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
 
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
@@ -2826,7 +2826,7 @@ set(HU_TEST_EXTRA_MODULES)
 if(NOT HU_ENABLE_PERIPHERALS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/peripherals/arduino.c src/peripherals/stm32.c src/peripherals/rpi.c
-        src/peripherals/factory.c src/hardware.c
+        src/peripherals/factory.c src/peripherals/hardware.c
         src/tools/hardware_info.c src/tools/hardware_memory.c
         src/tools/i2c.c src/tools/peripheral_ctrl.c src/tools/spi.c)
 endif()
@@ -2868,8 +2868,8 @@ if(NOT HU_ENABLE_OTEL)
 endif()
 if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES
-        src/skillforge.c
-        src/skills.c
+        src/skills/skillforge.c
+        src/skills/skills.c
         src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
@@ -4456,7 +4456,7 @@ target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wf
 
 # Per-file warning exceptions.
 #
-# src/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
+# src/onboard/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
 # literal that exceeds the 4095-byte ISO C99 minimum for string literals
 # (and so trips -Wpedantic -> -Werror=overlength-strings on Linux GCC). The
 # literal is legitimately large configuration data, not a bug; Apple Clang
@@ -4468,7 +4468,7 @@ target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wf
 # pattern used for data/prompts/safety_rules.txt). Until then, silence the
 # warning for this single file. Tracked: TODO move hu_starter_persona_json
 # into data/personas/starter.json.
-set_source_files_properties(src/onboard.c PROPERTIES
+set_source_files_properties(src/onboard/onboard.c PROPERTIES
     COMPILE_FLAGS "-Wno-overlength-strings")
 
 # Synthetic pressure tests (requires libcurl for real HTTP)
