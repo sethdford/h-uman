@@ -23,7 +23,8 @@ set -euo pipefail
 # Recomputed against the merged tree.
 # Updated 2026-05-29 after opinions aggregate migration (opinions.c): 101 -> 100
 # Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
-BASELINE=99
+# Updated 2026-05-29 after social_graph aggregate migration (social_graph.c): 99 -> 98
+BASELINE=98
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
