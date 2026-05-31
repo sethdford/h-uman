@@ -1,6 +1,11 @@
 #include "human/agent/autonomy.h"
 #include "test_framework.h"
 #include <string.h>
+#ifdef HU_ENABLE_SQLITE
+#include "human/agent/goals.h"
+#include "human/core/allocator.h"
+#include <sqlite3.h>
+#endif
 
 static void test_autonomy_init_defaults(void) {
     hu_autonomy_state_t state;
@@ -143,6 +148,55 @@ static void test_autonomy_externalize_null(void) {
     HU_ASSERT_EQ(hu_autonomy_generate_intrinsic_goal(NULL, 0, 0), HU_ERR_INVALID_ARGUMENT);
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* #4 self-initiated agenda: hu_autonomy_seed_intrinsic_goal persists ONE goal
+ * into the (prompt-read) goal engine when the contact's agenda is empty, honors
+ * off/shadow/on, and never piles up. Pre/post pinned non-vacuously. */
+static void test_autonomy_seed_intrinsic_goal_persists_when_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_goal_engine_t ge;
+    HU_ASSERT_EQ(hu_goal_engine_create(&alloc, db, &ge), HU_OK);
+    HU_ASSERT_EQ(hu_goal_init_tables(&ge), HU_OK);
+
+    const char *c = "contact_a";
+    size_t cl = 9;
+    size_t n = 99;
+    HU_ASSERT_EQ(hu_goal_count(&ge, c, cl, &n), HU_OK);
+    HU_ASSERT_EQ((int)n, 0); /* precondition: empty agenda */
+
+    /* off → no-op, nothing persisted */
+    int64_t id = 7;
+    HU_ASSERT_EQ(hu_autonomy_seed_intrinsic_goal(&ge, c, cl, 0, 1000, &id), HU_OK);
+    HU_ASSERT_EQ((int)id, 0);
+    hu_goal_count(&ge, c, cl, &n);
+    HU_ASSERT_EQ((int)n, 0);
+
+    /* shadow → computes + logs, persists nothing */
+    HU_ASSERT_EQ(hu_autonomy_seed_intrinsic_goal(&ge, c, cl, 1, 1000, &id), HU_OK);
+    HU_ASSERT_EQ((int)id, 0);
+    hu_goal_count(&ge, c, cl, &n);
+    HU_ASSERT_EQ((int)n, 0);
+
+    /* on → persists exactly one self-initiated goal */
+    HU_ASSERT_EQ(hu_autonomy_seed_intrinsic_goal(&ge, c, cl, 2, 1000, &id), HU_OK);
+    HU_ASSERT(id > 0);
+    hu_goal_count(&ge, c, cl, &n);
+    HU_ASSERT_EQ((int)n, 1);
+
+    /* idempotent: agenda now non-empty → no pile-up */
+    int64_t id2 = 5;
+    HU_ASSERT_EQ(hu_autonomy_seed_intrinsic_goal(&ge, c, cl, 2, 1000, &id2), HU_OK);
+    HU_ASSERT_EQ((int)id2, 0);
+    hu_goal_count(&ge, c, cl, &n);
+    HU_ASSERT_EQ((int)n, 1);
+
+    hu_goal_engine_deinit(&ge);
+    sqlite3_close(db);
+}
+#endif
+
 void run_autonomy_tests(void) {
     HU_TEST_SUITE("Autonomy");
     HU_RUN_TEST(test_autonomy_init_defaults);
@@ -157,4 +211,7 @@ void run_autonomy_tests(void) {
     HU_RUN_TEST(test_autonomy_intrinsic_goal_generated_daily_target);
     HU_RUN_TEST(test_autonomy_externalize_restore);
     HU_RUN_TEST(test_autonomy_externalize_null);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_autonomy_seed_intrinsic_goal_persists_when_empty);
+#endif
 }

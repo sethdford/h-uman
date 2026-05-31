@@ -58,6 +58,18 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector, const char
                                        size_t prompt_len, const char *response, size_t response_len,
                                        bool positive);
 
+/* Record a single-sided feedback signal (a +/- reaction to ONE response, with
+ * no counterpart) into the feedback_signals table — NOT dpo_pairs. dpo_pairs is
+ * reserved for true preference pairs; single-sided rows there poison ORPO
+ * training (2026-05-19 audit). A reward-model / KTO trainer consumes these.
+ * Responses <4 bytes are labels, not signal, and are refused. */
+hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt, size_t prompt_len,
+                                const char *response, size_t response_len, bool positive,
+                                const char *source, size_t source_len);
+
+/* Count rows in feedback_signals. */
+hu_error_t hu_dpo_signal_count(hu_dpo_collector_t *collector, size_t *out);
+
 hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector, const char *prompt,
                                     size_t prompt_len, const char *rejected, size_t rejected_len,
                                     const char *chosen, size_t chosen_len);

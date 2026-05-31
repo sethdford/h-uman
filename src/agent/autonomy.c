@@ -1,8 +1,12 @@
 #include "human/agent/autonomy.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#ifdef HU_ENABLE_SQLITE
+#include "human/agent/goals.h"
+#endif
 
 static int64_t now_ms(void) {
     return (int64_t)time(NULL) * 1000;
@@ -145,6 +149,68 @@ hu_error_t hu_autonomy_generate_intrinsic_goal(hu_autonomy_state_t *state,
     if (n <= 0)
         return HU_ERR_INTERNAL;
     return hu_autonomy_add_goal(state, desc, (size_t)n, priority);
+}
+
+hu_error_t hu_autonomy_seed_intrinsic_goal(struct hu_goal_engine *engine, const char *contact_id,
+                                           size_t contact_id_len, int mode, int64_t now_ts,
+                                           int64_t *out_id) {
+    if (out_id)
+        *out_id = 0;
+    if (mode <= 0) /* off */
+        return HU_OK;
+    if (!engine)
+        return HU_ERR_INVALID_ARGUMENT;
+#ifdef HU_ENABLE_SQLITE
+    /* Only seed when the contact's agenda is empty — never pile up. Fail SAFE:
+     * if we cannot read the current agenda (list errored), do NOT seed — skipping
+     * a self-initiated goal is strictly better than violating the never-pile-up
+     * invariant by creating one blind to what's already there. */
+    hu_goal_t *active = NULL;
+    size_t active_n = 0;
+    if (hu_goal_list_active(engine, contact_id, contact_id_len, &active, &active_n) != HU_OK)
+        return HU_OK;
+    {
+        size_t had = active_n;
+        if (active)
+            hu_goal_free(engine->alloc, active, active_n);
+        if (had > 0)
+            return HU_OK;
+    }
+
+    /* Generate one intrinsic goal via the (otherwise dormant) generator. A fresh
+     * state with 0 completed/0 failed yields the default maintenance agenda. */
+    hu_autonomy_state_t st;
+    if (hu_autonomy_init(&st, 0) != HU_OK)
+        return HU_ERR_INTERNAL;
+    if (hu_autonomy_generate_intrinsic_goal(&st, 0, 0) != HU_OK || st.goal_count == 0)
+        return HU_OK;
+    hu_autonomy_goal_t g;
+    if (hu_autonomy_get_next_goal(&st, &g) != HU_OK)
+        return HU_OK;
+
+    if (mode == 1) { /* shadow: log what it WOULD create, persist nothing */
+        hu_log_info("intrinsic_goal", NULL, "shadow: would create '%.*s' (priority %.2f)",
+                    (int)g.description_len, g.description, g.priority);
+        return HU_OK;
+    }
+
+    /* on: persist into the agenda the world model reads into the prompt */
+    int64_t id = 0;
+    hu_error_t e = hu_goal_create(engine, contact_id, contact_id_len, g.description,
+                                  g.description_len, g.priority, 0, 0, now_ts, &id);
+    if (e == HU_OK) {
+        if (out_id)
+            *out_id = id;
+        hu_log_info("intrinsic_goal", NULL, "created '%.*s' (priority %.2f, id %lld)",
+                    (int)g.description_len, g.description, g.priority, (long long)id);
+    }
+    return e;
+#else
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)now_ts;
+    return HU_OK;
+#endif
 }
 
 hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state,

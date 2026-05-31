@@ -36,14 +36,19 @@ static void dpo_record_pair_stores_correctly(void) {
     hu_dpo_collector_deinit(&col);
 }
 
+/* Contract change (2026-05-31): single-sided feedback is a reaction to ONE
+ * response with no counterpart, so it routes to feedback_signals, NOT dpo_pairs
+ * (writing single-sided rows to dpo_pairs poisoned ORPO training — 2026-05-19
+ * audit). These two assert feedback creates ZERO dpo_pairs; the signal-routing
+ * itself is pinned (db-backed) by dpo_feedback_routes_to_signals_not_pairs. */
 static void dpo_record_from_feedback_positive(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "prompt", 6, "response", 8, true), HU_OK);
-    size_t count = 0;
+    size_t count = 99;
     hu_dpo_pair_count(&col, &count);
-    HU_ASSERT_EQ((int)count, 1);
+    HU_ASSERT_EQ((int)count, 0); /* feedback no longer creates a DPO pair */
     hu_dpo_collector_deinit(&col);
 }
 
@@ -52,9 +57,9 @@ static void dpo_record_from_feedback_negative(void) {
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "prompt", 6, "bad resp", 8, false), HU_OK);
-    size_t count = 0;
+    size_t count = 99;
     hu_dpo_pair_count(&col, &count);
-    HU_ASSERT_EQ((int)count, 1);
+    HU_ASSERT_EQ((int)count, 0); /* feedback no longer creates a DPO pair */
     hu_dpo_collector_deinit(&col);
 }
 
@@ -73,7 +78,7 @@ static void dpo_export_jsonl_format(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
+    hu_dpo_record_from_retry(&col, "p", 1, "rejected", 8, "chosen", 6); /* a real pair to export */
     size_t exported = 0;
     HU_ASSERT_EQ(hu_dpo_export_jsonl(&col, "test.jsonl", 10, &exported), HU_OK);
     HU_ASSERT_EQ((int)exported, 1);
@@ -84,8 +89,10 @@ static void dpo_pair_count_accurate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p1", 2, "resp1", 5, true);
-    hu_dpo_record_from_feedback(&col, "p2", 2, "resp2", 5, false);
+    /* Three real pairs (retry path). Feedback no longer makes pairs, so use
+     * the retry path to exercise multi-pair counting. */
+    hu_dpo_record_from_retry(&col, "p1", 2, "rejected1", 9, "chosen1", 7);
+    hu_dpo_record_from_retry(&col, "p2", 2, "rejected2", 9, "chosen2", 7);
     hu_dpo_record_from_retry(&col, "p3", 2, "rejected", 8, "chosen", 6);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
@@ -97,7 +104,7 @@ static void dpo_clear_removes_all(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
+    hu_dpo_record_from_retry(&col, "p", 1, "rejected", 8, "chosen", 6); /* a real pair to clear */
     HU_ASSERT_EQ(hu_dpo_clear(&col), HU_OK);
     size_t count = 999;
     hu_dpo_pair_count(&col, &count);
@@ -189,7 +196,7 @@ static void dpo_max_pairs_ring_buffer(void) {
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 3, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
     for (int i = 0; i < 5; i++)
-        hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
+        hu_dpo_record_from_retry(&col, "p", 1, "rejected", 8, "chosen", 6);
     /* DB should have at most 3 rows due to ring buffer eviction */
     sqlite3_stmt *stmt = NULL;
     sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM dpo_pairs", -1, &stmt, NULL);
@@ -536,14 +543,65 @@ static void dpo_record_inbound_arrival_null_returns_invalid(void) {
     hu_dpo_collector_deinit(&col);
 }
 
+/* Positive contract for the 2026-05-31 routing fix: single-sided feedback lands
+ * in feedback_signals (one row, correct label) and leaves dpo_pairs EMPTY — so
+ * it never poisons ORPO training, but the human signal is preserved for a
+ * reward-model / KTO trainer. Pre/post pinned non-vacuously. */
+static void dpo_feedback_routes_to_signals_not_pairs(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    /* precondition: both tables empty */
+    size_t pairs = 99, signals = 99;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &pairs), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_signal_count(&col, &signals), HU_OK);
+    HU_ASSERT_EQ((int)pairs, 0);
+    HU_ASSERT_EQ((int)signals, 0);
+
+    /* one positive + one negative reaction */
+    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "how was your day?", 17, "pretty good!", 12, true),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "you there?", 10, "yeah one sec", 12, false),
+                 HU_OK);
+
+    /* postcondition: dpo_pairs still empty (no poison), 2 feedback_signals rows */
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &pairs), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_signal_count(&col, &signals), HU_OK);
+    HU_ASSERT_EQ((int)pairs, 0);
+    HU_ASSERT_EQ((int)signals, 2);
+
+    /* the negative label persisted correctly (1 positive, 1 negative) */
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM feedback_signals WHERE label = 0", -1, &stmt,
+                           NULL),
+        SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(stmt, 0), 1);
+    sqlite3_finalize(stmt);
+
+    /* trivially-short responses are labels, not signal — refused, no row added */
+    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "p", 1, "k", 1, true), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_dpo_signal_count(&col, &signals), HU_OK);
+    HU_ASSERT_EQ((int)signals, 2);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 static void dpo_margin_reflects_confidence(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    /* record_from_feedback uses margin=0.7, record_from_retry uses margin=0.8 */
-    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true), HU_OK);
+    /* Two real pairs via the retry path (record_from_retry uses margin=0.8).
+     * Feedback no longer creates a margin'd pair — it routes to feedback_signals. */
+    HU_ASSERT_EQ(hu_dpo_record_from_retry(&col, "p", 1, "rejected1", 9, "chosen1", 7), HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_from_retry(&col, "p", 1, "rejected", 8, "chosen", 6), HU_OK);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
@@ -835,6 +893,8 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_record_inbound_arrival_computes_latency);
     HU_RUN_TEST(dpo_record_inbound_arrival_no_outbound_is_noop);
     HU_RUN_TEST(dpo_record_inbound_arrival_null_returns_invalid);
+    /* 2026-05-31 — single-sided feedback routes to feedback_signals, not dpo_pairs */
+    HU_RUN_TEST(dpo_feedback_routes_to_signals_not_pairs);
 #endif
     HU_RUN_TEST(dpo_null_collector_returns_error);
     HU_RUN_TEST(dpo_empty_export_succeeds);

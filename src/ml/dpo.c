@@ -116,7 +116,20 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
         "outcome_type INTEGER,"
         "outcome_timestamp INTEGER,"
         "processed INTEGER DEFAULT 0);"
-        "CREATE INDEX IF NOT EXISTS idx_proactive_unprocessed ON proactive_sends(processed);";
+        "CREATE INDEX IF NOT EXISTS idx_proactive_unprocessed ON proactive_sends(processed);"
+        /* feedback_signals — single-sided +/- reactions to ONE response. These
+         * are NOT preference pairs (no counterpart), so they belong here, NOT in
+         * dpo_pairs (writing them there poisoned ORPO training — 2026-05-19 audit,
+         * docs/plans/2026-05-19-dpo-corpus-inverted.md). A reward-model / KTO-style
+         * trainer can consume single-sided labels from this table. */
+        "CREATE TABLE IF NOT EXISTS feedback_signals("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "prompt TEXT NOT NULL,"
+        "response TEXT NOT NULL,"
+        "label INTEGER NOT NULL," /* 1 = positive, 0 = negative */
+        "source TEXT,"
+        "timestamp INTEGER NOT NULL);"
+        "CREATE INDEX IF NOT EXISTS idx_feedback_signals_label ON feedback_signals(label);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(collector->db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -198,52 +211,85 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector, const char
                                        bool positive) {
     if (!collector || !prompt || !response)
         return HU_ERR_INVALID_ARGUMENT;
-    /* Refuse single-sided writes. Previously this function would write a
-     * row with empty chosen (when positive=false) or empty rejected (when
-     * positive=true). Those rows are NOT preference pairs — they're
-     * single-sided labels — and they actively poison ORPO training.
+    /* Single-sided feedback (a +/- reaction to ONE response) is NOT a
+     * preference pair — it has no counterpart. Writing it to dpo_pairs as a
+     * row with one empty side poisons ORPO training: the 2026-05-19 audit
+     * (docs/plans/2026-05-19-dpo-corpus-inverted.md) found 41.5% of dpo_pairs
+     * inverted, dominated by exactly this path. The documented fix (see the
+     * note in hu_dpo_record_pair) is to route single-sided reactions to a
+     * separate table so dpo_pairs holds only true pairs — that table is now
+     * `feedback_signals`, where a reward-model / KTO-style trainer (which CAN
+     * learn from single-sided labels) consumes them.
      *
-     * Audit on 2026-05-19 (docs/plans/2026-05-19-dpo-corpus-inverted.md)
-     * found 41.5% of dpo_pairs were inverted; the dominant pattern was
-     * empty chosen + "SKIP"/"GOOD" in rejected, all from this path. The
-     * fix: refuse to write at all when the response side is empty or
-     * trivially-short (≤3 bytes, e.g. "k", "GO"). Callers that want to
-     * record a feedback signal without a paired counterpart should use
-     * a separate table (e.g. negative_signals), NOT dpo_pairs.
+     * This keeps the same signature, so the four live callers are unchanged;
+     * they simply no longer pollute the DPO corpus. True pairs still flow via
+     * hu_dpo_record_from_retry (reflection_retry) and the outbound-edit path.
      *
-     * This is a behavior change. The previously bug-pinning test
-     * `dpo_feedback_with_zero_length_response` is updated to assert the
-     * new contract per ~/.claude/rules/tests-that-pin-bugs.md. */
+     * Behavior change vs the prior single-sided dpo_pairs write — the
+     * previously bug-pinning feedback tests are updated to assert the new
+     * contract per ~/.claude/rules/tests-that-pin-bugs.md. */
+    return hu_dpo_record_signal(collector, prompt, prompt_len, response, response_len, positive,
+                                "user_feedback", 13);
+}
+
+/* Record a single-sided feedback signal (a +/- reaction to one response) into
+ * the feedback_signals table — NOT dpo_pairs. Trivially-short responses
+ * (<4 bytes, e.g. "k"/"GO") are labels, not signal, and are refused. */
+hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt, size_t prompt_len,
+                                const char *response, size_t response_len, bool positive,
+                                const char *source, size_t source_len) {
+    if (!collector || !prompt || !response)
+        return HU_ERR_INVALID_ARGUMENT;
     if (response_len < 4)
         return HU_ERR_INVALID_ARGUMENT;
-
-    hu_preference_pair_t pair;
-    memset(&pair, 0, sizeof(pair));
-
-    size_t plen = prompt_len < sizeof(pair.prompt) - 1 ? prompt_len : sizeof(pair.prompt) - 1;
-    memcpy(pair.prompt, prompt, plen);
-    pair.prompt_len = plen;
-
-    if (positive) {
-        size_t rlen =
-            response_len < sizeof(pair.chosen) - 1 ? response_len : sizeof(pair.chosen) - 1;
-        memcpy(pair.chosen, response, rlen);
-        pair.chosen_len = rlen;
-        pair.rejected_len = 0;
-    } else {
-        size_t rlen =
-            response_len < sizeof(pair.rejected) - 1 ? response_len : sizeof(pair.rejected) - 1;
-        memcpy(pair.rejected, response, rlen);
-        pair.rejected_len = rlen;
-        pair.chosen_len = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (collector->db) {
+        sqlite3_stmt *stmt = NULL;
+        int rc = sqlite3_prepare_v2(
+            collector->db,
+            "INSERT INTO feedback_signals(prompt, response, label, source, timestamp) "
+            "VALUES(?, ?, ?, ?, ?)",
+            -1, &stmt, NULL);
+        if (rc != SQLITE_OK)
+            return HU_ERR_IO;
+        sqlite3_bind_text(stmt, 1, prompt, (int)prompt_len, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, response, (int)response_len, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, 3, positive ? 1 : 0);
+        sqlite3_bind_text(stmt, 4, source ? source : "user_feedback",
+                          source ? (int)source_len : 13, SQLITE_STATIC);
+        sqlite3_bind_int64(stmt, 5, (int64_t)time(NULL));
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        if (rc != SQLITE_DONE)
+            return HU_ERR_IO;
     }
+#else
+    (void)prompt_len;
+    (void)response_len;
+    (void)positive;
+    (void)source;
+    (void)source_len;
+#endif
+    return HU_OK;
+}
 
-    pair.margin = 0.7;
-    pair.timestamp = (int64_t)time(NULL);
-    memcpy(pair.source, "user_feedback", 13);
-    pair.source_len = 13;
-
-    return hu_dpo_record_pair(collector, &pair);
+/* Count rows in feedback_signals (for tests + reward-model trainer sizing). */
+hu_error_t hu_dpo_signal_count(hu_dpo_collector_t *collector, size_t *out) {
+    if (!collector || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (collector->db) {
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(collector->db, "SELECT COUNT(*) FROM feedback_signals", -1, &stmt,
+                               NULL) != SQLITE_OK)
+            return HU_ERR_IO;
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            *out = (size_t)sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+#endif
+    return HU_OK;
 }
 
 hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector, const char *prompt,

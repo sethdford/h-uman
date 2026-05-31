@@ -1198,6 +1198,22 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         bool has_native_tools =
             (agent->provider.vtable->supports_native_tools &&
              agent->provider.vtable->supports_native_tools(agent->provider.ctx));
+
+        /* Humanness directive context + salience gate (off|shadow|live), shared with
+         * hu_agent_turn. This is the daemon's PRIMARY inbound path: before this, the
+         * six humanness directives were never built on streaming turns, so HU_SALIENCE
+         * was a no-op here (2026-05-31 follow-up to the gates-streaming-path fix). The
+         * never-suppress floor lives inside the shared builder. Strings are copied into
+         * system_prompt by hu_prompt_build_system, so we free our copies right after. */
+        char *humanness_ctx = NULL;
+        size_t humanness_ctx_len = 0;
+        char *imperfect_dir = NULL;
+        size_t imperfect_dir_len = 0;
+        char *residue_dir = NULL;
+        size_t residue_dir_len = 0;
+        hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
+                                         &humanness_ctx, &humanness_ctx_len, &imperfect_dir,
+                                         &imperfect_dir_len, &residue_dir, &residue_dir_len);
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -1264,6 +1280,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .personal_model_context_len = personal_model_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            .humanness_context = humanness_ctx,
+            .humanness_context_len = humanness_ctx_len,
+            .imperfect_delivery = imperfect_dir,
+            .imperfect_delivery_len = imperfect_dir_len,
+            .residue_carryover = residue_dir,
+            .residue_carryover_len = residue_dir_len,
             /* B3 Phase 3 — same trim-gate population as agent_turn.c so
              * streaming turns honor the same operator config. */
             .prompt_budget_trim_enabled =
@@ -1288,6 +1310,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_prompt_budget_observe(agent->prompt_budget, prompt_field_stats,
                                      HU_PROMPT_FIELD_COUNT);
         }
+        /* hu_prompt_build_system copied these into system_prompt (see prompt.c
+         * append()); free our owned copies on every subsequent path. */
+        if (humanness_ctx)
+            agent->alloc->free(agent->alloc->ctx, humanness_ctx, humanness_ctx_len + 1);
+        if (imperfect_dir)
+            agent->alloc->free(agent->alloc->ctx, imperfect_dir, imperfect_dir_len + 1);
+        if (residue_dir)
+            agent->alloc->free(agent->alloc->ctx, residue_dir, residue_dir_len + 1);
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */

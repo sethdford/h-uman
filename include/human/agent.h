@@ -859,6 +859,27 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
                                           size_t contact_id_len, const char *msg, size_t msg_len,
                                           char **system_prompt, size_t *system_prompt_len);
 
+/* Build the per-turn humanness directive context — shared references, curiosity,
+ * absence, evolved opinions, emotional residue, imperfect delivery — and run the
+ * salience gate over those directives. Honors HU_SALIENCE (off|shadow|live;
+ * legacy HU_SALIENCE_LIVE / HU_SALIENCE_SHADOW; default live). In SHADOW it logs
+ * kept-vs-suppressed; in LIVE it filters the assembled context to the selected
+ * directives, with a never-suppress floor (required/crisis/grief directives
+ * always pass; an invariant violation fails safe to no suppression). Called by
+ * BOTH hu_agent_turn and hu_agent_turn_stream_v2 so HU_SALIENCE shapes the
+ * streaming path the daemon actually uses for inbound messages.
+ *
+ * On return the three out-params own freshly allocated strings (or NULL): the
+ * combined humanness context, the imperfect-delivery directive, and the
+ * emotional-residue carryover directive. The caller frees each via
+ * agent->alloc->free(ctx, p, len + 1). No-op (all outs NULL/0) if inputs are
+ * NULL. */
+void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                      const char *memory_ctx, size_t memory_ctx_len,
+                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
+                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
+                                      char **residue_dir_out, size_t *residue_dir_len_out);
+
 /* Optional: if non-NULL, called for each streaming token delta (CLI mode).
  * Provider must support streaming. When provided, uses stream_chat when available. */
 typedef void (*hu_agent_stream_token_cb)(const char *delta, size_t len, void *ctx);
