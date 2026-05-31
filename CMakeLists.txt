@@ -1588,6 +1588,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
+        src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3861,6 +3862,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)

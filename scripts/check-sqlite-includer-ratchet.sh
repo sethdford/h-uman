@@ -24,7 +24,8 @@ set -euo pipefail
 # Updated 2026-05-29 after opinions aggregate migration (opinions.c): 101 -> 100
 # Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
 # Updated 2026-05-29 after social_graph aggregate migration (social_graph.c): 99 -> 98
-BASELINE=98
+# Updated 2026-05-29 after self_awareness aggregate migration (self_awareness.c): 98 -> 97
+BASELINE=97
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
