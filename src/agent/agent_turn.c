@@ -468,6 +468,7 @@ static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact
             agent->alloc->free(agent->alloc->ctx, tom_context,
                                tom_context_len > 0 ? tom_context_len + 1 : 0);
             hu_tom_gaps_free(agent->alloc, gaps, gap_count);
+            hu_tom_deinit(&tom_state, agent->alloc);
             return HU_ERR_OUT_OF_MEMORY;
         }
 
@@ -485,6 +486,7 @@ static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact
         agent->alloc->free(agent->alloc->ctx, tom_context, tom_context_len + 1);
     }
     hu_tom_gaps_free(agent->alloc, gaps, gap_count);
+    hu_tom_deinit(&tom_state, agent->alloc);
 
     /* In shadow mode, the directive is appended silently for testing without affecting behavior */
     (void)tom_shadow;

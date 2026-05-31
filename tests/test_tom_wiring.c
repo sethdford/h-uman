@@ -48,6 +48,7 @@ static void gap_directive_reaches_system_prompt_when_enabled(void) {
     /* Cleanup */
     alloc.free(alloc.ctx, directive, directive_len + 1);
     hu_tom_gaps_free(&alloc, gaps, gap_count);
+    hu_tom_deinit(state, &alloc);
     alloc.free(alloc.ctx, state, sizeof(*state));
 }
 
@@ -85,6 +86,7 @@ static void gap_directive_absent_when_disabled(void) {
     }
 
     hu_tom_gaps_free(&alloc, gaps, gap_count);
+    hu_tom_deinit(state, &alloc);
     alloc.free(alloc.ctx, state, sizeof(*state));
 }
 
