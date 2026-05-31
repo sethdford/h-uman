@@ -54,7 +54,10 @@ static void reaction_stream_becomes_trainable_pairs_e2e(void) {
         snprintf(msg, sizeof(msg), "msg-%03d", i);
         bool positive = (i % 2 == 0);
         hu_reaction_handler_register_assistant_message_for_production(
-            "imessage", thread, msg, prompt, positive ? good : bad);
+            "imessage", thread, msg, prompt, positive ? good : bad,
+            /* no alternative draft here — this test exercises main's export-paired
+             * zip path on single-sided rows (B2's alternative-pairing is orthogonal). */
+            "");
         hu_reaction_event_t evt = {
             .channel_id = "imessage",
             .target_thread_id = thread,
