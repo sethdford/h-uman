@@ -631,6 +631,171 @@ static void judge_parse_clamps_above_100(void) {
     HU_ASSERT_EQ((int)s, 100);
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* Record the single-sided rows reaction collection writes: a positive reaction
+ * fills only `chosen`, a negative only `rejected`. */
+static void dpo_paired_record_chosen_only(hu_dpo_collector_t *col, const char *prompt,
+                                          const char *chosen, int64_t ts) {
+    hu_preference_pair_t p = {0};
+    size_t pl = strlen(prompt), cl = strlen(chosen);
+    memcpy(p.prompt, prompt, pl);
+    p.prompt_len = pl;
+    memcpy(p.chosen, chosen, cl);
+    p.chosen_len = cl;
+    p.margin = 1.0;
+    p.timestamp = ts;
+    memcpy(p.source, "imessage_tapback", 16);
+    p.source_len = 16;
+    HU_ASSERT_EQ(hu_dpo_record_pair(col, &p), HU_OK);
+}
+static void dpo_paired_record_rejected_only(hu_dpo_collector_t *col, const char *prompt,
+                                            const char *rejected, int64_t ts) {
+    hu_preference_pair_t p = {0};
+    size_t pl = strlen(prompt), rl = strlen(rejected);
+    memcpy(p.prompt, prompt, pl);
+    p.prompt_len = pl;
+    memcpy(p.rejected, rejected, rl);
+    p.rejected_len = rl;
+    p.margin = -1.0;
+    p.timestamp = ts;
+    memcpy(p.source, "imessage_tapback", 16);
+    p.source_len = 16;
+    HU_ASSERT_EQ(hu_dpo_record_pair(col, &p), HU_OK);
+}
+#endif
+
+/* AC (a): same-prompt chosen-only + rejected-only rows zip into two-sided pairs;
+ * plain hu_dpo_export drops them all (the bug this fixes). */
+static void dpo_export_paired_zips_same_prompt_singles(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 32, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    const char *P = "what should i do first?";
+    dpo_paired_record_chosen_only(&col, P, "ship the small fix now", 100);
+    dpo_paired_record_rejected_only(&col, P, "consider exploring more", 101);
+    dpo_paired_record_chosen_only(&col, P, "merge the ready branch", 102);
+    dpo_paired_record_rejected_only(&col, P, "rewrite the whole module", 103);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export_paired(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 2u);
+    for (size_t i = 0; i < ex.count; i++) {
+        HU_ASSERT_TRUE(ex.pairs[i].chosen_len >= 4);
+        HU_ASSERT_TRUE(ex.pairs[i].rejected_len >= 4);
+        HU_ASSERT_EQ(memcmp(ex.pairs[i].prompt, P, strlen(P)), 0);
+    }
+
+    /* Contrast: plain export drops every single-sided row → 0 pairs. */
+    hu_dpo_export_t plain = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &plain), HU_OK);
+    HU_ASSERT_EQ(plain.count, 0u);
+
+    hu_dpo_export_free(&alloc, &ex);
+    hu_dpo_export_free(&alloc, &plain);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+#else
+    HU_SKIP_IF(1, "SQLite required for hu_dpo_export_paired");
+#endif
+}
+
+/* AC (b): unequal chosen/rejected counts for one prompt → min(nc, nr) pairs,
+ * remainder dropped. */
+static void dpo_export_paired_unequal_counts_drops_remainder(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 32, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    const char *P = "ranked prompt here";
+    dpo_paired_record_chosen_only(&col, P, "good answer one", 200);
+    dpo_paired_record_chosen_only(&col, P, "good answer two", 201);
+    dpo_paired_record_chosen_only(&col, P, "good answer three", 202);
+    dpo_paired_record_rejected_only(&col, P, "bad answer only", 203);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export_paired(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 1u); /* min(3 chosen, 1 rejected) */
+    HU_ASSERT_TRUE(ex.pairs[0].chosen_len >= 4 && ex.pairs[0].rejected_len >= 4);
+
+    hu_dpo_export_free(&alloc, &ex);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+#else
+    HU_SKIP_IF(1, "SQLite required for hu_dpo_export_paired");
+#endif
+}
+
+/* AC (c): single-sided rows with DIFFERENT prompts are never paired. */
+static void dpo_export_paired_different_prompts_not_paired(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 32, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    dpo_paired_record_chosen_only(&col, "prompt alpha here", "chosen for alpha", 300);
+    dpo_paired_record_rejected_only(&col, "prompt beta here", "rejected for beta", 301);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export_paired(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 0u); /* no same-prompt partner */
+
+    hu_dpo_export_free(&alloc, &ex);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+#else
+    HU_SKIP_IF(1, "SQLite required for hu_dpo_export_paired");
+#endif
+}
+
+/* AC (d): genuine two-sided rows pass through unchanged. */
+static void dpo_export_paired_passes_through_two_sided(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 32, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_preference_pair_t in = {0};
+    memcpy(in.prompt, "what should i do first?", 23);
+    in.prompt_len = 23;
+    memcpy(in.chosen, "ship the small fix.", 19);
+    in.chosen_len = 19;
+    memcpy(in.rejected, "perhaps consider.", 17);
+    in.rejected_len = 17;
+    in.margin = 0.7;
+    in.timestamp = 1715472000;
+    memcpy(in.source, "retry_test", 10);
+    in.source_len = 10;
+    HU_ASSERT_EQ(hu_dpo_record_pair(&col, &in), HU_OK);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export_paired(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 1u);
+    HU_ASSERT_EQ(memcmp(ex.pairs[0].chosen, in.chosen, in.chosen_len), 0);
+    HU_ASSERT_EQ(memcmp(ex.pairs[0].rejected, in.rejected, in.rejected_len), 0);
+
+    hu_dpo_export_free(&alloc, &ex);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+#else
+    HU_SKIP_IF(1, "SQLite required for hu_dpo_export_paired");
+#endif
+}
+
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
     HU_RUN_TEST(judge_parse_extracts_number);
@@ -675,4 +840,8 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_empty_export_succeeds);
     HU_RUN_TEST(dpo_margin_reflects_confidence);
     HU_RUN_TEST(test_dpo_export_in_memory_roundtrip);
+    HU_RUN_TEST(dpo_export_paired_zips_same_prompt_singles);
+    HU_RUN_TEST(dpo_export_paired_unequal_counts_drops_remainder);
+    HU_RUN_TEST(dpo_export_paired_different_prompts_not_paired);
+    HU_RUN_TEST(dpo_export_paired_passes_through_two_sided);
 }

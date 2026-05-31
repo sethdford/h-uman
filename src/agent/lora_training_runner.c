@@ -735,7 +735,13 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in, hu_alloc
         goto cleanup;
     }
 
-    err = hu_dpo_export(in->collector, alloc, &export_data);
+    /* Paired export: reaction collection writes single-sided rows (a positive
+     * reaction fills only `chosen`, a negative only `rejected`). hu_dpo_export
+     * drops those, so a reaction-driven corpus would train on zero pairs. The
+     * paired variant zips same-prompt chosen-only + rejected-only rows into
+     * trainable two-sided pairs (and still passes genuine two-sided rows
+     * through). See hu_dpo_export_paired in src/ml/dpo.c. */
+    err = hu_dpo_export_paired(in->collector, alloc, &export_data);
     if (err != HU_OK)
         goto cleanup;
 

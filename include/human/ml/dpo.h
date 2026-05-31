@@ -144,6 +144,26 @@ typedef struct hu_dpo_export {
 hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
                          hu_dpo_export_t *out);
 
+/* Like hu_dpo_export, but additionally synthesizes two-sided preference pairs
+ * from SINGLE-SIDED rows — the rows reaction collection writes (a positive
+ * reaction fills only `chosen`, a negative fills only `rejected`). Without this
+ * pairing the reaction-driven closed loop trains on zero data, because
+ * hu_dpo_export drops every single-sided row.
+ *
+ * Pairing policy:
+ *   - Genuine two-sided rows (both sides >= 4 chars) pass through unchanged.
+ *   - Single-sided rows are paired ONLY within an identical `prompt` (never
+ *     across different prompts). Within a prompt, chosen-only rows are zipped
+ *     with rejected-only rows in chronological (insertion / id) order:
+ *     pair k = (k-th chosen-only's `chosen`, k-th rejected-only's `rejected`).
+ *   - When a prompt has unequal chosen/rejected counts, min(nc, nr) pairs are
+ *     produced and the remainder is dropped.
+ *   - Rows empty/short on BOTH sides are dropped.
+ * Synthesized pairs carry margin 1.0, the chosen-only row's timestamp + source.
+ * Output ownership matches hu_dpo_export (free with hu_dpo_export_free). */
+hu_error_t hu_dpo_export_paired(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
+                                hu_dpo_export_t *out);
+
 void hu_dpo_export_free(hu_allocator_t *alloc, hu_dpo_export_t *export_data);
 
 /* Build a prompt fragment from top-margin preference pairs (few-shot injection). */
