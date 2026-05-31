@@ -105,6 +105,27 @@ TTS:  default      → Cartesia Sonic (cloned + expressive + ~82 ms)   ← reply
       fallback     → local Kokoro when Cartesia unavailable          ← privacy-safe by construction
 ```
 
+## Privacy-mode egress coverage (as implemented, PRs #212 + follow-up)
+
+`privacy_mode` is enforced by a process-global kill-switch (`hu_privacy_enforced()`,
+`include/human/core/privacy.h`) latched once at config load from `voice.privacy_mode`
+inside `hu_voice_config_from_settings` — the single function every entry point (daemon,
+gateway, CLI) calls — so callers that build *partial* voice configs (multimodal
+audio/video) cannot bypass it. Every cloud **media** egress checks it:
+
+- ✅ Voice STT (`hu_voice_stt_file`) and TTS (`hu_voice_tts`) — Cartesia + cloud default.
+- ✅ Gemini transcription/description (`hu_voice_stt_gemini`) — audio + video.
+- ✅ Cloud vision (`hu_vision_describe_image`) — covers the video fallback, image
+  describe, the visual-grounding tool, and the daemon vision callers.
+- ✅ Audio's OpenAI transcription fallback (routes through the guarded
+  `hu_voice_stt_file`).
+
+**Boundary (M5 — be precise in marketing):** `privacy_mode` blocks cloud **voice and
+multimodal-media** egress. It does **NOT** make the **LLM** local — the agent's core
+reasoning still uses the configured provider (Cartesia/Gemini/etc.) unless a *local
+model* is selected, which is a separate concern. So the honest claim is "your voice,
+audio, and images never leave the device in privacy mode," not "nothing leaves."
+
 ## Implementation slice (deferred to a follow-up — this ADR ships no code)
 
 The provider integration already exists; the gap is policy/defaults/disclosure:

@@ -1041,9 +1041,6 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
 #endif
         memset(&bi->voice_cfg, 0, sizeof(bi->voice_cfg));
         (void)hu_voice_config_from_settings(&bi->cfg, &bi->voice_cfg);
-        /* Latch the process-global privacy kill-switch from the authoritative config so
-         * partial-config callers (multimodal audio/video) cannot bypass privacy_mode. */
-        hu_voice_set_privacy_enforced(bi->cfg.voice.privacy_mode);
         if (bi->voice_cfg.tts_provider || bi->voice_cfg.local_tts_endpoint ||
             bi->voice_cfg.api_key || bi->voice_cfg.cartesia_api_key ||
             bi->voice_cfg.openai_api_key || (bi->cfg.voice.mode && bi->cfg.voice.mode[0])) {

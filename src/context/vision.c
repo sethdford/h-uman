@@ -2,6 +2,7 @@
  * multimodal (image) understanding in conversations. */
 
 #include "human/context/vision.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
 #include <stdio.h>
@@ -125,6 +126,12 @@ hu_error_t hu_vision_describe_image(hu_allocator_t *alloc, hu_provider_t *provid
         return HU_ERR_INVALID_ARGUMENT;
     *description_out = NULL;
     *description_len = 0;
+
+    /* Privacy kill-switch: cloud vision is a media egress; never send images/frames
+     * to a cloud provider when privacy mode is enforced (covers video fallback, image
+     * describe, visual-grounding, and the daemon vision callers). */
+    if (hu_privacy_enforced())
+        return HU_ERR_NOT_SUPPORTED;
 
 #if !defined(HU_HTTP_CURL) && !(defined(HU_IS_TEST) && HU_IS_TEST)
     /* Provider calls require HTTP (libcurl); tests use mock provider */

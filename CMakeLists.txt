@@ -628,6 +628,7 @@ set(HU_CORE_SOURCES
     src/service.c
     src/skill_registry.c
     src/subagent.c
+    src/core/privacy.c
     src/voice.c
     src/voice_config.c
     src/voice/local_stt.c

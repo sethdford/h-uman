@@ -3,6 +3,7 @@
 #include "human/context/vision.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "test_framework.h"
@@ -47,8 +48,8 @@ static void vision_read_image_null_path(void) {
     size_t base64_len = 0;
     char *media_type = NULL;
     size_t media_type_len = 0;
-    hu_error_t err = hu_vision_read_image(&alloc, NULL, 0, &base64, &base64_len,
-                                          &media_type, &media_type_len);
+    hu_error_t err =
+        hu_vision_read_image(&alloc, NULL, 0, &base64, &base64_len, &media_type, &media_type_len);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_NULL(base64);
     HU_ASSERT_NULL(media_type);
@@ -61,8 +62,7 @@ static void vision_read_image_mock_in_test(void) {
     size_t base64_len = 0;
     char *media_type = NULL;
     size_t media_type_len = 0;
-    hu_error_t err = hu_vision_read_image(&alloc, "/nonexistent/path.png", 20,
-                                          &base64, &base64_len,
+    hu_error_t err = hu_vision_read_image(&alloc, "/nonexistent/path.png", 20, &base64, &base64_len,
                                           &media_type, &media_type_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(base64);
@@ -102,8 +102,8 @@ static void vision_describe_image_no_vision_support(void) {
     };
     char *desc = NULL;
     size_t desc_len = 0;
-    hu_error_t err = hu_vision_describe_image(
-        &alloc, &provider, "/tmp/test.png", 11, "gpt-4o", 6, &desc, &desc_len);
+    hu_error_t err = hu_vision_describe_image(&alloc, &provider, "/tmp/test.png", 11, "gpt-4o", 6,
+                                              &desc, &desc_len);
     HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(desc);
 }
@@ -126,8 +126,8 @@ static void vision_describe_image_no_vision_vtable_null(void) {
     };
     char *desc = NULL;
     size_t desc_len = 0;
-    hu_error_t err = hu_vision_describe_image(
-        &alloc, &provider, "/tmp/test.png", 11, "gpt-4o", 6, &desc, &desc_len);
+    hu_error_t err = hu_vision_describe_image(&alloc, &provider, "/tmp/test.png", 11, "gpt-4o", 6,
+                                              &desc, &desc_len);
     HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(desc);
 }
@@ -137,8 +137,8 @@ static void vision_describe_image_null_vtable(void) {
     hu_provider_t provider = {.ctx = NULL, .vtable = NULL};
     char *desc = NULL;
     size_t desc_len = 0;
-    hu_error_t err = hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6,
-                                              &desc, &desc_len);
+    hu_error_t err =
+        hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6, &desc, &desc_len);
     HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(desc);
 }
@@ -149,18 +149,18 @@ static void vision_describe_image_null_args_returns_error(void) {
     char *desc = NULL;
     size_t desc_len = 0;
 
-    HU_ASSERT_EQ(hu_vision_describe_image(NULL, &provider, "test.png", 8, "gpt-4o", 6,
-                                          &desc, &desc_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_vision_describe_image(&alloc, NULL, "test.png", 8, "gpt-4o", 6,
-                                          &desc, &desc_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6,
-                                          NULL, &desc_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6,
-                                          &desc, NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_vision_describe_image(NULL, &provider, "test.png", 8, "gpt-4o", 6, &desc, &desc_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_vision_describe_image(&alloc, NULL, "test.png", 8, "gpt-4o", 6, &desc, &desc_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6, NULL, &desc_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_vision_describe_image(&alloc, &provider, "test.png", 8, "gpt-4o", 6, &desc, NULL),
+        HU_ERR_INVALID_ARGUMENT);
 }
 
 static void vision_build_context_null_returns_null(void) {
@@ -189,9 +189,8 @@ static const char *mock_vision_get_name(void *ctx) {
 }
 
 static hu_error_t mock_vision_chat(void *ctx, hu_allocator_t *alloc,
-                                  const hu_chat_request_t *request, const char *model,
-                                  size_t model_len, double temperature,
-                                  hu_chat_response_t *out) {
+                                   const hu_chat_request_t *request, const char *model,
+                                   size_t model_len, double temperature, hu_chat_response_t *out) {
     (void)ctx;
     (void)request;
     (void)model;
@@ -228,8 +227,8 @@ static void vision_describe_image_test_mock_returns_description(void) {
     char *desc = NULL;
     size_t desc_len = 0;
 
-    hu_error_t err = hu_vision_describe_image(&alloc, &provider, "/tmp/test.png", 12,
-                                              "gpt-4o", 6, &desc, &desc_len);
+    hu_error_t err = hu_vision_describe_image(&alloc, &provider, "/tmp/test.png", 12, "gpt-4o", 6,
+                                              &desc, &desc_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(desc);
     HU_ASSERT_TRUE(desc_len > 0);
@@ -237,6 +236,21 @@ static void vision_describe_image_test_mock_returns_description(void) {
 
     alloc.free(alloc.ctx, desc, desc_len + 1);
 #endif
+}
+
+/* Privacy kill-switch: cloud vision is blocked at the egress boundary even with a
+ * vision-capable provider — covers the video/image/visual-grounding/daemon callers. */
+static void vision_describe_blocked_under_privacy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t provider = {.ctx = NULL, .vtable = &mock_vision_vtable};
+    char *desc = NULL;
+    size_t desc_len = 0;
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_EQ(hu_vision_describe_image(&alloc, &provider, "/tmp/test.png", 12, "gpt-4o", 6,
+                                          &desc, &desc_len),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(desc);
+    hu_privacy_set_enforced(false); /* reset so other tests observe default behavior */
 }
 
 /* ── Suite ──────────────────────────────────────────────────────────────── */
@@ -254,4 +268,5 @@ void run_vision_tests(void) {
     HU_RUN_TEST(vision_describe_image_no_vision_vtable_null);
     HU_RUN_TEST(vision_describe_image_null_vtable);
     HU_RUN_TEST(vision_describe_image_test_mock_returns_description);
+    HU_RUN_TEST(vision_describe_blocked_under_privacy);
 }

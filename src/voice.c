@@ -6,13 +6,13 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/platform.h"
 #include "human/tts/cartesia.h"
 #include "human/voice/local_stt.h"
 #include "human/voice/local_tts.h"
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,26 +68,10 @@ const char *hu_voice_privacy_disclosure(hu_voice_tts_backend_t backend) {
     }
 }
 
-/*
- * Process-global privacy kill-switch (ADR 2026-05-31). Set once at config load
- * (bootstrap) from voice.privacy_mode. The egress functions honor this IN ADDITION
- * to per-config privacy_mode, so callers that build a partial hu_voice_config_t (e.g.
- * multimodal audio/video, which have no app-config handle) cannot bypass privacy.
- */
-static atomic_bool g_voice_privacy_enforced = false;
-
-void hu_voice_set_privacy_enforced(bool enforced) {
-    atomic_store_explicit(&g_voice_privacy_enforced, enforced, memory_order_relaxed);
-}
-
-bool hu_voice_privacy_enforced(void) {
-    return atomic_load_explicit(&g_voice_privacy_enforced, memory_order_relaxed);
-}
-
-/* Effective privacy for one egress decision: per-config privacy_mode OR the global
- * kill-switch. `config` may be NULL. */
+/* Effective privacy for one egress decision: per-config privacy_mode OR the
+ * process-global kill-switch (human/core/privacy.h). `config` may be NULL. */
 static bool voice_privacy_active(const hu_voice_config_t *config) {
-    return (config && config->privacy_mode) || hu_voice_privacy_enforced();
+    return (config && config->privacy_mode) || hu_privacy_enforced();
 }
 
 hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *config,

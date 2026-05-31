@@ -1,4 +1,5 @@
 #include "human/core/allocator.h"
+#include "human/core/privacy.h"
 #include "human/voice.h"
 #include "test_framework.h"
 #include <string.h>
@@ -464,8 +465,8 @@ static void voice_global_privacy_kill_switch_blocks_partial_config(void) {
     cfg.api_key = "sk-test";
     cfg.api_key_len = 7;
 
-    hu_voice_set_privacy_enforced(true);
-    HU_ASSERT_TRUE(hu_voice_privacy_enforced());
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_TRUE(hu_privacy_enforced());
 
     char *text = NULL;
     size_t len = 0;
@@ -480,8 +481,8 @@ static void voice_global_privacy_kill_switch_blocks_partial_config(void) {
     HU_ASSERT_NULL(audio);
 
     /* reset so later tests observe the default (cloud-allowed) behavior */
-    hu_voice_set_privacy_enforced(false);
-    HU_ASSERT_FALSE(hu_voice_privacy_enforced());
+    hu_privacy_set_enforced(false);
+    HU_ASSERT_FALSE(hu_privacy_enforced());
 }
 
 void run_voice_tests(void) {
