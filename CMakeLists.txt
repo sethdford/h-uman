@@ -3288,6 +3288,7 @@ set(HU_TEST_SOURCES
     tests/test_fidelity_delta.c
     tests/test_m3_frontier_auto_invocation.c
     tests/test_sql_transaction.c
+    tests/test_sqlite_integrity.c
     tests/test_normalize.c
     tests/test_memory_util.c
     tests/test_tunnel.c
