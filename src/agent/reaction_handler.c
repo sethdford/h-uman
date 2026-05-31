@@ -345,65 +345,38 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     if (!s_collector)
         return HU_ERR_NOT_SUPPORTED; /* daemon hasn't wired it yet */
 
-    /* Build source string. hu_preference_pair_t.source is a char[64], so we
-     * write into the struct directly (NOT a const char* assignment — that
-     * would be a C11 type error since the field is an array, not a pointer). */
-    hu_preference_pair_t pair = {0};
-
-    /* Pick source string per channel */
-    const char *src = "unknown";
-    if (strcmp(e->channel_id, "imessage") == 0)
-        src = "imessage_tapback";
-    else if (strcmp(e->channel_id, "slack") == 0)
-        src = "slack_reactji";
-    else
-        src = e->channel_id;
-
-    /* Copy strings into fixed-size buffers (NOT pointer assignment — fields
-     * are char[2048] / char[4096] / char[64] per include/human/ml/dpo.h:15-26). */
-    strncpy(pair.prompt, prompt_buf, sizeof(pair.prompt) - 1);
-    pair.prompt_len = strlen(pair.prompt);
-
-    if (e->polarity > 0) {
-        /* Positive reaction → record this response as `chosen` */
-        strncpy(pair.chosen, response_buf, sizeof(pair.chosen) - 1);
-        pair.chosen_len = strlen(pair.chosen);
-        /* `rejected` left as zeroed-out empty string */
-    } else if (e->polarity < 0) {
-        /* Negative reaction → record this response as `rejected` */
-        strncpy(pair.rejected, response_buf, sizeof(pair.rejected) - 1);
-        pair.rejected_len = strlen(pair.rejected);
-    } else {
-        return HU_OK; /* neutral reactions don't yield training signal */
-    }
-
-    pair.margin = (double)e->polarity;
-    pair.timestamp = e->timestamp_unix;
-    strncpy(pair.source, src, sizeof(pair.source) - 1);
-    pair.source_len = strlen(pair.source);
-
-    /* Set the per-turn flag BEFORE hu_dpo_record_pair so that even if the
-     * SQLite insert fails (disk full, schema drift, etc.) the agent_turn
-     * code path knows a reaction was observed this turn — the substring
-     * heuristic should still defer. The return code is the caller's
-     * diagnostic; the flag is the side-effect signal. */
-    s_called_this_turn = 1;
-    hu_error_t rec_err = hu_dpo_record_pair(s_collector, &pair);
-
-    /* AGI-C1b — also update the production_outcomes row for this
+    /* AGI-C1b — update the production_outcomes row for this
      * (channel, target, message_ref) with the tapback polarity. This
      * is the "reaction came in" signal that resolves an outbound's
-     * outcome columns. Best-effort: failures here don't fail the
-     * caller's signal — the per-turn flag is already set. */
+     * outcome columns. The nightly dpo_collector_mine_pairs_from_outcomes
+     * job will then generate complete DPO pairs by pairing a response that
+     * received a positive tapback (chosen) with a response that received no
+     * reply (rejected) for the same contact. This approach avoids writing
+     * single-sided pairs that would be filtered at export time.
+     *
+     * See docs/plans/2026-05-19-agi-path.md for the intended design:
+     * production_outcomes holds the raw outcome data, and the nightly
+     * miner creates dpo_pairs with source='implicit_feedback'. */
     if (e->channel_id && e->target_thread_id && e->target_message_ref) {
         int polarity_int = (e->polarity > 0) ? 1 : (e->polarity < 0 ? -1 : 0);
-        (void)hu_dpo_record_outcome(s_collector, e->channel_id, strlen(e->channel_id),
-                                    e->target_thread_id, strlen(e->target_thread_id),
-                                    e->target_message_ref, strlen(e->target_message_ref),
-                                    polarity_int,
-                                    /*reply_latency_s=*/-1, /*reply_length=*/-1);
+        hu_error_t out_err = hu_dpo_record_outcome(
+            s_collector, e->channel_id, strlen(e->channel_id), e->target_thread_id,
+            strlen(e->target_thread_id), e->target_message_ref, strlen(e->target_message_ref),
+            polarity_int,
+            /*reply_latency_s=*/-1, /*reply_length=*/-1);
+
+        /* Set the per-turn flag so that agent_turn knows a reaction was
+         * observed this turn — the substring heuristic should defer if
+         * a reaction arrived. The outcome update's result code is the
+         * diagnostic; the flag is the side-effect signal. */
+        s_called_this_turn = 1;
+        return out_err;
     }
-    return rec_err;
+
+    /* No message_ref means we can't link this reaction to a production_outcomes row.
+     * This is unexpected but not fatal — we still record that a reaction arrived. */
+    s_called_this_turn = 1;
+    return HU_OK;
 }
 
 static void register_assistant_message(const char *channel, const char *thread, const char *msg_ref,
