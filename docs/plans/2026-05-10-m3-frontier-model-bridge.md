@@ -585,7 +585,7 @@ on (which forces `HU_ENABLE_LEARNING=ON` per `CMakeLists.txt:38-42`).
 Two new pre-existing latent bugs surfaced by the slim build that were
 fixed under the same triage (one-line each, surgically scoped):
 
-3. **`src/agent/autodream.c::phase_hyperedge_consolidation`** had an
+3. **`src/agent/simulation/autodream.c::phase_hyperedge_consolidation`** had an
    unused `alloc` parameter that the `-Wunused-parameter -Werror`
    gate was rejecting on dev. `(void)alloc;` added with a comment
    explaining the parameter is reserved for future hyperedge synthesis

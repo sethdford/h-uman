@@ -202,7 +202,7 @@ hu_error_t hu_graph_ground_load(hu_memory_loader_t *loader,
 
 - [ ] **Step 2: Write the failing tests**
 
-The seed data each SQLite-backed test needs (apply this SQL against the test's db handle via a small static helper that wraps the SQLite C string-exec API — table schema matches `src/agent/autodream.c:55`):
+The seed data each SQLite-backed test needs (apply this SQL against the test's db handle via a small static helper that wraps the SQLite C string-exec API — table schema matches `src/agent/simulation/autodream.c:55`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS community_summaries (
