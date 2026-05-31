@@ -339,6 +339,16 @@ class LocalBackend:
             first_token_ms = total_ms
         return "".join(parts), first_token_ms, total_ms
 
+    def health_ok(self):
+        """True if the server answers /health 200. Used to wait out a transient
+        restart (KeepAlive relaunch) before deferring the whole run."""
+        try:
+            req = urllib.request.Request(f"{self.url}/health")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return getattr(resp, "status", resp.getcode()) == 200
+        except (OSError, urllib.error.URLError):
+            return False
+
 
 def judge_available():
     """True when ADC credentials are present (judge can run)."""
@@ -539,6 +549,39 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
 
 
+def wait_for_backend(backend, timeout_s=180, interval_s=10):
+    """Poll the server's /health until it responds or timeout elapses. Used to
+    ride out a transient restart (KeepAlive relaunches the mlx-server in seconds)
+    so a momentary blip does not throw away the whole night's measurement.
+    Returns True if the backend came back, False on timeout."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if backend.health_ok():
+            return True
+        time.sleep(interval_s)
+    return False
+
+
+def run_all_scenarios(scenarios, backend, judge_on, persona_prompt, max_turns, out):
+    """Run every scenario into `out`, surviving a transient backend restart: on
+    BackendUnreachable, wait for the server to recover and retry the scenario
+    ONCE. Completed scenarios in `out` are preserved across the retry. Re-raises
+    BackendUnreachable only if the server does not come back — so a true outage
+    still DEFERS honestly rather than scoring a phantom 0."""
+    for scenario in scenarios:
+        for attempt in range(2):
+            try:
+                out.append(run_scenario(scenario, backend, judge_on=judge_on,
+                                        persona_prompt=persona_prompt, max_turns=max_turns))
+                break
+            except BackendUnreachable as e:
+                if attempt == 0 and wait_for_backend(backend):
+                    print(f"WARN: backend blipped ({e}); recovered after wait, "
+                          f"retrying scenario {scenario.get('name', '?')}.")
+                    continue
+                raise
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Sustained multi-turn coherence eval (on-device)")
     ap.add_argument("--server-url", default="http://127.0.0.1:8741")
@@ -560,10 +603,8 @@ def main(argv=None):
 
     scenario_verdicts = []
     try:
-        for scenario in scenarios:
-            scenario_verdicts.append(
-                run_scenario(scenario, backend, judge_on=judge_on,
-                             persona_prompt=persona_prompt, max_turns=args.max_turns))
+        run_all_scenarios(scenarios, backend, judge_on, persona_prompt,
+                          args.max_turns, scenario_verdicts)
     except BackendUnreachable as e:
         write_verdict({"run_passed": False, "backend": "UNREACHABLE", "error": str(e),
                        "scenarios": scenario_verdicts}, args.output_json)
@@ -576,10 +617,8 @@ def main(argv=None):
         print(f"WARN: judge unavailable mid-run ({e}); re-running latency-only.")
         scenario_verdicts = []
         try:
-            for scenario in scenarios:
-                scenario_verdicts.append(
-                    run_scenario(scenario, backend, judge_on=False,
-                                 persona_prompt=persona_prompt, max_turns=args.max_turns))
+            run_all_scenarios(scenarios, backend, False, persona_prompt,
+                              args.max_turns, scenario_verdicts)
         except BackendUnreachable as be:
             write_verdict({"run_passed": False, "backend": "UNREACHABLE", "error": str(be),
                            "scenarios": scenario_verdicts}, args.output_json)
