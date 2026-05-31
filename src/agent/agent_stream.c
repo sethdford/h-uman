@@ -6,6 +6,7 @@
 #include "human/agent/constitutional.h"
 #include "human/agent/conv_goals.h"
 #include "human/agent/frontier_persist.h"
+#include "human/agent/graph_grounding.h"
 #include "human/agent/growth_narrative.h"
 #include "human/agent/gvr.h"
 #include "human/agent/humanness.h"
@@ -468,6 +469,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* Build system prompt (memory, persona, awareness, outcomes) */
     char *memory_ctx = NULL;
     size_t memory_ctx_len = 0;
+    char *graph_ctx = NULL;
+    size_t graph_ctx_len = 0;
     if (agent->memory && agent->memory->vtable) {
         hu_memory_loader_t loader;
         hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine, 10,
@@ -494,6 +497,20 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         if (mem_err != HU_OK && mem_err != HU_ERR_NOT_SUPPORTED)
             hu_log_error("agent_stream_v2", NULL, "memory_loader_load failed: %s",
                          hu_error_string(mem_err));
+        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
+            agent->memory_session_id_len > 0) {
+            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
+                                 &graph_ctx, &graph_ctx_len);
+            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+                hu_log_info("graph_grounding", NULL,
+                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
+                if (graph_ctx)
+                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
+                graph_ctx = NULL;
+                graph_ctx_len = 0;
+            }
+        }
     }
 
     char *awareness_ctx = NULL;
@@ -704,6 +721,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+                if (graph_ctx)
+                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
                 if (awareness_ctx)
                     agent->alloc->free(agent->alloc->ctx, awareness_ctx, awareness_ctx_len + 1);
                 if (outcome_ctx)
@@ -1167,6 +1186,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
         if (memory_ctx)
             agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+        if (graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
         if (err != HU_OK) {
             hu_agent_clear_current_for_tools();
             return err;
@@ -1186,6 +1207,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .tools_count = turn_needs_tools ? agent->tools_count : 0,
             .memory_context = memory_ctx,
             .memory_context_len = memory_ctx_len,
+            .graph_context = graph_ctx,
+            .graph_context_len = graph_ctx_len,
             .stm_context = stm_ctx,
             .stm_context_len = stm_ctx_len,
             .commitment_context = commitment_ctx,
@@ -1298,6 +1321,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
         if (memory_ctx)
             agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+        if (graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
         if (stm_ctx) {
             agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);
             stm_ctx = NULL;
