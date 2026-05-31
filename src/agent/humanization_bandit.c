@@ -66,10 +66,13 @@ bool hu_humanization_apply_bandit_override(hu_contextual_bandit_t *bandit, uint6
     if (!inout_params)
         return false;
 
-    /* Check gate: HU_BANDIT_HUMANIZATION env var (default OFF) */
+    /* Gate: HU_BANDIT_HUMANIZATION. Activated 2026-05-31 after blind A/B (g2g) —
+     * ENABLED by default. Disable via HU_BANDIT_HUMANIZATION=off|0|false|no. */
     const char *gate_env = getenv("HU_BANDIT_HUMANIZATION");
-    bool gate_enabled = gate_env && (gate_env[0] == '1' || strcmp(gate_env, "true") == 0 ||
-                                     strcmp(gate_env, "yes") == 0 || strcmp(gate_env, "on") == 0);
+    bool gate_enabled = true;
+    if (gate_env && *gate_env)
+        gate_enabled = !(strcmp(gate_env, "0") == 0 || strcmp(gate_env, "off") == 0 ||
+                         strcmp(gate_env, "false") == 0 || strcmp(gate_env, "no") == 0);
 
     if (!gate_enabled || !bandit)
         return false;

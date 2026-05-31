@@ -68,19 +68,50 @@ validated against a real PR's check accounting, not edited blind.
   `.github/actions/setup-build` (installs ccache, caches `~/.cache/ccache`
   content-addressed keyed on src hash + prefix restore-keys, sets the launcher).
   Verified 2026-05-31 — no work needed; the original note here was wrong.
-- Remaining: cache the **llama.cpp / mlx** build trees for the rl_sota nightly
-  (its long pole is a from-scratch llama.cpp build every run).
+- ~~Remaining: cache the **llama.cpp** build for the rl_sota nightly~~ **DONE.**
+  The nightly's `validate-rl-sota.sh` ran its own `cmake --preset rl_sota` with
+  NO compiler launcher (setup-build's launcher applies to the `build` dir, not
+  the separate `build-rl-sota`), so llama.cpp recompiled from scratch every run
+  — the nightly's long pole. Fixed: validate-rl-sota.sh now adds
+  `CMAKE_C/CXX_COMPILER_LAUNCHER=ccache` (guarded on ccache present), and
+  rl-nightly.yml bumps `ccache max_size=2G` so the vendored llama.cpp objects
+  (ggml + llama) fit alongside h-uman's and persist across runs. ccache is
+  content-addressed → no stale-object risk; no-op locally without ccache.
 
 ## Phase 5 — intelligent / self-healing (wire existing assets)
 
-| Capability | Mechanism | Existing asset |
-|---|---|---|
-| Systemic-vs-per-PR triage | cluster failures by signature; O(root-causes) not O(PRs) | `/diagnose-ci-queue`, `ci-queue-triage.md` |
-| Auto-bisect red `main` → tracked issue (+ optional auto-revert past N min) | dispatch on `main` failure | `regression-hunter` agent |
-| Flaky-test quarantine + auto-retry, tracked | detect non-determinism | `flake-detector` agent |
-| Auto-retry transient infra (network/runner) | `nick-fields/retry` on flaky steps; gate only `required` (advisory `ui-e2e`/`visual-regression` never block) | `ci-required-checks.md` tiers |
-| Predictive test selection | ML-rank tests by failure probability | net-new |
-| Generated stats are generated, not hand-edited | a CI check/commit regenerates binary-size/test-count lines in README/CLAUDE.md/AGENTS.md | (kills the `2775` vs `23209 KB` drift) |
+| Capability | Mechanism | Existing asset | Status |
+|---|---|---|---|
+| Auto-retry transient infra (network/runner) | bounded bash `until` retry (×3, exp backoff, fail-loud) around `apt-get update`/`apt-get install`/`brew install` in `setup-build` | zero-dep, no third-party action | **SHIPPED** |
+| Auto-triage red `main` → tracked issue | `ci-autotriage.yml` (`workflow_run` on Human CI / M3 smoke / RL Nightly) opens/updates ONE deduped issue: failed-run URL, commit range since last-green, ready-to-run bisect harness | `regression-hunter` agent, `ci-queue-triage.md` | **SHIPPED** |
+| Systemic-vs-per-PR triage | cluster failures by signature; O(root-causes) not O(PRs) | `/diagnose-ci-queue`, `ci-queue-triage.md` | future PR |
+| Flaky-test quarantine + auto-retry, tracked | detect non-determinism in-framework | `flake-detector` agent | future PR (net-new framework hook) |
+| Predictive test selection | ML-rank tests by failure probability | net-new | future PR |
+| Generated stats are generated, not hand-edited | a CI check/commit regenerates binary-size/test-count lines in README/CLAUDE.md/AGENTS.md | (kills the `2775` vs `23209 KB` drift) | future PR |
+
+### Phase 5 shipped here — design notes
+
+**Auto-retry transient infra** (`.github/actions/setup-build/action.yml`). apt
+mirror 5xx / DNS blips / dpkg-lock contention on shared runners are a recurring
+red cause unrelated to the change under test. A `retry()` bash helper wraps the
+three network-bound install commands: up to 3 attempts, `n*5s` (apt) / `n*10s`
+(brew) backoff, and an `exit 1` (fail-loud) after the third so a genuinely
+broken install still goes red. `until <cmd>` is exempt from `set -eo pipefail`,
+so the final failure propagates via the explicit `exit`. Zero new dependency
+(no `nick-fields/retry` SHA to pin/maintain — keeps the action self-contained).
+
+**Auto-triage red `main`** (`.github/workflows/ci-autotriage.yml`). A
+`workflow_run`-triggered job (fires only on `conclusion == 'failure'` +
+`head_branch == 'main'`) files a single, deduped `ci-red-main`-labelled tracking
+issue per workflow with: the failed run URL, the commit range since that
+workflow's last green run on main (via `gh run list --status success`), the
+suspect-commit list, and a paste-ready `git bisect` harness pointing at
+`regression-hunter`. Subsequent failures append a comment rather than spawn
+duplicates (exact-title match in awk). Security: the only untrusted input (the
+head-commit subject) is passed solely as a `printf` `%s` argument and to gh/jq
+via env/`-v`, never interpolated into a shell command or an expanding heredoc —
+verified locally against an adversarial `$(touch …)` + backtick subject (nothing
+executed). `actionlint`-clean.
 
 ## Sequencing
 

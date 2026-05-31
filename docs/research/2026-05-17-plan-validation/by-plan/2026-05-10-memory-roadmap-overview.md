@@ -21,7 +21,7 @@ Umbrella roadmap sequencing W1-W6 (bitemporal foundation, background consolidati
 
 ### Implemented? (code exists)
 - W1: `include/human/memory/graph.h` shows bitemporal `event_start`/`event_end`, `provenance`, `supersedes_id` fields, `hu_belief_t` field
-- W2: `src/memory/consolidation_engine.c`, `src/agent/autodream.c` ship; `autodream_runs` table
+- W2: `src/memory/consolidation_engine.c`, `src/agent/simulation/autodream.c` ship; `autodream_runs` table
 - W3: `src/memory/cross_graph.c`, `src/memory/emotional_graph.c`, `src/memory/contact_graph.c`, `src/memory/episodic.c`, `src/memory/relational_episode.c`, `src/agent/case_based.h`
 - W4: `src/memory/self_rag.c`, `src/memory/corrective_rag.c`, `src/memory/adaptive_rag.c`, `src/memory/hallucination_guard.c`, `src/memory/verify_claim.c`, `src/memory/erasure.c`
 - W5: `include/human/persona/persona_deltas.h`, `include/human/persona/delta_observer.h`

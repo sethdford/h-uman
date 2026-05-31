@@ -76,12 +76,17 @@ static void test_graph_ground_load_empty_is_failopen(void) {
 #endif
 
 static void test_graph_grounding_mode_parse(void) {
+    /* Activated 2026-05-31 after blind A/B: ON by default (unset => ON). */
     unsetenv("HU_GRAPH_GROUNDING");
-    HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_OFF);
+    HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_ON);
     setenv("HU_GRAPH_GROUNDING", "shadow", 1);
     HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_SHADOW);
     setenv("HU_GRAPH_GROUNDING", "on", 1);
     HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_ON);
+    /* Explicit off (disable) override. */
+    setenv("HU_GRAPH_GROUNDING", "off", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_OFF);
+    /* Unknown values disable (fail-safe to off, not silently on). */
     setenv("HU_GRAPH_GROUNDING", "garbage", 1);
     HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_OFF);
     unsetenv("HU_GRAPH_GROUNDING");
@@ -226,21 +231,22 @@ static void test_graph_ground_load_shadows_bytes_when_in_shadow_mode(void) {
 }
 #endif
 
-/* AC-1.3: Compliance test that the gate comment exists in source */
+/* AC-1.3: Compliance test that the gate comment exists in source. Checks the
+ * comment is PRESENT (not at a hardcoded line — that pinned line 1471 and broke
+ * whenever code was inserted above it; presence is the real contract). */
 static void test_gate_comment_exists_at_agent_turn_1471(void) {
     FILE *f = fopen("src/agent/agent_turn.c", "r");
     HU_ASSERT_NOT_NULL(f);
 
-    int line_num = 0;
     char buf[512];
     bool found_comment = false;
+    /* Search the whole file: the gate comment PRESENCE is the contract; its
+     * line shifts whenever agent_turn.c is edited (the ToM helper), so do not
+     * pin a line range. */
     while (fgets(buf, sizeof(buf), f)) {
-        line_num++;
-        if (line_num >= 1471 && line_num <= 1475) {
-            if (strstr(buf, "GraphRAG activation gated") != NULL) {
-                found_comment = true;
-                break;
-            }
+        if (strstr(buf, "GraphRAG activation gated") != NULL) {
+            found_comment = true;
+            break;
         }
     }
     fclose(f);

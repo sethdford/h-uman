@@ -5312,6 +5312,30 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         break;
     }
 
+    /* 6.5. Formality-aware absolute rules — the SAME block the live reactive
+     * path appends (src/agent/agent_stream.c via
+     * hu_persona_build_absolute_rules_fmt). Without it, the eval/A-B
+     * generation prompt omits the B1 register fix entirely and cannot
+     * measure production (nor prove the detect drop). Formality is taken
+     * from the channel overlay so a professional-formality overlay yields
+     * formal rules and a casual one yields casual rules — exactly the
+     * register signal the daemon uses. Placed last (highest attention). */
+    {
+        char rules_buf[2048];
+        size_t rules_len = 0;
+        const char *fmlty = overlay ? overlay->formality : NULL;
+        if (hu_persona_build_absolute_rules_fmt(persona, fmlty, rules_buf, sizeof(rules_buf),
+                                                &rules_len) == HU_OK &&
+            rules_len > 0) {
+            err = persona_compact_append(alloc, &buf, &len, &cap, rules_buf, rules_len);
+            if (err != HU_OK)
+                goto fail;
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
+    }
+
     /* 7. Closing imperative: shape constraints + anti-pattern guards. */
     err = persona_compact_append_str(
         alloc, &buf, &len, &cap,
