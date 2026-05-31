@@ -293,11 +293,83 @@ static void test_prompt_addendum_absent_on_nonfactual_query(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+static void test_prompt_graph_context_present(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .workspace_dir = ".",
+        .workspace_dir_len = 1,
+        .autonomy_level = 1,
+        .graph_context = "Climbing partner since 2019; talks in short bursts.",
+        .graph_context_len = 51,
+    };
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "Relationship Context") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Climbing partner since 2019") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_prompt_graph_context_absent_is_noop(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .workspace_dir = ".",
+        .workspace_dir_len = 1,
+        .autonomy_level = 1,
+        /* graph_context deliberately unset */
+    };
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(out, "Relationship Context") == NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_prompt_graph_context_present_immersive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .workspace_dir = ".",
+        .workspace_dir_len = 1,
+        .autonomy_level = 1,
+        .persona_immersive = true,
+        .persona_prompt = "Be yourself.",
+        .persona_prompt_len = 12,
+        .graph_context = "Climbing partner since 2019; talks in short bursts.",
+        .graph_context_len = 51,
+    };
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "Relationship Context") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Climbing partner since 2019") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
     HU_RUN_TEST(test_prompt_build_with_tools);
     HU_RUN_TEST(test_prompt_build_with_memory);
+    HU_RUN_TEST(test_prompt_graph_context_present);
+    HU_RUN_TEST(test_prompt_graph_context_absent_is_noop);
+    HU_RUN_TEST(test_prompt_graph_context_present_immersive);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);

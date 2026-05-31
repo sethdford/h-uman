@@ -65,6 +65,7 @@ static const char *const s_field_names[HU_PROMPT_FIELD_COUNT] = {
     [HU_PROMPT_FIELD_SOMATIC_CONTEXT] = "somatic_context",
     [HU_PROMPT_FIELD_RUPTURE_CONTEXT] = "rupture_context",
     [HU_PROMPT_FIELD_VOICE_MATURITY_DIRECTIVE] = "voice_maturity_directive",
+    [HU_PROMPT_FIELD_GRAPH_CONTEXT] = "graph_context",
 };
 
 const char *hu_prompt_field_name(hu_prompt_field_t field) {

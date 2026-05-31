@@ -33,6 +33,7 @@
 
 struct hu_w7_facade {
     hu_memory_facade_t *m;
+    struct hu_graph *graph;
 };
 
 hu_error_t hu_w7_facade_open(struct hu_graph *graph, hu_allocator_t *alloc, hu_w7_facade_t **out) {
@@ -43,6 +44,7 @@ hu_error_t hu_w7_facade_open(struct hu_graph *graph, hu_allocator_t *alloc, hu_w
     if (!f)
         return HU_ERR_OUT_OF_MEMORY;
     f->m = NULL;
+    f->graph = graph;
     hu_error_t e = hu_memory_facade_open_on_graph(alloc, graph, &f->m);
     if (e != HU_OK) {
         alloc->free(alloc->ctx, f, sizeof(*f));
@@ -54,6 +56,18 @@ hu_error_t hu_w7_facade_open(struct hu_graph *graph, hu_allocator_t *alloc, hu_w
 
 hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
     return facade ? facade->m : NULL;
+}
+
+struct sqlite3 *hu_w7_facade_graph_db(hu_w7_facade_t *facade) {
+#ifdef HU_ENABLE_SQLITE
+    if (!facade || !facade->graph)
+        return NULL;
+    return hu_graph_sqlite_connection(facade->graph);
+#else
+    /* No SQLite backend → no graph DB to read community_summaries from. */
+    (void)facade;
+    return NULL;
+#endif
 }
 
 /* W15 — bridge callback: memory facade audit hook → SQLite audit log. */

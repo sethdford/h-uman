@@ -24,7 +24,7 @@ cmake --build . -j$(nproc)
 ./human_tests
 ```
 
-All 13,172+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
+All 13,225+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
 
 **Release build:**
 

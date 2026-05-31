@@ -151,6 +151,9 @@ typedef struct hu_prompt_config {
      * NULL/empty when voice profile is uninitialised or persona is disabled. */
     const char *voice_maturity_directive;
     size_t voice_maturity_directive_len;
+    /* GraphRAG: per-contact community summaries for relationship context */
+    const char *graph_context;
+    size_t graph_context_len;
     /* Phase 2 prompt-budget trim — populated from hu_config_t.prompt_budget
      * by the caller (agent_turn.c / agent_stream.c). When trim_enabled is
      * true AND the builder is invoked with a non-NULL budget pointer that

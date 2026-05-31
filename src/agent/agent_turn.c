@@ -1,6 +1,7 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
+#include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
 #include "human/config.h"
 #include "human/core/json.h"
@@ -1433,6 +1434,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     /* Load memory context for this turn (gated by Self-RAG) */
     char *memory_ctx = NULL;
     size_t memory_ctx_len = 0;
+    char *graph_ctx = NULL;
+    size_t graph_ctx_len = 0;
     if (agent->memory && agent->memory->vtable && !srag_skip_retrieval) {
         hu_memory_loader_t loader;
         hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine,
@@ -1465,6 +1468,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
+        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
+            agent->memory_session_id_len > 0) {
+            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
+                                 &graph_ctx, &graph_ctx_len);
+            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+                hu_log_info("graph_grounding", NULL,
+                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
+                if (graph_ctx)
+                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
+                graph_ctx = NULL;
+                graph_ctx_len = 0;
+            }
+        }
+
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
             memory_ctx_len > 0) {
@@ -1474,8 +1492,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                      memory_ctx, memory_ctx_len, &relevance, &should_use);
             if (!should_use) {
                 agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+                if (graph_ctx)
+                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
                 memory_ctx = NULL;
                 memory_ctx_len = 0;
+                graph_ctx = NULL;
+                graph_ctx_len = 0;
             }
         }
     }
@@ -1611,8 +1633,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 merged[pos] = '\0';
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+                if (graph_ctx)
+                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
                 memory_ctx = merged;
                 memory_ctx_len = pos;
+                graph_ctx = NULL;
+                graph_ctx_len = 0;
             }
             agent->alloc->free(agent->alloc->ctx, contact_text, contact_text_len + 1);
         }
@@ -2326,6 +2352,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
             if (memory_ctx)
                 agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+            if (graph_ctx)
+                agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
             if (stm_ctx)
                 agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);
             if (commitment_ctx)
@@ -2598,8 +2626,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     memcpy(merged + core_len + 1, memory_ctx, memory_ctx_len);
                     merged[merged_len] = '\0';
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+                    if (graph_ctx)
+                        agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
                     memory_ctx = merged;
                     memory_ctx_len = merged_len;
+                    graph_ctx = NULL;
+                    graph_ctx_len = 0;
                 }
             } else if (!memory_ctx) {
                 memory_ctx = hu_strndup(agent->alloc, core_buf, core_len);
@@ -3510,6 +3542,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
         if (memory_ctx)
             agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+        if (graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
         if (stm_ctx) {
             agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);
             stm_ctx = NULL;
@@ -3815,6 +3849,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .tools_count = agent->tools_count,
             .memory_context = memory_ctx,
             .memory_context_len = memory_ctx_len,
+            .graph_context = graph_ctx,
+            .graph_context_len = graph_ctx_len,
             .instruction_context = instruction_ctx,
             .instruction_context_len = instruction_ctx_len,
             .stm_context = stm_ctx,
@@ -3999,6 +4035,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
              * Surfaced by the M4 production A/B harness on 2026-05-19. */
             memory_ctx = NULL;
             memory_ctx_len = 0;
+        }
+        if (graph_ctx) {
+            agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
+            graph_ctx = NULL;
+            graph_ctx_len = 0;
         }
         if (stm_ctx) {
             agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);

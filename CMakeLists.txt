@@ -727,6 +727,7 @@ set(HU_CORE_SOURCES
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
+    src/agent/graph_grounding.c
     src/agent/memory_loader.c
     src/agent/channel_trust.c
     src/agent/agent_definition.c
@@ -3379,6 +3380,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_prompt.c
+    tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c
     tests/test_vector.c
