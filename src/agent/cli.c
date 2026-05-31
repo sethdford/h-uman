@@ -816,6 +816,19 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     if (parsed_args.message && parsed_args.message[0])
         agent_p->lean_prompt = true;
 
+    /* --contact: bind the contact id as the memory session so per-contact memory
+     * recall AND GraphRAG community-summary grounding fire on a one-shot CLI turn
+     * (agent_turn gates grounding on memory_session_id && len>0). The daemon binds
+     * this from cp->contact_id; the CLI had no equivalent seam. memory_session_id
+     * is a non-owning const char* (see daemon.c) and argv outlives the turn, so
+     * pointing it at the flag string is safe. */
+    if (parsed_args.contact_id && parsed_args.contact_id[0]) {
+        agent_p->memory_session_id = parsed_args.contact_id;
+        agent_p->memory_session_id_len = strlen(parsed_args.contact_id);
+        if (agent_p->memory && agent_p->memory->vtable)
+            agent_p->memory->current_session_id = parsed_args.contact_id;
+    }
+
     /* Session persistence: load prior conversation if --session was given,
      * or generate a session ID so auto_save works for new sessions. */
     {
