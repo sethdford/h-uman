@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# check-clone-ratchet.sh
+#
+# Clone-block duplication ratchet (DDD bounded-context refactor, Phase 0).
+# Detects code duplication by counting sliding-window line patterns.
+# Fails if count of duplicated windows grows past baseline.
+#
+# Approach: normalize lines (strip whitespace, drop comments/blanks),
+# build overlapping windows of 6 consecutive lines, count window
+# occurrences, report number of windows appearing 2+ times.
+set -euo pipefail
+
+# Measured 2026-05-31 at the start of Phase 0.
+# Window=6, measuring 1,071 src/**/*.c files across h-uman.
+CLONE_BASELINE=11766
+WINDOW=6
+
+cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+
+fail=0
+
+# Tempfile
+tmp_normalized=$(mktemp)
+trap "rm -f '$tmp_normalized'" EXIT
+
+# Extract and normalize all lines from src/**/*.c
+{
+    find src -name '*.c' -type f 2>/dev/null \
+        | grep -v '/third_party/' \
+        | grep -v '/vendor/' \
+        | grep -v '_generated\.c$' \
+        | while read -r file; do
+            awk -v fname="$file" '
+                NF == 0 { next }                          # blank lines
+                /^[[:space:]]*\/\// { next }              # C++ comments
+                /^[[:space:]]*\*/ { next }                # block comment lines
+                /^[[:space:]]*\/\*/ { next }              # block comment start
+                {
+                    # Normalize: strip whitespace, collapse internal spaces
+                    $0 = $0
+                    gsub(/[[:space:]]+/, " ")
+                    sub(/^[[:space:]]+/, "")
+                    sub(/[[:space:]]+$/, "")
+                    print $0
+                }
+            ' "$file"
+        done
+} > "$tmp_normalized"
+
+# Count windows: build WINDOW-line blocks and track duplicates
+clone_count=$(awk -v w="$WINDOW" '
+BEGIN {
+    for (i = 0; i < w; i++) buffer[i] = ""
+    line_num = 0
+    window_total = 0
+    window_dupes = 0
+}
+{
+    line_num++
+
+    # Shift buffer
+    for (i = 0; i < w - 1; i++) {
+        buffer[i] = buffer[i + 1]
+    }
+    buffer[w - 1] = $0
+
+    # Once we have w lines, emit the window
+    if (line_num >= w) {
+        # Build window string (join with newline)
+        window_str = ""
+        for (i = 0; i < w; i++) {
+            if (i > 0) window_str = window_str "\n"
+            window_str = window_str buffer[i]
+        }
+        # Count this window
+        window_count[window_str]++
+    }
+}
+END {
+    # Count how many windows appear 2+ times
+    dupes = 0
+    for (window in window_count) {
+        if (window_count[window] > 1) {
+            dupes++
+        }
+    }
+    print dupes
+}
+' "$tmp_normalized")
+
+echo "Scanning src/**/*.c for code duplication (window=$WINDOW)..."
+echo "Clone groups found: $clone_count (ceiling $CLONE_BASELINE)"
+
+if [ "$clone_count" -gt "$CLONE_BASELINE" ]; then
+    echo "FAIL: new clone blocks detected. Baseline: $CLONE_BASELINE, current: $clone_count" >&2
+    echo "      Run deduplication to lower the count, then update CLONE_BASELINE." >&2
+    fail=1
+elif [ "$clone_count" -lt "$CLONE_BASELINE" ]; then
+    echo "NOTE: clone count dropped to $clone_count — lower CLONE_BASELINE to lock the gain." >&2
+fi
+
+exit $fail

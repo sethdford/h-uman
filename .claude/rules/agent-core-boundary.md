@@ -35,6 +35,6 @@ and safe in pre-commit. The phases that retire them lower the baseline:
 
 ## Related
 
-- `docs/plans/2026-05-29-ddd-bounded-contexts/phase-1-channel-behavior-class.md`
-- `docs/plans/2026-05-29-ddd-bounded-contexts/phase-4-repackaging.md`
+- `docs/plans/2026-05-29-ddd-bounded-contexts/README.md` — Phase 1 (channel `behavior_class`, ✅ done) in the completed ledger
+- `docs/plans/2026-05-29-ddd-bounded-contexts/phase-E4-repackaging.md` — provider injection retires `FACTORY_BASELINE`
 - `~/.claude/rules/substring-classifier-pitfalls.md` — why the prefix `memcmp` is also a latent bug
