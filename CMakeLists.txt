@@ -773,6 +773,7 @@ set(HU_CORE_SOURCES
     src/agent/awareness.c
     src/agent/outcomes.c
     src/agent/contextual_bandit.c
+    src/agent/humanization_bandit.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
     src/agent/stop_sequence_registry.c
@@ -3271,6 +3272,7 @@ set(HU_TEST_SOURCES
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
     tests/test_contextual_bandit.c
+    tests/test_humanization_bandit.c
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
