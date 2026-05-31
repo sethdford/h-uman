@@ -39,6 +39,20 @@ hu_error_t hu_autonomy_consolidate(hu_autonomy_state_t *state);
 hu_error_t hu_autonomy_generate_intrinsic_goal(hu_autonomy_state_t *state,
                                                 size_t completed_count, size_t failed_count);
 
+/* Self-initiated agenda: when `engine`'s persisted agenda for `contact_id` is
+ * EMPTY, generate one intrinsic goal (via hu_autonomy_generate_intrinsic_goal)
+ * and seed it into the persisted goal engine the world model reads into the
+ * prompt — wiring the otherwise-dormant generator into the live path.
+ *
+ * mode: 0 = off (no-op), 1 = shadow (compute + log, do NOT persist),
+ *       2 = on (persist via hu_goal_create). No-op (out_id = 0) when the
+ * contact already has ≥1 active goal, so it never piles up. Forward-declared
+ * engine type keeps SQLite out of this widely-included header. */
+struct hu_goal_engine;
+hu_error_t hu_autonomy_seed_intrinsic_goal(struct hu_goal_engine *engine, const char *contact_id,
+                                           size_t contact_id_len, int mode, int64_t now_ts,
+                                           int64_t *out_id);
+
 hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state,
                                           char *buf, size_t buf_size, size_t *out_len);
 

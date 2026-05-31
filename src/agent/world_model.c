@@ -16,6 +16,7 @@
 
 #include "human/agent/world_model.h"
 
+#include "human/agent/autonomy.h"
 #include "human/agent/goals.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
@@ -901,6 +902,26 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
         if (db) {
             hu_goal_engine_t ge;
             if (hu_goal_engine_create(alloc, db, &ge) == HU_OK) {
+                /* Self-initiated agenda: if this contact has no active goals, let
+                 * the (otherwise dormant) intrinsic-goal generator propose one so
+                 * the agent forms its own agenda instead of being purely reactive.
+                 * Gated HU_INTRINSIC_GOALS off|shadow|on (default off; activation
+                 * gated on the blind A/B per feature-gate-requires-measurement).
+                 * Seeded here — co-located with the goal->prompt read below — so
+                 * a freshly created goal surfaces into the world model this turn.
+                 * (The daemon idle loop in daemon.c is frozen at the file-size
+                 * ceiling, so this read path is the wiring point.) */
+                {
+                    const char *ig = getenv("HU_INTRINSIC_GOALS");
+                    int ig_mode = 0; /* off */
+                    if (ig && (strcmp(ig, "on") == 0 || strcmp(ig, "1") == 0))
+                        ig_mode = 2;
+                    else if (ig && strcmp(ig, "shadow") == 0)
+                        ig_mode = 1;
+                    if (ig_mode > 0)
+                        (void)hu_autonomy_seed_intrinsic_goal(&ge, contact_id, cid_len, ig_mode,
+                                                              (int64_t)time(NULL), NULL);
+                }
                 hu_goal_t *active = NULL;
                 size_t active_n = 0;
                 if (hu_goal_list_active(&ge, contact_id, cid_len, &active, &active_n) == HU_OK &&
