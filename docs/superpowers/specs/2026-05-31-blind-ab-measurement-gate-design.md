@@ -1,3 +1,10 @@
+---
+title: Blind-A/B Measurement Gate — Design Spec
+description: Two-tier (LLM-judge proxy + authoritative human veto) measurement gate that makes feature-gate-requires-measurement enforceable instead of theater.
+date: 2026-05-31
+status: approved
+---
+
 # Blind-A/B Measurement Gate — Design Spec
 
 **Date:** 2026-05-31

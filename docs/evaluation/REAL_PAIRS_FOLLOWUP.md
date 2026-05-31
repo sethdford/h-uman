@@ -1,3 +1,8 @@
+---
+title: "Blind-A/B Gate: ADVISORY → ENFORCING Runbook"
+description: How to populate real Seth pairs to make the blind-A/B gate enforcing, and the gated path to flipping a capability LIVE.
+---
+
 # Blind-A/B gate: ADVISORY → ENFORCING (and the path to flipping a capability LIVE)
 
 The blind-A/B measurement gate is wired and enforced in CI, but it ships

@@ -1,3 +1,10 @@
+---
+title: Blind-A/B Measurement Gate — Implementation Plan
+description: Six-task TDD plan to convert the inert blind-A/B harnesses into an enforced two-tier measurement gate (LLM-judge proxy + human veto + fail-closed capability registry).
+date: 2026-05-31
+status: implemented
+---
+
 # Blind-A/B Measurement Gate Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
