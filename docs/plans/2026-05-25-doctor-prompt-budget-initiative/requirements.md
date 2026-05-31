@@ -11,7 +11,7 @@ AND `initiative`. Code-level verification surfaced that:
 
 2. **`initiative` already has a human CLI**: `human initiative log [--last N]`
    and `human initiative status` already exist (`src/agent/init_outcome.c:766`,
-   registered in `src/main.c:559`). They show verdict counts, mean confidence,
+   registered in `src/app/main.c:559`). They show verdict counts, mean confidence,
    last-fire time, and pretty-printed last-N entries. Adding `human doctor
    initiative` would mostly duplicate this. **Not the gap.**
 

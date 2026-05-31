@@ -55,7 +55,7 @@
 
 ## T5: CLI wiring (~30 LOC, ~30 min)
 **AC:** AC-7 (doctor integration)
-**Files:** `src/doctor/ws_consumer_cli.c`, modify `src/main.c` or
+**Files:** `src/doctor/ws_consumer_cli.c`, modify `src/app/main.c` or
 wherever `doctor` is dispatched (likely `cmd_doctor`)
 **Effort:** S (30 min)
 **Done when:**

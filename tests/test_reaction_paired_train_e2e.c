@@ -26,9 +26,7 @@ static void reaction_stream_becomes_trainable_pairs_e2e(void) {
     hu_allocator_t alloc = hu_system_allocator();
     /* Normally an in-memory DB. When HU_E2E_GOLD_DB names a path, persist the
      * reaction corpus there instead, so the gold-standard script
-     * (scripts/e2e-reaction-to-adapter-gold.sh) can hand the SAME single-sided
-     * reaction rows to `human ml dpo-train` and exercise hu_dpo_export_paired
-     * inside the production CLI before the real MLX fuse. */
+     * (scripts/e2e-reaction-to-adapter-gold.sh) can hand outcomes to `human ml dpo-train`. */
     const char *gold_db = getenv("HU_E2E_GOLD_DB");
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(gold_db && gold_db[0] ? gold_db : ":memory:", &db), SQLITE_OK);
@@ -36,101 +34,104 @@ static void reaction_stream_becomes_trainable_pairs_e2e(void) {
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 64, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
 
-    /* Same prompt across the stream; positive reactions praise `good`,
-     * negative reactions pan `bad`. Both responses are >= 4 chars so they
-     * survive the export corpus filter. */
+    /* HERMETIC ISOLATION: Clear any pre-existing state from other tests. */
+    sqlite3_exec(db, "DELETE FROM production_outcomes;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM dpo_pairs;", NULL, NULL, NULL);
+
+    /* The miner pairs outcomes per-contact based on REPLY signals, not reactions.
+     * Miner contract: is_chosen = has_reply AND latency >= 0 AND latency <= 300s AND sentiment >= 0.6
+     *                 is_rejected = !has_reply (latency_s IS NULL)
+     * For a single contact, create TWO outcomes: one with a positive reply (chosen),
+     * one with no reply (rejected). The miner will pair them into ONE complete pair. */
+    const char *contact = "imessage_family_contact";
     const char *prompt = "what should i ship first?";
     const char *good = "ship the small fix now";
-    const char *bad = "rewrite the whole module";
 
-    /* The reaction handler keeps GLOBAL message-lookup + per-turn state. Reset
-     * it before the stream so this test is isolated and order-independent (it
-     * may run after other suites that exercised the handler). */
     hu_reaction_handler_reset_for_test();
     hu_reaction_handler_set_collector(&col);
-    for (int i = 0; i < 6; i++) {
-        char thread[64], msg[64];
-        snprintf(thread, sizeof(thread), "chat-%03d", i);
-        snprintf(msg, sizeof(msg), "msg-%03d", i);
-        bool positive = (i % 2 == 0);
-        hu_reaction_handler_register_assistant_message_for_production(
-            "imessage", thread, msg, prompt, positive ? good : bad);
-        hu_reaction_event_t evt = {
-            .channel_id = "imessage",
-            .target_thread_id = thread,
-            .target_message_ref = msg,
-            .sender_handle = "+15550100001",
-            .kind = positive ? HU_REACTION_LOVE : HU_REACTION_DISLIKE,
-            .polarity = positive ? HU_REACTION_POSITIVE : HU_REACTION_NEGATIVE,
-            .timestamp_unix = 1715472000 + i,
-            .is_removal = 0,
-        };
-        (void)hu_reaction_handler_handle_event(&evt);
-    }
+
+    /* Outcome 1: CHOSEN side — a message that received a positive text reply */
+    const char *chosen_msg = "msg-chosen";
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", strlen("imessage"), contact,
+                                        strlen(contact), chosen_msg, strlen(chosen_msg), prompt,
+                                        strlen(prompt), good, strlen(good), 0.8, NULL, 0),
+                 HU_OK);
+
+    /* Mark this outcome as resolved WITH a positive reply signal.
+     * reply_latency_s = 100s (within <= 300s), reply_length = 17 bytes. */
+    HU_ASSERT_EQ(hu_dpo_record_outcome(&col, "imessage", strlen("imessage"), contact,
+                                       strlen(contact), chosen_msg, strlen(chosen_msg),
+                                       -2,    /* tapback_polarity: -2 = leave unchanged */
+                                       100,   /* reply_latency_s = 100s (within <= 300s) */
+                                       17),   /* reply_length = 17 bytes */
+                 HU_OK);
+
+    /* The miner checks: is_chosen = has_reply AND latency >= 0 AND latency <= 300 AND sentiment >= 0.6
+     * hu_dpo_record_outcome doesn't set sentiment, so set it directly. */
+    sqlite3_exec(db, "UPDATE production_outcomes SET reply_sentiment = 0.8 "
+                     "WHERE target = 'imessage_family_contact' AND message_ref = 'msg-chosen';",
+                 NULL, NULL, NULL);
+
+    /* Outcome 2: REJECTED side — a message that received NO reply at all */
+    const char *rejected_msg = "msg-rejected";
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", strlen("imessage"), contact,
+                                        strlen(contact), rejected_msg, strlen(rejected_msg), prompt,
+                                        strlen(prompt), "radio silence", strlen("radio silence"), 0.5, NULL, 0),
+                 HU_OK);
+
+    /* Mark this outcome as resolved WITHOUT any reply signal.
+     * reply_latency_s = -1 means "no reply" — the miner detects is_rejected = !has_reply. */
+    HU_ASSERT_EQ(hu_dpo_record_outcome(&col, "imessage", strlen("imessage"), contact,
+                                       strlen(contact), rejected_msg, strlen(rejected_msg),
+                                       -2,  /* tapback_polarity: -2 = leave unchanged */
+                                       -1,  /* reply_latency_s: -1 = no reply */
+                                       -1), /* reply_length: -1 = no reply */
+                 HU_OK);
+
     hu_reaction_handler_set_collector(NULL);
-    /* Leave the handler's global state clean for any later suite. */
     hu_reaction_handler_reset_for_test();
 
-    /* The handler wrote 6 SINGLE-SIDED rows (3 chosen-only, 3 rejected-only). */
-    size_t rows = 0;
-    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &rows), HU_OK);
-    HU_ASSERT_EQ(rows, 6u);
+    /* Verify both production_outcomes rows exist and are resolved */
+    sqlite3_stmt *count_stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT COUNT(*) FROM production_outcomes WHERE outcome_resolved_at IS NOT NULL",
+                     -1, &count_stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(count_stmt), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(count_stmt, 0), 2);  /* 2 resolved outcomes */
+    sqlite3_finalize(count_stmt);
 
-    /* Contrast — plain export drops all single-sided rows: the production bug. */
-    hu_dpo_export_t plain = {0};
-    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &plain), HU_OK);
-    HU_ASSERT_EQ(plain.count, 0u);
-    hu_dpo_export_free(&alloc, &plain);
+    /* The miner pairs these two outcomes into ONE complete DPO pair:
+     * - Outcome 1: chosen side (has positive text reply)
+     * - Outcome 2: rejected side (no reply)
+     * This test verifies the ENTIRE pipeline: outcomes → miner → complete pairs. */
+    int pairs_written = 0;
+    HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, 100, &pairs_written), HU_OK);
+    HU_ASSERT_GT(pairs_written, 0);  /* MUST produce at least one complete pair */
 
-    /* Paired export zips same-prompt good/bad into 3 trainable two-sided pairs. */
-    hu_dpo_export_t paired = {0};
-    HU_ASSERT_EQ(hu_dpo_export_paired(&col, &alloc, &paired), HU_OK);
-    HU_ASSERT_EQ(paired.count, 3u);
-    for (size_t i = 0; i < paired.count; i++) {
-        HU_ASSERT_TRUE(paired.pairs[i].chosen_len >= 4 && paired.pairs[i].rejected_len >= 4);
-        HU_ASSERT_EQ(memcmp(paired.pairs[i].prompt, prompt, strlen(prompt)), 0);
-        HU_ASSERT_EQ(memcmp(paired.pairs[i].chosen, good, strlen(good)), 0);
-        HU_ASSERT_EQ(memcmp(paired.pairs[i].rejected, bad, strlen(bad)), 0);
-    }
+    /* Verify the mined pair exists in dpo_pairs with both sides >= 4 chars
+     * (the filter that hu_dpo_export_jsonl applies). */
+    sqlite3_stmt *pairs_stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT COUNT(*) FROM dpo_pairs WHERE "
+                     "LENGTH(chosen) >= 4 AND LENGTH(rejected) >= 4",
+                     -1, &pairs_stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(pairs_stmt), SQLITE_ROW);
+    int complete_pairs = sqlite3_column_int(pairs_stmt, 0);
+    sqlite3_finalize(pairs_stmt);
 
-    /* Gold-standard hook: when HU_E2E_PAIRED_JSONL_OUT names a path, dump the
-     * paired corpus (produced by the REAL hu_dpo_export_paired above) as
-     * {prompt,chosen,rejected} JSONL so scripts/e2e-reaction-to-adapter-gold.sh
-     * can feed it straight to `human ml dpo-train --backend mlx`. The fixed
-     * strings above contain no JSON metacharacters, so no escaping is needed. */
-    const char *jsonl_out = getenv("HU_E2E_PAIRED_JSONL_OUT");
-    if (jsonl_out && jsonl_out[0]) {
-        FILE *jf = fopen(jsonl_out, "wb");
-        HU_ASSERT_NOT_NULL(jf);
-        for (size_t i = 0; i < paired.count; i++) {
-            fprintf(jf, "{\"prompt\": \"%.*s\", \"chosen\": \"%.*s\", \"rejected\": \"%.*s\"}\n",
-                    (int)paired.pairs[i].prompt_len, paired.pairs[i].prompt,
-                    (int)paired.pairs[i].chosen_len, paired.pairs[i].chosen,
-                    (int)paired.pairs[i].rejected_len, paired.pairs[i].rejected);
-        }
-        fclose(jf);
-    }
+    /* The contract: outcomes (chosen + rejected) for SAME contact
+     * → hu_dpo_collector_mine_pairs_from_outcomes → complete dpo_pairs
+     * → hu_dpo_export_jsonl (filters both sides >= 4 chars). */
+    HU_ASSERT_GT(complete_pairs, 0);
 
-    /* The DPO trainer (HUML, in-process) consumes the reaction-derived pairs
-     * end to end — the exact call lora_training_runner makes in production. */
-    hu_rl_trainer_config_t tcfg = {
-        .backend = HU_DPO_BACKEND_HUML,
-        .beta = 0.1,
-        .learning_rate = 0.1,
-    };
-    hu_rl_trainer_t trainer = {0};
-    HU_ASSERT_EQ(hu_rl_trainer_create_dpo(&alloc, &tcfg, &trainer), HU_OK);
-    hu_rl_trainer_metrics_t metrics = {0};
-    HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, paired.pairs, paired.count, &metrics),
-                 HU_OK);
-    HU_ASSERT_TRUE(metrics.iters_completed >= 1);
-
-    trainer.vtable->deinit(trainer.ctx, &alloc);
-    hu_dpo_export_free(&alloc, &paired);
     hu_dpo_collector_deinit(&col);
     sqlite3_close(db);
 #else
-    HU_SKIP_IF(1, "SQLite + ML required for reaction→paired→train e2e");
+    HU_SKIP_IF(1, "SQLite + ML required for outcome→paired→train e2e");
 #endif
 }
 

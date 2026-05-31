@@ -24,7 +24,7 @@
 | `src/reflection/consumer.c` | System-prompt slice query, unsurfaced-query, surfaced/retired mutators | NEW |
 | `src/reflection/reflection_system_prompt.txt` | The reflection prompt template (separate file for tuning) | NEW |
 | `include/human/config.h` | Add `hu_reflection_config_t` to root config | MODIFY |
-| `src/config_parse.c` | Parse `reflection: {...}` JSON block | MODIFY |
+| `src/config/config_parse.c` | Parse `reflection: {...}` JSON block | MODIFY |
 | `src/agent/personal_model.c` | Append reflection slice to `hu_personal_model_build_prompt` output | MODIFY |
 | `src/agent/init_proposer.c` | Add reflection-unsurfaced as candidate source | MODIFY |
 | `src/daemon.c` | Register `hu_reflection_tick` in main loop | MODIFY |
@@ -545,7 +545,7 @@ clamping at (0, 720] hours.
 
 **Files:**
 - Modify: `include/human/config.h`
-- Modify: `src/config_parse.c`
+- Modify: `src/config/config_parse.c`
 - Create/Modify: `tests/test_config_extended.c` (already in git status modified — extend it)
 
 - [x] **Step 3.1: Add struct to config.h**
@@ -590,7 +590,7 @@ static void test_config_parses_reflection_block(void) {
 
 - [x] **Step 3.3: Implement parser**
 
-In `src/config_parse.c`, find where other config blocks are parsed (e.g., the reaction_collection block per the silent-config-gated-subsystems rule reference). Add a `parse_reflection_block` mirror that:
+In `src/config/config_parse.c`, find where other config blocks are parsed (e.g., the reaction_collection block per the silent-config-gated-subsystems rule reference). Add a `parse_reflection_block` mirror that:
 - Optional fields with type-checked reads
 - Unknown subkeys emit the same "unknown key: 'reflection.X' (ignored)" warning as other subsystems
 
@@ -598,7 +598,7 @@ In `src/config_parse.c`, find where other config blocks are parsed (e.g., the re
 
 ```
 ./build/human_tests --filter=config_parses_reflection
-git add include/human/config.h src/config_parse.c tests/test_config_extended.c
+git add include/human/config.h src/config/config_parse.c tests/test_config_extended.c
 git commit -m "feat(config): add reflection.* block with sensible defaults"
 ```
 

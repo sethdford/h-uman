@@ -515,8 +515,8 @@ Migration sequence (W7 cleanup branch handles ~110 call sites; mechanical `sed` 
 | `src/memory/retrieval/engine.c` | Mod | +60 | Episode-first stage + fallback predicate |
 | `src/memory/retrieval/qmd.c` | Mod | +20 | New QMD class: `HU_QMD_NEEDLE_VERBATIM` |
 | `src/memory/factory.c` | Mod | +10 | Wire episode store into facade open path |
-| `src/main.c` | Mod | +30 | `human episodes` subcommand (status/list/destroy-verbatim) |
-| `src/config.c` + `include/human/config.h` | Mod | +20 | New config block `memory.episodes.*` |
+| `src/app/main.c` | Mod | +30 | `human episodes` subcommand (status/list/destroy-verbatim) |
+| `src/config/config.c` + `include/human/config.h` | Mod | +20 | New config block `memory.episodes.*` |
 | `tests/test_episode_store.c` | New | 380 | Schema round-trip, bitemporal predicate, encryption round-trip, requery bookkeeping |
 | `tests/test_consolidation_nrem.c` | New | 240 | Clustering, compression ratio, idempotence, partial-batch resume |
 | `tests/test_consolidation_rem.c` | New | 220 | Belief delta extraction, contradiction merge, trust-tier gating |

@@ -27,7 +27,20 @@ info() { printf '      %s\n' "$1"; }
 
 info "=== RL SOTA validation (rl_sota preset) ==="
 
-cmake --preset rl_sota
+# Route the rl_sota build (h-uman + the vendored llama.cpp submodule) through
+# ccache when it's available. The nightly's setup-build step already installs
+# ccache and restores ~/.cache/ccache, but the rl_sota preset sets no compiler
+# launcher — so llama.cpp was recompiled from scratch on every run (the
+# nightly's long pole). ccache is content-addressed (no stale-object risk) and
+# llama.cpp source rarely changes, so warm runs reuse its objects. Explicit
+# if/else (not an array) to stay safe under `set -u` on macOS bash 3.2.
+if command -v ccache >/dev/null 2>&1; then
+    cmake --preset rl_sota \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+else
+    cmake --preset rl_sota
+fi
 cmake --build --preset rl_sota -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 
 export HU_E2E_TMP_ROOT="${ROOT}/build-rl-sota/tests/_tmp"
@@ -53,7 +66,15 @@ LORA_BASELINE_BIN="${ROOT}/build-rl-sota/human" bash scripts/check-lora-baseline
 
 if [ "$QUICK" -eq 0 ]; then
     info "Full test suite"
-  ./build-rl-sota/human_tests | tail -3
+  # Line-buffer (stdbuf -oL) so the "Results:" / "FAIL  (...)" lines flush
+  # BEFORE any end-of-process LeakSanitizer abort. A plain pipe is fully
+  # buffered on a non-TTY, so SIGABRT at exit discarded the unflushed tail —
+  # which is exactly why a CI leak failure used to show the LSan SUMMARY but no
+  # Results line, leaving it undiagnosable. Tee the full output to a log so CI
+  # can upload it as an artifact, then show the tail. pipefail still propagates
+  # a non-zero human_tests exit.
+  HU_FULL_SUITE_LOG="${HU_FULL_SUITE_LOG:-${ROOT}/build-rl-sota/full-suite.log}"
+  stdbuf -oL -eL ./build-rl-sota/human_tests 2>&1 | tee "${HU_FULL_SUITE_LOG}" | tail -5
 fi
 
 info "Demo CLI (HUML wiring, no Gemma)"

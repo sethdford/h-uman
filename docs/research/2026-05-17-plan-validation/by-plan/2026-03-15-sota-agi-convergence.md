@@ -22,7 +22,7 @@ Sweeping six-phase plan to bring every subsystem of h-uman to 2026 SOTA: evaluat
 ## Evidence
 
 ### Implemented? (code exists)
-- Eval: `src/eval.c`, `src/eval_benchmarks.c`, `src/eval_dashboard.c`, `src/eval_judge.c`, and 12 files in `src/evaluation/` (locomo, longmemeval, memoryagentbench, regression, frontier_compare, etc.) — substantial.
+- Eval: `src/eval/eval.c`, `src/eval/eval_benchmarks.c`, `src/eval/eval_dashboard.c`, `src/eval/eval_judge.c`, and 12 files in `src/evaluation/` (locomo, longmemeval, memoryagentbench, regression, frontier_compare, etc.) — substantial.
 - World model: `src/intelligence/world_model.c`, `src/agent/world_model.c`, `src/agent/world_model_bridge.c` — present.
 - Self-improvement: `src/intelligence/self_improve.c`, `experience.c`, `distiller.c`, `cycle.c`, `meta_learning.c`, `online_learning.c`, `value_learning.c`, `weakness.c`, `weakness_analyzer.c`, `feedback.c` — substantial.
 - Orchestration: `src/agent/orchestrator.c`, `orchestrator_llm.c`, `swarm.c`, `mailbox.c`, `mcts_planner.c`, `tree_of_thought.c`, `planner.c` — present.

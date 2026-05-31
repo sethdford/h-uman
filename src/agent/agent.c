@@ -1812,6 +1812,14 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }
+    /* Free the last rejected draft from the prior turn (used for DPO pairing
+     * with production reaction handlers). Safe on NULL. */
+    if (agent->sota.last_rejected_draft) {
+        agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
+                           agent->sota.last_rejected_draft_len + 1);
+        agent->sota.last_rejected_draft = NULL;
+        agent->sota.last_rejected_draft_len = 0;
+    }
     /* Scratchpad's max_bytes is set in hu_agent_init (agent.c:629) and
      * populated per-turn by hu_agent_turn (agent_turn.c:8601). Without
      * an explicit deinit, the heap copies of each turn's metadata leak

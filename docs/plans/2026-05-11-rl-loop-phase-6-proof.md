@@ -80,14 +80,14 @@ The Phase 6 code adds **one** new C source (`src/ml/cli_demo.c`), **one** new C 
 
 ## Phase 6 boundary with in-flight Track D Phase 1 work
 
-Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (the 3+1-axis communication-style fidelity scorer; the 4th axis was added by Phase 5), and `src/main.c::cmd_ml` (the `human ml *` dispatcher).
+Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (the 3+1-axis communication-style fidelity scorer; the 4th axis was added by Phase 5), and `src/app/main.c::cmd_ml` (the `human ml *` dispatcher).
 
-Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-level command** `human demo` with a single subcommand `rl-closed-loop` (extensible later for other demos). This puts the demo dispatch into a new function `cmd_demo` in `src/main.c` (analog to the existing `cmd_ml`), bypassing the `cmd_ml` shared file entirely. Rationale: the demo is presentation, not training; conflating it with `human ml *` would confuse the surface and force every Phase 6 commit to rebase against Track D's `cli.c` churn.
+Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-level command** `human demo` with a single subcommand `rl-closed-loop` (extensible later for other demos). This puts the demo dispatch into a new function `cmd_demo` in `src/app/main.c` (analog to the existing `cmd_ml`), bypassing the `cmd_ml` shared file entirely. Rationale: the demo is presentation, not training; conflating it with `human ml *` would confuse the surface and force every Phase 6 commit to rebase against Track D's `cli.c` churn.
 
 **Phase 6 must:**
 
 - Branch from tag `rl-sota-phase-5-complete` (`git checkout -b rl-sota-phase-6 rl-sota-phase-5-complete`).
-- Rebase against `main` at the start of each task if Track D Phase 1 lands new commits in `src/main.c` (the `commands[]` table at line 510-ish is the only shared zone; Track D rarely touches it).
+- Rebase against `main` at the start of each task if Track D Phase 1 lands new commits in `src/app/main.c` (the `commands[]` table at line 510-ish is the only shared zone; Track D rarely touches it).
 - Use `git stash push -- <files>` if Track D contamination appears in the working tree (recurring pattern from Phases 0/1/2/3/4/5).
 - Stage ONLY Phase 6 files into Phase 6 commits.
 
@@ -129,7 +129,7 @@ Phase 6 **cannot** merge until Phase 5 H8 lands `hu_reaction_handler_register_as
 
 ### D3: New top-level `human demo` command, NOT a new `human ml *` subcommand
 
-**Decision:** Phase 6 adds `cmd_demo` to `src/main.c::commands[]` (analog to existing `cmd_ml`, `cmd_evaluation`, `cmd_hula`). The single subcommand under it is `human demo rl-closed-loop`. The dispatch handler lives in `src/ml/cli_demo.c` (because the implementation is ML-adjacent and reuses ML internals); the `cmd_demo` wrapper in `main.c` is a 12-line `argc`/`argv` shim mirroring `cmd_ml`'s shape.
+**Decision:** Phase 6 adds `cmd_demo` to `src/app/main.c::commands[]` (analog to existing `cmd_ml`, `cmd_evaluation`, `cmd_hula`). The single subcommand under it is `human demo rl-closed-loop`. The dispatch handler lives in `src/ml/cli_demo.c` (because the implementation is ML-adjacent and reuses ML internals); the `cmd_demo` wrapper in `main.c` is a 12-line `argc`/`argv` shim mirroring `cmd_ml`'s shape.
 
 **Why:**
 
@@ -483,7 +483,7 @@ The full evidence directory schema is the union of E1–E5 plus the spec §8 man
 | `tests/fixtures/e2e_persona_seed.json` | ~150 lines | Synthetic persona definition (D7) + 100 held-out prompts + 50 sample style fingerprints. Schema documented in the file's `$schema` field; reader is `tests/test_e2e_rl_loop.c::load_persona_seed`. |
 | `tests/fixtures/e2e_reaction_signals.json` | ~250 lines | Synthetic reaction stream (D8) — exactly 50 events, 25 with `polarity: 1` + 25 with `polarity: -1`. fix(plan,e2e,NEW-MED-1): every top-level event field is a 1:1 name match for `hu_reaction_event_t` (`channel_id`, `target_thread_id`, `target_message_ref`, `sender_handle`, `kind`, `polarity`, `timestamp_unix` (epoch SECONDS), `is_removal`). The `(prompt, response_chosen, response_rejected)` triple lives under the leading-underscore `_aux` key — that key is consumed by the loader only and never written into the C struct. Reader is `tests/test_e2e_rl_loop.c::load_reaction_signals`: parses each event into `hu_reaction_event_t`, parallel-strdups `_aux.*` into `hu_e2e_reaction_aux_t[]`, returns both via out-params. The aux array drives the pre-registration loop in `hu_e2e_closed_loop_run` step 2a (fix(plan,e2e,H4)). |
 | `src/ml/cli_demo.c` | ~400 | `hu_ml_cli_demo_rl_closed_loop` — argv parser (`--persona`, `--method {dpo,kto,grpo}`, `--backend {huml,mlx}`, `--reaction-count N`, `--prompt P`, `--out <evidence-dir>`, `--require-positive-delta`), provider creation (Phase 1 llamacpp factory or HUML mock), trainer creation (Phase 2/3/4 factories), reaction synthesis (or live load from a `--reactions <jsonl>` file), the static `cli_demo_run_closed_loop` (D5 duplicate of `hu_e2e_closed_loop_run`), evidence-dir writer (`write_evidence_dir` emits all 9 spec §8 files), exit-code mapping (0 = win-condition met, 2 = win-condition missed, 3 = harness error). |
-| `include/human/ml/cli_demo.h` | ~30 | Public declaration of `hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocator_t *alloc)` and the `hu_ml_cli_demo_subcommand_dispatch` shim called from `cmd_demo` in `src/main.c`. Header guards `HU_ML_CLI_DEMO_H`. |
+| `include/human/ml/cli_demo.h` | ~30 | Public declaration of `hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocator_t *alloc)` and the `hu_ml_cli_demo_subcommand_dispatch` shim called from `cmd_demo` in `src/app/main.c`. Header guards `HU_ML_CLI_DEMO_H`. |
 | `scripts/demo-rl-loop.sh` | ~200 | Bash demo runner. Verifies prerequisites (`bash scripts/fetch-gemma.sh`, `bash scripts/fetch-qwen-rm.sh`, `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"`), prompts user for confirmation, runs `./build-rl-sota/human demo rl-closed-loop --persona "${PERSONA:-seth}" --method "${METHOD:-dpo}" --backend mlx --reaction-count "${REACTION_COUNT:-200}" --prompt "${PROMPT:-what should I do first?}" --out ~/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD:-dpo}-step-$$ --require-positive-delta`, prints the evidence dir path, opens the runbook in `$PAGER` (or `cat`s it). Honors `DRY_RUN=1` for runbook validation in CI without invoking `human`. |
 | `docs/demos/rl-loop-demo.md` | ~400 lines | The runbook. YAML frontmatter (required by `scripts/check-docs-frontmatter.sh`) + sections: 1. Prerequisites (Apple Silicon + macOS 13+ + Python 3.11+ venv with mlx-lm + mlx-lm-lora + 5 GB free disk for GGUF). 2. One-command setup (clone, fetch models, build `rl_sota` preset). 3. Running the demo (env vars, expected output, expected wall-clock ~3 min). 4. Reading the evidence dir (file-by-file walkthrough of all 9 spec §8 files). 5. Troubleshooting (R3 mitigation: smaller delta? try more reactions; F4: numbers don't match across machines? expected, document). 6. Reproducibility recipe (mirrors spec §14 verbatim). 7. FAQ (R5: HUML vs MLX; F4: nondeterminism; "can I run this in CI?" → no, see §6.5). 8. Citations (spec, prior phase plans, Apple FM docs, mlx-lm-lora). |
 | `tests/_tmp/.gitkeep` | 0 | Empty file pinning the per-test temp directory (test code writes evidence to `tests/_tmp/proofs/<test-id>/` to keep the user's `~/.human/` clean during test runs). **LO3 fix:** the absolute path is resolved at runtime via `hu_e2e_tmp_root()` (Phase 6 helper that reads the `HU_E2E_TMP_ROOT` env var CMake sets to `${CMAKE_BINARY_DIR}/tests/_tmp` via `set_tests_properties(... ENVIRONMENT ...)`), so tests work regardless of CWD. `hu_e2e_tmp_path(buf, n, "proofs/dpo-step-0001/lora.bin")` concatenates root + relative tail. `.gitignore` adds `tests/_tmp/proofs/` (everything except `.gitkeep`). |
@@ -495,7 +495,7 @@ The full evidence directory schema is the union of E1–E5 plus the spec §8 man
 | `include/human/ml/dpo.h` | +12 LOC | fix(plan,e2e,C4): add the missing public declaration `hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc, hu_dpo_export_t *out)`. Slots in next to the existing `hu_dpo_export_t` struct (lines 69–72) and `hu_dpo_export_free` (line 74). Required by Phase 6 because the closed-loop runner needs an in-memory companion to `hu_dpo_export_jsonl` (which writes to file only). Round-2 plan referenced this function without ever shipping it; round 3 lands it in Task 2.5 below. |
 | `src/ml/dpo.c` | +60 LOC | fix(plan,e2e,C4): implement `hu_dpo_export`. SQLite path mirrors the `hu_dpo_export_jsonl` `SELECT … FROM dpo_pairs ORDER BY id` (src/ml/dpo.c:200-203) but materializes rows into a heap-allocated `hu_preference_pair_t` array sized via `hu_dpo_pair_count`. Returns `HU_ERR_NOT_SUPPORTED` when `HU_ENABLE_SQLITE` is off (matches the existing dpo.c gating pattern). Caller owns + frees via `hu_dpo_export_free`. New test `tests/test_dpo.c::test_dpo_export_in_memory_roundtrip` (Task 2.5 step 2) pins record → export → free correctness. |
 | `src/agent/lora_training_runner.c` | +130 LOC inside `#ifdef HU_IS_TEST` block | Add `hu_e2e_closed_loop_input_t` + `hu_e2e_closed_loop_output_t` + `hu_e2e_reaction_aux_t` structs (declared in a new test-only header `tests/include/hu_e2e_closed_loop.h` so they don't pollute the public surface) and `hu_e2e_closed_loop_run` function (D4). Also add the close-the-loop wiring fold-in if Phase 5 deferred it: ensure `hu_lora_training_runner` calls `hu_eval_gate` before promoting the adapter (verify at Task 0 step 5; if the call site is already there, this delta is zero — Phase 5 owns it). |
-| `src/main.c` | +25 LOC | Add `cmd_demo` static function (12 LOC mirroring `cmd_ml`'s structure), declare it at the forward-decl block (~line 199), register it in `commands[]` array (~line 510 — single new row: `{"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo}`). The dispatcher inside `cmd_demo` calls `hu_ml_cli_demo_rl_closed_loop` for `argv[2] == "rl-closed-loop"`, prints help otherwise. |
+| `src/app/main.c` | +25 LOC | Add `cmd_demo` static function (12 LOC mirroring `cmd_ml`'s structure), declare it at the forward-decl block (~line 199), register it in `commands[]` array (~line 510 — single new row: `{"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo}`). The dispatcher inside `cmd_demo` calls `hu_ml_cli_demo_rl_closed_loop` for `argv[2] == "rl-closed-loop"`, prints help otherwise. |
 | `tests/test_main.c` | +5 LOC | Forward-declare `void run_e2e_closed_loop_tests(void)` and add a single call to it in the appropriate place (between existing E2E suites, locate by `rg -n 'run_e2e' tests/test_main.c`). READ first; APPEND only; do NOT replace existing runners — every prior phase has burned a token on this rule and Phase 6 honors it. |
 | `CMakeLists.txt` | +35 LOC | (See "CMakeLists.txt entries" section below for the exact diff; goes inside the existing `if(HU_ENABLE_RL_FULL)` guard block established by Phase 2.) |
 | `.gitignore` | +2 lines | Add `tests/_tmp/proofs/` and a negative pattern preserving `tests/_tmp/.gitkeep` (or just `!tests/_tmp/.gitkeep` after the directory ignore). |
@@ -642,7 +642,7 @@ Expected: at least one match, declared OUTSIDE any `#if HU_IS_TEST` block (the `
 git checkout -b rl-sota-phase-6 rl-sota-phase-5-complete
 ```
 
-If working tree has Track D Phase 1 WIP, `git stash push -- src/main.c src/ml/cli.c` first.
+If working tree has Track D Phase 1 WIP, `git stash push -- src/app/main.c src/ml/cli.c` first.
 
 - [ ] **Step 6: Dispatch `spec-verifier` subagent**
 
@@ -1506,7 +1506,7 @@ Refs spec §4.7, §6 Tier 4, plan D1 + D4 + R7 + E5."
  *   void hu_sha256(const uint8_t *data, size_t len, uint8_t out[32]);
  * (one-shot, no streaming context). Verified via:
  *   rg -n 'hu_sha256' include/human/crypto.h  → line 13.
- * Confirmed used elsewhere in-tree, e.g. src/update.c:257. */
+ * Confirmed used elsewhere in-tree, e.g. src/app/update.c:257. */
 #include "human/crypto.h"
 
 static void compute_file_sha256(hu_allocator_t *alloc,
@@ -1577,7 +1577,7 @@ static void test_e2e_closed_loop_deterministic_run1_vs_run3(void) {
 }
 ```
 
-> **ME2 fix:** `<openssl/sha.h>` is NOT available — AGENTS.md §1 mandates "zero dependencies beyond libc, optional SQLite and libcurl." The skeleton above uses the existing one-shot `hu_sha256` helper from `include/human/crypto.h` line 13. This is the canonical in-tree SHA-256 (used by `src/update.c:257`, `src/security/audit.c`, `src/security/pairing.c`, `src/crypto/dispatch.c`). If you reach for OpenSSL during implementation, stop — you've violated the zero-dep constraint.
+> **ME2 fix:** `<openssl/sha.h>` is NOT available — AGENTS.md §1 mandates "zero dependencies beyond libc, optional SQLite and libcurl." The skeleton above uses the existing one-shot `hu_sha256` helper from `include/human/crypto.h` line 13. This is the canonical in-tree SHA-256 (used by `src/app/update.c:257`, `src/security/audit.c`, `src/security/pairing.c`, `src/crypto/dispatch.c`). If you reach for OpenSSL during implementation, stop — you've violated the zero-dep constraint.
 
 - [ ] **Step 2: Add to runner**
 
@@ -1882,12 +1882,12 @@ Refs spec §4.7, plan D1."
 
 ---
 
-### Task 9: Implement `src/ml/cli_demo.c` + the `human demo` command in `src/main.c`
+### Task 9: Implement `src/ml/cli_demo.c` + the `human demo` command in `src/app/main.c`
 
 **Files:**
 - Create: `src/ml/cli_demo.c`
 - Create: `include/human/ml/cli_demo.h`
-- Modify: `src/main.c` (add `cmd_demo` + register in `commands[]`)
+- Modify: `src/app/main.c` (add `cmd_demo` + register in `commands[]`)
 
 - [ ] **Step 1: Write `include/human/ml/cli_demo.h`**
 
@@ -2010,7 +2010,7 @@ The full implementation is ~400 LOC. Key invariants:
   > The format the env var carries is **epoch seconds** (e.g. `HU_E2E_FIXED_TIMESTAMP=1715472000`), not ISO-8601 — `strtoll` is the parser. The R8 fix in the risk register table writes the ISO-8601 string `"2026-05-12T00:00:00Z"` which is wrong; treat that table entry as illustrative and use the epoch-seconds form everywhere in the implementation.
 - Exit code mapping (per spec demo-exit-code convention: 0 = pass, 2 = soft fail, 3 = hard fail): `0` if `delta ≥ 0.05` AND `lower_95_ci > 0`; `2` if delta is computed but doesn't meet threshold (still write evidence dir); `3` if harness error before delta could be computed (no evidence dir).
 
-- [ ] **Step 3: Add `cmd_demo` to `src/main.c`**
+- [ ] **Step 3: Add `cmd_demo` to `src/app/main.c`**
 
 ```c
 static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv);
@@ -2071,7 +2071,7 @@ the spec §8 evidence directory. Backend selectable via --backend
 {huml,mlx}; HUML is the deterministic toy-GPT path (wiring proof
 only); MLX is real Gemma-3-4B-it on Apple Silicon.
 
-Adds cmd_demo to src/main.c as a new top-level command, separate
+Adds cmd_demo to src/app/main.c as a new top-level command, separate
 from cmd_ml (per plan D3 — surface clarity + Track D Phase 1
 conflict avoidance).
 
@@ -2286,7 +2286,7 @@ Expected: pre-Phase-6 baseline + (number of new test functions in `tests/test_e2
 ```
 Task: dead-code-finder
 Prompt: Review src/ml/cli_demo.c, src/agent/lora_training_runner.c (HU_IS_TEST
-        block), src/main.c (cmd_demo additions), tests/test_e2e_rl_loop.c,
+        block), src/app/main.c (cmd_demo additions), tests/test_e2e_rl_loop.c,
         tests/test_llamacpp_lora_hotswap_midsession.c, scripts/demo-rl-loop.sh,
         docs/demos/rl-loop-demo.md, include/human/ml/cli_demo.h, and
         tests/include/hu_e2e_closed_loop.h. Catch any unused exports, unreachable

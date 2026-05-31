@@ -575,6 +575,14 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
 hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
                                            size_t *out_len);
 
+/* Formality-aware variant: when `formality` word-matches "formal"/"professional"
+ * the register rules switch to capitalized/punctuated/no-slang (how the person
+ * texts a colleague); otherwise the casual friend-voice (the prior default).
+ * `formality` may be NULL (-> casual). The plain hu_persona_build_absolute_rules
+ * delegates here with NULL for backward compatibility. */
+hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, const char *formality,
+                                               char *buf, size_t cap, size_t *out_len);
+
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
                                       const hu_persona_example_t **out, size_t *out_count,

@@ -93,7 +93,7 @@ A 5-explorer adversarial audit of `src/ml/`, `src/agent/`, `src/memory/`, `src/e
 - Real LoRA primitives in `src/ml/lora.c` (low-rank A/B, apply, backward, save/load).
 - Real preference-data layer in `src/ml/dpo.c` (SQLite `dpo_pairs`, JSONL export).
 - Real hot-swap adapter loading at daemon startup and post-train (`src/daemon.c:2465-2532`, `src/agent/lora_training_runner.c:90-93`).
-- Real eval harness with LLM-as-judge, bootstrap regression detection, nightly W16 bench (`src/eval.c`, `evaluation.yml`).
+- Real eval harness with LLM-as-judge, bootstrap regression detection, nightly W16 bench (`src/eval/eval.c`, `evaluation.yml`).
 
 **What Track D Phase 1 (in-flight, uncommitted) has additionally shipped** (see §1.5.1 for the full mapping):
 - Personal Model v4 with symmetric signal aging + decay + goals lifecycle + daemon hourly tick.

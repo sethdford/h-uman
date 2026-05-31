@@ -66,7 +66,7 @@ Eliminate all 17 hard-coded `strcmp(chn, "imessage")` forks in `src/daemon.c`. R
 - Modify: `src/daemon.c` — replace all iMessage forks with generic paths
 - Modify: `include/human/channel.h` — add optional vtable hooks
 - Modify: `include/human/config.h` — generalize `response_mode` and `user_response_window_sec`
-- Modify: `src/config_parse_channels.c` — parse generalized config
+- Modify: `src/config/config_parse_channels.c` — parse generalized config
 - Add tests for each generalized path
 
 **Specific refactors (by daemon.c line):**
@@ -115,7 +115,7 @@ Fill the gaps in the top 5 non-iMessage channels:
 **Files:**
 
 - Modify: `include/human/config.h` — add `hu_channel_daemon_config_t` shared struct
-- Modify: `src/config_parse_channels.c` — parse shared fields per channel
+- Modify: `src/config/config_parse_channels.c` — parse shared fields per channel
 - Modify: `src/daemon.c` — read from channel-specific daemon config
 
 ```c
@@ -303,7 +303,7 @@ Capture Seth's real messaging patterns and use them to tune parameters.
 - `src/calibration/timing_analyzer.c` — analyze real chat.db for response time distributions per contact, time of day, message type
 - `src/calibration/style_analyzer.c` — analyze real messages for length distributions, emoji usage, reaction frequency, vocabulary
 - `src/calibration/calibrate.c` — CLI command `human calibrate` that reads chat.db, produces persona parameter recommendations
-- `src/cli_commands.c` — `calibrate` subcommand
+- `src/app/cli_commands.c` — `calibrate` subcommand
 
 **Output**: JSON file with measured distributions that the daemon can read to set timing parameters, filler probabilities, reaction frequencies, etc.
 
@@ -320,13 +320,13 @@ Compare digital twin output to what Seth actually said.
 
 ### 3.5 Regression Dashboard
 
-**Status — partial** — `hu_eval_dashboard_render_trend` exists in `src/eval_dashboard.c`; end-to-end “always-on” trend UX + SQLite history may still need product wiring.
+**Status — partial** — `hu_eval_dashboard_render_trend` exists in `src/eval/eval_dashboard.c`; end-to-end “always-on” trend UX + SQLite history may still need product wiring.
 
 Track improvements over time.
 
 **Files:**
 
-- `src/eval_dashboard.c` — fidelity + intelligence trend rendering
+- `src/eval/eval_dashboard.c` — fidelity + intelligence trend rendering
 - Store eval runs in SQLite for historical comparison
 - CLI: `human eval trend` shows score changes over time
 

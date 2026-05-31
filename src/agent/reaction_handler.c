@@ -48,6 +48,7 @@ typedef struct {
     char msg_ref[128];
     char prompt[2048];
     char response[4096];
+    char alternative[4096];
 } lookup_entry_t;
 
 static lookup_entry_t s_lookup[LOOKUP_CAP];
@@ -167,10 +168,13 @@ static int rxn_db_open(void) {
         "msg_ref TEXT NOT NULL,"
         "prompt TEXT NOT NULL,"
         "response TEXT NOT NULL,"
+        "alternative TEXT,"
         "inserted_at INTEGER NOT NULL,"
         "PRIMARY KEY (channel, thread, msg_ref))",
         "CREATE INDEX IF NOT EXISTS idx_reaction_lookup_inserted "
         "ON reaction_lookup(inserted_at DESC)",
+        /* Forward-compatible migration: add alternative column if missing */
+        "ALTER TABLE reaction_lookup ADD COLUMN alternative TEXT",
         NULL,
     };
     for (size_t i = 0; ddl[i]; i++) {
@@ -198,14 +202,15 @@ static void rxn_db_cleanup_old(void) {
 }
 
 static void rxn_db_register(const char *channel, const char *thread, const char *msg_ref,
-                            const char *prompt, const char *response) {
+                            const char *prompt, const char *response, const char *alternative) {
     if (!rxn_db_open())
         return;
 
     sqlite3_stmt *st = NULL;
-    static const char sql[] = "INSERT OR REPLACE INTO reaction_lookup "
-                              "(channel, thread, msg_ref, prompt, response, inserted_at) "
-                              "VALUES (?, ?, ?, ?, ?, strftime('%s','now'))";
+    static const char sql[] =
+        "INSERT OR REPLACE INTO reaction_lookup "
+        "(channel, thread, msg_ref, prompt, response, alternative, inserted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'))";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
         return;
 
@@ -214,6 +219,7 @@ static void rxn_db_register(const char *channel, const char *thread, const char 
     sqlite3_bind_text(st, 3, msg_ref, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 4, prompt, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 5, response, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 6, alternative ? alternative : "", -1, SQLITE_STATIC);
     (void)sqlite3_step(st);
     sqlite3_finalize(st);
 
@@ -223,17 +229,19 @@ static void rxn_db_register(const char *channel, const char *thread, const char 
         rxn_db_cleanup_old();
 }
 
-/* Lookup returns 1 on hit, 0 on miss. On hit, prompt_out/response_out are
- * filled (truncated via snprintf if needed). */
+/* Lookup returns 1 on hit, 0 on miss. On hit, prompt_out/response_out/alternative_out are
+ * filled (truncated via snprintf if needed). alternative_out and alternative_cap may be NULL
+ * if the caller doesn't need the alternative. */
 static int rxn_db_lookup(const char *channel, const char *thread, const char *msg_ref,
                          char *prompt_out, size_t prompt_cap, char *response_out,
-                         size_t response_cap) {
+                         size_t response_cap, char *alternative_out, size_t alternative_cap) {
     if (!rxn_db_open())
         return 0;
 
     sqlite3_stmt *st = NULL;
-    static const char sql[] = "SELECT prompt, response FROM reaction_lookup "
-                              "WHERE channel = ? AND thread = ? AND msg_ref = ? LIMIT 1";
+    static const char sql[] =
+        "SELECT prompt, response, COALESCE(alternative, '') FROM reaction_lookup "
+        "WHERE channel = ? AND thread = ? AND msg_ref = ? LIMIT 1";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
         return 0;
 
@@ -245,8 +253,11 @@ static int rxn_db_lookup(const char *channel, const char *thread, const char *ms
     if (sqlite3_step(st) == SQLITE_ROW) {
         const unsigned char *p = sqlite3_column_text(st, 0);
         const unsigned char *r = sqlite3_column_text(st, 1);
+        const unsigned char *a = sqlite3_column_text(st, 2);
         snprintf(prompt_out, prompt_cap, "%s", p ? (const char *)p : "");
         snprintf(response_out, response_cap, "%s", r ? (const char *)r : "");
+        if (alternative_out && alternative_cap > 0)
+            snprintf(alternative_out, alternative_cap, "%s", a ? (const char *)a : "");
         found = 1;
     }
     sqlite3_finalize(st);
@@ -257,23 +268,27 @@ static int rxn_db_lookup(const char *channel, const char *thread, const char *ms
 
 /* ===== Unified lookup adapter =====
  *
- * Returns 1 on hit (prompt_out / response_out filled), 0 on miss.
- * Buffers must be sized at least 2048 (prompt) and 4096 (response) to
- * match hu_preference_pair_t's fixed-size columns. */
+ * Returns 1 on hit (prompt_out / response_out / alternative_out filled), 0 on miss.
+ * Buffers must be sized at least 2048 (prompt) and 4096 (response/alternative) to
+ * match hu_preference_pair_t's fixed-size columns. alternative_out and alternative_cap
+ * may be NULL if the caller doesn't need the alternative. */
 static int reaction_lookup_find(const hu_reaction_event_t *e, char *prompt_out, size_t prompt_cap,
-                                char *response_out, size_t response_cap) {
+                                char *response_out, size_t response_cap, char *alternative_out,
+                                size_t alternative_cap) {
     const char *thread = e->target_thread_id ? e->target_thread_id : "";
     const char *msg_ref = e->target_message_ref ? e->target_message_ref : "";
 
 #if HU_RXN_LOOKUP_USES_SQLITE
     return rxn_db_lookup(e->channel_id, thread, msg_ref, prompt_out, prompt_cap, response_out,
-                         response_cap);
+                         response_cap, alternative_out, alternative_cap);
 #else
     for (size_t i = 0; i < s_lookup_n; i++) {
         if (strcmp(s_lookup[i].channel, e->channel_id) == 0 &&
             strcmp(s_lookup[i].thread, thread) == 0 && strcmp(s_lookup[i].msg_ref, msg_ref) == 0) {
             snprintf(prompt_out, prompt_cap, "%s", s_lookup[i].prompt);
             snprintf(response_out, response_cap, "%s", s_lookup[i].response);
+            if (alternative_out && alternative_cap > 0)
+                snprintf(alternative_out, alternative_cap, "%s", s_lookup[i].alternative);
             return 1;
         }
     }
@@ -303,10 +318,13 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
 
     char prompt_buf[2048];
     char response_buf[4096];
+    char alternative_buf[4096];
     prompt_buf[0] = '\0';
     response_buf[0] = '\0';
+    alternative_buf[0] = '\0';
     int lookup_hit =
-        reaction_lookup_find(e, prompt_buf, sizeof(prompt_buf), response_buf, sizeof(response_buf));
+        reaction_lookup_find(e, prompt_buf, sizeof(prompt_buf), response_buf, sizeof(response_buf),
+                             alternative_buf, sizeof(alternative_buf));
 
     /* Personal-model ingest fires REGARDLESS of lookup hit. DPO below
      * still requires the lookup (DPO only learns from reactions on OUR
@@ -364,15 +382,39 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     strncpy(pair.prompt, prompt_buf, sizeof(pair.prompt) - 1);
     pair.prompt_len = strlen(pair.prompt);
 
+    /* Check if we have a complete pair (both sides non-empty) via alternative */
+    int has_complete_pair = (alternative_buf[0] != '\0');
+    if (has_complete_pair) {
+        size_t alt_len = strlen(alternative_buf);
+        has_complete_pair = (alt_len >= 4); /* both sides must be >= 4 bytes */
+    }
+
     if (e->polarity > 0) {
         /* Positive reaction → record this response as `chosen` */
         strncpy(pair.chosen, response_buf, sizeof(pair.chosen) - 1);
         pair.chosen_len = strlen(pair.chosen);
-        /* `rejected` left as zeroed-out empty string */
+
+        if (has_complete_pair) {
+            /* Alternative exists → complete pair: chosen = response, rejected = alternative */
+            strncpy(pair.rejected, alternative_buf, sizeof(pair.rejected) - 1);
+            pair.rejected_len = strlen(pair.rejected);
+        } else {
+            /* No alternative or too short → single-sided (behavior unchanged) */
+            /* `rejected` left as zeroed-out empty string */
+        }
     } else if (e->polarity < 0) {
         /* Negative reaction → record this response as `rejected` */
         strncpy(pair.rejected, response_buf, sizeof(pair.rejected) - 1);
         pair.rejected_len = strlen(pair.rejected);
+
+        if (has_complete_pair) {
+            /* Alternative exists → complete pair: rejected = response, chosen = alternative */
+            strncpy(pair.chosen, alternative_buf, sizeof(pair.chosen) - 1);
+            pair.chosen_len = strlen(pair.chosen);
+        } else {
+            /* No alternative or too short → single-sided (behavior unchanged) */
+            /* `chosen` left as zeroed-out empty string */
+        }
     } else {
         return HU_OK; /* neutral reactions don't yield training signal */
     }
@@ -407,11 +449,12 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
 }
 
 static void register_assistant_message(const char *channel, const char *thread, const char *msg_ref,
-                                       const char *prompt, const char *response) {
+                                       const char *prompt, const char *response,
+                                       const char *alternative) {
     if (!channel || !thread || !msg_ref || !prompt || !response)
         return;
 #if HU_RXN_LOOKUP_USES_SQLITE
-    rxn_db_register(channel, thread, msg_ref, prompt, response);
+    rxn_db_register(channel, thread, msg_ref, prompt, response, alternative);
 #else
     /* In-memory path: overwrite existing entry on key match (upsert
      * semantics so tests can re-register and see the latest values). */
@@ -420,6 +463,8 @@ static void register_assistant_message(const char *channel, const char *thread, 
             strcmp(s_lookup[i].msg_ref, msg_ref) == 0) {
             snprintf(s_lookup[i].prompt, sizeof(s_lookup[i].prompt), "%s", prompt);
             snprintf(s_lookup[i].response, sizeof(s_lookup[i].response), "%s", response);
+            snprintf(s_lookup[i].alternative, sizeof(s_lookup[i].alternative), "%s",
+                     alternative ? alternative : "");
             return;
         }
     }
@@ -430,25 +475,23 @@ static void register_assistant_message(const char *channel, const char *thread, 
     snprintf(s_lookup[s_lookup_n].msg_ref, sizeof(s_lookup[0].msg_ref), "%s", msg_ref);
     snprintf(s_lookup[s_lookup_n].prompt, sizeof(s_lookup[0].prompt), "%s", prompt);
     snprintf(s_lookup[s_lookup_n].response, sizeof(s_lookup[0].response), "%s", response);
+    snprintf(s_lookup[s_lookup_n].alternative, sizeof(s_lookup[0].alternative), "%s",
+             alternative ? alternative : "");
     s_lookup_n++;
 #endif
 }
 
-void hu_reaction_handler_register_assistant_message_for_production(const char *channel,
-                                                                   const char *thread,
-                                                                   const char *msg_ref,
-                                                                   const char *prompt,
-                                                                   const char *response) {
-    register_assistant_message(channel, thread, msg_ref, prompt, response);
+void hu_reaction_handler_register_assistant_message_for_production(
+    const char *channel, const char *thread, const char *msg_ref, const char *prompt,
+    const char *response, const char *alternative) {
+    register_assistant_message(channel, thread, msg_ref, prompt, response, alternative);
 }
 
 #if HU_IS_TEST
-void hu_reaction_handler_register_assistant_message_for_test(const char *channel,
-                                                             const char *thread,
-                                                             const char *msg_ref,
-                                                             const char *prompt,
-                                                             const char *response) {
-    register_assistant_message(channel, thread, msg_ref, prompt, response);
+void hu_reaction_handler_register_assistant_message_for_test(
+    const char *channel, const char *thread, const char *msg_ref, const char *prompt,
+    const char *response, const char *alternative) {
+    register_assistant_message(channel, thread, msg_ref, prompt, response, alternative);
 }
 void hu_reaction_handler_reset_for_test(void) {
 #if HU_RXN_LOOKUP_USES_SQLITE == 0

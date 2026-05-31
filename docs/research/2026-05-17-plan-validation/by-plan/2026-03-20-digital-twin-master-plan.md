@@ -33,8 +33,8 @@ Five-phase master plan to deliver an "AGI-grade Seth" digital twin across channe
 - Full 145-test target not enumerated here, but cloning-specific tests exist.
 
 ### Wired? (called in runtime path / dispatch)
-- `src/cli_commands.c:2583` — `hu_calibrate(alloc, db_path, contact, channel, &recommendations)` invoked via CLI.
-- `src/cli_commands.c:2600` — `hu_clone_patterns_t` populated via CLI.
+- `src/app/cli_commands.c:2583` — `hu_calibrate(alloc, db_path, contact, channel, &recommendations)` invoked via CLI.
+- `src/app/cli_commands.c:2600` — `hu_clone_patterns_t` populated via CLI.
 - No clear evidence in this audit that calibration runs *automatically* per-channel per-turn — appears to be CLI-driven only.
 - AGI cognition modules (mcts/swarm/orchestrator_llm) exist but their wiring into daemon proactive flows not exhaustively traced here.
 

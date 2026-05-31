@@ -31,5 +31,5 @@ the `BASELINE` constant to lock the gain — the ratchet only tightens.
 
 ## Related
 
-- `docs/plans/2026-05-29-ddd-bounded-contexts/phase-3-memory-query-interface.md` — the repository pattern that closes T1
+- `docs/plans/2026-05-29-ddd-bounded-contexts/phase-E3-memory-query-interface.md` — the repository pattern that closes T1
 - `~/.claude/rules/quality-gates.md` — "No silent failures"; this is its structural form for the SQLite boundary

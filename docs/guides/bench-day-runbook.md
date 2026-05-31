@@ -346,15 +346,15 @@ with the bench JSON pair attached.
 | 0.3 hit/miss counters | [src/providers/llamacpp_kvcache.c](../../src/providers/llamacpp_kvcache.c) | [include/human/providers/llamacpp_kvcache.h](../../include/human/providers/llamacpp_kvcache.h) |
 | 1 KV quant | [src/providers/llamacpp.c](../../src/providers/llamacpp.c) (GGML type wiring at `llama_init_from_model`) | [include/human/providers/llamacpp.h](../../include/human/providers/llamacpp.h) (`hu_kv_quant_t`) |
 | 1b env bridge | [src/providers/factory.c](../../src/providers/factory.c) (`factory_apply_kv_quant_env`) | — |
-| 1c config schema | [src/config_parse.c](../../src/config_parse.c) (`parse_inference`) | — |
+| 1c config schema | [src/config/config_parse.c](../../src/config/config_parse.c) (`parse_inference`) | — |
 | 2 LRU + 2b counters | [src/providers/llamacpp_kvcache.c](../../src/providers/llamacpp_kvcache.c) | [include/human/providers/llamacpp_kvcache.h](../../include/human/providers/llamacpp_kvcache.h) |
 | 2b.2 skip-decode | [src/providers/llamacpp.c](../../src/providers/llamacpp.c) (chat path), [src/providers/factory.c](../../src/providers/factory.c) (`factory_apply_kvcache_skip_decode_env`) | — |
 | 3a SSE streaming | [scripts/mlx-server.py](../../scripts/mlx-server.py) (`_stream_chat_completion`) | — |
 | 3a.2 mlx-http alias | [src/providers/factory.c](../../src/providers/factory.c) (compat-provider table) | — |
 | 3b spec decode config | [src/providers/factory.c](../../src/providers/factory.c) (`factory_apply_spec_decode_env`), [scripts/mlx-server.py](../../scripts/mlx-server.py) (draft load) | [include/human/providers/llamacpp.h](../../include/human/providers/llamacpp.h) (`draft_model_path`) |
 | 4 Flash Attention | [src/providers/llamacpp.c](../../src/providers/llamacpp.c), [src/providers/factory.c](../../src/providers/factory.c) | — |
-| 4b doctor checks | [src/doctor.c](../../src/doctor.c) (`hu_doctor_check_inference`) | [include/human/doctor.h](../../include/human/doctor.h) |
-| 4c CLI status | [src/main.c](../../src/main.c) (`cmd_inference_status`) | — |
+| 4b doctor checks | [src/doctor/doctor.c](../../src/doctor/doctor.c) (`hu_doctor_check_inference`) | [include/human/doctor.h](../../include/human/doctor.h) |
+| 4c CLI status | [src/app/main.c](../../src/app/main.c) (`cmd_inference_status`) | — |
 | 4d fetch --draft | [scripts/fetch-gemma.sh](../../scripts/fetch-gemma.sh) | — |
 | 4e bench wrapper | [scripts/bench-gemma-perf.py](../../scripts/bench-gemma-perf.py) (`compare_modes`) | — |
 

@@ -99,7 +99,7 @@ via config.
 
 - `src/agent/agent_turn.c:7740-7750` — parallel path invokes hooks.
 - `src/agent/agent_turn.c:8222-8241` — sequential path does NOT.
-- `src/hook_pipeline.c:30-60` — default decision is `HU_HOOK_ALLOW` for null registry.
+- `src/security/hook_pipeline.c:30-60` — default decision is `HU_HOOK_ALLOW` for null registry.
 
 ## Risks
 
@@ -150,7 +150,7 @@ via config.
   - `test_dispatch_tool_public_alias_delegates_to_internal`
 - `grep -rn 'hu_hook_pipeline_pre_tool\|hu_hook_pipeline_post_tool' src/`
   now returns only the canonical implementations in
-  `src/hook_pipeline.c` and `src/agent/agent.c` — all previously
+  `src/security/hook_pipeline.c` and `src/agent/agent.c` — all previously
   scattered call sites in `agent_turn.c` and `agent_stream.c` are gone.
 - Full suite: 10,650 / 10,650 passing.
 
@@ -163,7 +163,7 @@ via config.
 | AC-3 (DENY skips tool execute) | Done — pinned by `test_dispatch_pre_hook_deny_skips_tool` |
 | AC-3-followup (post-hook STILL fires on deny) | Done — pinned by `test_dispatch_pre_deny_still_fires_post_hook` |
 | AC-4 (null-registry policy flag) | **Deferred** — current behavior is `PERMIT`; introducing the `HU_NO_HOOKS_REFUSE` enum + config wiring is a separate change. The helpers already centralize the null-registry check, so flipping the default later is a 1-line change in `pre_hook_check`. |
-| AC-5 (single call site per direction) | Done — only `hu_agent_internal_pre_hook_check` and `hu_agent_internal_post_hook_fire` invoke the pipeline outside `src/hook_pipeline.c` |
+| AC-5 (single call site per direction) | Done — only `hu_agent_internal_pre_hook_check` and `hu_agent_internal_post_hook_fire` invoke the pipeline outside `src/security/hook_pipeline.c` |
 
 **Out of scope (documented for future work):**
 

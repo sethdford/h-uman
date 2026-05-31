@@ -102,7 +102,7 @@ Each task uses this status tracking:
 
 **Files:**
 
-- Modify: `src/eval.c` — implement task parsing, runner loop
+- Modify: `src/eval/eval.c` — implement task parsing, runner loop
 - Modify: `include/human/eval.h` — add runner API (`hu_eval_run_suite`)
 - Create: `src/eval_runner.c` — task execution engine
 - Create: `include/human/eval_runner.h` — runner interface
@@ -158,8 +158,8 @@ Each task uses this status tracking:
 
 **Files:**
 
-- Modify: `src/eval.c` — implement LLM judge path in `hu_eval_check`
-- Create: `src/eval_judge.c` — judge prompt construction and response parsing
+- Modify: `src/eval/eval.c` — implement LLM judge path in `hu_eval_check`
+- Create: `src/eval/eval_judge.c` — judge prompt construction and response parsing
 - Create: `include/human/eval_judge.h` — judge interface
 - Create: `tests/test_eval_judge.c` — judge tests
 
@@ -210,13 +210,13 @@ Each task uses this status tracking:
 
 **Files:**
 
-- Create: `src/eval_benchmarks.c` — benchmark loader adapters
+- Create: `src/eval/eval_benchmarks.c` — benchmark loader adapters
 - Create: `include/human/eval_benchmarks.h` — benchmark interfaces
 - Create: `eval_suites/gaia_sample.json` — sample GAIA tasks
 - Create: `eval_suites/swe_bench_sample.json` — sample SWE-bench tasks
 - Create: `eval_suites/tool_use_sample.json` — tool-use eval tasks
 - Create: `tests/test_eval_benchmarks.c` — benchmark tests
-- Modify: `src/cli_commands.c` — add `human eval benchmark <name>` command
+- Modify: `src/app/cli_commands.c` — add `human eval benchmark <name>` command
 
 **Steps:**
 
@@ -264,10 +264,10 @@ Each task uses this status tracking:
 
 **Files:**
 
-- Modify: `src/cli_commands.c` — add `human eval dashboard` command
-- Create: `src/eval_dashboard.c` — dashboard renderer (terminal)
+- Modify: `src/app/cli_commands.c` — add `human eval dashboard` command
+- Create: `src/eval/eval_dashboard.c` — dashboard renderer (terminal)
 - Create: `.github/workflows/eval.yml` — CI eval workflow
-- Modify: `src/eval.c` — add SQLite-backed historical storage
+- Modify: `src/eval/eval.c` — add SQLite-backed historical storage
 
 **Steps:**
 
@@ -1824,9 +1824,9 @@ These apply to ALL phases and are audited at every phase gate.
 | File                                   | Phase | Purpose                   |
 | -------------------------------------- | ----- | ------------------------- |
 | `src/eval_runner.c`                    | 1     | Task execution engine     |
-| `src/eval_judge.c`                     | 1     | LLM-as-judge              |
-| `src/eval_benchmarks.c`                | 1     | Benchmark adapters        |
-| `src/eval_dashboard.c`                 | 1     | Terminal dashboard        |
+| `src/eval/eval_judge.c`                     | 1     | LLM-as-judge              |
+| `src/eval/eval_benchmarks.c`                | 1     | Benchmark adapters        |
+| `src/eval/eval_dashboard.c`                 | 1     | Terminal dashboard        |
 | `src/agent/mcts_planner.c`             | 2     | MCTS-style planning       |
 | `src/intelligence/weakness_analyzer.c` | 3     | Weakness identification   |
 | `src/feeds/research_executor.c`        | 3     | Research action execution |
@@ -1851,9 +1851,9 @@ These apply to ALL phases and are audited at every phase gate.
 
 | File                              | Phases | Changes                                                      |
 | --------------------------------- | ------ | ------------------------------------------------------------ |
-| `src/eval.c`                      | 1      | Complete task parsing, judge integration, historical storage |
+| `src/eval/eval.c`                      | 1      | Complete task parsing, judge integration, historical storage |
 | `include/human/eval.h`            | 1      | Runner API, judge types                                      |
-| `src/cli_commands.c`              | 1, 3   | Eval CLI commands, research commands                         |
+| `src/app/cli_commands.c`              | 1, 3   | Eval CLI commands, research commands                         |
 | `src/intelligence/world_model.c`  | 2      | Graph engine, simulation, context-aware                      |
 | `src/agent/tree_of_thought.c`     | 2      | Recursive + beam search                                      |
 | `src/agent/planner.c`             | 2      | MCTS integration                                             |

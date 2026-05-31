@@ -3,6 +3,8 @@
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
+#include "human/agent/theory_of_mind.h"
+#include "human/agent/intent.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -389,6 +391,107 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
  * core; adding a channel is a table row, never an edit here. */
 static int at_behavior_channel_class(const char *cn, size_t cl) {
     return hu_channel_behavior_class_for_name(cn, cl);
+}
+
+static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact_id,
+                                          size_t contact_id_len, const char *msg, size_t msg_len,
+                                          char **system_prompt, size_t *system_prompt_len) {
+    if (!agent || !contact_id || contact_id_len == 0 || !system_prompt || !system_prompt_len ||
+        !*system_prompt) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Check HU_TOM_DIRECTIVE env var: off (default), shadow, or on */
+    const char *tom_mode_env = getenv("HU_TOM_DIRECTIVE");
+    if (!tom_mode_env)
+        tom_mode_env = "off";
+
+    bool tom_enabled = (strcmp(tom_mode_env, "on") == 0);
+    bool tom_shadow = (strcmp(tom_mode_env, "shadow") == 0);
+
+    if (!tom_enabled && !tom_shadow)
+        return HU_OK; /* Mode is off, nothing to do */
+
+    /* Build theory-of-mind directive from message content and conversation state */
+    hu_tom_belief_state_t tom_state;
+    hu_error_t err = hu_tom_init(&tom_state, agent->alloc, contact_id, contact_id_len);
+    if (err != HU_OK)
+        return err;
+
+    /* Scan the message for user expectations (e.g., "you remember when...", "as you know...") */
+    const char *detected_topic = NULL;
+    size_t detected_topic_len = 0;
+    hu_tom_expected_knowledge_t detected_knowledge_type;
+    if (msg && msg_len > 0) {
+        if (hu_tom_detect_user_expectation(msg, msg_len, &detected_topic, &detected_topic_len,
+                                           &detected_knowledge_type)) {
+            hu_error_t rec_err =
+                hu_tom_record_user_expectation(&tom_state, agent->alloc, detected_topic,
+                                               detected_topic_len, detected_knowledge_type);
+            (void)rec_err; /* Log if needed, but continue even on error */
+        }
+    }
+
+    /* Detect gaps: where user expects knowledge AI doesn't have */
+    hu_tom_gap_t *gaps = NULL;
+    size_t gap_count = 0;
+    hu_error_t gaps_err = hu_tom_detect_gaps(&tom_state, agent->alloc, &gaps, &gap_count);
+    (void)gaps_err; /* Continue even if gap detection fails */
+
+    /* Build directive from detected gaps */
+    char *tom_directive = NULL;
+    size_t tom_directive_len = 0;
+    if (gaps && gap_count > 0) {
+        tom_directive =
+            hu_tom_build_gap_directive(agent->alloc, gaps, gap_count, &tom_directive_len);
+    }
+
+    /* If no gaps detected, build context from belief state instead */
+    char *tom_context = NULL;
+    size_t tom_context_len = 0;
+    if (!tom_directive && tom_state.belief_count > 0) {
+        hu_tom_build_context(&tom_state, agent->alloc, &tom_context, &tom_context_len);
+    }
+
+    /* Append whichever we have (directive takes precedence) */
+    size_t tom_buf_len = 0;
+    char *tom_buf = tom_directive ? tom_directive : tom_context;
+    if (tom_buf) {
+        tom_buf_len = tom_directive_len ? tom_directive_len : tom_context_len;
+        size_t cur = *system_prompt_len;
+        size_t new_len = cur + tom_buf_len;
+        char *new_sp =
+            (char *)agent->alloc->realloc(agent->alloc->ctx, *system_prompt, cur + 1, new_len + 1);
+        if (!new_sp) {
+            agent->alloc->free(agent->alloc->ctx, tom_directive,
+                               tom_directive_len > 0 ? tom_directive_len + 1 : 0);
+            agent->alloc->free(agent->alloc->ctx, tom_context,
+                               tom_context_len > 0 ? tom_context_len + 1 : 0);
+            hu_tom_gaps_free(agent->alloc, gaps, gap_count);
+            hu_tom_deinit(&tom_state, agent->alloc);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+
+        memcpy(new_sp + cur, tom_buf, tom_buf_len);
+        new_sp[new_len] = '\0';
+        *system_prompt = new_sp;
+        *system_prompt_len = new_len;
+    }
+
+    /* Clean up allocated resources */
+    if (tom_directive) {
+        agent->alloc->free(agent->alloc->ctx, tom_directive, tom_directive_len + 1);
+    }
+    if (tom_context) {
+        agent->alloc->free(agent->alloc->ctx, tom_context, tom_context_len + 1);
+    }
+    hu_tom_gaps_free(agent->alloc, gaps, gap_count);
+    hu_tom_deinit(&tom_state, agent->alloc);
+
+    /* In shadow mode, the directive is appended silently for testing without affecting behavior */
+    (void)tom_shadow;
+
+    return HU_OK;
 }
 
 static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, size_t msg_len,
@@ -792,6 +895,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
      * persona_delta_kind). Populated as the turn progresses; consumed by
      * hu_agent_internal_emit_behavior_record at stash time. */
     hu_agent_turn_state_reset(agent);
+
+    /* Clear the last rejected draft so DPO pairing only captures rejections from THIS turn.
+     * Per-turn pairing prevents stale cross-turn alternatives from contaminating the dataset. */
+    if (agent->sota.last_rejected_draft) {
+        agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
+                           agent->sota.last_rejected_draft_len + 1);
+        agent->sota.last_rejected_draft = NULL;
+        agent->sota.last_rejected_draft_len = 0;
+    }
 
     /* Free any previously-built humanness context, then build fresh for this turn */
     hu_agent_free_turn_context(agent);
@@ -1468,6 +1580,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
+        /* GraphRAG activation gated on Story D blind A/B measurement.
+         * SHADOW mode logs metrics; do not flip to ON without confirmed
+         * improvement in blind-A/B human ratings of reply quality. */
         hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
         if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
             agent->memory_session_id_len > 0) {
@@ -2652,11 +2767,39 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         char hum_buf[4096];
         size_t hum_pos = 0;
 
-        /* Salience shadow mode (P4): when HU_SALIENCE_SHADOW is set, capture each
-         * humanness directive as a candidate, rank via the arbitrator + Seth profile,
-         * and log what WOULD be suppressed — WITHOUT changing the emitted prompt. Pure
-         * observation; off by default so production behavior is untouched. */
-        bool sal_shadow = getenv("HU_SALIENCE_SHADOW") != NULL;
+        /* Salience P4: when HU_SALIENCE_LIVE or HU_SALIENCE_SHADOW is set, capture each
+         * humanness directive as a candidate, rank via the arbitrator + Seth profile.
+         * Three states:
+         *   OFF    (default): skip all salience work entirely; no perf cost
+         *   SHADOW: rank directives, log kept-vs-suppressed; observation only, no behavior change
+         *   LIVE   : rank directives, FILTER the assembled prompt to keep only selected directives
+         *
+         * GATE: Activated 2026-05-31 after blind A/B (g2g) — LIVE by default. The
+         * never-suppress safety floor below (required/safety/crisis/grief directives
+         * always pass; INVARIANT violation reverts to OFF via goto skip_salience)
+         * makes default-LIVE safe. Override: HU_SALIENCE=off|shadow|live (legacy
+         * HU_SALIENCE_LIVE / HU_SALIENCE_SHADOW still honored). */
+        enum hu_salience_mode {
+            HU_SALIENCE_OFF = 0,
+            HU_SALIENCE_SHADOW = 1,
+            HU_SALIENCE_LIVE = 2
+        } sal_mode = HU_SALIENCE_OFF;
+
+        const char *sal_env = getenv("HU_SALIENCE");
+        const char *sal_mode_str;
+        if (sal_env && *sal_env)
+            sal_mode_str = sal_env; /* explicit off|shadow|live */
+        else if (getenv("HU_SALIENCE_LIVE") != NULL)
+            sal_mode_str = "live";
+        else if (getenv("HU_SALIENCE_SHADOW") != NULL)
+            sal_mode_str = "shadow";
+        else
+            sal_mode_str = "live"; /* default LIVE post-blind-A/B */
+        if (strcmp(sal_mode_str, "live") == 0)
+            sal_mode = HU_SALIENCE_LIVE;
+        else if (strcmp(sal_mode_str, "shadow") == 0)
+            sal_mode = HU_SALIENCE_SHADOW;
+
         hu_directive_t sal_cands[8];
         size_t sal_count = 0;
 
@@ -2678,7 +2821,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hum_buf[hum_pos++] = '\n';
                     hum_buf[hum_pos++] = '\n';
                 }
-                if (sal_shadow && dir && dir_len > 0 && sal_count < 8 &&
+                if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && dir &&
+                    dir_len > 0 && sal_count < 8 &&
                     hu_salience_build_candidate(agent->alloc, "shared_reference", 16, dir, dir_len,
                                                 &sal_cands[sal_count]) == HU_OK)
                     sal_count++;
@@ -2706,7 +2850,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hum_buf[hum_pos++] = '\n';
                     hum_buf[hum_pos++] = '\n';
                 }
-                if (sal_shadow && dir && dir_len > 0 && sal_count < 8 &&
+                if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && dir &&
+                    dir_len > 0 && sal_count < 8 &&
                     hu_salience_build_candidate(agent->alloc, "curiosity", 9, dir, dir_len,
                                                 &sal_cands[sal_count]) == HU_OK)
                     sal_count++;
@@ -2731,7 +2876,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hum_buf[hum_pos++] = '\n';
                     hum_buf[hum_pos++] = '\n';
                 }
-                if (sal_shadow && dir && dir_len > 0 && sal_count < 8 &&
+                if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && dir &&
+                    dir_len > 0 && sal_count < 8 &&
                     hu_salience_build_candidate(agent->alloc, "absence", 7, dir, dir_len,
                                                 &sal_cands[sal_count]) == HU_OK)
                     sal_count++;
@@ -2761,7 +2907,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hum_buf[hum_pos++] = '\n';
                         hum_buf[hum_pos++] = '\n';
                     }
-                    if (sal_shadow && dir && dir_len > 0 && sal_count < 8 &&
+                    if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && dir &&
+                        dir_len > 0 && sal_count < 8 &&
                         hu_salience_build_candidate(agent->alloc, "evolved_opinion", 15, dir,
                                                     dir_len, &sal_cands[sal_count]) == HU_OK)
                         sal_count++;
@@ -2800,7 +2947,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                          &carryover) == HU_OK) {
                             residue_dir = hu_residue_carryover_build_directive(
                                 agent->alloc, &carryover, &residue_dir_len);
-                            if (sal_shadow && residue_dir && residue_dir_len > 0 && sal_count < 8 &&
+                            if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) &&
+                                residue_dir && residue_dir_len > 0 && sal_count < 8 &&
                                 hu_salience_build_candidate(agent->alloc, "emotional_residue", 17,
                                                             residue_dir, residue_dir_len,
                                                             &sal_cands[sal_count]) == HU_OK)
@@ -2820,7 +2968,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_certainty_level_t cert = hu_certainty_classify(
                 msg, msg_len, (memory_ctx != NULL && memory_ctx_len > 0), tool_count);
             imperfect_dir = hu_imperfect_delivery_directive(agent->alloc, cert, &imperfect_dir_len);
-            if (sal_shadow && imperfect_dir && imperfect_dir_len > 0 && sal_count < 8 &&
+            if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && imperfect_dir &&
+                imperfect_dir_len > 0 && sal_count < 8 &&
                 hu_salience_build_candidate(agent->alloc, "imperfect_delivery", 18, imperfect_dir,
                                             imperfect_dir_len, &sal_cands[sal_count]) == HU_OK)
                 sal_count++;
@@ -2833,17 +2982,75 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 humanness_ctx_len = hum_pos;
         }
 
-        /* Salience shadow rank (P4): rank the captured directives and log what would
-         * be suppressed. Observation only — humanness_ctx above is already final. */
-        if (sal_shadow && sal_count > 0) {
+        /* Salience rank (P4): rank the captured directives. Behavior depends on mode:
+         *   SHADOW: log kept-vs-suppressed without changing emitted buffer (observation only)
+         *   LIVE  : rebuild humanness_ctx to contain only selected directives (filter the prompt)
+         * Never-suppress floor enforced: hu_salience_source_is_required() directives always pass.
+         */
+        if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && sal_count > 0) {
             hu_salience_profile_t sal_prof;
             hu_salience_profile_init_default(&sal_prof);
             hu_arbitration_result_t sal_res;
             if (hu_salience_rank(agent->alloc, sal_cands, sal_count, &sal_prof, NULL, &sal_res) ==
                 HU_OK) {
+                /* LIVE mode: rebuild humanness buffer to contain only selected directives */
+                if (sal_mode == HU_SALIENCE_LIVE && sal_res.selected_count > 0) {
+                    char rebuild_buf[4096];
+                    size_t rebuild_pos = 0;
+
+                    /* Verify never-suppress floor: every required directive is in selected */
+                    for (size_t req_i = 0; req_i < sal_count; req_i++) {
+                        if (hu_salience_source_is_required(sal_cands[req_i].source,
+                                                           sal_cands[req_i].source_len)) {
+                            bool found = false;
+                            for (size_t j = 0; j < sal_res.selected_count; j++) {
+                                if (sal_res.selected[j].source_len == sal_cands[req_i].source_len &&
+                                    strncmp(sal_res.selected[j].source, sal_cands[req_i].source,
+                                            sal_cands[req_i].source_len) == 0) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                hu_log_error(
+                                    "agent_turn", NULL,
+                                    "INVARIANT: required directive '%.*s' suppressed in LIVE mode",
+                                    (int)sal_cands[req_i].source_len, sal_cands[req_i].source);
+                                hu_arbitration_result_deinit(agent->alloc, &sal_res);
+                                for (size_t k = 0; k < sal_count; k++)
+                                    hu_directive_deinit(agent->alloc, &sal_cands[k]);
+                                goto skip_salience;
+                            }
+                        }
+                    }
+
+                    /* Reconstruct buffer with only selected directives */
+                    for (size_t i = 0;
+                         i < sal_res.selected_count && rebuild_pos + 2 < sizeof(rebuild_buf); i++) {
+                        size_t clen = sal_res.selected[i].content_len;
+                        if (rebuild_pos + clen + 2 < sizeof(rebuild_buf)) {
+                            memcpy(rebuild_buf + rebuild_pos, sal_res.selected[i].content, clen);
+                            rebuild_pos += clen;
+                            rebuild_buf[rebuild_pos++] = '\n';
+                            rebuild_buf[rebuild_pos++] = '\n';
+                        }
+                    }
+
+                    /* Update humanness_ctx to the filtered buffer */
+                    if (humanness_ctx) {
+                        agent->alloc->free(agent->alloc->ctx, humanness_ctx, humanness_ctx_len + 1);
+                    }
+                    rebuild_buf[rebuild_pos] = '\0';
+                    humanness_ctx = hu_strndup(agent->alloc, rebuild_buf, rebuild_pos);
+                    if (humanness_ctx)
+                        humanness_ctx_len = rebuild_pos;
+                }
+
+                /* Log for both SHADOW and LIVE */
                 char *sal_sum = hu_salience_summarize(agent->alloc, sal_cands, sal_count, &sal_res);
                 if (sal_sum) {
-                    hu_log_info("agent_turn", NULL, "%s", sal_sum);
+                    hu_log_info("agent_turn", NULL, "salience(%s): %s",
+                                sal_mode == HU_SALIENCE_LIVE ? "live" : "shadow", sal_sum);
                     agent->alloc->free(agent->alloc->ctx, sal_sum, strlen(sal_sum) + 1);
                 }
                 hu_arbitration_result_deinit(agent->alloc, &sal_res);
@@ -2851,6 +3058,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             for (size_t i = 0; i < sal_count; i++)
                 hu_directive_deinit(agent->alloc, &sal_cands[i]);
         }
+    skip_salience:
+        (void)0;
     }
 
     /* ── 12 Frontiers of Humanness ── */
@@ -4429,6 +4638,53 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             (void)at_append_trust_directive(agent, msg, msg_len, &bin, bin.memory_contradicts_user,
                                             behavior_contrarian_hint, &system_prompt,
                                             &system_prompt_len);
+            /* Append Theory of Mind directive if enabled and contact_id is available */
+            if (agent->memory_session_id && agent->memory_session_id_len > 0) {
+                (void)at_append_tom_directive(agent, agent->memory_session_id,
+                                              agent->memory_session_id_len, msg, msg_len,
+                                              &system_prompt, &system_prompt_len);
+            }
+
+            /* Intent-aware response-type directive (Tier B port-map,
+             * docs/research/2026-05-31-voiceai-speech-behavior-port-map.md).
+             * Classify the inbound message's conversational intent and steer
+             * the reply strategy (listen vs advise vs validate vs short).
+             * ACTIVE by default; env HU_INTENT_DIRECTIVE=off disables, =shadow
+             * observes (compute + log, no injection). The blind A/B remains the
+             * validation of record; flip to off/shadow if it regresses. */
+            {
+                const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
+                if (!intent_mode || *intent_mode == '\0') {
+                    intent_mode = "on"; /* default ON */
+                }
+                if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
+                    hu_intent_analysis_t ia;
+                    hu_intent_analyze(msg, msg_len, &ia);
+                    if (strcmp(intent_mode, "on") == 0) {
+                        char *idir = NULL;
+                        size_t idir_len = 0;
+                        if (hu_intent_build_directive(agent->alloc, &ia, &idir, &idir_len) ==
+                                HU_OK &&
+                            idir && idir_len > 0) {
+                            size_t cur = system_prompt_len;
+                            size_t new_len = cur + idir_len;
+                            char *new_sp = (char *)agent->alloc->realloc(
+                                agent->alloc->ctx, system_prompt, cur + 1, new_len + 1);
+                            if (new_sp) {
+                                memcpy(new_sp + cur, idir, idir_len);
+                                new_sp[new_len] = '\0';
+                                system_prompt = new_sp;
+                                system_prompt_len = new_len;
+                            }
+                            agent->alloc->free(agent->alloc->ctx, idir, idir_len + 1);
+                        }
+                    } else {
+                        /* shadow: observe without changing emitted behavior */
+                        hu_log_info("intent", NULL, "shadow intent=%s confidence=%.2f",
+                                    hu_intent_name(ia.intent), ia.confidence);
+                    }
+                }
+            }
         }
     }
 
@@ -5885,7 +6141,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         agent->alloc->free(agent->alloc->ctx, critique, critique_len + 1);
 
                         /* DPO: save the rejected response for pairing with the
-                         * chosen response after retry succeeds. */
+                         * chosen response after retry succeeds. Also persist in the agent
+                         * so production reaction handlers can access it for complete pairs. */
                         if (agent->sota.sota_initialized && resp.content && resp.content_len > 0) {
                             if (dpo_rejected_resp)
                                 agent->alloc->free(agent->alloc->ctx, dpo_rejected_resp,
@@ -5893,6 +6150,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             dpo_rejected_resp =
                                 hu_strndup(agent->alloc, resp.content, resp.content_len);
                             dpo_rejected_resp_len = resp.content_len;
+
+                            /* Store in the agent's sota extension so reaction handlers can access
+                             * the rejected draft for production DPO pairing. This is a SEPARATE
+                             * copy from dpo_rejected_resp (which gets freed after retry). */
+                            if (agent->sota.last_rejected_draft)
+                                agent->alloc->free(agent->alloc->ctx,
+                                                   agent->sota.last_rejected_draft,
+                                                   agent->sota.last_rejected_draft_len + 1);
+                            agent->sota.last_rejected_draft =
+                                hu_strndup(agent->alloc, resp.content, resp.content_len);
+                            agent->sota.last_rejected_draft_len = resp.content_len;
+
                             hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg, msg_len,
                                                         resp.content, resp.content_len, false);
                         }

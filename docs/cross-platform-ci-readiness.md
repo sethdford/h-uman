@@ -16,7 +16,7 @@ This document tracks platform support, known platform-specific code locations, a
 
 ## Platform-Specific Code Locations
 
-### Centralized Helpers (`src/platform.c`, `include/human/platform.h`)
+### Centralized Helpers (`src/app/platform.c`, `include/human/platform.h`)
 
 All cross-platform time, sleep, and filesystem helpers live here:
 

@@ -160,8 +160,8 @@ UI:
 Backend:
 
 - `src/gateway/control_protocol.c` — cron handlers
-- `src/crontab.c` — format extension + load-on-startup
-- `src/main.c` — wire crontab loading
+- `src/daemon/crontab.c` — format extension + load-on-startup
+- `src/app/main.c` — wire crontab loading
 - `include/human/crontab.h` — struct extension
 
 UI:

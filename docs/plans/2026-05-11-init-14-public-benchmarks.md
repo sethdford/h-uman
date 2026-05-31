@@ -12,8 +12,8 @@ related:
   - ../standards/quality/governance.md
   - ../../include/human/eval.h
   - ../../include/human/eval_benchmarks.h
-  - ../../src/eval.c
-  - ../../src/cli_evaluation.c
+  - ../../src/eval/eval.c
+  - ../../src/eval/cli_evaluation.c
 risk: low
 binary_budget_kb: 8
 last_audit: 2026-05-25
@@ -97,7 +97,7 @@ human eval frontier --suite=longmemeval --models=gemini-3.1-pro-preview,claude-o
 human evaluation list                                       # already lists; will pick up new suites
 ```
 
-The `--suite=` / `--full` / `--output=` / `frontier` flags are new but live inside the existing `cmd_eval` (`src/main.c:490` → `src/cli_evaluation.c` and the inline handler) — no new top-level command, no new exported main symbol.
+The `--suite=` / `--full` / `--output=` / `frontier` flags are new but live inside the existing `cmd_eval` (`src/app/main.c:490` → `src/eval/cli_evaluation.c` and the inline handler) — no new top-level command, no new exported main symbol.
 
 ---
 
@@ -135,9 +135,9 @@ The `--suite=` / `--full` / `--output=` / `frontier` flags are new but live insi
 | Path | Change | LOC est. |
 |---|---|---|
 | `include/human/eval_benchmarks.h` | Add five enum values + two new functions (above) | +30 |
-| `src/eval_benchmarks.c` | Dispatch table additions for the five new suites | +120 |
-| `src/cli_evaluation.c` | `--full`, `--output`, `frontier` flag handling; route to new suites | +180 |
-| `src/main.c` | (No change — existing `cmd_eval` / `cmd_evaluation` already routed; new suites just discovered via dir scan.) | 0 |
+| `src/eval/eval_benchmarks.c` | Dispatch table additions for the five new suites | +120 |
+| `src/eval/cli_evaluation.c` | `--full`, `--output`, `frontier` flag handling; route to new suites | +180 |
+| `src/app/main.c` | (No change — existing `cmd_eval` / `cmd_evaluation` already routed; new suites just discovered via dir scan.) | 0 |
 | `CMakeLists.txt` | Add `src/eval_public_suites.c` and `tests/test_eval_public_suites.c` to existing lists | +6 |
 | `.github/workflows/ci.yml` | Add 30 s job step `human_tests --suite="public-benchmarks"` (smoke only) | +12 |
 | `.github/workflows/evaluation.yml` | Add manual-dispatch full-run job (gated on `ANTHROPIC_API_KEY`, `GCP_ADC_JSON`, `OPENAI_API_KEY`) | +40 |
@@ -189,8 +189,8 @@ Tests follow the `subject_expected_behavior` naming convention.
 
 ```
 src/eval_public_suites.c  -> tests/test_eval_public_suites.c
-src/eval_benchmarks.c      -> tests/test_eval_benchmarks.c (existing)
-src/cli_evaluation.c       -> tests/test_eval_runner.c (existing)
+src/eval/eval_benchmarks.c      -> tests/test_eval_benchmarks.c (existing)
+src/eval/cli_evaluation.c       -> tests/test_eval_runner.c (existing)
 ```
 
 ---
@@ -235,8 +235,8 @@ src/cli_evaluation.c       -> tests/test_eval_runner.c (existing)
 | Component | LOC | Est. compiled (MinSizeRel+LTO) |
 |---|---|---|
 | `src/eval_public_suites.c` (five smoke loaders + frontier comparator) | ~480 | ~4.2 KB |
-| `src/eval_benchmarks.c` dispatch additions | +120 | ~0.9 KB |
-| `src/cli_evaluation.c` flag handling additions | +180 | ~1.5 KB |
+| `src/eval/eval_benchmarks.c` dispatch additions | +120 | ~0.9 KB |
+| `src/eval/cli_evaluation.c` flag handling additions | +180 | ~1.5 KB |
 | `include/human/eval_benchmarks.h` symbol declarations | +30 | ~0 KB (header) |
 | `include/human/eval_public_suites.h` | +50 | ~0 KB (header) |
 | **Total binary delta** | | **~6.6 KB (≈ 82 % of 8 KB ceiling)** |
@@ -456,7 +456,7 @@ Test `eval_reproduce_sh_smoke_redrives_identical_pass_rate` exercises step 4-5 w
 
 ### Phase P4 — `human eval --full` plumbing (day 7)
 
-- [ ] Add `--full`, `--output`, `--seed`, `--persona` flag parsing to `src/cli_evaluation.c`.
+- [ ] Add `--full`, `--output`, `--seed`, `--persona` flag parsing to `src/eval/cli_evaluation.c`.
 - [ ] Implement `hu_benchmark_publish_results` (atomic write).
 - [ ] Test 12-13.
 

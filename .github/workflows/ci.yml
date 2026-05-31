@@ -2,12 +2,58 @@ name: Human CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 9 * * 1"
   workflow_dispatch:
 
+# Run CI once per change, not twice. Previously `on: push` (no branch filter)
+# AND `on: pull_request` both fired for every PR branch, double-running the
+# whole matrix. Scoping push to `main` means PR branches get one run via
+# pull_request; main gets one run via push.
+#
+# Cancel superseded runs on the same ref so a new commit on a PR branch
+# immediately obsoletes the in-flight matrix — this alone reclaims the
+# ~15-20 min the full matrix burned on every amended/review-fix commit. main
+# runs are never cancelled, so the default-branch record stays intact.
+concurrency:
+  group: human-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  # Detect which areas a PR touches so frontend/docs jobs skip on pure-backend
+  # PRs (and vice-versa). A job skipped via job-level `if:` reports "skipped",
+  # which SATISFIES required status checks — no merge deadlock (unlike an
+  # on:-level paths filter, which would leave the context permanently pending).
+  # On push/schedule/dispatch every consumer forces a full run via
+  # `github.event_name != 'pull_request'`, so main + nightly never skip.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ui: ${{ steps.f.outputs.ui }}
+      web: ${{ steps.f.outputs.web }}
+      docs: ${{ steps.f.outputs.docs }}
+      tokens: ${{ steps.f.outputs.tokens }}
+      apps: ${{ steps.f.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            ui:
+              - 'ui/**'
+            web:
+              - 'website/**'
+            docs:
+              - 'docs/**'
+              - '**/*.md'
+            tokens:
+              - 'design-tokens/**'
+            apps:
+              - 'apps/**'
+
   build-and-test:
     strategy:
       matrix:
@@ -226,6 +272,10 @@ jobs:
 
   release-size:
     runs-on: macos-latest
+    # Release-quality binary-size guard — not per-PR correctness, and a scarce
+    # macOS runner. Run on main/schedule/dispatch only; skipped on PRs (skip
+    # still satisfies the required check). Size regressions surface on merge.
+    if: ${{ github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
@@ -255,6 +305,9 @@ jobs:
 
   build-android:
     runs-on: ubuntu-latest
+    needs: changes
+    # Native Android app — only a change under apps/** can affect it.
+    if: ${{ needs.changes.outputs.apps == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -267,12 +320,19 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    needs: changes
+    # Native macOS Swift app — only a change under apps/** can affect it. Skips
+    # on pure-backend/docs PRs, freeing a scarce macOS runner. Full run on
+    # main/schedule/dispatch.
+    if: ${{ needs.changes.outputs.apps == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - run: cd apps/macos && swift build
 
   ui:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     defaults:
       run:
         working-directory: ui
@@ -314,6 +374,8 @@ jobs:
 
   ui-e2e:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -416,6 +478,8 @@ jobs:
 
   visual-regression:
     runs-on: macos-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.tokens == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -468,7 +532,7 @@ jobs:
         run: bash -n completions/human.bash
       - name: Verify completions cover all subcommands
         run: |
-          CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
+          CMDS=$(grep -oP '\{"[a-z-]+", "' src/app/main.c | sed 's/{"//;s/", "//' | sort)
           for cmd in $CMDS; do
             grep -q "$cmd" completions/human.bash || { echo "MISSING in bash: $cmd"; exit 1; }
             grep -q "$cmd" completions/_human || { echo "MISSING in zsh: $cmd"; exit 1; }
@@ -585,6 +649,8 @@ jobs:
 
   website:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -638,6 +704,8 @@ jobs:
 
   design-tokens:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.tokens == 'true' || needs.changes.outputs.ui == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -685,6 +753,8 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - name: Check for stale branding
@@ -828,6 +898,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # Reproducibility check rebuilds twice + diffs — expensive, and the macOS
+    # leg burns a scarce runner. It's a release-quality guarantee, not per-PR
+    # correctness: run on main/schedule/dispatch only (skip satisfies required).
+    if: ${{ github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
       - name: Install Linux build deps

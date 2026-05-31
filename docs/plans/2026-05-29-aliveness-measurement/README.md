@@ -9,7 +9,7 @@ created: 2026-05-29
 
 > CLAUDE.md principle 4: *measure before tuning*. The three aliveness scorers
 > exist (`hu_eval_score_belief_flexibility` / `_distinctiveness` /
-> `_self_direction`, `src/eval.c:1514-1537`) but are unit-rubric only. This plan
+> `_self_direction`, `src/eval/eval.c:1514-1537`) but are unit-rubric only. This plan
 > wires them to live data — honestly.
 
 ## The honest data situation (2026-05-29)

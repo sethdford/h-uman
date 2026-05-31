@@ -265,7 +265,7 @@ defense is valid for **naive** attackers but fails completely against an informe
 
 | Priority | File | Violation |
 |----------|------|-----------|
-| P1 | `src/main.c::cmd_mcp` | Currently runs the stdio engine in pass-through mode with "no consent / pairing / audit" (design §1). Any existing user with `human mcp` in their IDE config gets this bare engine. The replacement (Init 12) must be shipped with consent seeding (`hu_mcp_consent_seed_defaults`) that defaults-deny everything except persona identity, to avoid a permissions escalation on upgrade. |
+| P1 | `src/app/main.c::cmd_mcp` | Currently runs the stdio engine in pass-through mode with "no consent / pairing / audit" (design §1). Any existing user with `human mcp` in their IDE config gets this bare engine. The replacement (Init 12) must be shipped with consent seeding (`hu_mcp_consent_seed_defaults`) that defaults-deny everything except persona identity, to avoid a permissions escalation on upgrade. |
 
 ---
 

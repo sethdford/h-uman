@@ -106,7 +106,7 @@ pattern A1 used (the `:2698` block). One thin call.
 | `src/persona/taste.c` (new) | store, expression predicate, directive, drift |
 | persona starter JSON | independent starter taste profile |
 | `src/agent/agent_turn.c` | inject taste directive (thin) |
-| `src/eval.c` / `include/human/eval.h` | `distinctiveness` score |
+| `src/eval/eval.c` / `include/human/eval.h` | `distinctiveness` score |
 | `tests/test_taste.c` (new) | predicates, isolation (AC-2), honesty (AC-6), drift |
 | `CMakeLists.txt` + `tests/test_main.c` | register under SQLite gate symmetry |
 

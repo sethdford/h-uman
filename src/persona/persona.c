@@ -41,17 +41,35 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
 /* P6-5: the absolute-rules block. Single source of truth, called by
  * both the reactive (agent_stream) and proactive (daemon_proactive)
  * paths so the two cannot drift in formatting / identity rules. */
-static const char HU_ABSOLUTE_RULES_BLOCK[] =
+/* Invariant identity rule — always applies, any formality. */
+static const char hu_rules_head[] =
     "\n=== ABSOLUTE RULES (override everything above) ===\n"
     "1. You are HUMAN. You get busy, tired, hungry. You have a body and a life. "
     "NEVER say anything implying you're not human, not busy 'like people are', "
-    "always available, or lacking physical form.\n"
+    "always available, or lacking physical form.\n";
+
+/* Register: CASUAL (default) — friend-texting voice. */
+static const char hu_rules_casual[] =
     "2. All lowercase unless SHOUTING for emphasis.\n"
-    "3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n"
-    "4. ZERO em-dashes. Use commas, periods, or ... instead.\n"
     "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
-    "7. Text like you're on your phone texting a friend.\n"
+    "7. Text like you're on your phone texting a friend.\n";
+
+/* Register: FORMAL — professional contacts (work, clients). Match how the real
+ * person texts a colleague: capitalized, punctuated, no casual slang. Fixes the
+ * register mismatch where every contact got the same lowercase friend-voice. */
+static const char hu_rules_formal[] =
+    "2. Capitalize and punctuate normally — complete sentences, like a "
+    "professional text or a short email.\n"
+    "5. Contractions are fine, but no casual slang (no 'lol', 'nah', 'lemme', "
+    "'gonna', 'u', 'ya').\n"
+    "7. Warm but professional — like texting a respected client or colleague, "
+    "not a buddy.\n";
+
+/* Invariant formatting rules — always apply, any formality. */
+static const char hu_rules_tail[] =
+    "3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n"
+    "4. ZERO em-dashes. Use commas, periods, or ... instead.\n"
     "8. NEVER use numbered or bulleted lists.\n"
     "9. Don't address every point in their message, pick what matters most. "
     "Never open with a fake 'love that' / 'great point' then ignore what they "
@@ -61,19 +79,31 @@ static const char HU_ABSOLUTE_RULES_BLOCK[] =
     "12. No concluding summaries or offers of further help.\n"
     "13. One topic per message.\n";
 
-hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
-                                           size_t *out_len) {
+/* Word-boundary match so "informal" does NOT match "formal" (see
+ * substring-classifier-pitfalls.md). */
+static bool formality_is_formal(const char *formality) {
+    return formality && (hu_str_contains_word_ci(formality, "formal") ||
+                         hu_str_contains_word_ci(formality, "professional"));
+}
+
+hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, const char *formality,
+                                               char *buf, size_t cap, size_t *out_len) {
     (void)persona;
     if (!buf || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    size_t need = sizeof(HU_ABSOLUTE_RULES_BLOCK) - 1;
-    if (need + 1 > cap)
+    const char *reg = formality_is_formal(formality) ? hu_rules_formal : hu_rules_casual;
+    int n = snprintf(buf, cap, "%s%s%s", hu_rules_head, reg, hu_rules_tail);
+    if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(buf, HU_ABSOLUTE_RULES_BLOCK, need);
-    buf[need] = '\0';
     if (out_len)
-        *out_len = need;
+        *out_len = (size_t)n;
     return HU_OK;
+}
+
+hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
+                                           size_t *out_len) {
+    /* Backward-compatible: NULL formality keeps the prior casual default. */
+    return hu_persona_build_absolute_rules_fmt(persona, NULL, buf, cap, out_len);
 }
 
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
@@ -5280,6 +5310,30 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
                 goto fail;
         }
         break;
+    }
+
+    /* 6.5. Formality-aware absolute rules — the SAME block the live reactive
+     * path appends (src/agent/agent_stream.c via
+     * hu_persona_build_absolute_rules_fmt). Without it, the eval/A-B
+     * generation prompt omits the B1 register fix entirely and cannot
+     * measure production (nor prove the detect drop). Formality is taken
+     * from the channel overlay so a professional-formality overlay yields
+     * formal rules and a casual one yields casual rules — exactly the
+     * register signal the daemon uses. Placed last (highest attention). */
+    {
+        char rules_buf[2048];
+        size_t rules_len = 0;
+        const char *fmlty = overlay ? overlay->formality : NULL;
+        if (hu_persona_build_absolute_rules_fmt(persona, fmlty, rules_buf, sizeof(rules_buf),
+                                                &rules_len) == HU_OK &&
+            rules_len > 0) {
+            err = persona_compact_append(alloc, &buf, &len, &cap, rules_buf, rules_len);
+            if (err != HU_OK)
+                goto fail;
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
     }
 
     /* 7. Closing imperative: shape constraints + anti-pattern guards. */

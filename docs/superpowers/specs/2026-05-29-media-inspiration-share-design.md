@@ -84,8 +84,8 @@ send by channel capability:
 
 | File | Role |
 |---|---|
-| `include/human/youtube.h` / `src/youtube.c` | `hu_youtube_search(alloc, api_key, query, len, &result)` — YouTube Data API v3 `search.list?part=snippet&q=&type=video&maxResults=1&key=`; parse `videoId` + `title` + `channelTitle`; build canonical `watch?v=<id>`. `HU_IS_TEST` guard on network; tests parse fixture JSON via a separate `hu_youtube_parse_search_response`. |
-| `include/human/inspiration.h` / `src/inspiration.c` | `hu_inspiration_medium_t { HU_INSPIRATION_NONE, _MUSIC, _YOUTUBE, _TIKTOK }`; `hu_inspiration_pick_medium(incoming, len, history, count, youtube_available)`; `hu_tiktok_tag_url(keyword, len, out, cap)` (URL-encode, strip leading `#`, multi-word → single tag). |
+| `include/human/youtube.h` / `src/multimodal/youtube.c` | `hu_youtube_search(alloc, api_key, query, len, &result)` — YouTube Data API v3 `search.list?part=snippet&q=&type=video&maxResults=1&key=`; parse `videoId` + `title` + `channelTitle`; build canonical `watch?v=<id>`. `HU_IS_TEST` guard on network; tests parse fixture JSON via a separate `hu_youtube_parse_search_response`. |
+| `include/human/inspiration.h` / `src/agent/inspiration.c` | `hu_inspiration_medium_t { HU_INSPIRATION_NONE, _MUSIC, _YOUTUBE, _TIKTOK }`; `hu_inspiration_pick_medium(incoming, len, history, count, youtube_available)`; `hu_tiktok_tag_url(keyword, len, out, cap)` (URL-encode, strip leading `#`, multi-word → single tag). |
 
 ### Modified files
 
@@ -93,8 +93,8 @@ send by channel capability:
 |---|---|
 | `src/daemon.c` | Replace the music block (13663-13938) with the inspiration dispatch + two-bubble send. Keep taste-tracking + 3-7s pacing. |
 | `src/context/conversation.c` | Generalize `hu_conversation_should_send_music` → `hu_conversation_should_share_inspiration` (keep crisis-skip + recent-share guards; broaden keyword boost to all media). Add per-medium prompt builders that inject persona voice. Keep `hu_conversation_should_send_music` as a thin wrapper if any caller needs it, else migrate callers. |
-| `src/music.c` | Add pure predicate `hu_music_result_matches(suggested_artist, suggested_title, result)`. |
-| `CMakeLists.txt` | Register `src/youtube.c`, `src/inspiration.c`, `tests/test_youtube.c`, `tests/test_inspiration.c` (+ `test_main.c` runner wiring). Gate-symmetry per `.claude/rules/test-source-gate-symmetry.md` — no new `HU_ENABLE_*` flag intended; YouTube uses libcurl HTTP like music and rides the same build. |
+| `src/multimodal/music.c` | Add pure predicate `hu_music_result_matches(suggested_artist, suggested_title, result)`. |
+| `CMakeLists.txt` | Register `src/multimodal/youtube.c`, `src/agent/inspiration.c`, `tests/test_youtube.c`, `tests/test_inspiration.c` (+ `test_main.c` runner wiring). Gate-symmetry per `.claude/rules/test-source-gate-symmetry.md` — no new `HU_ENABLE_*` flag intended; YouTube uses libcurl HTTP like music and rides the same build. |
 | config (no schema change) | YouTube key read via existing `hu_config_get_provider_key(config, "youtube")`. Document the key. |
 
 ## Mechanism 1 — validity (resolve-and-verify)
@@ -171,7 +171,7 @@ Three independently-testable slices, each green before the next:
    music block + tests. (Fixes "wrong song" immediately on the live music path.)
 2. **Two-bubble framing + persona voice** — stop discarding the human line;
    persona-shaped generation; extend rich-link contract tests.
-3. **YouTube + TikTok resolvers** — `src/youtube.c`, `src/inspiration.c`,
+3. **YouTube + TikTok resolvers** — `src/multimodal/youtube.c`, `src/agent/inspiration.c`,
    medium picker, dispatch in daemon; tests.
 
 ## Out of scope / honest limitations

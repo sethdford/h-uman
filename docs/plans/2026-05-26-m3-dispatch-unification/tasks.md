@@ -44,8 +44,8 @@ A task is "done" when its acceptance criterion in
 
 **Files**
 - `include/human/config.h` — add field.
-- `src/config_merge.c` — default false.
-- `src/config_parse.c` — parse from JSON.
+- `src/config/config_merge.c` — default false.
+- `src/config/config_parse.c` — parse from JSON.
 
 **Test**
 - `tests/test_config_extended.c` — pin field defaults to false; pin
@@ -115,7 +115,7 @@ log-scrape script.
 ## T7 — Flip default to true
 
 **Files**
-- `src/config_merge.c` — change default from false to true.
+- `src/config/config_merge.c` — change default from false to true.
 
 **Test**
 - `tests/test_config_extended.c` — update default-value test.
@@ -128,7 +128,7 @@ log-scrape script.
 - `src/daemon.c` — remove the legacy branch of the
   `use_unified_dispatch` conditional. The flag is now dead; remove it
   too in a follow-up.
-- `src/daemon_proactive.c` — keep the context-builder helpers (they
+- `src/daemon/daemon_proactive.c` — keep the context-builder helpers (they
   feed compose-inputs); remove the old prompt-assembly entry point.
 - `include/human/config.h` — remove `use_unified_dispatch` field.
 

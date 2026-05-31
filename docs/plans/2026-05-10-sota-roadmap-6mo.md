@@ -241,7 +241,7 @@ Only after Tracks A and B have delivered measurable value. This phase is the ans
 
 | Step | Work | Proof |
 |---|---|---|
-| C1.1 | Audit `src/onboard.c` against the actual first-run friction list. Add starter persona presets (e.g. "casual", "professional", "warm-and-direct") with channel overlays | New user smoke-test: install → first reply in < 5 min on at least one channel |
+| C1.1 | Audit `src/onboard/onboard.c` against the actual first-run friction list. Add starter persona presets (e.g. "casual", "professional", "warm-and-direct") with channel overlays | New user smoke-test: install → first reply in < 5 min on at least one channel |
 | C1.2 | Model wizard: detect local hardware, pick default tier defaults (E4B + 31B on M-series, llama.cpp on Linux), validate disk + RAM budgets up front | `human init` exits with clean status; no post-init re-config required |
 | C1.3 | Persona creation wizard pulls in user-provided seed messages (3–10) and proposes a starter persona via the existing `src/persona/creator.c` | Onboarding eval: 5 test users produce non-default personas |
 | C1.4 | Telemetry-free product analytics (local event log; user can inspect) | Local event log shows install → first message latency P50 < 5 min |

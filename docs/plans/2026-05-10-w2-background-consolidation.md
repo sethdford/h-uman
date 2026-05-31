@@ -24,7 +24,7 @@ Give h-uman REM sleep. A scheduled idle subagent runs while the user is away and
 
 ## Motivation
 
-`src/memory/consolidation_engine.c` runs from `src/daemon.c` and `src/main.c`. Today it is a one-shot dedupe + recovery pass. It is not the AutoDream / Cognee `memify` shape: there's no scheduled idle window, no second-order derivation, no summary generation. `hu_graph_leiden_communities` and `hu_graph_build_communities` already cluster; `hu_graph_query_temporal` already reads time ranges; `hu_episodic_*` (`include/human/memory/episodic.h`) already captures contact-scoped narratives. None of these get woven into a periodic refinement pass.
+`src/memory/consolidation_engine.c` runs from `src/daemon.c` and `src/app/main.c`. Today it is a one-shot dedupe + recovery pass. It is not the AutoDream / Cognee `memify` shape: there's no scheduled idle window, no second-order derivation, no summary generation. `hu_graph_leiden_communities` and `hu_graph_build_communities` already cluster; `hu_graph_query_temporal` already reads time ranges; `hu_episodic_*` (`include/human/memory/episodic.h`) already captures contact-scoped narratives. None of these get woven into a periodic refinement pass.
 
 Effects:
 
@@ -43,7 +43,7 @@ Effects:
 
 ### 1. AutoDream subagent
 
-New module `src/agent/autodream.c` + `include/human/agent/autodream.h`.
+New module `src/agent/simulation/autodream.c` + `include/human/agent/autodream.h`.
 
 ```c
 typedef struct hu_autodream_config {
@@ -176,7 +176,7 @@ CLI: `human autodream --dry-run` triggers a one-shot run for inspection; `human 
 | File | Role |
 |------|------|
 | `include/human/agent/autodream.h` | New — public API, config, report struct |
-| `src/agent/autodream.c` | New — phases, idle scheduler integration |
+| `src/agent/simulation/autodream.c` | New — phases, idle scheduler integration |
 | `include/human/memory/summary_writer.h` | New — `hu_summary_writer_t` vtable |
 | `src/memory/summary_writer.c` | New — default provider-backed impl |
 | `src/memory/community_summary.c` | New — summary table CRUD + retrieval integration |
@@ -185,8 +185,8 @@ CLI: `human autodream --dry-run` triggers a one-shot run for inspection; `human 
 | `src/memory/retrieval/qmd.c` | Route global queries to community summaries |
 | `src/memory/retrieval/engine.c` | Read summaries when QMD signals |
 | `src/daemon.c` | Idle detector + invocation; persist `last_autodream_run` |
-| `src/main.c` | `human autodream` subcommand |
-| `src/config.c` | Parse new config block |
+| `src/app/main.c` | `human autodream` subcommand |
+| `src/config/config.c` | Parse new config block |
 | `include/human/config.h` | Config struct fields |
 | `tests/test_autodream.c` | New — phases under `HU_IS_TEST` with stub summary writer |
 | `tests/test_community_summary.c` | New — CRUD + retrieval-routing |

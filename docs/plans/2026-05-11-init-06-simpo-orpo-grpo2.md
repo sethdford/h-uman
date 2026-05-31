@@ -471,7 +471,7 @@ src/ml/rl_orpo.c                      (NEW,  ~320 LOC: orpo ctx + step + save + 
 src/ml/rl_grpo2.c                     (NEW,  ~420 LOC: grpo2 ctx + snapshot + step + save + deinit)
 src/ml/cli.c                          (MODIFY, +~120 LOC: hu_ml_cli_rl_train handler)
 include/human/ml/cli.h                (MODIFY, +1 declaration)
-src/main.c                            (MODIFY, +1 dispatch row in cmd_ml)
+src/app/main.c                            (MODIFY, +1 dispatch row in cmd_ml)
 CMakeLists.txt                        (MODIFY, +4 source rows under HU_ENABLE_ML guard)
 
 tests/test_rl_trainer.c               (NEW,  ~600 LOC: 10 tests across the three algos)
@@ -538,7 +538,7 @@ Declared in `include/human/ml/cli.h`:
 hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv);
 ```
 
-Dispatched from `cmd_ml` in `src/main.c` next to the existing
+Dispatched from `cmd_ml` in `src/app/main.c` next to the existing
 `dpo-train`, `lora-persona`, `lora-baseline`, `lora-ab` rows.
 
 Flag table:
