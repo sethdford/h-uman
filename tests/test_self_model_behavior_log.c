@@ -280,6 +280,47 @@ static void test_self_model_behavior_log_record_null_rec_is_noop(void) {
     hu_agent_behavior_log_destroy(&log);
 }
 
+/* #2 self-model readback: the directive must REFLECT the window (mean length +
+ * dominant tone), refuse <3 turns, and reject NULL args. Non-vacuous: asserts
+ * the computed mean (250) and tone string actually appear. */
+static void test_self_model_build_directive_reflects_window(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_behavior_log_t log;
+    HU_ASSERT_EQ(hu_agent_behavior_log_init(&log, &alloc, 16), HU_OK);
+
+    char *dir = NULL;
+    size_t dir_len = 0;
+
+    /* <3 turns → no directive (NULL, HU_OK) */
+    hu_agent_behavior_record_t a = make_record(100, 0x1, 1000);
+    HU_ASSERT_EQ(hu_agent_behavior_log_record(&log, &a), HU_OK);
+    HU_ASSERT_EQ(hu_agent_self_model_build_directive(&log, &alloc, &dir, &dir_len), HU_OK);
+    HU_ASSERT_TRUE(dir == NULL);
+    HU_ASSERT_EQ((long long)dir_len, 0);
+
+    /* 4 POSITIVE turns, lengths 100/200/300/400 → mean 250, dominant tone warm */
+    hu_agent_behavior_record_t b = make_record(200, 0x2, 2000);
+    hu_agent_behavior_record_t c = make_record(300, 0x3, 3000);
+    hu_agent_behavior_record_t d = make_record(400, 0x4, 4000);
+    HU_ASSERT_EQ(hu_agent_behavior_log_record(&log, &b), HU_OK);
+    HU_ASSERT_EQ(hu_agent_behavior_log_record(&log, &c), HU_OK);
+    HU_ASSERT_EQ(hu_agent_behavior_log_record(&log, &d), HU_OK);
+
+    HU_ASSERT_EQ(hu_agent_self_model_build_directive(&log, &alloc, &dir, &dir_len), HU_OK);
+    HU_ASSERT_TRUE(dir != NULL);
+    HU_ASSERT_TRUE(dir_len > 0);
+    HU_ASSERT_TRUE(strstr(dir, "self-awareness") != NULL);
+    HU_ASSERT_TRUE(strstr(dir, "250") != NULL);               /* mean of 100..400 */
+    HU_ASSERT_TRUE(strstr(dir, "warm and positive") != NULL); /* dominant register */
+    alloc.free(alloc.ctx, dir, dir_len + 1);
+
+    /* NULL log → INVALID_ARGUMENT */
+    HU_ASSERT_EQ(hu_agent_self_model_build_directive(NULL, &alloc, &dir, &dir_len),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    hu_agent_behavior_log_destroy(&log);
+}
+
 #else /* !HU_ENABLE_SELF_MODEL */
 
 /* In OFF builds we still want to verify the documented contract that
@@ -328,6 +369,7 @@ void run_self_model_behavior_log_tests(void) {
     HU_RUN_TEST(test_self_model_behavior_log_zero_alloc_per_record);
     HU_RUN_TEST(test_self_model_behavior_log_record_null_log_is_noop);
     HU_RUN_TEST(test_self_model_behavior_log_record_null_rec_is_noop);
+    HU_RUN_TEST(test_self_model_build_directive_reflects_window);
 #else
     HU_RUN_TEST(test_self_model_disabled_flag_record_is_noop);
 #endif

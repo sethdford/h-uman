@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef HU_ENABLE_SELF_MODEL
@@ -151,6 +152,62 @@ size_t hu_agent_behavior_log_total_records(const hu_agent_behavior_log_t *log) {
     return log->head;
 }
 
+hu_error_t hu_agent_self_model_build_directive(const hu_agent_behavior_log_t *log,
+                                               const hu_allocator_t *alloc, char **out,
+                                               size_t *out_len) {
+    if (out)
+        *out = NULL;
+    if (out_len)
+        *out_len = 0;
+    if (!log || !alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Aggregate the recent window. Privacy invariant holds: we read only
+     * sizes + the emotion enum shadow — never any content. */
+    hu_agent_behavior_record_t recs[16];
+    size_t n = 0;
+    if (hu_agent_behavior_log_snapshot(log, recs, 16, &n) != HU_OK || n < 3)
+        return HU_OK; /* too few turns to say anything meaningful — no directive */
+
+    uint64_t total_chars = 0;
+    size_t emo_counts[5] = {0, 0, 0, 0, 0};
+    for (size_t i = 0; i < n; i++) {
+        total_chars += recs[i].response_length_chars;
+        uint8_t e = recs[i].emotional_register;
+        if (e < 5)
+            emo_counts[e]++;
+    }
+    unsigned mean_chars = (unsigned)(total_chars / (uint64_t)n);
+
+    size_t dom = 0;
+    for (size_t i = 1; i < 5; i++) {
+        if (emo_counts[i] > emo_counts[dom])
+            dom = i;
+    }
+    /* Index by hu_agent_emotional_register_t: NEUTRAL, POSITIVE, NEGATIVE,
+     * CAUTIOUS, OTHER. */
+    static const char *const tone[5] = {"pretty even", "warm and positive", "a bit more guarded",
+                                        "careful and measured", "all over the place"};
+
+    char buf[320];
+    int w = snprintf(buf, sizeof(buf),
+                     "[self-awareness] Over your last %zu replies you've averaged about %u "
+                     "characters and your tone has mostly read as %s. Keep showing up the way "
+                     "you naturally do — stay consistent rather than over-correcting.",
+                     n, mean_chars, tone[dom]);
+    if (w <= 0 || (size_t)w >= sizeof(buf))
+        return HU_OK;
+
+    char *d = (char *)alloc->alloc(alloc->ctx, (size_t)w + 1);
+    if (!d)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(d, buf, (size_t)w);
+    d[w] = '\0';
+    *out = d;
+    *out_len = (size_t)w;
+    return HU_OK;
+}
+
 #else /* !HU_ENABLE_SELF_MODEL */
 
 /* OFF-variant stubs. Match `.claude/rules/test-source-gate-symmetry.md`'s
@@ -199,6 +256,18 @@ hu_error_t hu_agent_behavior_log_snapshot(const hu_agent_behavior_log_t *log,
 size_t hu_agent_behavior_log_total_records(const hu_agent_behavior_log_t *log) {
     (void)log;
     return 0;
+}
+
+hu_error_t hu_agent_self_model_build_directive(const hu_agent_behavior_log_t *log,
+                                               const hu_allocator_t *alloc, char **out,
+                                               size_t *out_len) {
+    (void)log;
+    (void)alloc;
+    if (out)
+        *out = NULL;
+    if (out_len)
+        *out_len = 0;
+    return HU_OK; /* self-model OFF → no self-observation directive */
 }
 
 #endif /* HU_ENABLE_SELF_MODEL */

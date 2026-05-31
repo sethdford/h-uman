@@ -995,6 +995,33 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
             }
         }
     }
+
+    /* Self-model readback: feed the agent a short summary of how it has recently
+     * been behaving (avg reply length + dominant tone), from the behavior-log
+     * ring, so it can be metacognitively aware of its own pattern. Gated
+     * HU_SELF_MODEL off|shadow|on (default off; activation gated on the blind A/B
+     * per feature-gate-requires-measurement). No-op unless the binary is built
+     * with HU_ENABLE_SELF_MODEL (the log is otherwise a stub) AND there are >=3
+     * recorded turns — so it is doubly safe to leave wired. */
+    {
+        const char *sm_mode = getenv("HU_SELF_MODEL");
+        if (sm_mode && (strcmp(sm_mode, "on") == 0 || strcmp(sm_mode, "shadow") == 0)) {
+            char *smdir = NULL;
+            size_t smdir_len = 0;
+            if (hu_agent_self_model_build_directive(&agent->behavior_log, agent->alloc, &smdir,
+                                                    &smdir_len) == HU_OK &&
+                smdir && smdir_len > 0) {
+                if (strcmp(sm_mode, "on") == 0) {
+                    at_append_owned_directive(agent, smdir, smdir_len, system_prompt,
+                                              system_prompt_len);
+                } else {
+                    hu_log_info("self_model", NULL, "shadow self-observation: %.*s",
+                                (int)smdir_len, smdir);
+                    agent->alloc->free(agent->alloc->ctx, smdir, smdir_len + 1);
+                }
+            }
+        }
+    }
 }
 
 /* Build the per-turn humanness directive context (shared references, curiosity,
