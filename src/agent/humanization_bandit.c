@@ -1,5 +1,6 @@
 #include "human/agent/humanization_bandit.h"
 #include "human/core/log.h"
+#include <stdlib.h>
 #include <string.h>
 
 hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
@@ -62,4 +63,26 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
     }
 
     return config;
+}
+
+bool hu_humanization_apply_bandit_override(hu_contextual_bandit_t *bandit, uint64_t contact_handle,
+                                           hu_humanization_config_t *inout_params) {
+    if (!inout_params)
+        return false;
+
+    /* Check gate: HU_BANDIT_HUMANIZATION env var (default OFF) */
+    const char *gate_env = getenv("HU_BANDIT_HUMANIZATION");
+    bool gate_enabled = gate_env && (gate_env[0] == '1' || strcmp(gate_env, "true") == 0 ||
+                                     strcmp(gate_env, "yes") == 0 || strcmp(gate_env, "on") == 0);
+
+    if (!gate_enabled || !bandit)
+        return false;
+
+    /* Gate is enabled and bandit is non-NULL: apply the decision */
+    hu_humanization_config_t decision =
+        hu_humanization_decide_contact_params(bandit, contact_handle);
+    inout_params->disfluency_frequency = decision.disfluency_frequency;
+    inout_params->backchannel_probability = decision.backchannel_probability;
+
+    return true;
 }
