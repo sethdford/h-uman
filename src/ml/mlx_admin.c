@@ -211,12 +211,16 @@ hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapt
         treat_as_file = S_ISREG(st.st_mode);
     } else {
         /* Path does not exist (weights file already removed, or about to be
-         * written): a '.' extension in the last component (".safetensors",
-         * ".npz", ".bin") means it's a file, so look in the parent dir. A
-         * component with no extension is treated as a directory — it reads
-         * its OWN (possibly absent) config, never a sibling's, so a missing
-         * directory can't pick up a stray config from its parent. */
-        treat_as_file = (strchr(base, '.') != NULL);
+         * written): a known weights-file extension in the last component
+         * (".safetensors", ".npz", ".bin") means it's a file, so look in the
+         * parent dir. A component with no such extension is treated as a
+         * directory — it reads its OWN (possibly absent) config, never a
+         * sibling's, so a missing directory can't pick up a stray config from
+         * its parent. */
+        size_t base_len = strlen(base);
+        treat_as_file = (base_len > 12 && strcmp(base + base_len - 12, ".safetensors") == 0) ||
+                        (base_len > 4 && strcmp(base + base_len - 4, ".npz") == 0) ||
+                        (base_len > 4 && strcmp(base + base_len - 4, ".bin") == 0);
     }
     if (treat_as_file) {
         char *slash = strrchr(dir, '/');

@@ -68,6 +68,7 @@ set -e
 echo "    --- dpo-train tail ---"
 tail -25 "$GOLD_DIR/train.log" | sed 's/^/    /'
 echo "    dpo-train exit code: $TRAIN_RC"
+test "$TRAIN_RC" -eq 0 || { echo "FAIL: dpo-train exited with code $TRAIN_RC"; exit 1; }
 
 echo "==> [3/4] Verifying a real adapter was produced"
 SAFET="$GOLD_ADAPTER/adapters.safetensors"
