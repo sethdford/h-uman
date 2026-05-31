@@ -22,7 +22,8 @@ set -euo pipefail
 # (emotional_residue/moments, mood, emotional_state, self_model, theory_of_mind).
 # Recomputed against the merged tree.
 # Updated 2026-05-29 after opinions aggregate migration (opinions.c): 101 -> 100
-BASELINE=100
+# Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
+BASELINE=99
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

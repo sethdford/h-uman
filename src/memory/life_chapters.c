@@ -2,20 +2,24 @@ typedef int hu_life_chapters_unused_;
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/memory/life_chapters.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/memory.h"
-#include "human/memory/life_chapters.h"
-#include "human/memory/sql_transaction.h"
+#include "human/memory/life_chapter_repo.h"
 #include "human/persona.h"
-#include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
 
+/* DDD Phase 3: SQL + the raw sqlite3 handle now live behind
+ * hu_life_chapter_repo_t (src/memory/repos/life_chapter_repo_sqlite.c). This
+ * file keeps the key_threads JSON (de)serialization and the directive builder,
+ * and depends only on the backend-agnostic repo interface — no <sqlite3.h>. */
+
 static char *key_threads_to_json(hu_allocator_t *alloc, const hu_life_chapter_t *chapter,
-                                size_t *out_len) {
+                                 size_t *out_len) {
     hu_json_value_t *arr = hu_json_array_new(alloc);
     if (!arr)
         return NULL;
@@ -82,124 +86,68 @@ static hu_error_t parse_key_threads(hu_allocator_t *alloc, const char *json, siz
 }
 
 hu_error_t hu_life_chapter_get_active(hu_allocator_t *alloc, hu_memory_t *memory,
-                                     hu_life_chapter_t *out) {
+                                      hu_life_chapter_t *out) {
     if (!alloc || !memory || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
-    sqlite3 *db = hu_sqlite_memory_get_db(memory);
-    if (!db)
-        return HU_ERR_NOT_SUPPORTED;
+    hu_life_chapter_repo_t repo;
+    hu_error_t e = hu_life_chapter_repo_create(memory, alloc, &repo);
+    if (e != HU_OK)
+        return e; /* HU_ERR_NOT_SUPPORTED for non-sqlite, as before */
 
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                                "SELECT theme, mood, started_at, key_threads "
-                                "FROM life_chapters WHERE active=1 "
-                                "ORDER BY started_at DESC LIMIT 1",
-                                -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
+    bool found = false;
+    hu_life_chapter_row_t row = {0};
+    e = repo.vtable->get_active(repo.ctx, alloc, &found, &row);
+    if (e == HU_OK && found) {
+        if (row.theme)
+            snprintf(out->theme, sizeof(out->theme), "%s", row.theme);
+        if (row.mood)
+            snprintf(out->mood, sizeof(out->mood), "%s", row.mood);
+        out->started_at = row.started_at;
+        if (row.key_threads_json)
+            parse_key_threads(alloc, row.key_threads_json, strlen(row.key_threads_json), out);
+    }
+    if (row.theme)
+        hu_str_free(alloc, row.theme);
+    if (row.mood)
+        hu_str_free(alloc, row.mood);
+    if (row.key_threads_json)
+        hu_str_free(alloc, row.key_threads_json);
 
-    rc = sqlite3_step(stmt);
-    if (rc != SQLITE_ROW) {
-        sqlite3_finalize(stmt);
-        return HU_OK;
-    }
-
-    const char *theme = (const char *)sqlite3_column_text(stmt, 0);
-    if (theme) {
-        size_t len = (size_t)sqlite3_column_bytes(stmt, 0);
-        if (len > 255)
-            len = 255;
-        snprintf(out->theme, sizeof(out->theme), "%.*s", (int)len, theme);
-    }
-    const char *mood = (const char *)sqlite3_column_text(stmt, 1);
-    if (mood) {
-        size_t len = (size_t)sqlite3_column_bytes(stmt, 1);
-        if (len > 63)
-            len = 63;
-        snprintf(out->mood, sizeof(out->mood), "%.*s", (int)len, mood);
-    }
-    out->started_at = sqlite3_column_int64(stmt, 2);
-    const char *kt = (const char *)sqlite3_column_text(stmt, 3);
-    if (kt) {
-        size_t kt_len = (size_t)sqlite3_column_bytes(stmt, 3);
-        parse_key_threads(alloc, kt, kt_len, out);
-    }
-
-    sqlite3_finalize(stmt);
-    return HU_OK;
+    repo.vtable->deinit(repo.ctx);
+    return e;
 }
 
 hu_error_t hu_life_chapter_store(hu_allocator_t *alloc, hu_memory_t *memory,
-                                const hu_life_chapter_t *chapter) {
+                                 const hu_life_chapter_t *chapter) {
     if (!alloc || !memory || !chapter)
         return HU_ERR_INVALID_ARGUMENT;
 
-    sqlite3 *db = hu_sqlite_memory_get_db(memory);
-    if (!db)
-        return HU_ERR_NOT_SUPPORTED;
-
-    hu_sql_txn_t txn = {0};
-    if (hu_sql_txn_begin(&txn, db) != HU_OK)
-        return HU_ERR_MEMORY_BACKEND;
-
-    /* Deactivate all previous chapters (rolled back if insert/json fails) */
-    sqlite3_stmt *upd = NULL;
-    int rc = sqlite3_prepare_v2(db, "UPDATE life_chapters SET active=0", -1, &upd, NULL);
-    if (rc != SQLITE_OK) {
-        hu_sql_txn_rollback(&txn);
-        return HU_ERR_MEMORY_BACKEND;
-    }
-    rc = sqlite3_step(upd);
-    sqlite3_finalize(upd);
-    if (rc != SQLITE_DONE) {
-        hu_sql_txn_rollback(&txn);
-        return HU_ERR_MEMORY_BACKEND;
-    }
+    hu_life_chapter_repo_t repo;
+    hu_error_t e = hu_life_chapter_repo_create(memory, alloc, &repo);
+    if (e != HU_OK)
+        return e;
 
     size_t kt_len = 0;
     char *key_threads_json = key_threads_to_json(alloc, chapter, &kt_len);
     if (!key_threads_json && chapter->key_threads_count > 0) {
-        hu_sql_txn_rollback(&txn);
+        repo.vtable->deinit(repo.ctx);
         return HU_ERR_OUT_OF_MEMORY;
     }
     const char *kt = key_threads_json ? key_threads_json : "[]";
-    if (!key_threads_json)
-        kt_len = 2;
 
-    sqlite3_stmt *ins = NULL;
-    rc = sqlite3_prepare_v2(db,
-                            "INSERT INTO life_chapters(theme,mood,started_at,key_threads,active) "
-                            "VALUES(?,?,?,?,1)",
-                            -1, &ins, NULL);
-    if (rc != SQLITE_OK) {
-        if (key_threads_json)
-            alloc->free(alloc->ctx, key_threads_json, kt_len + 1);
-        hu_sql_txn_rollback(&txn);
-        return HU_ERR_MEMORY_BACKEND;
-    }
-    sqlite3_bind_text(ins, 1, chapter->theme[0] ? chapter->theme : "", -1, SQLITE_STATIC);
-    sqlite3_bind_text(ins, 2, chapter->mood[0] ? chapter->mood : "", -1, SQLITE_STATIC);
-    sqlite3_bind_int64(ins, 3, chapter->started_at);
-    sqlite3_bind_text(ins, 4, kt, (int)kt_len, SQLITE_STATIC);
-    rc = sqlite3_step(ins);
-    sqlite3_finalize(ins);
+    e = repo.vtable->store_active(repo.ctx, chapter->theme[0] ? chapter->theme : "",
+                                  chapter->mood[0] ? chapter->mood : "", chapter->started_at, kt);
+
     if (key_threads_json)
         alloc->free(alloc->ctx, key_threads_json, kt_len + 1);
-    if (rc != SQLITE_DONE) {
-        hu_sql_txn_rollback(&txn);
-        return HU_ERR_MEMORY_BACKEND;
-    }
-    if (hu_sql_txn_commit(&txn) != HU_OK) {
-        hu_sql_txn_rollback(&txn);
-        return HU_ERR_MEMORY_BACKEND;
-    }
-    return HU_OK;
+    repo.vtable->deinit(repo.ctx);
+    return e;
 }
 
-char *hu_life_chapter_build_directive(hu_allocator_t *alloc,
-                                     const hu_life_chapter_t *chapter, size_t *out_len) {
+char *hu_life_chapter_build_directive(hu_allocator_t *alloc, const hu_life_chapter_t *chapter,
+                                      size_t *out_len) {
     if (!alloc || !chapter || !out_len)
         return NULL;
     *out_len = 0;
