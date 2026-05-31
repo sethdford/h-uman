@@ -868,6 +868,7 @@ set(HU_CORE_SOURCES
     src/agent/arbitrator.c
     src/agent/salience.c
     src/agent/intent.c
+    src/agent/self_uncertainty.c
     src/agent/planning.c
     src/agent/collab_planning.c
     src/behavior/rel_dynamics.c
@@ -3654,6 +3655,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_sota_features.c
     tests/test_mood.c
     tests/test_intent.c
+    tests/test_self_uncertainty.c
     tests/test_bth_e2e.c
     tests/test_style_tracker.c
     tests/test_theory_of_mind.c

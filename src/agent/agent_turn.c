@@ -5,6 +5,7 @@
 #include "human/agent/humanness.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/intent.h"
+#include "human/agent/self_uncertainty.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -4643,6 +4644,42 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 (void)at_append_tom_directive(agent, agent->memory_session_id,
                                               agent->memory_session_id_len, msg, msg_len,
                                               &system_prompt, &system_prompt_len);
+            }
+
+            /* Calibrated self-uncertainty directive (capability-maturity-map): when
+             * the agent's recent self-assessed confidence is low, nudge the model to
+             * hedge rather than overclaim. Gated by env HU_SELF_UNCERTAINTY: off
+             * (default) | shadow | on; activation gated on the blind A/B per
+             * feature-gate-requires-measurement. */
+            {
+                const char *su_mode = getenv("HU_SELF_UNCERTAINTY");
+                if (su_mode && (strcmp(su_mode, "on") == 0 || strcmp(su_mode, "shadow") == 0)) {
+                    hu_self_uncertainty_t su;
+                    hu_self_uncertainty_assess(
+                        hu_metacog_trajectory_confidence(&agent->infra.metacognition), &su);
+                    if (strcmp(su_mode, "on") == 0) {
+                        char *sdir = NULL;
+                        size_t sdir_len = 0;
+                        if (hu_self_uncertainty_build_directive(agent->alloc, &su, &sdir,
+                                                                &sdir_len) == HU_OK &&
+                            sdir && sdir_len > 0) {
+                            size_t cur = system_prompt_len;
+                            size_t new_len = cur + sdir_len;
+                            char *new_sp = (char *)agent->alloc->realloc(
+                                agent->alloc->ctx, system_prompt, cur + 1, new_len + 1);
+                            if (new_sp) {
+                                memcpy(new_sp + cur, sdir, sdir_len);
+                                new_sp[new_len] = '\0';
+                                system_prompt = new_sp;
+                                system_prompt_len = new_len;
+                            }
+                            agent->alloc->free(agent->alloc->ctx, sdir, sdir_len + 1);
+                        }
+                    } else {
+                        hu_log_info("self_uncertainty", NULL, "shadow confidence=%.2f hedge=%d",
+                                    (double)su.confidence, (int)su.hedge);
+                    }
+                }
             }
 
             /* Intent-aware response-type directive (Tier B port-map,
