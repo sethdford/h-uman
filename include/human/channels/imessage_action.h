@@ -50,6 +50,13 @@ hu_reply_style_scores_t hu_imessage_score_reply_style(const hu_reply_style_facts
 hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *facts,
                                                 uint64_t rng_seed);
 
+/* Should the threaded-intent fallback carry an explicit inline `↩ "quote"`?
+ * True only when a human would actually reference the parent — parent not the
+ * newest inbound, stale parent (>180s), or >=2 pending questions. Fresh /
+ * last / single-thread context returns false so the fallback reads as a
+ * natural plain reply rather than a bot-like quote block. Pure; NULL → false. */
+bool hu_imessage_reply_should_quote_on_fallback(const hu_reply_style_facts_t *facts);
+
 #include <stddef.h>
 
 #include "human/core/error.h"

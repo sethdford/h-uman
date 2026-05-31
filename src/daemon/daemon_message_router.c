@@ -91,7 +91,14 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
          * used for BOTH the (best-effort) reply attempt and the flat fallback,
          * so the quote is present whether the AX reply flat-commits or we fall
          * straight through. Falls back to the plain body if the parent text
-         * can't be looked up or no allocator is available — never a regression. */
+         * can't be looked up or no allocator is available — never a regression.
+         *
+         * BUT only quote when a human actually would. An `↩ "quote"` block on a
+         * reply to the message just received is the single most bot-like tell on
+         * the reply path; humans quote only when context is ambiguous. The
+         * should_quote_on_fallback predicate gates the quote on the same signals
+         * thread_logodds uses (parent not newest / stale / multiple pending Qs).
+         * Fresh-last-single context → no quote, send the natural plain body. */
         const char *send_body = body;
         size_t send_len = body_len;
         char *quoted = NULL;
@@ -101,7 +108,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
          * platforms where the iMessage channel exists (HU_HAS_IMESSAGE). Off
          * that platform there is no iMessage channel to reply to, so the quote
          * is simply skipped and the plain body is sent. */
-        if (agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
+        bool want_quote = hu_imessage_reply_should_quote_on_fallback(&facts);
+        if (want_quote && agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
             char ptext[256];
             size_t plen = 0;
             if (hu_imessage_lookup_message_by_guid(agent->alloc, parent_msg_guid, parent_guid_len,
