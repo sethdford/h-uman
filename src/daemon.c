@@ -379,39 +379,9 @@ bool gov_budget_inited = true;
 /* F27: Classify our response type for comfort pattern learning.
  * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
  * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */
-static void classify_comfort_response_type(const char *response, size_t response_len,
-                                           char *out_type, size_t out_cap) {
-    if (!response || !out_type || out_cap < 8)
-        return;
-    out_type[0] = '\0';
-    if (response_len < 20) {
-        snprintf(out_type, out_cap, "space");
-        return;
-    }
-    char lower[256];
-    size_t copy = response_len < sizeof(lower) - 1 ? response_len : sizeof(lower) - 1;
-    for (size_t i = 0; i < copy; i++) {
-        char c = response[i];
-        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
-    }
-    lower[copy] = '\0';
-    if (strstr(lower, "haha") || strstr(lower, "lol") || strstr(lower, "hah ") ||
-        strstr(lower, " joke") || strstr(lower, "funny")) {
-        snprintf(out_type, out_cap, "distraction");
-        return;
-    }
-    if (strstr(lower, "you should") || strstr(lower, "try this") || strstr(lower, "maybe ") ||
-        strstr(lower, "have you tried") || strstr(lower, "i'd suggest")) {
-        snprintf(out_type, out_cap, "advice");
-        return;
-    }
-    if (strstr(lower, "sorry") || strstr(lower, "i understand") || strstr(lower, "that sucks") ||
-        strstr(lower, "i hear you") || strstr(lower, "that must be")) {
-        snprintf(out_type, out_cap, "empathy");
-        return;
-    }
-    snprintf(out_type, out_cap, "empathy");
-}
+/* classify_comfort_response_type: deduped to hu_daemon_classify_comfort_response_type
+ * in src/daemon/daemon_director.c (declared in human/daemon/director.h). E2 chip 1 —
+ * removed the identical static copy; call sites use the public version. */
 
 #ifdef HU_ENABLE_SQLITE
 /* F23: Extract significant topic keywords from user text and record baselines.
@@ -12232,8 +12202,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                          strcmp(emo_pend.dominant_emotion, "worried") == 0));
                     if (should_pend && key_len < sizeof(comfort_pending[0].key)) {
                         char resp_type[32];
-                        classify_comfort_response_type(response, response_len, resp_type,
-                                                       sizeof(resp_type));
+                        hu_daemon_classify_comfort_response_type(response, response_len, resp_type,
+                                                                 sizeof(resp_type));
                         const char *emotion_str =
                             emo_pend.dominant_emotion && emo_pend.dominant_emotion[0]
                                 ? emo_pend.dominant_emotion
