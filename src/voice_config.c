@@ -18,6 +18,7 @@ hu_error_t hu_voice_config_from_settings(const hu_config_t *config, hu_voice_con
     out->tts_model = vs->tts_model;
     out->tts_voice = vs->tts_voice;
     out->language = vs->stt_language;
+    out->privacy_mode = vs->privacy_mode;
 
     const char *ckey = hu_config_get_provider_key(config, "cartesia");
     if (ckey && ckey[0]) {

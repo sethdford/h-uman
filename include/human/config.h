@@ -735,6 +735,8 @@ typedef struct hu_voice_settings {
     char *vertex_access_token;
     char *vertex_region;
     char *vertex_project;
+    bool privacy_mode; /* true = on-device only: STT+TTS never contact Cartesia/cloud (ADR
+                          2026-05-31) */
 } hu_voice_settings_t;
 
 typedef struct hu_identity_config {
