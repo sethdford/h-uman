@@ -37,7 +37,9 @@ void run_example_tests(void) {
 ./build/human_tests --help                   # show all options
 ```
 
-Use `scripts/what-to-test.sh <changed-files>` to auto-detect relevant suites for changed files.
+Use `scripts/what-to-test.sh <changed-files>` to auto-detect relevant suites for changed files (maps by directory).
+
+For **header** changes, `scripts/predict-tests.sh <changed-files>` is more precise: it traces the reverse `#include` graph and selects the suites of the test files that actually reach the changed header (e.g. a leaf channel header → just the few suites that include it, not the whole `Channel` group). For a hot/central header it prints "RUN THE FULL SUITE" rather than a useless 200-suite filter. Advisory only — CI still runs the full suite. Smoke test: `bash scripts/test-predict-tests.sh`.
 
 ## Adding Tests
 
