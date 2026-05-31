@@ -86,7 +86,7 @@ validated against a real PR's check accounting, not edited blind.
 | Auto-triage red `main` → tracked issue | `ci-autotriage.yml` (`workflow_run` on Human CI / M3 smoke / RL Nightly) opens/updates ONE deduped issue: failed-run URL, commit range since last-green, ready-to-run bisect harness | `regression-hunter` agent, `ci-queue-triage.md` | **SHIPPED** |
 | Systemic-vs-per-PR triage | cluster failures by signature; O(root-causes) not O(PRs) | `/diagnose-ci-queue`, `ci-queue-triage.md` | future PR |
 | Flaky-test quarantine + auto-retry, tracked | detect non-determinism in-framework | `flake-detector` agent | future PR (net-new framework hook) |
-| Predictive test selection | ML-rank tests by failure probability | net-new | future PR |
+| Predictive test selection | `predict-tests.sh`: header-level reverse-`#include` reachability → the suites a changed header actually reaches (precise where `what-to-test.sh`'s directory map is coarse); caps to "full suite" for hot/central headers | net-new | **SHIPPED** (deterministic; ML failure-probability ranking still needs a failure-history corpus — future) |
 | Generated stats are generated, not hand-edited | extend `check-metrics-drift.sh`: lines-of-C gated build-free (doc-fleet + pre-push); new `--binary` mode gates the `~NNNNN KB` claims in the `release-size` job. Fixed the live drift: binary `~23209 KB`→`~2468 KB` (9.4x), LOC `~476K`→`~430K`. | `repo-metrics.sh`, `update-stats.sh` | **SHIPPED** |
 
 ### Phase 5 shipped here — design notes
