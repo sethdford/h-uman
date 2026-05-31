@@ -190,6 +190,7 @@ jobs:
             python3 scripts/eval_blinded_ab.py --gate --gate-dry-run
           fi
       - name: Show gate verdict
+        if: always()
         run: |
           python3 -c "import json; d=json.load(open('docs/evaluation/blind_ab_gate.json')); print('effective_verdict=', d['effective_verdict'], 'proxy.mode=', d['proxy']['mode'])"
       - name: Upload gate report
