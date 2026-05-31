@@ -411,6 +411,7 @@ void run_outbound_crosstalk_tests(void);
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
 void run_life_chapter_repo_tests(void);
+void run_social_graph_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
@@ -1380,6 +1381,7 @@ int main(int argc, char **argv) {
     run_boundary_repo_tests();
     run_opinions_repo_tests();
     run_life_chapter_repo_tests();
+    run_social_graph_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
     run_emotional_moments_repo_tests();
