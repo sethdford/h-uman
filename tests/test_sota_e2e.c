@@ -248,9 +248,12 @@ static void e2e_all_systems_feedback_loop(void) {
     /* Verify the full feedback loop: strategy weight should increase */
     HU_ASSERT(arag.strategy_weights[strategy] > 0.9);
 
-    size_t pair_count = 0;
+    /* (2026-05-31) Feedback routes to feedback_signals, NOT dpo_pairs — a +/-
+     * reaction has no counterpart, so dpo_pairs stays empty here. The signal is
+     * preserved for reward-model / KTO training. */
+    size_t pair_count = 99;
     hu_dpo_pair_count(&dpo, &pair_count);
-    HU_ASSERT_EQ((int)pair_count, 1);
+    HU_ASSERT_EQ((int)pair_count, 0);
 
     hu_prm_result_free(&alloc, &prm_result);
     hu_dpo_collector_deinit(&dpo);
