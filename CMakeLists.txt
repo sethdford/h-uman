@@ -3657,6 +3657,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_bth_e2e.c
     tests/test_style_tracker.c
     tests/test_theory_of_mind.c
+    tests/test_tom_wiring.c
     tests/test_anticipatory.c
     tests/test_visual_content.c
     tests/test_media_gen.c
