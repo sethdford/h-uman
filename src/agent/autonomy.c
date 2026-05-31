@@ -161,10 +161,15 @@ hu_error_t hu_autonomy_seed_intrinsic_goal(struct hu_goal_engine *engine, const 
     if (!engine)
         return HU_ERR_INVALID_ARGUMENT;
 #ifdef HU_ENABLE_SQLITE
-    /* Only seed when the contact's agenda is empty — never pile up. */
+    /* Only seed when the contact's agenda is empty — never pile up. Fail SAFE:
+     * if we cannot read the current agenda (list errored), do NOT seed — skipping
+     * a self-initiated goal is strictly better than violating the never-pile-up
+     * invariant by creating one blind to what's already there. */
     hu_goal_t *active = NULL;
     size_t active_n = 0;
-    if (hu_goal_list_active(engine, contact_id, contact_id_len, &active, &active_n) == HU_OK) {
+    if (hu_goal_list_active(engine, contact_id, contact_id_len, &active, &active_n) != HU_OK)
+        return HU_OK;
+    {
         size_t had = active_n;
         if (active)
             hu_goal_free(engine->alloc, active, active_n);
