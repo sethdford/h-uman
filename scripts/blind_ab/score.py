@@ -203,6 +203,8 @@ def main():
     ap.add_argument("sheets", nargs="*")
     ap.add_argument("--key")
     ap.add_argument("--json-out", help="Write JSON output to this file")
+    ap.add_argument("--emit-gate", default=None,
+                    help="Write the human half of the blind_ab gate JSON to this path")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -222,6 +224,18 @@ def main():
     if a.json_out:
         with open(a.json_out, 'w') as f:
             json.dump(agg, f, indent=2)
+    if a.emit_gate:
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        import blind_ab_gate as _gate
+        _gate.write_human_half(a.emit_gate, {
+            "detection": round(agg["detect"], 4),
+            "ci_lo": round(agg["ci_lo"], 4),
+            "ci_hi": round(agg["ci_hi"], 4),
+            "n": agg["n"],
+            "verdict": verdict,
+        })
+        print(f"\nWrote human gate half ({verdict}) to {a.emit_gate}")
     sys.exit(0 if verdict == "PASS" else 1)
 
 

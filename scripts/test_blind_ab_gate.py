@@ -90,6 +90,30 @@ def test_eval_gate_synthetic_is_advisory_and_exits_zero():
         assert data["effective_verdict"] == "ADVISORY"
 
 
+def test_score_emit_gate_writes_human_half():
+    import subprocess, csv
+    here = os.path.dirname(os.path.abspath(__file__))
+    score = os.path.join(here, "blind_ab", "score.py")
+    with tempfile.TemporaryDirectory() as d:
+        gate = os.path.join(d, "gate.json")
+        sheet = os.path.join(d, "sheet.csv")
+        keyf = os.path.join(d, "key.json")
+        with open(sheet, "w", newline="") as f:
+            w = csv.writer(f); w.writerow(["id", "choice", "confidence"])
+            # Create data: 2 correct, 2 incorrect -> 0.5 detection (PASS)
+            for i in range(4):
+                choice = "A" if i < 2 else "B"
+                w.writerow([str(i), choice, "4"])
+        json.dump({str(i): "A" for i in range(4)}, open(keyf, "w"))
+        r = subprocess.run(
+            ["python3", score, sheet, "--key", keyf, "--emit-gate", gate],
+            capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, f"returncode={r.returncode}, stderr={r.stderr}"
+        data = json.load(open(gate))
+        assert data["human"]["verdict"] in ("PASS", "FAIL")
+        assert data["human"]["n"] == 4
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
