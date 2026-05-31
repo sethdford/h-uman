@@ -214,18 +214,24 @@ def test_full_loop_with_simulate_train(tmpdir: Path):
             accepted_phs == EXPECTED_ACCEPTED_PHS,
             f"got {accepted_phs}")
 
-        # 2. Adapter artifact should exist (simulate-train produced it).
-        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("*.safetensors"))
+        # 2. Adapter artifact should exist (simulate-train produced it). The driver
+        #    writes a directory `m3-driver-<stamp>/adapters.safetensors` (the
+        #    training_loop.py layout) and swaps the DIRECTORY path — so glob for the
+        #    adapter dir, then verify the checkpoint lives inside it.
+        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("m3-driver-*"))
         _ok("exactly 1 adapter written", len(adapters) == 1,
             f"got {[str(p) for p in adapters]}")
+        _ok("adapter dir holds adapters.safetensors",
+            bool(adapters) and (adapters[0] / "adapters.safetensors").is_file(),
+            f"contents={[str(p) for p in adapters[0].iterdir()] if adapters else None}")
 
-        # 3. MLX swap was called with the right path.
+        # 3. MLX swap was called with the right path (the adapter directory).
         _ok("MLX server got 1 swap request", len(FakeMLX.SWAPS) == 1,
             f"got {FakeMLX.SWAPS}")
         if FakeMLX.SWAPS:
             swapped_path = FakeMLX.SWAPS[0].get("adapter_path", "")
-            _ok("swap path matches adapter file",
-                adapters and swapped_path == str(adapters[0]),
+            _ok("swap path matches adapter directory",
+                bool(adapters) and swapped_path == str(adapters[0]),
                 f"swap={swapped_path!r} adapter={adapters[0] if adapters else None}")
 
         # 4. State file should have advanced the watermark.
@@ -317,10 +323,12 @@ def test_mlx_offline_is_soft_failure(tmpdir: Path):
             "skipped/failed" in result.stdout or "unreachable" in result.stdout,
             f"stdout={result.stdout!r}")
 
-        # Adapter still gets written.
-        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("*.safetensors"))
+        # Adapter still gets written (directory layout — see above).
+        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("m3-driver-*"))
         _ok("adapter still written when MLX offline",
-            len(adapters) == 1, f"got {[str(p) for p in adapters]}")
+            len(adapters) == 1
+            and (adapters[0] / "adapters.safetensors").is_file(),
+            f"got {[str(p) for p in adapters]}")
     finally:
         gateway_srv.shutdown()
 

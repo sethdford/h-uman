@@ -593,15 +593,19 @@ def prune_old_adapters(adapter_dir: Path, keep: int = ADAPTER_RETENTION_LIMIT) -
         return 0
     pruneable = []
     for p in adapter_dir.iterdir():
-        if not p.is_file():
-            continue
+        # Driver-produced m3-driver-<stamp> adapters are now DIRECTORIES (each
+        # holds adapters.safetensors); candidate-real.bin remains a file. Match
+        # both kinds — the prior `is_file()` skip meant the new dirs never rotated.
         if p.name.startswith("m3-driver-") or p.name == "candidate-real.bin":
             pruneable.append(p)
     pruneable.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     deleted = 0
     for old in pruneable[keep:]:
         try:
-            old.unlink()
+            if old.is_dir():
+                shutil.rmtree(old)
+            else:
+                old.unlink()
             deleted += 1
         except OSError:
             pass

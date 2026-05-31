@@ -101,7 +101,8 @@ def convert_to_mlx_lm_jsonl(src: Path, dst: Path, src_format: str) -> int:
                           `{"prompt": "...", "chosen": "...", "rejected": "..."}`
                           for DPO (matching our alpaca-dpo).
 
-    Alpaca-DPO passes through unchanged.
+    Alpaca-DPO is SFT-flattened onto the CHOSEN completion (mlx_lm
+    0.21+ dropped the dedicated DPO trainer; see the inline note below).
     Chat-completion logs concatenate (prompt, response) into the
     `text` field with the chat template's role markers."""
     n = 0
