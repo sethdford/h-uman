@@ -1213,6 +1213,7 @@ set(HU_CORE_SOURCES
     src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
+    src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
