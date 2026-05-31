@@ -11,6 +11,7 @@
 #include "human/memory.h"
 #include "human/memory/sql_common.h"
 #include "test_framework.h"
+#include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,7 +36,9 @@ static void test_quarantine_moves_corrupt_file_aside(void) {
     char path[256];
     snprintf(path, sizeof(path), "/tmp/hu_sqlite_integrity_q_%d.db", (int)getpid());
     remove(path);
-    FILE *f = fopen(path, "wb");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    HU_ASSERT_TRUE(fd >= 0);
+    FILE *f = fdopen(fd, "wb");
     HU_ASSERT_NOT_NULL(f);
     fwrite("not a database", 1, 14, f);
     fclose(f);
@@ -59,7 +62,9 @@ static void test_create_self_heals_corrupt_db(void) {
     remove(path);
 
     /* Write garbage where a valid DB should be. */
-    FILE *f = fopen(path, "wb");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    HU_ASSERT_TRUE(fd >= 0);
+    FILE *f = fdopen(fd, "wb");
     HU_ASSERT_NOT_NULL(f);
     for (int i = 0; i < 256; i++)
         fputc(0xAB, f);
