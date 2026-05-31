@@ -521,7 +521,7 @@ find_package(Threads QUIET)
 # Core library sources (Phase 4-6, 11: agent, providers, channels, tools, memory, tunnel, gateway, runtime)
 # Channels and memory engines are conditionally added above
 set(HU_CORE_SOURCES
-    src/platform.c
+    src/app/platform.c
     src/platform/calendar_macos.c
     src/peripherals/terminal.c
     src/util/util.c
@@ -589,7 +589,7 @@ set(HU_CORE_SOURCES
     src/config/config_parse_providers.c
     src/config/config_parse_agent.c
     src/config/config_parse_behavior.c
-    src/capabilities.c
+    src/app/capabilities.c
     src/channel_catalog.c
     src/channel_adapters.c
     src/doctor/doctor.c
@@ -716,8 +716,8 @@ set(HU_CORE_SOURCES
     src/runtime/docker.c
     src/runtime/gce.c
     src/runtime/factory.c
-    src/hook.c
-    src/hook_pipeline.c
+    src/security/hook.c
+    src/security/hook_pipeline.c
     src/agent/action_preview.c
     src/agent/agent.c
     src/agent/agent_plan.c
@@ -1224,13 +1224,13 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
-    src/cron.c
-    src/crontab.c
+    src/daemon/cron.c
+    src/daemon/crontab.c
     src/webhook.c
-    src/migration.c
-    src/version.c
-    src/cli_commands.c
-    src/cli_ctl.c
+    src/memory/migration.c
+    src/app/version.c
+    src/app/cli_commands.c
+    src/app/cli_ctl.c
     src/eval/cli_evaluation.c
     src/observability/cost.c
     src/observability/usage.c
@@ -1676,7 +1676,7 @@ endif()
 
 # Update check/apply
 if(HU_ENABLE_UPDATE)
-    list(APPEND HU_CORE_SOURCES src/update.c)
+    list(APPEND HU_CORE_SOURCES src/app/update.c)
 endif()
 
 # ML training subsystem (BPE tokenizer, dataloader, experiment loop, GPT model)
@@ -2578,7 +2578,7 @@ endif()
 set_source_files_properties(src/onboard/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
 
 # --- Main executable ---
-add_executable(human src/main.c src/bootstrap.c)
+add_executable(human src/app/main.c src/app/bootstrap.c)
 target_link_libraries(human human_core)
 
 # US-8.3 per-target: Mach-O LC_UUID embeds host-derived randomness; zero
@@ -2891,7 +2891,7 @@ if(NOT HU_ENABLE_PUSH)
     list(APPEND HU_TEST_EXTRA_MODULES src/gateway/push.c)
 endif()
 if(NOT HU_ENABLE_UPDATE)
-    list(APPEND HU_TEST_EXTRA_MODULES src/update.c)
+    list(APPEND HU_TEST_EXTRA_MODULES src/app/update.c)
 endif()
 if(NOT HU_ENABLE_CRON)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -4105,7 +4105,7 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
 
-add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
+add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
     ${HU_ROOT}/src/gateway
