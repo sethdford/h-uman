@@ -87,7 +87,7 @@ validated against a real PR's check accounting, not edited blind.
 | Systemic-vs-per-PR triage | cluster failures by signature; O(root-causes) not O(PRs) | `/diagnose-ci-queue`, `ci-queue-triage.md` | future PR |
 | Flaky-test quarantine + auto-retry, tracked | `HU_RUN_TEST_FLAKY` in `test_framework.h`: retries a known-flaky test, recovers on pass, still FAILS if all attempts fail; call sites = the quarantine registry; `HU_TEST_FLAKY_RETRIES` tunable | `flake-detector` agent | **SHIPPED** |
 | Predictive test selection | ML-rank tests by failure probability | net-new | future PR |
-| Generated stats are generated, not hand-edited | a CI check/commit regenerates binary-size/test-count lines in README/CLAUDE.md/AGENTS.md | (kills the `2775` vs `23209 KB` drift) | future PR |
+| Generated stats are generated, not hand-edited | extend `check-metrics-drift.sh`: lines-of-C gated build-free (doc-fleet + pre-push); new `--binary` mode gates the `~NNNNN KB` claims in the `release-size` job. Fixed the live drift: binary `~23209 KB`→`~2468 KB` (9.4x), LOC `~476K`→`~430K`. | `repo-metrics.sh`, `update-stats.sh` | **SHIPPED** |
 
 ### Phase 5 shipped here — design notes
 

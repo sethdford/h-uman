@@ -82,8 +82,13 @@ def test_detect_format_missing_file():
         b.detect_format(Path("/tmp/nonexistent_e2_test.jsonl")) == "unknown")
 
 
-def test_convert_alpaca_dpo_pass_through():
-    print("\n--- test_convert_alpaca_dpo_pass_through ---")
+def test_convert_alpaca_dpo_sft_flattens_to_chosen():
+    """mlx_lm 0.21+ dropped the dedicated DPO trainer; `lora` only does
+    SFT against `{"text":}` records. So the alpaca-dpo converter
+    SFT-flattens each pair onto the CHOSEN completion wrapped in the
+    chat template, and DROPS the rejected side. This pins that contract
+    (NOT the old pass-through shape, which mlx_lm's lora CLI rejects)."""
+    print("\n--- test_convert_alpaca_dpo_sft_flattens_to_chosen ---")
     with tempfile.TemporaryDirectory() as d:
         src = Path(d) / "src.jsonl"
         dst = Path(d) / "dst.jsonl"
@@ -95,8 +100,14 @@ def test_convert_alpaca_dpo_pass_through():
         _ok("converted 2 records", n == 2)
         lines = dst.read_text().splitlines()
         rec0 = json.loads(lines[0])
-        _ok("preserves prompt/chosen/rejected",
-            rec0.get("chosen") == "hey" and rec0.get("rejected") == "no")
+        # SFT shape: single "text" field, no top-level chosen/rejected.
+        _ok("emits mlx-lm SFT 'text' field", "text" in rec0)
+        _ok("does NOT pass through chosen/rejected keys",
+            "chosen" not in rec0 and "rejected" not in rec0)
+        _ok("text embeds prompt + chosen",
+            "hi" in rec0["text"] and "hey" in rec0["text"])
+        _ok("text drops the rejected side",
+            "no" not in rec0["text"])
 
 
 def test_convert_chat_log_wraps_in_template():
@@ -145,7 +156,7 @@ def main():
     test_detect_format_chat_log()
     test_detect_format_unknown()
     test_detect_format_missing_file()
-    test_convert_alpaca_dpo_pass_through()
+    test_convert_alpaca_dpo_sft_flattens_to_chosen()
     test_convert_chat_log_wraps_in_template()
     test_write_stub_adapter_parseable()
     test_have_mlx_lm_returns_bool()
