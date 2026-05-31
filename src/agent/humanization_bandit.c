@@ -10,8 +10,8 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
 
     if (!bandit || contact_handle == 0) {
         /* No bandit or invalid contact → return conservative defaults */
-        config.disfluency_frequency = 0.05;
-        config.backchannel_probability = 0.10;
+        config.disfluency_frequency = 0.05f;
+        config.backchannel_probability = 0.10f;
         return config;
     }
 
@@ -20,8 +20,8 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
     hu_error_t err = hu_contextual_bandit_get_arm(bandit, contact_handle, &arm);
     if (err != HU_OK) {
         /* Arm doesn't exist or error; default to conservative */
-        config.disfluency_frequency = 0.05;
-        config.backchannel_probability = 0.10;
+        config.disfluency_frequency = 0.05f;
+        config.backchannel_probability = 0.10f;
         return config;
     }
 
@@ -29,8 +29,8 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
      * return conservative defaults (safe). Else sample and decide. */
     if (arm.alpha == 1.0 && arm.beta == 1.0 && arm.updates == 0) {
         /* New contact; default to conservative (safe) */
-        config.disfluency_frequency = 0.05;
-        config.backchannel_probability = 0.10;
+        config.disfluency_frequency = 0.05f;
+        config.backchannel_probability = 0.10f;
         return config;
     }
 
@@ -50,16 +50,16 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
     /* Classify based on theta threshold */
     if (theta > 0.65) {
         /* Aggressive humanization */
-        config.disfluency_frequency = 0.25;
-        config.backchannel_probability = 0.45;
+        config.disfluency_frequency = 0.25f;
+        config.backchannel_probability = 0.45f;
     } else if (theta > 0.35) {
         /* Moderate humanization */
-        config.disfluency_frequency = 0.15;
-        config.backchannel_probability = 0.30;
+        config.disfluency_frequency = 0.15f;
+        config.backchannel_probability = 0.30f;
     } else {
         /* Conservative (default) */
-        config.disfluency_frequency = 0.05;
-        config.backchannel_probability = 0.10;
+        config.disfluency_frequency = 0.05f;
+        config.backchannel_probability = 0.10f;
     }
 
     return config;
