@@ -1,5 +1,5 @@
-#include "human/voice.h"
 #include "human/config.h"
+#include "human/voice.h"
 #include <string.h>
 
 hu_error_t hu_voice_config_from_settings(const hu_config_t *config, hu_voice_config_t *out) {
@@ -17,6 +17,7 @@ hu_error_t hu_voice_config_from_settings(const hu_config_t *config, hu_voice_con
     out->stt_model = vs->stt_model;
     out->tts_model = vs->tts_model;
     out->tts_voice = vs->tts_voice;
+    out->language = vs->stt_language;
 
     const char *ckey = hu_config_get_provider_key(config, "cartesia");
     if (ckey && ckey[0]) {
