@@ -1,5 +1,5 @@
 #include "human/agent/graph_grounding.h"
-#include "human/memory.h"
+#include "human/agent/world_model_bridge.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,9 +26,9 @@ hu_error_t hu_graph_ground_load(hu_memory_loader_t *loader, const char *contact_
     if (max_chars == 0)
         max_chars = 600;
 #ifdef HU_ENABLE_SQLITE
-    sqlite3 *db = loader->memory ? hu_sqlite_memory_get_db(loader->memory) : NULL;
+    sqlite3 *db = loader->facade ? hu_w7_facade_graph_db(loader->facade) : NULL;
     if (!db)
-        return HU_OK;
+        return HU_OK; /* fail-open: no graph wired */
     sqlite3_stmt *st = NULL;
     const char *sql = "SELECT summary_text FROM community_summaries WHERE contact_id = ?1 "
                       "ORDER BY (entity_count + edge_count) DESC, generated_at DESC LIMIT 3";

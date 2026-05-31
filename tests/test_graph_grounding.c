@@ -1,6 +1,6 @@
 #include "human/agent/graph_grounding.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
-#include "human/memory.h"
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -30,12 +30,16 @@ static const char *seed_rows_sql = "INSERT INTO community_summaries (contact_id,
 
 static void test_graph_ground_load_returns_contact_summaries(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    seed_run(db, seed_schema_sql);
-    seed_run(db, seed_rows_sql);
+    hu_graph_t *graph = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, ":memory:", strlen(":memory:"), &graph), HU_OK);
+    sqlite3 *gdb = hu_graph_sqlite_connection(graph);
+    seed_run(gdb, seed_schema_sql);
+    seed_run(gdb, seed_rows_sql);
+    hu_w7_facade_t *facade = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(graph, &alloc, &facade), HU_OK);
     hu_memory_loader_t loader;
-    hu_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
+    hu_memory_loader_init(&loader, &alloc, NULL, NULL, 10, 4000);
+    hu_memory_loader_set_facade(&loader, facade);
     char *out = NULL;
     size_t out_len = 0;
     HU_ASSERT_EQ(hu_graph_ground_load(&loader, "alice", 5, 0, &out, &out_len), HU_OK);
@@ -45,20 +49,26 @@ static void test_graph_ground_load_returns_contact_summaries(void) {
     HU_ASSERT_TRUE(strstr(out, "Should not appear") == NULL);
     HU_ASSERT_TRUE(strstr(out, "Climbing") < strstr(out, "short bursts"));
     alloc.free(alloc.ctx, out, out_len + 1);
-    mem.vtable->deinit(mem.ctx);
+    hu_w7_facade_close(facade, &alloc);
+    hu_graph_close(graph, &alloc);
 }
 
 static void test_graph_ground_load_empty_is_failopen(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_graph_t *graph = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, ":memory:", strlen(":memory:"), &graph), HU_OK);
+    hu_w7_facade_t *facade = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(graph, &alloc, &facade), HU_OK);
     hu_memory_loader_t loader;
-    hu_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
+    hu_memory_loader_init(&loader, &alloc, NULL, NULL, 10, 4000);
+    hu_memory_loader_set_facade(&loader, facade);
     char *out = (char *)0x1;
     size_t out_len = 99;
     HU_ASSERT_EQ(hu_graph_ground_load(&loader, "nobody", 6, 0, &out, &out_len), HU_OK);
     HU_ASSERT_TRUE(out == NULL);
     HU_ASSERT_EQ((int)out_len, 0);
-    mem.vtable->deinit(mem.ctx);
+    hu_w7_facade_close(facade, &alloc);
+    hu_graph_close(graph, &alloc);
 }
 #endif
 

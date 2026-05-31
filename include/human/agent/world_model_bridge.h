@@ -86,6 +86,10 @@ void hu_w7_facade_close(hu_w7_facade_t *facade, hu_allocator_t *alloc);
  * Valid until `hu_w7_facade_close`. */
 hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade);
 
+/* Returns the SQLite connection backing the facade's knowledge graph
+ * (where autodream writes community_summaries), or NULL. */
+struct sqlite3 *hu_w7_facade_graph_db(hu_w7_facade_t *facade);
+
 /* Render the cached world model for `contact_id` into a prompt-ready text
  * block. Returns HU_OK with `*out_text == NULL`, `*out_len == 0` when there
  * is no information worth surfacing -- callers should treat that as "no

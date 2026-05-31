@@ -1,16 +1,16 @@
 # Human — Project Status
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 ## Summary
 
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **1,093**              |
-| Lines of C/H/ASM code          | **~473K**              |
+| Lines of C/H/ASM code          | **~476K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **13,172/13,172 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~23123 KB**           |
+| Tests passing                  | **13,225/13,225 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **~23209 KB**           |
 | Peak RSS (test suite)          | **~6.0 MB**            |
 
 ## Channels — Honest Status
