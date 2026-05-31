@@ -25,7 +25,7 @@ framing is **imprecise**, and the corrected picture narrows the work substantial
   to the local MLX server. Streaming path: `src/agent/agent_stream.c:490` (retrieval) →
   `:1187` (config) → `:1256` (`hu_prompt_build_system`) → `:1575` (`stream_chat`). Non-stream
   mirror: `src/agent/agent_turn.c:1461`.
-- **The actual graph layer is computed and then discarded.** `src/agent/autodream.c` builds
+- **The actual graph layer is computed and then discarded.** `src/agent/simulation/autodream.c` builds
   per-contact `community_summaries` (entities + relationships + community detection — the
   PersonaAgent / Microsoft-GraphRAG pattern) on a schedule, but
   `hu_autodream_read_community_summary` is called **only inside autodream.c**. Nothing in the
@@ -48,7 +48,7 @@ missing.
 - **Summary read needs no new handle.** The loader reaches the SQLite db via
   `hu_sqlite_memory_get_db` (already used in its strategy-learner block). `community_summaries`
   is keyed by `contact_id` with columns `community_id, summary_text, entity_count, edge_count,
-  generated_at, schema_version` (`src/agent/autodream.c:55`). A single
+  generated_at, schema_version` (`src/agent/simulation/autodream.c:55`). A single
   `SELECT … WHERE contact_id=? ORDER BY (entity_count+edge_count) DESC LIMIT N` fetches them.
 - **A real prompt-budget system exists.** `hu_prompt_budget` with per-field DEAD-field
   trimming and a `field_allowlist` that keeps `memory_context`

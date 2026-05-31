@@ -55,6 +55,13 @@ static void test_register_then_handle_event_records_dpo_pair(void) {
     hu_reaction_handler_register_assistant_message_for_test(
         "imessage", "chat_A", "msg_1", "How are you?", "Doing great, thanks!", "");
 
+    /* First register an outbound to production_outcomes */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", strlen("imessage"), "chat_A",
+                                        strlen("chat_A"), "msg_1", strlen("msg_1"), "How are you?",
+                                        strlen("How are you?"), "Doing great, thanks!",
+                                        strlen("Doing great, thanks!"), 0.8, NULL, 0),
+                 HU_OK);
+
     hu_reaction_event_t e = {.channel_id = "imessage",
                              .target_thread_id = "chat_A",
                              .target_message_ref = "msg_1",
@@ -62,9 +69,17 @@ static void test_register_then_handle_event_records_dpo_pair(void) {
                              .polarity = HU_REACTION_POSITIVE};
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
 
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
-    HU_ASSERT_EQ(n, 1);
+    /* After the fix, reactions update production_outcomes, not dpo_pairs directly.
+     * Verify production_outcomes was updated with the tapback polarity. */
+    sqlite3_stmt *check = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT tapback_polarity FROM production_outcomes WHERE message_ref='msg_1'",
+                     -1, &check, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(check), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(check, 0), 1); /* positive tapback */
+    sqlite3_finalize(check);
 
     teardown(db, &col);
 }
@@ -80,6 +95,15 @@ static void test_register_two_distinct_keys_both_retrievable(void) {
     hu_reaction_handler_register_assistant_message_for_test("slack", "C_Y", "msg_b", "Q2", "R2",
                                                             "");
 
+    /* Register outbounds to production_outcomes */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", strlen("imessage"), "chat_X",
+                                        strlen("chat_X"), "msg_a", strlen("msg_a"), "Q1", 2, "R1",
+                                        2, 0.8, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "slack", strlen("slack"), "C_Y", strlen("C_Y"),
+                                        "msg_b", strlen("msg_b"), "Q2", 2, "R2", 2, 0.8, NULL, 0),
+                 HU_OK);
+
     hu_reaction_event_t e1 = {.channel_id = "imessage",
                               .target_thread_id = "chat_X",
                               .target_message_ref = "msg_a",
@@ -94,9 +118,15 @@ static void test_register_two_distinct_keys_both_retrievable(void) {
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e1), HU_OK);
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e2), HU_OK);
 
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
-    HU_ASSERT_EQ(n, 2);
+    /* Verify both production_outcomes rows were updated with tapback polarity */
+    sqlite3_stmt *check = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db, "SELECT COUNT(*) FROM production_outcomes WHERE tapback_polarity = 1", -1,
+                     &check, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(check), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(check, 0), 2);
+    sqlite3_finalize(check);
 
     teardown(db, &col);
 }
@@ -116,6 +146,13 @@ static void test_register_same_key_twice_upserts_latest_wins(void) {
     hu_reaction_handler_register_assistant_message_for_test(
         "imessage", "chat_dup", "msg_dup", "Updated prompt", "Updated response", "");
 
+    /* First record outbound to production_outcomes */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(
+                     &col, "imessage", strlen("imessage"), "chat_dup", strlen("chat_dup"),
+                     "msg_dup", strlen("msg_dup"), "Updated prompt", strlen("Updated prompt"),
+                     "Updated response", strlen("Updated response"), 0.8, NULL, 0),
+                 HU_OK);
+
     hu_reaction_event_t e = {.channel_id = "imessage",
                              .target_thread_id = "chat_dup",
                              .target_message_ref = "msg_dup",
@@ -123,20 +160,26 @@ static void test_register_same_key_twice_upserts_latest_wins(void) {
                              .polarity = HU_REACTION_POSITIVE};
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
 
-    /* Verify the LATEST values landed in the DPO row */
+    /* Verify the reaction updated production_outcomes with the tapback polarity */
     sqlite3_stmt *stmt = NULL;
-    HU_ASSERT_EQ(
-        sqlite3_prepare_v2(db, "SELECT prompt, chosen FROM dpo_pairs LIMIT 1", -1, &stmt, NULL),
-        SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT tapback_polarity FROM production_outcomes WHERE message_ref='msg_dup'",
+                     -1, &stmt, NULL),
+                 SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "Updated prompt");
-    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "Updated response");
+    HU_ASSERT_EQ(sqlite3_column_int(stmt, 0), 1);
     sqlite3_finalize(stmt);
 
-    /* And only ONE row (no duplicate) */
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
-    HU_ASSERT_EQ(n, 1);
+    /* Verify only ONE production_outcomes row (upsert semantics) */
+    sqlite3_stmt *count_stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db, "SELECT COUNT(*) FROM production_outcomes WHERE message_ref='msg_dup'", -1,
+                     &count_stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(count_stmt), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(count_stmt, 0), 1);
+    sqlite3_finalize(count_stmt);
 
     teardown(db, &col);
 }
@@ -268,7 +311,7 @@ static void test_neutral_polarity_no_dpo_row_inserted(void) {
     teardown(db, &col);
 }
 
-static void test_negative_polarity_records_rejected_not_chosen(void) {
+static void test_negative_polarity_updates_production_outcomes_with_negative_tapback(void) {
     hu_reaction_handler_reset_for_test();
     sqlite3 *db = NULL;
     hu_dpo_collector_t col = {0};
@@ -277,6 +320,12 @@ static void test_negative_polarity_records_rejected_not_chosen(void) {
     hu_reaction_handler_register_assistant_message_for_test("slack", "chat_Neg", "msg_Neg",
                                                             "What's 2+2?", "5", "");
 
+    /* Register outbound to production_outcomes */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "slack", strlen("slack"), "chat_Neg",
+                                        strlen("chat_Neg"), "msg_Neg", strlen("msg_Neg"),
+                                        "What's 2+2?", strlen("What's 2+2?"), "5", 1, 0.8, NULL, 0),
+                 HU_OK);
+
     hu_reaction_event_t e = {.channel_id = "slack",
                              .target_thread_id = "chat_Neg",
                              .target_message_ref = "msg_Neg",
@@ -284,15 +333,15 @@ static void test_negative_polarity_records_rejected_not_chosen(void) {
                              .polarity = HU_REACTION_NEGATIVE};
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
 
+    /* Verify negative tapback is recorded in production_outcomes */
     sqlite3_stmt *stmt = NULL;
-    HU_ASSERT_EQ(
-        sqlite3_prepare_v2(db, "SELECT chosen, rejected FROM dpo_pairs LIMIT 1", -1, &stmt, NULL),
-        SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT tapback_polarity FROM production_outcomes WHERE message_ref='msg_Neg'",
+                     -1, &stmt, NULL),
+                 SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-    /* chosen empty, rejected populated for negative polarity */
-    const char *chosen = (const char *)sqlite3_column_text(stmt, 0);
-    HU_ASSERT_TRUE(chosen == NULL || chosen[0] == '\0');
-    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "5");
+    HU_ASSERT_EQ(sqlite3_column_int(stmt, 0), -1); /* negative tapback */
     sqlite3_finalize(stmt);
 
     teardown(db, &col);
@@ -334,7 +383,7 @@ void run_reaction_handler_lookup_store_tests(void) {
     HU_RUN_TEST(test_null_event_is_invalid_argument);
     HU_RUN_TEST(test_removal_event_is_dropped_silently);
     HU_RUN_TEST(test_neutral_polarity_no_dpo_row_inserted);
-    HU_RUN_TEST(test_negative_polarity_records_rejected_not_chosen);
+    HU_RUN_TEST(test_negative_polarity_updates_production_outcomes_with_negative_tapback);
 }
 
 #else /* !HU_ENABLE_SQLITE — stub runner so the symbol always resolves */

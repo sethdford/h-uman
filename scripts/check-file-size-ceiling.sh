@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14745   # src/daemon.c, measured 2026-05-31. Lower as god-files are carved.
+MAX_BASELINE=14715   # src/daemon.c, measured 2026-05-31. Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

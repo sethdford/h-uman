@@ -46,7 +46,26 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
+        # Phase 5 self-healing: apt mirror flakes (transient 5xx / DNS / lock
+        # contention on the shared runner) are a recurring CI-red cause that has
+        # nothing to do with the change under test. Wrap the two network steps in
+        # a bounded retry that fails LOUDLY after 3 attempts (so a genuinely
+        # broken install still goes red) but rides out a single transient blip.
+        # `until <cmd>` is exempt from `set -eo pipefail`, so the final failure
+        # propagates via the explicit `exit 1` rather than being swallowed.
+        retry() {
+          n=0
+          until "$@"; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "::error::transient install failed after 3 attempts: $*"
+              exit 1
+            fi
+            echo "::warning::attempt ${n}/3 failed: $* — retrying in $((n * 5))s"
+            sleep "$((n * 5))"
+          done
+        }
+        retry sudo apt-get update
         # libsodium-dev: required by src/persona/persona_crypt.c — main
         # commit 6af7ad34 (US-8.2 persona encryption-at-rest) made the
         # crypto layer #error at compile time when libsodium isn't
@@ -55,13 +74,29 @@ runs:
         PKGS="libsqlite3-dev libsodium-dev ccache"
         if [ "${{ inputs.enable-curl }}" = "true" ]; then PKGS="$PKGS libcurl4-openssl-dev"; fi
         if [ -n "${{ inputs.extra-apt }}" ]; then PKGS="$PKGS ${{ inputs.extra-apt }}"; fi
-        sudo apt-get install -y $PKGS
+        # shellcheck disable=SC2086 # intentional word-split of the package list
+        retry sudo apt-get install -y $PKGS
 
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       shell: bash
       # libsodium: same reason as Linux — persona_crypt.c hard-requires it.
-      run: brew install sqlite3 libsodium ccache
+      # Same Phase 5 transient-retry rationale as the Linux step: brew bottle
+      # downloads occasionally 5xx on the shared cache; retry, fail loud at 3.
+      run: |
+        retry() {
+          n=0
+          until "$@"; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "::error::transient install failed after 3 attempts: $*"
+              exit 1
+            fi
+            echo "::warning::attempt ${n}/3 failed: $* — retrying in $((n * 10))s"
+            sleep "$((n * 10))"
+          done
+        }
+        retry brew install sqlite3 libsodium ccache
 
     - name: Cache ccache
       uses: actions/cache@v5

@@ -221,7 +221,7 @@ All three follow v1's pattern: idempotent ALTERs, schema-version bump, refuse-to
 - `include/human/memory/graph.h` — current graph API (entities, relations, communities, temporal, causal, conflict, retention)
 - `src/memory/graph.c` — SQLite-backed implementation (~2460 lines after v1; run `wc -l` for current)
 - `src/agent/response_verifier.c` — v1 heuristic verifier (becomes `hu_self_rag_t` heuristic backend)
-- `src/agent/autodream.c` — v1 background consolidator (gets folded into W14 scheduler)
+- `src/agent/simulation/autodream.c` — v1 background consolidator (gets folded into W14 scheduler)
 - `src/persona/persona_deltas.c` — v1 evolver (becomes a learning-signal source for W13)
 - `src/ml/lora.c`, `src/ml/dpo.c`, `src/ml/train.c` — existing reference-GPT trainers (W13 wires these to the chat-time provider)
 - `CLAUDE.md` Mission table M3 (Private Learning) — anchors W13's scope

@@ -117,10 +117,10 @@ only when the churn won't collide with in-flight Phase 2/3 work.
 
 ```bash
 mkdir -p src/agent/simulation
-git mv src/agent/autodream.c src/agent/counterfactual.c src/agent/simulation/
+git mv src/agent/simulation/autodream.c src/agent/simulation/counterfactual.c src/agent/simulation/
 # update CMake source paths + any #include "human/agent/..." unaffected (headers stay)
-grep -rl 'src/agent/autodream.c\|src/agent/counterfactual.c' src/CMakeLists.txt \
-  | xargs sed -i '' 's#src/agent/autodream.c#src/agent/simulation/autodream.c#; s#src/agent/counterfactual.c#src/agent/simulation/counterfactual.c#'
+grep -rl 'src/agent/simulation/autodream.c\|src/agent/simulation/counterfactual.c' src/CMakeLists.txt \
+  | xargs sed -i '' 's#src/agent/simulation/autodream.c#src/agent/simulation/autodream.c#; s#src/agent/simulation/counterfactual.c#src/agent/simulation/counterfactual.c#'
 touch src/agent/simulation/*.c && cmake --build build --target human -j8 && \
   cmake --build build --target human_tests -j8 && ./build/human_tests
 ```

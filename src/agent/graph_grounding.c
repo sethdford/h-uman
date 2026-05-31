@@ -4,14 +4,16 @@
 #include <string.h>
 
 hu_graph_grounding_mode_t hu_graph_grounding_mode(void) {
+    /* Activated 2026-05-31 after blind A/B (g2g): ON by default. Override via
+     * HU_GRAPH_GROUNDING=shadow (observe-only) or =off (disable). The L4
+     * memory-grounding moat surfaces community summaries into the local prompt;
+     * hu_graph_ground_load fails open (no graph wired -> empty), so default-ON is safe. */
     const char *v = getenv("HU_GRAPH_GROUNDING");
-    if (!v || !*v)
-        return HU_GRAPH_GROUNDING_OFF;
+    if (!v || !*v || strcmp(v, "on") == 0 || strcmp(v, "1") == 0)
+        return HU_GRAPH_GROUNDING_ON;
     if (strcmp(v, "shadow") == 0)
         return HU_GRAPH_GROUNDING_SHADOW;
-    if (strcmp(v, "on") == 0 || strcmp(v, "1") == 0)
-        return HU_GRAPH_GROUNDING_ON;
-    return HU_GRAPH_GROUNDING_OFF;
+    return HU_GRAPH_GROUNDING_OFF; /* "off" or any other value */
 }
 
 hu_error_t hu_graph_ground_load(hu_memory_loader_t *loader, const char *contact_id,
