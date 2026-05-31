@@ -111,6 +111,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("sheets", nargs="*")
     ap.add_argument("--key")
+    ap.add_argument("--json-out", help="Write JSON output to this file")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -120,7 +121,11 @@ def main():
     with open(a.key) as f:
         key = json.load(f)
     rows = load_sheets(a.sheets)
-    verdict = report(score_rows(rows, key))
+    agg = score_rows(rows, key)
+    verdict = report(agg)
+    if a.json_out:
+        with open(a.json_out, 'w') as f:
+            json.dump(agg, f, indent=2)
     sys.exit(0 if verdict == "PASS" else 1)
 
 

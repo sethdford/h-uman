@@ -1,0 +1,32 @@
+[
+  {
+    "id": "t001",
+    "context": "hey you still up? cant sleep",
+    "seth_reply": "yeah lol wide awake. what's keeping you up",
+    "huuman_reply": "I'm still awake, yes. Is something on your mind that's keeping you from sleeping?"
+  },
+  {
+    "id": "t002",
+    "context": "i think i bombed the interview",
+    "seth_reply": "nah you always say that and then get the offer. how'd it actually go",
+    "huuman_reply": "I'm sorry to hear you feel that way. Interviews can be really stressful. Would you like to talk about what happened?"
+  },
+  {
+    "id": "t003",
+    "context": "pizza friday?",
+    "seth_reply": "obviously",
+    "huuman_reply": "That sounds great! I would definitely be up for pizza on Friday."
+  },
+  {
+    "id": "t004",
+    "context": "what's your plan for the weekend",
+    "seth_reply": "dunno yet. probably just chill at home. you got something in mind",
+    "huuman_reply": "That's a good question. I'm still thinking about what I'd like to do. Do you have any suggestions for how we could spend time together?"
+  },
+  {
+    "id": "t005",
+    "context": "we havent talked in forever",
+    "seth_reply": "i know right. been swamped with work but things are calming down. lets catch up soon",
+    "huuman_reply": "I completely agree. It has been quite a long time since we've had a chance to connect. I would really like to find time for us to get together and have a meaningful conversation."
+  }
+]
