@@ -908,6 +908,95 @@ static void at_log_humanness_gates_once(hu_observer_t *obs) {
     }
 }
 
+/* Append one owned directive string to the system prompt, then free it. Shared
+ * by the self-uncertainty and intent gates to avoid duplicating the
+ * realloc+memcpy+free dance (clone-ratchet). Takes ownership of `dir`. */
+static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_len,
+                                      char **sp, size_t *sp_len) {
+    if (!dir)
+        return;
+    if (dir_len > 0 && sp && *sp) {
+        size_t cur = *sp_len;
+        size_t new_len = cur + dir_len;
+        char *new_sp =
+            (char *)agent->alloc->realloc(agent->alloc->ctx, *sp, cur + 1, new_len + 1);
+        if (new_sp) {
+            memcpy(new_sp + cur, dir, dir_len);
+            new_sp[new_len] = '\0';
+            *sp = new_sp;
+            *sp_len = new_len;
+        }
+    }
+    agent->alloc->free(agent->alloc->ctx, dir, dir_len + 1);
+}
+
+/* Append the per-turn humanness directives — Theory-of-Mind, calibrated
+ * self-uncertainty, intent-aware response-type — to the system prompt, and log
+ * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
+ * AND hu_agent_turn_stream_v2 (the daemon's PRIMARY inbound path). Before this
+ * existed, these gates were inline in hu_agent_turn only, so they never fired
+ * on the streaming path the daemon actually uses for inbound texts (2026-05-31
+ * audit). All three honor their env gates (HU_TOM_DIRECTIVE / HU_SELF_UNCERTAINTY
+ * default off; HU_INTENT_DIRECTIVE default on) with off|shadow|on semantics. */
+void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact_id,
+                                          size_t contact_id_len, const char *msg, size_t msg_len,
+                                          char **system_prompt, size_t *system_prompt_len) {
+    if (!agent || !system_prompt || !system_prompt_len || !*system_prompt)
+        return;
+
+    at_log_humanness_gates_once(agent->observer);
+
+    /* Theory of Mind */
+    if (contact_id && contact_id_len > 0) {
+        (void)at_append_tom_directive(agent, contact_id, contact_id_len, msg, msg_len,
+                                      system_prompt, system_prompt_len);
+    }
+
+    /* Calibrated self-uncertainty: when recent self-assessed confidence is low,
+     * nudge the model to hedge rather than overclaim. */
+    {
+        const char *su_mode = getenv("HU_SELF_UNCERTAINTY");
+        if (su_mode && (strcmp(su_mode, "on") == 0 || strcmp(su_mode, "shadow") == 0)) {
+            hu_self_uncertainty_t su;
+            hu_self_uncertainty_assess(
+                hu_metacog_trajectory_confidence(&agent->infra.metacognition), &su);
+            if (strcmp(su_mode, "on") == 0) {
+                char *sdir = NULL;
+                size_t sdir_len = 0;
+                if (hu_self_uncertainty_build_directive(agent->alloc, &su, &sdir, &sdir_len) ==
+                    HU_OK)
+                    at_append_owned_directive(agent, sdir, sdir_len, system_prompt,
+                                              system_prompt_len);
+            } else {
+                hu_log_info("self_uncertainty", NULL, "shadow confidence=%.2f hedge=%d",
+                            (double)su.confidence, (int)su.hedge);
+            }
+        }
+    }
+
+    /* Intent-aware response-type: classify the inbound message's intent and steer
+     * the reply strategy. Default ON. */
+    {
+        const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
+        if (!intent_mode || *intent_mode == '\0')
+            intent_mode = "on";
+        if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
+            hu_intent_analysis_t ia;
+            hu_intent_analyze(msg, msg_len, &ia);
+            if (strcmp(intent_mode, "on") == 0) {
+                char *idir = NULL;
+                size_t idir_len = 0;
+                if (hu_intent_build_directive(agent->alloc, &ia, &idir, &idir_len) == HU_OK)
+                    at_append_owned_directive(agent, idir, idir_len, system_prompt,
+                                              system_prompt_len);
+            } else {
+                hu_log_info("intent", NULL, "shadow intent=%s confidence=%.2f",
+                            hu_intent_name(ia.intent), ia.confidence);
+            }
+        }
+    }
+}
+
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out) {
     if (!agent || !msg || !response_out)
@@ -922,10 +1011,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
 
     hu_agent_set_current_for_tools(agent);
-
-    /* First turn of the process: surface which humanness gates are active, so
-     * the flipped-on-but-silent gates are discoverable in the service log. */
-    at_log_humanness_gates_once(agent->observer);
 
     /* Reset per-turn state tracking so this turn's behavior-log stash sees a
      * clean slate (tool_count, tool_sequence_hash, emotional_register,
@@ -4675,89 +4760,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             (void)at_append_trust_directive(agent, msg, msg_len, &bin, bin.memory_contradicts_user,
                                             behavior_contrarian_hint, &system_prompt,
                                             &system_prompt_len);
-            /* Append Theory of Mind directive if enabled and contact_id is available */
-            if (agent->memory_session_id && agent->memory_session_id_len > 0) {
-                (void)at_append_tom_directive(agent, agent->memory_session_id,
-                                              agent->memory_session_id_len, msg, msg_len,
-                                              &system_prompt, &system_prompt_len);
-            }
-
-            /* Calibrated self-uncertainty directive (capability-maturity-map): when
-             * the agent's recent self-assessed confidence is low, nudge the model to
-             * hedge rather than overclaim. Gated by env HU_SELF_UNCERTAINTY: off
-             * (default) | shadow | on; activation gated on the blind A/B per
-             * feature-gate-requires-measurement. */
-            {
-                const char *su_mode = getenv("HU_SELF_UNCERTAINTY");
-                if (su_mode && (strcmp(su_mode, "on") == 0 || strcmp(su_mode, "shadow") == 0)) {
-                    hu_self_uncertainty_t su;
-                    hu_self_uncertainty_assess(
-                        hu_metacog_trajectory_confidence(&agent->infra.metacognition), &su);
-                    if (strcmp(su_mode, "on") == 0) {
-                        char *sdir = NULL;
-                        size_t sdir_len = 0;
-                        if (hu_self_uncertainty_build_directive(agent->alloc, &su, &sdir,
-                                                                &sdir_len) == HU_OK &&
-                            sdir && sdir_len > 0) {
-                            size_t cur = system_prompt_len;
-                            size_t new_len = cur + sdir_len;
-                            char *new_sp = (char *)agent->alloc->realloc(
-                                agent->alloc->ctx, system_prompt, cur + 1, new_len + 1);
-                            if (new_sp) {
-                                memcpy(new_sp + cur, sdir, sdir_len);
-                                new_sp[new_len] = '\0';
-                                system_prompt = new_sp;
-                                system_prompt_len = new_len;
-                            }
-                            agent->alloc->free(agent->alloc->ctx, sdir, sdir_len + 1);
-                        }
-                    } else {
-                        hu_log_info("self_uncertainty", NULL, "shadow confidence=%.2f hedge=%d",
-                                    (double)su.confidence, (int)su.hedge);
-                    }
-                }
-            }
-
-            /* Intent-aware response-type directive (Tier B port-map,
-             * docs/research/2026-05-31-voiceai-speech-behavior-port-map.md).
-             * Classify the inbound message's conversational intent and steer
-             * the reply strategy (listen vs advise vs validate vs short).
-             * ACTIVE by default; env HU_INTENT_DIRECTIVE=off disables, =shadow
-             * observes (compute + log, no injection). The blind A/B remains the
-             * validation of record; flip to off/shadow if it regresses. */
-            {
-                const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
-                if (!intent_mode || *intent_mode == '\0') {
-                    intent_mode = "on"; /* default ON */
-                }
-                if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
-                    hu_intent_analysis_t ia;
-                    hu_intent_analyze(msg, msg_len, &ia);
-                    if (strcmp(intent_mode, "on") == 0) {
-                        char *idir = NULL;
-                        size_t idir_len = 0;
-                        if (hu_intent_build_directive(agent->alloc, &ia, &idir, &idir_len) ==
-                                HU_OK &&
-                            idir && idir_len > 0) {
-                            size_t cur = system_prompt_len;
-                            size_t new_len = cur + idir_len;
-                            char *new_sp = (char *)agent->alloc->realloc(
-                                agent->alloc->ctx, system_prompt, cur + 1, new_len + 1);
-                            if (new_sp) {
-                                memcpy(new_sp + cur, idir, idir_len);
-                                new_sp[new_len] = '\0';
-                                system_prompt = new_sp;
-                                system_prompt_len = new_len;
-                            }
-                            agent->alloc->free(agent->alloc->ctx, idir, idir_len + 1);
-                        }
-                    } else {
-                        /* shadow: observe without changing emitted behavior */
-                        hu_log_info("intent", NULL, "shadow intent=%s confidence=%.2f",
-                                    hu_intent_name(ia.intent), ia.confidence);
-                    }
-                }
-            }
+            /* Per-turn humanness directives (ToM, self-uncertainty, intent),
+             * shared with the streaming path so they fire on both. */
+            hu_agent_append_humanness_directives(agent, agent->memory_session_id,
+                                                 agent->memory_session_id_len, msg, msg_len,
+                                                 &system_prompt, &system_prompt_len);
         }
     }
 
