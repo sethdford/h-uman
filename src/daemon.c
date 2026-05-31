@@ -5647,10 +5647,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                         /* US-2: Apply bandit-based humanization override if gated ON */
                         if (agent->sota.bandit && batch_key && key_len > 0) {
-                            uint64_t contact_handle = 0;
-                            for (const char *p = batch_key; *p; p++) {
-                                contact_handle = contact_handle * 31 + (unsigned char)*p;
-                            }
+                            /* Canonical hash — must match the trainer in dpo.c so we
+                             * read the same Beta arm the outcomes trained. */
+                            uint64_t contact_handle = hu_contact_handle_hash(batch_key);
 
                             hu_humanization_config_t humanization_params;
                             humanization_params.disfluency_frequency =

@@ -3,42 +3,49 @@
 #include <stdlib.h>
 #include <string.h>
 
-hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
-                                                               uint64_t contact_handle) {
+/* Thompson-sampled humanization tiers. theta = sampled P(this contact rewards
+ * more expressive humanization), drawn from the contact's Beta(alpha,beta) arm;
+ * higher theta -> more disfluency + backchannels. Thresholds and tier values
+ * are tunable in this one place rather than scattered as magic numbers. */
+#define HU_BANDIT_THETA_AGGRESSIVE 0.65 /* theta above this -> aggressive tier */
+#define HU_BANDIT_THETA_MODERATE   0.35 /* theta above this -> moderate tier   */
+
+typedef struct {
+    float disfluency;
+    float backchannel;
+} hum_tier_t;
+
+/* CONSERVATIVE is the safe default for new/unknown contacts and the low-theta
+ * bucket — least likely to read as "off". */
+static const hum_tier_t hum_conservative = {0.05f, 0.10f};
+static const hum_tier_t hum_moderate = {0.15f, 0.30f};
+static const hum_tier_t hum_aggressive = {0.25f, 0.45f};
+
+static hu_humanization_config_t tier_config(hum_tier_t t) {
     hu_humanization_config_t config;
     memset(&config, 0, sizeof(config));
+    config.disfluency_frequency = t.disfluency;
+    config.backchannel_probability = t.backchannel;
+    return config;
+}
 
-    if (!bandit || contact_handle == 0) {
-        /* No bandit or invalid contact → return conservative defaults */
-        config.disfluency_frequency = 0.05f;
-        config.backchannel_probability = 0.10f;
-        return config;
-    }
+hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
+                                                               uint64_t contact_handle) {
+    if (!bandit || contact_handle == 0)
+        return tier_config(hum_conservative); /* no bandit / invalid contact */
 
-    /* Get the arm for this contact (initialize if new) */
     hu_contextual_bandit_arm_t arm;
-    hu_error_t err = hu_contextual_bandit_get_arm(bandit, contact_handle, &arm);
-    if (err != HU_OK) {
-        /* Arm doesn't exist or error; default to conservative */
-        config.disfluency_frequency = 0.05f;
-        config.backchannel_probability = 0.10f;
-        return config;
-    }
+    if (hu_contextual_bandit_get_arm(bandit, contact_handle, &arm) != HU_OK)
+        return tier_config(hum_conservative); /* arm missing or error */
 
-    /* NEW CONTACT: if arm was just initialized (alpha=1, beta=1, updates=0),
-     * return conservative defaults (safe). Else sample and decide. */
-    if (arm.alpha == 1.0 && arm.beta == 1.0 && arm.updates == 0) {
-        /* New contact; default to conservative (safe) */
-        config.disfluency_frequency = 0.05f;
-        config.backchannel_probability = 0.10f;
-        return config;
-    }
+    /* New contact (arm freshly initialized): conservative until we have signal. */
+    if (arm.alpha == 1.0 && arm.beta == 1.0 && arm.updates == 0)
+        return tier_config(hum_conservative);
 
-    /* Thompson sample θ from Beta(α, β) */
+    /* Thompson sample theta from Beta(alpha, beta). */
     uint32_t seed = bandit->rng_seed;
     double theta = hu_contextual_bandit_sample_beta(arm.alpha, arm.beta, &seed);
 
-    /* Log once per process */
     static int logged = 0;
     if (!logged) {
         logged = 1;
@@ -47,22 +54,11 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
                     (unsigned long long)contact_handle, theta);
     }
 
-    /* Classify based on theta threshold */
-    if (theta > 0.65) {
-        /* Aggressive humanization */
-        config.disfluency_frequency = 0.25f;
-        config.backchannel_probability = 0.45f;
-    } else if (theta > 0.35) {
-        /* Moderate humanization */
-        config.disfluency_frequency = 0.15f;
-        config.backchannel_probability = 0.30f;
-    } else {
-        /* Conservative (default) */
-        config.disfluency_frequency = 0.05f;
-        config.backchannel_probability = 0.10f;
-    }
-
-    return config;
+    if (theta > HU_BANDIT_THETA_AGGRESSIVE)
+        return tier_config(hum_aggressive);
+    if (theta > HU_BANDIT_THETA_MODERATE)
+        return tier_config(hum_moderate);
+    return tier_config(hum_conservative);
 }
 
 bool hu_humanization_apply_bandit_override(hu_contextual_bandit_t *bandit, uint64_t contact_handle,

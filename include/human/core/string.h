@@ -5,6 +5,7 @@
 #include "error.h"
 #include "slice.h"
 #include <stdarg.h>
+#include <stdint.h>
 
 char *hu_strdup(hu_allocator_t *alloc, const char *s);
 char *hu_strndup(hu_allocator_t *alloc, const char *s, size_t n);
@@ -65,5 +66,12 @@ size_t hu_buf_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...)
  * signatures; see docs/dedupe-debt.md for the migration plan. */
 hu_error_t hu_sql_quote_escape_into(const char *src, size_t src_len, char *dst, size_t dst_cap,
                                     size_t *out_len);
+
+/* Canonical contact-string -> stable uint64 handle hash (Java-String-style
+ * `h = h*31 + byte`, NUL-terminated). Single source of truth: the bandit trainer
+ * (src/ml/dpo.c) and the reply path (src/daemon.c) both map a contact identifier
+ * to the same handle to address the same Beta arm — if the two ever drifted they
+ * would silently train and read different arms. NULL-safe (NULL -> 0). */
+uint64_t hu_contact_handle_hash(const char *s);
 
 #endif
