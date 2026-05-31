@@ -526,13 +526,13 @@ set(HU_CORE_SOURCES
     src/peripherals/terminal.c
     src/util/util.c
     src/util/json_util.c
-    src/bus.c
-    src/session.c
-    src/channel_loop.c
-    src/channel_manager.c
+    src/agent/bus.c
+    src/agent/session.c
+    src/channels/channel_loop.c
+    src/channels/channel_manager.c
     src/security/auth.c
     src/security/identity.c
-    src/state.c
+    src/agent/state.c
     src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
@@ -590,8 +590,8 @@ set(HU_CORE_SOURCES
     src/config/config_parse_agent.c
     src/config/config_parse_behavior.c
     src/app/capabilities.c
-    src/channel_catalog.c
-    src/channel_adapters.c
+    src/channels/channel_catalog.c
+    src/channels/channel_adapters.c
     src/doctor/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
@@ -625,7 +625,7 @@ set(HU_CORE_SOURCES
     src/multimodal/video.c
     src/multimodal/multimodal.c
     src/memory/rag.c
-    src/service.c
+    src/agent/service.c
     src/skills/skill_registry.c
     src/subagent.c
     src/voice/voice.c
@@ -633,7 +633,7 @@ set(HU_CORE_SOURCES
     src/voice/local_stt.c
     src/voice/local_tts.c
     src/util/portable_atomic.c
-    src/agent_routing.c
+    src/agent/agent_routing.c
     src/observability/health.c
     src/security/security.c
     src/security/sycophancy_guard.c
@@ -1135,7 +1135,7 @@ set(HU_CORE_SOURCES
     src/tools/memory_forget.c
     src/tools/bff_memory.c
     src/tools/doc_ingest.c
-    src/task_manager.c
+    src/agent/task_manager.c
     src/tools/ask_user.c
     src/tools/task_tools.c
     src/tools/webhook_tools.c
@@ -1226,7 +1226,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/cron.c
     src/daemon/crontab.c
-    src/webhook.c
+    src/gateway/webhook.c
     src/memory/migration.c
     src/app/version.c
     src/app/cli_commands.c
@@ -1335,7 +1335,7 @@ list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
-    src/a2a.c
+    src/agent/a2a.c
     src/eval/eval.c
     src/eval/shape.c
     src/eval/register.c
@@ -1445,7 +1445,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
-    src/follow_up.c
+    src/agent/follow_up.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -1536,7 +1536,7 @@ list(APPEND HU_CORE_SOURCES
 list(APPEND HU_CORE_SOURCES src/multimodal/music.c)
 
 # Media inspiration (conversation cues -> medium picker, per-medium prompts, voice hints, TikTok URLs)
-list(APPEND HU_CORE_SOURCES src/inspiration.c)
+list(APPEND HU_CORE_SOURCES src/agent/inspiration.c)
 
 # YouTube Data API v3 search (find and verify canonical watch URLs)
 list(APPEND HU_CORE_SOURCES src/multimodal/youtube.c)
