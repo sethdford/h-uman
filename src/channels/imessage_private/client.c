@@ -86,7 +86,7 @@ hu_error_t hu_imessage_private_build_send(char *out, size_t cap, const char *txn
     char *et = json_escape_dup(text);
     char *eid = json_escape_dup(txn_id);
     char *ep = (parent_guid && parent_guid[0]) ? json_escape_dup(parent_guid) : NULL;
-    hu_error_t rc = HU_ERR_INVALID_ARGUMENT;
+    hu_error_t rc = HU_ERR_OUT_OF_MEMORY;
     if (!eg || !et || !eid || ((parent_guid && parent_guid[0]) && !ep))
         goto done;
 

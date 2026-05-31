@@ -10,6 +10,7 @@ final class TCPClient {
     private let host: NWEndpoint.Host = .ipv4(.loopback)
     private let port: NWEndpoint.Port
     private var buffer = Data()
+    private let maxBufferSize = 1024 * 1024
 
     var onMessage: ((String) -> Void)?
     var onConnect: (() -> Void)?
@@ -25,6 +26,8 @@ final class TCPClient {
     }
 
     func connect() {
+        connection?.cancel()
+        connection = nil
         let conn = NWConnection(host: host, port: port, using: .tcp)
         self.connection = conn
         conn.stateUpdateHandler = { [weak self] state in
@@ -76,6 +79,11 @@ final class TCPClient {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
             if let data = data, !data.isEmpty {
+                if self.buffer.count + data.count > self.maxBufferSize {
+                    Log.error("TCPClient: buffer overflow, disconnecting")
+                    self.scheduleReconnect()
+                    return
+                }
                 self.buffer.append(data)
                 self.processBuffer()
             }

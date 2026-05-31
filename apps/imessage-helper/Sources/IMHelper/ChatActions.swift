@@ -6,12 +6,22 @@ import Foundation
 enum ChatActions {
     static func startTyping(data: [String: Any], transaction: String?) {
         guard let chat = getChat(guid: data["chatGuid"] as? String, transaction: transaction) else { return }
+        let sel = NSSelectorFromString("setLocalUserIsTyping:")
+        guard chat.responds(to: sel) else {
+            IMHelper.respondError(transaction: transaction, error: "setLocalUserIsTyping: not available")
+            return
+        }
         safePerform(chat, selector: "setLocalUserIsTyping:", with: NSNumber(value: true))
         IMHelper.respond(transaction: transaction)
     }
 
     static func stopTyping(data: [String: Any], transaction: String?) {
         guard let chat = getChat(guid: data["chatGuid"] as? String, transaction: transaction) else { return }
+        let sel = NSSelectorFromString("setLocalUserIsTyping:")
+        guard chat.responds(to: sel) else {
+            IMHelper.respondError(transaction: transaction, error: "setLocalUserIsTyping: not available")
+            return
+        }
         safePerform(chat, selector: "setLocalUserIsTyping:", with: NSNumber(value: false))
         IMHelper.respond(transaction: transaction)
     }

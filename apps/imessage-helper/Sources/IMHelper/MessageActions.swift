@@ -66,13 +66,17 @@ enum MessageActions {
                     return
                 }
                 let messageItem = safePerformReturning(message, selector: "_imMessageItem")
-                let items = messageItem?.perform(NSSelectorFromString("_newChatItems"))?.takeUnretainedValue()
-                let partIndex = data["partIndex"] as? Int ?? 0
+                let items = messageItem?.perform(NSSelectorFromString("_newChatItems"))?.takeRetainedValue()
+                let partIndex = (data["partIndex"] as? Int) ?? (data["partIndex"] as? NSNumber)?.intValue ?? 0
                 let item = items.flatMap { findPartChatItem(items: $0, partIndex: partIndex) }
 
                 if let reactionType = data["reactionType"] as? String, !reactionType.isEmpty {
                     // Classic tapback only (emoji/sticker deferred — see README).
                     let reactionLong = parseReactionType(reactionType)
+                    guard reactionLong != 0 else {
+                        IMHelper.respondError(transaction: transaction, error: "Invalid reaction type: \(reactionType)")
+                        return
+                    }
                     let verb = reactionToVerb(reactionType)
 
                     var textString: String?
@@ -114,7 +118,11 @@ enum MessageActions {
                     // Threaded reply.
                     var threadId = message.value(forKey: "threadIdentifier") as? String ?? ""
                     if threadId.isEmpty, let item = item, let fn = resolved_IMCreateThreadIdentifier {
-                        threadId = fn(item).takeUnretainedValue() as String
+                        threadId = fn(item).takeRetainedValue() as String
+                    }
+                    guard !threadId.isEmpty else {
+                        IMHelper.respondError(transaction: transaction, error: "Cannot create thread identifier")
+                        return
                     }
                     createAndSend(attrStr, subjectStr, effectId, threadId, nil, nil, NSRange(location: 0, length: 0), nil)
                 }
@@ -137,7 +145,7 @@ enum MessageActions {
             }
             let editedText = data["editedMessage"] as? String ?? ""
             let bcText = data["backwardsCompatibilityMessage"] as? String ?? ""
-            let partIndex = data["partIndex"] as? Int ?? 0
+            let partIndex = (data["partIndex"] as? Int) ?? (data["partIndex"] as? NSNumber)?.intValue ?? 0
             let editedString = NSMutableAttributedString(string: editedText)
             let bcString = NSMutableAttributedString(string: bcText)
 
@@ -172,12 +180,12 @@ enum MessageActions {
     static func unsendMessage(data: [String: Any], transaction: String?) {
         guard let chat = getChat(guid: data["chatGuid"] as? String, transaction: transaction) else { return }
         guard let messageGuid = data["messageGuid"] as? String else { return }
-        let partIndex = data["partIndex"] as? Int ?? 0
+        let partIndex = (data["partIndex"] as? Int) ?? (data["partIndex"] as? NSNumber)?.intValue ?? 0
 
         getMessageItem(guid: messageGuid) { message in
             guard let message = message,
                   let messageItem = safePerformReturning(message, selector: "_imMessageItem"),
-                  let items = messageItem.perform(NSSelectorFromString("_newChatItems"))?.takeUnretainedValue() else {
+                  let items = messageItem.perform(NSSelectorFromString("_newChatItems"))?.takeRetainedValue() else {
                 IMHelper.respondError(transaction: transaction, error: "Message not found for unsend!")
                 return
             }
@@ -197,7 +205,7 @@ enum MessageActions {
         getMessageItem(guid: messageGuid) { message in
             guard let message = message,
                   let messageItem = safePerformReturning(message, selector: "_imMessageItem"),
-                  let items = messageItem.perform(NSSelectorFromString("_newChatItems"))?.takeUnretainedValue() else {
+                  let items = messageItem.perform(NSSelectorFromString("_newChatItems"))?.takeRetainedValue() else {
                 IMHelper.respondError(transaction: transaction, error: "Message not found for delete!")
                 return
             }

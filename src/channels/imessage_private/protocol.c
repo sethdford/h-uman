@@ -60,10 +60,15 @@ bool hu_imsg_line_buf_append(hu_imsg_line_buf_t *buf, const char *bytes, size_t 
         return false;
     if (n == 0)
         return true;
+    static const size_t MAX_BUFFER_SIZE = 1024 * 1024;
+    if (buf->len + n > MAX_BUFFER_SIZE)
+        return false;
     if (buf->len + n > buf->cap) {
         size_t new_cap = buf->cap ? buf->cap : 64;
         while (new_cap < buf->len + n)
             new_cap *= 2;
+        if (new_cap > MAX_BUFFER_SIZE)
+            new_cap = MAX_BUFFER_SIZE;
         char *grown = (char *)realloc(buf->data, new_cap);
         if (!grown)
             return false;

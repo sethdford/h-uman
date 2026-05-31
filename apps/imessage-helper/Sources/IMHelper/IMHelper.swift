@@ -7,6 +7,7 @@ import Foundation
 final class IMHelper {
     static var shared: IMHelper?
     static var tcp: TCPClient?
+    static var imcoreReady = false
 
     static func bootstrap() {
         let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
@@ -32,6 +33,7 @@ final class IMHelper {
                 }
                 _ = getSharedInstance("IMChatRegistry")
                 Log.info("IMCore initialized, sending ready")
+                imcoreReady = true
                 client.send(["event": "ready", "process": bundleId])
             }
         }
@@ -51,11 +53,24 @@ final class IMHelper {
         let data = dict["data"] as? [String: Any] ?? [:]
         let transaction: String? = {
             guard let val = dict["transactionId"], !(val is NSNull) else { return nil }
-            return val as? String
+            if let str = val as? String { return str }
+            if let num = val as? NSNumber { return num.stringValue }
+            return nil
         }()
 
+        guard imcoreReady else {
+            respondError(transaction: transaction, error: "IMCore not ready")
+            return
+        }
+
         switch action {
-        case "send-message", "send-reaction":
+        case "send-message":
+            MessageActions.sendMessage(data: data, transaction: transaction)
+        case "send-reaction":
+            guard data["selectedMessageGuid"] != nil, data["reactionType"] != nil else {
+                respondError(transaction: transaction, error: "send-reaction requires selectedMessageGuid and reactionType")
+                return
+            }
             MessageActions.sendMessage(data: data, transaction: transaction)
         case "edit-message":
             MessageActions.editMessage(data: data, transaction: transaction)
