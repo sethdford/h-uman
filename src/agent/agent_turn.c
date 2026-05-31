@@ -1468,6 +1468,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
+        /* GraphRAG activation gated on Story D blind A/B measurement.
+         * SHADOW mode logs metrics; do not flip to ON without confirmed
+         * improvement in blind-A/B human ratings of reply quality. */
         hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
         if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
             agent->memory_session_id_len > 0) {

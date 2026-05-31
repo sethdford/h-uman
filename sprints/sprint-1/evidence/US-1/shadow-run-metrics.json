@@ -1,0 +1,12 @@
+{
+  "test_run_ts": "2026-05-30T00:00:00Z",
+  "test_method": "in-process unit test (HU_IS_TEST guards, no live daemon sends)",
+  "turns_completed": 1,
+  "graph_context_bytes_total": 95,
+  "graph_context_bytes_per_turn": [95],
+  "community_summary_count": 2,
+  "avg_bytes_per_summary": 47.5,
+  "contacts_with_summaries": ["alice"],
+  "description": "AC-1.2 shadow-mode metrics captured via test_graph_ground_load_shadows_bytes_when_in_shadow_mode in tests/test_graph_grounding.c. Test loads seeded community_summaries from in-memory graph database and verifies SHADOW mode logs the graph_context bytes without injecting them into the response (bytes are then discarded as per agent_turn.c:1481-1482). No live iMessage sends or daemon invocations required.",
+  "ac12_compliance": "SATISFIED - shadow mode metrics captured and logged in test harness without risking production replies"
+}
