@@ -1270,6 +1270,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 agent->config ? agent->config->prompt_budget.dead_field_min_bytes : 0,
             .prompt_budget_min_samples_before_tag =
                 agent->config ? agent->config->prompt_budget.min_samples_before_tag : 0,
+            .prompt_budget_field_allowlist =
+                agent->config ? agent->config->prompt_budget.field_allowlist : NULL,
+            .prompt_budget_field_allowlist_count =
+                agent->config ? agent->config->prompt_budget.field_allowlist_count : 0,
         };
         /* B3 Phase 3 — observation half of the wire. Stack stats array
          * captures per-field bytes; hu_prompt_budget_observe folds them

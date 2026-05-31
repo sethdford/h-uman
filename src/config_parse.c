@@ -409,7 +409,8 @@ static hu_error_t parse_proactive_throttle(hu_config_t *cfg, const hu_json_value
     return HU_OK;
 }
 
-static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *obj) {
+static hu_error_t parse_prompt_budget(hu_allocator_t *a, hu_config_t *cfg,
+                                      const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
     cfg->prompt_budget.enabled = hu_json_get_bool(obj, "enabled", cfg->prompt_budget.enabled);
@@ -421,6 +422,18 @@ static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *o
                                               cfg->prompt_budget.min_samples_before_tag);
     if (min_samples > 0)
         cfg->prompt_budget.min_samples_before_tag = min_samples;
+
+    /* Parse optional field_allowlist array (field names to keep even if DEAD).
+     * Default empty; operators opt in with {"field_allowlist": ["memory_context",
+     * "graph_context"]} to preserve high-value fields. */
+    const hu_json_value_t *allowlist_obj = hu_json_object_get(obj, "field_allowlist");
+    if (allowlist_obj && allowlist_obj->type == HU_JSON_ARRAY) {
+        hu_error_t al_err =
+            parse_string_array(a, (char ***)&cfg->prompt_budget.field_allowlist,
+                               &cfg->prompt_budget.field_allowlist_count, allowlist_obj);
+        if (al_err != HU_OK)
+            return al_err;
+    }
     return HU_OK;
 }
 
@@ -1639,7 +1652,7 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     /* Prompt-Budget Compression — see docs/plans/2026-05-25-director-compression/. */
     hu_json_value_t *pb_obj = hu_json_object_get(root, "prompt_budget");
     if (pb_obj) {
-        hu_error_t pbe = parse_prompt_budget(cfg, pb_obj);
+        hu_error_t pbe = parse_prompt_budget(a, cfg, pb_obj);
         if (pbe != HU_OK) {
             hu_json_free(a, root);
             return pbe;

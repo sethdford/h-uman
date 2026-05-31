@@ -162,6 +162,9 @@ typedef struct hu_prompt_config {
     bool prompt_budget_trim_enabled;
     int prompt_budget_dead_field_min_bytes;   /* default 16 if 0 */
     int prompt_budget_min_samples_before_tag; /* default 100 if 0 */
+    const char **
+        prompt_budget_field_allowlist; /* field names to keep even if DEAD (borrowed from config) */
+    size_t prompt_budget_field_allowlist_count; /* number of allowlisted fields */
     /* 2026-05 audit follow-up — suppress the "trim gate disabled" one-shot
      * diagnostic when invoked from the static-cache path (hu_prompt_build_
      * static). The static cache is built at agent_from_config time before

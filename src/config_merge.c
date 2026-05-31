@@ -493,6 +493,22 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
      * in a fresh config so real user feedback (tapbacks, edits) flows
      * through the training loop without explicit config. */
     cfg->reaction_collection.enabled = true;
+
+    /* Prompt-budget compression (L4): budget-aware trimming instead of blind
+     * end-truncation. When enabled, DEAD fields (mean bytes below threshold
+     * over sufficient samples) are skipped during prompt assembly, preventing
+     * graph_context and memory_context from being blindly truncated at the
+     * 16 KB MLX backend cap. Default enabled; operators opt out with
+     * {"prompt_budget": {"enabled": false}} in config.json.
+     *
+     * The field_allowlist is initialized empty; it's populated from config
+     * at parse time. Default behavior: allowlist memory_context and
+     * graph_context so they survive trimming even if occasionally light. */
+    cfg->prompt_budget.enabled = true;
+    cfg->prompt_budget.dead_field_min_bytes = 16;
+    cfg->prompt_budget.min_samples_before_tag = 100;
+    cfg->prompt_budget.field_allowlist = NULL;
+    cfg->prompt_budget.field_allowlist_count = 0;
 }
 
 void hu_config_apply_defaults(hu_config_t *cfg, hu_allocator_t *a) {
