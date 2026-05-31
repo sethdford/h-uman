@@ -321,7 +321,7 @@ apps/           iOS, macOS, Android native apps + shared HumanKit
 
 | Metric                | Measured       |
 | --------------------- | -------------- |
-| Binary size (release) | ~2075 KB       |
+| Binary size (release) | ~2512 KB       |
 | Cold start            | 4-27 ms        |
 | Peak RSS              | ~5.7 MB        |
 | Test throughput       | 700+ tests/sec |
