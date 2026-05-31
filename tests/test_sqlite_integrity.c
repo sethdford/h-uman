@@ -11,10 +11,20 @@
 #include "human/memory.h"
 #include "human/memory/sql_common.h"
 #include "test_framework.h"
+#include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+/* Create a test scratch file with restrictive 0600 perms (not fopen's default
+ * 0666 — CodeQL cpp/world-writable-file, CWE-732). Returns a FILE* or NULL. */
+static FILE *open_private_wb(const char *path) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return NULL;
+    return fdopen(fd, "wb");
+}
 
 /* quick_check returns true on a freshly-created, valid db. */
 static void test_quick_check_ok_on_valid_db(void) {
@@ -35,7 +45,7 @@ static void test_quarantine_moves_corrupt_file_aside(void) {
     char path[256];
     snprintf(path, sizeof(path), "/tmp/hu_sqlite_integrity_q_%d.db", (int)getpid());
     remove(path);
-    FILE *f = fopen(path, "wb");
+    FILE *f = open_private_wb(path);
     HU_ASSERT_NOT_NULL(f);
     fwrite("not a database", 1, 14, f);
     fclose(f);
@@ -59,7 +69,7 @@ static void test_create_self_heals_corrupt_db(void) {
     remove(path);
 
     /* Write garbage where a valid DB should be. */
-    FILE *f = fopen(path, "wb");
+    FILE *f = open_private_wb(path);
     HU_ASSERT_NOT_NULL(f);
     for (int i = 0; i < 256; i++)
         fputc(0xAB, f);
