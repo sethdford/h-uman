@@ -203,6 +203,17 @@ hu_error_t hu_agent_behavior_log_snapshot(const hu_agent_behavior_log_t *log,
  * advance by N over a fixture run" assertions (AC-SM-1 pin). */
 size_t hu_agent_behavior_log_total_records(const hu_agent_behavior_log_t *log);
 
+/* Self-model readback: summarize the recent behavior-log window into a short
+ * first-person "self-awareness" directive (avg reply length + dominant tone) so
+ * the agent can SEE how it has been showing up — the metacognition loop the log
+ * was built for. Privacy-safe: reads only sizes + the emotion enum, never
+ * content. *out is a freshly allocated NUL-terminated string the caller frees via
+ * alloc->free(ctx, *out, *out_len + 1); *out is NULL (HU_OK) when there are too
+ * few turns (<3) to summarize or when HU_ENABLE_SELF_MODEL is OFF (stub). */
+hu_error_t hu_agent_self_model_build_directive(const hu_agent_behavior_log_t *log,
+                                               const hu_allocator_t *alloc, char **out,
+                                               size_t *out_len);
+
 /* ===================================================================
  * Phase C — Periodic aggregation + drift signal
  * ===================================================================
