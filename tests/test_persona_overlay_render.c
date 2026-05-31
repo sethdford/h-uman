@@ -499,9 +499,66 @@ static void steering_coeffs_negative_tier_scale_is_zero(void) {
     HU_ASSERT_EQ((int)(v * 1000), 0);
 }
 
+/* TAIL B — eval-path faithfulness: the COMPACT prompt that the blind-A/B
+ * generation path runs (build/human eval run -> hu_persona_build_prompt_compact)
+ * must append the SAME formality-aware absolute-rules block the live reactive
+ * send path appends. Without it the A/B measures a prompt the daemon never
+ * uses. These pin that the register routes on the channel-overlay formality:
+ * a professional overlay yields the formal register, a casual one the casual
+ * register — the B1 register fix, now visible to the measurement path. */
+static void compact_prompt_formal_overlay_includes_formal_register(void) {
+    setup_alloc();
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.channel = "imessage";
+    ov.formality = "professional"; /* routes to hu_rules_formal */
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "Seth";
+    p.identity = "a finance executive";
+    p.overlays = &ov;
+    p.overlays_count = 1;
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_build_prompt_compact(&test_alloc, &p, "imessage",
+                                                     strlen("imessage"), &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* formal-only marker present, casual-only marker absent */
+    HU_ASSERT(strstr(out, "no casual slang") != NULL);
+    HU_ASSERT(strstr(out, "No formal transitions") == NULL);
+    free(out);
+}
+
+static void compact_prompt_casual_overlay_includes_casual_register(void) {
+    setup_alloc();
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.channel = "imessage";
+    ov.formality = "casual"; /* routes to hu_rules_casual */
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "Seth";
+    p.identity = "a finance executive";
+    p.overlays = &ov;
+    p.overlays_count = 1;
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_build_prompt_compact(&test_alloc, &p, "imessage",
+                                                     strlen("imessage"), &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* casual-only marker present, formal-only marker absent */
+    HU_ASSERT(strstr(out, "No formal transitions") != NULL);
+    HU_ASSERT(strstr(out, "no casual slang") == NULL);
+    free(out);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
+    HU_RUN_TEST(compact_prompt_formal_overlay_includes_formal_register);
+    HU_RUN_TEST(compact_prompt_casual_overlay_includes_casual_register);
     HU_RUN_TEST(render_with_null_overlay_returns_identity_copy);
     HU_RUN_TEST(render_with_empty_input_returns_empty_string);
     HU_RUN_TEST(render_with_null_allocator_returns_invalid_argument);

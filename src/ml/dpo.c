@@ -1429,11 +1429,9 @@ hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque)
         if (!contact_str)
             continue;
 
-        /* Convert contact string to uint64_t contact_handle by simple hash. */
-        uint64_t contact_handle = 0;
-        for (const char *p = contact_str; *p; p++) {
-            contact_handle = contact_handle * 31 + (unsigned char)*p;
-        }
+        /* Canonical contact-string -> handle (must match the reply path in
+         * daemon.c so the trainer and reader address the same Beta arm). */
+        uint64_t contact_handle = hu_contact_handle_hash(contact_str);
 
         /* Update the bandit with the outcome. */
         hu_error_t err =

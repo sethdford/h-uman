@@ -142,7 +142,7 @@ static void test_e2e_imessage_tapback_reaches_personal_model(void) {
     hu_reaction_handler_register_assistant_message_for_test(
         "imessage", "iMessage;-;+15551234567", "OUR-MSG-001",
         /*prompt=*/"what should we do this weekend?",
-        /*response=*/"let's hike Saturday");
+        /*response=*/"let's hike Saturday", "");
 
     /* Stage 3: wire a fresh personal_model. */
     hu_personal_model_t model;
@@ -210,7 +210,7 @@ static void test_e2e_slack_reaction_reaches_personal_model(void) {
     hu_reaction_handler_register_assistant_message_for_test(
         "slack", "C012ABCDEF", "1700000000.123456",
         /*prompt=*/"can you draft the release notes?",
-        /*response=*/"sure — here's a draft for v2.3");
+        /*response=*/"sure — here's a draft for v2.3", "");
 
     hu_personal_model_t model;
     hu_personal_model_init(&model);
@@ -247,7 +247,7 @@ static void test_e2e_identity_graph_canonicalizes_reactor_handle(void) {
     hu_reaction_handler_register_assistant_message_for_test("imessage", "iMessage;-;+15551234567",
                                                             "OUR-MSG-002",
                                                             /*prompt=*/"what's for dinner?",
-                                                            /*response=*/"taco tuesday again?");
+                                                            /*response=*/"taco tuesday again?", "");
 
     /* Build a graph that merges the phone + a display name "Alice"
      * via HIGH confidence (phone-canonicalization match — both entries

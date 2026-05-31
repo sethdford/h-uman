@@ -130,8 +130,9 @@ static const char *const hu_ensemble_keys[] = {
 static const size_t hu_ensemble_keys_len = sizeof(hu_ensemble_keys) / sizeof(hu_ensemble_keys[0]);
 
 static const char *const hu_voice_keys[] = {
-    "local_stt_endpoint", "local_tts_endpoint", "stt_provider", "tts_provider",   "tts_voice",
-    "tts_model",          "stt_model",          "mode",         "realtime_model", "realtime_voice",
+    "local_stt_endpoint", "local_tts_endpoint", "stt_provider", "tts_provider", "tts_voice",
+    "tts_model",          "stt_model",          "stt_language", "mode",         "realtime_model",
+    "realtime_voice",
 };
 static const size_t hu_voice_keys_len = sizeof(hu_voice_keys) / sizeof(hu_voice_keys[0]);
 

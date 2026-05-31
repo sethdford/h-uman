@@ -52,8 +52,8 @@ static void test_register_then_handle_event_records_dpo_pair(void) {
     hu_dpo_collector_t col = {0};
     wire_collector(&db, &col);
 
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_A", "msg_1",
-                                                            "How are you?", "Doing great, thanks!");
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "chat_A", "msg_1", "How are you?", "Doing great, thanks!", "");
 
     hu_reaction_event_t e = {.channel_id = "imessage",
                              .target_thread_id = "chat_A",
@@ -76,8 +76,9 @@ static void test_register_two_distinct_keys_both_retrievable(void) {
     wire_collector(&db, &col);
 
     hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_X", "msg_a", "Q1",
-                                                            "R1");
-    hu_reaction_handler_register_assistant_message_for_test("slack", "C_Y", "msg_b", "Q2", "R2");
+                                                            "R1", "");
+    hu_reaction_handler_register_assistant_message_for_test("slack", "C_Y", "msg_b", "Q2", "R2",
+                                                            "");
 
     hu_reaction_event_t e1 = {.channel_id = "imessage",
                               .target_thread_id = "chat_X",
@@ -107,13 +108,13 @@ static void test_register_same_key_twice_upserts_latest_wins(void) {
     wire_collector(&db, &col);
 
     /* First registration */
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_dup", "msg_dup",
-                                                            "Original prompt", "Original response");
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "chat_dup", "msg_dup", "Original prompt", "Original response", "");
 
     /* Second registration with the SAME (channel, thread, msg_ref) but
      * different prompt/response — upsert semantics mean latest wins. */
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_dup", "msg_dup",
-                                                            "Updated prompt", "Updated response");
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "chat_dup", "msg_dup", "Updated prompt", "Updated response", "");
 
     hu_reaction_event_t e = {.channel_id = "imessage",
                              .target_thread_id = "chat_dup",
@@ -147,7 +148,7 @@ static void test_register_without_matching_lookup_returns_not_found(void) {
     wire_collector(&db, &col);
 
     hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_A", "msg_real", "Q",
-                                                            "R");
+                                                            "R", "");
 
     /* Event references a non-registered msg_ref → NOT_FOUND */
     hu_reaction_event_t e = {.channel_id = "imessage",
@@ -172,8 +173,8 @@ static void test_reset_for_test_clears_lookup_store(void) {
     hu_dpo_collector_t col = {0};
     wire_collector(&db, &col);
 
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_R", "msg_R", "Q",
-                                                            "R");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_R", "msg_R", "Q", "R",
+                                                            "");
 
     /* Confirm it's there */
     hu_reaction_event_t e = {.channel_id = "imessage",
@@ -210,7 +211,7 @@ static void test_register_beyond_old_256_cap_no_silent_drop(void) {
         snprintf(thread, sizeof(thread), "chat_%d", i);
         snprintf(msg_ref, sizeof(msg_ref), "msg_%d", i);
         hu_reaction_handler_register_assistant_message_for_test("imessage", thread, msg_ref, "p",
-                                                                "r");
+                                                                "r", "");
     }
 
     /* The 400th entry (well past the old cap) must still be retrievable. */
@@ -249,8 +250,8 @@ static void test_neutral_polarity_no_dpo_row_inserted(void) {
     hu_dpo_collector_t col = {0};
     wire_collector(&db, &col);
 
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_N", "msg_N", "Q",
-                                                            "R");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_N", "msg_N", "Q", "R",
+                                                            "");
 
     hu_reaction_event_t e = {.channel_id = "imessage",
                              .target_thread_id = "chat_N",
@@ -274,7 +275,7 @@ static void test_negative_polarity_records_rejected_not_chosen(void) {
     wire_collector(&db, &col);
 
     hu_reaction_handler_register_assistant_message_for_test("slack", "chat_Neg", "msg_Neg",
-                                                            "What's 2+2?", "5");
+                                                            "What's 2+2?", "5", "");
 
     hu_reaction_event_t e = {.channel_id = "slack",
                              .target_thread_id = "chat_Neg",

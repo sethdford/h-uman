@@ -25,8 +25,14 @@ TEST_FILES=$(find tests -name 'test_*.c' | wc -l | tr -d ' ')
 TEST_LINES_RAW=$(find tests \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
 TEST_LINES_K=$(( (TEST_LINES_RAW + 500) / 1000 ))
 
-# Count channels (exclude non-channel infrastructure)
+# Channel .c file count — for the "N channel implementations" repo-map line only.
 CHANNEL_COUNT=$(find src/channels -maxdepth 1 -name '*.c' ! -name 'factory.c' ! -name 'meta_common.c' | wc -l | tr -d ' ')
+# Canonical channel count = HU_CHANNEL_* enum entries in channel_catalog.h.
+# MUST match scripts/repo-metrics.sh — the source of truth the docs metrics-drift
+# gate (scripts/check-metrics-drift.sh) checks. Use this for every "N channels"
+# phrasing so the writer and the gate agree; otherwise pre-push rewrites the count
+# to the .c-file tally and re-breaks the docs gate on the next push.
+CHANNEL_ENUM=$(grep -cE '^[[:space:]]+HU_CHANNEL_[A-Z_]+,' include/human/channel_catalog.h 2>/dev/null | tr -d ' ')
 
 # Count tools (exclude factory)
 TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l | tr -d ' ')
@@ -64,7 +70,8 @@ echo "Test files:           ${TEST_FILES}"
 echo "Lines of tests:       ~${TEST_LINES_K}K (${TEST_LINES_RAW})"
 echo "Tests:                ${TEST_COUNT_FMT}"
 echo "Binary size:          ~${BINARY_KB} KB"
-echo "Channels:             ${CHANNEL_COUNT}"
+echo "Channels (enum):      ${CHANNEL_ENUM}"
+echo "Channel .c files:     ${CHANNEL_COUNT}"
 echo "Tools:                ${TOOL_COUNT}"
 
 if ! $APPLY; then
@@ -78,7 +85,7 @@ echo "Patching AGENTS.md..."
 
 # "Current scale" line (test count, channels, lines, etc.)
 sed -i.bak -E \
-    "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_COUNT} channels**/" \
+    "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_ENUM} channels**/" \
     AGENTS.md && rm -f AGENTS.md.bak
 
 # "tests/" repo-map line (test files + test count)
@@ -139,12 +146,12 @@ fi
 
 # Tools count in tagline and feature list
 sed -i.bak -E \
-    "s/[0-9]+ channels, [0-9]+\+ tools/${CHANNEL_COUNT} channels, ${TOOL_COUNT}+ tools/g" \
+    "s/[0-9]+ channels, [0-9]+\+ tools/${CHANNEL_ENUM} channels, ${TOOL_COUNT}+ tools/g" \
     README.md && rm -f README.md.bak
 
 # Tools count in bullet-separated tagline (· separator)
 sed -i.bak -E \
-    "s/[0-9]+ channels · [0-9]+\+ tools/${CHANNEL_COUNT} channels · ${TOOL_COUNT}+ tools/g" \
+    "s/[0-9]+ channels · [0-9]+\+ tools/${CHANNEL_ENUM} channels · ${TOOL_COUNT}+ tools/g" \
     README.md && rm -f README.md.bak
 
 # Stats block: "Source files:", "Lines of code:", "Test files:", "Tests:"

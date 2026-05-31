@@ -4,7 +4,7 @@
 # T1 guard (DDD bounded-context refactor, Phase 0). The number of src/ files
 # that directly `#include <sqlite3.h>` must only ever DECREASE. New domain code
 # must reach SQLite through a memory repository (see
-# docs/plans/2026-05-29-ddd-bounded-contexts/phase-3-memory-query-interface.md),
+# docs/plans/2026-05-29-ddd-bounded-contexts/phase-E3-memory-query-interface.md),
 # never by grabbing the raw sqlite3* handle via hu_sqlite_memory_get_db().
 #
 # The engine + repository layers are the ONLY places sqlite3 is legal, so
@@ -22,7 +22,10 @@ set -euo pipefail
 # (emotional_residue/moments, mood, emotional_state, self_model, theory_of_mind).
 # Recomputed against the merged tree.
 # Updated 2026-05-29 after opinions aggregate migration (opinions.c): 101 -> 100
-BASELINE=100
+# Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
+# Updated 2026-05-29 after social_graph aggregate migration (social_graph.c): 99 -> 98
+# Updated 2026-05-29 after self_awareness aggregate migration (self_awareness.c): 98 -> 97
+BASELINE=97
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

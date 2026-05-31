@@ -773,6 +773,7 @@ set(HU_CORE_SOURCES
     src/agent/awareness.c
     src/agent/outcomes.c
     src/agent/contextual_bandit.c
+    src/agent/humanization_bandit.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
     src/agent/stop_sequence_registry.c
@@ -866,6 +867,7 @@ set(HU_CORE_SOURCES
     src/agent/activation_steering.c
     src/agent/arbitrator.c
     src/agent/salience.c
+    src/agent/intent.c
     src/agent/planning.c
     src/agent/collab_planning.c
     src/behavior/rel_dynamics.c
@@ -1586,6 +1588,9 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/feed_items_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
+        src/memory/repos/life_chapter_repo_sqlite.c
+        src/memory/repos/social_graph_repo_sqlite.c
+        src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
         src/memory/episodic.c
         src/memory/consolidation_engine.c
@@ -3271,6 +3276,7 @@ set(HU_TEST_SOURCES
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
     tests/test_contextual_bandit.c
+    tests/test_humanization_bandit.c
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
@@ -3647,6 +3653,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_workflow_event.c
     tests/test_sota_features.c
     tests/test_mood.c
+    tests/test_intent.c
     tests/test_bth_e2e.c
     tests/test_style_tracker.c
     tests/test_theory_of_mind.c
@@ -3857,6 +3864,9 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_burst_egress.c)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
@@ -3920,6 +3930,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_reaction_paired_train_e2e.c
     tests/test_dpo_collector.c
     tests/test_proactive_outcomes.c
     tests/test_e2e_learning_loop.c

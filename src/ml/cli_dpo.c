@@ -331,7 +331,13 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
             return cerr;
         }
         hu_dpo_export_t exp = {0};
-        cerr = hu_dpo_export(&col, alloc, &exp);
+        /* Paired export: a user's on-disk corpus accumulates SINGLE-SIDED rows
+         * from reaction collection (a positive tapback fills only `chosen`, a
+         * negative only `rejected`). Plain hu_dpo_export drops those, so manual
+         * `dpo-train` on a reaction-built DB would see zero pairs. The paired
+         * variant zips same-prompt chosen-only + rejected-only rows into
+         * trainable pairs (genuine two-sided rows still pass through). */
+        cerr = hu_dpo_export_paired(&col, alloc, &exp);
         if (cerr != HU_OK) {
             fprintf(stderr, "[dpo-train] export from SQLite failed: error %d\n", (int)cerr);
             hu_dpo_export_free(alloc, &exp);

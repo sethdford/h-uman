@@ -29,7 +29,9 @@ def build(triples, seed):
         key[t["id"]] = "A" if seth_is_A else "B"   # which option is the REAL Seth
         rows.append({"id": t["id"], "context": t["context"],
                      "option_A": opt_a, "option_B": opt_b,
-                     "choice": "", "confidence": ""})
+                     "choice": "", "confidence": "",
+                     "axis_opinion": "", "axis_memory": "", "axis_reasoning": "",
+                     "axis_lexical": "", "axis_tone": "", "axis_syntax": ""})
     rng.shuffle(rows)
     return rows, key
 
@@ -50,7 +52,9 @@ def main():
     keyf = os.path.join(a.out_dir, "answer_key.json")
     with open(sheet, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["id", "context", "option_A", "option_B",
-                                          "choice", "confidence"])
+                                          "choice", "confidence",
+                                          "axis_opinion", "axis_memory", "axis_reasoning",
+                                          "axis_lexical", "axis_tone", "axis_syntax"])
         w.writeheader(); w.writerows(rows)
     with open(keyf, "w") as f:
         json.dump(key, f, indent=2)

@@ -6,6 +6,7 @@
 #include "human/agent/chaos.h"
 #include "human/agent/checkpoint.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/contextual_bandit.h"
 #include "human/agent/data_quality.h"
 #include "human/agent/degradation.h"
 #include "human/agent/gvr.h"
@@ -118,6 +119,8 @@ typedef struct hu_agent_extensions {
     hu_tier_manager_t tier_manager;
     hu_prm_config_t prm_config;
     hu_dpo_collector_t dpo_collector;
+    hu_contextual_bandit_t
+        *bandit; /* Contextual bandit for per-contact humanization param selection */
     int64_t current_trajectory_id; /* ML trajectory for RL training (0 = inactive) */
     bool sota_initialized;
 
@@ -132,6 +135,9 @@ typedef struct hu_agent_extensions {
     hu_checkpoint_store_t checkpoint_store;
     hu_scratchpad_t scratchpad;
     hu_escalate_protocol_t escalate_protocol;
+
+    char *last_rejected_draft; /* owned; the response rejected by response guard on the last turn */
+    size_t last_rejected_draft_len; /* length of last_rejected_draft (excluding null terminator) */
 } hu_agent_extensions_t;
 
 typedef struct hu_frontier_state {

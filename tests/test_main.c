@@ -40,6 +40,7 @@ void run_config_banner_runtime_failfast_tests(void);
 void run_slice_tests(void);
 void run_tool_registry_honesty_tests(void);
 void run_contextual_bandit_tests(void);
+void run_humanization_bandit_tests(void);
 void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
 void run_mlx_load_adapter_tests(void);
@@ -410,6 +411,9 @@ void run_outbound_crosstalk_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
+void run_life_chapter_repo_tests(void);
+void run_social_graph_repo_tests(void);
+void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
@@ -549,6 +553,7 @@ void run_hula_golden_tests(void);
 void run_workflow_event_tests(void);
 void run_sota_features_tests(void);
 void run_mood_tests(void);
+void run_intent_tests(void);
 void run_style_tracker_tests(void);
 void run_theory_of_mind_tests(void);
 void run_tom_activation_tests(void);
@@ -759,6 +764,7 @@ void run_self_rag_tests(void);
 void run_memory_tiers_tests(void);
 void run_process_reward_tests(void);
 void run_dpo_tests(void);
+void run_reaction_paired_train_e2e_tests(void);
 void run_dpo_collector_tests(void);
 void run_proactive_outcomes_tests(void);
 void run_e2e_learning_loop_tests(void);
@@ -1040,6 +1046,7 @@ int main(int argc, char **argv) {
     run_slice_tests();
     run_tool_registry_honesty_tests();
     run_contextual_bandit_tests();
+    run_humanization_bandit_tests();
     run_memory_tests();
     run_w7_render_null_safety_tests();
     run_mlx_load_adapter_tests();
@@ -1378,6 +1385,9 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
+    run_life_chapter_repo_tests();
+    run_social_graph_repo_tests();
+    run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
     run_emotional_moments_repo_tests();
@@ -1510,6 +1520,7 @@ int main(int argc, char **argv) {
     run_workflow_event_tests();
     run_sota_features_tests();
     run_mood_tests();
+    run_intent_tests();
     run_style_tracker_tests();
     run_theory_of_mind_tests();
     run_tom_activation_tests();
@@ -1698,6 +1709,7 @@ int main(int argc, char **argv) {
     run_memory_tiers_tests();
     run_process_reward_tests();
     run_dpo_tests();
+    run_reaction_paired_train_e2e_tests();
     run_dpo_collector_tests();
     run_proactive_outcomes_tests();
     run_e2e_learning_loop_tests();
