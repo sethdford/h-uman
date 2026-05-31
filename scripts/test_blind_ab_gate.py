@@ -74,6 +74,22 @@ def test_merge_preserves_other_half():
         assert data["effective_verdict"] == "PASS"
 
 
+def test_eval_gate_synthetic_is_advisory_and_exits_zero():
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    with tempfile.TemporaryDirectory() as d:
+        gate = os.path.join(d, "gate.json")
+        env = dict(os.environ, HU_BLIND_AB_GATE_PATH=gate)
+        r = subprocess.run(
+            ["python3", os.path.join(here, "eval_blinded_ab.py"),
+             "--gate", "--gate-dry-run"],
+            capture_output=True, text=True, env=env, timeout=60)
+        assert r.returncode == 0, r.stderr
+        data = json.load(open(gate))
+        assert data["proxy"]["mode"] == "ADVISORY"
+        assert data["effective_verdict"] == "ADVISORY"
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

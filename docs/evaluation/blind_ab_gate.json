@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "commit": "c8a58b5206617e44b97210c29ce48d886ea8237b",
+  "proxy": {
+    "tool": "eval_blinded_ab.py",
+    "timestamp": "2026-05-31T12:35:54",
+    "verdict": "ADVISORY",
+    "mode": "ADVISORY",
+    "fool_rate": null,
+    "baseline_fool_rate": null,
+    "n_trials": 0,
+    "n_real_pairs": 0,
+    "fail_under": 45.0,
+    "max_regression": 5.0
+  },
+  "human": {
+    "verdict": "ABSENT"
+  },
+  "effective_verdict": "ADVISORY"
+}
