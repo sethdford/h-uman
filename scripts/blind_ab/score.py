@@ -28,6 +28,52 @@ def wilson(k, n, z=1.96):
     return (p, max(0.0, centre - half), min(1.0, centre + half))
 
 
+def likert_to_01(likert_val):
+    """Convert Likert [1-5] rating to [0-1] scale."""
+    try:
+        val = float(likert_val)
+    except (ValueError, TypeError):
+        return None
+    if val < 1.0 or val > 5.0:
+        return None
+    return (val - 1.0) / 4.0
+
+
+def score_axes(rows):
+    """Compute per-axis scores from Likert responses.
+
+    Returns dict: {axis_name: mean_score_in_[0,1], ...}
+    Also returns per_rater_per_axis for observability.
+    """
+    axis_names = ["opinion", "memory", "reasoning", "lexical", "tone", "syntax"]
+    axis_sums = {ax: 0.0 for ax in axis_names}
+    axis_counts = {ax: 0 for ax in axis_names}
+    per_rater_axes = {}
+
+    for r in rows:
+        rater = r.get("_rater", "?")
+        if rater not in per_rater_axes:
+            per_rater_axes[rater] = {ax: [] for ax in axis_names}
+
+        for ax in axis_names:
+            col = f"axis_{ax}"
+            val = likert_to_01(r.get(col) or "")
+            if val is not None:
+                axis_sums[ax] += val
+                axis_counts[ax] += 1
+                per_rater_axes[rater][ax].append(val)
+
+    # Aggregate per-axis means
+    result = {}
+    for ax in axis_names:
+        if axis_counts[ax] > 0:
+            result[ax] = axis_sums[ax] / axis_counts[ax]
+        else:
+            result[ax] = 0.0
+
+    return result
+
+
 def score_rows(rows, key):
     """rows: list of {id, choice, confidence, _rater?}. Returns aggregate dict."""
     n = wsum = wdet = det = 0
@@ -91,12 +137,17 @@ def selftest():
     for i in range(200):
         choice = rng.choice(("A", "B"))
         rows.append({"id": f"t{i}", "choice": choice, "confidence": rng.randint(1, 5),
+                     "axis_opinion": 3, "axis_memory": 3, "axis_reasoning": 3,
+                     "axis_lexical": 3, "axis_tone": 3, "axis_syntax": 3,
                      "_rater": f"r{i % 5}"})
     agg = score_rows(rows, key)
     assert 0.40 <= agg["detect"] <= 0.60, agg["detect"]
     assert agg["n"] == 200
     # Perfect-detector case -> detection 1.0, PASS must be False.
-    perfect = [{"id": k, "choice": v, "confidence": 5, "_rater": "x"} for k, v in key.items()]
+    perfect = [{"id": k, "choice": v, "confidence": 5,
+                "axis_opinion": 5, "axis_memory": 5, "axis_reasoning": 5,
+                "axis_lexical": 5, "axis_tone": 5, "axis_syntax": 5,
+                "_rater": "x"} for k, v in key.items()]
     pagg = score_rows(perfect, key)
     assert abs(pagg["detect"] - 1.0) < 1e-9, pagg["detect"]
     assert pagg["ci_lo"] > 0.55
@@ -104,7 +155,47 @@ def selftest():
     assert wilson(0, 0) == (0.0, 0.0, 0.0)
     lo_ok = 0.0 <= wilson(1, 1)[1] <= 1.0
     assert lo_ok
-    print("selftest OK: chance-bot detect ~0.5, perfect-detector detect=1.0, Wilson bounded")
+
+    # Test Likert → [0,1] conversion
+    assert likert_to_01(1) == 0.0, "Likert 1 should map to 0.0"
+    assert likert_to_01(3) == 0.5, "Likert 3 should map to 0.5"
+    assert likert_to_01(5) == 1.0, "Likert 5 should map to 1.0"
+    assert likert_to_01("") is None, "Empty string should be None"
+    assert likert_to_01("invalid") is None, "Invalid string should be None"
+
+    # Test per-axis aggregation with all-neutral ratings
+    neutral_rows = [{"id": f"t{i}", "axis_opinion": 3, "axis_memory": 3,
+                     "axis_reasoning": 3, "axis_lexical": 3, "axis_tone": 3,
+                     "axis_syntax": 3, "_rater": f"r{i % 3}"} for i in range(15)]
+    axes = score_axes(neutral_rows)
+    for ax in ["opinion", "memory", "reasoning", "lexical", "tone", "syntax"]:
+        assert abs(axes[ax] - 0.5) < 1e-9, f"Axis {ax} with all 3's should be 0.5, got {axes[ax]}"
+
+    # Test per-axis with mixed ratings
+    mixed_rows = [
+        {"axis_opinion": 5, "axis_memory": 1, "axis_reasoning": 3,
+         "axis_lexical": 5, "axis_tone": 5, "axis_syntax": 3, "_rater": "r1"},
+        {"axis_opinion": 5, "axis_memory": 1, "axis_reasoning": 3,
+         "axis_lexical": 5, "axis_tone": 5, "axis_syntax": 3, "_rater": "r2"},
+    ]
+    axes = score_axes(mixed_rows)
+    assert abs(axes["opinion"] - 1.0) < 1e-9, f"opinion should be 1.0, got {axes['opinion']}"
+    assert abs(axes["memory"] - 0.0) < 1e-9, f"memory should be 0.0, got {axes['memory']}"
+    assert abs(axes["reasoning"] - 0.5) < 1e-9, f"reasoning should be 0.5, got {axes['reasoning']}"
+
+    # Test backward compatibility: legacy keys still present
+    test_rows = [{"id": "t1", "choice": "A", "confidence": 5,
+                  "axis_opinion": 5, "axis_memory": 5, "axis_reasoning": 5,
+                  "axis_lexical": 5, "axis_tone": 5, "axis_syntax": 5,
+                  "_rater": "test"}]
+    test_key = {"t1": "A"}
+    agg = score_rows(test_rows, test_key)
+    assert "detect" in agg, "Legacy 'detect' field missing"
+    assert "n" in agg, "Legacy 'n' field missing"
+    assert "ci_lo" in agg, "Legacy 'ci_lo' field missing"
+    assert "ci_hi" in agg, "Legacy 'ci_hi' field missing"
+
+    print("selftest OK: Likert conversion, axis aggregation, backward-compat verified")
 
 
 def main():
@@ -122,6 +213,11 @@ def main():
         key = json.load(f)
     rows = load_sheets(a.sheets)
     agg = score_rows(rows, key)
+    axes = score_axes(rows)
+
+    # Backward-compatible output: keep legacy keys, add axes object
+    agg["axes"] = axes
+
     verdict = report(agg)
     if a.json_out:
         with open(a.json_out, 'w') as f:
