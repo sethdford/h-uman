@@ -253,10 +253,41 @@ static void test_gate_comment_exists_at_agent_turn_1471(void) {
     HU_ASSERT_TRUE(found_comment);
 }
 
+/* Regression (GraphRAG calibration audit 2026-05-31): the Self-RAG
+ * memory-relevance !should_use branch must NOT free graph_ctx.
+ * hu_srag_verify_relevance scores memory_ctx ONLY; coupling graph_ctx's lifetime
+ * to that verdict silently defeated GraphRAG grounding whenever flat memory was
+ * judged irrelevant. Pins the decoupling: between the "Self-RAG: verify
+ * relevance" comment and the "behavior_memory_ctx_nonempty" line that follows
+ * the block, no graph_ctx free may appear. (Source-presence style, like the
+ * gate-comment test above — fails on the pre-fix code that freed graph_ctx.) */
+static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
+    FILE *f = fopen("src/agent/agent_turn.c", "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[512];
+    bool in_block = false;
+    bool freed_graph_in_block = false;
+    while (fgets(buf, sizeof(buf), f)) {
+        if (!in_block) {
+            if (strstr(buf, "Self-RAG: verify relevance") != NULL)
+                in_block = true;
+            continue;
+        }
+        /* The statement immediately following the Self-RAG block. */
+        if (strstr(buf, "behavior_memory_ctx_nonempty") != NULL)
+            break;
+        if (strstr(buf, "graph_ctx") != NULL && strstr(buf, "free") != NULL)
+            freed_graph_in_block = true;
+    }
+    fclose(f);
+    HU_ASSERT_FALSE(freed_graph_in_block);
+}
+
 void run_graph_grounding_tests(void) {
     HU_TEST_SUITE("GraphRAG grounding");
     HU_RUN_TEST(test_graph_grounding_mode_parse);
     HU_RUN_TEST(test_gate_comment_exists_at_agent_turn_1471);
+    HU_RUN_TEST(test_srag_memory_miss_does_not_free_graph_ctx);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_graph_ground_load_returns_contact_summaries);
     HU_RUN_TEST(test_graph_ground_load_empty_is_failopen);
