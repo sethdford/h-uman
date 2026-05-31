@@ -23,12 +23,11 @@
 #include "test_framework.h"
 #include <sqlite3.h>
 
-static void test_reaction_event_with_known_target_updates_production_outcomes(void) {
+static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
-    /* Set up an in-memory collector with production_outcomes table.
-     * Phase 2 design: reactions update production_outcomes, and the nightly
-     * miner creates dpo_pairs. See docs/plans/2026-05-19-agi-path.md. */
+    /* Set up an in-memory dpo_pairs SQLite store via the actual API in
+     * include/human/ml/dpo.h:39-46 */
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
     hu_dpo_collector_t col = {0};
@@ -42,115 +41,44 @@ static void test_reaction_event_with_known_target_updates_production_outcomes(vo
     /* Pre-populate a chat history record so the handler has something to lookup */
     hu_reaction_handler_register_assistant_message_for_test(
         /*channel*/ "imessage",
-        /*thread*/ "contact_alice",
-        /*msg_ref*/ "msg_001",
+        /*thread*/ "chat_xyz",
+        /*msg_ref*/ "msg_abc",
         /*prompt*/ "What's the weather?",
-        /*response*/ "Sunny and 72.");
+        /*response*/ "Sunny and 72.",
+        /*alternative*/ "");
 
-    /* First, simulate an outbound message being recorded to production_outcomes.
-     * This is what hu_dpo_record_outbound does in daemon.c. */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col,
-                                        /*channel*/ "imessage", strlen("imessage"),
-                                        /*target*/ "contact_alice", strlen("contact_alice"),
-                                        /*message_ref*/ "msg_001", strlen("msg_001"),
-                                        /*prompt*/ "What's the weather?",
-                                        strlen("What's the weather?"),
-                                        /*chosen*/ "Sunny and 72.", strlen("Sunny and 72."),
-                                        /*p_seth_at_send*/ 0.85,
-                                        /*alternatives_json*/ NULL, 0),
-                 HU_OK);
-
-    /* Verify the production_outcomes row was created with NULL outcome */
-    sqlite3_stmt *check = NULL;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(
-                     db, "SELECT COUNT(*) FROM production_outcomes WHERE message_ref='msg_001'", -1,
-                     &check, NULL),
-                 SQLITE_OK);
-    HU_ASSERT_EQ(sqlite3_step(check), SQLITE_ROW);
-    HU_ASSERT_EQ(sqlite3_column_int(check, 0), 1);
-    sqlite3_finalize(check);
-
-    /* Now handle the reaction: this should update the production_outcomes row
-     * with the tapback_polarity outcome. */
     hu_reaction_event_t e = {
         .channel_id = "imessage",
-        .target_thread_id = "contact_alice",
-        .target_message_ref = "msg_001",
+        .target_thread_id = "chat_xyz",
+        .target_message_ref = "msg_abc",
         .sender_handle = "+15551234567",
         .kind = HU_REACTION_LOVE,
         .polarity = HU_REACTION_POSITIVE,
         .is_removal = 0,
-        .timestamp_unix = 1000000,
     };
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
 
-    /* Verify the production_outcomes row was updated with the tapback_polarity */
+    /* Verify a row was inserted via the public count API */
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+
+    /* Verify content via direct SQL query (collector has no read-back API today) */
+    sqlite3_stmt *stmt = NULL;
     HU_ASSERT_EQ(
-        sqlite3_prepare_v2(db,
-                           "SELECT tapback_polarity, outcome_resolved_at FROM production_outcomes "
-                           "WHERE message_ref='msg_001'",
-                           -1, &check, NULL),
+        sqlite3_prepare_v2(db, "SELECT prompt, chosen, rejected, source FROM dpo_pairs LIMIT 1", -1,
+                           &stmt, NULL),
         SQLITE_OK);
-    HU_ASSERT_EQ(sqlite3_step(check), SQLITE_ROW);
-    HU_ASSERT_EQ(sqlite3_column_int(check, 0), 1); /* positive tapback */
-    HU_ASSERT_NOT_NULL(
-        (void *)(intptr_t)sqlite3_column_int64(check, 1)); /* outcome_resolved_at is set */
-    sqlite3_finalize(check);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "What's the weather?");
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "Sunny and 72.");
+    /* rejected column is empty string for positive-polarity row */
+    const char *rej = (const char *)sqlite3_column_text(stmt, 2);
+    HU_ASSERT_TRUE(rej == NULL || rej[0] == '\0');
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 3), "imessage_tapback");
+    sqlite3_finalize(stmt);
 
     /* Verify the per-turn flag was set */
-    HU_ASSERT_TRUE(hu_reaction_handler_was_called_this_turn());
-
-    hu_dpo_collector_deinit(&col);
-    sqlite3_close(db);
-    hu_reaction_handler_reset_for_test();
-}
-
-/* Test: when a negative tapback arrives, it should update production_outcomes
- * with tapback_polarity = -1, which the nightly miner will pair against
- * responses that received no reply (is_rejected case in mine_pairs_from_outcomes). */
-static void test_negative_reaction_sets_tapback_polarity_minus_one(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    sqlite3 *db = NULL;
-    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
-    hu_dpo_collector_t col = {0};
-    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 1024, &col), HU_OK);
-    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
-
-    hu_reaction_handler_reset_for_test();
-    hu_reaction_handler_set_collector(&col);
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "contact_bob", "msg_002",
-                                                            "Tell a joke.", "Bad response.");
-
-    /* Record outbound to production_outcomes */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", strlen("imessage"), "contact_bob",
-                                        strlen("contact_bob"), "msg_002", strlen("msg_002"),
-                                        "Tell a joke.", strlen("Tell a joke."), "Bad response.",
-                                        strlen("Bad response."), 0.75, NULL, 0),
-                 HU_OK);
-
-    /* Send a negative reaction */
-    hu_reaction_event_t e = {
-        .channel_id = "imessage",
-        .target_thread_id = "contact_bob",
-        .target_message_ref = "msg_002",
-        .kind = HU_REACTION_DISLIKE,
-        .polarity = HU_REACTION_NEGATIVE,
-        .is_removal = 0,
-        .timestamp_unix = 2000000,
-    };
-    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
-
-    /* Verify tapback_polarity was set to -1 */
-    sqlite3_stmt *check = NULL;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(
-                     db,
-                     "SELECT tapback_polarity FROM production_outcomes WHERE message_ref='msg_002'",
-                     -1, &check, NULL),
-                 SQLITE_OK);
-    HU_ASSERT_EQ(sqlite3_step(check), SQLITE_ROW);
-    HU_ASSERT_EQ(sqlite3_column_int(check, 0), -1);
-    sqlite3_finalize(check);
-
     HU_ASSERT_TRUE(hu_reaction_handler_was_called_this_turn());
 
     hu_dpo_collector_deinit(&col);
@@ -194,7 +122,7 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
     hu_dpo_collector_create(&alloc, db, 1024, &col);
     hu_dpo_init_tables(&col);
     hu_reaction_handler_set_collector(&col);
-    hu_reaction_handler_register_assistant_message_for_test("imessage", "ct", "mr", "p", "r");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "ct", "mr", "p", "r", "");
 
     HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
 
@@ -214,6 +142,132 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
     hu_reaction_handler_reset_for_test();
 }
 
+/* BLOCKER 2: positive tapback with alternative draft creates a complete pair.
+ * The pair's chosen = response, rejected = alternative, both non-empty.
+ * Proves reactions with alternatives now yield trainable complete pairs
+ * (previously, single-sided rows were dropped during export). */
+static void test_positive_tapback_with_alternative_creates_complete_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 1024, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    /* Register a message WITH an alternative (the rejected draft from the retry path) */
+    const char *prompt = "What time is the meeting?";
+    const char *response = "The meeting is at 2pm.";
+    const char *alternative = "Meeting is scheduled for 14:00 hours today.";
+
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_abc", "msg_123",
+                                                            prompt, response, alternative);
+
+    /* Fire a positive tapback */
+    hu_reaction_event_t e = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_abc",
+        .target_message_ref = "msg_123",
+        .sender_handle = "+15551234567",
+        .kind = HU_REACTION_LOVE,
+        .polarity = HU_REACTION_POSITIVE,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
+
+    /* Verify the dpo_pairs row has BOTH chosen AND rejected non-empty */
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT prompt, chosen, rejected FROM dpo_pairs WHERE source = "
+                                    "'imessage_tapback' LIMIT 1",
+                                    -1, &stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+
+    /* Assertion 1: prompt matches */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), prompt);
+
+    /* Assertion 2: chosen = response (the sent message) */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), response);
+
+    /* Assertion 3: rejected = alternative (the OTHER side of the pair) */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 2), alternative);
+
+    sqlite3_finalize(stmt);
+
+    /* CRITICAL: Verify this pair is now exportable (not dropped like single-sided rows).
+     * hu_dpo_export returns pairs where both sides >= 4 bytes; reactions now produce them. */
+    hu_dpo_export_t export = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &export), HU_OK);
+    HU_ASSERT_GE(export.count, 1); /* At least one pair exported (not dropped as single-sided) */
+
+    hu_dpo_export_free(&alloc, &export);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
+/* BLOCKER 2: negative tapback with alternative creates a complete pair.
+ * The pair's rejected = response, chosen = alternative.
+ * Proves negative reactions also produce trainable complete pairs. */
+static void test_negative_tapback_with_alternative_creates_complete_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 1024, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    const char *prompt = "What's your favorite color?";
+    const char *response = "I really like blue.";
+    const char *alternative = "My preferred shade is deep blue.";
+
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_xyz", "msg_456",
+                                                            prompt, response, alternative);
+
+    /* Fire a negative tapback (thumbs down) */
+    hu_reaction_event_t e = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_xyz",
+        .target_message_ref = "msg_456",
+        .sender_handle = "+15551234567",
+        .kind = HU_REACTION_DISLIKE,
+        .polarity = HU_REACTION_NEGATIVE,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
+
+    /* Verify: NEGATIVE means rejected = response, chosen = alternative */
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT prompt, chosen, rejected FROM dpo_pairs WHERE source = "
+                                    "'imessage_tapback' LIMIT 1",
+                                    -1, &stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), prompt);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), alternative); /* chosen */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 2), response);    /* rejected */
+
+    sqlite3_finalize(stmt);
+
+    /* Verify the pair is exportable */
+    hu_dpo_export_t export = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &export), HU_OK);
+    HU_ASSERT_GE(export.count, 1);
+
+    hu_dpo_export_free(&alloc, &export);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
 /* Pin the NULL-input guards in src/agent/reaction_handler.c:53. Adding this
  * regression test (cheap, no setup) so any future refactor that drops the
  * `if (!e || !e->channel_id)` early-return surfaces as a test failure
@@ -227,9 +281,10 @@ static void test_reaction_handler_handle_event_null_returns_invalid_argument(voi
 
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
-    HU_RUN_TEST(test_reaction_event_with_known_target_updates_production_outcomes);
-    HU_RUN_TEST(test_negative_reaction_sets_tapback_polarity_minus_one);
+    HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
     HU_RUN_TEST(test_reaction_event_with_unknown_target_drops_silently);
     HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
+    HU_RUN_TEST(test_positive_tapback_with_alternative_creates_complete_pair);
+    HU_RUN_TEST(test_negative_tapback_with_alternative_creates_complete_pair);
     HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
 }

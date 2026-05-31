@@ -248,3 +248,12 @@ hu_error_t hu_sql_quote_escape_into(const char *src, size_t src_len, char *dst, 
     *out_len = pos;
     return HU_OK;
 }
+
+uint64_t hu_contact_handle_hash(const char *s) {
+    uint64_t h = 0;
+    if (s) {
+        for (const char *p = s; *p; p++)
+            h = h * 31 + (unsigned char)*p;
+    }
+    return h;
+}

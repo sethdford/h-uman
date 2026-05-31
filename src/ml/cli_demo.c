@@ -420,7 +420,7 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
         snprintf(msg, sizeof(msg), "msg-synth-%03d", i + 1);
         const char *resp = (i % 2 == 0) ? "ship the small fix." : "perhaps consider exploring.";
         hu_reaction_handler_register_assistant_message_for_production("imessage", thread, msg,
-                                                                      args->prompt, resp);
+                                                                      args->prompt, resp, "");
 
         hu_reaction_event_t evt = {
             .channel_id = "imessage",

@@ -698,7 +698,10 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in, hu_alloc
             continue;
         hu_reaction_handler_register_assistant_message_for_test(
             e->channel_id, e->target_thread_id, e->target_message_ref, aux->prompt,
-            e->polarity == HU_REACTION_POSITIVE ? aux->response_chosen : aux->response_rejected);
+            e->polarity == HU_REACTION_POSITIVE ? aux->response_chosen : aux->response_rejected,
+            /* alternative: for this test fixture, pass empty string (no alternative draft
+               available) */
+            "");
     }
 
     hu_reaction_handler_set_collector(in->collector);

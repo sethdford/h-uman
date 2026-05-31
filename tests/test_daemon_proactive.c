@@ -672,6 +672,32 @@ static void test_p6_5_absolute_rules_helper_emits_key_rules(void) {
     HU_ASSERT_TRUE(strstr(buf, "ABSOLUTE RULES") != NULL);
 }
 
+/* Register fix: formality-aware rules. Professional contacts get a capitalized
+ * register; casual/NULL keeps the "all lowercase" friend-voice. Pins the
+ * substring trap: "informal" must NOT match "formal" (stays casual). */
+static void test_absolute_rules_formality_aware(void) {
+    char buf[2048];
+    size_t out_len = 0;
+    /* professional -> formal register, NOT "All lowercase". */
+    HU_ASSERT_EQ(
+        hu_persona_build_absolute_rules_fmt(NULL, "professional", buf, sizeof(buf), &out_len),
+        HU_OK);
+    HU_ASSERT_TRUE(strstr(buf, "Capitalize") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "All lowercase") == NULL);
+    /* NULL -> casual friend-voice with "All lowercase". */
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(NULL, NULL, buf, sizeof(buf), &out_len),
+                 HU_OK);
+    HU_ASSERT_TRUE(strstr(buf, "All lowercase") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Capitalize") == NULL);
+    /* "informal" must NOT trip the formal path (word-boundary). */
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(NULL, "informal", buf, sizeof(buf), &out_len),
+                 HU_OK);
+    HU_ASSERT_TRUE(strstr(buf, "All lowercase") != NULL);
+    /* Invariant rules present regardless of register. */
+    HU_ASSERT_TRUE(strstr(buf, "You are HUMAN") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ZERO markdown") != NULL);
+}
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_daemon_proactive_tests(void) {
@@ -724,6 +750,7 @@ void run_daemon_proactive_tests(void) {
     /* P6-5: shared absolute-rules block in proactive prompts */
     HU_RUN_TEST(test_p6_5_proactive_prompt_includes_absolute_rules);
     HU_RUN_TEST(test_p6_5_absolute_rules_helper_emits_key_rules);
+    HU_RUN_TEST(test_absolute_rules_formality_aware);
 
     /* Sprint 41 — quiet-hour gate (Jordan incident 2026-05-26).
      * Pure-predicate truth-table coverage of the autoresponder DND

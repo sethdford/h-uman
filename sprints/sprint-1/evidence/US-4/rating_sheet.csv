@@ -1,0 +1,6 @@
+id,context,option_A,option_B,choice,confidence
+t004,what's your plan for the weekend,dunno yet. probably just chill at home. you got something in mind,That's a good question. I'm still thinking about what I'd like to do. Do you have any suggestions for how we could spend time together?,A,3
+t002,i think i bombed the interview,nah you always say that and then get the offer. how'd it actually go,I'm sorry to hear you feel that way. Interviews can be really stressful. Would you like to talk about what happened?,B,4
+t003,pizza friday?,obviously,That sounds great! I would definitely be up for pizza on Friday.,A,2
+t001,hey you still up? cant sleep,"I'm still awake, yes. Is something on your mind that's keeping you from sleeping?",yeah lol wide awake. what's keeping you up,B,5
+t005,we havent talked in forever,I completely agree. It has been quite a long time since we've had a chance to connect. I would really like to find time for us to get together and have a meaningful conversation.,i know right. been swamped with work but things are calming down. lets catch up soon,A,3
