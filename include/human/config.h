@@ -1,6 +1,7 @@
 #ifndef HU_CONFIG_H
 #define HU_CONFIG_H
 
+#include "human/channels/imessage_private/protocol.h"
 #include "human/cognition/metacognition.h"
 #include "human/config_types.h"
 #include "human/core/allocator.h"
@@ -390,6 +391,17 @@ typedef struct hu_imessage_action_surface_v2_config {
     char *sticker_dir;             /* local sticker directory (default ~/.human/stickers) */
 } hu_imessage_action_surface_v2_config_t;
 
+/* Native IMCore private-API backend (reply/tapback/edit/unsend/delete/typing
+ * via an injected helper dylib). Power-user opt-in: requires SIP disabled.
+ * Defaults to disabled/OFF; promoted OFF→SHADOW→LIVE only on a measurement
+ * (see docs/investigations/imessage-private-api-mechanism.md and
+ * ~/.claude/rules/feature-gate-requires-measurement.md). When unavailable or
+ * OFF, the dispatcher falls back to the hardened Tier-1 reply path. */
+typedef struct hu_imessage_private_api_config {
+    bool enabled;                     /* master gate, default false */
+    hu_imessage_private_mode_t mode;  /* OFF (default) / SHADOW / LIVE */
+} hu_imessage_private_api_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -400,6 +412,7 @@ typedef struct hu_imessage_channel_config {
     bool use_imsg_cli;            /* prefer steipete/imsg CLI for send/react when available */
     char *loopback_handle;        /* treat is_from_me=1 from this handle as incoming (self-test) */
     hu_imessage_action_surface_v2_config_t action_surface_v2;
+    hu_imessage_private_api_config_t private_api;
     hu_channel_daemon_config_t daemon;
 } hu_imessage_channel_config_t;
 
