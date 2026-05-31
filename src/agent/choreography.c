@@ -237,10 +237,30 @@ hu_error_t hu_choreography_plan(hu_allocator_t *alloc, const char *response, siz
         size_t tl = strlen(t);
         segs[si].text = t;
         segs[si].text_len = tl;
-        if (reaction && si == 0)
+        if (reaction && si == 0) {
             segs[si].delay_ms = 300;
-        else
-            segs[si].delay_ms = (uint32_t)(choreo_word_count(t, tl) * (size_t)config->ms_per_word);
+        } else {
+            /* Human typing rhythm: faster when energized, slower and more
+             * deliberate when low-energy — and never a metronome. Scale ms/word
+             * by energy_level and add seeded ±25% jitter (reproducible from the
+             * plan seed, so tests stay deterministic). energy 1.0 -> 1.0x,
+             * 0.2 -> ~1.6x slower, 1.6 -> ~0.6x faster. */
+            float e = config->energy_level;
+            if (e < 0.2f)
+                e = 0.2f;
+            if (e > 1.6f)
+                e = 1.6f;
+            float energy_factor = 1.6f - 0.625f * e;
+            if (energy_factor < 0.5f)
+                energy_factor = 0.5f;
+            uint32_t base = (uint32_t)(choreo_word_count(t, tl) * (size_t)config->ms_per_word);
+            uint32_t h = seed ^ ((uint32_t)si * 2654435761u);
+            h ^= h >> 13;
+            h *= 0x5bd1e995u;
+            h ^= h >> 15;
+            float jitter = 0.75f + ((float)(h % 1000) / 1000.0f) * 0.5f;
+            segs[si].delay_ms = (uint32_t)((float)base * energy_factor * jitter);
+        }
     }
 
     if (burst) {
