@@ -12787,6 +12787,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
+                        /* PLAINTEXT-IFY BEFORE SPLIT (Gap A): the choreography planner
+                         * and the fragment splitter both derive their per-bubble text
+                         * from send_ptr. Strip markdown ONCE here so EVERY multi-bubble
+                         * path inherits clean plaintext. Previously only the single
+                         * whole-reply fallback ran format_outbound, so split /
+                         * choreographed replies leaked '>' blockquotes and other markup
+                         * straight onto the wire (the loudest AI tell). strip_markdown
+                         * only REMOVES markup — never adds HTML/mrkdwn — so it is a
+                         * strict cleanup for every channel and cannot regress email/slack.
+                         * Falls back to send_ptr if the strip fails — never a regression. */
+                        /* Plaintext-ify ONCE before the choreo/fragment split so every bubble
+                         * path inherits clean text (was: only the whole-reply fallback ran the
+                         * chain). NULL result → keep send_ptr (no regression). */
+                        char *split_clean = NULL;
+                        size_t split_clean_len = 0;
+                        const char *split_src = send_ptr;
+                        size_t split_src_len = send_len;
+                        if (hu_daemon_plaintext_for_split_channel(ch->channel, alloc, send_ptr,
+                                                                  send_len, &split_clean,
+                                                                  &split_clean_len)) {
+                            split_src = split_clean;
+                            split_src_len = split_clean_len;
+                        }
+
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};
                         bool use_choreography = false;
@@ -12794,7 +12818,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
                             choreo_cfg.energy_level = agent->frontiers.somatic.energy;
                             hu_error_t ce = hu_choreography_plan(
-                                alloc, send_ptr, send_len, &choreo_cfg,
+                                alloc, split_src, split_src_len, &choreo_cfg,
                                 (uint32_t)(time(NULL) ^ (uintptr_t)send_ptr), &choreo_plan);
                             if (ce == HU_OK && choreo_plan.segment_count > 1)
                                 use_choreography = true;
@@ -12855,8 +12879,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_message_fragment_t fragments[4];
                         size_t frag_count = 0;
                         if (!use_choreography) {
-                            frag_count = hu_conversation_split_response(alloc, send_ptr, send_len,
-                                                                        fragments, 4, split_max);
+                            frag_count = hu_conversation_split_response(
+                                alloc, split_src, split_src_len, fragments, 4, split_max);
                         }
                         if (frag_count > 0) {
                             /* Stephanie2 active waiting: thinking + typing time per fragment */
@@ -12881,19 +12905,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         total_ms = total_ms * 2;
                                     usleep((useconds_t)(total_ms * 1000));
                                 }
-#ifndef HU_IS_TEST
-                                {
-                                    const char *eff = hu_conversation_classify_effect(
-                                        fragments[f].text, fragments[f].text_len);
-                                    if (eff)
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "%s effect: %s (%.*s)", eff_ch, eff,
-                                                    (int)(fragments[f].text_len > 60
-                                                              ? 60
-                                                              : fragments[f].text_len),
-                                                    fragments[f].text);
-                                }
-#endif
+                                hu_daemon_log_send_effect(agent ? agent->observer : NULL, eff_ch,
+                                                          fragments[f].text, fragments[f].text_len);
                                 const char *const *pv_ptr =
                                     (f == 0 && all_send_media_cnt > 0) ? all_send_media_ptr : NULL;
                                 size_t pv_cnt =
@@ -13076,16 +13089,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                              * double-reply bug). Predicate in
                              * human/daemon/common.h, pinned by
                              * tests/test_daemon_reply_fallback.c. */
-#ifndef HU_IS_TEST
-                            {
-                                const char *eff =
-                                    hu_conversation_classify_effect(send_ptr, send_len);
-                                if (eff)
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "%s effect: %s (%.*s)", eff_ch, eff,
-                                                (int)(send_len > 60 ? 60 : send_len), send_ptr);
-                            }
-#endif
+                            hu_daemon_log_send_effect(agent ? agent->observer : NULL, eff_ch,
+                                                      send_ptr, send_len);
                             {
                                 char *fmt_text = NULL;
                                 size_t fmt_len = 0;
@@ -13142,6 +13147,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
+                        if (split_clean)
+                            alloc->free(alloc->ctx, split_clean, split_clean_len + 1);
                         /* Send correction after main message (2.5–5s delay) */
                         if (original_response) {
                             if (has_typo_quirk && typo_seed != 0 && response && response_len > 0) {
@@ -13162,15 +13169,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, original_response, original_len + 1);
                         }
 #else
-#ifndef HU_IS_TEST
-                        {
-                            const char *eff = hu_conversation_classify_effect(send_ptr, send_len);
-                            if (eff)
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "%s effect: %s (%.*s)", eff_ch, eff,
-                                            (int)(send_len > 60 ? 60 : send_len), send_ptr);
-                        }
-#endif
+                        hu_daemon_log_send_effect(agent ? agent->observer : NULL, eff_ch, send_ptr,
+                                                  send_len);
                         {
                             const char *send_ptr = (const char *)response;
                             size_t send_len = response_len;

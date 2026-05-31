@@ -36,6 +36,28 @@ static size_t strip_markdown_core(const char *message, size_t message_len, char 
                 i++;
             continue;
         }
+        /* Line-leading blockquote markers ("> ", ">> ", nested). A human texter
+         * never types a leading '>' to quote — it is the loudest AI tell on the
+         * outbound wire. Strip the run of '>' and following spaces at line start.
+         * Inline '>' (e.g. "5 > 3", "a -> b") is NOT line-leading, so preserved. */
+        if ((i == 0 || message[i - 1] == '\n') && message[i] == '>') {
+            while (i < message_len && (message[i] == '>' || message[i] == ' '))
+                i++;
+            continue;
+        }
+        /* Line-leading reply-framing glyphs the model leaks from its own
+         * transcript view: U+21A9 ↩ (bytes E2 86 A9) and U+21B5 ↵ (E2 86 B5).
+         * No human types these. The daemon's INTENTIONAL inline-quote glyph is
+         * prepended later in the router (downstream of this strip), so the gated
+         * fallback quote is unaffected — only model leaks die here. */
+        if ((i == 0 || message[i - 1] == '\n') && i + 2 < message_len &&
+            (unsigned char)message[i] == 0xE2 && (unsigned char)message[i + 1] == 0x86 &&
+            ((unsigned char)message[i + 2] == 0xA9 || (unsigned char)message[i + 2] == 0xB5)) {
+            i += 3;
+            while (i < message_len && message[i] == ' ')
+                i++;
+            continue;
+        }
         if ((i == 0 || message[i - 1] == '\n') && i + 1 < message_len &&
             (message[i] == '-' || message[i] == '*') && message[i + 1] == ' ') {
             i += 2;
@@ -145,6 +167,43 @@ hu_error_t hu_channel_strip_ai_phrases(hu_allocator_t *alloc, const char *text, 
     n = strip_channel_output_whitespace(buf, n);
     *out = buf;
     *out_len = n;
+    return HU_OK;
+}
+
+hu_error_t hu_channel_plaintext_for_split(hu_allocator_t *alloc, const char *channel_name,
+                                          size_t channel_name_len, const char *text,
+                                          size_t text_len, char **out, size_t *out_len) {
+    if (!alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+
+    /* slack → mrkdwn, email → HTML: format_outbound CONVERTS those to markup,
+     * which must never be fed to the bubble splitter. Every other (plaintext)
+     * channel runs the full chain (strip_markdown + ai-phrase + assistant-closer
+     * strip), bringing bubbled replies to parity with the whole-reply path. */
+    bool markup_channel = channel_name_eq(channel_name, channel_name_len, "slack", 5) ||
+                          channel_name_eq(channel_name, channel_name_len, "email", 5);
+
+    char *buf = NULL;
+    size_t buf_len = 0;
+    hu_error_t e =
+        markup_channel
+            ? hu_channel_strip_markdown(alloc, text, text_len, &buf, &buf_len)
+            : hu_channel_format_outbound(alloc, channel_name, channel_name_len, text, text_len,
+                                         &buf, &buf_len);
+    if (e != HU_OK)
+        return e;
+
+    /* Empty result (chain REJECT / all-markup input): discard so the caller keeps
+     * the raw text. Never feed "" to the splitter. */
+    if (!buf || buf_len == 0) {
+        if (buf)
+            alloc->free(alloc->ctx, buf, 1);
+        return HU_OK;
+    }
+    *out = buf;
+    *out_len = buf_len;
     return HU_OK;
 }
 
