@@ -220,6 +220,116 @@ static void dpo_collector_mine_invalid_args(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* Insert a resolved outcome carrying an explicit tapback_polarity. */
+static int test_insert_outcome_tb(sqlite3 *db, const char *target, const char *prompt,
+                                  const char *chosen, int64_t send_timestamp, int reply_latency_s,
+                                  int reply_length, int tapback_polarity) {
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        db,
+        "INSERT INTO production_outcomes(channel, target, prompt, chosen, send_timestamp, "
+        "reply_latency_s, reply_length, tapback_polarity, user_edited, outcome_resolved_at) "
+        "VALUES('imessage', ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, target, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, prompt, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, chosen, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 4, send_timestamp);
+    if (reply_latency_s >= 0)
+        sqlite3_bind_int(stmt, 5, reply_latency_s);
+    else
+        sqlite3_bind_null(stmt, 5);
+    if (reply_length >= 0)
+        sqlite3_bind_int(stmt, 6, reply_length);
+    else
+        sqlite3_bind_null(stmt, 6);
+    sqlite3_bind_int(stmt, 7, tapback_polarity);
+    sqlite3_bind_int64(stmt, 8, (int64_t)time(NULL));
+    rc = sqlite3_step(stmt);
+    int last_rowid = (int)sqlite3_last_insert_rowid(db);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return -1;
+    return last_rowid;
+}
+
+/* Fix #1 regression: before this fix, is_chosen REQUIRED reply_sentiment >= 0.6
+ * — a column never written in production — so the miner produced ZERO pairs for
+ * the entire history of production_outcomes. These tests pin the corrected
+ * behavior: pairs form from tapback polarity and from reply latency/length
+ * engagement, WITHOUT any reply_sentiment. */
+
+static void dpo_collector_mines_pair_from_latency_without_sentiment(void) {
+    sqlite3 *db = test_create_dpo_db();
+    HU_ASSERT_NOT_NULL(db);
+    int64_t now = (int64_t)time(NULL);
+    /* engaged: 120s reply, 18 chars, sentiment UNSET (-1.0) -> chosen */
+    test_insert_outcome(db, "imessage", "dave", "Hi dave", "engaged reply here", now - 300, 120, 18,
+                        -1.0, 0);
+    /* disengaged: no reply, sentiment UNSET -> rejected */
+    test_insert_outcome(db, "imessage", "dave", "Hey dave", "ignored", now - 100000, -1, -1, -1.0,
+                        0);
+    int pairs_written = 0;
+    HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, INT_MAX, &pairs_written), HU_OK);
+    HU_ASSERT_EQ(pairs_written, 1);
+    HU_ASSERT_EQ(test_count_pairs_by_source(db, "implicit_feedback"), 1);
+    sqlite3_close(db);
+}
+
+static void dpo_collector_mines_pair_from_tapback(void) {
+    /* Tapback dominates: a positive reaction is chosen even with a slow reply;
+     * a negative reaction is rejected even with a fast one. */
+    sqlite3 *db = test_create_dpo_db();
+    HU_ASSERT_NOT_NULL(db);
+    int64_t now = (int64_t)time(NULL);
+    test_insert_outcome_tb(db, "erin", "Hi erin", "loved this", now - 300, 5000, 4, 1);   /* 👍 */
+    test_insert_outcome_tb(db, "erin", "Hey erin", "this flopped", now - 200, 30, 30, -1); /* 👎 */
+    int pairs_written = 0;
+    HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, INT_MAX, &pairs_written), HU_OK);
+    HU_ASSERT_EQ(pairs_written, 1);
+    HU_ASSERT_EQ(test_count_pairs_by_source(db, "implicit_feedback"), 1);
+    sqlite3_close(db);
+}
+
+static void dpo_collector_slow_reply_counts_as_rejected(void) {
+    /* A reply arriving >1h later signals a dead thread = rejected, even though
+     * has_reply is true; pairs with a fast engaged reply. */
+    sqlite3 *db = test_create_dpo_db();
+    HU_ASSERT_NOT_NULL(db);
+    int64_t now = (int64_t)time(NULL);
+    test_insert_outcome(db, "imessage", "frank", "Hi frank", "quick reply", now - 300, 90, 18, -1.0,
+                        0); /* engaged */
+    test_insert_outcome(db, "imessage", "frank", "Hey frank", "next day", now - 100000, 90000, 12,
+                        -1.0, 0); /* 25h later -> disengaged */
+    int pairs_written = 0;
+    HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, INT_MAX, &pairs_written), HU_OK);
+    HU_ASSERT_EQ(pairs_written, 1);
+    sqlite3_close(db);
+}
+
+/* E2E proof against REAL data. Skips in CI; runs only when HU_DPO_E2E_DB points
+ * at a (copied) production memory.db. Run locally:
+ *   cp ~/.human/memory.db /tmp/e2e.db
+ *   sqlite3 /tmp/e2e.db "UPDATE production_outcomes SET processed_into_dpo=0; \
+ *                        DELETE FROM dpo_pairs WHERE source='implicit_feedback';"
+ *   HU_DPO_E2E_DB=/tmp/e2e.db ./build/human_tests --filter=real_production */
+static void dpo_collector_mines_real_production_db_when_provided(void) {
+    const char *db_path = getenv("HU_DPO_E2E_DB");
+    if (!db_path || !*db_path)
+        return; /* skipped unless explicitly pointed at a db copy */
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(db_path, &db), SQLITE_OK);
+    int before = test_count_pairs_by_source(db, "implicit_feedback");
+    int pairs_written = 0;
+    HU_ASSERT_EQ(hu_dpo_collector_mine_pairs_from_outcomes(db, INT_MAX, &pairs_written), HU_OK);
+    int after = test_count_pairs_by_source(db, "implicit_feedback");
+    HU_ASSERT_GE(pairs_written, 1); /* real production data must now yield pairs */
+    HU_ASSERT_GE(after, before + 1);
+    sqlite3_close(db);
+}
+
 void run_dpo_collector_tests(void) {
     HU_TEST_SUITE("dpo_collector");
 
@@ -227,6 +337,10 @@ void run_dpo_collector_tests(void) {
     HU_RUN_TEST(dpo_collector_mine_empty_produces_zero_pairs);
     HU_RUN_TEST(dpo_collector_mine_respects_limit);
     HU_RUN_TEST(dpo_collector_mine_invalid_args);
+    HU_RUN_TEST(dpo_collector_mines_pair_from_latency_without_sentiment);
+    HU_RUN_TEST(dpo_collector_mines_pair_from_tapback);
+    HU_RUN_TEST(dpo_collector_slow_reply_counts_as_rejected);
+    HU_RUN_TEST(dpo_collector_mines_real_production_db_when_provided);
 }
 
 #else
