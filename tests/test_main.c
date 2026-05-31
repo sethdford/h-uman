@@ -554,6 +554,7 @@ void run_workflow_event_tests(void);
 void run_sota_features_tests(void);
 void run_mood_tests(void);
 void run_intent_tests(void);
+void run_self_uncertainty_tests(void);
 void run_style_tracker_tests(void);
 void run_theory_of_mind_tests(void);
 void run_tom_activation_tests(void);
@@ -1522,6 +1523,7 @@ int main(int argc, char **argv) {
     run_sota_features_tests();
     run_mood_tests();
     run_intent_tests();
+    run_self_uncertainty_tests();
     run_style_tracker_tests();
     run_theory_of_mind_tests();
     run_tom_activation_tests();
