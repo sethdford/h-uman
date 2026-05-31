@@ -23,23 +23,28 @@ The harness wiring is complete. **Agent work is done.** The following human-in-t
   - `context`: the actual message you received (the prompt you're replying to)
   - `seth_reply`: the actual reply you sent (the ground truth)
   
-**How to export:**
-The repository already has chat.db access utilities. Run:
+**How to export — ONE command (tool added 2026-05-31):**
 ```bash
-# Verify chat.db exists and is readable
-ls -la ~/.human/chat.db
+# The real iMessage DB is at ~/Library/Messages/chat.db (NOT ~/.human/chat.db).
+# Modern macOS stores message text in attributedBody (binary), so a plain SQL
+# dump returns nothing — this script decodes it for you.
+python3 scripts/blind_ab/export_seth_triples.py --limit 200 --out seth_triples.json
 
-# Export representative conversations (100–200 items)
-# Option A: use scripts/blind_ab/gen_huuman_replies.py with a real contact list
-#   This script can read chat.db directly via the persona system.
-# Option B: manually assemble from iMessage export (see next)
-# Option C: use existing h-uman eval runner to pull conversations
-
-# Export from iMessage.app (macOS):
-# 1. Messages app → File → Export Chat History (for specific conversation)
-# 2. Or use third-party iMessage exporter (SQLite → JSON)
-# 3. Format as JSON array with {contact_name, context, seth_reply}
+# If you hit "permission denied" / DB locked: either grant your terminal
+# Full Disk Access (System Settings > Privacy & Security > Full Disk Access),
+# or copy the DB first:
+cp ~/Library/Messages/chat.db /tmp/chat.db && \
+  python3 scripts/blind_ab/export_seth_triples.py --db /tmp/chat.db --out seth_triples.json
 ```
+Output: a JSON array of `{contact_name, context, seth_reply}` with your REAL
+replies. Contact handles are aliased (contact_1, contact_2, …) by default so no
+phone numbers reach raters. Smoke-tested: 200 pairs, 0 decode failures.
+
+**Diversity tip:** the script fills oldest→newest per chat, so a single big
+thread can dominate. For emotional/contextual range across people, run it once
+per important contact with `--keep-handles` into separate files and concatenate,
+or raise `--limit` and hand-trim. The blind A/B is strongest when triples span
+multiple contacts and moods.
 
 **Why:** The entire measurement validity depends on using Seth's REAL replies. Synthetic or made-up conversations invalidate the ground truth and the blind A/B rating loses meaning.
 
