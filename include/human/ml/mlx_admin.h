@@ -154,6 +154,37 @@ hu_mlx_swap_failure_reason_t hu_mlx_admin_classify_swap_failure(hu_error_t err, 
  * NONE/COUNT. */
 const char *hu_mlx_admin_swap_failure_label(hu_mlx_swap_failure_reason_t reason);
 
+/* ─────────────────────────────────────────────────────────────────────
+ * LoRA scale safety gate (per .claude/rules/lora-scale-default-or-die.md).
+ *
+ * LoRA scale is baked into BOTH training and fusion; a scale that is too
+ * high over-amplifies the adapter delta and collapses the base model's
+ * instruction-following (the "zero usable replies for 2 weeks" failure).
+ * The rule mandates scale=2.0 and REJECTS anything >8.0. These predicates
+ * let the serve/swap boundary refuse a dangerously over-scaled adapter,
+ * and are pure so tests pin every branch without a model. */
+typedef enum {
+    HU_LORA_SCALE_SAFE = 0, /* scale <= 4.0 */
+    HU_LORA_SCALE_WARN,     /* 4.0 < scale <= 8.0 — validate before fusion */
+    HU_LORA_SCALE_REJECT,   /* scale > 8.0 — refuse */
+} hu_lora_scale_class_t;
+
+hu_lora_scale_class_t hu_lora_scale_classify(double scale);
+
+/* Read lora_parameters.scale (or top-level scale) from
+ * <adapter_dir>/adapter_config.json. Returns HU_OK + *out_scale on
+ * success; HU_ERR_NOT_FOUND when the file or field is absent/unreadable
+ * (caller decides fail-open). */
+hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapter_dir,
+                                        size_t adapter_dir_len, double *out_scale);
+
+/* Serve/swap-boundary guard: HU_OK if the adapter at adapter_path is safe
+ * to serve, HU_ERR_INVALID_ARGUMENT if its scale classifies as REJECT
+ * (>8.0). Fail-open (HU_OK) when no readable adapter_config.json — matches
+ * the swap path's existing fail-open posture. */
+hu_error_t hu_lora_scale_guard_serveable(hu_allocator_t *alloc, const char *adapter_path,
+                                         size_t adapter_path_len);
+
 /* Test-only: reset all observability counters AND the once-guard so a
  * test can re-arm the first-failure landmark. Production code MUST NOT
  * call this; it exists to make the once-guard testable. */

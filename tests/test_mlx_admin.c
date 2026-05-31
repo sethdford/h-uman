@@ -23,7 +23,9 @@
 #include "human/core/error.h"
 #include "human/ml/mlx_admin.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static hu_allocator_t A(void) {
@@ -166,9 +168,63 @@ static void probe_health_unreachable_server_returns_false(void) {
 
 /* ── Suite runner ─────────────────────────────────────────────────── */
 
+/* ── LoRA scale safety gate (lora-scale-default-or-die.md) ── */
+
+static void lora_scale_classify_truth_table(void) {
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(2.0), (int)HU_LORA_SCALE_SAFE);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(4.0), (int)HU_LORA_SCALE_SAFE);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(4.01), (int)HU_LORA_SCALE_WARN);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(8.0), (int)HU_LORA_SCALE_WARN);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(8.01), (int)HU_LORA_SCALE_REJECT);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(10.0), (int)HU_LORA_SCALE_REJECT);
+    HU_ASSERT_EQ((int)hu_lora_scale_classify(20.0), (int)HU_LORA_SCALE_REJECT);
+}
+
+static void seed_adapter_config(const char *dir, const char *json) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/adapter_config.json", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    fputs(json, f);
+    fclose(f);
+}
+
+static void lora_scale_guard_refuses_over_scaled_adapter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu-lora-scale", dir, sizeof(dir)));
+
+    /* scale=10.0 — exactly the over-scaled artifact this guard exists to stop. */
+    seed_adapter_config(dir, "{\"lora_parameters\": {\"rank\": 8, \"scale\": 10.0}}");
+    double sc = 0.0;
+    HU_ASSERT_EQ(hu_lora_adapter_config_scale(&alloc, dir, strlen(dir), &sc), HU_OK);
+    HU_ASSERT_TRUE(sc > 9.9 && sc < 10.1);
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, dir, strlen(dir)), HU_ERR_INVALID_ARGUMENT);
+
+    /* scale=2.0 — the mandated value — is serveable. */
+    seed_adapter_config(dir, "{\"lora_parameters\": {\"rank\": 8, \"scale\": 2.0}}");
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, dir, strlen(dir)), HU_OK);
+
+    hu_test_rm_rf(dir);
+}
+
+static void lora_scale_guard_fails_open_without_config(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu-lora-noconfig", dir, sizeof(dir)));
+    /* No adapter_config.json → reader reports NOT_FOUND, guard fails open (HU_OK). */
+    double sc = 0.0;
+    HU_ASSERT_EQ(hu_lora_adapter_config_scale(&alloc, dir, strlen(dir), &sc), HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(hu_lora_scale_guard_serveable(&alloc, dir, strlen(dir)), HU_OK);
+    hu_test_rm_rf(dir);
+}
+
 void run_mlx_admin_tests(void);
 void run_mlx_admin_tests(void) {
     HU_TEST_SUITE("MLXAdmin");
+    HU_RUN_TEST(lora_scale_classify_truth_table);
+    HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter);
+    HU_RUN_TEST(lora_scale_guard_fails_open_without_config);
     HU_RUN_TEST(swap_null_alloc_returns_invalid_argument);
     HU_RUN_TEST(swap_null_base_url_returns_invalid_argument);
     HU_RUN_TEST(swap_null_adapter_path_returns_invalid_argument);
