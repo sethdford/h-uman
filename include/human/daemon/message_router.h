@@ -33,6 +33,19 @@ void hu_daemon_cross_channel_platform_label(const char *plat, char *out, size_t 
 bool hu_daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *buf_len,
                                      const char *line, size_t line_len);
 
+/* Classify the iMessage effect (slam/confetti/…) of an outbound fragment and
+ * log it once at info level. No-op under HU_IS_TEST. Dedups the three identical
+ * classify-effect + log blocks that lived inline in the daemon reply loop.
+ * observer is an hu_observer_t* (void* here to keep this header dependency-free). */
+void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *text, size_t len);
+
+/* Plaintext-ify `text` for the pre-split sanitize using the channel's own name
+ * (hu_channel_plaintext_for_split). Returns true with an owned *out (free via
+ * alloc) only on a non-empty result; false otherwise (caller keeps raw text).
+ * `ch` is a struct hu_channel* (void* to keep this header dependency-free). */
+bool hu_daemon_plaintext_for_split_channel(void *ch, hu_allocator_t *alloc, const char *text,
+                                           size_t len, char **out, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

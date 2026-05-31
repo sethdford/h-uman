@@ -27,9 +27,38 @@
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
 #include "human/persona/pacing.h"
+#include "human/channels/format.h"
+#include "human/context/conversation.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+bool hu_daemon_plaintext_for_split_channel(void *ch_v, hu_allocator_t *alloc, const char *text,
+                                           size_t len, char **out, size_t *out_len) {
+    *out = NULL;
+    *out_len = 0;
+    struct hu_channel *ch = (struct hu_channel *)ch_v;
+    const char *name = (ch && ch->vtable && ch->vtable->name) ? ch->vtable->name(ch->ctx) : NULL;
+    if (!name)
+        return false;
+    return hu_channel_plaintext_for_split(alloc, name, strlen(name), text, len, out, out_len) ==
+               HU_OK &&
+           *out != NULL;
+}
+
+void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *text, size_t len) {
+#ifndef HU_IS_TEST
+    const char *eff = hu_conversation_classify_effect(text, len);
+    if (eff)
+        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%.*s)", eff_ch, eff,
+                    (int)(len > 60 ? 60 : len), text);
+#else
+    (void)observer;
+    (void)eff_ch;
+    (void)text;
+    (void)len;
+#endif
+}
 
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
