@@ -29,6 +29,14 @@ python3 "$BA/synthetic_judge.py" "$RUN/rating_sheet.csv" --api "$API" --out "$RU
 echo "[gate] scoring..."
 python3 "$BA/score.py" "$RUN/judged.csv" --key "$RUN/answer_key.json" --json-out "$RUN/results.json" || true
 
+# B3 reward wire: feed corrective pairs (rounds h-uman was distinguishable) into
+# dpo_pairs so the loop is always-learning. judge_to_dpo.py enforces a HARD
+# different-family gate internally, so this is a safe no-op when the cheap local
+# (same-family) judge ran, and only ingests when --api anthropic produced the
+# verdicts. Non-fatal: a reward-ingest hiccup must never fail the regression gate.
+echo "[gate] reward wire: judge verdicts -> dpo_pairs (different-family only)..."
+python3 "$BA/judge_to_dpo.py" "$RUN/judged.csv" --key "$RUN/answer_key.json" || true
+
 DETECT="$(python3 -c "import json;print(json.load(open('$RUN/results.json'))['detect'])")"
 PREV="$(cat "$PREV_FILE" 2>/dev/null || echo "1.0")"
 
