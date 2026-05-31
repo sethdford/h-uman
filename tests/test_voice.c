@@ -439,6 +439,22 @@ static void voice_stt_privacy_mode_blocks_cloud(void) {
     HU_ASSERT_NULL(text);
 }
 
+/* privacy_mode must also block the DIRECT Gemini transcription/description egress point
+ * (gateway cp_voice + multimodal audio/video callers reach it without hu_voice_stt_file).
+ * Regression for the bypass where audio could leave the device despite privacy_mode. */
+static void voice_stt_gemini_privacy_mode_blocks_cloud(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0};
+    cfg.privacy_mode = true;
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+    char *text = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_voice_stt_gemini(&alloc, &cfg, "AAAA", 4, "audio/webm", &text, &len),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(text);
+}
+
 void run_voice_tests(void) {
     HU_TEST_SUITE("Voice");
     HU_RUN_TEST(test_voice_stt_file_mock);
@@ -482,4 +498,5 @@ void run_voice_tests(void) {
     HU_RUN_TEST(voice_tts_privacy_mode_blocks_cloud);
     HU_RUN_TEST(voice_tts_privacy_mode_uses_local);
     HU_RUN_TEST(voice_stt_privacy_mode_blocks_cloud);
+    HU_RUN_TEST(voice_stt_gemini_privacy_mode_blocks_cloud);
 }

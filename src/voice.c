@@ -625,6 +625,10 @@ hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *c
     *out_text = NULL;
     *out_len = 0;
 
+    if (config->privacy_mode)
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: transcription is local-only; no cloud egress
+                                      */
+
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
     if (!audio_base64 || audio_base64_len == 0)
