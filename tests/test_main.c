@@ -190,6 +190,7 @@ void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
+void run_graph_grounding_tests(void);
 void run_uncertainty_tests(void);
 void run_tool_search_tests(void);
 void run_persona_tests(void);
@@ -1164,6 +1165,7 @@ int main(int argc, char **argv) {
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
+    run_graph_grounding_tests();
     run_uncertainty_tests();
     run_tool_search_tests();
     run_persona_tests();
