@@ -1,6 +1,6 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~23209 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~2468 KB binary, <6 MB RAM, <30 ms startup.
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -136,7 +136,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~420K lines)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~430K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
 | `tests/`                          | 760+ test files, 13,225+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
