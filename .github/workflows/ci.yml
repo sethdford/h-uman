@@ -2,10 +2,24 @@ name: Human CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 9 * * 1"
   workflow_dispatch:
+
+# Run CI once per change, not twice. Previously `on: push` (no branch filter)
+# AND `on: pull_request` both fired for every PR branch, double-running the
+# whole matrix. Scoping push to `main` means PR branches get one run via
+# pull_request; main gets one run via push.
+#
+# Cancel superseded runs on the same ref so a new commit on a PR branch
+# immediately obsoletes the in-flight matrix — this alone reclaims the
+# ~15-20 min the full matrix burned on every amended/review-fix commit. main
+# runs are never cancelled, so the default-branch record stays intact.
+concurrency:
+  group: human-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build-and-test:
