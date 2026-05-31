@@ -133,10 +133,17 @@ def _build_lora_parameters_json(args) -> str:
     """
     target_modules = list(getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES)
     rank = int(getattr(args, "rank", None) or 32)
+    # LoRA scale is baked into BOTH training and fusion. mlx_lm_lora's own
+    # default (10.0) is well into the over-amplification range that collapses
+    # the base model's instruction-following — see
+    # .claude/rules/lora-scale-default-or-die.md, which MANDATES 2.0 and REJECTS
+    # >8.0. Pin 2.0 by construction so the M3 / training_loop path can never mint
+    # an unsafe adapter (an --scale override, if present, still defaults to 2.0).
+    scale = float(getattr(args, "scale", None) or 2.0)
     payload = {
         "rank": rank,
         "dropout": 0.0,
-        "scale": 10.0,
+        "scale": scale,
         "keys": target_modules,
     }
     return json.dumps(payload)

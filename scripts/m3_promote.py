@@ -152,6 +152,23 @@ def cmd_current(args):
     return 0
 
 
+def _read_adapter_scale(adapter_path):
+    """Return the LoRA scale from <adapter>/adapter_config.json. A config that
+    exists but omits `scale` is treated as mlx_lm_lora's UNSAFE 10.0 default.
+    Returns None only when no config can be read (cannot assess)."""
+    try:
+        cfg_path = Path(adapter_path) / "adapter_config.json"
+        if not cfg_path.exists():
+            return None
+        import json as _json
+        cfg = _json.loads(cfg_path.read_text())
+        lp = cfg.get("lora_parameters", cfg)
+        s = lp.get("scale")
+        return 10.0 if s is None else float(s)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def cmd_promote(args):
     if not args.adapter:
         print("ERROR: --adapter required", file=sys.stderr)
@@ -165,6 +182,20 @@ def cmd_promote(args):
               f"Pass --yes to confirm, or --no-prod-check to disable the heuristic.",
               file=sys.stderr)
         return 3
+
+    # lora-scale-default-or-die.md: NEVER promote an adapter whose LoRA scale
+    # exceeds the 8.0 ceiling. scale>8 over-amplifies the persona delta and
+    # collapses the base model's instruction-following (the 2026-05-25 scale=20
+    # incident that produced ~2 weeks of empty replies). A missing scale is
+    # treated as mlx_lm_lora's unsafe 10.0 default. This is the last gate before
+    # a bad adapter reaches the live server — retrain at scale=2.0 instead.
+    scale = _read_adapter_scale(args.adapter)
+    if scale is not None and scale > 8.0:
+        print(f"ERROR: refusing to promote {args.adapter}: LoRA scale {scale} "
+              f"exceeds the 8.0 safety ceiling (lora-scale-default-or-die.md). "
+              f"scale>8 collapses base instruction-following. Retrain at scale=2.0.",
+              file=sys.stderr)
+        return 4
 
     mlx_url = args.mlx_url
     current = get_current_adapter(mlx_url)
