@@ -1703,8 +1703,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
         /* GraphRAG activation gated on Story D blind A/B measurement.
-         * SHADOW mode logs metrics; do not flip to ON without confirmed
-         * improvement in blind-A/B human ratings of reply quality. */
+         * Default is ON since 53b0958b; SHADOW logs metrics without injecting,
+         * OFF disables. NOTE: docs/evaluation/blind_ab_gate.json is still
+         * ADVISORY/ABSENT — the gating measurement has not recorded a pass, so
+         * the default-ON rests on the proxy, not a confirmed human blind A/B.
+         * graph_ctx is protected-core in the prompt and is NOT subject to the
+         * Self-RAG memory-relevance verdict below. */
         hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
         if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
             agent->memory_session_id_len > 0) {
@@ -1728,13 +1732,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_srag_verify_relevance(agent->alloc, &agent->sota.srag_config, msg, msg_len,
                                      memory_ctx, memory_ctx_len, &relevance, &should_use);
             if (!should_use) {
+                /* Drop ONLY flat memory_ctx. hu_srag_verify_relevance scored
+                 * memory_ctx, NOT graph_ctx — GraphRAG community-summary
+                 * grounding ("who this contact is") is a distinct signal that a
+                 * flat-memory relevance miss says nothing about. Freeing it here
+                 * silently defeated grounding whenever flat memory happened to be
+                 * judged irrelevant. graph_ctx is protected-core in the prompt and
+                 * is freed downstream after the build (or on any earlier guarded
+                 * exit), so leaving it live here cannot leak. */
                 agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
                 memory_ctx = NULL;
                 memory_ctx_len = 0;
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
             }
         }
     }
