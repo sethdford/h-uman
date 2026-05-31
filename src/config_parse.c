@@ -1211,6 +1211,7 @@ static hu_error_t parse_voice(hu_allocator_t *a, hu_config_t *cfg, const hu_json
     HU_PARSE_VOICE_STR(tts_voice, "tts_voice");
     HU_PARSE_VOICE_STR(tts_model, "tts_model");
     HU_PARSE_VOICE_STR(stt_model, "stt_model");
+    HU_PARSE_VOICE_STR(stt_language, "stt_language");
     HU_PARSE_VOICE_STR(mode, "mode");
     HU_PARSE_VOICE_STR(realtime_model, "realtime_model");
     HU_PARSE_VOICE_STR(realtime_voice, "realtime_voice");

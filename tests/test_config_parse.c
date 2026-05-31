@@ -877,18 +877,19 @@ static void test_config_parse_voice_section(void) {
     HU_ASSERT_NOT_NULL(arena);
     cfg_local.arena = arena;
     cfg_local.allocator = hu_arena_allocator(arena);
-    const char *json =
-        "{\"voice\":{\"local_stt_endpoint\":\"http://localhost:8000/v1/audio/transcriptions\","
-        "\"tts_voice\":\"af_heart\",\"stt_model\":\"whisper-large-v3\"}}";
+    const char *json = "{\"voice\":{\"local_stt_endpoint\":\"http://127.0.0.1:8080/inference\","
+                       "\"tts_voice\":\"af_heart\",\"stt_model\":\"whisper-large-v3\","
+                       "\"stt_language\":\"en\"}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(cfg_local.voice.local_stt_endpoint);
-    HU_ASSERT_STR_EQ(cfg_local.voice.local_stt_endpoint,
-                     "http://localhost:8000/v1/audio/transcriptions");
+    HU_ASSERT_STR_EQ(cfg_local.voice.local_stt_endpoint, "http://127.0.0.1:8080/inference");
     HU_ASSERT_NOT_NULL(cfg_local.voice.tts_voice);
     HU_ASSERT_STR_EQ(cfg_local.voice.tts_voice, "af_heart");
     HU_ASSERT_NOT_NULL(cfg_local.voice.stt_model);
     HU_ASSERT_STR_EQ(cfg_local.voice.stt_model, "whisper-large-v3");
+    HU_ASSERT_NOT_NULL(cfg_local.voice.stt_language);
+    HU_ASSERT_STR_EQ(cfg_local.voice.stt_language, "en");
     hu_arena_destroy(arena);
 }
 

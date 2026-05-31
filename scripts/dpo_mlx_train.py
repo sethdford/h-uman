@@ -25,6 +25,8 @@ Exit codes:
     0  Success — adapters.safetensors exists at args.adapter_path.
     2  mlx_lm_lora package not installed (import probe failed).
     3  Subprocess succeeded but adapters.safetensors missing/empty.
+    4  Refusing: --scale > 8.0 (lora-scale-default-or-die rule). Distinct from
+       code 2 so automation can tell "bad scale" from "missing dependency".
     other  CLI's own non-zero exit (training/model load failure).
 
 Usage:
@@ -67,7 +69,22 @@ def main():
     ap.add_argument("--iters", type=int, default=100)
     ap.add_argument("--beta", type=float, default=0.1)
     ap.add_argument("--batch-size", type=int, default=1)
+    # LoRA scale is baked into BOTH training and fusion. mlx_lm_lora's default
+    # is 10.0 (train.py: lora_parameters{scale:10.0}) — well into the
+    # catastrophic over-amplification range that collapses the base model's
+    # instruction-following (see .claude/rules/lora-scale-default-or-die.md,
+    # which mandates scale=2.0 and REJECTS >8.0). We pin 2.0 explicitly via a
+    # YAML config so adapters are safe by construction, never inheriting 10.0.
+    ap.add_argument("--scale", type=float, default=2.0,
+                    help="LoRA scale (default 2.0; mlx_lm_lora's own default 10.0 is catastrophic)")
     args = ap.parse_args()
+    if args.scale > 8.0:
+        print(
+            f"[dpo_mlx_train] REFUSING scale={args.scale}: >8.0 collapses "
+            f"instruction-following (lora-scale-default-or-die rule). Use <=2.0.",
+            file=sys.stderr,
+        )
+        return 4  # distinct from code 2 (missing dependency)
 
     # Probe import. We don't touch any internal symbol — just verify the
     # package is on sys.path before spawning the CLI subprocess.
@@ -116,10 +133,25 @@ def main():
             cli_data_arg = tmp_dir
             shutil.copy(str(data_path), str(Path(tmp_dir) / "train.jsonl"))
 
+        # Pin the LoRA scale via a YAML config. Without this, mlx_lm_lora.train
+        # uses its own default lora_parameters.scale=10.0 (train.py) — the
+        # over-amplification value that collapses instruction-following. CLI
+        # args still override everything else; only lora_parameters comes from
+        # the config. Verify the result with `cat <adapter>/adapter_config.json`.
+        config_path = Path(tmp_dir) / "hu_lora_config.yaml"
+        config_path.write_text(
+            "lora_parameters:\n"
+            "  rank: 8\n"
+            "  dropout: 0.0\n"
+            f"  scale: {args.scale}\n"
+        )
+
         cmd = [
             sys.executable,
             "-m",
             "mlx_lm_lora.train",
+            "-c",
+            str(config_path),
             "--train",
             "--train-mode",
             "dpo",

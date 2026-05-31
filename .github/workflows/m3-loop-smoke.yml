@@ -14,6 +14,9 @@ name: M3 Closed-Loop Smoke
 
 on:
   push:
+    # main only — PR branches are covered by the pull_request trigger below.
+    # Without this, push (any branch) + pull_request both fired, double-running.
+    branches: [main]
     paths:
       - "src/agent/agent.c"
       - "src/gateway/gateway.c"
@@ -101,6 +104,10 @@ on:
       - "scripts/m3_h_tier_demo.sh"
       - "scripts/test_m3_loop_cycle_smoke.sh"
   workflow_dispatch:
+
+concurrency:
+  group: m3-loop-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   driver-e2e:

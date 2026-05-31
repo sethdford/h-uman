@@ -53,7 +53,15 @@ LORA_BASELINE_BIN="${ROOT}/build-rl-sota/human" bash scripts/check-lora-baseline
 
 if [ "$QUICK" -eq 0 ]; then
     info "Full test suite"
-  ./build-rl-sota/human_tests | tail -3
+  # Line-buffer (stdbuf -oL) so the "Results:" / "FAIL  (...)" lines flush
+  # BEFORE any end-of-process LeakSanitizer abort. A plain pipe is fully
+  # buffered on a non-TTY, so SIGABRT at exit discarded the unflushed tail —
+  # which is exactly why a CI leak failure used to show the LSan SUMMARY but no
+  # Results line, leaving it undiagnosable. Tee the full output to a log so CI
+  # can upload it as an artifact, then show the tail. pipefail still propagates
+  # a non-zero human_tests exit.
+  HU_FULL_SUITE_LOG="${HU_FULL_SUITE_LOG:-${ROOT}/build-rl-sota/full-suite.log}"
+  stdbuf -oL -eL ./build-rl-sota/human_tests 2>&1 | tee "${HU_FULL_SUITE_LOG}" | tail -5
 fi
 
 info "Demo CLI (HUML wiring, no Gemma)"
