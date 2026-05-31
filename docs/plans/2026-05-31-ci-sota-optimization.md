@@ -85,7 +85,7 @@ validated against a real PR's check accounting, not edited blind.
 | Auto-retry transient infra (network/runner) | bounded bash `until` retry (×3, exp backoff, fail-loud) around `apt-get update`/`apt-get install`/`brew install` in `setup-build` | zero-dep, no third-party action | **SHIPPED** |
 | Auto-triage red `main` → tracked issue | `ci-autotriage.yml` (`workflow_run` on Human CI / M3 smoke / RL Nightly) opens/updates ONE deduped issue: failed-run URL, commit range since last-green, ready-to-run bisect harness | `regression-hunter` agent, `ci-queue-triage.md` | **SHIPPED** |
 | Systemic-vs-per-PR triage | cluster failures by signature; O(root-causes) not O(PRs) | `/diagnose-ci-queue`, `ci-queue-triage.md` | future PR |
-| Flaky-test quarantine + auto-retry, tracked | detect non-determinism in-framework | `flake-detector` agent | future PR (net-new framework hook) |
+| Flaky-test quarantine + auto-retry, tracked | `HU_RUN_TEST_FLAKY` in `test_framework.h`: retries a known-flaky test, recovers on pass, still FAILS if all attempts fail; call sites = the quarantine registry; `HU_TEST_FLAKY_RETRIES` tunable | `flake-detector` agent | **SHIPPED** |
 | Predictive test selection | ML-rank tests by failure probability | net-new | future PR |
 | Generated stats are generated, not hand-edited | a CI check/commit regenerates binary-size/test-count lines in README/CLAUDE.md/AGENTS.md | (kills the `2775` vs `23209 KB` drift) | future PR |
 
