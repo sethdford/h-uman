@@ -21,7 +21,7 @@ AutoDream-style idle subagent for quarantine review, LLM conflict resolution, co
 ## Evidence
 
 ### Implemented? (code exists)
-- `src/agent/autodream.c` — `hu_autodream_config_t`, `hu_autodream_default_config`, runs schema migration `CREATE TABLE IF NOT EXISTS autodream_runs`
+- `src/agent/simulation/autodream.c` — `hu_autodream_config_t`, `hu_autodream_default_config`, runs schema migration `CREATE TABLE IF NOT EXISTS autodream_runs`
 - `src/memory/consolidation.c` and `src/memory/consolidation_engine.c` — consolidation engine
 - `src/memory/life_chapters.c` + `include/human/memory/life_chapters.h`
 - `src/memory/forgetting.c`, `src/memory/forgetting_curve.c`, `src/memory/degradation.c` — decay

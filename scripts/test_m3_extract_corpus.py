@@ -269,17 +269,17 @@ def test_extract_imessage_skips_probe_messages():
         # A probe with text in the text column
         conn.execute("INSERT INTO message(text, is_from_me, date, handle_id) "
                      "VALUES ('🧠 [m3 probe]\nWhich would you send?', 1, "
-                     "1_000_000_000, 1)")
+                     "1000000000, 1)")  # plain int: SQLite <3.46 rejects 1_000_000_000
         # An authentic Seth message
         conn.execute("INSERT INTO message(text, is_from_me, date, handle_id) "
-                     "VALUES ('yeah sounds good', 1, 2_000_000_000, 1)")
+                     "VALUES ('yeah sounds good', 1, 2000000000, 1)")
         # A probe with body in attributedBody (text=NULL — common case)
         probe_body = b"\xf0\x9f\xa7\xa0 [m3 probe]\nWhich would you send?"
         ab = (b"NSString\x00\x01\x94\x84\x01\x2b" + bytes([len(probe_body)]) +
               probe_body + b"NSDictionary\x00")
         conn.execute("INSERT INTO message(text, is_from_me, date, "
                      "handle_id, attributedBody) VALUES "
-                     "(NULL, 1, 3_000_000_000, 1, ?)", (ab,))
+                     "(NULL, 1, 3000000000, 1, ?)", (ab,))  # plain int: SQLite <3.46 rejects 3_000_000_000
         conn.commit()
         conn.close()
         records = m.extract_imessage(db_path, max_records=100,

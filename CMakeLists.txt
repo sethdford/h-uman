@@ -960,7 +960,7 @@ set(HU_CORE_SOURCES
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
     # hu_memory_read / hu_memory_write via the facade (include/human/memory/memory.h).
-    # Known remaining callers: src/agent/autodream.c (1 site),
+    # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
     src/memory/conflict_resolver.c
@@ -982,11 +982,11 @@ set(HU_CORE_SOURCES
     src/agent/tom_scenario.c
     src/agent/retrieval_planner.c
     src/agent/retrieval_planner_llm.c
-    src/agent/autodream.c
+    src/agent/simulation/autodream.c
     src/agent/scheduler.c
     src/agent/scheduler_probes.c
     src/agent/scheduler_status_json.c
-    src/agent/counterfactual.c
+    src/agent/simulation/counterfactual.c
     src/agent/autodream_runner.c
     src/agent/case_based.c
     src/agent/response_verifier.c
@@ -3657,6 +3657,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_bth_e2e.c
     tests/test_style_tracker.c
     tests/test_theory_of_mind.c
+    tests/test_tom_wiring.c
     tests/test_anticipatory.c
     tests/test_visual_content.c
     tests/test_media_gen.c

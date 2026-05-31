@@ -43,7 +43,7 @@ Effects:
 
 ### 1. AutoDream subagent
 
-New module `src/agent/autodream.c` + `include/human/agent/autodream.h`.
+New module `src/agent/simulation/autodream.c` + `include/human/agent/autodream.h`.
 
 ```c
 typedef struct hu_autodream_config {
@@ -176,7 +176,7 @@ CLI: `human autodream --dry-run` triggers a one-shot run for inspection; `human 
 | File | Role |
 |------|------|
 | `include/human/agent/autodream.h` | New — public API, config, report struct |
-| `src/agent/autodream.c` | New — phases, idle scheduler integration |
+| `src/agent/simulation/autodream.c` | New — phases, idle scheduler integration |
 | `include/human/memory/summary_writer.h` | New — `hu_summary_writer_t` vtable |
 | `src/memory/summary_writer.c` | New — default provider-backed impl |
 | `src/memory/community_summary.c` | New — summary table CRUD + retrieval integration |

@@ -115,6 +115,13 @@ def main():
                            r["option_B"], a.temp, a.timeout))
         except Exception:
             j = None
+        # Stamp the judging model + family on every row so the downstream
+        # reward wire (judge_to_dpo.py) can enforce the different-family-only
+        # gate: same-family (local gemma) verdicts inflate via shared blindspot
+        # and MUST NOT become training pairs. (Empirically: gemma self-judge
+        # 0.21 vs Opus 0.90 on the same triples.)
+        r["judge_api"] = a.api
+        r["judge_model"] = a.model
         if j and j.get("real") in ("A", "B"):
             ok += 1
             r["choice"] = j["real"]
