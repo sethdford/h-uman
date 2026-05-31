@@ -26,13 +26,17 @@ cmake --build build --target human -j"$(nproc)"   # production #else path compil
 
 **Coverage:** AC-1→{1,3}; AC-2→{1,3}; AC-3→{2,3}; AC-4→{3}; AC-5→{4}. No orphans.
 
-## Slice 2 — Local TTS turnkey (planned)
+## Slice 2 — Local TTS turnkey (THIS PR — stacked on slice 1)
 
-| # | Task | Notes |
-|---|------|-------|
-| 5 | Extract a pure JSON-body builder from `local_tts.c` (mirrors task 1) so the request is testable without spawning curl. | OpenAI-compatible `/v1/audio/speech` |
-| 6 | Confirm/adjust the contract against a turnkey local TTS server (e.g. Kokoro/Piper-style OpenAI-compatible server); document the start command. | guide sibling to STT |
-| 7 | Tests + guide. | |
+| # | Task | Notes | Status |
+|---|------|-------|--------|
+| 5 | Extract a pure JSON-body builder `hu_local_tts_build_body` from `local_tts.c` so the body is testable without spawning curl. **Fixes a real bug:** the prior inline builder prepended `"model":"` (trailing quote) then `hu_json_append_string` (which emits the value already quoted) → malformed `"model":""kokoro"",`. Kokoro requires `voice`, so every turnkey request was rejected. The builder emits well-formed `{"model":…,"voice":…,"input":…}`. | OpenAI-compatible `/v1/audio/speech` | ✅ done |
+| 6 | Confirm the contract against Kokoro-FastAPI (verified: `POST /v1/audio/speech`, JSON `{model,input,voice}`, port 8880); document the one docker command. | [docs/guides/local-tts-server.md](../../guides/local-tts-server.md) | ✅ done |
+| 7 | Tests (`local_tts_build_body_{input_only, model_and_voice_well_formed, escapes_input, null_args}`) + guide. The well-formed test is a regression pin for the bug above. | no network/spawn | ✅ done |
+
+**Verify (slice 2):** `./build/human_tests --suite=LocalVoice` (11/11); full suite
+13198/13198, 0 ASan; `human` production binary links clean. No new config key —
+`local_tts_endpoint` / `tts_model` / `tts_voice` already parse and map.
 
 ## Slice 3 — Duplex / barge-in polish over local path (planned)
 

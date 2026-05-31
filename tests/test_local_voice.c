@@ -87,6 +87,53 @@ static void local_stt_build_request_null_args_returns_error(void) {
     HU_ASSERT_EQ(hu_local_stt_build_request(&alloc, &cfg, "", &req), HU_ERR_INVALID_ARGUMENT);
 }
 
+static void local_tts_build_body_input_only(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_local_tts_config_t cfg = {.endpoint = "http://127.0.0.1:8880/v1/audio/speech"};
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_local_tts_build_body(&alloc, &cfg, "hello", &json, &len), HU_OK);
+    HU_ASSERT_NOT_NULL(json);
+    HU_ASSERT_STR_EQ(json, "{\"input\":\"hello\"}");
+    HU_ASSERT_EQ(len, strlen("{\"input\":\"hello\"}"));
+    alloc.free(alloc.ctx, json, len + 1);
+}
+
+/* Regression: model/voice must be single-quoted JSON. The prior inline builder
+ * produced malformed {"model":""kokoro"",...} whenever a voice was configured —
+ * which Kokoro requires, so every turnkey request was rejected by the server. */
+static void local_tts_build_body_model_and_voice_well_formed(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_local_tts_config_t cfg = {.endpoint = "http://127.0.0.1:8880/v1/audio/speech",
+                                 .model = "kokoro",
+                                 .voice = "af_heart"};
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_local_tts_build_body(&alloc, &cfg, "hello", &json, &len), HU_OK);
+    HU_ASSERT_STR_EQ(json, "{\"model\":\"kokoro\",\"voice\":\"af_heart\",\"input\":\"hello\"}");
+    alloc.free(alloc.ctx, json, len + 1);
+}
+
+static void local_tts_build_body_escapes_input(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_local_tts_config_t cfg = {.endpoint = "http://127.0.0.1:8880/v1/audio/speech"};
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_local_tts_build_body(&alloc, &cfg, "he said \"hi\"", &json, &len), HU_OK);
+    HU_ASSERT_STR_EQ(json, "{\"input\":\"he said \\\"hi\\\"\"}");
+    alloc.free(alloc.ctx, json, len + 1);
+}
+
+static void local_tts_build_body_null_args_returns_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *json = NULL;
+    size_t len = 0;
+    hu_local_tts_config_t cfg = {.endpoint = "http://x"};
+    HU_ASSERT_EQ(hu_local_tts_build_body(NULL, NULL, "hi", &json, &len), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_local_tts_build_body(&alloc, &cfg, NULL, &json, &len), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_local_tts_build_body(&alloc, &cfg, "", &json, &len), HU_ERR_INVALID_ARGUMENT);
+}
+
 static void local_tts_synthesize_mock_returns_path(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_local_tts_config_t cfg = {.endpoint = "http://localhost:8880/v1/audio/speech"};
@@ -117,6 +164,10 @@ void run_local_voice_tests(void) {
     HU_RUN_TEST(local_stt_build_request_whispercpp_default_fields);
     HU_RUN_TEST(local_stt_build_request_includes_model_and_language_when_set);
     HU_RUN_TEST(local_stt_build_request_null_args_returns_error);
+    HU_RUN_TEST(local_tts_build_body_input_only);
+    HU_RUN_TEST(local_tts_build_body_model_and_voice_well_formed);
+    HU_RUN_TEST(local_tts_build_body_escapes_input);
+    HU_RUN_TEST(local_tts_build_body_null_args_returns_error);
     HU_RUN_TEST(local_tts_synthesize_mock_returns_path);
     HU_RUN_TEST(local_tts_synthesize_null_args_returns_error);
 }
