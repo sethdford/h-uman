@@ -95,48 +95,84 @@ static void test_autodream_tick_populates_community_summaries_for_contact(void) 
     hu_graph_t *graph = NULL;
     HU_ASSERT_EQ(hu_graph_open(&alloc, ":memory:", strlen(":memory:"), &graph), HU_OK);
 
-    /* Ensure graph has the community_summaries schema */
     sqlite3 *gdb = hu_graph_sqlite_connection(graph);
-    seed_run(gdb, seed_schema_sql);
 
-    /* Seed a fixture contact and a synthetic message so autodream has data to work with */
-    const char *add_contact_sql =
-        "INSERT INTO entities (name, entity_type) VALUES ('TestContact', 'person')";
-    seed_run(gdb, add_contact_sql);
+    /* Seed entities table with contact_id and community_id columns,
+     * and relationships to give the community real structure */
+    const char *create_entities_sql = "CREATE TABLE IF NOT EXISTS entities ("
+                                      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                      "  name TEXT NOT NULL,"
+                                      "  entity_type TEXT NOT NULL DEFAULT 'unknown',"
+                                      "  contact_id TEXT,"
+                                      "  community_id INTEGER,"
+                                      "  mention_count INTEGER DEFAULT 1)";
+    seed_run(gdb, create_entities_sql);
 
-    /* Create a facade for the autodream runner to use */
-    hu_w7_facade_t *facade = NULL;
-    HU_ASSERT_EQ(hu_w7_facade_open(graph, &alloc, &facade), HU_OK);
+    const char *create_relationships_sql = "CREATE TABLE IF NOT EXISTS relations ("
+                                           "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                           "  source_id INTEGER,"
+                                           "  target_id INTEGER,"
+                                           "  contact_id TEXT,"
+                                           "  relationship_type TEXT DEFAULT 'knows',"
+                                           "  weight REAL DEFAULT 1.0,"
+                                           "  context TEXT,"
+                                           "  event_start INTEGER,"
+                                           "  event_end INTEGER DEFAULT 0,"
+                                           "  last_seen INTEGER)";
+    seed_run(gdb, create_relationships_sql);
 
-    /* Prepare job spec for COMMUNITY phase */
-    hu_job_spec_t spec = {0};
-    spec.kind = HU_JOB_AUTODREAM_COMMUNITY;
-    spec.contact_id = "TestContact";
-    spec.contact_id_len = strlen("TestContact");
+    /* Seed entities for a test contact with community_id set (this is what
+     * the community summarizer reads to generate summaries) */
+    const char *seed_entities_sql =
+        "INSERT INTO entities (name, entity_type, contact_id, community_id, mention_count) VALUES"
+        "  ('Alice Friend', 'person', 'TestContact', 1, 5),"
+        "  ('Bob Colleague', 'person', 'TestContact', 1, 3),"
+        "  ('Carol Neighbor', 'person', 'TestContact', 1, 2),"
+        "  ('David Other', 'person', 'TestContact', 2, 4),"
+        "  ('Eve Another', 'person', 'TestContact', 2, 2)";
+    seed_run(gdb, seed_entities_sql);
 
-    /* Run autodream runner (direct invocation, bypassing scheduler) */
-    hu_autodream_config_t cfg = hu_autodream_default_config();
-    cfg.enable_community_summaries = true;
-    cfg.enable_quarantine_review = false;
-    cfg.enable_edge_reweight = false;
-    cfg.enable_derived_facts = false;
-    cfg.now_ms = (int64_t)time(NULL) * 1000;
+    /* Seed relationships between entities in the same community so the
+     * summarizer has graph structure to count. Relations join with entities
+     * via source_id = e.id to count live edges per community. */
+    const char *seed_relations_sql = "INSERT INTO relations (source_id, target_id, contact_id, "
+                                     "context, event_start, event_end) VALUES"
+                                     "  (1, 2, 'TestContact', 'work_together', 1000, 0),"
+                                     "  (2, 3, 'TestContact', 'neighborhood', 2000, 0),"
+                                     "  (4, 5, 'TestContact', 'friends_group', 3000, 0)";
+    seed_run(gdb, seed_relations_sql);
+
+    /* Assert the table is empty before the runner.
+     * The summarizer's ensure_autodream_schema will create community_summaries on first call. */
+    sqlite3_stmt *pre_check = NULL;
+    const char *count_sql =
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='community_summaries'";
+    HU_ASSERT_EQ(sqlite3_prepare_v2(gdb, count_sql, -1, &pre_check, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(pre_check), SQLITE_ROW);
+    int table_exists_pre = sqlite3_column_int(pre_check, 0);
+    sqlite3_finalize(pre_check);
+    /* Table should not exist yet before calling the summarizer */
+    HU_ASSERT_EQ(table_exists_pre, 0);
+
+    /* Invoke the real production summarizer for community 1 */
+    hu_error_t runner_result = hu_autodream_summarize_community(
+        &alloc, graph, "TestContact", strlen("TestContact"), 1, (int64_t)time(NULL) * 1000);
+    HU_ASSERT_EQ(runner_result, HU_OK);
 
     /* After runner completes, query the table for inserted rows */
-    sqlite3_stmt *check_stmt = NULL;
-    const char *count_sql =
+    const char *count_summaries_sql =
         "SELECT COUNT(*) FROM community_summaries WHERE contact_id = 'TestContact'";
-    HU_ASSERT_EQ(sqlite3_prepare_v2(gdb, count_sql, -1, &check_stmt, NULL), SQLITE_OK);
-    HU_ASSERT_EQ(sqlite3_step(check_stmt), SQLITE_ROW);
-    int count = sqlite3_column_int(check_stmt, 0);
-    sqlite3_finalize(check_stmt);
+    sqlite3_stmt *post_check = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(gdb, count_summaries_sql, -1, &post_check, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(post_check), SQLITE_ROW);
+    int post_count = sqlite3_column_int(post_check, 0);
+    sqlite3_finalize(post_check);
 
-    /* AC-1.1 contract: after autodream tick, table MUST have >= 1 row for the contact
-     * (Note: in a real scenario with actual graph edges, this would populate.
-     *  For this test-harness version, the assertion validates the schema and structure.) */
-    HU_ASSERT_TRUE(count >= 0);
+    /* AC-1.1 contract: after autodream summarizer invocation, table MUST have >= 1 row
+     * for the contact. The runner was called with real seeded entities and community_id,
+     * so it must have written at least one community_summaries row. */
+    HU_ASSERT_TRUE(post_count >= 1);
 
-    hu_w7_facade_close(facade, &alloc);
     hu_graph_close(graph, &alloc);
 }
 
