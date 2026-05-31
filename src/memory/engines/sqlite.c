@@ -2,6 +2,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/platform.h"
@@ -1394,6 +1395,45 @@ static const hu_session_store_vtable_t sqlite_session_vtable = {
     .clear_auto_saved = impl_session_clear_auto_saved,
 };
 
+/* Corruption self-heal helpers — contract in include/human/memory/sql_common.h. */
+bool hu_sqlite_quick_check_ok(struct sqlite3 *db) {
+    if (!db)
+        return false;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL) != SQLITE_OK)
+        return false; /* e.g. SQLITE_NOTADB — a bad header fails to prepare */
+    bool ok = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *row = sqlite3_column_text(stmt, 0);
+        ok = (row != NULL && strcmp((const char *)row, "ok") == 0);
+    }
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool hu_sqlite_quarantine_corrupt_file(const char *db_path) {
+    if (!db_path || !db_path[0] || strcmp(db_path, ":memory:") == 0)
+        return false;
+    char dst[1100];
+    long long ts = (long long)time(NULL);
+    int n = snprintf(dst, sizeof(dst), "%s.corrupt-%lld", db_path, ts);
+    if (n < 0 || (size_t)n >= sizeof(dst))
+        return false; /* path too long to quarantine safely */
+    if (rename(db_path, dst) != 0)
+        return false;
+    /* WAL/SHM siblings — best effort (may not exist). */
+    char sib[1100], sibdst[1140];
+    if (snprintf(sib, sizeof(sib), "%s-wal", db_path) < (int)sizeof(sib))
+        if (snprintf(sibdst, sizeof(sibdst), "%s.corrupt-%lld-wal", db_path, ts) <
+            (int)sizeof(sibdst))
+            (void)rename(sib, sibdst);
+    if (snprintf(sib, sizeof(sib), "%s-shm", db_path) < (int)sizeof(sib))
+        if (snprintf(sibdst, sizeof(sibdst), "%s.corrupt-%lld-shm", db_path, ts) <
+            (int)sizeof(sibdst))
+            (void)rename(sib, sibdst);
+    return true;
+}
+
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     sqlite3 *db = NULL;
     int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
@@ -1403,6 +1443,30 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
         return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
     sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
+
+    /* Self-heal: a corrupt on-disk DB must not be read as silent garbage.
+     * quick_check the file; if it fails, quarantine it (preserved for manual
+     * recovery) and reopen fresh. Losing memory LOUDLY beats serving garbage
+     * silently. :memory: / NULL have nothing on disk to corrupt or quarantine. */
+    if (db_path && db_path[0] && strcmp(db_path, ":memory:") != 0 &&
+        !hu_sqlite_quick_check_ok(db)) {
+        hu_log_error("memory.sqlite", NULL,
+                     "memory DB failed PRAGMA quick_check — quarantining '%s' and "
+                     "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
+                     db_path);
+        sqlite3_close(db);
+        db = NULL;
+        if (!hu_sqlite_quarantine_corrupt_file(db_path) ||
+            sqlite3_open(db_path, &db) != SQLITE_OK) {
+            hu_log_error("memory.sqlite", NULL,
+                         "could not recover corrupt DB '%s'; refusing to open", db_path);
+            if (db)
+                sqlite3_close(db);
+            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+        }
+        sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
+    }
+
     sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
 
     for (const char *const *part = schema_parts; *part; part++) {
