@@ -140,6 +140,12 @@ YAGNI: code with no caller, carrying real cryptographic/packetization risk.
 
 ## Slice roadmap
 
+> **Provider-tiering update (2026-05-31):** the default TTS for the product was
+> subsequently decided to be **Cartesia Sonic (cloud)** with local Kokoro as a
+> privacy mode, while STT stays local — see
+> [ADR — Voice provider tiering](../adr/2026-05-31-voice-provider-cartesia-default.md).
+> The local TTS path below remains the privacy-mode / fallback engine.
+
 | Slice | Scope | Status |
 |---|---|---|
 | **1** | Local **STT** turnkey: contract pinned, `stt_language` key, request-builder + tests, guide | **this PR** |
