@@ -3,15 +3,16 @@
  * In HU_IS_TEST mode, returns mock data without spawning curl.
  */
 #include "human/voice.h"
-#include "human/tts/cartesia.h"
-#include "human/voice/local_stt.h"
-#include "human/voice/local_tts.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/platform.h"
+#include "human/tts/cartesia.h"
+#include "human/voice/local_stt.h"
+#include "human/voice/local_tts.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,46 @@ static int get_pid(void) {
 }
 #endif /* !HU_IS_TEST */
 
+/* Voice provider tiering predicates (ADR 2026-05-31). Pure; no I/O. */
+bool hu_voice_cloud_egress_allowed(bool privacy_mode) {
+    return !privacy_mode;
+}
+
+hu_voice_tts_backend_t hu_voice_preferred_tts_backend(bool privacy_mode,
+                                                      bool cartesia_selected_and_keyed,
+                                                      bool have_local_endpoint) {
+    if (privacy_mode)
+        return HU_VOICE_TTS_BACKEND_LOCAL;
+    if (cartesia_selected_and_keyed)
+        return HU_VOICE_TTS_BACKEND_CARTESIA;
+    if (have_local_endpoint)
+        return HU_VOICE_TTS_BACKEND_LOCAL;
+    return HU_VOICE_TTS_BACKEND_CLOUD_DEFAULT;
+}
+
+const char *hu_voice_privacy_disclosure(hu_voice_tts_backend_t backend) {
+    switch (backend) {
+    case HU_VOICE_TTS_BACKEND_LOCAL:
+        return "on-device (private): audio never leaves this device";
+    case HU_VOICE_TTS_BACKEND_CARTESIA:
+        return "cloud (Cartesia): your reply text and voice model are processed by Cartesia";
+    case HU_VOICE_TTS_BACKEND_CLOUD_DEFAULT:
+    default:
+        return "cloud: your reply text is sent to the configured TTS provider";
+    }
+}
+
+/* Effective privacy for one egress decision. Privacy is a PROCESS-WIDE setting,
+ * latched to the global kill-switch (human/core/privacy.h) at every config build and
+ * on reload — so egress decides on the GLOBAL only, never a per-call config's cached
+ * privacy_mode, which can go stale (e.g. a long-lived agent config after a reload that
+ * flips privacy off would otherwise keep blocking). `config` is retained for signature
+ * stability and future per-call overrides. */
+static bool voice_privacy_active(const hu_voice_config_t *config) {
+    (void)config;
+    return hu_privacy_enforced();
+}
+
 hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *config,
                              const char *file_path, char **out_text, size_t *out_len) {
     if (!alloc || !config || !out_text || !out_len)
@@ -55,6 +96,8 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
                                     .language = config->language};
         return hu_local_stt_transcribe(alloc, &lc, file_path, out_text, out_len);
     }
+    if (voice_privacy_active(config))
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: STT is local-only; no cloud egress */
     if (config->stt_provider && strcmp(config->stt_provider, "cartesia") == 0) {
         const char *ckey = config->cartesia_api_key;
         size_t cklen = config->cartesia_api_key_len;
@@ -97,6 +140,9 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
             *out_len = 0;
         }
     }
+
+    if (voice_privacy_active(config))
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: STT is local-only; no cloud egress */
 
     if (config->stt_provider && strcmp(config->stt_provider, "cartesia") == 0) {
         const char *ckey = config->cartesia_api_key;
@@ -310,6 +356,27 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
     *out_audio_len = 0;
 
 #if HU_IS_TEST
+    bool egress_t = !voice_privacy_active(config);
+    /* Cartesia is the default cloud TTS when privacy mode is off and it is the selected
+     * provider (ADR 2026-05-31). Attempt first; on failure fall through to local. */
+    if (egress_t && config->tts_provider && strcmp(config->tts_provider, "cartesia") == 0) {
+        const char *ckey = config->cartesia_api_key;
+        size_t cklen = config->cartesia_api_key_len;
+        if (!ckey || cklen == 0) {
+            ckey = "test-cartesia-key";
+            cklen = 17;
+        }
+        hu_cartesia_tts_config_t tc = {.model_id = config->tts_model,
+                                       .voice_id = config->tts_voice};
+        unsigned char *bytes = NULL;
+        size_t blen = 0;
+        if (hu_cartesia_tts_synthesize(alloc, ckey, cklen, text, text_len, &tc, "mp3", &bytes,
+                                       &blen) == HU_OK) {
+            *out_audio = bytes;
+            *out_audio_len = blen;
+            return HU_OK;
+        }
+    }
     if (config->local_tts_endpoint && config->local_tts_endpoint[0]) {
         hu_local_tts_config_t lc = {.endpoint = config->local_tts_endpoint,
                                     .model = config->tts_model,
@@ -334,25 +401,8 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
         *out_audio_len = 0;
         return HU_OK;
     }
-    if (config->tts_provider && strcmp(config->tts_provider, "cartesia") == 0) {
-        const char *ckey = config->cartesia_api_key;
-        size_t cklen = config->cartesia_api_key_len;
-        if (!ckey || cklen == 0) {
-            ckey = "test-cartesia-key";
-            cklen = 17;
-        }
-        hu_cartesia_tts_config_t tc = {
-            .model_id = config->tts_model, .voice_id = config->tts_voice};
-        unsigned char *bytes = NULL;
-        size_t blen = 0;
-        hu_error_t ce =
-            hu_cartesia_tts_synthesize(alloc, ckey, cklen, text, text_len, &tc, "mp3", &bytes, &blen);
-        if (ce != HU_OK)
-            return ce;
-        *out_audio = bytes;
-        *out_audio_len = blen;
-        return HU_OK;
-    }
+    if (!egress_t)
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: TTS is local-only; no cloud egress */
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
     {
@@ -368,6 +418,33 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
         return HU_OK;
     }
 #else
+    bool egress = !voice_privacy_active(config);
+    /* Cartesia is the default cloud TTS when privacy mode is off and it is the selected
+     * provider (ADR 2026-05-31). Attempt first; on missing key or failure, fall through to
+     * the local/cloud chain below (graceful, privacy-safe fallback). */
+    if (egress && config->tts_provider && strcmp(config->tts_provider, "cartesia") == 0) {
+        const char *ckey = config->cartesia_api_key;
+        size_t cklen = config->cartesia_api_key_len;
+        if (!ckey || cklen == 0) {
+            const char *env = getenv("CARTESIA_API_KEY");
+            if (env && env[0]) {
+                ckey = env;
+                cklen = strlen(env);
+            }
+        }
+        if (ckey && cklen > 0) {
+            hu_cartesia_tts_config_t tc = {.model_id = config->tts_model,
+                                           .voice_id = config->tts_voice};
+            unsigned char *bytes = NULL;
+            size_t blen = 0;
+            if (hu_cartesia_tts_synthesize(alloc, ckey, cklen, text, text_len, &tc, "mp3", &bytes,
+                                           &blen) == HU_OK) {
+                *out_audio = bytes;
+                *out_audio_len = blen;
+                return HU_OK;
+            }
+        }
+    }
     if (config->local_tts_endpoint && config->local_tts_endpoint[0]) {
         hu_local_tts_config_t lc = {.endpoint = config->local_tts_endpoint,
                                     .model = config->tts_model,
@@ -410,8 +487,7 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
                                 (void)unlink(path);
                                 alloc->free(alloc->ctx, path, strlen(path) + 1);
                             } else {
-                                if (audio_sz > 0 &&
-                                    fread(raw, 1, audio_sz, af) != audio_sz) {
+                                if (audio_sz > 0 && fread(raw, 1, audio_sz, af) != audio_sz) {
                                     fclose(af);
                                     (void)unlink(path);
                                     alloc->free(alloc->ctx, path, strlen(path) + 1);
@@ -432,30 +508,8 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
         }
     }
 
-    if (config->tts_provider && strcmp(config->tts_provider, "cartesia") == 0) {
-        const char *ckey = config->cartesia_api_key;
-        size_t cklen = config->cartesia_api_key_len;
-        if ((!ckey || cklen == 0)) {
-            const char *env = getenv("CARTESIA_API_KEY");
-            if (env && env[0]) {
-                ckey = env;
-                cklen = strlen(env);
-            }
-        }
-        if (!ckey || cklen == 0)
-            return HU_ERR_PROVIDER_AUTH;
-        hu_cartesia_tts_config_t tc = {
-            .model_id = config->tts_model, .voice_id = config->tts_voice};
-        unsigned char *bytes = NULL;
-        size_t blen = 0;
-        hu_error_t ce =
-            hu_cartesia_tts_synthesize(alloc, ckey, cklen, text, text_len, &tc, "mp3", &bytes, &blen);
-        if (ce != HU_OK)
-            return ce;
-        *out_audio = bytes;
-        *out_audio_len = blen;
-        return HU_OK;
-    }
+    if (!egress)
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: TTS is local-only; no cloud egress */
 
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
@@ -571,8 +625,8 @@ tts_fail:
     "Transcribe the following audio exactly, word for word. " \
     "Output only the spoken words, nothing else. "            \
     "If the audio is silent or unintelligible, output an empty string."
-#define HU_VOICE_GEMINI_VIDEO_PROMPT                                                   \
-    "Describe this video: summarize visible scenes, actions, people or objects, and "  \
+#define HU_VOICE_GEMINI_VIDEO_PROMPT                                                  \
+    "Describe this video: summarize visible scenes, actions, people or objects, and " \
     "any readable text. Be concise but complete."
 
 hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *config,
@@ -582,6 +636,10 @@ hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *c
         return HU_ERR_INVALID_ARGUMENT;
     *out_text = NULL;
     *out_len = 0;
+
+    if (voice_privacy_active(config))
+        return HU_ERR_NOT_SUPPORTED; /* privacy mode: transcription is local-only; no cloud egress
+                                      */
 
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;

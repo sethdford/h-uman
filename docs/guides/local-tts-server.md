@@ -49,6 +49,18 @@ Notes:
   `af_bella`, `am_adam`, …). `tts_model` is `"kokoro"` for this server.
 - These two keys are sent as the JSON body `{"model","voice","input"}`; both are
   omitted when unset, so an OpenAI-compatible server can use its own defaults.
+- **`privacy_mode` forces this local path.** Per the
+  [voice-provider tiering ADR](../plans/adr/2026-05-31-voice-provider-cartesia-default.md),
+  cloud Cartesia is the *default* TTS. Set `"privacy_mode": true` in the `voice` block to
+  route TTS/STT through this on-device server and block the cloud **voice/media** egress
+  paths (Cartesia/cloud TTS, cloud STT, image/video description). Scope note: privacy mode
+  covers voice and multimodal **media** only — it does **not** make the LLM local, so a
+  cloud reasoning provider can still receive conversation *text*. See the ADR for the exact
+  coverage boundary:
+
+  ```json
+  { "voice": { "privacy_mode": true, "local_tts_endpoint": "http://127.0.0.1:8880/v1/audio/speech", "tts_model": "kokoro", "tts_voice": "af_heart" } }
+  ```
 
 ## 3. Verify
 

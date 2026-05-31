@@ -2,6 +2,7 @@
 #include "human/auth.h"
 #include "human/context/vision.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
 #include "human/voice.h"
@@ -73,9 +74,9 @@ static bool is_supported_video_ext(const char *path, size_t path_len) {
            match_ext(path, path_len, "webm", 4) || match_ext(path, path_len, "avi", 3);
 }
 
-hu_error_t hu_multimodal_process_video(hu_allocator_t *alloc, const char *file_path, size_t path_len,
-                                       hu_provider_t *provider, const char *model, size_t model_len,
-                                       char **out_text, size_t *out_text_len) {
+hu_error_t hu_multimodal_process_video(hu_allocator_t *alloc, const char *file_path,
+                                       size_t path_len, hu_provider_t *provider, const char *model,
+                                       size_t model_len, char **out_text, size_t *out_text_len) {
     if (!alloc || !file_path || path_len == 0 || !provider || !out_text || !out_text_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!provider->vtable || !provider->vtable->get_name)
@@ -122,7 +123,8 @@ hu_error_t hu_multimodal_process_video(hu_allocator_t *alloc, const char *file_p
     }
     size_t vision_model_len = strlen(vision_model);
 
-    /* Gemini natively processes video — send bytes via generateContent (see hu_voice_stt_gemini). */
+    /* Gemini natively processes video — send bytes via generateContent (see hu_voice_stt_gemini).
+     */
     {
         const char *pname = provider->vtable->get_name(provider->ctx);
         if (pname && (strstr(pname, "gemini") != NULL || strstr(pname, "google") != NULL)) {
@@ -153,7 +155,8 @@ hu_error_t hu_multimodal_process_video(hu_allocator_t *alloc, const char *file_p
 
             char *b64 = NULL;
             size_t b64_len = 0;
-            hu_error_t enc_err = hu_multimodal_encode_base64(alloc, vbuf, (size_t)vsz, &b64, &b64_len);
+            hu_error_t enc_err =
+                hu_multimodal_encode_base64(alloc, vbuf, (size_t)vsz, &b64, &b64_len);
             alloc->free(alloc->ctx, vbuf, (size_t)vsz);
             if (enc_err != HU_OK || !b64)
                 goto ffmpeg_fallback;
@@ -210,6 +213,20 @@ hu_error_t hu_multimodal_process_video(hu_allocator_t *alloc, const char *file_p
     }
 
 ffmpeg_fallback: {
+    /* Privacy kill-switch: don't extract frames or send them to a cloud vision
+     * provider. (hu_vision_describe_image also enforces this, but stop earlier here so
+     * we skip frame extraction entirely and return a clean placeholder.) */
+    if (hu_privacy_enforced()) {
+        const char *blocked = "[Video received — not described: privacy mode (on-device only)]";
+        size_t blen = strlen(blocked);
+        char *dup = hu_strndup(alloc, blocked, blen);
+        if (!dup)
+            return HU_ERR_OUT_OF_MEMORY;
+        *out_text = dup;
+        *out_text_len = blen;
+        return HU_OK;
+    }
+
     char tmpl[] = "/tmp/hu_video_XXXXXX";
     if (!mkdtemp(tmpl))
         return HU_ERR_IO;
@@ -246,8 +263,7 @@ ffmpeg_fallback: {
     bool got_desc = false;
     for (int fi = 1; fi <= 5; fi++) {
         char frame_path[600];
-        int fn =
-            snprintf(frame_path, sizeof(frame_path), "%s/frame_%03d.jpg", tmpl, fi);
+        int fn = snprintf(frame_path, sizeof(frame_path), "%s/frame_%03d.jpg", tmpl, fi);
         if (fn <= 0 || (size_t)fn >= sizeof(frame_path))
             continue;
 

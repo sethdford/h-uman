@@ -1,6 +1,7 @@
 #include "human/voice/gemini_live.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
 #include "human/voice/provider.h"
@@ -33,8 +34,8 @@ static size_t gl_url_encode(const char *src, char *dst, size_t dst_cap) {
     size_t w = 0;
     for (size_t i = 0; src[i]; i++) {
         unsigned char c = (unsigned char)src[i];
-        bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                    (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+        bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                    c == '-' || c == '_' || c == '.' || c == '~';
         size_t need = safe ? 1u : 3u;
         if (w + need + 1u > dst_cap) {
             if (dst_cap > 0 && dst)
@@ -177,8 +178,7 @@ hu_error_t hu_gemini_live_build_setup_json(hu_allocator_t *alloc,
     /* temperature + maxOutputTokens inside generationConfig */
     if (config->temperature > 0.0f) {
         char tbuf[64];
-        int tn = snprintf(tbuf, sizeof(tbuf), ",\"temperature\":%.2f",
-                          (double)config->temperature);
+        int tn = snprintf(tbuf, sizeof(tbuf), ",\"temperature\":%.2f", (double)config->temperature);
         if (tn > 0)
             err = hu_json_buf_append_raw(&buf, tbuf, (size_t)tn);
         if (err != HU_OK)
@@ -186,8 +186,7 @@ hu_error_t hu_gemini_live_build_setup_json(hu_allocator_t *alloc,
     }
     if (config->max_output_tokens > 0) {
         char mbuf[64];
-        int mn = snprintf(mbuf, sizeof(mbuf), ",\"maxOutputTokens\":%d",
-                          config->max_output_tokens);
+        int mn = snprintf(mbuf, sizeof(mbuf), ",\"maxOutputTokens\":%d", config->max_output_tokens);
         if (mn > 0)
             err = hu_json_buf_append_raw(&buf, mbuf, (size_t)mn);
         if (err != HU_OK)
@@ -209,9 +208,8 @@ hu_error_t hu_gemini_live_build_setup_json(hu_allocator_t *alloc,
 
     /* realtimeInputConfig (setup-level, not inside generationConfig) */
     if (config->manual_vad) {
-        static const char vad_str[] =
-            ",\"realtimeInputConfig\":"
-            "{\"automaticActivityDetection\":{\"disabled\":true}}";
+        static const char vad_str[] = ",\"realtimeInputConfig\":"
+                                      "{\"automaticActivityDetection\":{\"disabled\":true}}";
         err = hu_json_buf_append_raw(&buf, vad_str, sizeof(vad_str) - 1);
         if (err != HU_OK)
             goto fail;
@@ -267,9 +265,8 @@ hu_error_t hu_gemini_live_build_setup_json(hu_allocator_t *alloc,
 
     /* contextWindowCompression (setup-level) */
     if (config->enable_context_compression) {
-        static const char cc[] =
-            ",\"contextWindowCompression\":"
-            "{\"slidingWindow\":{\"targetTokens\":8192}}";
+        static const char cc[] = ",\"contextWindowCompression\":"
+                                 "{\"slidingWindow\":{\"targetTokens\":8192}}";
         err = hu_json_buf_append_raw(&buf, cc, sizeof(cc) - 1);
         if (err != HU_OK)
             goto fail;
@@ -855,8 +852,7 @@ hu_error_t hu_gemini_live_recv_event(hu_gemini_live_session_t *session, hu_alloc
                         combined[out->transcript_len] = '\n';
                         memcpy(combined + out->transcript_len + 1, text, tlen);
                         combined[combined_len] = '\0';
-                        alloc->free(alloc->ctx, out->transcript,
-                                    out->transcript_len + 1);
+                        alloc->free(alloc->ctx, out->transcript, out->transcript_len + 1);
                         out->transcript = combined;
                         out->transcript_len = combined_len;
                     } else {
@@ -940,8 +936,8 @@ hu_error_t hu_gemini_live_recv_event(hu_gemini_live_session_t *session, hu_alloc
             /* Buffer remaining calls for subsequent recv_event invocations */
             size_t extra = fcs->data.array.len - 1;
             if (extra > 0) {
-                hu_gl_pending_tool_call_t *pcs = (hu_gl_pending_tool_call_t *)
-                    alloc->alloc(alloc->ctx, extra * sizeof(hu_gl_pending_tool_call_t));
+                hu_gl_pending_tool_call_t *pcs = (hu_gl_pending_tool_call_t *)alloc->alloc(
+                    alloc->ctx, extra * sizeof(hu_gl_pending_tool_call_t));
                 if (pcs) {
                     memset(pcs, 0, extra * sizeof(hu_gl_pending_tool_call_t));
                     size_t stored = 0;
@@ -993,17 +989,19 @@ hu_error_t hu_gemini_live_recv_event(hu_gemini_live_session_t *session, hu_alloc
         hu_json_value_t *fcs2 = hu_json_object_get(tc, "functionCalls");
         if (fcs2 && fcs2->type == HU_JSON_ARRAY && fcs2->data.array.len > 0) {
             size_t cnt = fcs2->data.array.len;
-            hu_gl_pending_tool_call_t *pcs = (hu_gl_pending_tool_call_t *)
-                alloc->alloc(alloc->ctx, cnt * sizeof(hu_gl_pending_tool_call_t));
+            hu_gl_pending_tool_call_t *pcs = (hu_gl_pending_tool_call_t *)alloc->alloc(
+                alloc->ctx, cnt * sizeof(hu_gl_pending_tool_call_t));
             if (pcs) {
                 memset(pcs, 0, cnt * sizeof(hu_gl_pending_tool_call_t));
                 size_t stored = 0;
                 for (size_t fi = 0; fi < cnt; fi++) {
                     hu_json_value_t *fc = fcs2->data.array.items[fi];
                     const char *fn = hu_json_get_string(fc, "name");
-                    if (!fn) continue;
+                    if (!fn)
+                        continue;
                     pcs[stored].name = hu_strndup(alloc, fn, strlen(fn));
-                    if (!pcs[stored].name) continue;
+                    if (!pcs[stored].name)
+                        continue;
                     pcs[stored].name_len = strlen(fn);
                     const char *fi2 = hu_json_get_string(fc, "id");
                     if (fi2 && fi2[0]) {
@@ -1012,7 +1010,8 @@ hu_error_t hu_gemini_live_recv_event(hu_gemini_live_session_t *session, hu_alloc
                     }
                     hu_json_value_t *fa = hu_json_object_get(fc, "args");
                     if (fa) {
-                        char *fas = NULL; size_t fal = 0;
+                        char *fas = NULL;
+                        size_t fal = 0;
                         if (hu_json_stringify(alloc, fa, &fas, &fal) == HU_OK && fas) {
                             pcs[stored].args_json = fas;
                             pcs[stored].args_json_len = fal;
@@ -1051,8 +1050,8 @@ hu_error_t hu_gemini_live_recv_event(hu_gemini_live_session_t *session, hu_alloc
                         id_err = hu_json_buf_append_raw(&id_buf, ",", 1);
                     hu_json_value_t *v = ids->data.array.items[i];
                     if (id_err == HU_OK && v && v->type == HU_JSON_STRING)
-                        id_err = hu_json_buf_append_raw(&id_buf, v->data.string.ptr,
-                                                        v->data.string.len);
+                        id_err =
+                            hu_json_buf_append_raw(&id_buf, v->data.string.ptr, v->data.string.len);
                 }
                 if (id_err == HU_OK && id_buf.len > 0) {
                     out->transcript = hu_strndup(alloc, id_buf.ptr, id_buf.len);
@@ -1203,8 +1202,7 @@ hu_error_t hu_gemini_live_send_tool_response(hu_gemini_live_session_t *session, 
     hu_error_t err = hu_json_buf_init(&buf, session->alloc);
     if (err != HU_OK)
         return err;
-    err = hu_json_buf_append_raw(
-        &buf, "{\"toolResponse\":{\"functionResponses\":[{\"name\":", 49);
+    err = hu_json_buf_append_raw(&buf, "{\"toolResponse\":{\"functionResponses\":[{\"name\":", 49);
     if (err == HU_OK)
         err = hu_json_append_string(&buf, name, strlen(name));
     if (err == HU_OK)
@@ -1359,6 +1357,11 @@ hu_error_t hu_voice_provider_gemini_live_create(hu_allocator_t *alloc,
                                                 hu_voice_provider_t *out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
+    /* Privacy kill-switch: Gemini Live streams microphone audio to the cloud.
+     * Refuse construction under privacy mode — covers the provider factory and
+     * any direct caller by construction. */
+    if (hu_privacy_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     hu_gemini_live_session_t *session = NULL;
     hu_error_t err = hu_gemini_live_session_create(alloc, config, &session);
     if (err != HU_OK)

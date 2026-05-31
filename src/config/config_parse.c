@@ -1219,6 +1219,7 @@ static hu_error_t parse_voice(hu_allocator_t *a, hu_config_t *cfg, const hu_json
     HU_PARSE_VOICE_STR(vertex_region, "vertex_region");
     HU_PARSE_VOICE_STR(vertex_project, "vertex_project");
 #undef HU_PARSE_VOICE_STR
+    cfg->voice.privacy_mode = hu_json_get_bool(obj, "privacy_mode", cfg->voice.privacy_mode);
     return HU_OK;
 }
 
