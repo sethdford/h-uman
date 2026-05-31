@@ -62,11 +62,34 @@ MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8741/v1/chat/completions")
 USE_GATEWAY = "--gateway" in sys.argv
 USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
+USE_GATE = "--gate" in sys.argv
+GATE_DRY_RUN = "--gate-dry-run" in sys.argv
 MAX_TRIALS = 50
 
 for arg in sys.argv:
     if arg.startswith("--max-trials="):
         MAX_TRIALS = int(arg.split("=")[1])
+
+import blind_ab_gate as _gate
+_GATE_PATH = os.environ.get("HU_BLIND_AB_GATE_PATH", _gate.GATE_PATH)
+
+
+def _git_commit():
+    """Get the current git commit SHA."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return None
+
+
+def _load_baseline():
+    """Load the previous fool_rate from the gate file."""
+    try:
+        with open(_GATE_PATH) as f:
+            return {"fool_rate": json.load(f)["proxy"].get("fool_rate")}
+    except Exception:
+        return None
 
 HU_BIN = "hu"
 GT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "imessage", "ground_truth.jsonl")
@@ -255,6 +278,17 @@ def load_ground_truth():
 
 
 def main():
+    # Short-circuit for --gate --gate-dry-run (no creds, no data needed)
+    if USE_GATE and GATE_DRY_RUN:
+        _gate.write_proxy_half(_GATE_PATH, {
+            "verdict": "ADVISORY", "mode": "ADVISORY", "fool_rate": None,
+            "baseline_fool_rate": None, "n_trials": 0, "n_real_pairs": 0,
+            "fail_under": _gate.DEFAULT_FAIL_UNDER,
+            "max_regression": _gate.DEFAULT_MAX_REGRESSION,
+        }, commit=_git_commit())
+        print("GATE: ADVISORY (dry run / no data) — not blocking")
+        sys.exit(0)
+
     if not API_KEY and not os.path.exists(os.path.expanduser("~/.config/gcloud/application_default_credentials.json")):
         print("ERROR: Set GEMINI_API_KEY or configure gcloud ADC")
         sys.exit(1)
@@ -386,6 +420,25 @@ def main():
             "trials": results,
         }, f, indent=2)
     print(f"\n  Full results saved to {RESULTS_PATH}")
+
+    if USE_GATE:
+        fool_rate = ai_detected_correctly / total * 100 if total else 0.0
+        n_real_pairs = sum(1 for t in results if not t.get("is_synthetic"))
+        baseline = _load_baseline()
+        mode, verdict, should_fail = _gate.proxy_gate_decision(
+            fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
+        _gate.write_proxy_half(_GATE_PATH, {
+            "verdict": verdict, "mode": mode,
+            "fool_rate": fool_rate if total else None,
+            "baseline_fool_rate": (baseline or {}).get("fool_rate"),
+            "n_trials": total, "n_real_pairs": n_real_pairs,
+            "fail_under": _gate.DEFAULT_FAIL_UNDER,
+            "max_regression": _gate.DEFAULT_MAX_REGRESSION,
+        }, commit=_git_commit())
+        banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
+                  if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
+        print(f"\n  GATE: {banner}")
+        sys.exit(1 if should_fail else 0)
 
 
 if __name__ == "__main__":

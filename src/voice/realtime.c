@@ -1,5 +1,6 @@
 #include "human/voice/realtime.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
 #include "human/websocket/websocket.h"
@@ -65,17 +66,17 @@ hu_error_t hu_voice_rt_connect(hu_voice_rt_session_t *session) {
         const char *mdl = (session->config.model && session->config.model[0])
                               ? session->config.model
                               : "gpt-4o-realtime-preview";
-        const char *voice = (session->config.voice && session->config.voice[0])
-                                ? session->config.voice
-                                : "alloy";
+        const char *voice =
+            (session->config.voice && session->config.voice[0]) ? session->config.voice : "alloy";
         static const char su_head[] = "{\"type\":\"session.update\",\"session\":{";
         static const char su_mid[] = ",\"modalities\":[\"text\",\"audio\"],\"voice\":";
-        static const char su_tail[] = ",\"input_audio_format\":\"pcm16\","
-                                       "\"output_audio_format\":\"pcm16\","
-                                       "\"input_audio_transcription\":{\"model\":\"whisper-1\"},"
-                                       "\"turn_detection\":{\"type\":\"server_vad\",\"threshold\":0.5,"
-                                       "\"prefix_padding_ms\":300,\"silence_duration_ms\":500}"
-                                       "}}";
+        static const char su_tail[] =
+            ",\"input_audio_format\":\"pcm16\","
+            "\"output_audio_format\":\"pcm16\","
+            "\"input_audio_transcription\":{\"model\":\"whisper-1\"},"
+            "\"turn_detection\":{\"type\":\"server_vad\",\"threshold\":0.5,"
+            "\"prefix_padding_ms\":300,\"silence_duration_ms\":500}"
+            "}}";
         hu_json_buf_t su_buf = {0};
         hu_error_t su_err = hu_json_buf_init(&su_buf, session->alloc);
         if (su_err == HU_OK)
@@ -104,7 +105,8 @@ hu_error_t hu_voice_rt_connect(hu_voice_rt_session_t *session) {
 #endif
 }
 
-hu_error_t hu_voice_rt_send_audio(hu_voice_rt_session_t *session, const void *data, size_t data_len) {
+hu_error_t hu_voice_rt_send_audio(hu_voice_rt_session_t *session, const void *data,
+                                  size_t data_len) {
     if (!session || !data)
         return HU_ERR_INVALID_ARGUMENT;
 #if HU_IS_TEST
@@ -359,13 +361,13 @@ static hu_error_t openai_vp_send_audio(void *ctx, const void *pcm16, size_t len)
     return hu_voice_rt_send_audio((hu_voice_rt_session_t *)ctx, pcm16, len);
 }
 
-static hu_error_t openai_vp_recv_event(void *ctx, hu_allocator_t *alloc,
-                                        hu_voice_rt_event_t *out, int timeout_ms) {
+static hu_error_t openai_vp_recv_event(void *ctx, hu_allocator_t *alloc, hu_voice_rt_event_t *out,
+                                       int timeout_ms) {
     return hu_voice_rt_recv_event((hu_voice_rt_session_t *)ctx, alloc, out, timeout_ms);
 }
 
 static hu_error_t openai_vp_add_tool(void *ctx, const char *name, const char *description,
-                                      const char *parameters_json) {
+                                     const char *parameters_json) {
     return hu_voice_rt_add_tool((hu_voice_rt_session_t *)ctx, name, description, parameters_json);
 }
 
@@ -394,10 +396,15 @@ static const hu_voice_provider_vtable_t openai_voice_vtable = {
 };
 
 hu_error_t hu_voice_provider_openai_create(hu_allocator_t *alloc,
-                                            const hu_voice_rt_config_t *config,
-                                            hu_voice_provider_t *out) {
+                                           const hu_voice_rt_config_t *config,
+                                           hu_voice_provider_t *out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
+    /* Privacy kill-switch: OpenAI Realtime streams microphone audio to the
+     * cloud. Refuse construction under privacy mode — covers direct callers
+     * (hu_voice_session_start in session.c) and the provider factory. */
+    if (hu_privacy_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     hu_voice_rt_session_t *session = NULL;
     hu_error_t err = hu_voice_rt_session_create(alloc, config, &session);
     if (err != HU_OK)

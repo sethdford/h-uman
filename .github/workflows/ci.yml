@@ -928,3 +928,19 @@ jobs:
         env:
           SOURCE_DATE_EPOCH: "1700000000"
         run: scripts/check-reproducible-build.sh
+
+  # Fail-closed enforcement for feature-gate-requires-measurement: any
+  # capability marked LIVE in docs/evaluation/capability_gates.json must have a
+  # green blind-A/B gate (docs/evaluation/blind_ab_gate.json effective_verdict
+  # == PASS). Runs on PRs so the diff that flips a capability LIVE is what's
+  # gated. Fast, deterministic, stdlib-only — no creds, never flaky.
+  capability-gate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Gate-core + registry unit tests
+        run: |
+          python3 scripts/test_blind_ab_gate.py
+          python3 scripts/test_check_capability_gates.py
+      - name: Enforce capability registry against blind_ab gate
+        run: python3 scripts/check_capability_gates.py

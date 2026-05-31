@@ -1206,7 +1206,8 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
 
     const char *query =
         "SELECT id, channel, target, prompt, chosen, reply_sentiment, "
-        "reply_latency_s, reply_length, send_timestamp, outcome_resolved_at, user_edited "
+        "reply_latency_s, reply_length, send_timestamp, outcome_resolved_at, user_edited, "
+        "tapback_polarity "
         "FROM production_outcomes "
         "WHERE outcome_resolved_at IS NOT NULL AND processed_into_dpo = 0 "
         "ORDER BY target, id ASC "
@@ -1219,12 +1220,15 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
     }
     sqlite3_bind_int(select_stmt, 1, output_limit > 0 ? output_limit : INT_MAX);
 
-    /* One pair per contact: a "chosen" (we replied-to and got positive
-     * engagement) outcome paired with a "rejected" (no reply) outcome for the
-     * same contact. Order-independent — we accumulate both sides as the
-     * contact's resolved rows stream past (ORDER BY target,id keeps a contact's
-     * rows contiguous) and emit once both are present. "No reply" is detected
-     * by a NULL reply_latency_s column, NOT a sentinel value. */
+    /* One pair per contact: a "chosen" outcome (positive tapback, or — absent a
+     * tapback — a fast substantive reply) paired with a "rejected" outcome
+     * (negative tapback, or no/very-slow reply) for the same contact.
+     * Order-independent — we accumulate both sides as the contact's resolved
+     * rows stream past (ORDER BY target,id keeps a contact's rows contiguous)
+     * and emit once both are present. The chosen/rejected predicate keys off
+     * tapback_polarity and reply latency/length — signals that are actually
+     * populated in production — NOT reply_sentiment, which is historically
+     * unset and previously starved this miner to zero pairs. */
     typedef struct {
         char channel[64];
         char target[256];
@@ -1248,6 +1252,8 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
         int reply_latency_s = has_reply ? sqlite3_column_int(select_stmt, 6) : -1;
         int reply_length = sqlite3_column_int(select_stmt, 7);
         int user_edited = sqlite3_column_int(select_stmt, 10);
+        bool tb_set = sqlite3_column_type(select_stmt, 11) != SQLITE_NULL;
+        int tapback = tb_set ? sqlite3_column_int(select_stmt, 11) : 0;
 
         /* Contact boundary → reset accumulator (rows are grouped by target). */
         if ((contact.has_chosen || contact.has_rejected) &&
@@ -1265,9 +1271,27 @@ hu_error_t hu_dpo_collector_mine_pairs_from_outcomes(sqlite3 *db, int output_lim
         if (user_edited)
             continue;
 
-        bool is_chosen = has_reply && reply_latency_s >= 0 && reply_latency_s <= 300 &&
-                         reply_sentiment >= 0.6 && reply_length > 0;
-        bool is_rejected = !has_reply;
+        /* Preference signal, in priority order:
+         *   1. Explicit iMessage tapback on our outbound reply (cleanest):
+         *      a positive reaction (👍/❤️/😂) = chosen, a negative one (👎) =
+         *      rejected.
+         *   2. Implicit engagement when there is no tapback: a fast, substantive
+         *      reply keeps the thread alive (chosen); no reply at all, or a very
+         *      slow one, signals a dead thread (rejected).
+         * reply_sentiment, when present, is an ADDITIONAL positive signal but is
+         * NOT required — it is historically unset in production, and requiring it
+         * starved this miner to zero pairs for the entire history of the table.
+         * Thresholds: reply within 15 min with >=8 chars = engaged/chosen;
+         *             no reply OR latency > 1 h = disengaged/rejected. */
+        bool tb_pos = tb_set && tapback > 0;
+        bool tb_neg = tb_set && tapback < 0;
+        bool engaged =
+            has_reply && reply_latency_s >= 0 && reply_latency_s <= 900 && reply_length >= 8;
+        bool disengaged = !has_reply || (has_reply && reply_latency_s > 3600);
+        bool sentiment_good = reply_sentiment >= 0.6;
+
+        bool is_chosen = tb_pos || (!tb_neg && (engaged || sentiment_good));
+        bool is_rejected = tb_neg || (!tb_pos && disengaged);
 
         if (is_chosen && !contact.has_chosen) {
             contact.has_chosen = true;

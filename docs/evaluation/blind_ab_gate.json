@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "commit": null,
+  "proxy": {
+    "tool": "eval_blinded_ab.py",
+    "verdict": "ABSENT",
+    "mode": "ADVISORY",
+    "fool_rate": null,
+    "baseline_fool_rate": null,
+    "n_trials": 0,
+    "n_real_pairs": 0,
+    "fail_under": 45,
+    "max_regression": 5,
+    "timestamp": null
+  },
+  "human": {
+    "tool": "blind_ab/score.py",
+    "verdict": "ABSENT",
+    "detection": null,
+    "ci_lo": null,
+    "n": 0,
+    "timestamp": null
+  },
+  "effective_verdict": "ADVISORY"
+}

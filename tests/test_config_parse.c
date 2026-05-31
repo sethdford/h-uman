@@ -879,9 +879,10 @@ static void test_config_parse_voice_section(void) {
     cfg_local.allocator = hu_arena_allocator(arena);
     const char *json = "{\"voice\":{\"local_stt_endpoint\":\"http://127.0.0.1:8080/inference\","
                        "\"tts_voice\":\"af_heart\",\"stt_model\":\"whisper-large-v3\","
-                       "\"stt_language\":\"en\"}}";
+                       "\"stt_language\":\"en\",\"privacy_mode\":true}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(cfg_local.voice.privacy_mode);
     HU_ASSERT_NOT_NULL(cfg_local.voice.local_stt_endpoint);
     HU_ASSERT_STR_EQ(cfg_local.voice.local_stt_endpoint, "http://127.0.0.1:8080/inference");
     HU_ASSERT_NOT_NULL(cfg_local.voice.tts_voice);

@@ -848,6 +848,17 @@ void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg);
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out);
 
+/* Append the per-turn humanness directives (Theory-of-Mind, calibrated
+ * self-uncertainty, intent-aware response-type) to the system prompt, honoring
+ * each gate's env (HU_TOM_DIRECTIVE / HU_SELF_UNCERTAINTY default off,
+ * HU_INTENT_DIRECTIVE default on; off|shadow|on). Called by BOTH hu_agent_turn
+ * and hu_agent_turn_stream_v2 so the gates fire on the streaming path the daemon
+ * actually uses for inbound messages. Takes ownership of nothing; reallocs
+ * *system_prompt in place. No-op if inputs are NULL. */
+void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact_id,
+                                          size_t contact_id_len, const char *msg, size_t msg_len,
+                                          char **system_prompt, size_t *system_prompt_len);
+
 /* Optional: if non-NULL, called for each streaming token delta (CLI mode).
  * Provider must support streaming. When provided, uses stream_chat when available. */
 typedef void (*hu_agent_stream_token_cb)(const char *delta, size_t len, void *ctx);

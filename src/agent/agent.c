@@ -59,6 +59,7 @@
 #include "human/context.h"
 #include "human/context_tokens.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/string.h"
 #include "human/hook.h"
 #include "human/hook_pipeline.h"
@@ -2530,6 +2531,15 @@ hu_error_t hu_agent_reload_config(hu_agent_t *agent, char **summary_out, size_t 
             *summary_len_out = strlen(error_msg);
         return HU_OK; /* Return HU_OK but include error in summary */
     }
+
+    /* Keep the process-global privacy kill-switch in sync on SIGHUP reload —
+     * voice.privacy_mode may have changed on disk (config-load path does not go
+     * through hu_voice_config_from_settings, which is where it is otherwise latched).
+     * Production-only to avoid cross-test pollution of the global (reload is exercised
+     * by tests/test_config_reload.c). */
+#if !HU_IS_TEST
+    hu_privacy_set_enforced(fresh_cfg.voice.privacy_mode);
+#endif
 
     char *summary_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 512);
     if (!summary_buf) {

@@ -1400,6 +1400,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         }
     }
 
+    /* Per-turn humanness directives (ToM, self-uncertainty, intent), shared with
+     * hu_agent_turn. This is the daemon's PRIMARY inbound path — without this
+     * call the gates never fired on real streaming turns (2026-05-31 audit). */
+    hu_agent_append_humanness_directives(agent, agent->memory_session_id,
+                                         agent->memory_session_id_len, msg, msg_len,
+                                         &system_prompt, &system_prompt_len);
+
     /* ── Observer: turn start (matches batch path in agent_turn.c) ─────── */
     hu_agent_internal_generate_trace_id(agent->trace_id);
 

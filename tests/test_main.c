@@ -58,6 +58,7 @@ void run_m3_outcome_ring_population_tests(void);
 void run_m3_ab_fidelity_gate_tests(void);
 void run_m3_frontier_auto_invocation_tests(void);
 void run_sql_transaction_tests(void);
+void run_sqlite_integrity_tests(void);
 void run_memory_util_tests(void);
 void run_tunnel_tests(void);
 void run_gateway_tests(void);
@@ -1092,6 +1093,7 @@ int main(int argc, char **argv) {
     run_m3_ab_fidelity_gate_tests();
     run_m3_frontier_auto_invocation_tests();
     run_sql_transaction_tests();
+    run_sqlite_integrity_tests();
     run_memory_util_tests();
     run_tunnel_tests();
     run_gateway_tests();

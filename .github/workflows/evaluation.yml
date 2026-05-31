@@ -162,3 +162,39 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GCP_ADC_JSON: ${{ secrets.GCP_ADC_JSON }}
         run: ./build/human evaluation run frontier
+
+  # Tier-1 blind-A/B proxy gate (LLM-judge). A REAL measurement needs both
+  # Gemini creds AND a model-serving endpoint (HU_GATEWAY_URL); a bare runner
+  # has neither, so this falls back to the ADVISORY dry-run that validates the
+  # gate plumbing without faking a measurement. When a serving path exists,
+  # set HU_GATEWAY_URL + GEMINI_API_KEY and the real proxy run takes over and
+  # updates docs/evaluation/blind_ab_gate.json. The authoritative human tier
+  # (scripts/blind_ab/) remains the veto — see docs/evaluation/REAL_PAIRS_FOLLOWUP.md.
+  blind-ab-gate:
+    name: Blind-A/B proxy gate (LLM-judge)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run blind-A/B proxy gate (real if serving available, else ADVISORY dry-run)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HU_GATEWAY_URL: ${{ secrets.HU_GATEWAY_URL }}
+        run: |
+          if [ -n "$GEMINI_API_KEY" ] && [ -n "$HU_GATEWAY_URL" ]; then
+            echo "Creds + serving present — running live proxy gate"
+            python3 scripts/eval_blinded_ab.py --gate --gateway
+          else
+            echo "No creds/serving — ADVISORY dry-run (validates wiring, does not measure)"
+            python3 scripts/eval_blinded_ab.py --gate --gate-dry-run
+          fi
+      - name: Show gate verdict
+        run: |
+          python3 -c "import json; d=json.load(open('docs/evaluation/blind_ab_gate.json')); print('effective_verdict=', d['effective_verdict'], 'proxy.mode=', d['proxy']['mode'])"
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blind-ab-gate
+          path: docs/evaluation/blind_ab_gate.json

@@ -1,4 +1,5 @@
 #include "human/config.h"
+#include "human/core/privacy.h"
 #include "human/voice.h"
 #include <string.h>
 
@@ -18,6 +19,14 @@ hu_error_t hu_voice_config_from_settings(const hu_config_t *config, hu_voice_con
     out->tts_model = vs->tts_model;
     out->tts_voice = vs->tts_voice;
     out->language = vs->stt_language;
+    out->privacy_mode = vs->privacy_mode;
+#if !HU_IS_TEST
+    /* Latch the process-global privacy kill-switch from the authoritative config.
+     * Every entry point (daemon, gateway, CLI) builds its voice config here, so this
+     * covers them all — including partial-config callers (multimodal) that consult only
+     * the global. Production-only to avoid cross-test pollution of the global flag. */
+    hu_privacy_set_enforced(vs->privacy_mode);
+#endif
 
     const char *ckey = hu_config_get_provider_key(config, "cartesia");
     if (ckey && ckey[0]) {

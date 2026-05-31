@@ -4,6 +4,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/privacy.h"
 #include "human/tts/cartesia.h"
 #include "human/voice.h"
 #include "test_framework.h"
@@ -84,7 +85,7 @@ static void test_cartesia_synthesize_with_config(void) {
     unsigned char *out = NULL;
     size_t out_len = 0;
     hu_error_t err = hu_cartesia_tts_synthesize(&alloc, "test-key", 8, "Hello world", 11, &cfg,
-        NULL, &out, &out_len);
+                                                NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
@@ -95,8 +96,8 @@ static void test_cartesia_synthesize_wav_format_returns_mock_bytes(void) {
     hu_allocator_t alloc = hu_system_allocator();
     unsigned char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_cartesia_tts_synthesize(&alloc, "test-key", 8, "Hi", 2, NULL, "wav", &out,
-        &out_len);
+    hu_error_t err =
+        hu_cartesia_tts_synthesize(&alloc, "test-key", 8, "Hi", 2, NULL, "wav", &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_EQ(out_len, 400u);
@@ -183,6 +184,22 @@ static void test_voice_tts_cartesia_provider_routes_correctly(void) {
     alloc.free(alloc.ctx, audio, alen);
 }
 
+/* Privacy kill-switch: Cartesia is cloud TTS egress. The daemon persona path
+ * calls hu_cartesia_tts_synthesize directly (bypassing hu_voice_tts's gate), so
+ * the refusal must live at this boundary. Regression for that bypass. */
+static void test_cartesia_synthesize_blocked_under_privacy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_cartesia_tts_config_t cfg = {0};
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    hu_privacy_set_enforced(true);
+    hu_error_t err =
+        hu_cartesia_tts_synthesize(&alloc, "ck-test", 7, "hello", 5, &cfg, "mp3", &bytes, &len);
+    hu_privacy_set_enforced(false);
+    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(bytes);
+}
+
 void run_cartesia_tests(void) {
     HU_TEST_SUITE("Cartesia");
     HU_RUN_TEST(test_tts_format_for_channel_imessage_returns_caf);
@@ -202,4 +219,5 @@ void run_cartesia_tests(void) {
 #endif
     HU_RUN_TEST(test_voice_stt_file_cartesia_provider_routes_correctly);
     HU_RUN_TEST(test_voice_tts_cartesia_provider_routes_correctly);
+    HU_RUN_TEST(test_cartesia_synthesize_blocked_under_privacy);
 }

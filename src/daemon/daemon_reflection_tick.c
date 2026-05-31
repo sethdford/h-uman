@@ -80,9 +80,18 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
         return;
 
     /* Cheap gate before we touch the db handle — saves us a sqlite
-     * call when the operator hasn't opted in. */
-    if (!cfg->reflection_loop.enabled)
+     * call when the operator hasn't opted in. This early-return is reached
+     * BEFORE reflection.c's own disable-log, so without a one-shot line here
+     * the daemon's reflection loop is silently off — the 2026-05-18 class of
+     * invisible-dataloss bug (silent-config-gated-subsystems.md). */
+    if (!cfg->reflection_loop.enabled) {
+        static atomic_bool warned_disabled = false;
+        hu_log_info_once(&warned_disabled, "reflection.daemon", NULL,
+                         "reflection_loop subsystem disabled by config "
+                         "(cfg->reflection_loop.enabled=false); set "
+                         "reflection_loop.enabled=true in config.json to activate");
         return;
+    }
 
     /* Reflection needs the same SQLite handle the rest of the memory
      * subsystem uses. If the memory backend isn't SQLite-backed (or

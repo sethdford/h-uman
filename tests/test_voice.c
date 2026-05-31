@@ -1,4 +1,5 @@
 #include "human/core/allocator.h"
+#include "human/core/privacy.h"
 #include "human/voice.h"
 #include "test_framework.h"
 #include <string.h>
@@ -369,6 +370,125 @@ static void test_voice_tts_local_endpoint_null_tts_provider_routes_local(void) {
     alloc.free(alloc.ctx, audio, 1);
 }
 
+/* --- Voice provider tiering / privacy_mode (ADR 2026-05-31) --- */
+
+static void voice_preferred_tts_backend_truth_table(void) {
+    /* privacy_mode dominates -> always local (cloud forbidden) */
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(true, true, true), HU_VOICE_TTS_BACKEND_LOCAL);
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(true, false, false), HU_VOICE_TTS_BACKEND_LOCAL);
+    /* privacy off -> Cartesia is the default when selected+keyed (even if local also present) */
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(false, true, true), HU_VOICE_TTS_BACKEND_CARTESIA);
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(false, true, false), HU_VOICE_TTS_BACKEND_CARTESIA);
+    /* privacy off, no cartesia -> local fallback when endpoint present */
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(false, false, true), HU_VOICE_TTS_BACKEND_LOCAL);
+    /* privacy off, nothing -> cloud default */
+    HU_ASSERT_EQ(hu_voice_preferred_tts_backend(false, false, false),
+                 HU_VOICE_TTS_BACKEND_CLOUD_DEFAULT);
+}
+
+static void voice_cloud_egress_allowed_matches_privacy(void) {
+    HU_ASSERT_FALSE(hu_voice_cloud_egress_allowed(true));
+    HU_ASSERT_TRUE(hu_voice_cloud_egress_allowed(false));
+}
+
+static void voice_privacy_disclosure_reflects_backend(void) {
+    HU_ASSERT_STR_CONTAINS(hu_voice_privacy_disclosure(HU_VOICE_TTS_BACKEND_LOCAL), "on-device");
+    HU_ASSERT_STR_CONTAINS(hu_voice_privacy_disclosure(HU_VOICE_TTS_BACKEND_CARTESIA), "Cartesia");
+}
+
+/* privacy_mode forbids cloud egress: a cartesia-selected TTS with no local endpoint must NOT
+ * reach Cartesia — it returns NOT_SUPPORTED rather than leaking to the cloud. */
+static void voice_tts_privacy_mode_blocks_cloud(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0};
+    cfg.tts_provider = "cartesia";
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+    void *audio = NULL;
+    size_t alen = 0;
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(audio);
+    hu_privacy_set_enforced(false);
+}
+
+/* privacy_mode + a local endpoint -> uses the on-device local path. */
+static void voice_tts_privacy_mode_uses_local(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0};
+    cfg.local_tts_endpoint = "http://127.0.0.1:9/tts";
+    cfg.tts_provider = "cartesia"; /* ignored under privacy mode */
+    void *audio = NULL;
+    size_t alen = 0;
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_OK);
+    HU_ASSERT_NOT_NULL(audio);
+    HU_ASSERT_EQ(alen, 0u);
+    alloc.free(alloc.ctx, audio, 1);
+    hu_privacy_set_enforced(false);
+}
+
+/* privacy_mode forbids cloud STT egress too: no local endpoint -> NOT_SUPPORTED, never Cartesia. */
+static void voice_stt_privacy_mode_blocks_cloud(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0};
+    cfg.stt_provider = "cartesia";
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+    char *text = NULL;
+    size_t len = 0;
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_EQ(hu_voice_stt_file(&alloc, &cfg, "/tmp/x.wav", &text, &len), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(text);
+    hu_privacy_set_enforced(false);
+}
+
+/* privacy_mode must also block the DIRECT Gemini transcription/description egress point
+ * (gateway cp_voice + multimodal audio/video callers reach it without hu_voice_stt_file).
+ * Regression for the bypass where audio could leave the device despite privacy_mode. */
+static void voice_stt_gemini_privacy_mode_blocks_cloud(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0};
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+    char *text = NULL;
+    size_t len = 0;
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_EQ(hu_voice_stt_gemini(&alloc, &cfg, "AAAA", 4, "audio/webm", &text, &len),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(text);
+    hu_privacy_set_enforced(false);
+}
+
+/* The process-global kill-switch blocks cloud egress even when the per-call config does
+ * NOT carry privacy_mode — i.e. the exact partial-config bypass that multimodal
+ * audio/video callers hit (they build vcfg with only an api_key). */
+static void voice_global_privacy_kill_switch_blocks_partial_config(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_voice_config_t cfg = {0}; /* privacy_mode is false here, mirroring multimodal vcfg */
+    cfg.api_key = "sk-test";
+    cfg.api_key_len = 7;
+
+    hu_privacy_set_enforced(true);
+    HU_ASSERT_TRUE(hu_privacy_enforced());
+
+    char *text = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_voice_stt_gemini(&alloc, &cfg, "AAAA", 4, "audio/webm", &text, &len),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(text);
+
+    cfg.tts_provider = "cartesia";
+    void *audio = NULL;
+    size_t alen = 0;
+    HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(audio);
+
+    /* reset so later tests observe the default (cloud-allowed) behavior */
+    hu_privacy_set_enforced(false);
+    HU_ASSERT_FALSE(hu_privacy_enforced());
+}
+
 void run_voice_tests(void) {
     HU_TEST_SUITE("Voice");
     HU_RUN_TEST(test_voice_stt_file_mock);
@@ -406,4 +526,12 @@ void run_voice_tests(void) {
     HU_RUN_TEST(test_voice_stt_file_groq_provider_routes_to_default_stt);
     HU_RUN_TEST(test_voice_stt_file_local_endpoint_routes_before_cloud);
     HU_RUN_TEST(test_voice_tts_local_endpoint_null_tts_provider_routes_local);
+    HU_RUN_TEST(voice_preferred_tts_backend_truth_table);
+    HU_RUN_TEST(voice_cloud_egress_allowed_matches_privacy);
+    HU_RUN_TEST(voice_privacy_disclosure_reflects_backend);
+    HU_RUN_TEST(voice_tts_privacy_mode_blocks_cloud);
+    HU_RUN_TEST(voice_tts_privacy_mode_uses_local);
+    HU_RUN_TEST(voice_stt_privacy_mode_blocks_cloud);
+    HU_RUN_TEST(voice_stt_gemini_privacy_mode_blocks_cloud);
+    HU_RUN_TEST(voice_global_privacy_kill_switch_blocks_partial_config);
 }

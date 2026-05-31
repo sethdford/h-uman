@@ -637,6 +637,7 @@ set(HU_CORE_SOURCES
     src/agent/service.c
     src/skills/skill_registry.c
     src/subagent.c
+    src/core/privacy.c
     src/voice/voice.c
     src/voice/voice_config.c
     src/voice/local_stt.c
@@ -1223,6 +1224,7 @@ set(HU_CORE_SOURCES
     src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
+    src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
@@ -3297,6 +3299,7 @@ set(HU_TEST_SOURCES
     tests/test_fidelity_delta.c
     tests/test_m3_frontier_auto_invocation.c
     tests/test_sql_transaction.c
+    tests/test_sqlite_integrity.c
     tests/test_normalize.c
     tests/test_memory_util.c
     tests/test_tunnel.c
