@@ -104,7 +104,7 @@ step "1. Pre-flight: stop existing processes, wipe driver state"
 cleanup
 sleep 1
 rm -f "$DRIVER_OUT_JSONL" "$DRIVER_STATE"
-rm -f "$ADAPTER_DIR"/m3-driver-*.safetensors 2>/dev/null || true
+rm -rf "$ADAPTER_DIR"/m3-driver-* 2>/dev/null || true
 
 # Bootstrap minimal config if none exists (CI cold-start path). The fixture
 # adapter file under /tmp lets the daemon attach an M3 adapter on boot,
@@ -231,11 +231,14 @@ python3 "$REPO_ROOT/scripts/m3_outcome_driver.py" \
         --threshold 1 \
         --simulate-train 2>&1 | tee /tmp/driver-output.log
 
-ADAPTER_FILE=$(ls -t "$ADAPTER_DIR"/m3-driver-*.safetensors 2>/dev/null | head -1)
+# The driver writes a directory `m3-driver-<stamp>/adapters.safetensors` (the
+# training_loop.py layout) and swaps the DIRECTORY path.
+ADAPTER_NEW=$(ls -dt "$ADAPTER_DIR"/m3-driver-*/ 2>/dev/null | head -1)
+ADAPTER_NEW="${ADAPTER_NEW%/}"
 require "driver produced at least one adapter artifact" \
-        "[ -f '$ADAPTER_FILE' ]"
-echo "[live-fire] adapter file: $ADAPTER_FILE"
-echo "[live-fire] adapter size: $(wc -c < "$ADAPTER_FILE") bytes"
+        "[ -n '$ADAPTER_NEW' ] && [ -f '$ADAPTER_NEW/adapters.safetensors' ]"
+echo "[live-fire] adapter dir: $ADAPTER_NEW"
+echo "[live-fire] checkpoint size: $(wc -c < "$ADAPTER_NEW/adapters.safetensors") bytes"
 
 step "8. Verify stub MLX received the swap call"
 # Two independent witnesses, in case Python stdout buffering ate the log line:
@@ -244,7 +247,7 @@ step "8. Verify stub MLX received the swap call"
 ACTIVE_AFTER=$(curl -s "$MLX_URL/v1/adapters/current" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['adapter_path'])")
 echo "[live-fire] stub-mlx active adapter (post-swap): $ACTIVE_AFTER"
 require "stub MLX active adapter equals the new artifact" \
-        "[ '$ACTIVE_AFTER' = '$ADAPTER_FILE' ]"
+        "[ '$ACTIVE_AFTER' = '$ADAPTER_NEW' ]"
 require "driver-output log confirms swap OK" \
         "grep -q 'adapter swap OK' /tmp/driver-output.log"
 SWAP_LOG=$(grep "swap →" "$STUB_LOG" || true)
@@ -263,7 +266,7 @@ require "JSONL first prompt_hash matches ring's first" \
 
 step "10. End-state snapshot"
 echo "[live-fire] DRIVER_STATE: $(cat $DRIVER_STATE 2>/dev/null | python3 -m json.tool | head -5)"
-echo "[live-fire] adapter on disk: $ADAPTER_FILE ($(wc -c < $ADAPTER_FILE) bytes)"
+echo "[live-fire] adapter on disk: $ADAPTER_NEW/adapters.safetensors ($(wc -c < "$ADAPTER_NEW/adapters.safetensors") bytes)"
 echo "[live-fire] stub-mlx current adapter (post-swap):"
 curl -s "$MLX_URL/v1/adapters/current" | python3 -m json.tool
 
@@ -276,6 +279,6 @@ echo "  - daemon's agent recorded $RING_COUNT outcome(s) with guard=PASS,"
 echo "    positive tokens, adapter_id=0"
 echo "  - driver fetched, filtered, deduped, appended $JSONL_LINES outcome(s)"
 echo "    to $DRIVER_OUT_JSONL"
-echo "  - simulate-train produced adapter at $ADAPTER_FILE"
+echo "  - simulate-train produced adapter at $ADAPTER_NEW"
 echo "  - swap POST landed on stub MLX (now its active adapter)"
 echo "═══════════════════════════════════════════════════════════════════"
