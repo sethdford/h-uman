@@ -4435,13 +4435,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
              * docs/research/2026-05-31-voiceai-speech-behavior-port-map.md).
              * Classify the inbound message's conversational intent and steer
              * the reply strategy (listen vs advise vs validate vs short).
-             * Gated by env HU_INTENT_DIRECTIVE: off (default) | shadow
-             * (compute + log, no injection) | on. Promotion off->shadow->on is
-             * gated on the blind A/B per feature-gate-requires-measurement. */
+             * ACTIVE by default; env HU_INTENT_DIRECTIVE=off disables, =shadow
+             * observes (compute + log, no injection). The blind A/B remains the
+             * validation of record; flip to off/shadow if it regresses. */
             {
                 const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
-                if (intent_mode &&
-                    (strcmp(intent_mode, "shadow") == 0 || strcmp(intent_mode, "on") == 0)) {
+                if (!intent_mode || *intent_mode == '\0') {
+                    intent_mode = "on"; /* default ON */
+                }
+                if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
                     hu_intent_analysis_t ia;
                     hu_intent_analyze(msg, msg_len, &ia);
                     if (strcmp(intent_mode, "on") == 0) {
