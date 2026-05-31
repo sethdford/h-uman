@@ -14,9 +14,16 @@
 #include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
+
+#ifdef HU_ENABLE_SQLITE
 
 static hu_allocator_t g_alloc;
-static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
+static hu_allocator_t *A(void) {
+    g_alloc = hu_system_allocator();
+    return &g_alloc;
+}
 
 static void open_graph(hu_graph_t **g) {
     hu_error_t rc = hu_graph_open(A(), NULL, 0, g);
@@ -53,8 +60,8 @@ static void test_w2_autodream_drops_low_trust_quarantine_entries(void) {
     quarantine(g, alice, acme, 0.45f, 1735689600000LL);
 
     hu_autodream_config_t cfg = hu_autodream_default_config();
-    cfg.now_ms = 1735689600000LL + 1000;       /* very fresh */
-    cfg.enable_community_summaries = false;    /* isolate */
+    cfg.now_ms = 1735689600000LL + 1000;    /* very fresh */
+    cfg.enable_community_summaries = false; /* isolate */
     cfg.enable_edge_reweight = false;
     hu_autodream_report_t r = {0};
     HU_ASSERT_EQ(hu_autodream_run(A(), g, &cfg, &r), HU_OK);
@@ -164,8 +171,8 @@ static void test_w2_autodream_does_not_release_when_contradicted(void) {
     hu_graph_upsert_entity(g, "u1", 2, "EvilCorp", 8, HU_ENTITY_ORGANIZATION, NULL, &evil);
 
     /* Live high-confidence: Alice works at Acme. */
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                1735689600000LL, 0, 1.0f, NULL, 0, "user", 4);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
+                                1.0f, NULL, 0, "user", 4);
 
     /* Quarantined low-confidence different employer (target = EvilCorp). */
     quarantine(g, alice, evil, 0.55f, 1735689600000LL);
@@ -278,6 +285,161 @@ static void test_w2_autodream_handles_quarantine_bomb(void) {
     hu_graph_close(g, A());
 }
 
+/* --- Community summaries: Leiden detection with real entity/relation graph --- */
+static void test_w2_autodream_leiden_populates_summaries(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+
+    /* Create 16 entities for a single contact_id to pass the LEIDEN_ENTITY_THRESHOLD (15).
+     * Each entity is a person, creating some structure the Leiden algorithm can cluster. */
+    int64_t entities[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "Person%d", i);
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, name, (size_t)strlen(name),
+                                            HU_ENTITY_PERSON, NULL, &entities[i]),
+                     HU_OK);
+    }
+
+    /* Add relations to create edge structure that Leiden can cluster.
+     * Arrange in a loose "chain" pattern: 0-1, 1-2, 2-3, ... (linear),
+     * then add some cross-edges to create community structure:
+     * 0-4-8-12, 1-5-9-13, 2-6-10-14, 3-7-11-15 (four chains).
+     * This should produce 2-4 natural clusters for Leiden to find. */
+    for (int i = 0; i < 15; i++) {
+        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, entities[i], entities[i + 1],
+                                              HU_REL_KNOWS, 0.8f, NULL, 0),
+                     HU_OK);
+    }
+    /* Add cross-edges to create multiple communities. */
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u1", 2, entities[0], entities[4], HU_REL_KNOWS, 0.7f, NULL, 0),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u1", 2, entities[4], entities[8], HU_REL_KNOWS, 0.7f, NULL, 0),
+        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, entities[8], entities[12], HU_REL_KNOWS, 0.7f,
+                                          NULL, 0),
+                 HU_OK);
+
+    /* Run AutoDream with community summaries ENABLED (the key difference).
+     * Isolate other phases to focus on community detection. */
+    hu_autodream_config_t cfg = hu_autodream_default_config();
+    cfg.now_ms = 1735689600000LL;
+    cfg.enable_quarantine_review = false;
+    cfg.enable_community_summaries = true; /* ← THE KEY: this enables Leiden detection */
+    cfg.enable_edge_reweight = false;
+    cfg.enable_derived_facts = false;
+
+    hu_autodream_report_t r = {0};
+    HU_ASSERT_EQ(hu_autodream_run(A(), g, &cfg, &r), HU_OK);
+
+    /* L1: Verify Leiden assigned community_id to entities.
+     * Query: entities with non-null community_id > 0. */
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT COUNT(*) FROM entities WHERE community_id IS NOT NULL AND community_id > 0", -1,
+        &st, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    rc = sqlite3_step(st);
+    HU_ASSERT_EQ(rc, SQLITE_ROW);
+    int community_count = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+
+    /* Assert at least 1 entity has a community_id assigned (Leiden ran and produced output). */
+    HU_ASSERT_GE(community_count, 1);
+
+    /* L2: Verify community_summaries table has entries (summarization phase ran).
+     * Query: count rows in community_summaries. */
+    rc = sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM community_summaries", -1, &st, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    rc = sqlite3_step(st);
+    HU_ASSERT_EQ(rc, SQLITE_ROW);
+    int summary_count = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+
+    /* Assert at least 1 summary was created (Leiden detected ≥1 community). */
+    HU_ASSERT_GE(summary_count, 1);
+
+    /* L3: Verify r.communities_summarized reflects the work done. */
+    HU_ASSERT_GE(r.communities_summarized, 1);
+
+    hu_graph_close(g, A());
+}
+
+/* --- Community summaries: negative test — threshold gating --- */
+static void test_w2_autodream_leiden_below_threshold_no_communities(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+
+    /* Create only 5 entities (below the LEIDEN_ENTITY_THRESHOLD of 15).
+     * Leiden should NOT run; no communities should be assigned. */
+    int64_t entities[5] = {0};
+    for (int i = 0; i < 5; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "Person%d", i);
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, name, (size_t)strlen(name),
+                                            HU_ENTITY_PERSON, NULL, &entities[i]),
+                     HU_OK);
+    }
+
+    /* Add some relations (optional for a sparse graph). */
+    for (int i = 0; i < 4; i++) {
+        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, entities[i], entities[i + 1],
+                                              HU_REL_KNOWS, 0.8f, NULL, 0),
+                     HU_OK);
+    }
+
+    hu_autodream_config_t cfg = hu_autodream_default_config();
+    cfg.now_ms = 1735689600000LL;
+    cfg.enable_quarantine_review = false;
+    cfg.enable_community_summaries = true;
+    cfg.enable_edge_reweight = false;
+    cfg.enable_derived_facts = false;
+
+    hu_autodream_report_t r = {0};
+    HU_ASSERT_EQ(hu_autodream_run(A(), g, &cfg, &r), HU_OK);
+
+    /* Verify no communities were assigned (threshold gate worked). */
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+
+    {
+        sqlite3_stmt *st = NULL;
+        int rc = sqlite3_prepare_v2(
+            db, "SELECT COUNT(*) FROM entities WHERE community_id IS NOT NULL AND community_id > 0",
+            -1, &st, NULL);
+        HU_ASSERT_EQ(rc, SQLITE_OK);
+        rc = sqlite3_step(st);
+        HU_ASSERT_EQ(rc, SQLITE_ROW);
+        int community_count = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+
+        /* Assert NO communities assigned (below threshold). */
+        HU_ASSERT_EQ(community_count, 0);
+    }
+
+    /* community_summaries should also stay empty. */
+    {
+        sqlite3_stmt *st = NULL;
+        int rc = sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM community_summaries", -1, &st, NULL);
+        HU_ASSERT_EQ(rc, SQLITE_OK);
+        rc = sqlite3_step(st);
+        HU_ASSERT_EQ(rc, SQLITE_ROW);
+        int summary_count = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+
+        HU_ASSERT_EQ(summary_count, 0);
+    }
+
+    HU_ASSERT_EQ(r.communities_summarized, 0);
+
+    hu_graph_close(g, A());
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_w2_autodream_tests(void) {
@@ -291,5 +453,7 @@ void run_w2_autodream_tests(void) {
     HU_RUN_TEST(test_w2_autodream_writes_community_summary);
     HU_RUN_TEST(test_w2_autodream_decays_stale_edges);
     HU_RUN_TEST(test_w2_autodream_handles_quarantine_bomb);
+    HU_RUN_TEST(test_w2_autodream_leiden_populates_summaries);
+    HU_RUN_TEST(test_w2_autodream_leiden_below_threshold_no_communities);
 #endif
 }

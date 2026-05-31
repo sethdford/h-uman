@@ -18,7 +18,9 @@
 #ifdef HU_ENABLE_SQLITE
 /* Only referenced from the SQLite paths below — gate to silence
  * -Werror=unused-function in no-sqlite / minimal builds. */
-static int64_t wall_now_ms(void) { return (int64_t)time(NULL) * 1000; }
+static int64_t wall_now_ms(void) {
+    return (int64_t)time(NULL) * 1000;
+}
 #endif
 
 hu_autodream_config_t hu_autodream_default_config(void) {
@@ -198,8 +200,7 @@ static hu_error_t phase_quarantine_review(struct sqlite3 *db, struct hu_graph *g
              * `hu_memory_facade_write` (HU_MEM_RELATION); otherwise the graph
              * helper (same underlying v1 backend). */
             float initial_variance =
-                hu_belief_initial_variance_for_provenance(prefixed,
-                                                          n > 0 ? (size_t)n : 0);
+                hu_belief_initial_variance_for_provenance(prefixed, n > 0 ? (size_t)n : 0);
             if (facade != NULL) {
                 hu_memory_relation_row_t rel = {0};
                 rel.source_id = source_id;
@@ -223,9 +224,9 @@ static hu_error_t phase_quarantine_review(struct sqlite3 *db, struct hu_graph *g
                 (void)hu_memory_facade_write(facade, &rec);
             } else {
                 (void)hu_memory_v1_upsert_relation_with_belief(
-                    g, cid_t, cid_len, source_id, target_id, rtype, weight,
-                    event_start, event_end, confidence, initial_variance, ctx,
-                    ctx_len, prefixed, n > 0 ? (size_t)n : 0, NULL);
+                    g, cid_t, cid_len, source_id, target_id, rtype, weight, event_start, event_end,
+                    confidence, initial_variance, ctx, ctx_len, prefixed, n > 0 ? (size_t)n : 0,
+                    NULL);
             }
             sqlite3_stmt *del = NULL;
             if (sqlite3_prepare_v2(db, "DELETE FROM quarantine_relations WHERE id = ?", -1, &del,
@@ -244,8 +245,8 @@ static hu_error_t phase_quarantine_review(struct sqlite3 *db, struct hu_graph *g
 /* Heuristic, deterministic community summary writer. Plug-in point for the
  * LLM-driven backend: replace this function body or inject via a vtable. */
 static hu_error_t generate_heuristic_summary(struct sqlite3 *db, const char *contact_id,
-                                             size_t contact_id_len, int64_t community_id,
-                                             char *buf, size_t buf_cap, size_t *out_len,
+                                             size_t contact_id_len, int64_t community_id, char *buf,
+                                             size_t buf_cap, size_t *out_len,
                                              size_t *out_entity_count, size_t *out_edge_count) {
     *out_len = 0;
     *out_entity_count = 0;
@@ -278,10 +279,9 @@ static hu_error_t generate_heuristic_summary(struct sqlite3 *db, const char *con
     sqlite3_finalize(st2);
 
     sqlite3_stmt *st3 = NULL;
-    const char *sql_ec =
-        "SELECT COUNT(*) FROM relations r "
-        "JOIN entities e ON r.source_id = e.id "
-        "WHERE r.contact_id = ? AND e.community_id = ? AND r.event_end = 0";
+    const char *sql_ec = "SELECT COUNT(*) FROM relations r "
+                         "JOIN entities e ON r.source_id = e.id "
+                         "WHERE r.contact_id = ? AND e.community_id = ? AND r.event_end = 0";
     sqlite3_prepare_v2(db, sql_ec, -1, &st3, NULL);
     sqlite3_bind_text(st3, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
     sqlite3_bind_int64(st3, 2, community_id);
@@ -291,13 +291,12 @@ static hu_error_t generate_heuristic_summary(struct sqlite3 *db, const char *con
 
     int written;
     if (nn == 0) {
-        written = snprintf(buf, buf_cap,
-                           "Community %lld is empty or has no named entities yet.",
+        written = snprintf(buf, buf_cap, "Community %lld is empty or has no named entities yet.",
                            (long long)community_id);
     } else if (nn == 1) {
-        written = snprintf(buf, buf_cap,
-                           "Community %lld centers on %s (%zu entities, %zu live edges).",
-                           (long long)community_id, names[0], *out_entity_count, *out_edge_count);
+        written =
+            snprintf(buf, buf_cap, "Community %lld centers on %s (%zu entities, %zu live edges).",
+                     (long long)community_id, names[0], *out_entity_count, *out_edge_count);
     } else {
         char joined[256] = {0};
         size_t off = 0;
@@ -457,8 +456,14 @@ static hu_error_t phase_edge_reweight(struct sqlite3 *db, const hu_autodream_con
 }
 
 /* Minimum entity count per contact before Leiden community detection runs.
- * Below this threshold only manually-assigned community_ids are summarized. */
-#define LEIDEN_ENTITY_THRESHOLD 50
+ * Below this threshold only manually-assigned community_ids are summarized.
+ *
+ * Sized for real personal graphs: in practice the richest contact accrues a
+ * few dozen entities (not the hundreds a global KG would), so a threshold of
+ * 50 never fired and the community-summary pipeline produced nothing. 15 lets
+ * detection run on the well-populated contacts while still skipping trivially
+ * small graphs where Leiden would only produce singleton communities. */
+#define LEIDEN_ENTITY_THRESHOLD 15
 
 /* Phase 2: Community summaries — detect communities via Leiden label propagation
  * when enough entities exist, then generate-or-refresh summaries. */
@@ -491,8 +496,8 @@ static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite
                 size_t cid_len = cid ? (size_t)sqlite3_column_bytes(cid_st, 0) : 0;
                 char *leiden_out = NULL;
                 size_t leiden_len = 0;
-                hu_error_t le = hu_graph_leiden_communities(
-                    graph, alloc, cid, cid_len, 20, 10, &leiden_out, &leiden_len);
+                hu_error_t le = hu_graph_leiden_communities(graph, alloc, cid, cid_len, 20, 10,
+                                                            &leiden_out, &leiden_len);
                 if (le == HU_OK && leiden_out)
                     alloc->free(alloc->ctx, leiden_out, leiden_len + 1);
             }
@@ -545,15 +550,14 @@ static hu_error_t phase_hyperedge_consolidation(struct sqlite3 *db, hu_memory_fa
 
     /* CTE collects unique entity IDs per (contact, context) via UNION,
      * then counts. Only contexts binding 3+ entities qualify. */
-    const char *ctx_sql =
-        "WITH ectx AS ("
-        " SELECT contact_id, context, source_id AS eid FROM relations"
-        "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
-        " UNION"
-        " SELECT contact_id, context, target_id AS eid FROM relations"
-        "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
-        ") SELECT contact_id, context, COUNT(DISTINCT eid) AS n"
-        " FROM ectx GROUP BY contact_id, context HAVING n >= 3 LIMIT 100";
+    const char *ctx_sql = "WITH ectx AS ("
+                          " SELECT contact_id, context, source_id AS eid FROM relations"
+                          "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
+                          " UNION"
+                          " SELECT contact_id, context, target_id AS eid FROM relations"
+                          "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
+                          ") SELECT contact_id, context, COUNT(DISTINCT eid) AS n"
+                          " FROM ectx GROUP BY contact_id, context HAVING n >= 3 LIMIT 100";
     sqlite3_stmt *ctx_st = NULL;
     if (sqlite3_prepare_v2(db, ctx_sql, -1, &ctx_st, NULL) != SQLITE_OK)
         return HU_OK;
@@ -594,12 +598,11 @@ static hu_error_t phase_hyperedge_consolidation(struct sqlite3 *db, hu_memory_fa
         size_t eid_count = 0;
         {
             sqlite3_stmt *eid_st = NULL;
-            const char *eid_sql =
-                "SELECT DISTINCT source_id FROM relations"
-                " WHERE contact_id = ? AND context = ? AND event_end = 0"
-                " UNION"
-                " SELECT DISTINCT target_id FROM relations"
-                " WHERE contact_id = ? AND context = ? AND event_end = 0";
+            const char *eid_sql = "SELECT DISTINCT source_id FROM relations"
+                                  " WHERE contact_id = ? AND context = ? AND event_end = 0"
+                                  " UNION"
+                                  " SELECT DISTINCT target_id FROM relations"
+                                  " WHERE contact_id = ? AND context = ? AND event_end = 0";
             if (sqlite3_prepare_v2(db, eid_sql, -1, &eid_st, NULL) != SQLITE_OK)
                 continue;
             sqlite3_bind_text(eid_st, 1, cid ? cid : "", (int)cid_len, SQLITE_STATIC);
@@ -622,14 +625,14 @@ static hu_error_t phase_hyperedge_consolidation(struct sqlite3 *db, hu_memory_fa
 
         hu_hyperedge_t he;
         memset(&he, 0, sizeof(he));
-        size_t llen = ctx_len < sizeof(he.relation_label) - 1
-                          ? ctx_len
-                          : sizeof(he.relation_label) - 1;
+        size_t llen =
+            ctx_len < sizeof(he.relation_label) - 1 ? ctx_len : sizeof(he.relation_label) - 1;
         memcpy(he.relation_label, context, llen);
         he.relation_label[llen] = '\0';
         he.members = members;
         he.members_count = eid_count;
-        he.belief = hu_belief_init(0.8f, "autodream", cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms());
+        he.belief =
+            hu_belief_init(0.8f, "autodream", cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms());
         he.event_start = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
 
         int64_t he_id = 0;
@@ -698,8 +701,7 @@ static hu_error_t autodream_run_impl(hu_allocator_t *alloc, struct hu_graph *gra
 }
 
 hu_error_t hu_autodream_run(hu_allocator_t *alloc, struct hu_graph *graph,
-                            const hu_autodream_config_t *cfg,
-                            hu_autodream_report_t *out_report) {
+                            const hu_autodream_config_t *cfg, hu_autodream_report_t *out_report) {
     return autodream_run_impl(alloc, graph, NULL, cfg, out_report);
 }
 
@@ -717,8 +719,7 @@ hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t 
 #else /* !HU_ENABLE_SQLITE */
 
 hu_error_t hu_autodream_run(hu_allocator_t *alloc, struct hu_graph *graph,
-                            const hu_autodream_config_t *cfg,
-                            hu_autodream_report_t *out_report) {
+                            const hu_autodream_config_t *cfg, hu_autodream_report_t *out_report) {
     (void)alloc;
     (void)graph;
     (void)cfg;
