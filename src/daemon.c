@@ -98,6 +98,7 @@
 #include "human/tools/validation.h"
 #include "human/youtube.h"
 /* Daemon modules */
+#include "human/daemon_comfort_summary.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_proactive.h"
@@ -375,222 +376,13 @@ bool gov_budget_inited = true;
 /* build_callback_context — now in daemon_proactive.c as hu_daemon_build_callback_context */
 #define build_callback_context hu_daemon_build_callback_context
 
-#ifndef HU_IS_TEST
-/* F27: Classify our response type for comfort pattern learning.
- * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
- * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */
-/* classify_comfort_response_type: deduped to hu_daemon_classify_comfort_response_type
- * in src/daemon/daemon_director.c (declared in human/daemon/director.h). E2 chip 1 —
- * removed the identical static copy; call sites use the public version. */
-
-#ifdef HU_ENABLE_SQLITE
-/* F23: Extract significant topic keywords from user text and record baselines.
- * Skips stopwords, records each significant word (3–32 chars) via topic_baselines. */
-#define HU_DAEMON_TOPIC_BASELINE_MAX 8
-#define HU_DAEMON_TOPIC_BUF          32
-
-static void record_topic_baselines_from_text(hu_memory_t *memory, const char *contact_id,
-                                             size_t contact_id_len, const char *text,
-                                             size_t text_len) {
-    if (!memory || !contact_id || contact_id_len == 0 || !text || text_len == 0)
-        return;
-    static const char *const stop[] = {
-        "i",     "the",   "a",      "is",    "was", "that", "this", "it",    "to",  "and",  "but",
-        "so",    "just",  "really", "what",  "how", "why",  "when", "where", "who", "can",  "will",
-        "would", "could", "should", "have",  "has", "had",  "do",   "does",  "did", "am",   "are",
-        "were",  "be",    "been",   "being", "of",  "in",   "on",   "at",    "for", "with", "about",
-        "from",  "as",    "or",     "if",    "not", "no",   "yes",  "oh",    "um",  "like", NULL,
-    };
-    char topics[HU_DAEMON_TOPIC_BASELINE_MAX][HU_DAEMON_TOPIC_BUF];
-    size_t topic_count = 0;
-    memset(topics, 0, sizeof(topics));
-
-    const char *p = text;
-    const char *end = text + text_len;
-    while (p < end && topic_count < HU_DAEMON_TOPIC_BASELINE_MAX) {
-        while (p < end && !isalnum((unsigned char)*p))
-            p++;
-        if (p >= end)
-            break;
-        const char *start = p;
-        while (p < end && (isalnum((unsigned char)*p) || *p == '\'' || *p == '-'))
-            p++;
-        size_t wlen = (size_t)(p - start);
-        if (wlen < 3 || wlen >= HU_DAEMON_TOPIC_BUF - 1)
-            continue;
-        bool is_stop = false;
-        for (const char *const *sw = stop; *sw; sw++) {
-            size_t swlen = strlen(*sw);
-            if (wlen == swlen && strncasecmp(start, *sw, wlen) == 0) {
-                is_stop = true;
-                break;
-            }
-        }
-        if (is_stop)
-            continue;
-        /* Dedupe */
-        bool dup = false;
-        for (size_t k = 0; k < topic_count; k++) {
-            if (strncasecmp(topics[k], start, wlen) == 0 && topics[k][wlen] == '\0') {
-                dup = true;
-                break;
-            }
-        }
-        if (dup)
-            continue;
-        memcpy(topics[topic_count], start, wlen);
-        topics[topic_count][wlen] = '\0';
-        for (size_t i = 0; i < wlen; i++)
-            topics[topic_count][i] = (char)tolower((unsigned char)topics[topic_count][i]);
-        (void)hu_superhuman_topic_baseline_record(memory, contact_id, contact_id_len,
-                                                  topics[topic_count], wlen);
-        topic_count++;
-    }
-}
-#endif
-
-/* F27: Score engagement from their reply. reply_len>20 + positive words -> 0.8;
- * brief thanks -> 0.4; very short -> 0.2. */
-static float score_comfort_engagement(const char *reply, size_t reply_len) {
-    if (!reply)
-        return 0.2f;
-    if (reply_len <= 5)
-        return 0.2f;
-    char lower[256];
-    size_t copy = reply_len < sizeof(lower) - 1 ? reply_len : sizeof(lower) - 1;
-    for (size_t i = 0; i < copy; i++) {
-        char c = reply[i];
-        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
-    }
-    lower[copy] = '\0';
-    if (strstr(lower, "thanks") || strstr(lower, "thank you") || strstr(lower, "ty ") ||
-        strstr(lower, "thx")) {
-        if (reply_len > 20)
-            return 0.8f;
-        return 0.4f;
-    }
-    if (strstr(lower, "yes") || strstr(lower, "yeah") || strstr(lower, "that helped") ||
-        strstr(lower, "good point") || strstr(lower, "makes sense")) {
-        return 0.8f;
-    }
-    if (reply_len > 20)
-        return 0.6f;
-    return 0.3f;
-}
-#endif
-
-#ifndef HU_IS_TEST
-/* Store a conversation summary as long-term memory.
- * Concatenates the user message and agent response, runs deep-extract
- * on the full exchange, and stores extracted facts scoped to the contact.
- * When graph is non-NULL, also upserts facts and relations into the GraphRAG knowledge graph.
- * agent may be NULL; when non-NULL and bth_metrics set, increments facts_extracted. */
-static void store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memory,
-                                       hu_graph_t *graph, hu_agent_t *agent, const char *session_id,
-                                       size_t session_id_len, const char *user_msg,
-                                       size_t user_msg_len, const char *response,
-                                       size_t response_len) {
-    if (!alloc || !memory || !memory->vtable || !memory->vtable->store)
-        return;
-    if (!user_msg || user_msg_len == 0)
-        return;
-#ifndef HU_ENABLE_SQLITE
-    (void)graph;
-#endif
-
-    /* Build "them: ... | me: ..." for richer extraction context */
-    if (response_len > SIZE_MAX - user_msg_len)
-        return;
-    if (user_msg_len + response_len > SIZE_MAX - 17)
-        return;
-    size_t total = user_msg_len + response_len + 16;
-    char *combined = (char *)alloc->alloc(alloc->ctx, total + 1);
-    if (!combined)
-        return;
-    int n = snprintf(combined, total + 1, "them: %.*s | me: %.*s", (int)user_msg_len, user_msg,
-                     (int)response_len, response);
-    if (n <= 0) {
-        alloc->free(alloc->ctx, combined, total + 1);
-        return;
-    }
-    size_t combined_len = (size_t)n < total ? (size_t)n : total;
-
-    hu_deep_extract_result_t de;
-    memset(&de, 0, sizeof(de));
-    hu_error_t err = hu_deep_extract_lightweight(alloc, combined, combined_len, &de);
-    if (err == HU_OK && de.fact_count > 0) {
-        if (agent && agent->bth_metrics)
-            agent->bth_metrics->facts_extracted += de.fact_count;
-        static const char cat_name[] = "conversation_summary";
-        hu_memory_category_t cat = {
-            .tag = HU_MEMORY_CATEGORY_CUSTOM,
-            .data.custom = {.name = cat_name, .name_len = sizeof(cat_name) - 1},
-        };
-        for (size_t i = 0; i < de.fact_count; i++) {
-            const hu_extracted_fact_t *f = &de.facts[i];
-            if (!f->subject || !f->predicate || !f->object)
-                continue;
-            char key_buf[256];
-            int kn =
-                snprintf(key_buf, sizeof(key_buf), "%s:%s:%s", f->subject, f->predicate, f->object);
-            if (kn > 0 && (size_t)kn < sizeof(key_buf)) {
-                (void)memory->vtable->store(memory->ctx, key_buf, (size_t)kn, f->object,
-                                            strlen(f->object), &cat, session_id ? session_id : "",
-                                            session_id ? session_id_len : 0);
-            }
-#ifdef HU_ENABLE_SQLITE
-            if (graph) {
-                int64_t src_id = 0;
-                int64_t tgt_id = 0;
-                size_t subj_len = strlen(f->subject);
-                size_t obj_len = strlen(f->object);
-                hu_relation_type_t rel_type =
-                    hu_relation_type_from_string(f->predicate, strlen(f->predicate));
-                if (hu_graph_upsert_entity(graph, session_id, session_id_len, f->subject, subj_len,
-                                           HU_ENTITY_UNKNOWN, NULL, &src_id) == HU_OK &&
-                    hu_graph_upsert_entity(graph, session_id, session_id_len, f->object, obj_len,
-                                           HU_ENTITY_UNKNOWN, NULL, &tgt_id) == HU_OK) {
-                    hu_error_t rel_err =
-                        hu_graph_upsert_relation(graph, session_id, session_id_len, src_id, tgt_id,
-                                                 rel_type, 1.0f, f->object, obj_len);
-                    if (rel_err != HU_OK)
-                        hu_log_error("daemon", agent ? agent->observer : NULL,
-                                     "graph: relation upsert failed: %s", hu_error_string(rel_err));
-                }
-            }
-#endif
-        }
-    }
-#ifdef HU_ENABLE_SQLITE
-    if (graph && err == HU_OK && de.relation_count > 0) {
-        for (size_t i = 0; i < de.relation_count; i++) {
-            const hu_extracted_relation_t *r = &de.relations[i];
-            if (!r->entity_a || !r->relation || !r->entity_b)
-                continue;
-            int64_t src_id = 0;
-            int64_t tgt_id = 0;
-            size_t a_len = strlen(r->entity_a);
-            size_t b_len = strlen(r->entity_b);
-            size_t rel_len = strlen(r->relation);
-            hu_relation_type_t rel_type = hu_relation_type_from_string(r->relation, rel_len);
-            if (hu_graph_upsert_entity(graph, session_id, session_id_len, r->entity_a, a_len,
-                                       HU_ENTITY_UNKNOWN, NULL, &src_id) == HU_OK &&
-                hu_graph_upsert_entity(graph, session_id, session_id_len, r->entity_b, b_len,
-                                       HU_ENTITY_UNKNOWN, NULL, &tgt_id) == HU_OK) {
-                hu_error_t rel_err =
-                    hu_graph_upsert_relation(graph, session_id, session_id_len, src_id, tgt_id,
-                                             rel_type, 1.0f, r->entity_b, b_len);
-                if (rel_err != HU_OK)
-                    hu_log_error("daemon", agent ? agent->observer : NULL,
-                                 "graph: relation upsert failed: %s", hu_error_string(rel_err));
-            }
-        }
-    }
-#endif
-    hu_deep_extract_result_deinit(&de, alloc);
-    alloc->free(alloc->ctx, combined, total + 1);
-}
-#endif /* !HU_IS_TEST */
+/* Post-conversation comfort/summary learning helpers extracted from daemon.c
+ * (DDD Phase E2 daemon split). Public API: hu_daemon_* declared in the listed
+ * headers; daemon.c call sites use the public versions.
+ *   - classify_comfort_response_type   -> daemon_director.c        (chip 1)
+ *   - record_topic_baselines_from_text -> daemon_comfort_summary.c (chip 2)
+ *   - score_comfort_engagement         -> daemon_comfort_summary.c (chip 2)
+ *   - store_conversation_summary       -> daemon_comfort_summary.c (chip 2) */
 
 /* validate_home and get_pid_path moved to daemon_lifecycle.c */
 
@@ -5328,7 +5120,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifdef HU_ENABLE_SQLITE
                 /* F23: Topic absence detection — record topic baselines from user message */
                 if (agent->memory && combined_len > 0)
-                    record_topic_baselines_from_text(agent->memory, batch_key, key_len, combined,
+                    hu_daemon_record_topic_baselines_from_text(agent->memory, batch_key, key_len, combined,
                                                      combined_len);
                 /* F26: Temporal pattern learning — record message frequency by day/hour */
                 if (agent->memory && batch_key && key_len > 0) {
@@ -6491,7 +6283,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (key_len < sizeof(comfort_pending[0].key) &&
                             memcmp(comfort_pending[cp_i].key, batch_key, key_len) == 0 &&
                             comfort_pending[cp_i].key[key_len] == '\0') {
-                            float eng = score_comfort_engagement(combined, combined_len);
+                            float eng = hu_daemon_score_comfort_engagement(combined, combined_len);
                             (void)hu_comfort_pattern_record(
                                 agent->memory, batch_key, key_len, comfort_pending[cp_i].emotion,
                                 strlen(comfort_pending[cp_i].emotion),
@@ -12019,7 +11811,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Store conversation summary as long-term memory */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
-                    store_conversation_summary(alloc, agent->memory, graph, agent, batch_key,
+                    hu_daemon_store_conversation_summary(alloc, agent->memory, graph, agent, batch_key,
                                                key_len, combined, combined_len, response,
                                                response_len);
                 }
