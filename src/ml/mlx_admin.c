@@ -260,7 +260,12 @@ hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapt
     hu_json_value_t *root = NULL;
     hu_error_t e = hu_json_parse(alloc, raw, rd, &root);
     alloc->free(alloc->ctx, raw, (size_t)sz + 1);
-    if (e != HU_OK || !root)
+    if (e != HU_OK)
+        return e; /* OOM / JSON_PARSE: propagate the real cause. Masking it as
+                     NOT_FOUND would fail-open the scale guard under memory
+                     pressure or on a corrupt config — exactly the leak it exists
+                     to prevent. */
+    if (!root)
         return HU_ERR_NOT_FOUND;
 
     /* mlx_lm_lora writes {"lora_parameters": {"scale": N, ...}, ...};
@@ -419,11 +424,17 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
     memset(result, 0, sizeof(*result));
 
     /* Refuse to serve a catastrophically over-scaled adapter (scale>8.0)
-     * before it ever reaches the model server. Fail-open when no readable
-     * adapter_config.json. See lora-scale-default-or-die.md. */
-    if (hu_lora_scale_guard_serveable(alloc, adapter_path, adapter_path_len) != HU_OK) {
-        record_swap_outcome(adapter_path, adapter_path_len, HU_ERR_INVALID_ARGUMENT, 0, 0);
-        return HU_ERR_INVALID_ARGUMENT;
+     * before it ever reaches the model server. The guard fails OPEN (HU_OK)
+     * only when there's no readable adapter_config.json; an over-scale refusal
+     * is HU_ERR_INVALID_ARGUMENT, while a real read failure (OOM / JSON_PARSE)
+     * comes back as itself. Surface whatever the guard returns verbatim — a
+     * memory failure must NOT be mislabeled as an over-scale refusal in the
+     * return value or the swap-outcome observability. See
+     * lora-scale-default-or-die.md. */
+    hu_error_t guard = hu_lora_scale_guard_serveable(alloc, adapter_path, adapter_path_len);
+    if (guard != HU_OK) {
+        record_swap_outcome(adapter_path, adapter_path_len, guard, 0, 0);
+        return guard;
     }
 
     char *url = join_url(alloc, base_url, base_url_len, "adapters/swap");

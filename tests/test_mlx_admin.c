@@ -278,6 +278,39 @@ static void lora_scale_guard_refuses_over_scaled_adapter_missing_weights_file(vo
     hu_test_rm_rf(dir);
 }
 
+/* A real read failure (OOM, corrupt JSON) must NOT be laundered into NOT_FOUND
+ * (which fail-opens the guard) nor — at the swap site — relabeled as the
+ * over-scale refusal HU_ERR_INVALID_ARGUMENT. A corrupt config exercises the
+ * JSON_PARSE branch deterministically; OOM follows the same propagation path
+ * (cursor review, PR #207, comments 3330118402 + 3330118399).
+ *
+ * This pins the contract at the reader + guard, which are compiled
+ * unconditionally. The swap-site propagation (swap returns the guard's code
+ * verbatim) lives in the HU_ENABLE_CURL branch of hu_mlx_admin_swap_adapter;
+ * the test build compiles mlx_admin.c with curl OFF, where swap is a
+ * NOT_SUPPORTED stub that never reaches the guard — so the swap leg can't be
+ * exercised here. The guard returning JSON_PARSE (distinct from the over-scale
+ * INVALID_ARGUMENT) is exactly what the curl swap now forwards verbatim. */
+static void lora_scale_guard_propagates_parse_error_not_fail_open(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char dir[256];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu-lora-badjson", dir, sizeof(dir)));
+
+    seed_adapter_config(dir, "{ this is not valid json ");
+
+    /* reader surfaces the real cause, not NOT_FOUND */
+    double sc = 0.0;
+    HU_ASSERT_EQ(hu_lora_adapter_config_scale(&alloc, dir, strlen(dir), &sc), HU_ERR_JSON_PARSE);
+    /* guard propagates it (does NOT fail-open to HU_OK), and the code is
+     * distinct from the over-scale refusal (HU_ERR_INVALID_ARGUMENT) so the
+     * swap site can forward it without mislabeling a read failure */
+    hu_error_t g = hu_lora_scale_guard_serveable(&alloc, dir, strlen(dir));
+    HU_ASSERT_EQ(g, HU_ERR_JSON_PARSE);
+    HU_ASSERT_TRUE(g != HU_OK && g != HU_ERR_INVALID_ARGUMENT);
+
+    hu_test_rm_rf(dir);
+}
+
 void run_mlx_admin_tests(void);
 void run_mlx_admin_tests(void) {
     HU_TEST_SUITE("MLXAdmin");
@@ -285,6 +318,7 @@ void run_mlx_admin_tests(void) {
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_by_file_path);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_missing_weights_file);
+    HU_RUN_TEST(lora_scale_guard_propagates_parse_error_not_fail_open);
     HU_RUN_TEST(lora_scale_guard_fails_open_without_config);
     HU_RUN_TEST(swap_null_alloc_returns_invalid_argument);
     HU_RUN_TEST(swap_null_base_url_returns_invalid_argument);
