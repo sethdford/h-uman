@@ -334,6 +334,17 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             if (err != HU_OK)
                 goto fail;
         }
+        if (config->graph_context && config->graph_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap, "\n## Relationship Context\n", 25);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, config->graph_context, config->graph_context_len);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+            if (err != HU_OK)
+                goto fail;
+        }
         if (config->contact_context && config->contact_context_len > 0) {
             err = append(alloc, &buf, &len, &cap, config->contact_context,
                          config->contact_context_len);
