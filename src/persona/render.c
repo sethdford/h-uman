@@ -315,6 +315,32 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
     return overlay_formality;
 }
 
+const char *hu_persona_contact_formality(const hu_contact_profile_t *contact,
+                                         const char *overlay_formality) {
+    /* Per-contact register source. Precedence:
+     *   1. explicit contact->formality (set by classify_contact_formality.py
+     *      --keep-handles merge into the persona);
+     *   2. derived from contact->relationship_type
+     *      (coworker/colleague/work/business -> "professional";
+     *       family/friend/close -> "casual");
+     *   3. fall back to the channel overlay formality.
+     * Word-boundary matching avoids the "informal" contains "formal" trap
+     * (substring-classifier-pitfalls.md) — check casual keywords before formal. */
+    if (contact && contact->formality && contact->formality[0])
+        return contact->formality;
+    if (contact && contact->relationship_type && contact->relationship_type[0]) {
+        const char *rt = contact->relationship_type;
+        if (hu_str_contains_word_ci(rt, "family") || hu_str_contains_word_ci(rt, "friend") ||
+            hu_str_contains_word_ci(rt, "close"))
+            return "casual";
+        if (hu_str_contains_word_ci(rt, "coworker") || hu_str_contains_word_ci(rt, "colleague") ||
+            hu_str_contains_word_ci(rt, "professional") || hu_str_contains_word_ci(rt, "work") ||
+            hu_str_contains_word_ci(rt, "business"))
+            return "professional";
+    }
+    return overlay_formality;
+}
+
 void hu_persona_steering_coeffs(const char *formality, const char *avg_length, double tier_scale,
                                 double *out_formality, double *out_verbosity) {
     double f = 0.0, v = 0.0;

@@ -701,8 +701,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 char rules_buf[2048];
                 size_t rules_len = 0;
                 /* Formality-aware: professional contacts get capitalized/punctuated
-                 * register, not the casual friend-voice (fixes register mismatch). */
-                if (hu_persona_build_absolute_rules_fmt(p, ov ? ov->formality : NULL, rules_buf,
+                 * register, not the casual friend-voice (fixes register mismatch).
+                 * Resolve THIS contact's formality (explicit field > relationship_type
+                 * > channel overlay) so the register matches who we're texting, not a
+                 * channel-wide default. Contact id = agent->memory_session_id. */
+                const hu_contact_profile_t *reg_cp =
+                    (agent->memory_session_id && agent->memory_session_id_len)
+                        ? hu_persona_find_contact(p, agent->memory_session_id,
+                                                  agent->memory_session_id_len)
+                        : NULL;
+                const char *reg_formality =
+                    hu_persona_contact_formality(reg_cp, ov ? ov->formality : NULL);
+                if (hu_persona_build_absolute_rules_fmt(p, reg_formality, rules_buf,
                                                         sizeof(rules_buf), &rules_len) == HU_OK &&
                     rules_len > 0) {
                     int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", rules_buf);

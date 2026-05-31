@@ -1349,8 +1349,13 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
              * Empirical effect (8-task imessage_humanness comparison):
              * 97% length reduction + 100% markdown elimination.
              * See: scripts/persona_eval_comparison.py, src/eval.c:572. */
-            const char *persona_name =
-                cfg.agent.persona && cfg.agent.persona[0] ? cfg.agent.persona : "default";
+            /* HU_EVAL_PERSONA lets a blind-A/B arm point the eval at a persona
+             * variant (e.g. a formal-register overlay) WITHOUT mutating the
+             * user's live config. Falls back to the configured persona. */
+            const char *persona_name = getenv("HU_EVAL_PERSONA");
+            if (!persona_name || !persona_name[0])
+                persona_name =
+                    cfg.agent.persona && cfg.agent.persona[0] ? cfg.agent.persona : "default";
             hu_persona_t persona_obj;
             memset(&persona_obj, 0, sizeof(persona_obj));
             hu_error_t pload =

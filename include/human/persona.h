@@ -63,6 +63,7 @@ typedef struct hu_contact_profile {
     char *relationship;
     char *relationship_stage;
     char *relationship_type; /* "family", "friend", "coworker", "acquaintance", or NULL */
+    char *formality; /* "professional"/"formal" or "casual"/"informal" (classify_contact_formality.py), or NULL */
     char *warmth_level;
     char *vulnerability_level;
     char *identity;
@@ -726,6 +727,16 @@ hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, co
  * pioneered by hu_followup_compute_send_time. */
 const char *hu_persona_effective_formality(const char *overlay_formality,
                                            const char *contact_warmth);
+
+/* Per-contact register source for the absolute-rules builder. Precedence:
+ *   1. explicit contact->formality (set by classify_contact_formality.py merge),
+ *   2. derived from contact->relationship_type (coworker/work -> "professional",
+ *      family/friend -> "casual"),
+ *   3. the channel overlay_formality fallback.
+ * Returns an interned/borrowed string (do NOT free). `contact` may be NULL.
+ * Pure; safe for tests. Word-boundary matching avoids the informal-vs-formal trap. */
+const char *hu_persona_contact_formality(const hu_contact_profile_t *contact,
+                                         const char *overlay_formality);
 
 /* Map persona overlay traits to activation-steering coefficients for the local
  * model's residual stream. Only verbosity (avg_length) and formality are mapped

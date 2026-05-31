@@ -250,6 +250,7 @@ static void free_contact_profile(hu_allocator_t *alloc, hu_contact_profile_t *cp
     free_contact_string(alloc, cp->relationship);
     free_contact_string(alloc, cp->relationship_stage);
     free_contact_string(alloc, cp->relationship_type);
+    free_contact_string(alloc, cp->formality);
     free_contact_string(alloc, cp->warmth_level);
     free_contact_string(alloc, cp->vulnerability_level);
     free_contact_string(alloc, cp->identity);
@@ -2418,6 +2419,9 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             s = hu_json_get_string(cval, "relationship_type");
             if (s)
                 PERSONA_STRDUP_OPT(cp->relationship_type, s);
+            s = hu_json_get_string(cval, "formality");
+            if (s)
+                PERSONA_STRDUP_OPT(cp->formality, s);
             s = hu_json_get_string(cval, "warmth_level");
             if (s)
                 PERSONA_STRDUP_OPT(cp->warmth_level, s);

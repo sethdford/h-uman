@@ -554,11 +554,56 @@ static void compact_prompt_casual_overlay_includes_casual_register(void) {
     free(out);
 }
 
+/* hu_persona_contact_formality — per-contact register source. Precedence:
+ * explicit contact->formality > relationship_type derivation > overlay fallback.
+ * Word-boundary matching (no "network" ⊃ "work" false-positive). */
+static void contact_formality_explicit_field_wins(void) {
+    hu_contact_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.formality = "professional";
+    c.relationship_type = "family"; /* explicit must win over derivation */
+    HU_ASSERT_STR_EQ(hu_persona_contact_formality(&c, "casual"), "professional");
+}
+static void contact_formality_coworker_derives_professional(void) {
+    hu_contact_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.relationship_type = "coworker";
+    HU_ASSERT_STR_EQ(hu_persona_contact_formality(&c, NULL), "professional");
+}
+static void contact_formality_family_derives_casual(void) {
+    hu_contact_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.relationship_type = "family";
+    HU_ASSERT_STR_EQ(hu_persona_contact_formality(&c, "professional"), "casual");
+}
+static void contact_formality_null_contact_falls_back_to_overlay(void) {
+    HU_ASSERT_STR_EQ(hu_persona_contact_formality(NULL, "professional"), "professional");
+    HU_ASSERT(hu_persona_contact_formality(NULL, NULL) == NULL);
+}
+static void contact_formality_informal_field_passed_through(void) {
+    hu_contact_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.formality = "informal"; /* returned verbatim; the builder maps it to casual */
+    HU_ASSERT_STR_EQ(hu_persona_contact_formality(&c, NULL), "informal");
+}
+static void contact_formality_network_not_matched_as_work(void) {
+    hu_contact_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.relationship_type = "network"; /* contains "work" but must NOT match (word boundary) */
+    HU_ASSERT(hu_persona_contact_formality(&c, NULL) == NULL); /* no match -> overlay (NULL) */
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
     HU_RUN_TEST(compact_prompt_formal_overlay_includes_formal_register);
     HU_RUN_TEST(compact_prompt_casual_overlay_includes_casual_register);
+    HU_RUN_TEST(contact_formality_explicit_field_wins);
+    HU_RUN_TEST(contact_formality_coworker_derives_professional);
+    HU_RUN_TEST(contact_formality_family_derives_casual);
+    HU_RUN_TEST(contact_formality_null_contact_falls_back_to_overlay);
+    HU_RUN_TEST(contact_formality_informal_field_passed_through);
+    HU_RUN_TEST(contact_formality_network_not_matched_as_work);
     HU_RUN_TEST(render_with_null_overlay_returns_identity_copy);
     HU_RUN_TEST(render_with_empty_input_returns_empty_string);
     HU_RUN_TEST(render_with_null_allocator_returns_invalid_argument);

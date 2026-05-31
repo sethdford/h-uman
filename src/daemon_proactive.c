@@ -635,8 +635,13 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
      * reactive path (src/agent/agent_stream.c). Last-position weight. */
     char absolute_rules_buf[2048];
     size_t absolute_rules_len = 0;
-    if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
-                                        sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)
+    /* Per-contact register: a proactive note to a professional contact stays in
+     * professional register, not the casual friend-voice. Same source of truth
+     * as the reactive path (hu_persona_contact_formality). */
+    const char *pro_formality = hu_persona_contact_formality(cp, NULL);
+    if (hu_persona_build_absolute_rules_fmt(agent ? agent->persona : NULL, pro_formality,
+                                            absolute_rules_buf, sizeof(absolute_rules_buf),
+                                            &absolute_rules_len) != HU_OK)
         absolute_rules_len = 0;
 
     size_t total = base_len + rules_len;
