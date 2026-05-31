@@ -876,6 +876,38 @@ static void agent_turn_strip_leaked_tool_calls_owned(hu_allocator_t *alloc, char
     }
 }
 
+/* Observability: log, once per process, which humanness gates are active.
+ * These gates are SILENT in active mode (self_uncertainty injects without a
+ * log; graph_grounding / intent / tom / bandit don't log on the happy path),
+ * so without this an operator cannot tell from the service log whether the
+ * flipped-on gates are actually live — flagged by the 2026-05-31 audit (79
+ * turns, 0 gate-tagged lines). Names the env var + value per
+ * silent-config-gated-subsystems.md so the operator knows the exact knob. */
+static void at_log_humanness_gates_once(hu_observer_t *obs) {
+    static atomic_bool logged = false;
+    if (!hu_log_once_check_(&logged))
+        return;
+    static const struct {
+        const char *env;
+        const char *name;
+        bool default_on;
+    } gates[] = {
+        {"HU_INTENT_DIRECTIVE", "intent", true},
+        {"HU_TOM_DIRECTIVE", "theory_of_mind", false},
+        {"HU_SELF_UNCERTAINTY", "self_uncertainty", false},
+        {"HU_GRAPH_GROUNDING", "graph_grounding", false},
+        {"HU_BANDIT_HUMANIZATION", "bandit_humanization", false},
+        {"HU_SALIENCE_LIVE", "salience", false},
+    };
+    for (size_t i = 0; i < sizeof(gates) / sizeof(gates[0]); i++) {
+        const char *v = getenv(gates[i].env);
+        bool set = v && *v && strcmp(v, "off") != 0;
+        bool active = set || (gates[i].default_on && (!v || !*v));
+        hu_log_info("humanness_gate", obs, "%s=%s (%s=%s)", gates[i].name,
+                    active ? "ACTIVE" : "off", gates[i].env, (v && *v) ? v : "(unset)");
+    }
+}
+
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out) {
     if (!agent || !msg || !response_out)
@@ -890,6 +922,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
 
     hu_agent_set_current_for_tools(agent);
+
+    /* First turn of the process: surface which humanness gates are active, so
+     * the flipped-on-but-silent gates are discoverable in the service log. */
+    at_log_humanness_gates_once(agent->observer);
 
     /* Reset per-turn state tracking so this turn's behavior-log stash sees a
      * clean slate (tool_count, tool_sequence_hash, emotional_register,
