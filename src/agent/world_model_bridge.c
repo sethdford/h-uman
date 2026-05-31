@@ -59,9 +59,15 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
 }
 
 struct sqlite3 *hu_w7_facade_graph_db(hu_w7_facade_t *facade) {
+#ifdef HU_ENABLE_SQLITE
     if (!facade || !facade->graph)
         return NULL;
     return hu_graph_sqlite_connection(facade->graph);
+#else
+    /* No SQLite backend → no graph DB to read community_summaries from. */
+    (void)facade;
+    return NULL;
+#endif
 }
 
 /* W15 — bridge callback: memory facade audit hook → SQLite audit log. */

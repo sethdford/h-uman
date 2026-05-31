@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **1943 source + header files, ~476K lines of C, ~269K lines of tests, 13,225 tests, 59 channels**.
+Current scale: **1943 source + header files, ~476K lines of C, ~269K lines of tests, 13,225 tests, 31 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -96,7 +96,7 @@ Summary: **KISS** (straightforward control flow, explicit `#ifdef`), **YAGNI** (
 src/
   main.c                CLI entrypoint and command routing
   agent/                agent loop, context, planner, compaction, dispatcher
-  channels/             59 channel implementations (cli, telegram, discord, slack, ...)
+  channels/             31 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
   tools/                99 tool implementations
   memory/               SQLite + markdown + LRU + LanceDB + Lucid backends, embeddings, vector search, connections, consolidation, multimodal ingest
