@@ -102,8 +102,8 @@ reskinned user-service OR violates a bound. Rubric tests both.
 | `include/human/agent/intrinsic_drive.h` (new) | drive state + start predicate + goal |
 | `src/agent/intrinsic_drive.c` (new) | dynamics, predicate, goal, runner |
 | `src/daemon.c` | config-gated tick (thin); one-shot log |
-| config schema + `src/config_parse.c` | `intrinsic.enabled` (default false) |
-| `src/eval.c` / `include/human/eval.h` | `self_direction` score |
+| config schema + `src/config/config_parse.c` | `intrinsic.enabled` (default false) |
+| `src/eval/eval.c` / `include/human/eval.h` | `self_direction` score |
 | `tests/test_intrinsic_drive.c` (new) | dynamics, start truth table, preemption, isolation-from-autonomy, audit log |
 | `CMakeLists.txt` + `tests/test_main.c` | register (gate symmetry) |
 

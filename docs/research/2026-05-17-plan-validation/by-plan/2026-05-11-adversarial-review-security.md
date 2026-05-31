@@ -30,7 +30,7 @@ Adversarial security review of 7 SOTA-2026 initiatives plus 2 pre-existing P0 vi
 
 ### Proven? (tests exist)
 - MINJA: detection tested in `tests/test_minja_guard*.c` (presence verified in tree).
-- HU_PERM_DENY (audit-followup, related): `src/permission.c` returns HU_PERM_DENY for unknown tools; pinned by `tests/test_permission_*.c`.
+- HU_PERM_DENY (audit-followup, related): `src/security/permission.c` returns HU_PERM_DENY for unknown tools; pinned by `tests/test_permission_*.c`.
 
 ### Wired? (called in runtime path / dispatch)
 - MINJA guard called from memory ingest path via the trust-tier downgrade logic.

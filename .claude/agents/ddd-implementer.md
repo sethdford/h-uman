@@ -77,7 +77,7 @@ Store these in your response at the END as `RATCHET_BEFORE=101`.
 
 ### Execute the Chip
 Make the edits specified in the chip contract. Examples:
-- **Relocate-cluster (E1)**: `mv` files into subdirs, edit CMakeLists.txt paths.
+- **Relocate-cluster (E1)**: `git mv` files into subdirs, edit CMakeLists.txt paths. **E1 lessons (mandatory):** (1) ALSO move co-located private headers the cluster owns — if a moved `.c` does `#include "X_internal.h"` (bare, not `human/...`), `grep -rln` to confirm it's cluster-only, then `git mv` it too (the build fails `fatal error: file not found` otherwise). (2) After moving, update stale `src/` doc references via the EXACT git rename map (`git diff -M --diff-filter=R --name-status origin/main HEAD -- 'src/*.c'`), NOT `find|head -1` (ambiguous basenames pick the wrong file); run `scripts/doc-fleet.sh` before commit or the `docs` CI gate fails. (3) Skip files that collide with an existing same-named file in the target dir, include `providers/factory.h` (→ trips agent-core-boundary, defer to E4), or are `daemon.c` (E2) — leave at root, document the exception.
 - **Carve-function (E2)**: extract code into new .c/.h files, declare public functions, move statics.
 - **Migrate-aggregate (E3)**: define repo interface, implement sqlite backend, migrate call sites.
 

@@ -71,7 +71,7 @@
 - **Verify:** filter test green (guards existing behavior).
 
 ## T8 — belief_flexibility eval metric ⓣ  → AC-7
-- [ ] Add `belief_flexibility` score to `src/eval.c` + `include/human/eval.h`
+- [ ] Add `belief_flexibility` score to `src/eval/eval.c` + `include/human/eval.h`
       beside antisycophancy. + on genuine-evidence update; − on never-update
       across evidence turns OR update-on-reassertion.
 - [ ] Rubric unit tests for both extremes (wall, pushover) + the good case.

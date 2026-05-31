@@ -12,7 +12,7 @@ status: active
 
 **Architecture:** One per-turn "share an inspiration?" roll → pick medium from conversation cues → resolve the LLM's *search intent* against a real source (iTunes/Spotify, YouTube Data API, TikTok tag URL) → verify the result → send as two bubbles (human line, then bare link) on unfurling channels. The LLM never produces an identifier we send; it only produces a search intent. Verify-failure → silent skip.
 
-**Tech Stack:** C11, libcurl HTTP (`hu_http_get`), cJSON (`hu_json_*`), existing `hu_music_*` + channel vtable. New modules `src/youtube.c`, `src/inspiration.c`. No new build flag; no config schema change (YouTube key via existing generic provider-key map).
+**Tech Stack:** C11, libcurl HTTP (`hu_http_get`), cJSON (`hu_json_*`), existing `hu_music_*` + channel vtable. New modules `src/multimodal/youtube.c`, `src/agent/inspiration.c`. No new build flag; no config schema change (YouTube key via existing generic provider-key map).
 
 **Spec:** [docs/superpowers/specs/2026-05-29-media-inspiration-share-design.md](../specs/2026-05-29-media-inspiration-share-design.md)
 
@@ -20,8 +20,8 @@ status: active
 
 ## Grounded facts (verified against the tree, 2026-05-29)
 
-- HTTP: `hu_error_t hu_http_get(hu_allocator_t*, const char *url, const char *auth_or_NULL, hu_http_response_t*)`; response fields `body`, `body_len`, `status_code`, `owned`; free with `hu_http_response_free(alloc, &resp)`. Network code guarded `#if !defined(HU_IS_TEST) && defined(HU_HTTP_CURL)` (see `src/music.c:618`).
-- JSON: `hu_json_*` from `human/core/json.h` (e.g. `hu_json_get_string`), used in `src/music.c`.
+- HTTP: `hu_error_t hu_http_get(hu_allocator_t*, const char *url, const char *auth_or_NULL, hu_http_response_t*)`; response fields `body`, `body_len`, `status_code`, `owned`; free with `hu_http_response_free(alloc, &resp)`. Network code guarded `#if !defined(HU_IS_TEST) && defined(HU_HTTP_CURL)` (see `src/multimodal/music.c:618`).
+- JSON: `hu_json_*` from `human/core/json.h` (e.g. `hu_json_get_string`), used in `src/multimodal/music.c`.
 - Word-boundary CI match: `bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle)` (`src/core/string.c:190`, header `human/core/string.h`).
 - Channel send: `vtable->send(ctx, target, target_len, message, message_len, media, media_count)`; `bool hu_channel_supports_link_unfurl(const hu_channel_t*)` inline in `include/human/channel.h:194`.
 - URL guard: `hu_error_t hu_tool_validate_url(const char *url)` (`include/human/tools/validation.h:61`).
@@ -38,7 +38,7 @@ status: active
 
 **Files:**
 - Modify: `include/human/music.h` (add prototype after `hu_music_parse_suggestion`, ~line 78)
-- Modify: `src/music.c` (add near other pure helpers, above the HTTP `#if` block)
+- Modify: `src/multimodal/music.c` (add near other pure helpers, above the HTTP `#if` block)
 - Test: `tests/test_music.c` (add suite cases + register)
 
 - [ ] **Step 1: Write the failing tests**
@@ -115,7 +115,7 @@ In `include/human/music.h`, after the `hu_music_parse_suggestion` declaration:
 bool hu_music_result_matches(const char *suggested, const hu_music_result_t *result);
 ```
 
-- [ ] **Step 4: Implement in `src/music.c`** (place above the `#if !defined(HU_IS_TEST)` block so it is always compiled)
+- [ ] **Step 4: Implement in `src/multimodal/music.c`** (place above the `#if !defined(HU_IS_TEST)` block so it is always compiled)
 
 ```c
 /* Lowercase-copy `src` into `dst`, dropping anything from the first '('
@@ -181,17 +181,17 @@ bool hu_music_result_matches(const char *suggested, const hu_music_result_t *res
 }
 ```
 
-Add `#include <ctype.h>` and `#include <string.h>` at the top of `src/music.c` if not already present (string.h is; ctype.h: check and add).
+Add `#include <ctype.h>` and `#include <string.h>` at the top of `src/multimodal/music.c` if not already present (string.h is; ctype.h: check and add).
 
 - [ ] **Step 5: Run tests to verify pass**
 
-Run: `touch src/music.c tests/test_music.c && cmake --build build --target human_tests -j8 && ./build/human_tests --filter=music_match`
+Run: `touch src/multimodal/music.c tests/test_music.c && cmake --build build --target human_tests -j8 && ./build/human_tests --filter=music_match`
 Expected: all 5 `music_match_*` PASS, 0 failures.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add include/human/music.h src/music.c tests/test_music.c
+git add include/human/music.h src/multimodal/music.c tests/test_music.c
 git commit -m "feat(music): verify search result matches LLM suggestion before sending"
 ```
 
@@ -250,13 +250,13 @@ git commit -m "fix(daemon): gate music share on verified result match (no wrong 
 
 # SLICE 2 — Two-bubble human framing (fixes the robotic feel)
 
-### Task 3: Persona voice-hint helper (`src/inspiration.c` bootstrap)
+### Task 3: Persona voice-hint helper (`src/agent/inspiration.c` bootstrap)
 
 **Files:**
 - Create: `include/human/inspiration.h`
-- Create: `src/inspiration.c`
+- Create: `src/agent/inspiration.c`
 - Test: `tests/test_inspiration.c`
-- Modify: `CMakeLists.txt` (register `src/inspiration.c`, `tests/test_inspiration.c`)
+- Modify: `CMakeLists.txt` (register `src/agent/inspiration.c`, `tests/test_inspiration.c`)
 - Modify: `tests/test_main.c` (declare + call `run_inspiration_tests`)
 
 - [ ] **Step 1: Create the header**
@@ -343,10 +343,10 @@ void run_inspiration_tests(void) {
 
 - [ ] **Step 3: Register in build + runner**
 
-In `CMakeLists.txt`, find where `src/music.c` is listed in the core sources and `tests/test_music.c` in the test sources; add alongside:
+In `CMakeLists.txt`, find where `src/multimodal/music.c` is listed in the core sources and `tests/test_music.c` in the test sources; add alongside:
 
 ```cmake
-        src/inspiration.c
+        src/agent/inspiration.c
 ```
 ```cmake
         tests/test_inspiration.c
@@ -366,7 +366,7 @@ void run_inspiration_tests(void);
 Run: `cmake --build build --target human_tests -j8`
 Expected: link error — `hu_inspiration_*` undefined (header exists, no impl yet).
 
-- [ ] **Step 5: Implement `src/inspiration.c`**
+- [ ] **Step 5: Implement `src/agent/inspiration.c`**
 
 ```c
 #include "human/inspiration.h"
@@ -496,7 +496,7 @@ Run: `bash scripts/check-test-source-gate-symmetry.sh`
 Expected: exit 0 (source+test both unconditional).
 
 ```bash
-git add include/human/inspiration.h src/inspiration.c tests/test_inspiration.c CMakeLists.txt tests/test_main.c
+git add include/human/inspiration.h src/agent/inspiration.c tests/test_inspiration.c CMakeLists.txt tests/test_main.c
 git commit -m "feat(inspiration): medium picker, per-medium prompts, voice hint, tiktok tag url"
 ```
 
@@ -641,7 +641,7 @@ git commit -m "test(imessage): pin two-bubble ordering + bare-url invariant for 
 
 **Files:**
 - Create: `include/human/youtube.h`
-- Create: `src/youtube.c`
+- Create: `src/multimodal/youtube.c`
 - Test: `tests/test_youtube.c`
 - Modify: `CMakeLists.txt`, `tests/test_main.c`
 
@@ -722,7 +722,7 @@ void run_youtube_tests(void) {
 
 - [ ] **Step 3: Register in build + runner**
 
-`CMakeLists.txt`: add `src/youtube.c` and `tests/test_youtube.c` next to the inspiration entries.
+`CMakeLists.txt`: add `src/multimodal/youtube.c` and `tests/test_youtube.c` next to the inspiration entries.
 `tests/test_main.c`: add `void run_youtube_tests(void);` and `run_youtube_tests();`.
 
 - [ ] **Step 4: Run to verify failure**
@@ -730,7 +730,7 @@ void run_youtube_tests(void) {
 Run: `cmake --build build --target human_tests -j8`
 Expected: link error — `hu_youtube_*` undefined.
 
-- [ ] **Step 5: Implement `src/youtube.c`** (mirror `src/music.c`'s parse + network split)
+- [ ] **Step 5: Implement `src/multimodal/youtube.c`** (mirror `src/multimodal/music.c`'s parse + network split)
 
 ```c
 #include "human/youtube.h"
@@ -835,7 +835,7 @@ Run: `bash scripts/check-test-source-gate-symmetry.sh` → exit 0.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add include/human/youtube.h src/youtube.c tests/test_youtube.c CMakeLists.txt tests/test_main.c
+git add include/human/youtube.h src/multimodal/youtube.c tests/test_youtube.c CMakeLists.txt tests/test_main.c
 git commit -m "feat(youtube): Data API v3 search → verified canonical watch URL"
 ```
 

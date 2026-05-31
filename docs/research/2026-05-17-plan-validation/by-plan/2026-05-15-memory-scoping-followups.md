@@ -50,7 +50,7 @@ SQLite NULL-session filter, recency LRU module) and lists 7 follow-ups (FU-1..FU
 
 ### Wired? (called in runtime path / dispatch)
 - `contact_send_recency` module is built and tested, but `grep -rn "contact_send_recency"
-  src/daemon.c src/daemon_proactive.c` returns 0 hits. FU-1 wiring is NOT done.
+  src/daemon.c src/daemon/daemon_proactive.c` returns 0 hits. FU-1 wiring is NOT done.
 - Memory scoping commits (P3-1, P3-2, P3-5, P3-8, RI-1, RI-2) ARE wired in their respective
   call sites per the commit messages.
 

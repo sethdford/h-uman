@@ -27,7 +27,20 @@ info() { printf '      %s\n' "$1"; }
 
 info "=== RL SOTA validation (rl_sota preset) ==="
 
-cmake --preset rl_sota
+# Route the rl_sota build (h-uman + the vendored llama.cpp submodule) through
+# ccache when it's available. The nightly's setup-build step already installs
+# ccache and restores ~/.cache/ccache, but the rl_sota preset sets no compiler
+# launcher — so llama.cpp was recompiled from scratch on every run (the
+# nightly's long pole). ccache is content-addressed (no stale-object risk) and
+# llama.cpp source rarely changes, so warm runs reuse its objects. Explicit
+# if/else (not an array) to stay safe under `set -u` on macOS bash 3.2.
+if command -v ccache >/dev/null 2>&1; then
+    cmake --preset rl_sota \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+else
+    cmake --preset rl_sota
+fi
 cmake --build --preset rl_sota -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 
 export HU_E2E_TMP_ROOT="${ROOT}/build-rl-sota/tests/_tmp"

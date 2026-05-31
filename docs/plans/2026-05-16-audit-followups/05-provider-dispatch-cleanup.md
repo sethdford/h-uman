@@ -13,9 +13,9 @@ found three sites where dispatch happens via `strcmp` on provider name strings:
 
 | Site | Count | Symptom |
 |---|---|---|
-| `src/onboard.c:275-371` | 15× `strcmp(provider, ...)` | Adding a provider requires editing onboard |
-| `src/voice.c:58,101,337,435` | 4× hardcoded Cartesia check | New voice provider needs voice.c surgery |
-| `src/config_merge.c:717-722` | provider defaults via string compare | Default-model logic outside the factory |
+| `src/onboard/onboard.c:275-371` | 15× `strcmp(provider, ...)` | Adding a provider requires editing onboard |
+| `src/voice/voice.c:58,101,337,435` | 4× hardcoded Cartesia check | New voice provider needs voice.c surgery |
+| `src/config/config_merge.c:717-722` | provider defaults via string compare | Default-model logic outside the factory |
 
 Net effect: **adding a new provider is not a "register in factory.c"
 operation** — it requires changes in three other places. This is the opposite
@@ -108,9 +108,9 @@ should return zero hits outside `src/providers/`.
 
 ## Audit evidence
 
-- `src/onboard.c:275-371` — 15 `strcmp` provider checks.
-- `src/voice.c:58,101,337,435` — Cartesia hardcoded.
-- `src/config_merge.c:717-722` — provider default models hardcoded.
+- `src/onboard/onboard.c:275-371` — 15 `strcmp` provider checks.
+- `src/voice/voice.c:58,101,337,435` — Cartesia hardcoded.
+- `src/config/config_merge.c:717-722` — provider default models hardcoded.
 
 ## Risks
 

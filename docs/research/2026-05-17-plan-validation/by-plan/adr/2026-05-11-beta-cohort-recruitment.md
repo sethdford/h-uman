@@ -25,7 +25,7 @@ and legal review before public phase.
 
 ### Implemented? (code exists)
 - `ls docs/legal/` — directory does NOT exist
-- `grep -rn "human beta\|HU_BETA" src/main.c` returns 0 hits
+- `grep -rn "human beta\|HU_BETA" src/app/main.c` returns 0 hits
 - No CLI subcommand for beta opt-out
 
 ### Proven? (tests exist)

@@ -34,7 +34,7 @@ vtable is a thin write-to-transport.
 
    ```
    grep -rn "hu_outbound_sanitize\|outbound_pipeline_run\|burst_egress_validate_fragment" \
-     src/channels/ src/daemon.c src/daemon_proactive.c
+     src/channels/ src/daemon.c src/daemon/daemon_proactive.c
    ```
 
 2. For each match, read 10 lines of context to confirm the

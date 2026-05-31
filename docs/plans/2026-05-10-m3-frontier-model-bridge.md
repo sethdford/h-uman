@@ -424,9 +424,9 @@ Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
   wiring lands.
 
 - `hu_personalization_config_t` lives in `include/human/config_types.h`;
-  parser at `src/config_parse.c::parse_personalization`; serializer at
-  `src/config_serialize.c`; default state (off, NULL paths) is set in
-  `src/config_merge.c`.
+  parser at `src/config/config_parse.c::parse_personalization`; serializer at
+  `src/config/config_serialize.c`; default state (off, NULL paths) is set in
+  `src/config/config_merge.c`.
 - Daemon (`src/daemon.c`, immediately after the W14 scheduler open)
   calls `hu_provider_load_adapter(&agent->provider, alloc, path,
   strlen(path), id, strlen(id))` when the block is enabled and a path
@@ -528,7 +528,7 @@ Pick this up when ANY of these become true:
 | 2026-05-11 | Bridge A | CMake: system libllama resolution — `find_package(Llama)` → pkg-config → Homebrew/Linux prefix probe; vendored `third_party/llama.cpp/` still preferred. Test build mirrors include-only (link rides on `human_core` PUBLIC). Coverage: `test_llamacpp_chat_rejects_null_args`. |
 | 2026-05-11 | Bridge A | `llamacpp.c` ported to **modern llama.cpp API (b3000+)**: `llama_model_load_from_file` / `llama_init_from_model` / `llama_model_free` (the `_load_model_from_file` / `_new_context_with_model` / `_free_model` spellings are `-Werror=deprecated` traps under recent libllama). Adapter API: `llama_adapter_lora_init` + `llama_set_adapters_lora(ctx, &a, 1, &scale)` (the modern API has no per-adapter remove; clear by setting an empty array). Linked path now compiles cleanly against Homebrew `llama.cpp@b6981+`. |
 | 2026-05-11 | Bridge A | CI: new `feature-flags` matrix entry `llamacpp-on` builds with `-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_ML=ON -DHU_ENABLE_LLAMACPP=ON`. Exercises both the libllama discovery chain and the linked vtable path on every PR. Local repro: `cmake -S . -B build-llamacpp-ci <flags>` → 9740/9740 passing. |
-| 2026-05-11 | Bridge A | **Matrix entry shrunk to minimal Bridge-A reproducer:** `-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_LLAMACPP=ON` (no more piggybacking on `HU_ENABLE_ML`). Required gating the unconditional learner call sites in `src/bootstrap.c` (W13 open/close), `src/daemon.c` (W14 wiring + scheduler-tick outcome drain + LoRA auto-enqueue), and `src/agent/world_model_bridge.c` (`hu_w14_scheduler_register_lora_runner` / `_register_training_data_runner` now return `HU_ERR_NOT_SUPPORTED` when learning is off — public symbols stay defined so daemon callers don't need their own `#ifdef`). The W14 runner sources `src/agent/lora_training_runner.c` + `src/agent/training_data_runner.c` moved to the `if(HU_ENABLE_LEARNING)` CMake block (with matching `HU_TEST_EXTRA_MODULES` carve-out for the test binary). 9790/9790 passing on the slim build, 9847/9847 on dev. |
+| 2026-05-11 | Bridge A | **Matrix entry shrunk to minimal Bridge-A reproducer:** `-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_LLAMACPP=ON` (no more piggybacking on `HU_ENABLE_ML`). Required gating the unconditional learner call sites in `src/app/bootstrap.c` (W13 open/close), `src/daemon.c` (W14 wiring + scheduler-tick outcome drain + LoRA auto-enqueue), and `src/agent/world_model_bridge.c` (`hu_w14_scheduler_register_lora_runner` / `_register_training_data_runner` now return `HU_ERR_NOT_SUPPORTED` when learning is off — public symbols stay defined so daemon callers don't need their own `#ifdef`). The W14 runner sources `src/agent/lora_training_runner.c` + `src/agent/training_data_runner.c` moved to the `if(HU_ENABLE_LEARNING)` CMake block (with matching `HU_TEST_EXTRA_MODULES` carve-out for the test binary). 9790/9790 passing on the slim build, 9847/9847 on dev. |
 | 2026-05-11 | Bridge A | `hu_provider_load_adapter` dispatcher safety pinned: regression test pack in `tests/test_provider_all.c` proves NOT_SUPPORTED return on every cloud provider (openai, anthropic, gemini, ollama, openrouter), invalid-args rejection without provider deref, and NULL-return for `hu_provider_active_adapter`. Guards against a future helpers.c refactor accidentally turning a clean NOT_SUPPORTED into a NULL deref when the W13 learner auto-load wires a cloud provider. 8 tests added. |
 | 2026-05-11 | Bridge A | Daemon-pattern fall-through pinned: `test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat` walks the daemon's exact startup sequence (`hu_provider_create("openai") → hu_provider_load_adapter(.., NOT_SUPPORTED) → chat_with_system continues serving the base model`). The user-visible promise — "configuring personalization on a cloud provider does not break startup, the daemon logs and falls back" — is now an explicit regression guard. Pairs with the existing dispatcher safety pack: the dispatcher tests prove the call cannot crash; this test proves the *whole turn* survives the NOT_SUPPORTED return. |
 | 2026-05-11 | D1.3 | **Rollback flag landed.** `personalization.m3_adapter_disabled` (config) + `HUMAN_M3_ADAPTER_DISABLE` (env) both gate the bridge attach in `bootstrap.c`. Precedence is centralized in `hu_m3_adapter_should_disable(bool cfg_disabled)` so callers (bootstrap, future tools, tests) all observe the same decision. Env semantics: empty / `0` → no force (config wins), any other value (`1`, `true`, `yes`, `on`) → force-disable. Disable causes `hu_agent_m3_adapter_attach` to be skipped; `hu_agent_m3_on_provider_success` is a NULL-adapter no-op so the chat hot path has zero added cost. 7 new tests in `tests/test_ml.c::test_m3_adapter_should_disable_*` + `test_m3_on_provider_success_noop_when_unattached`; 3 new config tests in `tests/test_config_parse.c::test_config_*_m3_disabled*`. |
@@ -564,7 +564,7 @@ Adding the matrix entry uncovered two pre-existing build-config bugs that
 were hidden because every prior matrix entry implicitly turned `HU_ENABLE_ML`
 on (which forces `HU_ENABLE_LEARNING=ON` per `CMakeLists.txt:38-42`).
 
-1. ~~**`src/bootstrap.c` references `hu_learner_open_default` /
+1. ~~**`src/app/bootstrap.c` references `hu_learner_open_default` /
    `hu_learner_close` unconditionally**~~ — **fixed 2026-05-11.** Call
    sites in `bootstrap.c`, `daemon.c`, and the public W14 registration
    shims in `world_model_bridge.c` are now gated on `HU_ENABLE_LEARNING`;
@@ -585,7 +585,7 @@ on (which forces `HU_ENABLE_LEARNING=ON` per `CMakeLists.txt:38-42`).
 Two new pre-existing latent bugs surfaced by the slim build that were
 fixed under the same triage (one-line each, surgically scoped):
 
-3. **`src/agent/autodream.c::phase_hyperedge_consolidation`** had an
+3. **`src/agent/simulation/autodream.c::phase_hyperedge_consolidation`** had an
    unused `alloc` parameter that the `-Wunused-parameter -Werror`
    gate was rejecting on dev. `(void)alloc;` added with a comment
    explaining the parameter is reserved for future hyperedge synthesis

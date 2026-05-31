@@ -28,7 +28,7 @@
   (`src/daemon.c:1523`). Adds an optional `parent_guid` to the scheduled record so
   proactive/follow-up sends thread. Serves **AC-C1**.
 
-- **Register-aware send time** — `src/follow_up.c:39` (`hu_followup_compute_send_time`)
+- **Register-aware send time** — `src/agent/follow_up.c:39` (`hu_followup_compute_send_time`)
   + `include/human/follow_up.h` (`hu_followup_input_t`). Adds a banter signal so a
   short/casual message gets a fast send time while substantive messages keep the
   warmth/chronotype schedule. Serves **AC-C2**.

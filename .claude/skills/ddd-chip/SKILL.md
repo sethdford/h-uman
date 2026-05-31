@@ -53,14 +53,31 @@ Pick ONE of the three archetypes. Each has concrete steps below.
 **When:** Moving N=3-14 cohesive `.c` files from `src/*.c` root into a bounded-context subdirectory.
 
 **Steps:**
-1. `mkdir -p /Users/sethford/Projects/h-uman/.claude/worktrees/ddd-e0/src/<context>/`
-2. For each file: `git mv /Users/sethford/Projects/h-uman/.claude/worktrees/ddd-e0/src/X.c /Users/sethford/Projects/h-uman/.claude/worktrees/ddd-e0/src/<context>/X.c` (path change only, no edits)
-3. Update `CMakeLists.txt`: change `src/X.c` → `src/<context>/X.c` for each file in the group
-4. Touch all moved files and rebuild (see Step 2)
-5. Record the old `ROOT_BASELINE` (measure with `bash scripts/check-no-new-root-files.sh`) and new baseline (should decrease by group size)
-6. Verify tests pass and characterization test (if relevant) still green
+1. `mkdir -p src/<context>/` (use absolute worktree paths)
+2. For each `.c`: `git mv src/X.c src/<context>/X.c` (path change only, no edits)
+3. **Move co-located PRIVATE headers the cluster owns** (E1 lesson — chip A broke without this). If any moved `.c` does `#include "X_internal.h"` (bare quoted, not `human/...`), that private header lives in `src/` and must move with the cluster — BUT first verify it's cluster-only:
+   ```bash
+   # for each bare-quoted header the cluster includes:
+   grep -rln '#include "<hdr>.h"' src | grep -v 'src/<context>/'   # MUST be empty → cluster-only → safe to move
+   git mv src/<hdr>.h src/<context>/<hdr>.h
+   ```
+   Quoted `#include "<hdr>.h"` resolves relative to the including file's dir, so co-locating in `src/<context>/` keeps it found — no edit needed. (Public `include/human/...` headers do NOT move.)
+4. Update `CMakeLists.txt` (often the ROOT one): exact-replace `src/X.c` → `src/<context>/X.c` per file. Anchor on `src/<name>[._]` so look-alikes (`voice_config` vs `config`) and `daemon.c` (E2's, keep at root) are untouched.
+5. Touch all moved files and rebuild + full suite (see Step 2 of the loop) — the build catches a missed private header instantly (`fatal error: '<hdr>.h' file not found`).
+6. Record old `ROOT_BASELINE` and lower it by the group size in `scripts/check-no-new-root-files.sh`.
+7. **Update doc `src/` references** (E1 lesson — the `docs` CI gate fails otherwise). Moving files leaves stale `src/X.c` references in `ARCHITECTURE.md`, `docs/CONCEPT_INDEX.md`, etc. Fix them via the EXACT git rename map (never `find | head -1` — ambiguous basenames like `eval.c`/`session.c` exist in multiple dirs and find picks the wrong one):
+   ```bash
+   git diff -M --diff-filter=R --name-status origin/main HEAD -- 'src/*.c' \
+     | while IFS=$'\t' read -r _ old new; do case "$old" in src/*/*) ;; src/*.c)
+         esc=$(printf '%s' "$old" | sed 's/\./\\./g')
+         for d in $(grep -rl "$old" ARCHITECTURE.md docs human-skills skill-registry 2>/dev/null); do sed -i '' "s#${esc}#${new}#g" "$d"; done ;; esac; done
+   bash scripts/doc-fleet.sh   # MUST pass before commit
+   ```
+8. Verify full suite + characterization (if relevant) still green.
 
 **Ratchet:** `ROOT_BASELINE` in `scripts/check-no-new-root-files.sh` lowers by the number of files moved.
+
+**Collisions & blocked files (E1 lesson):** if `src/<context>/X.c` already exists (a *different* same-named file), do NOT overwrite — leave at root and document as a rename-needed exception. If a file includes `providers/factory.h` or does channel `memcmp`, moving it into `agent/` trips `agent-core-boundary` — leave it for E4 (provider injection). `daemon.c` stays for E2.
 
 #### Archetype: Carve-Function (E2)
 

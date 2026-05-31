@@ -282,7 +282,7 @@ Current state:
 - Substantial existing infrastructure: src/tts/cartesia*.c (TTS +
   streaming + emotion_map + voice_clone), src/channels/twilio.c (SMS),
   src/channels/voice_channel.c (3 modes, none Cartesia yet),
-  include/human/channels/voice_channel.h, src/voice.c (Whisper STT
+  include/human/channels/voice_channel.h, src/voice/voice.c (Whisper STT
   default + Cartesia STT optional), include/human/tts/cartesia.h
 
 PREREQUISITES — VERIFY BEFORE STARTING:

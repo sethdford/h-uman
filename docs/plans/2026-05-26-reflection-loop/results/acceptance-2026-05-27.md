@@ -50,7 +50,7 @@ Mapping each AC from design.md to the test that pins it:
 - `src/reflection/*.c` files do NOT import `human/daemon.h` (verified via
   grep) — the inputs-struct pattern (`hu_reflection_run_inputs_t`) is the
   only daemon→reflection coupling, and it lives in
-  `src/daemon_reflection_tick.c`, outside `src/reflection/`.
+  `src/daemon/daemon_reflection_tick.c`, outside `src/reflection/`.
 - Phase 1 quorum predicate is telemetry-only — pinned by
   `scripts/check-reflection-quorum-not-wired.sh` in the pre-commit hook.
   No production source under `src/` outside `src/reflection/` references
@@ -84,7 +84,7 @@ Mapping each AC from design.md to the test that pins it:
   empty-table is empty, low-confidence rows excluded.
 
 ### T9 — daemon wiring
-- Already shipped by parallel agent (`src/daemon_reflection_tick.c` +
+- Already shipped by parallel agent (`src/daemon/daemon_reflection_tick.c` +
   call from `src/daemon.c:14416`). Verified storage migrates on first
   tick, runs gated by config, stub iter produces NO_INPUT cleanly until
   T4-followup wires the real turn source.
@@ -103,7 +103,7 @@ Mapping each AC from design.md to the test that pins it:
 - `hu_reflection_check_failure_rate(db, now_ms, enabled)` — one-shot
   warn-once at INFO level when >50% of runs over the last 24h failed,
   4-run minimum sample to avoid small-sample noise. Wired into
-  `src/daemon_reflection_tick.c` after every tick.
+  `src/daemon/daemon_reflection_tick.c` after every tick.
 - 3 contracts in `tests/test_reflection_e2e.c`: count-helper
   distinguishes status, small-sample silenced, disabled+NULL safe.
 

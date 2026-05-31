@@ -39,8 +39,8 @@ for the `hu_mcp_host_*` function family.
 - 9715/9715 full pass at slice landing per the report
 
 ### Wired? (called in runtime path / dispatch)
-- `src/mcp.c`, `src/mcp_manager.c`, `src/mcp_server.c` all reference the new names
-- `src/main.c` uses `hu_mcp_engine_*` (per report's call-site count of 19 hits)
+- `src/mcp/mcp.c`, `src/mcp/mcp_manager.c`, `src/mcp/mcp_server.c` all reference the new names
+- `src/app/main.c` uses `hu_mcp_engine_*` (per report's call-site count of 19 hits)
 
 ## Gaps
 - None for W0b itself

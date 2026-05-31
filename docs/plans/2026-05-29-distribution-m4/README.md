@@ -96,7 +96,7 @@ onboarding-defaults-to-local ─┘
 
 ## Immediate next actions (when M4 becomes active)
 
-1. Make MLX/local the **default** onboarding branch (`src/onboard.c`) — the
+1. Make MLX/local the **default** onboarding branch (`src/onboard/onboard.c`) — the
    single highest-leverage funnel fix.
 2. One-command macOS iMessage setup (collapse the current multi-step pairing).
 3. Instrument per-user nightly humanness composite as the retention leading

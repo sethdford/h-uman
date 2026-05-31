@@ -376,14 +376,14 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 | net-new P5 | MODIFY | `src/memory/personal_model.c` | +160 LOC | Implement 4th-axis math (D1) as a new internal helper + new `_v2` entry point; the existing `hu_communication_style_fidelity_score` body is UNCHANGED and stays 3-axis (no rename, no forward to v2). The three internal call sites (`personal_model.c:1377`, `ml/cli.c:1509`, `ml/fidelity.c:75`) stay on the v1 default symbol |
 | net-new P5 | (no change) | `src/ml/fidelity.c` | 0 LOC | NO change — internal scorer call site stays on the v1 default symbol per B1. Removed from the MODIFY list |
 | net-new P5 | MODIFY | `tests/fixtures/lora_baseline_persona.json` | +25 LOC additive | Add a `"decision_style"` sub-object per response: `hedging_ratio`, `question_ratio`, `imperative_ratio` reference values. Existing 3-axis floor in `scripts/check-lora-baseline.sh` is unaffected |
-| net-new P5 | MODIFY | `src/main.c::cmd_eval` (resolves to `src/cli_commands.c::cmd_eval` body) | +30 LOC | Dispatch new subcommands: `human eval competitive`, `human eval leaderboard`, `human eval gate`. **fix(plan,eval,build): `#ifdef HU_ENABLE_RL_FULL` guard on dispatch (round-3 NEW-1)** — `hu_eval_cli_*` symbols are only compiled when `HU_ENABLE_RL_FULL=ON`. Default `dev` and `release` presets build without the flag, so the dispatch block MUST be wrapped in `#ifdef HU_ENABLE_RL_FULL` to preserve "0-byte delta on default release" and avoid linker errors. See Task 10 Step 2-5 for the guarded dispatch snippet. |
+| net-new P5 | MODIFY | `src/app/main.c::cmd_eval` (resolves to `src/app/cli_commands.c::cmd_eval` body) | +30 LOC | Dispatch new subcommands: `human eval competitive`, `human eval leaderboard`, `human eval gate`. **fix(plan,eval,build): `#ifdef HU_ENABLE_RL_FULL` guard on dispatch (round-3 NEW-1)** — `hu_eval_cli_*` symbols are only compiled when `HU_ENABLE_RL_FULL=ON`. Default `dev` and `release` presets build without the flag, so the dispatch block MUST be wrapped in `#ifdef HU_ENABLE_RL_FULL` to preserve "0-byte delta on default release" and avoid linker errors. See Task 10 Step 2-5 for the guarded dispatch snippet. |
 | net-new P5 | MODIFY | `scripts/check-lora-baseline.sh` | +20 LOC | Optional `--include-v2-axis` flag that runs the 4-axis path against `lora_baseline_persona_v2_responses.json`; default OFF until corpus-owner ratings are committed (spec coordination) |
 | net-new P5 | MODIFY | `CMakeLists.txt` | +60 LOC | New `HU_ENABLE_COMPETITIVE_EVAL` option, source list additions, Swift + Node availability probes for the optional bridges (configure-time, soft) |
 | net-new P5 | MODIFY | `tests/test_main.c` | +30 LOC | APPEND-ONLY: 8 new `run_*_tests` registrations |
 | **P2 fold-in** | MODIFY | `include/human/agent/lora_runner.h` | +12 LOC | Add `hu_eval_gate_t *eval_gate;` field (optional, NULL = no-gate as before). NO `adapter_id_template` string field — H7 replaces the broken `strftime("%Y-%m-%d-%s-step-%zu", ...)` form (strftime has no `%s` for arbitrary strings) with a two-step `strftime("%Y-%m-%d", &tm)` followed by `snprintf("%s-%s-step-%zu", datebuf, method_name, step_index)`, where `method_name = trainer->vtable->name(ctx)`. Adapter-id format is hard-coded, not a template string |
 | P2 fold-in | MODIFY | `src/agent/lora_training_runner.c` | +180 LOC | Insert post-train, pre-load gate call (D7); generate adapter_id; write `~/.human/proofs/<adapter-id>/` evidence directory on accept; move adapter to `<path>.rejected` on reject; backward-compat when `ctx->eval_gate == NULL` |
 | P2 fold-in | MODIFY | `src/daemon.c` | +90 LOC | Read `[reaction_collection]` from config; if enabled, schedule `hu_imessage_poll_reactions` every 30s (mirrors existing daemon poll cadences); feature-flagged off by default (D8) |
-| P2 fold-in | MODIFY | `src/config.c` + `include/human/config.h` | +25 LOC | New `hu_reaction_collection_config_t` field on `hu_config_t`; JSON schema add; default = disabled |
+| P2 fold-in | MODIFY | `src/config/config.c` + `include/human/config.h` | +25 LOC | New `hu_reaction_collection_config_t` field on `hu_config_t`; JSON schema add; default = disabled |
 
 ### Total Phase 5 weight
 
@@ -395,7 +395,7 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 
 **Approximate LOC:** ~2,800 LOC new C, ~1,780 LOC new test C, ~110 LOC Swift, ~180 LOC JS, ~280 LOC fixture+rubric JSON. Mid-pack vs Phase 2 (~3,800 LOC) and Phase 3 (~2,800 LOC).
 
-> **Footnote (M3):** the Phase 5 plan delivers more "modify" rows than umbrella spec §4.6's "~12 + 3" figure suggests because the Phase 2 production-wiring fold-in (LoRA training runner gate integration in Task 11 + daemon reaction-poll wiring in Task 12 + adapter hot-swap proof-directory contract in Task 13) accounts for additional touched files (`src/agent/lora_training_runner.c`, `include/human/agent/lora_runner.h`, `src/daemon.c`, `src/config.c`, `include/human/config.h`). When `sprint-auditor` runs at Task 14 Step 5, it should match the file inventory in **this plan**, NOT umbrella spec §4.6's count — the Phase 2 deferral fold-in is a documented Phase 5 deliverable per the umbrella spec §4.6's own "DEFERRED to Phase 5" rows.
+> **Footnote (M3):** the Phase 5 plan delivers more "modify" rows than umbrella spec §4.6's "~12 + 3" figure suggests because the Phase 2 production-wiring fold-in (LoRA training runner gate integration in Task 11 + daemon reaction-poll wiring in Task 12 + adapter hot-swap proof-directory contract in Task 13) accounts for additional touched files (`src/agent/lora_training_runner.c`, `include/human/agent/lora_runner.h`, `src/daemon.c`, `src/config/config.c`, `include/human/config.h`). When `sprint-auditor` runs at Task 14 Step 5, it should match the file inventory in **this plan**, NOT umbrella spec §4.6's count — the Phase 2 deferral fold-in is a documented Phase 5 deliverable per the umbrella spec §4.6's own "DEFERRED to Phase 5" rows.
 
 ---
 
@@ -1241,8 +1241,8 @@ void run_competitive_harness_tests(void) {
 ### Task 10: CLI plumbing — `human eval competitive`, `human eval leaderboard`, `human eval gate`
 
 **Files:**
-- Modify: `src/main.c::cmd_eval` (+30 LOC dispatch branches)
-- Modify: `src/cli_commands.c::cmd_eval` if the `eval` subcommand body lives there (verified at task time)
+- Modify: `src/app/main.c::cmd_eval` (+30 LOC dispatch branches)
+- Modify: `src/app/cli_commands.c::cmd_eval` if the `eval` subcommand body lives there (verified at task time)
 - Create: `tests/test_cli_eval_phase5.c`
 
 - [ ] **Step 1: Failing test**
@@ -1270,7 +1270,7 @@ void run_cli_eval_phase5_tests(void) {
 }
 ```
 
-- [ ] **Step 2-5:** Add dispatch branches in `cmd_eval` (the `src/cli_commands.c` body).
+- [ ] **Step 2-5:** Add dispatch branches in `cmd_eval` (the `src/app/cli_commands.c` body).
 
 **fix(plan,eval,build): `#ifdef HU_ENABLE_RL_FULL` guard on cmd_eval dispatch (round-3 NEW-1):** the `hu_eval_cli_competitive`, `hu_eval_cli_leaderboard`, and `hu_eval_cli_gate` symbols ONLY exist when `HU_ENABLE_RL_FULL=ON` (see the `if(HU_ENABLE_RL_FULL)` block in the CMakeLists.txt section below; `src/eval/cli_eval.c` is listed under that guard). The default `dev` and `release` presets build without `HU_ENABLE_RL_FULL`, so the dispatch lines below MUST be wrapped in `#ifdef HU_ENABLE_RL_FULL` to prevent a linker error in default builds. This preserves the "0-byte delta on default release" claim from the CMakeLists.txt section.
 
@@ -1507,7 +1507,7 @@ hu_error_t hu_format_adapter_id(const char *method_name, size_t step_index,
 
 **Files:**
 - Modify: `src/daemon.c` (+90 LOC: schedule `hu_imessage_poll_reactions` every 30s when feature-flag is on)
-- Modify: `src/config.c` + `include/human/config.h` (+25 LOC: new `[reaction_collection]` config block)
+- Modify: `src/config/config.c` + `include/human/config.h` (+25 LOC: new `[reaction_collection]` config block)
 - Create: `tests/test_daemon_reaction_poll_wiring.c`
 - Create: `tests/fixtures/imessage_chatdb_canned_tapbacks.sql`
 

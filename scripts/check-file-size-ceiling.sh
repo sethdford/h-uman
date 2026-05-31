@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14767   # src/daemon.c, 2026-05-31: 14723→14750 (origin/main merge) →14767 (B2 go-live reaction-pair capture wiring). Phase E2 daemon carve-out lowers this.
+MAX_BASELINE=14737   # src/daemon.c, measured 2026-05-31 post origin/main merge (B2 go-live reaction-pair capture wiring + main's E2 dedup). Phase E2 daemon carve-out lowers this.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

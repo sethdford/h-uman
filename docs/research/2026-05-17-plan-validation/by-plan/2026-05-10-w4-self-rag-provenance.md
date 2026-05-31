@@ -22,7 +22,7 @@ Wire self-RAG / corrective-RAG / hallucination_guard / verify_claim into the syn
 ### Implemented? (code exists)
 - `src/memory/self_rag.c`, `corrective_rag.c`, `adaptive_rag.c`, `hallucination_guard.c`, `verify_claim.c`
 - `src/memory/erasure.c` — `hu_memory_erase_entity`, `hu_memory_erase_by_provenance` (cascading erasure)
-- `src/cli_commands.c:30-44` — `hu_memory_facade_export_json` (memory view CLI)
+- `src/app/cli_commands.c:30-44` — `hu_memory_facade_export_json` (memory view CLI)
 - Provenance fields on `hu_graph_relation_t`
 
 ### Proven? (tests exist)

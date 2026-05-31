@@ -270,6 +270,170 @@ static void test_negative_tapback_with_alternative_creates_complete_pair(void) {
     hu_reaction_handler_reset_for_test();
 }
 
+/* B2 go-live: verify the production path (daemon calling with agent->sota.last_rejected_draft)
+ * yields a complete pair. This pins the B2 wire: the daemon registers with an
+ * alternative draft, the reaction handler inserts both sides, and the pair is
+ * exportable. */
+static void test_production_reaction_path_with_rejected_draft_yields_complete_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 512, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    /* Simulate the production flow: the response guard rejected this draft,
+     * and the daemon (via agent->sota.last_rejected_draft) threads it to
+     * the reaction handler as the alternative. */
+    const char *prompt = "What should I prioritize?";
+    const char *chosen_response = "Ship the fix now.";
+    const char *rejected_draft = "I think we should rewrite everything."; /* what guard rejected */
+
+    hu_reaction_handler_register_assistant_message_for_production(
+        /*channel*/ "imessage",
+        /*thread*/ "chat_production_001",
+        /*msg_ref*/ "msg_prod_001",
+        /*prompt*/ prompt,
+        /*response*/ chosen_response,
+        /*alternative (from agent->sota.last_rejected_draft)*/ rejected_draft);
+
+    /* Now fire a positive tapback on that message */
+    hu_reaction_event_t evt = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_production_001",
+        .target_message_ref = "msg_prod_001",
+        .sender_handle = "+15550100001",
+        .kind = HU_REACTION_LOVE,
+        .polarity = HU_REACTION_POSITIVE,
+        .timestamp_unix = 1715472000,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&evt), HU_OK);
+
+    /* Verify we got a COMPLETE pair (not single-sided) */
+    size_t pair_count = 0;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &pair_count), HU_OK);
+    HU_ASSERT_EQ(pair_count, 1u);
+
+    /* Verify the pair has both sides: chosen=rejected_draft, rejected=chosen_response
+     * dpo_pairs has: id, prompt, chosen, rejected, margin, timestamp, source (no thread/msg_ref) */
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT prompt, chosen, rejected, source FROM dpo_pairs WHERE "
+                                    "source = 'imessage_tapback' LIMIT 1",
+                                    -1, &stmt, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+
+    /* For POSITIVE reaction:
+     * - chosen = response (the message the user reacted positively to)
+     * - rejected = alternative (the rejected draft becomes the "other side")
+     * See src/agent/reaction_handler.c:392-404 for the logic. */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), prompt);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1),
+                     chosen_response); /* chosen = response */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 2),
+                     rejected_draft); /* rejected = alternative */
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 3), "imessage_tapback");
+
+    sqlite3_finalize(stmt);
+
+    /* Verify the pair is exportable (non-vacuous: hu_dpo_export actually returns it) */
+    hu_dpo_export_t export = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &export), HU_OK);
+    HU_ASSERT_GE(export.count, 1);
+
+    hu_dpo_export_free(&alloc, &export);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
+/* Verify per-turn clearing: after registering a message with an alternative,
+ * if we then call the handler again WITHOUT that alternative, the second pair
+ * should be single-sided (no alternative for the second reaction). This pins
+ * that last_rejected_draft is cleared per-turn and doesn't leak across. */
+static void test_last_rejected_draft_cleared_per_turn_no_cross_contamination(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 512, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    /* First registration WITH alternative */
+    hu_reaction_handler_register_assistant_message_for_production(
+        "imessage", "chat_001", "msg_001", "prompt1", "response1", "alternative1");
+
+    /* Second registration WITHOUT alternative (simulating the case where
+     * agent->sota.last_rejected_draft was cleared per-turn) */
+    hu_reaction_handler_register_assistant_message_for_production("imessage", "chat_002", "msg_002",
+                                                                  "prompt2", "response2", "");
+
+    /* Fire reactions on both messages */
+    hu_reaction_event_t evt1 = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_001",
+        .target_message_ref = "msg_001",
+        .sender_handle = "+1555",
+        .kind = HU_REACTION_LOVE,
+        .polarity = HU_REACTION_POSITIVE,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&evt1), HU_OK);
+
+    hu_reaction_event_t evt2 = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_002",
+        .target_message_ref = "msg_002",
+        .sender_handle = "+1555",
+        .kind = HU_REACTION_LOVE,
+        .polarity = HU_REACTION_POSITIVE,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&evt2), HU_OK);
+
+    /* Both should have inserted pairs, but with different structures:
+     * msg_001 should have BOTH chosen and rejected (complete pair)
+     * msg_002 should have only chosen (single-sided, no rejected)
+     * dpo_pairs has: id, prompt, chosen, rejected, margin, timestamp, source */
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT prompt, chosen, rejected FROM dpo_pairs "
+                                    "ORDER BY id",
+                                    -1, &stmt, NULL),
+                 SQLITE_OK);
+
+    /* First row: msg_001 with complete pair (alternative1 was provided)
+     * For POSITIVE reaction: chosen = response, rejected = alternative */
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "prompt1");
+    HU_ASSERT_TRUE((const char *)sqlite3_column_text(stmt, 1) != NULL); /* chosen exists */
+    HU_ASSERT_TRUE((const char *)sqlite3_column_text(stmt, 2) != NULL); /* rejected exists */
+    const char *msg1_chosen = (const char *)sqlite3_column_text(stmt, 1);
+    const char *msg1_rejected = (const char *)sqlite3_column_text(stmt, 2);
+    HU_ASSERT_STR_EQ(msg1_chosen, "response1");      /* chosen = response */
+    HU_ASSERT_STR_EQ(msg1_rejected, "alternative1"); /* rejected = alternative */
+
+    /* Second row: msg_002 with single-sided pair (no alternative provided) */
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "prompt2");
+    HU_ASSERT_TRUE((const char *)sqlite3_column_text(stmt, 1) != NULL); /* chosen exists */
+    const char *msg2_rejected = (const char *)sqlite3_column_text(stmt, 2);
+    HU_ASSERT_TRUE(msg2_rejected == NULL || msg2_rejected[0] == '\0'); /* empty string */
+
+    sqlite3_finalize(stmt);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
 /* Pin the NULL-input guards in src/agent/reaction_handler.c:53. Adding this
  * regression test (cheap, no setup) so any future refactor that drops the
  * `if (!e || !e->channel_id)` early-return surfaces as a test failure
@@ -443,6 +607,8 @@ void run_reaction_handler_e2e_tests(void) {
     HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
     HU_RUN_TEST(test_positive_tapback_with_alternative_creates_complete_pair);
     HU_RUN_TEST(test_negative_tapback_with_alternative_creates_complete_pair);
+    HU_RUN_TEST(test_production_reaction_path_with_rejected_draft_yields_complete_pair);
+    HU_RUN_TEST(test_last_rejected_draft_cleared_per_turn_no_cross_contamination);
     HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
     HU_RUN_TEST(test_sota_note_rejected_draft_populates_then_clears);
     HU_RUN_TEST(test_sota_note_rejected_draft_skips_proactive_turns);

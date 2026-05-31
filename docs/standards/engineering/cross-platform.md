@@ -42,7 +42,7 @@ Standard guards for platform-specific code:
 
 ## Platform Abstraction Layer
 
-`src/platform.c` / `include/human/platform.h` provides cross-platform wrappers:
+`src/app/platform.c` / `include/human/platform.h` provides cross-platform wrappers:
 
 - `hu_platform_is_windows()` / `hu_platform_is_unix()` -- runtime detection
 - `hu_platform_get_home_dir()` -- HOME or USERPROFILE

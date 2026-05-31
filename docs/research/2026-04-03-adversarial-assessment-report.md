@@ -312,9 +312,9 @@ Emotional cognition deepens engagement indefinitely, affect mirroring has no cei
 | **Trust Tracking** | src/intelligence/trust.c | ~400 | 28 | TRUST-006, TRUST-004 |
 | **Vulnerable User Detection** | (in companion_safety.c) | ~100 | 12 | SHIELD-007, SHIELD-008 |
 | **Affect Mirror Ceiling** | (in persona.c) | ~80 | 13 | PERSONA-001 |
-| **Daemon Cron** | src/daemon_cron.c | 400 | 23 | ARCH-002 |
-| **Daemon Lifecycle** | src/daemon_lifecycle.c | 470 | 15 | ARCH-002 |
-| **Daemon Routing** | src/daemon_routing.c | 105 | 16 | ARCH-002 |
+| **Daemon Cron** | src/daemon/daemon_cron.c | 400 | 23 | ARCH-002 |
+| **Daemon Lifecycle** | src/daemon/daemon_lifecycle.c | 470 | 15 | ARCH-002 |
+| **Daemon Routing** | src/daemon/daemon_routing.c | 105 | 16 | ARCH-002 |
 
 ### What Was Fixed
 

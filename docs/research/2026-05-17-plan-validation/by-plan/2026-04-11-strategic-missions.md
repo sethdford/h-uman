@@ -34,8 +34,8 @@ honest difficulty assessment.
 
 ### Implemented? (code exists)
 - **M1**: `grep -rn "HU_HAS_PERSONA" src/ include/` returns only **1 hit**
-  (`src/main.c:2212`) — plan's "100+ removed, 2 remain" claim matches reality.
-  `src/persona/*.c` is 20+ files. `src/onboard.c` is 499 LOC as CLAUDE.md
+  (`src/app/main.c:2212`) — plan's "100+ removed, 2 remain" claim matches reality.
+  `src/persona/*.c` is 20+ files. `src/onboard/onboard.c` is 499 LOC as CLAUDE.md
   states.
 - **M2**: `include/human/memory/personal_model.h` and
   `src/memory/personal_model.c` (2365 LOC) both present.
@@ -46,7 +46,7 @@ honest difficulty assessment.
   `src/ml/cli.c:905` still has `(void)checkpoint_path;` in the legacy code
   path. The honest-gap caveat doc is referenced at `cli.c:862`. Bridge plan
   `docs/plans/2026-05-10-m3-frontier-model-bridge.md` exists.
-- **M4**: `src/main.c:952,2883` wires `hu_onboard_run_with_args` and the
+- **M4**: `src/app/main.c:952,2883` wires `hu_onboard_run_with_args` and the
   first-run-no-config check. `human onboard` is a real CLI subcommand.
 - **M5**: `include/human/hula_sdk.h` exists with `HU_HULA_SDK_VERSION_STRING
   "0.1.0"` at line 70 and helpers at lines 82, 123, 185.
@@ -79,7 +79,7 @@ honest difficulty assessment.
 - M3 Track A wired (prompt path), Track B NOT wired into production
   inference — `lora-persona` is a separate CLI, not invoked by the agent
   runtime.
-- M4 onboard wired at `src/main.c:952` (subcommand) and `:2883` (first-run
+- M4 onboard wired at `src/app/main.c:952` (subcommand) and `:2883` (first-run
   auto-redirect).
 - M5 SDK helpers (`hu_hula_sdk_call/sequence/run_json`) defined but
   **zero callers in tests/ or examples/** — surface ships unexercised.

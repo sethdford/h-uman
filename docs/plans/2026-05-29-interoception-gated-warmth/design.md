@@ -115,7 +115,7 @@ battery labels (the gate is additive). Do not remove the prompt-text path.
 | `include/human/persona/somatic.h` | gate facts/modulations/band + predicate + directive decls | 1,2,3 |
 | `src/persona/somatic.c` | `hu_somatic_behavior_gate`, `hu_somatic_warmth_directive` | 1,2,3,4 |
 | `src/agent/agent_turn.c` | clamp brevity + append warmth directive (thin) | 1,5,6 |
-| `src/eval.c` / `include/human/eval.h` | `warmth_authenticity` scorer | 7 |
+| `src/eval/eval.c` / `include/human/eval.h` | `warmth_authenticity` scorer | 7 |
 | `tests/test_somatic.c` (extend/new) | gate truth table, honesty contract, brevity-floor, helpfulness-preserved, regression | 1,2,3,4,6,8 |
 | `tests/test_eval.c` | warmth_authenticity extremes | 7 |
 | `CMakeLists.txt` + `tests/test_main.c` | register if new TU (gate symmetry) | 8 |

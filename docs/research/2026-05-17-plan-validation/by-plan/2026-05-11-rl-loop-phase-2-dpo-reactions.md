@@ -23,7 +23,7 @@ Phase 2 replaces the provider-scored sigmoid `hu_dpo_judge_step` with two-track 
 - `src/ml/dpo_real_huml.c`, `src/ml/dpo_real_mlx.c`, `src/ml/policy_logprobs.c`, `src/ml/reference_model.c` (all on origin/main).
 - `include/human/ml/{dpo_real,rl_trainer,policy_logprobs,reference_model}.h`.
 - `src/ml/cli_dpo.c` (CLI dispatcher).
-- `src/channels/reaction_event.c`, `src/channels/imessage_reactions.c`, `src/channels/slack_reactions.c`, `src/daemon_reaction_poll.c`, `src/agent/reaction_handler.c`.
+- `src/channels/reaction_event.c`, `src/channels/imessage_reactions.c`, `src/channels/slack_reactions.c`, `src/daemon/daemon_reaction_poll.c`, `src/agent/reaction_handler.c`.
 - `scripts/dpo_mlx_train.py` (wrapper invoking `mlx-lm-lora`).
 - `include/human/channels/{reaction_event,imessage_reactions}.h`, `include/human/agent/reaction_handler.h`, `include/human/daemon_reaction_poll.h`.
 

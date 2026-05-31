@@ -15,7 +15,7 @@ with mandatory cloud fallback as the safety net.
 | Adapter swap curl-gated | `src/ml/mlx_admin.c:194` returns `HU_ERR_NOT_SUPPORTED` when `!HU_ENABLE_CURL` | AC-6: clear-log no-op in dev; works in release (curl ON) |
 | Existing turn fallback hook | `src/agent/agent_stream.c:230` `fallback_err` path | AC-2: extend for local→cloud |
 | DPO source tagging supported | `src/ml/dpo_miner.c:340-355` `pair.source` (e.g. `outbound_edit`) | AC-5: tapback path writes a real source tag |
-| `reaction_collection` already whitelisted | `src/config_validate.c:68` (since 2026-05-18) | AC-4: warning already gone; only default flip remains |
+| `reaction_collection` already whitelisted | `src/config/config_validate.c:68` (since 2026-05-18) | AC-4: warning already gone; only default flip remains |
 | Nightly train→swap wired | `src/ml/lora_nightly.c:46` `should_run(threshold)`, `:202` swap call | AC-6: mostly verify + curl-off log |
 | Doctor check module pattern | `src/doctor/check_chatdb.c`, `check_outbound_stats.c` | AC-3: add `check_local_voice.c` |
 
@@ -26,7 +26,7 @@ with mandatory cloud fallback as the safety net.
 - **Local health probe** — small helper (likely `src/agent/model_router_health.c` or in `from_config.c`) that sets `mlx_local_healthy` by checking adapter-file presence (path + nonzero size) and a cached MLX server reachability ping (TTL ~60s, reuses `hu_http_post_json` HEAD/health). Never blocks the turn; stale-but-cached is acceptable.
 - **Local→cloud turn fallback** — `src/agent/agent_stream.c` (extend the `:230` fallback path) + `agent_turn.c`. On local provider error, timeout, or response_guard-degenerate, retry once on the cloud provider in the same turn; emit one `hu_log_*` line naming the reason. Reuses the existing fallback plumbing, not a new path.
 - **Local-voice doctor check** — `src/doctor/check_local_voice.c` reporting three sub-states: adapter present (path/sha/size), MLX server reachable, curl-enabled build. Registered alongside existing checks.
-- **reaction_collection default-on** — `src/config_merge.c` seeds `cfg->reaction_collection.enabled = true`. (No validator change needed — already whitelisted.)
+- **reaction_collection default-on** — `src/config/config_merge.c` seeds `cfg->reaction_collection.enabled = true`. (No validator change needed — already whitelisted.)
 - **Real DPO pair sourcing** — verify/wire the iMessage tapback + user-edit collectors write `pair.source = "imessage_tapback"` / `"user_edit"` through `dpo_miner`. Add the source constants if missing.
 - **Nightly train→swap closure** — `src/ml/lora_nightly.c`: confirm `should_run` threshold reads real-pair count; ensure curl-off path logs a clear "swap skipped: build lacks curl" once rather than silent `HU_ERR_NOT_SUPPORTED`.
 

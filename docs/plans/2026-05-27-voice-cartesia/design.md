@@ -13,7 +13,7 @@ The recon during brainstorming turned up substantial existing infrastructure:
 |---|---|---|
 | Cartesia TTS API client | **Built** — `hu_cartesia_tts_synthesize` with model_id, voice_id, emotion, speed, volume, output_format | `include/human/tts/cartesia.h`, `src/tts/cartesia.c` |
 | Cartesia streaming TTS | **Built** — `cartesia_stream.c` (376+ lines of streaming infrastructure) | `src/tts/cartesia_stream.c` |
-| Cartesia STT (Ink Whisper) | **Built** — wired in `src/voice.c` as optional STT provider | `src/voice.c:58-66` |
+| Cartesia STT (Ink Whisper) | **Built** — wired in `src/voice/voice.c` as optional STT provider | `src/voice/voice.c:58-66` |
 | Emotion-from-context mapping | **Built** — `hu_cartesia_emotion_from_context` | `src/tts/emotion_map.c` |
 | Voice cloning workflow | **Built** — `voice_clone.c` exists | `src/tts/voice_clone.c` |
 | Channel-aware output format | **Built** — `hu_tts_format_for_channel` returns "caf" for iMessage, "ogg" for Telegram/Discord, "mp3" default | header line 33 |
@@ -406,7 +406,7 @@ Future eval work: plot per-call latency p50/p95 over time, watch for regressions
 - **R2 — h-uman daemon needs publicly-reachable HTTPS URL for Twilio webhook.** *Mitigation:* Phase 1 supports ngrok or any reverse proxy in front of the daemon's existing HTTP server. Production deployment is a separate concern (Cloudflare Tunnel, Tailscale Funnel, etc.).
 - **R3 — Latency budget tight on slow paths.** *Mitigation:* backchannel filler buys ~2s of cover. Reflexive tier MUST be enforced via model_router for voice channels; CLAUDE.md "Gemini 3.x thinking-token gotcha" applies. AC-3 measurement validates per release.
 - **R4 — WebSocket server doesn't exist in h-uman daemon.** *Mitigation:* recon during Task 6 — if `grep -rn "websocket\|wss\|upgrade.*http" src/` returns no infra, add a small WebSocket server (RFC 6455 is ~200 LOC for server-side accept + frame parse). Otherwise reuse.
-- **R5 — Cartesia API key in plaintext config.** *Mitigation:* same posture as existing `cartesia_api_key` in `src/voice.c` config; document secret rotation. Long-term: keychain integration.
+- **R5 — Cartesia API key in plaintext config.** *Mitigation:* same posture as existing `cartesia_api_key` in `src/voice/voice.c` config; document secret rotation. Long-term: keychain integration.
 - **R6 — Voice cloning quality unverified.** *Mitigation:* AC-4 is a subjective smoke test. The full voice-cloning workflow (recording reference audio, getting voice_id) is Scope C; Phase 1 assumes user has already obtained a voice_id from Cartesia's web UI and configured it.
 - **R7 — Single-call-at-a-time limitation.** *Mitigation:* if a new call arrives while one is active, webhook returns `<Reject>`. Caller hears busy tone. Concurrency is Scope C work.
 - **R8 — μ-law resampling 8k→16k is lossy.** *Mitigation:* acceptable for Phase 1 — Whisper handles 8kHz natively; resampling for Cartesia TTS direction is the lossy step but humans don't notice it. Upgrade to libsamplerate or sox is a future quality tweak.

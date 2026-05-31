@@ -24,7 +24,7 @@ Status key: **STUB** = returns HU_ERR_NOT_SUPPORTED for core operations,
 | `src/peripherals/stm32.c`     | 12.6 KB     | REAL (probe-rs) | Linux-only outside tests       |
 | `src/peripherals/rpi.c`       | 8.4 KB      | REAL (GPIO)     | Linux-only (`/sys/class/gpio`) |
 | `src/peripherals/factory.c`   | 5.4 KB      | REAL            | Peripheral router              |
-| `src/hardware.c`              | 5.5 KB      | REAL            | Hardware abstraction           |
+| `src/peripherals/hardware.c`              | 5.5 KB      | REAL            | Hardware abstraction           |
 | `src/tools/hardware_info.c`   | 17.2 KB     | REAL            | Hardware info tool             |
 | `src/tools/hardware_memory.c` | 17.5 KB     | REAL            | Hardware memory tool           |
 | `src/tools/i2c.c`             | 8.6 KB      | REAL            | I2C bus tool                   |
@@ -118,12 +118,12 @@ behind options would reduce binary size for deployments that don't need them.
 
 | File               | Object Size | Notes                    |
 | ------------------ | ----------- | ------------------------ |
-| `src/mcp_server.c` | 20.3 KB     | MCP server mode          |
-| `src/skillforge.c` | 17.8 KB     | Skill forge / generation |
-| `src/onboard.c`    | 13.9 KB     | First-run onboarding     |
+| `src/mcp/mcp_server.c` | 20.3 KB     | MCP server mode          |
+| `src/skills/skillforge.c` | 17.8 KB     | Skill forge / generation |
+| `src/onboard/onboard.c`    | 13.9 KB     | First-run onboarding     |
 | `src/daemon.c`     | 23.4 KB     | Daemon mode              |
-| `src/cost.c`       | 20.1 KB     | Cost tracking            |
-| `src/crontab.c`    | 15.4 KB     | Crontab management       |
+| `src/observability/cost.c`       | 20.1 KB     | Cost tracking            |
+| `src/daemon/crontab.c`    | 15.4 KB     | Crontab management       |
 
 ## Summary
 

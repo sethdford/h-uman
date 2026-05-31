@@ -16,9 +16,9 @@ extending `hu_provider_vtable_t` with `onboard_hints()`, `default_model()`, and
 
 ## Key Claims (from the plan)
 - Claim 1: Vtable extended with three optional methods
-- Claim 2: `src/onboard.c:275-371` strcmp loop replaced with vtable iteration
-- Claim 3: `src/voice.c` Cartesia checks replaced with `vtable->supports_voice()`
-- Claim 4: `src/config_merge.c` default-model strcmps replaced with `vtable->default_model()`
+- Claim 2: `src/onboard/onboard.c:275-371` strcmp loop replaced with vtable iteration
+- Claim 3: `src/voice/voice.c` Cartesia checks replaced with `vtable->supports_voice()`
+- Claim 4: `src/config/config_merge.c` default-model strcmps replaced with `vtable->default_model()`
 - Claim 5: Dummy no-op provider added in same PR as a demonstration of AC-4
 
 ## Evidence
@@ -26,10 +26,10 @@ extending `hu_provider_vtable_t` with `onboard_hints()`, `default_model()`, and
 ### Implemented? (code exists)
 - `grep -rn "onboard_hints\|supports_voice\|hu_provider_onboard_hints" src/ include/` → 0 hits
 - Vtable extension not present
-- `grep -c "strcmp(provider" src/onboard.c` → **8** (down from audit's 15 — partial trim,
+- `grep -c "strcmp(provider" src/onboard/onboard.c` → **8** (down from audit's 15 — partial trim,
   not the vtable-driven refactor the plan calls for)
-- `src/voice.c` still has hardcoded `strcmp(..., "cartesia") == 0` at multiple sites
-- `src/config_merge.c:137-139` still has explicit `strcmp(detected, "openai")`,
+- `src/voice/voice.c` still has hardcoded `strcmp(..., "cartesia") == 0` at multiple sites
+- `src/config/config_merge.c:137-139` still has explicit `strcmp(detected, "openai")`,
   `strcmp(detected, "anthropic")` chains
 
 ### Proven? (tests exist)

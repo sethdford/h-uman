@@ -16,7 +16,7 @@ Adversarial API-contract review of the 14-initiative SOTA-2026 design fleet, sur
 - Claim 1: `hu_personal_model_ingest` gains a required new `prov` parameter; 4 live call sites (not 2) must be patched.
 - Claim 2: `hu_job_kind_t` enum allocation table required — 4 initiatives racing for the same ordinal.
 - Claim 3: `hu_episode_t` ODR violation across `agent/episodic.h`, `memory/deep_memory.h`, `memory/episodic.h` must be renamed (W7 slice).
-- Claim 4: Init #12 removes `hu_mcp_host_*` symbol family with 5 unguarded call sites in `src/main.c`.
+- Claim 4: Init #12 removes `hu_mcp_host_*` symbol family with 5 unguarded call sites in `src/app/main.c`.
 
 ## Evidence
 

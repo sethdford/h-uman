@@ -27,10 +27,10 @@ each ≤ 1,500 LOC with dedicated tests, in 7 staged PRs. No behavior change.
 - `wc -l src/daemon.c` → **12,491 LOC** (slightly LARGER than audit's 12,262 baseline)
 - `ls src/daemon/` → directory does NOT exist
 - BUT: SIBLING extractions exist (not in `src/daemon/`):
-  - `src/daemon_cron.c` (413 LOC)
-  - `src/daemon_lifecycle.c` (510 LOC)
-  - `src/daemon_proactive.c` (723 LOC)
-  - `src/daemon_routing.c` (104 LOC)
+  - `src/daemon/daemon_cron.c` (413 LOC)
+  - `src/daemon/daemon_lifecycle.c` (510 LOC)
+  - `src/daemon/daemon_proactive.c` (723 LOC)
+  - `src/daemon/daemon_routing.c` (104 LOC)
   - Total extracted: 1,750 LOC
 - No `director.c`, `telemetry.c`, `ticks.c`, `inbox.c`, `outbound.c` modules
 

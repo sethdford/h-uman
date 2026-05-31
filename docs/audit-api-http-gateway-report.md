@@ -205,7 +205,7 @@ All providers use `hu_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 ---
 
-## 7. Config API (`src/config.c`, `src/config_merge.c`)
+## 7. Config API (`src/config/config.c`, `src/config/config_merge.c`)
 
 ### 7.1 Config Loading
 

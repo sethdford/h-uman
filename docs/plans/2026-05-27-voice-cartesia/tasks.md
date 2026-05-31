@@ -40,7 +40,7 @@
 | `src/channels/voice_channel.c` | Dispatch CARTESIA mode to `src/voice/call.c` | MODIFY |
 | `src/http_server.c` (assumed) | Add `/twilio/voice` POST + `/twilio/stream/:sid` WSS routes | MODIFY |
 | `include/human/config.h` | Add `hu_twilio_voice_config_t` | MODIFY |
-| `src/config_parse.c` | Parse `twilio_voice: {...}` block | MODIFY |
+| `src/config/config_parse.c` | Parse `twilio_voice: {...}` block | MODIFY |
 | `~/.human/personas/<id>/overlays/voice_twilio.json` | Persona overlay for the new channel | NEW (user-authored) |
 | `tests/test_voice_codec.c` | μ-law/PCM round-trip + resample tests | NEW |
 | `tests/test_voice_vad.c` | VAD state transitions | NEW |
@@ -427,7 +427,7 @@ git commit -m "feat(voice): end-to-end pump loop with agent integration"
 
 **Files:**
 - Modify: `include/human/config.h` (add `hu_twilio_voice_config_t`)
-- Modify: `src/config_parse.c` (parse the block)
+- Modify: `src/config/config_parse.c` (parse the block)
 - Extend: existing config-extended test file
 
 - [ ] **Step 7.1: Add struct**

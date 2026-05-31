@@ -1849,7 +1849,9 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }
-    /* B2: free any rejected draft carried for a not-yet-registered turn. */
+    /* B2: free any rejected draft carried for a not-yet-registered turn.
+     * Uses the helper (defined above) rather than inlining the free — the
+     * helper is the same one the daemon's per-turn capture path calls. */
     hu_agent_sota_clear_rejected_draft(agent);
     /* Scratchpad's max_bytes is set in hu_agent_init (agent.c:629) and
      * populated per-turn by hu_agent_turn (agent_turn.c:8601). Without

@@ -22,7 +22,7 @@ Unify static skills (skillforge) and dynamically spawned agents under a layered 
 ## Evidence
 
 ### Implemented? (code exists)
-- `src/skillforge.c` (22 `hu_skillforge_*` functions).
+- `src/skills/skillforge.c` (22 `hu_skillforge_*` functions).
 - `src/agent/spawn.c:204,286` — `hu_agent_set_skillforge` called inside spawn paths.
 - `src/agent/spawn.c:489` — `hu_agent_pool_spawn` definition.
 - `src/agent/spawn.c:910-923` — `hu_agent_pool_spawn_named` (named registry spawn) calls back into `hu_agent_pool_spawn`.

@@ -227,7 +227,7 @@ upper bound; we hit ~7.4 KB at LTO, with headroom for one more backend.
 | 5 | `src/agent/reflection.c` | +30 lines | Add `hu_reflection_evaluate_via_reward_model()` so the reflection retry path can consume the same backend as the PRM. Old `hu_reflection_evaluate_llm` kept as a deprecated shim that the new prompt backend wraps. |
 | 6 | `include/human/ml/cli.h` | +2 lines | Declare `hu_ml_cli_prm_train`, `hu_ml_cli_prm_audit`. |
 | 7 | `src/ml/cli.c` | +20 lines | Dispatch `prm-train` and `prm-audit` to `cli_prm.c`. |
-| 8 | `src/config.c` + `include/human/config.h` | +20 lines | Add `personalization.reward_model.backend` and `personalization.reward_model.checkpoint_path` (defaults: `"prompt"`, `""`). Parse path tilde-expansion via existing helper. |
+| 8 | `src/config/config.c` + `include/human/config.h` | +20 lines | Add `personalization.reward_model.backend` and `personalization.reward_model.checkpoint_path` (defaults: `"prompt"`, `""`). Parse path tilde-expansion via existing helper. |
 | 9 | `CLAUDE.md` "M3 row" + "Personalization status" | +6 lines | Document the new `HU_VERIFIER_TRAINED` env var and the calibration gate honestly. |
 
 **Total new code (C only): ~13–14 KB source, ~7.4 KB compiled at LTO.** Within
