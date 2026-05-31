@@ -1,0 +1,144 @@
+name: CI Auto-Triage (main red)
+
+# Phase 5 self-healing (docs/plans/2026-05-31-ci-sota-optimization.md): when a
+# core gating workflow goes RED on `main`, open (or update) a single tracking
+# issue that scopes the regression — the failed run, the commit range since the
+# last green run of the SAME workflow, and a ready-to-paste bisect harness that
+# drives the `regression-hunter` agent. This turns "main is red, someone notice
+# eventually" into a durable, deduplicated, actionable record the instant it
+# happens. Read-only against the repo; the only mutation is the issue.
+#
+# Why `workflow_run`: it is the only trigger that fires AFTER another workflow
+# finishes and carries its conclusion + head_sha. The triage logic runs from the
+# default-branch copy of THIS file, so edits take effect once merged to main.
+#
+# SECURITY: untrusted input (the head-commit SUBJECT) is only ever passed as a
+# printf ARGUMENT (never a format string) and to gh/jq via env + --arg — never
+# interpolated into a shell command or an expanding heredoc. See
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+
+on:
+  workflow_run:
+    workflows:
+      - "Human CI"
+      - "M3 Closed-Loop Smoke"
+      - "RL Nightly (closed-loop validation)"
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+# Serialize triage per watched workflow so two near-simultaneous failures can't
+# race into two duplicate issues. Do NOT cancel-in-progress — every failure
+# deserves its record; the second run waits, then dedups against the first.
+concurrency:
+  group: ci-autotriage-${{ github.event.workflow_run.name }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    # Only act on genuine failures of a main-branch run. Skips success,
+    # cancelled, and skipped conclusions, and skips any non-main ref.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for commit-range scoping)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Open or update the main-red tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_NUM: ${{ github.event.workflow_run.run_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LABEL="ci-red-main"
+          TITLE="🔴 main CI red: ${WF_NAME}"
+
+          # Ensure the dedup label exists (idempotent — ignore "already exists").
+          gh label create "$LABEL" \
+            --color B60205 \
+            --description "Tracking issue for a red core workflow on main (auto-filed)" \
+            2>/dev/null || true
+
+          # Last GREEN run of the SAME workflow on main → the known-good baseline
+          # for the bisect range. May be empty if the workflow has never been
+          # green on main (then we fall back to the latest release tag).
+          LAST_GREEN_SHA="$(gh run list \
+            --workflow "$WF_NAME" --branch main --status success \
+            --limit 1 --json headSha --jq '.[0].headSha // empty' || true)"
+
+          # Untrusted: a commit subject can contain arbitrary text. NEVER place
+          # it in a command or an expanding heredoc — only as a printf argument.
+          BAD_SUBJECT="$(git log -1 --format='%s' "$BAD_SHA" 2>/dev/null || echo '(commit subject unavailable)')"
+
+          # Scope the regression window.
+          if [ -n "$LAST_GREEN_SHA" ] && git cat-file -e "${LAST_GREEN_SHA}^{commit}" 2>/dev/null; then
+            RANGE="${LAST_GREEN_SHA}..${BAD_SHA}"
+            COUNT="$(git rev-list --count "$RANGE" 2>/dev/null || echo '?')"
+            GOOD_REF="$LAST_GREEN_SHA"
+            SCOPE="${COUNT} commit(s) in ${RANGE} (since the last green ${WF_NAME} on main)."
+            SUSPECTS="$(git log --format='- %h %s' "$RANGE" 2>/dev/null | head -20 || true)"
+          else
+            GOOD_REF="$(git describe --tags --abbrev=0 2>/dev/null || echo 'HEAD~20')"
+            SCOPE="No green ${WF_NAME} run found on main; using last tag/fallback ${GOOD_REF} as the good baseline."
+            SUSPECTS="$(git log --format='- %h %s' "${GOOD_REF}..${BAD_SHA}" 2>/dev/null | head -20 || true)"
+          fi
+          [ -n "${SUSPECTS:-}" ] || SUSPECTS="(commit list unavailable)"
+
+          # Build the issue body with printf — untrusted values ($BAD_SUBJECT,
+          # $SUSPECTS) are ARGUMENTS to %s, so they cannot be interpreted as
+          # markup-breaking shell or format directives. Format strings are
+          # double-quoted with escaped literal backticks (\`); no $VAR ever
+          # appears inside a format string. The two ```fence``` lines stay
+          # single-quoted (a triple backtick is not a substitution).
+          BODY_FILE="$(mktemp)"
+          {
+            printf "## \`%s\` is red on \`main\`\n\n" "$WF_NAME"
+            printf -- "- **Failed run:** %s (run #%s)\n" "$RUN_URL" "$RUN_NUM"
+            printf -- "- **Head commit:** \`%s\` — %s\n" "$BAD_SHA" "$BAD_SUBJECT"
+            printf -- "- **Regression window:** %s\n\n" "$SCOPE"
+            printf "### Suspect commits (newest first, capped at 20)\n%s\n\n" "$SUSPECTS"
+            printf "### Bisect harness\n"
+            printf "Drive the \`regression-hunter\` agent, or bisect by hand:\n\n"
+            printf '```bash\n'
+            printf "git bisect start %s %s\n" "$BAD_SHA" "$GOOD_REF"
+            printf "# Swap in the command that reproduces THIS workflow's failing gate.\n"
+            printf "git bisect run bash -c 'cmake --preset dev && cmake --build --preset dev -j8 && ./build/human_tests'\n"
+            printf "git bisect reset\n"
+            printf '```\n\n'
+            printf "### Triage protocol\n"
+            printf "See \`.claude/rules/ci-queue-triage.md\` (systemic-vs-per-PR). If ≥3 workflows\n"
+            printf "went red on the same commit, this is systemic — fix once on main, not per-workflow.\n\n"
+            printf -- "---\n"
+            printf "_Auto-filed by \`.github/workflows/ci-autotriage.yml\`. New failures of this\n"
+            printf "workflow append a comment here instead of opening a duplicate._\n"
+          } >"$BODY_FILE"
+
+          # Dedup: an OPEN issue with this exact title + label is the live record
+          # for this workflow. Comment on it; otherwise open a fresh one. The
+          # exact-title match is done in awk (TITLE as a -v var, never
+          # interpolated into jq/shell) to stay injection-safe.
+          EXISTING="$(gh issue list --state open --label "$LABEL" \
+            --json number,title \
+            --jq '.[] | [.number, .title] | @tsv' \
+            | awk -F'\t' -v t="$TITLE" '$2 == t {print $1; exit}' || true)"
+
+          if [ -n "${EXISTING:-}" ]; then
+            echo "Updating existing tracking issue #${EXISTING}"
+            gh issue comment "$EXISTING" --body-file "$BODY_FILE"
+          else
+            echo "Opening new tracking issue"
+            gh issue create --title "$TITLE" --label "$LABEL" --body-file "$BODY_FILE"
+          fi
