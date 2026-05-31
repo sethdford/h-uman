@@ -37,8 +37,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef HU_IS_TEST
-
 #ifdef HU_ENABLE_SQLITE
 /* F23: Extract significant topic keywords from user text and record baselines.
  * Skips stopwords, records each significant word (3–32 chars) via topic_baselines. */
@@ -103,6 +101,16 @@ void hu_daemon_record_topic_baselines_from_text(hu_memory_t *memory, const char 
         topic_count++;
     }
 }
+#else
+void hu_daemon_record_topic_baselines_from_text(hu_memory_t *memory, const char *contact_id,
+                                                size_t contact_id_len, const char *text,
+                                                size_t text_len) {
+    (void)memory;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)text;
+    (void)text_len;
+}
 #endif /* HU_ENABLE_SQLITE */
 
 /* F27: Score engagement from their reply. reply_len>20 + positive words -> 0.8;
@@ -134,6 +142,7 @@ float hu_daemon_score_comfort_engagement(const char *reply, size_t reply_len) {
     return 0.3f;
 }
 
+#ifndef HU_IS_TEST
 /* Store a conversation summary as long-term memory.
  * Concatenates the user message and agent response, runs deep-extract
  * on the full exchange, and stores extracted facts scoped to the contact.
@@ -148,6 +157,12 @@ void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *me
         return;
     if (!user_msg || user_msg_len == 0)
         return;
+    /* The director can record non-text turns (tapback/silence) with a NULL
+     * response; never feed NULL into the "%.*s" formatter below. */
+    if (!response) {
+        response = "";
+        response_len = 0;
+    }
 #ifndef HU_ENABLE_SQLITE
     (void)graph;
 #endif
@@ -244,5 +259,21 @@ void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *me
     hu_deep_extract_result_deinit(&de, alloc);
     alloc->free(alloc->ctx, combined, total + 1);
 }
-
+#else
+void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memory,
+                                          hu_graph_t *graph, hu_agent_t *agent,
+                                          const char *session_id, size_t session_id_len,
+                                          const char *user_msg, size_t user_msg_len,
+                                          const char *response, size_t response_len) {
+    (void)alloc;
+    (void)memory;
+    (void)graph;
+    (void)agent;
+    (void)session_id;
+    (void)session_id_len;
+    (void)user_msg;
+    (void)user_msg_len;
+    (void)response;
+    (void)response_len;
+}
 #endif /* !HU_IS_TEST */
