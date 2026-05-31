@@ -279,7 +279,7 @@ def load_ground_truth():
 
 def main():
     # Short-circuit for --gate --gate-dry-run (no creds, no data needed)
-    if "--gate" in sys.argv and "--gate-dry-run" in sys.argv:
+    if USE_GATE and GATE_DRY_RUN:
         _gate.write_proxy_half(_GATE_PATH, {
             "verdict": "ADVISORY", "mode": "ADVISORY", "fool_rate": None,
             "baseline_fool_rate": None, "n_trials": 0, "n_real_pairs": 0,
