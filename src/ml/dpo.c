@@ -725,6 +725,185 @@ hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
 #endif
 }
 
+hu_error_t hu_dpo_export_paired(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
+                                hu_dpo_export_t *out) {
+    if (!collector || !alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    out->pairs = NULL;
+    out->count = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db)
+        return HU_OK;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(collector->db,
+                                "SELECT prompt, chosen, rejected, margin, source, timestamp "
+                                "FROM dpo_pairs ORDER BY id",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    /* Pass 1: load every non-empty row into a temp array, preserving id
+     * (chronological) order. A row is "complete" when both sides are >= 4
+     * chars, "chosen-only"/"rejected-only" when exactly one side is, and
+     * dropped when neither is (the 4-char floor mirrors hu_dpo_export). */
+    size_t cap = collector->pair_count > 0 ? collector->pair_count : 8;
+    hu_preference_pair_t *rows = alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+    if (!rows) {
+        sqlite3_finalize(stmt);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(rows, 0, cap * sizeof(hu_preference_pair_t));
+
+    size_t nrows = 0;
+    size_t skipped_empty = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *prompt = (const char *)sqlite3_column_text(stmt, 0);
+        const char *chosen = (const char *)sqlite3_column_text(stmt, 1);
+        const char *rejected = (const char *)sqlite3_column_text(stmt, 2);
+        const char *source = (const char *)sqlite3_column_text(stmt, 4);
+        size_t clen = chosen ? strlen(chosen) : 0;
+        size_t rlen = rejected ? strlen(rejected) : 0;
+        if (clen < 4 && rlen < 4) {
+            skipped_empty++; /* empty/short on both sides — untrainable */
+            continue;
+        }
+        if (nrows == cap) {
+            size_t old_cap = cap;
+            cap *= 2;
+            hu_preference_pair_t *grow =
+                alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+            if (!grow) {
+                alloc->free(alloc->ctx, rows, old_cap * sizeof(hu_preference_pair_t));
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(grow, 0, cap * sizeof(hu_preference_pair_t));
+            memcpy(grow, rows, nrows * sizeof(hu_preference_pair_t));
+            alloc->free(alloc->ctx, rows, old_cap * sizeof(hu_preference_pair_t));
+            rows = grow;
+        }
+        hu_preference_pair_t *p = &rows[nrows];
+        if (prompt) {
+            size_t L = strnlen(prompt, sizeof(p->prompt) - 1);
+            memcpy(p->prompt, prompt, L);
+            p->prompt_len = L;
+        }
+        if (chosen) {
+            size_t L = strnlen(chosen, sizeof(p->chosen) - 1);
+            memcpy(p->chosen, chosen, L);
+            p->chosen_len = L;
+        }
+        if (rejected) {
+            size_t L = strnlen(rejected, sizeof(p->rejected) - 1);
+            memcpy(p->rejected, rejected, L);
+            p->rejected_len = L;
+        }
+        p->margin = sqlite3_column_double(stmt, 3);
+        p->timestamp = sqlite3_column_int64(stmt, 5);
+        if (source) {
+            size_t L = strnlen(source, sizeof(p->source) - 1);
+            memcpy(p->source, source, L);
+            p->source_len = L;
+        }
+        nrows++;
+    }
+    sqlite3_finalize(stmt);
+
+    /* Output bound: complete rows (1:1) + zipped singles (each consumes >=1
+     * single-sided row) <= nrows. */
+    size_t out_cap = nrows ? nrows : 1;
+    hu_preference_pair_t *outp = alloc->alloc(alloc->ctx, out_cap * sizeof(hu_preference_pair_t));
+    bool *consumed = (bool *)alloc->alloc(alloc->ctx, out_cap * sizeof(bool));
+    if (!outp || !consumed) {
+        if (outp)
+            alloc->free(alloc->ctx, outp, out_cap * sizeof(hu_preference_pair_t));
+        if (consumed)
+            alloc->free(alloc->ctx, consumed, out_cap * sizeof(bool));
+        alloc->free(alloc->ctx, rows, cap * sizeof(hu_preference_pair_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(outp, 0, out_cap * sizeof(hu_preference_pair_t));
+    memset(consumed, 0, out_cap * sizeof(bool));
+
+#define HU_PAIR_COMPLETE(r)      ((r).chosen_len >= 4 && (r).rejected_len >= 4)
+#define HU_PAIR_CHOSEN_ONLY(r)   ((r).chosen_len >= 4 && (r).rejected_len < 4)
+#define HU_PAIR_REJECTED_ONLY(r) ((r).rejected_len >= 4 && (r).chosen_len < 4)
+
+    size_t nout = 0;
+
+    /* Pass 2: genuine two-sided rows pass through unchanged. */
+    for (size_t i = 0; i < nrows; i++) {
+        if (HU_PAIR_COMPLETE(rows[i]))
+            outp[nout++] = rows[i];
+    }
+
+    /* Pass 3: zip single-sided rows into pairs, SAME PROMPT ONLY. For each
+     * chosen-only row in chronological order, take the earliest still-unconsumed
+     * rejected-only row with an identical prompt. min(nc, nr) pairs per prompt;
+     * the remainder (the longer side) stays unconsumed and is dropped. Pairs are
+     * never formed across different prompts. */
+    for (size_t i = 0; i < nrows; i++) {
+        if (consumed[i] || !HU_PAIR_CHOSEN_ONLY(rows[i]))
+            continue;
+        size_t match = SIZE_MAX;
+        for (size_t j = 0; j < nrows; j++) {
+            if (consumed[j] || !HU_PAIR_REJECTED_ONLY(rows[j]))
+                continue;
+            if (rows[j].prompt_len == rows[i].prompt_len &&
+                memcmp(rows[j].prompt, rows[i].prompt, rows[i].prompt_len) == 0) {
+                match = j;
+                break;
+            }
+        }
+        if (match == SIZE_MAX)
+            continue; /* no rejected-only partner for this prompt yet */
+        consumed[i] = true;
+        consumed[match] = true;
+        hu_preference_pair_t *p = &outp[nout++];
+        memcpy(p->prompt, rows[i].prompt, rows[i].prompt_len);
+        p->prompt_len = rows[i].prompt_len;
+        memcpy(p->chosen, rows[i].chosen, rows[i].chosen_len);
+        p->chosen_len = rows[i].chosen_len;
+        memcpy(p->rejected, rows[match].rejected, rows[match].rejected_len);
+        p->rejected_len = rows[match].rejected_len;
+        p->margin = 1.0; /* an observed reaction preference */
+        p->timestamp = rows[i].timestamp;
+        memcpy(p->source, rows[i].source, rows[i].source_len);
+        p->source_len = rows[i].source_len;
+    }
+
+    /* Count single-sided rows with no same-prompt partner (dropped remainder). */
+    size_t dropped_remainder = 0;
+    for (size_t i = 0; i < nrows; i++) {
+        if (!HU_PAIR_COMPLETE(rows[i]) && !consumed[i])
+            dropped_remainder++;
+    }
+
+#undef HU_PAIR_COMPLETE
+#undef HU_PAIR_CHOSEN_ONLY
+#undef HU_PAIR_REJECTED_ONLY
+
+    alloc->free(alloc->ctx, rows, cap * sizeof(hu_preference_pair_t));
+    alloc->free(alloc->ctx, consumed, out_cap * sizeof(bool));
+
+    if (skipped_empty > 0 || dropped_remainder > 0) {
+        hu_log_info("dpo", NULL,
+                    "dpo_export_paired: %zu pairs (dropped %zu empty rows, "
+                    "%zu unpartnered single-sided rows)",
+                    nout, skipped_empty, dropped_remainder);
+    }
+
+    out->pairs = outp;
+    out->count = nout;
+    return HU_OK;
+#else
+    (void)collector;
+    (void)alloc;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
 hu_error_t hu_dpo_get_best_examples(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
                                     size_t max_examples, char **out_prompt_fragment,
                                     size_t *out_len) {
