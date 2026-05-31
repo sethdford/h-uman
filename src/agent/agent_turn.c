@@ -398,8 +398,8 @@ static int at_behavior_channel_class(const char *cn, size_t cl) {
  * When HU_TOM_DIRECTIVE is shadow, logs the directive but doesn't inject it.
  * When off (default), returns without appending anything. */
 static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact_id,
-                                          size_t contact_id_len, char **system_prompt,
-                                          size_t *system_prompt_len) {
+                                          size_t contact_id_len, const char *msg, size_t msg_len,
+                                          char **system_prompt, size_t *system_prompt_len) {
     if (!agent || !contact_id || contact_id_len == 0 || !system_prompt || !system_prompt_len ||
         !*system_prompt) {
         return HU_ERR_INVALID_ARGUMENT;
@@ -416,40 +416,79 @@ static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact
     if (!tom_enabled && !tom_shadow)
         return HU_OK; /* Mode is off, nothing to do */
 
-    /* Build a terse theory-of-mind summary based on contact profile if available */
-    const hu_contact_profile_t *cp =
-        hu_persona_find_contact(agent->persona, contact_id, contact_id_len);
-    if (!cp) {
-        return HU_OK; /* No contact profile, nothing to inject */
+    /* Build theory-of-mind directive from message content and conversation state */
+    hu_tom_belief_state_t tom_state;
+    hu_error_t err = hu_tom_init(&tom_state, agent->alloc, contact_id, contact_id_len);
+    if (err != HU_OK)
+        return err;
+
+    /* Scan the message for user expectations (e.g., "you remember when...", "as you know...") */
+    const char *detected_topic = NULL;
+    size_t detected_topic_len = 0;
+    hu_tom_expected_knowledge_t detected_knowledge_type;
+    if (msg && msg_len > 0) {
+        if (hu_tom_detect_user_expectation(msg, msg_len, &detected_topic, &detected_topic_len,
+                                           &detected_knowledge_type)) {
+            hu_error_t rec_err =
+                hu_tom_record_user_expectation(&tom_state, agent->alloc, detected_topic,
+                                               detected_topic_len, detected_knowledge_type);
+            (void)rec_err; /* Log if needed, but continue even on error */
+        }
     }
 
-    /* Build a short ToM directive summarizing what we know about this contact's mental state.
-     * Format: [theory of mind] Known X, unaware of Y — account for this. */
-    char tom_buf[512];
-    size_t tom_pos = 0;
+    /* Detect gaps: where user expects knowledge AI doesn't have */
+    hu_tom_gap_t *gaps = NULL;
+    size_t gap_count = 0;
+    hu_error_t gaps_err = hu_tom_detect_gaps(&tom_state, agent->alloc, &gaps, &gap_count);
+    (void)gaps_err; /* Continue even if gap detection fails */
 
-    tom_pos = hu_buf_appendf(tom_buf, sizeof(tom_buf), tom_pos,
-                             "### Theory of Mind\n"
-                             "Contact mental model: expects competence in [your known domains]; "
-                             "unaware of [your limits/constraints]. "
-                             "Adjust framing and transparency accordingly.\n");
-
-    if (tom_pos >= sizeof(tom_buf))
-        tom_pos = sizeof(tom_buf) - 1;
-
-    /* Append the directive to the system prompt */
-    size_t cur = *system_prompt_len;
-    size_t new_len = cur + tom_pos;
-    char *new_sp =
-        (char *)agent->alloc->realloc(agent->alloc->ctx, *system_prompt, cur + 1, new_len + 1);
-    if (!new_sp) {
-        return HU_ERR_OUT_OF_MEMORY;
+    /* Build directive from detected gaps */
+    char *tom_directive = NULL;
+    size_t tom_directive_len = 0;
+    if (gaps && gap_count > 0) {
+        tom_directive =
+            hu_tom_build_gap_directive(agent->alloc, gaps, gap_count, &tom_directive_len);
     }
 
-    memcpy(new_sp + cur, tom_buf, tom_pos);
-    new_sp[new_len] = '\0';
-    *system_prompt = new_sp;
-    *system_prompt_len = new_len;
+    /* If no gaps detected, build context from belief state instead */
+    char *tom_context = NULL;
+    size_t tom_context_len = 0;
+    if (!tom_directive && tom_state.belief_count > 0) {
+        hu_tom_build_context(&tom_state, agent->alloc, &tom_context, &tom_context_len);
+    }
+
+    /* Append whichever we have (directive takes precedence) */
+    size_t tom_buf_len = 0;
+    char *tom_buf = tom_directive ? tom_directive : tom_context;
+    if (tom_buf) {
+        tom_buf_len = tom_directive_len ? tom_directive_len : tom_context_len;
+        size_t cur = *system_prompt_len;
+        size_t new_len = cur + tom_buf_len;
+        char *new_sp =
+            (char *)agent->alloc->realloc(agent->alloc->ctx, *system_prompt, cur + 1, new_len + 1);
+        if (!new_sp) {
+            agent->alloc->free(agent->alloc->ctx, tom_directive,
+                               tom_directive_len > 0 ? tom_directive_len + 1 : 0);
+            agent->alloc->free(agent->alloc->ctx, tom_context,
+                               tom_context_len > 0 ? tom_context_len + 1 : 0);
+            hu_tom_gaps_free(agent->alloc, gaps, gap_count);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+
+        memcpy(new_sp + cur, tom_buf, tom_buf_len);
+        new_sp[new_len] = '\0';
+        *system_prompt = new_sp;
+        *system_prompt_len = new_len;
+    }
+
+    /* Clean up allocated resources */
+    if (tom_directive) {
+        agent->alloc->free(agent->alloc->ctx, tom_directive, tom_directive_len + 1);
+    }
+    if (tom_context) {
+        agent->alloc->free(agent->alloc->ctx, tom_context, tom_context_len + 1);
+    }
+    hu_tom_gaps_free(agent->alloc, gaps, gap_count);
 
     /* In shadow mode, the directive is appended silently for testing without affecting behavior */
     (void)tom_shadow;
@@ -4498,8 +4537,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             /* Append Theory of Mind directive if enabled and contact_id is available */
             if (agent->memory_session_id && agent->memory_session_id_len > 0) {
                 (void)at_append_tom_directive(agent, agent->memory_session_id,
-                                              agent->memory_session_id_len, &system_prompt,
-                                              &system_prompt_len);
+                                              agent->memory_session_id_len, msg, msg_len,
+                                              &system_prompt, &system_prompt_len);
             }
         }
     }
