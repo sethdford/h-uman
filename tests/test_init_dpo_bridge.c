@@ -38,6 +38,21 @@ static void mk_collector(hu_dpo_collector_t *col) {
     HU_ASSERT_EQ(hu_dpo_init_tables(col), HU_OK);
 }
 
+/* Tear down a collector built by mk_collector. The collector only BORROWS the
+ * sqlite handle (hu_dpo_collector_deinit just memsets — the caller owns the
+ * db), and mk_collector opens an in-memory db that no one else can reach, so
+ * without closing col->db here the entire :memory: database leaks. Linux
+ * LeakSanitizer (rl_sota preset) flagged this across every test as allocations
+ * from hu_dpo_init_tables / hu_dpo_record_pair. Close before deinit, since
+ * deinit zeroes the struct. */
+static void tear_collector(hu_dpo_collector_t *col) {
+#ifdef HU_ENABLE_SQLITE
+    if (col->db)
+        sqlite3_close(col->db);
+#endif
+    hu_dpo_collector_deinit(col);
+}
+
 static void test_init_dpo_bridge_replied_sets_chosen(void) {
     hu_dpo_collector_t col;
     mk_collector(&col);
@@ -55,7 +70,7 @@ static void test_init_dpo_bridge_replied_sets_chosen(void) {
     HU_ASSERT_EQ((int)n, 1);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_ignored_sets_rejected(void) {
@@ -75,7 +90,7 @@ static void test_init_dpo_bridge_ignored_sets_rejected(void) {
     HU_ASSERT_EQ((int)n, 1);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_pending_rejected(void) {
@@ -97,7 +112,7 @@ static void test_init_dpo_bridge_pending_rejected(void) {
     HU_ASSERT_EQ((int)n, 0);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_no_collector_returns_not_supported(void) {
@@ -145,7 +160,7 @@ static void test_init_dpo_bridge_pair_singles_pairs_replied_with_ignored(void) {
     HU_ASSERT_EQ((int)after, 3);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_pair_singles_is_idempotent(void) {
@@ -173,7 +188,7 @@ static void test_init_dpo_bridge_pair_singles_is_idempotent(void) {
     HU_ASSERT_EQ((int)paired_again, 0);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_pair_singles_does_not_cross_targets(void) {
@@ -196,7 +211,7 @@ static void test_init_dpo_bridge_pair_singles_does_not_cross_targets(void) {
     HU_ASSERT_EQ((int)paired, 0);
 
     hu_init_dpo_bridge_set_collector(NULL);
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 static void test_init_dpo_bridge_pair_singles_no_collector_returns_not_supported(void) {
@@ -252,7 +267,7 @@ static void test_init_dpo_bridge_set_collector_round_trips(void) {
     hu_init_dpo_bridge_set_collector(NULL);
     HU_ASSERT(hu_init_dpo_bridge_get_collector() == NULL);
 
-    hu_dpo_collector_deinit(&col);
+    tear_collector(&col);
 }
 
 void run_init_dpo_bridge_tests(void) {

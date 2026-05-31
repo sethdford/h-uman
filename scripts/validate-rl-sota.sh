@@ -11,6 +11,16 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# LeakSanitizer gate is FULLY ENABLED. The rl_sota preset is the only CI build
+# that runs under Linux ASan+LSan (LeakSanitizer is unsupported on macOS), so it
+# is the canonical leak gate for the RL stack. The 1406-allocation backlog was
+# driven to zero across three fixes: dpo-bridge :memory: db close, m3 agent
+# teardown, and the final residual 58 (reward-model GPT backbone leaked via an
+# undertrained 5-seed test whose Linux-FP-divergent assert longjmped past deinit
+# — fixed by 200-iter convergence + deinit-before-assert — plus a lora_ab CLI
+# dangling-else that skipped freeing strs_before on the promote path).
+# Do NOT add `detect_leaks=0` here: fix the leak instead.
+
 pass() { printf '\033[0;32mPASS\033[0m  %s\n' "$1"; }
 fail() { printf '\033[0;31mFAIL\033[0m  %s\n' "$1"; exit 1; }
 info() { printf '      %s\n' "$1"; }
@@ -48,11 +58,17 @@ fi
 
 info "Demo CLI (HUML wiring, no Gemma)"
 OUT="/tmp/human-rl-validate-$$"
+# NOTE: no --require-positive-delta here. The HUML backend is the CPU *reference*
+# trainer — it computes DPO loss but does NOT emit a fusable LoRA adapter
+# (adapter_path stays empty). A positive persona-fidelity delta requires applying
+# an adapter in the candidate rollout, which only the MLX backend produces, so a
+# positive delta is structurally unavailable on --backend huml. This step asserts
+# the closed-loop WIRING + 9 non-stub evidence files instead; the delta gate
+# belongs on the MLX path. (Demo now trains on real token-ID synthetic pairs.)
 ./build-rl-sota/human demo rl-closed-loop \
     --backend huml \
     --reaction-count 50 \
-    --out "${OUT}" \
-    --require-positive-delta
+    --out "${OUT}"
 for f in manifest.json training_curves.json eval_before.json eval_after.json \
     eval_delta.json delta_responses.md gate_decision.json adversarial_review.md reproduce.sh; do
     test -f "${OUT}/${f}" || fail "demo evidence dir missing ${f}"

@@ -301,14 +301,19 @@ static void test_preference_ranking_5_seeds(void) {
         }
 
         hu_reward_model_train_config_t train_cfg = {
-            .max_iters = 10,
+            /* 200 iters matches the proven-convergent setup in
+             * test_reward_model_train.c. The prior value (10) undertrained by
+             * 20x: the model squeaked past the ranking check on macOS FP but a
+             * Linux-GCC FP-divergent seed failed to rank, firing the assert
+             * below and longjmp-leaking the model (LSan-caught on Linux only). */
+            .max_iters = 200,
             .learning_rate = 20.0,
             .log_every = 0,
         };
 
         hu_reward_model_train_metrics_t metrics = {0};
-        HU_ASSERT_EQ(hu_reward_model_train(&rm, &alloc, train_pairs, 10, &train_cfg, &metrics),
-                     HU_OK);
+        hu_error_t train_rc =
+            hu_reward_model_train(&rm, &alloc, train_pairs, 10, &train_cfg, &metrics);
 
         /* Test on held-out pair */
         hu_preference_pair_t heldout;
@@ -325,17 +330,25 @@ static void test_preference_ranking_5_seeds(void) {
         heldout.rejected_len = strlen(heldout.rejected);
 
         double chosen_score = 0.0, rejected_score = 0.0;
-        HU_ASSERT_EQ(rm.vtable->score(rm.ctx, &alloc, heldout.prompt, heldout.prompt_len,
-                                      heldout.chosen, heldout.chosen_len, &chosen_score),
-                     HU_OK);
-        HU_ASSERT_EQ(rm.vtable->score(rm.ctx, &alloc, heldout.prompt, heldout.prompt_len,
-                                      heldout.rejected, heldout.rejected_len, &rejected_score),
-                     HU_OK);
+        hu_error_t sc_chosen = rm.vtable->score(rm.ctx, &alloc, heldout.prompt, heldout.prompt_len,
+                                                heldout.chosen, heldout.chosen_len, &chosen_score);
+        hu_error_t sc_rejected =
+            rm.vtable->score(rm.ctx, &alloc, heldout.prompt, heldout.prompt_len, heldout.rejected,
+                             heldout.rejected_len, &rejected_score);
+        bool ranked_ok = (chosen_score > rejected_score);
 
-        /* Verify chosen > rejected (preference ranking works) */
-        HU_ASSERT(chosen_score > rejected_score);
-
+        /* Deinit BEFORE asserting. HU_FAIL longjmps out of the test, so any
+         * failed assertion placed before this deinit would skip it and leak the
+         * model (LSan-caught on Linux). Capture every result into a local,
+         * free, then assert on the locals — keeps the test leak-safe under any
+         * assertion outcome. */
         rm.vtable->deinit(rm.ctx, &alloc);
+
+        HU_ASSERT_EQ(train_rc, HU_OK);
+        HU_ASSERT_EQ(sc_chosen, HU_OK);
+        HU_ASSERT_EQ(sc_rejected, HU_OK);
+        /* chosen > rejected (preference ranking works) */
+        HU_ASSERT(ranked_ok);
     }
 }
 

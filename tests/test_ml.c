@@ -4799,6 +4799,13 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     HU_ASSERT_NOT_NULL(agent.m3_adapter);
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 }
 #endif /* HU_ENABLE_ML */
 
@@ -5009,6 +5016,13 @@ static void test_m3_agent_on_provider_success_advances_probe_count(void) {
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 #else
     /* When ML is disabled, the hook is a no-op and there is no adapter
      * to read a counter from. The test passes by construction — this
@@ -5050,6 +5064,13 @@ static void test_m3_probe_count_advances_once_per_chat_single_call(void) {
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 #else
     HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
 #endif
@@ -5085,6 +5106,13 @@ static void test_m3_probe_count_advances_once_per_chat_multiple_calls(void) {
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 #else
     HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
 #endif
@@ -5216,6 +5244,13 @@ static void test_m3_record_chat_outcome_populates_token_estimates(void) {
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 #else
     /* ML disabled — the producer hook is a no-op. The contract that
      * token estimates are positive only holds when ML is compiled in. */
@@ -5291,6 +5326,13 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
+    /* hu_agent_m3_adapter_attach lazily creates these on the agent; this test
+     * uses a bare memset-0 agent (no hu_agent_deinit), so free them explicitly
+     * to avoid the Linux-LSan leak (rl_sota preset). Both destroys are NULL-safe. */
+    hu_m3_id_map_destroy(agent.m3_id_map);
+    agent.m3_id_map = NULL;
+    hu_m3_contact_routes_destroy(agent.m3_contact_routes);
+    agent.m3_contact_routes = NULL;
 #else
     hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0,
                                     NULL);
