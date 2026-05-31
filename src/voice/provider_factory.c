@@ -3,10 +3,20 @@
  * Centralizes API key lookup, model/voice defaults, and backend config construction.
  */
 #include "human/config.h"
+#include "human/core/privacy.h"
 #include "human/voice/gemini_live.h"
 #include "human/voice/mlx_local.h"
 #include "human/voice/provider.h"
 #include <string.h>
+
+/* Privacy kill-switch: the realtime cloud backends (Gemini Live / OpenAI
+ * Realtime) stream microphone audio to the cloud. Under privacy mode only the
+ * on-device "mlx_local" backend is permitted; cloud modes are refused at this
+ * factory boundary so every caller (gateway cp_voice_stream, voice_channel,
+ * daemon session-start) is covered by construction. */
+static bool voice_rt_mode_blocked_by_privacy(const char *mode) {
+    return hu_privacy_enforced() && strcmp(mode, "mlx_local") != 0;
+}
 
 hu_error_t hu_voice_provider_create_from_config(hu_allocator_t *alloc, const hu_config_t *config,
                                                 const char *mode,
@@ -15,6 +25,9 @@ hu_error_t hu_voice_provider_create_from_config(hu_allocator_t *alloc, const hu_
     if (!alloc || !config || !mode || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
+
+    if (voice_rt_mode_blocked_by_privacy(mode))
+        return HU_ERR_NOT_SUPPORTED;
 
     const char *rt_model = (config->voice.realtime_model && config->voice.realtime_model[0])
                                ? config->voice.realtime_model
@@ -122,6 +135,9 @@ hu_error_t hu_voice_provider_create_from_extras(hu_allocator_t *alloc, const cha
     if (!alloc || !mode || !extras || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
+
+    if (voice_rt_mode_blocked_by_privacy(mode))
+        return HU_ERR_NOT_SUPPORTED;
 
     const char *model = (extras->model_id && extras->model_id[0]) ? extras->model_id : NULL;
     const char *voice = (extras->voice_id && extras->voice_id[0]) ? extras->voice_id : NULL;

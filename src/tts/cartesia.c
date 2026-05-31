@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/privacy.h"
 #include "human/core/process_util.h"
 #include <stdio.h>
 #include <string.h>
@@ -19,15 +20,15 @@ const char *hu_tts_format_for_channel(const char *channel_name) {
 
 #if defined(HU_ENABLE_CARTESIA)
 
-#define CARTESIA_TTS_URL "https://api.cartesia.ai/tts/bytes"
-#define CARTESIA_VERSION "2026-03-01"
-#define DEFAULT_MODEL "sonic-3-2026-01-12"
-#define DEFAULT_EMOTION "content"
-#define DEFAULT_SPEED 0.95f
-#define DEFAULT_VOLUME 1.0f
-#define MOCK_MP3_HEADER 0xFF
+#define CARTESIA_TTS_URL    "https://api.cartesia.ai/tts/bytes"
+#define CARTESIA_VERSION    "2026-03-01"
+#define DEFAULT_MODEL       "sonic-3-2026-01-12"
+#define DEFAULT_EMOTION     "content"
+#define DEFAULT_SPEED       0.95f
+#define DEFAULT_VOLUME      1.0f
+#define MOCK_MP3_HEADER     0xFF
 #define MOCK_MP3_HEADER_LEN 4
-#define MOCK_MP3_REPEAT 100
+#define MOCK_MP3_REPEAT     100
 
 #if !HU_IS_TEST && defined(HU_HTTP_CURL)
 /* Cartesia /tts/bytes supports mp3 and wav containers (not ogg). */
@@ -49,17 +50,21 @@ static cartesia_api_container_t api_container_for_output_format(const char *outp
 
 static hu_error_t append_output_format_json(hu_json_buf_t *jbuf, cartesia_api_container_t api) {
     if (api == CARTESIA_API_WAV)
-        return hu_json_buf_append_raw(jbuf,
+        return hu_json_buf_append_raw(
+            jbuf,
             "\"output_format\":{\"container\":\"wav\",\"encoding\":\"pcm_s16le\","
-            "\"sample_rate\":44100},\"generation_config\":{", 100);
-    return hu_json_buf_append_raw(jbuf,
+            "\"sample_rate\":44100},\"generation_config\":{",
+            100);
+    return hu_json_buf_append_raw(
+        jbuf,
         "\"output_format\":{\"container\":\"mp3\",\"sample_rate\":44100,\"bit_rate\":128000},"
-        "\"generation_config\":{", 95);
+        "\"generation_config\":{",
+        95);
 }
 
-static void apply_defaults(const hu_cartesia_tts_config_t *config,
-    const char **model_id, const char **voice_id, const char **emotion,
-    float *speed, float *volume, bool *nonverbals) {
+static void apply_defaults(const hu_cartesia_tts_config_t *config, const char **model_id,
+                           const char **voice_id, const char **emotion, float *speed, float *volume,
+                           bool *nonverbals) {
     if (config) {
         *model_id = config->model_id && config->model_id[0] ? config->model_id : DEFAULT_MODEL;
         *voice_id = config->voice_id ? config->voice_id : "";
@@ -78,12 +83,11 @@ static void apply_defaults(const hu_cartesia_tts_config_t *config,
 }
 #endif /* !HU_IS_TEST && HU_HTTP_CURL */
 
-hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
-    const char *api_key, size_t api_key_len,
-    const char *transcript, size_t transcript_len,
-    const hu_cartesia_tts_config_t *config,
-    const char *output_format,
-    unsigned char **out_bytes, size_t *out_len) {
+hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key,
+                                      size_t api_key_len, const char *transcript,
+                                      size_t transcript_len, const hu_cartesia_tts_config_t *config,
+                                      const char *output_format, unsigned char **out_bytes,
+                                      size_t *out_len) {
     if (!alloc || !out_bytes || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out_bytes = NULL;
@@ -93,6 +97,13 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     if (!transcript || transcript_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* Privacy kill-switch (human/core/privacy.h): Cartesia is cloud TTS egress.
+     * Refuse at this boundary so every caller is covered by construction — the
+     * daemon persona path (src/daemon.c) calls this directly, bypassing the
+     * voice_privacy_active gate in hu_voice_tts. Block before mock or network. */
+    if (hu_privacy_enforced())
+        return HU_ERR_NOT_SUPPORTED;
 
 #if HU_IS_TEST
     (void)config;
@@ -160,8 +171,8 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
     err = hu_json_append_string(&jbuf, emotion, strlen(emotion));
     if (err)
         goto fail;
-    n = snprintf(num_buf, sizeof(num_buf), ",\"volume\":%.2f,\"nonverbals\":%s}",
-        (double)volume, nonverbals ? "true" : "false");
+    n = snprintf(num_buf, sizeof(num_buf), ",\"volume\":%.2f,\"nonverbals\":%s}", (double)volume,
+                 nonverbals ? "true" : "false");
     if (n <= 0 || (size_t)n >= sizeof(num_buf)) {
         err = HU_ERR_INTERNAL;
         goto fail;
@@ -175,16 +186,15 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
 
     char headers_buf[768];
     n = snprintf(headers_buf, sizeof(headers_buf),
-        "X-API-Key: %.*s\nCartesia-Version: %s\nContent-Type: application/json",
-        (int)api_key_len, api_key, CARTESIA_VERSION);
+                 "X-API-Key: %.*s\nCartesia-Version: %s\nContent-Type: application/json",
+                 (int)api_key_len, api_key, CARTESIA_VERSION);
     if (n <= 0 || (size_t)n >= sizeof(headers_buf)) {
         err = HU_ERR_INVALID_ARGUMENT;
         goto fail;
     }
 
     hu_http_response_t resp = {0};
-    err = hu_http_request(alloc, CARTESIA_TTS_URL, "POST", headers_buf,
-        jbuf.ptr, jbuf.len, &resp);
+    err = hu_http_request(alloc, CARTESIA_TTS_URL, "POST", headers_buf, jbuf.ptr, jbuf.len, &resp);
     hu_json_buf_free(&jbuf);
     if (err != HU_OK)
         return err;
@@ -233,12 +243,11 @@ void hu_cartesia_tts_free_bytes(hu_allocator_t *alloc, unsigned char *bytes, siz
 
 #else
 
-hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
-    const char *api_key, size_t api_key_len,
-    const char *transcript, size_t transcript_len,
-    const hu_cartesia_tts_config_t *config,
-    const char *output_format,
-    unsigned char **out_bytes, size_t *out_len) {
+hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key,
+                                      size_t api_key_len, const char *transcript,
+                                      size_t transcript_len, const hu_cartesia_tts_config_t *config,
+                                      const char *output_format, unsigned char **out_bytes,
+                                      size_t *out_len) {
 #if HU_IS_TEST
     (void)config;
     (void)output_format;
@@ -248,6 +257,9 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     *out_bytes = NULL;
     *out_len = 0;
+    /* Privacy kill-switch parity with the HU_ENABLE_CARTESIA build. */
+    if (hu_privacy_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     static const unsigned char mock_header[4] = {0xFF, 0xFB, 0x90, 0x00};
     size_t mock_len = 4 * 100;
     unsigned char *mock = (unsigned char *)alloc->alloc(alloc->ctx, mock_len);
@@ -293,7 +305,7 @@ void hu_cartesia_tts_free_bytes(hu_allocator_t *alloc, unsigned char *bytes, siz
 
 /* --- Cartesia STT (always compiled; real HTTP path requires HU_HTTP_CURL) --- */
 
-#define CARTESIA_STT_URL "https://api.cartesia.ai/stt"
+#define CARTESIA_STT_URL           "https://api.cartesia.ai/stt"
 #define CARTESIA_STT_DEFAULT_MODEL "ink-whisper"
 #ifndef CARTESIA_VERSION
 #define CARTESIA_VERSION "2026-03-01"
