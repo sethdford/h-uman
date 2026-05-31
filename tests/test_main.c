@@ -9,6 +9,13 @@ const char *hu__suite_filter = NULL;
 const char *hu__test_filter = NULL;
 jmp_buf hu__jmp;
 
+/* Flaky-test quarantine (see HU_RUN_TEST_FLAKY in test_framework.h).
+ * Default 2 retries; overridable via HU_TEST_FLAKY_RETRIES (0 disables retry). */
+int hu__flaky_retries = 2;
+int hu__flaky_recovered = 0;
+int hu__quiet_fail = 0;
+
+void run_flaky_harness_tests(void);
 void run_allocator_tests(void);
 void run_data_loader_tests(void);
 void run_agent_modules_tests(void);
@@ -969,6 +976,8 @@ static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
     printf("  --suite=<name>   Run only suites whose name contains <name>\n");
     printf("  --filter=<name>  Run only tests whose function name contains <name>\n");
+    printf("  --flaky-retries=<n>  Extra attempts for HU_RUN_TEST_FLAKY tests "
+           "(default 2; 0 disables; env HU_TEST_FLAKY_RETRIES)\n");
     printf("  --help           Show this help message\n");
     printf("\nExamples:\n");
     printf("  %s --suite=config          # run config-related suites\n", prog);
@@ -1000,9 +1009,27 @@ int main(int argc, char **argv) {
             hu__suite_filter = argv[i] + 8;
         } else if (strncmp(argv[i], "--filter=", 9) == 0) {
             hu__test_filter = argv[i] + 9;
+        } else if (strncmp(argv[i], "--flaky-retries=", 16) == 0) {
+            hu__flaky_retries = atoi(argv[i] + 16);
+            if (hu__flaky_retries < 0)
+                hu__flaky_retries = 0;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
+        }
+    }
+
+    /* HU_TEST_FLAKY_RETRIES overrides the default (2); --flaky-retries= wins
+     * over both. 0 disables retry (HU_RUN_TEST_FLAKY behaves like HU_RUN_TEST). */
+    {
+        const char *fr = getenv("HU_TEST_FLAKY_RETRIES");
+        int cli_set = 0;
+        for (int i = 1; i < argc; i++)
+            if (strncmp(argv[i], "--flaky-retries=", 16) == 0)
+                cli_set = 1;
+        if (!cli_set && fr && *fr) {
+            int v = atoi(fr);
+            hu__flaky_retries = v < 0 ? 0 : v;
         }
     }
 
@@ -1013,7 +1040,10 @@ int main(int argc, char **argv) {
         printf("Suite filter: %s\n", hu__suite_filter);
     if (hu__test_filter)
         printf("Test filter:  %s\n", hu__test_filter);
+    if (hu__flaky_retries != 2)
+        printf("Flaky retries: %d\n", hu__flaky_retries);
 
+    run_flaky_harness_tests();
     run_allocator_tests();
     run_data_loader_tests();
     run_idempotency_tests();
