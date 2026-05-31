@@ -1644,6 +1644,14 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
 void hu_agent_sota_note_rejected_draft(hu_agent_t *agent, const char *draft, size_t draft_len) {
     if (!agent)
         return;
+    /* Skip auxiliary/proactive generations: best-of-N candidates and the post-turn
+     * deep-extract turn run with proactive_turn=true on a DIFFERENT prompt. Their
+     * losers must not become the main reply's alternative, or a tapback would pair
+     * the sent reply against an off-prompt draft. The daemon's explicit best-of-N /
+     * constitutional / turing / AI-tell notes run with proactive_turn=false (the
+     * candidate-gen toggle resets it), so those main-path losers still record. */
+    if (agent->proactive_turn)
+        return;
     /* Ignore too-short drafts: a < 4-byte candidate is a label/fragment, not a
      * real contrastive response (mirrors the floor in hu_dpo_export and
      * hu_dpo_record_from_retry). Most-recent meaningful draft wins. */

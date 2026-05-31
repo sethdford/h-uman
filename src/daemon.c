@@ -11144,6 +11144,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 hu_dpo_record_from_retry(&agent->sota.dpo_collector, combined,
                                                          combined_len, response, response_len, cand,
                                                          cand_len);
+                                /* B2 SOTA capture: the losing draft (old `response`) is a
+                                 * same-prompt contrastive candidate for a tapback pair. */
+                                hu_agent_sota_note_rejected_draft(agent, response, response_len);
                                 alloc->free(alloc->ctx, response, response_len + 1);
                                 response = cand;
                                 response_len = cand_len;
@@ -11152,6 +11155,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 hu_dpo_record_from_retry(&agent->sota.dpo_collector, combined,
                                                          combined_len, cand, cand_len, response,
                                                          response_len);
+                                /* B2 SOTA capture: the losing candidate is the contrastive draft.
+                                 */
+                                hu_agent_sota_note_rejected_draft(agent, cand, cand_len);
                                 alloc->free(alloc->ctx, cand, cand_len + 1);
                             }
                         }
@@ -11189,6 +11195,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_dpo_record_from_retry(&agent->sota.dpo_collector, combined,
                                                      combined_len, response, response_len,
                                                      cr.revised_response, cr.revised_response_len);
+                            /* B2 SOTA capture: the pre-rewrite draft is a same-prompt
+                             * contrastive candidate for a tapback pair. */
+                            hu_agent_sota_note_rejected_draft(agent, response, response_len);
                             alloc->free(alloc->ctx, response, response_len + 1);
                             response = cr.revised_response;
                             response_len = cr.revised_response_len;
@@ -11229,6 +11238,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                         if (has_ai_tell) {
                             retried = true;
+                            /* B2 SOTA capture: the AI-tell draft is a same-prompt contrastive
+                             * candidate; note it BEFORE freeing (the retry produces the sent
+                             * reply). */
+                            hu_agent_sota_note_rejected_draft(agent, response, response_len);
                             agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
                             response = NULL;
                             response_len = 0;
@@ -11490,6 +11503,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_dpo_record_from_retry(&agent->sota.dpo_collector, combined, combined_len,
                                              turing_rejected_resp, turing_rejected_len, response,
                                              response_len);
+                    /* B2 SOTA capture: the Turing-rejected draft is a same-prompt
+                     * contrastive candidate for a tapback pair. */
+                    hu_agent_sota_note_rejected_draft(agent, turing_rejected_resp,
+                                                      turing_rejected_len);
                 }
                 if (turing_rejected_resp) {
                     alloc->free(alloc->ctx, turing_rejected_resp, turing_rejected_len + 1);

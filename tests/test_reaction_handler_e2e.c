@@ -401,6 +401,41 @@ static void test_captured_draft_flows_to_exportable_pair(void) {
     hu_reaction_handler_reset_for_test();
 }
 
+/* B2 go-live (SOTA capture): hu_agent_sota_note_rejected_draft SKIPS auxiliary
+ * generations (proactive_turn=true) — best-of-N candidates and the post-turn
+ * deep-extract turn run a DIFFERENT prompt with proactive_turn set, and their
+ * losers must NOT overwrite the main reply's alternative (else a tapback pairs
+ * the sent reply against an off-prompt draft). The middle assertion fails if the
+ * proactive gate regresses. */
+static void test_sota_note_rejected_draft_skips_proactive_turns(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+
+    /* Main reply (proactive_turn == false) captures its same-prompt loser. */
+    agent.proactive_turn = false;
+    const char *main_alt = "Main reply alternative.";
+    hu_agent_sota_note_rejected_draft(&agent, main_alt, strlen(main_alt));
+    HU_ASSERT_NOT_NULL(agent.sota.last_rejected_draft);
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, main_alt);
+
+    /* An auxiliary/proactive turn must NOT clobber it, even with a valid draft. */
+    agent.proactive_turn = true;
+    hu_agent_sota_note_rejected_draft(&agent, "Off-prompt extraction draft.",
+                                      strlen("Off-prompt extraction draft."));
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, main_alt); /* unchanged — gate held */
+
+    /* Back on the main path, a fresh loser updates it again. */
+    agent.proactive_turn = false;
+    const char *newer = "Newer main loser.";
+    hu_agent_sota_note_rejected_draft(&agent, newer, strlen(newer));
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, newer);
+
+    hu_agent_sota_clear_rejected_draft(&agent);
+    HU_ASSERT_TRUE(agent.sota.last_rejected_draft == NULL);
+}
+
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
@@ -410,5 +445,6 @@ void run_reaction_handler_e2e_tests(void) {
     HU_RUN_TEST(test_negative_tapback_with_alternative_creates_complete_pair);
     HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
     HU_RUN_TEST(test_sota_note_rejected_draft_populates_then_clears);
+    HU_RUN_TEST(test_sota_note_rejected_draft_skips_proactive_turns);
     HU_RUN_TEST(test_captured_draft_flows_to_exportable_pair);
 }

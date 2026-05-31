@@ -6044,7 +6044,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     /* B2 go-live: carry this rejected draft so a later tapback on the
                      * sent reply forms a COMPLETE DPO pair (chosen = sent reply,
                      * rejected = this draft). The daemon reads it at reaction register
-                     * (src/daemon.c) and clears it at the next turn start. */
+                     * (src/daemon.c) and clears it at the next turn start.
+                     * hu_agent_sota_note_rejected_draft self-skips when proactive_turn
+                     * is set, so auxiliary in-turn generations can't contaminate this. */
                     hu_agent_sota_note_rejected_draft(agent, dpo_rejected_resp,
                                                       dpo_rejected_resp_len);
                     agent->alloc->free(agent->alloc->ctx, dpo_rejected_resp,
@@ -6611,6 +6613,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         agent->alloc, NULL, msg, msg_len, final_content, final_len,
                                         retry_content, retry_len,
                                         /*turn_kind=batch=*/2);
+                                    /* B2 go-live (SOTA capture): the validator-rejected
+                                     * draft is a same-prompt loser of the SENT reply — the
+                                     * highest-frequency free alternative source (validators
+                                     * run on every reply). note self-skips proactive turns. */
+                                    hu_agent_sota_note_rejected_draft(agent, final_content,
+                                                                      final_len);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
