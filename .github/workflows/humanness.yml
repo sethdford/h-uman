@@ -1,0 +1,91 @@
+name: humanness
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'scripts/run_humanness_deterministic.py'
+      - 'scripts/check_humanness_regression.py'
+      - 'docs/evaluation/humanness-baseline.json'
+      - '.github/workflows/humanness.yml'
+  schedule:
+    - cron: '0 2 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  humanness-deterministic:
+    name: Humanness (deterministic PR gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build libsqlite3-dev libcurl4-openssl-dev
+
+      - name: Build human (dev preset)
+        run: |
+          cmake --preset dev -B build
+          cmake --build --preset dev --target human -j$(nproc)
+
+      - name: Run deterministic humanness scorer
+        run: |
+          python3 scripts/run_humanness_deterministic.py > /tmp/humanness-scores.json
+          cat /tmp/humanness-scores.json
+
+      - name: Check humanness regression
+        run: |
+          python3 scripts/check_humanness_regression.py /tmp/humanness-scores.json
+
+      - name: Upload humanness scores artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humanness-scores
+          path: /tmp/humanness-scores.json
+          retention-days: 30
+
+  humanness-blind-ab:
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    name: Humanness (live-judge, scheduled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets availability
+        id: check-secrets
+        env:
+          HAS_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          HAS_LOCATION: ${{ secrets.VERTEX_LOCATION }}
+          HAS_API_KEY: ${{ secrets.VERTEX_API_KEY }}
+        run: |
+          if [ -z "$HAS_PROJECT_ID" ] || [ -z "$HAS_LOCATION" ] || [ -z "$HAS_API_KEY" ]; then
+            echo "secrets_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "secrets_available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip (no secrets)
+        if: steps.check-secrets.outputs.secrets_available == 'false'
+        run: |
+          echo "Live-judge secrets unavailable. Skipping advisory blind-A/B tier."
+          exit 0
+
+      - name: Placeholder blind-A/B (Task 5-6)
+        if: steps.check-secrets.outputs.secrets_available == 'true'
+        run: |
+          echo '{"status":"placeholder","note":"Live-judge tier requires Task 5-6 implementation"}' > /tmp/blind-ab-scores.json
+
+      - name: Upload blind-A/B artifact
+        if: always() && steps.check-secrets.outputs.secrets_available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: blind-ab-scores
+          path: /tmp/blind-ab-scores.json
+          retention-days: 30
