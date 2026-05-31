@@ -9,6 +9,17 @@ REACTION_COUNT="${REACTION_COUNT:-200}"
 PROMPT="${PROMPT:-what should I do first?}"
 DRY_RUN="${DRY_RUN:-0}"
 
+OUT_DIR="${OUT_DIR:-$HOME/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD}-step-$$}"
+
+# DRY_RUN validates the script's logic/paths without executing the MLX demo, so
+# it must run anywhere — including the Linux rl_sota nightly. Exit BEFORE the
+# Apple-Silicon + built-binary prerequisites, which only a real (MLX) run needs.
+if [ "$DRY_RUN" = "1" ]; then
+    echo "==> DRY_RUN=1; skipping Apple Silicon + MLX prerequisites and actual invocation"
+    echo "==> Output would be: $OUT_DIR"
+    exit 0
+fi
+
 echo "==> Verifying prerequisites..."
 test "$(uname -s)" = "Darwin" \
     || { echo "ERROR: Apple Silicon required. uname=$(uname -s)"; exit 1; }
@@ -16,14 +27,7 @@ test "$(uname -m)" = "arm64" \
     || { echo "ERROR: Apple Silicon required. arch=$(uname -m)"; exit 1; }
 test -x ./build-rl-sota/human \
     || { echo "ERROR: build-rl-sota/human missing. Run: cmake --preset rl_sota && cmake --build --preset rl_sota -j"; exit 1; }
-
-OUT_DIR="${OUT_DIR:-$HOME/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD}-step-$$}"
 echo "==> Output: $OUT_DIR"
-
-if [ "$DRY_RUN" = "1" ]; then
-    echo "==> DRY_RUN=1; skipping actual invocation"
-    exit 0
-fi
 
 set -x
 ./build-rl-sota/human demo rl-closed-loop \
