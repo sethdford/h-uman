@@ -73,6 +73,14 @@ jobs:
           enable-curl: "true"
           enable-all-channels: "true"
 
+      # setup-build sizes ccache at 500M, which thrashes once the vendored
+      # llama.cpp objects (ggml + llama) share the cache with h-uman. Bump to
+      # 2G so the rl_sota build's objects persist across nightly runs — this is
+      # what makes validate-rl-sota.sh's ccache launcher actually reuse the
+      # llama.cpp build instead of recompiling it from scratch each night.
+      - name: Enlarge ccache for the vendored llama.cpp build
+        run: ccache --set-config=max_size=2G
+
       - name: Resolve quick-mode flag
         id: mode
         env:

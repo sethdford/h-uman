@@ -68,8 +68,15 @@ validated against a real PR's check accounting, not edited blind.
   `.github/actions/setup-build` (installs ccache, caches `~/.cache/ccache`
   content-addressed keyed on src hash + prefix restore-keys, sets the launcher).
   Verified 2026-05-31 — no work needed; the original note here was wrong.
-- Remaining: cache the **llama.cpp / mlx** build trees for the rl_sota nightly
-  (its long pole is a from-scratch llama.cpp build every run).
+- ~~Remaining: cache the **llama.cpp** build for the rl_sota nightly~~ **DONE.**
+  The nightly's `validate-rl-sota.sh` ran its own `cmake --preset rl_sota` with
+  NO compiler launcher (setup-build's launcher applies to the `build` dir, not
+  the separate `build-rl-sota`), so llama.cpp recompiled from scratch every run
+  — the nightly's long pole. Fixed: validate-rl-sota.sh now adds
+  `CMAKE_C/CXX_COMPILER_LAUNCHER=ccache` (guarded on ccache present), and
+  rl-nightly.yml bumps `ccache max_size=2G` so the vendored llama.cpp objects
+  (ggml + llama) fit alongside h-uman's and persist across runs. ccache is
+  content-addressed → no stale-object risk; no-op locally without ccache.
 
 ## Phase 5 — intelligent / self-healing (wire existing assets)
 
