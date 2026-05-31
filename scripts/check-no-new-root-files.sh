@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Measured 2026-05-31
-ROOT_BASELINE=77
+ROOT_BASELINE=68
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

@@ -411,7 +411,7 @@ endif()
 # chat.db / Apple deps or wraps its chat.db SQL in an internal
 # `#if !HU_IS_TEST && defined(__APPLE__) ...` guard with a non-Apple stub, so
 # they compile clean on every platform. Unconditional core callers
-# (src/daemon_reaction_poll.c, src/daemon_social_tick.c,
+# (src/daemon/daemon_reaction_poll.c, src/daemon/daemon_social_tick.c,
 # src/agent/reaction_handler.c) plus tests reference their exported symbols on
 # every platform, so gating them caused undefined-reference link breaks in the
 # minimal / no-sqlite / cross-arm64 / HU_HAS_IMESSAGE=OFF CI variants.
@@ -551,12 +551,12 @@ set(HU_CORE_SOURCES
     # enriched-event columns (payload_data, message_summary_info,
     # group_action_type, balloon_bundle_id) and ingests into personal_model.
     # Test mode + non-Apple builds get a stub implementation.
-    src/daemon_imessage_observer.c
+    src/daemon/daemon_imessage_observer.c
     # Sprint A.6 wire: the missing production caller for the three
     # Tier-2 library-only scanners (gap / drift / signatures). Runs
     # every 6 hours from the daemon main loop, writes a JSON snapshot
     # to ~/.human/social_state.json.
-    src/daemon_social_tick.c
+    src/daemon/daemon_social_tick.c
     # Phase 4 of docs/plans/2026-05-18-imessage-sota.md: typedstream
     # attribute-run extractor — pulls mentions, OTP/2FA detection, link
     # spans, iOS 18 text effects, and formatting runs out of
@@ -1213,17 +1213,17 @@ set(HU_CORE_SOURCES
     src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
-    src/daemon_lifecycle.c
-    src/daemon_cron.c
-    src/daemon_routing.c
-    src/daemon_proactive.c
+    src/daemon/daemon_lifecycle.c
+    src/daemon/daemon_cron.c
+    src/daemon/daemon_routing.c
+    src/daemon/daemon_proactive.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
-    src/daemon_follow_up_watcher.c
+    src/daemon/daemon_follow_up_watcher.c
     src/cron.c
     src/crontab.c
     src/webhook.c
@@ -1326,12 +1326,12 @@ list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
 list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # CF-3: daemon reaction poll tick — always linked (daemon.c calls it
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
-list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_reaction_poll.c)
 
 # T9: daemon adapter for the M2 reflection loop. Body internally
 # gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
 # the unconditional list and links cleanly in the minimal variant.
-list(APPEND HU_CORE_SOURCES src/daemon_reflection_tick.c)
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
