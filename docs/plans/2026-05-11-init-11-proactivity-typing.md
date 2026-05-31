@@ -19,7 +19,7 @@ related:
   - ../standards/ai/conversation-design.md
   - ../standards/engineering/principles.md
 risk: medium
-scope: include/human/agent/, src/agent/, src/feeds/awareness.c, src/main.c, src/persona/, tests/
+scope: include/human/agent/, src/agent/, src/feeds/awareness.c, src/app/main.c, src/persona/, tests/
 last_audit: 2026-05-25
 ---
 
@@ -186,7 +186,7 @@ Naming compliance per `docs/standards/engineering/naming.md`:
 |---|------|---------|---------|
 | A | `src/feeds/awareness.c` | +35 / −0 | Call `hu_proactivity_gate` after `hu_feed_awareness_synthesize` and before recommending a topic for outbound; on DEFER, enqueue a re-check job; on SUPPRESS, write to inbox |
 | B | `src/agent/dispatcher.c` (or `src/channels/dispatch.c` whichever owns outbound) | +25 / −5 | Replace direct `ch->vtable->send(...)` for proactive paths with `hu_typing_send(..., &profile)`; reactive (user-initiated) paths bypass typing simulation by default unless persona overlay opts in |
-| C | `src/main.c` | +18 / −0 | Register `inbox` subcommand → `hu_main_inbox(...)` from new `main_inbox.c` |
+| C | `src/app/main.c` | +18 / −0 | Register `inbox` subcommand → `hu_main_inbox(...)` from new `main_inbox.c` |
 | D | `src/agent/scheduler.c` | +35 / −0 | Add `HU_JOB_PROACTIVITY_RECHECK` runner (re-runs the gate when the scheduler fires the deferred job; bounded re-defers ≤ 3 before forced SUPPRESS) |
 | E | `include/human/agent/scheduler.h` | +1 | New enum value `HU_JOB_PROACTIVITY_RECHECK` (before `HU_JOB_KIND_MAX`) |
 | F | `CMakeLists.txt` | +6 | Add new `src/agent/proactivity_gate.c`, `src/agent/typing_simulator.c`, `src/main_inbox.c` |

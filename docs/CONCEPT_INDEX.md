@@ -13,14 +13,14 @@ Use this to find the right files for a given task without searching the full cod
 | Concept                       | Primary Source Files                                                                                                           | Test Files                                      |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
 | **Allocator / arena / error** | `src/core/allocator.c`, `arena.c`, `error.c`                                                                                   | `test_allocator.c`, `test_core_extended.c`      |
-| **JSON parsing / building**   | `src/core/json.c`, `src/json_util.c`                                                                                           | `test_json.c`, `test_json_extended.c`           |
+| **JSON parsing / building**   | `src/core/json.c`, `src/util/json_util.c`                                                                                           | `test_json.c`, `test_json_extended.c`           |
 | **String / slice**            | `src/core/string.c`, `src/core/slice.c`                                                                                        | `test_string.c`, `test_slice.c`                 |
-| **HTTP client**               | `src/core/http.c`, `src/http_util.c`                                                                                           | `test_http.c`                                   |
-| **Config parsing**            | `src/config_parse.c`, `config_parse_agent.c`, `config_parse_channels.c`, `config_parse_providers.c`, `config_parse_behavior.c` | `test_config_parse.c`, `test_config_extended.c` |
-| **Config validation**         | `src/config_validate.c`, `src/config_schema.c`                                                                                 | `test_config_validation.c`                      |
-| **Config merge / migrate**    | `src/config_merge.c`, `src/config_migrate.c`                                                                                   | `test_config_migrate.c`                         |
-| **Config getters**            | `src/config_getters.c`, `src/config_serialize.c`                                                                               | `test_config_getters.c`                         |
-| **Config schema generation**  | `src/config_schema.c`, `include/human/config_schema.h`                                         | `test_config_schema.c`, `test_config_validation.c` |
+| **HTTP client**               | `src/core/http.c`, `src/util/http_util.c`                                                                                           | `test_http.c`                                   |
+| **Config parsing**            | `src/config/config_parse.c`, `config_parse_agent.c`, `config_parse_channels.c`, `config_parse_providers.c`, `config_parse_behavior.c` | `test_config_parse.c`, `test_config_extended.c` |
+| **Config validation**         | `src/config/config_validate.c`, `src/config/config_schema.c`                                                                                 | `test_config_validation.c`                      |
+| **Config merge / migrate**    | `src/config/config_merge.c`, `src/config/config_migrate.c`                                                                                   | `test_config_migrate.c`                         |
+| **Config getters**            | `src/config/config_getters.c`, `src/config/config_serialize.c`                                                                               | `test_config_getters.c`                         |
+| **Config schema generation**  | `src/config/config_schema.c`, `include/human/config_schema.h`                                         | `test_config_schema.c`, `test_config_validation.c` |
 
 ## Agent
 
@@ -73,12 +73,12 @@ Use this to find the right files for a given task without searching the full cod
 
 | Concept                        | Primary Source Files                                           | Test Files                                                        |
 | ------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **Channel factory / catalog**  | `src/channel_catalog.c`, `channel_manager.c`, `channel_loop.c` | `test_channel.c`, `test_channel_manager.c`, `test_channel_loop.c` |
+| **Channel factory / catalog**  | `src/channels/channel_catalog.c`, `channel_manager.c`, `channel_loop.c` | `test_channel.c`, `test_channel_manager.c`, `test_channel_loop.c` |
 | **CLI**                        | `src/channels/cli.c`, `src/agent/cli.c`                        | `test_cli.c`                                                      |
 | **Telegram / Discord / Slack** | `src/channels/telegram.c`, `discord.c`, `slack.c`              | `test_channel_all.c`                                              |
 | **iMessage**                   | `src/channels/imessage.c`                                      | `test_imessage_extended.c`                                        |
 | **Gmail**                      | `src/channels/gmail.c`                                         | `test_gmail.c`                                                    |
-| **Voice**                      | `src/channels/voice_channel.c`, `src/voice.c`                  | `test_voice.c`, `test_cartesia.c`, `test_local_voice.c`           |
+| **Voice**                      | `src/channels/voice_channel.c`, `src/voice/voice.c`                  | `test_voice.c`, `test_cartesia.c`, `test_local_voice.c`           |
 
 ## Voice
 
@@ -119,7 +119,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Vector / embeddings**         | `src/memory/vector/embeddings.c`, `store.c`, `chunker.c`                                                       | `test_vector.c`, `test_vector_full.c`, `test_vector_stores.c`                    |
 | **QMD (query memory dispatch)** | `src/memory/retrieval/qmd.c`                                                                                   | `test_qmd.c`                                                                     |
 | **Consolidation**               | `src/memory/consolidation.c`, `consolidation_engine.c`                                                         | `test_consolidation.c`, `test_consolidation_engine.c`                            |
-| **RAG pipeline**                | `src/rag.c`, `src/memory/rag_pipeline.c`                                                                       | `test_rag.c`, `test_rag_pipeline.c`                                              |
+| **RAG pipeline**                | `src/memory/rag.c`, `src/memory/rag_pipeline.c`                                                                       | `test_rag.c`, `test_rag_pipeline.c`                                              |
 | **Relational episodes**         | `src/memory/relational_episode.c`, `include/human/memory/relational_episode.h`                                 | `test_humanness_frontiers.c`                                                     |
 | **Episodic / STM**              | `src/memory/episodic.c`, `stm.c`                                                                               | `test_episodic.c`, `test_stm.c`                                                  |
 | **Emotional graph**             | `src/memory/emotional_graph.c`, `emotional_residue.c`, `emotional_moments.c`                                   | `test_emotional_graph.c`, `test_emotional_residue.c`, `test_emotional_moments.c` |
@@ -141,8 +141,8 @@ Use this to find the right files for a given task without searching the full cod
 | **Policy engine**   | `src/security/policy.c`, `policy_engine.c`                           | `test_security.c`, `test_security_extended.c`, `test_security_pipeline.c` |
 | **Sandbox**         | `src/security/sandbox.c`, `landlock.c`, `firejail.c`, `bubblewrap.c` | `test_security.c`                                                         |
 | **Adversarial**     | `src/security/adversarial.c`                                         | `test_adversarial.c`, `test_adversarial_detect.c`                         |
-| **Auth**            | `src/auth.c`                                                         | `test_auth.c`                                                             |
-| **Path security**   | `src/net_security.c`                                                 | `test_net_security.c`, `test_path_security.c`                             |
+| **Auth**            | `src/security/auth.c`                                                         | `test_auth.c`                                                             |
+| **Path security**   | `src/security/net_security.c`                                                 | `test_net_security.c`, `test_path_security.c`                             |
 | **Privacy audit**   | `src/security/audit.c`                                               | `test_privacy_audit.c`                                                    |
 | **Arg inspector (AEGIS-style)** | `src/security/arg_inspector.c`, `include/human/security/arg_inspector.h`                       | `test_sota_wiring.c`                                                      |
 | **CoT audit**       | `src/security/cot_audit.c`, `include/human/security/cot_audit.h`     | `test_cot_audit.c`, `test_sota_wiring.c`                                  |
@@ -217,7 +217,7 @@ Use this to find the right files for a given task without searching the full cod
 | Concept                         | Primary Source Files                                         | Test Files                               |
 | ------------------------------- | ------------------------------------------------------------ | ---------------------------------------- |
 | **Turing score (S2S, 18-dim)**  | `src/eval/turing_score.c`, `include/human/eval/turing_score.h` | `test_turing_score.c`, `test_sota_research.c` |
-| **W16 continuous evaluation (vtable)** | `src/evaluation/evaluation.c`, `evaluation_locomo.c`, `evaluation_longmemeval.c`, `evaluation_dmr.c`, `evaluation_minja.c`, `evaluation_memoryagentbench.c`, `evaluation_frontier_compare.c`, `evaluation_legacy_bridge.c`, `evaluation_facade_recall.c`, `include/human/evaluation/evaluation.h`, `src/cli_evaluation.c` | `test_w16_evaluation.c`, `test_w16_eval_cli.c` |
+| **W16 continuous evaluation (vtable)** | `src/evaluation/evaluation.c`, `evaluation_locomo.c`, `evaluation_longmemeval.c`, `evaluation_dmr.c`, `evaluation_minja.c`, `evaluation_memoryagentbench.c`, `evaluation_frontier_compare.c`, `evaluation_legacy_bridge.c`, `evaluation_facade_recall.c`, `include/human/evaluation/evaluation.h`, `src/eval/cli_evaluation.c` | `test_w16_evaluation.c`, `test_w16_eval_cli.c` |
 
 ## Other Subsystems
 
@@ -229,15 +229,15 @@ Use this to find the right files for a given task without searching the full cod
 | **Intelligence / skills**                              | `src/intelligence/skills.c`, `skill_system.c`, `reflection.c`, `experience.c`                                                   | `test_skills.c`, `test_skill_system.c`, `test_intelligence.c`, `test_experience.c` |
 | **Peripherals**                                        | `src/peripherals/factory.c`, `arduino.c`, `stm32.c`, `rpi.c`                                                                    | `test_peripheral.c`                                                                |
 | **Observability**                                      | `src/observability/log_observer.c`, `metrics_observer.c`, `bth_metrics.c`                                                       | `test_observer.c`, `test_bth_metrics.c`                                            |
-| **Subagent / MCP**                                     | `src/subagent.c`, `src/mcp.c`, `src/mcp_server.c`                                                                               | `test_subagent.c`, `test_mcp.c`                                                    |
-| **Session**                                            | `src/session.c`                                                                                                                 | `test_session.c`                                                                   |
+| **Subagent / MCP**                                     | `src/subagent.c`, `src/mcp/mcp.c`, `src/mcp/mcp_server.c`                                                                               | `test_subagent.c`, `test_mcp.c`                                                    |
+| **Session**                                            | `src/agent/session.c`                                                                                                                 | `test_session.c`                                                                   |
 | **WebSocket client**                                   | `src/websocket/websocket.c`                                                                                                     | `test_websocket.c`, `test_ws_integration.c`                                        |
 | **Tunnel**                                             | `src/tunnel/ngrok.c`, `cloudflare.c`, `tailscale.c`                                                                             | `test_tunnel.c`                                                                    |
-| **Voice / TTS / WebRTC**                               | `src/voice.c`, `src/voice_config.c`, `src/voice/realtime.c`, `src/voice/webrtc.c`, `src/tts/audio_pipeline.c`, `src/tts/emotion_map.c`                | `test_voice.c`, `test_webrtc.c`, `test_audio_pipeline.c`, `test_emotion_map.c`     |
+| **Voice / TTS / WebRTC**                               | `src/voice/voice.c`, `src/voice/voice_config.c`, `src/voice/realtime.c`, `src/voice/webrtc.c`, `src/tts/audio_pipeline.c`, `src/tts/emotion_map.c`                | `test_voice.c`, `test_webrtc.c`, `test_audio_pipeline.c`, `test_emotion_map.c`     |
 | **Paperclip**                                          | `src/paperclip/client.c`, `heartbeat.c`                                                                                         | `test_paperclip.c`                                                                 |
-| **Eval**                                               | `src/eval.c`, `eval_suites/*.json`, `scripts/adversarial-eval-harness.py`, `scripts/redteam-eval-fleet.sh`, `scripts/redteam-live.sh` | `test_eval.c`, `test_adversarial_detect.c`                                         |
+| **Eval**                                               | `src/eval/eval.c`, `eval_suites/*.json`, `scripts/adversarial-eval-harness.py`, `scripts/redteam-eval-fleet.sh`, `scripts/redteam-live.sh` | `test_eval.c`, `test_adversarial_detect.c`                                         |
 | **Daemon / worker pool**                         | `src/daemon.c`, `src/gateway/gateway.c`, `scripts/daemon-*`, `.claude/daemon-config.json` | `test_daemon.c` (if exists) |
-| **A2A**                                                | `src/a2a.c`                                                                                                                     | `test_a2a.c`                                                                       |
+| **A2A**                                                | `src/agent/a2a.c`                                                                                                                     | `test_a2a.c`                                                                       |
 
 ## Design system / tokens
 
@@ -274,7 +274,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Peripheral control tool** | `src/tools/peripheral_ctrl.c`                                                                            | `test_peripheral_ctrl.c` |
 | **Skill runner tool**       | `src/tools/skill_run.c`                                                                                  | `test_agent_registry.c`  |
 | **Skills ↔ agents**         | `docs/standards/ai/skills-vs-agents.md`, `docs/plans/2026-03-20-static-skills-dynamic-agents-unification.md` | `test_subsystems` (catalog) |
-| **Skill prompt catalog**    | `src/skillforge.c` (`hu_skillforge_build_prompt_catalog`), `src/agent/agent_turn.c`                     | `test_subsystems`        |
+| **Skill prompt catalog**    | `src/skills/skillforge.c` (`hu_skillforge_build_prompt_catalog`), `src/agent/agent_turn.c`                     | `test_subsystems`        |
 | **PWA bridge**              | `src/pwa/bridge.c`, `context.c`, `drivers.c`, `learner.c`                                                | `test_pwa.c`             |
 | **ML subsystem**            | `src/ml/gpt.c`, `train.c`, `prepare.c`, `tokenizer_bpe.c`, `dataloader.c`, `evaluator.c`, `experiment.c`, `dpo.c`, `lora.c`, `cli.c`, `checkpoint.c`, `agent_trainer.c`, `m3_frontier_adapter.c`, `include/human/ml/m3_frontier_adapter.h` | `test_ml.c` |
 | **Research feeds**          | `src/feeds/research.c`, `file_ingest.c`, `gmail.c`, `imessage.c`, `twitter.c`                            | `test_research_feeds.c`  |
@@ -290,7 +290,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Vertex auth (ADC)**       | `src/core/vertex_auth.c`, `include/human/core/vertex_auth.h`                                             | `test_media_gen.c`       |
 | **Vision OCR tool**         | `src/tools/vision_ocr.c`, `vision_ocr_apple.m`, `include/human/tools/vision_ocr.h`                      | `test_vision_ocr.c`      |
 | **Media generation**        | `src/tools/media_image.c`, `media_video.c`, `media_gif.c`                                                | `test_media_gen.c`       |
-| **Music (iTunes + Spotify + taste + persistence)** | `src/music.c`, `include/human/music.h`                                                            | `test_music.c`           |
+| **Music (iTunes + Spotify + taste + persistence)** | `src/multimodal/music.c`, `include/human/music.h`                                                            | `test_music.c`           |
 | **Image gen (proactive + download)** | `src/tools/image_gen.c`, `include/human/tools/image_gen.h`                                            | `test_image_gen.c`       |
 | **Send voice message**      | `src/tools/send_voice_message.c`, `include/human/tools/send_voice_message.h`                             | `test_send_voice_message.c` |
 

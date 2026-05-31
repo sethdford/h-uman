@@ -411,7 +411,7 @@ endif()
 # chat.db / Apple deps or wraps its chat.db SQL in an internal
 # `#if !HU_IS_TEST && defined(__APPLE__) ...` guard with a non-Apple stub, so
 # they compile clean on every platform. Unconditional core callers
-# (src/daemon_reaction_poll.c, src/daemon_social_tick.c,
+# (src/daemon/daemon_reaction_poll.c, src/daemon/daemon_social_tick.c,
 # src/agent/reaction_handler.c) plus tests reference their exported symbols on
 # every platform, so gating them caused undefined-reference link breaks in the
 # minimal / no-sqlite / cross-arm64 / HU_HAS_IMESSAGE=OFF CI variants.
@@ -521,19 +521,19 @@ find_package(Threads QUIET)
 # Core library sources (Phase 4-6, 11: agent, providers, channels, tools, memory, tunnel, gateway, runtime)
 # Channels and memory engines are conditionally added above
 set(HU_CORE_SOURCES
-    src/platform.c
+    src/app/platform.c
     src/platform/calendar_macos.c
-    src/terminal.c
-    src/util.c
-    src/json_util.c
-    src/bus.c
-    src/session.c
-    src/channel_loop.c
-    src/channel_manager.c
-    src/auth.c
-    src/identity.c
-    src/state.c
-    src/heartbeat.c
+    src/peripherals/terminal.c
+    src/util/util.c
+    src/util/json_util.c
+    src/agent/bus.c
+    src/agent/session.c
+    src/channels/channel_loop.c
+    src/channels/channel_manager.c
+    src/security/auth.c
+    src/security/identity.c
+    src/agent/state.c
+    src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
     src/core/rand.c
@@ -551,12 +551,12 @@ set(HU_CORE_SOURCES
     # enriched-event columns (payload_data, message_summary_info,
     # group_action_type, balloon_bundle_id) and ingests into personal_model.
     # Test mode + non-Apple builds get a stub implementation.
-    src/daemon_imessage_observer.c
+    src/daemon/daemon_imessage_observer.c
     # Sprint A.6 wire: the missing production caller for the three
     # Tier-2 library-only scanners (gap / drift / signatures). Runs
     # every 6 hours from the daemon main loop, writes a JSON snapshot
     # to ~/.human/social_state.json.
-    src/daemon_social_tick.c
+    src/daemon/daemon_social_tick.c
     # Phase 4 of docs/plans/2026-05-18-imessage-sota.md: typedstream
     # attribute-run extractor — pulls mentions, OTP/2FA detection, link
     # spans, iOS 18 text effects, and formatting runs out of
@@ -574,25 +574,25 @@ set(HU_CORE_SOURCES
     src/core/process_util.c
     src/sse/sse_client.c
     src/websocket/websocket.c
-    src/net_security.c
-    src/config.c
-    src/config_schema.c
-    src/config_merge.c
-    src/config_migrate.c
-    src/config_serialize.c
-    src/config_getters.c
-    src/config_validate.c
-    src/config_types.c
-    src/config_mutator.c
-    src/config_parse.c
-    src/config_parse_channels.c
-    src/config_parse_providers.c
-    src/config_parse_agent.c
-    src/config_parse_behavior.c
-    src/capabilities.c
-    src/channel_catalog.c
-    src/channel_adapters.c
-    src/doctor.c
+    src/security/net_security.c
+    src/config/config.c
+    src/config/config_schema.c
+    src/config/config_merge.c
+    src/config/config_migrate.c
+    src/config/config_serialize.c
+    src/config/config_getters.c
+    src/config/config_validate.c
+    src/config/config_types.c
+    src/config/config_mutator.c
+    src/config/config_parse.c
+    src/config/config_parse_channels.c
+    src/config/config_parse_providers.c
+    src/config/config_parse_agent.c
+    src/config/config_parse_behavior.c
+    src/app/capabilities.c
+    src/channels/channel_catalog.c
+    src/channels/channel_adapters.c
+    src/doctor/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
@@ -605,18 +605,18 @@ set(HU_CORE_SOURCES
     src/doctor/exit_code.c
     src/doctor/json_output.c
     src/doctor/ws_consumer.c
-    src/doctor_fix.c
+    src/doctor/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
-    src/status.c
-    src/http_util.c
-    src/mcp.c
-    src/mcp_jsonrpc.c
-    src/mcp_transport_stdio.c
-    src/mcp_transport_sse.c
-    src/mcp_transport_http.c
+    src/observability/status.c
+    src/util/http_util.c
+    src/mcp/mcp.c
+    src/mcp/mcp_jsonrpc.c
+    src/mcp/mcp_transport_stdio.c
+    src/mcp/mcp_transport_sse.c
+    src/mcp/mcp_transport_http.c
     src/multimodal.c
     src/multimodal/calendar.c
     src/multimodal/document.c
@@ -624,17 +624,17 @@ set(HU_CORE_SOURCES
     src/multimodal/audio.c
     src/multimodal/video.c
     src/multimodal/multimodal.c
-    src/rag.c
-    src/service.c
-    src/skill_registry.c
+    src/memory/rag.c
+    src/agent/service.c
+    src/skills/skill_registry.c
     src/subagent.c
-    src/voice.c
-    src/voice_config.c
+    src/voice/voice.c
+    src/voice/voice_config.c
     src/voice/local_stt.c
     src/voice/local_tts.c
-    src/portable_atomic.c
-    src/agent_routing.c
-    src/health.c
+    src/util/portable_atomic.c
+    src/agent/agent_routing.c
+    src/observability/health.c
     src/security/security.c
     src/security/sycophancy_guard.c
     src/security/mcp_audit.c
@@ -658,7 +658,7 @@ set(HU_CORE_SOURCES
     src/security/skill_trust.c
     src/security/keystore.c
     src/security/audit_log.c
-    src/observability.c
+    src/observability/observability.c
     src/observability/log_observer.c
     src/observability/metrics_observer.c
     src/observability/multi_observer.c
@@ -716,8 +716,8 @@ set(HU_CORE_SOURCES
     src/runtime/docker.c
     src/runtime/gce.c
     src/runtime/factory.c
-    src/hook.c
-    src/hook_pipeline.c
+    src/security/hook.c
+    src/security/hook_pipeline.c
     src/agent/action_preview.c
     src/agent/agent.c
     src/agent/agent_plan.c
@@ -891,9 +891,9 @@ set(HU_CORE_SOURCES
     src/behavior/belief_update.c
     src/cognition/intrinsic_drive.c
     src/agent/prosocial_routine.c
-    src/permission.c
-    src/mcp_manager.c
-    src/mcp_tool_wrapper.c
+    src/security/permission.c
+    src/mcp/mcp_manager.c
+    src/mcp/mcp_tool_wrapper.c
     src/agent/compaction_structured.c
     src/agent/session_persist.c
     src/agent/instruction_discover.c
@@ -1135,7 +1135,7 @@ set(HU_CORE_SOURCES
     src/tools/memory_forget.c
     src/tools/bff_memory.c
     src/tools/doc_ingest.c
-    src/task_manager.c
+    src/agent/task_manager.c
     src/tools/ask_user.c
     src/tools/task_tools.c
     src/tools/webhook_tools.c
@@ -1189,7 +1189,7 @@ set(HU_CORE_SOURCES
     src/tools/declarative.c
     src/tools/mcp_resource_tools.c
     src/tools/cron_session_tools.c
-    src/mcp_server.c
+    src/mcp/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
     src/channels/behavior_class.c
@@ -1200,42 +1200,42 @@ set(HU_CORE_SOURCES
     src/security/policy_engine.c
     src/security/replay.c
     src/plugins/registry.c
-    src/plugin_loader.c
-    src/plugin_discovery.c
+    src/plugins/plugin_loader.c
+    src/plugins/plugin_discovery.c
     src/skills/skill_scaffold.c
     src/context/context_engine.c
     src/context/context_engine_rag.c
-    src/mcp_registry.c
-    src/onboard.c
+    src/mcp/mcp_registry.c
+    src/onboard/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
     src/onboard/step_welcome.c
     src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
-    src/daemon_lifecycle.c
-    src/daemon_cron.c
-    src/daemon_routing.c
-    src/daemon_proactive.c
+    src/daemon/daemon_lifecycle.c
+    src/daemon/daemon_cron.c
+    src/daemon/daemon_routing.c
+    src/daemon/daemon_proactive.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
-    src/daemon_follow_up_watcher.c
-    src/cron.c
-    src/crontab.c
-    src/webhook.c
-    src/migration.c
-    src/version.c
-    src/cli_commands.c
-    src/cli_ctl.c
-    src/cli_evaluation.c
-    src/cost.c
-    src/usage.c
-    src/oauth.c
-    src/vertex_adc.c
+    src/daemon/daemon_follow_up_watcher.c
+    src/daemon/cron.c
+    src/daemon/crontab.c
+    src/gateway/webhook.c
+    src/memory/migration.c
+    src/app/version.c
+    src/app/cli_commands.c
+    src/app/cli_ctl.c
+    src/eval/cli_evaluation.c
+    src/observability/cost.c
+    src/observability/usage.c
+    src/security/oauth.c
+    src/security/vertex_adc.c
     src/agent/init_proposer.c
     src/agent/init_outcome.c
     src/agent/prompt_budget.c
@@ -1267,7 +1267,7 @@ if(HU_ENABLE_PERIPHERALS)
         src/peripherals/stm32.c
         src/peripherals/rpi.c
         src/peripherals/factory.c
-        src/hardware.c
+        src/peripherals/hardware.c
         src/tools/hardware_info.c
         src/tools/hardware_memory.c
         src/tools/i2c.c
@@ -1326,17 +1326,17 @@ list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
 list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # CF-3: daemon reaction poll tick — always linked (daemon.c calls it
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
-list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_reaction_poll.c)
 
 # T9: daemon adapter for the M2 reflection loop. Body internally
 # gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
 # the unconditional list and links cleanly in the minimal variant.
-list(APPEND HU_CORE_SOURCES src/daemon_reflection_tick.c)
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
-    src/a2a.c
-    src/eval.c
+    src/agent/a2a.c
+    src/eval/eval.c
     src/eval/shape.c
     src/eval/register.c
     src/eval/eval_score.c
@@ -1359,10 +1359,10 @@ list(APPEND HU_CORE_SOURCES
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
     src/eval/longmemeval.c
-    src/eval_judge.c
-    src/eval_benchmarks.c
-    src/mcp_resources.c
-    src/eval_dashboard.c
+    src/eval/eval_judge.c
+    src/eval/eval_benchmarks.c
+    src/mcp/mcp_resources.c
+    src/eval/eval_dashboard.c
     src/memory/corrective_rag.c
     src/memory/adaptive_rag.c
     src/memory/self_rag.c
@@ -1445,7 +1445,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
-    src/follow_up.c
+    src/agent/follow_up.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -1533,13 +1533,13 @@ list(APPEND HU_CORE_SOURCES
 )
 
 # Music preview integration (iTunes Search API + 30s preview download)
-list(APPEND HU_CORE_SOURCES src/music.c)
+list(APPEND HU_CORE_SOURCES src/multimodal/music.c)
 
 # Media inspiration (conversation cues -> medium picker, per-medium prompts, voice hints, TikTok URLs)
-list(APPEND HU_CORE_SOURCES src/inspiration.c)
+list(APPEND HU_CORE_SOURCES src/agent/inspiration.c)
 
 # YouTube Data API v3 search (find and verify canonical watch URLs)
-list(APPEND HU_CORE_SOURCES src/youtube.c)
+list(APPEND HU_CORE_SOURCES src/multimodal/youtube.c)
 
 # Paperclip integration (requires libcurl for API calls)
 if(HU_ENABLE_CURL)
@@ -1647,8 +1647,8 @@ endif()
 # Skillforge + Phase 8 intelligence (skills, reflection, feedback, meta-learning, cycle)
 if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES
-        src/skillforge.c
-        src/skills.c
+        src/skills/skillforge.c
+        src/skills/skills.c
         src/skills/skill_scaffold.c
         src/tools/skill_run.c
         src/intelligence/reflection.c
@@ -1676,7 +1676,7 @@ endif()
 
 # Update check/apply
 if(HU_ENABLE_UPDATE)
-    list(APPEND HU_CORE_SOURCES src/update.c)
+    list(APPEND HU_CORE_SOURCES src/app/update.c)
 endif()
 
 # ML training subsystem (BPE tokenizer, dataloader, experiment loop, GPT model)
@@ -2204,12 +2204,12 @@ endif()
 # --- Size optimization: function/data sections for link-time dead code elimination ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(human_core PRIVATE -ffunction-sections -fdata-sections)
-    # src/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
+    # src/onboard/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
     # required 4095-byte minimum string-literal length. The compiler we ship with
     # supports much longer literals; -Wno-overlength-strings just silences the
     # diagnostic so -Werror doesn't reject it. Scoped to this one file so the
     # global posture stays -Werror -Wall -Wextra -Wpedantic.
-    set_source_files_properties(src/onboard.c PROPERTIES
+    set_source_files_properties(src/onboard/onboard.c PROPERTIES
         COMPILE_OPTIONS "-Wno-overlength-strings")
 endif()
 
@@ -2571,14 +2571,14 @@ if(HU_ENABLE_ASAN)
     target_link_options(human_core PRIVATE -fsanitize=address)
 endif()
 
-# src/onboard.c carries the starter persona JSON as a C string literal that
+# src/onboard/onboard.c carries the starter persona JSON as a C string literal that
 # exceeds the 4095-byte ISO C99 maximum. This is intentional (the literal is
 # the single source of truth shared by `human init` and `human onboard`);
 # disable the warning for that file only.
-set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
+set_source_files_properties(src/onboard/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
 
 # --- Main executable ---
-add_executable(human src/main.c src/bootstrap.c)
+add_executable(human src/app/main.c src/app/bootstrap.c)
 target_link_libraries(human human_core)
 
 # US-8.3 per-target: Mach-O LC_UUID embeds host-derived randomness; zero
@@ -2826,7 +2826,7 @@ set(HU_TEST_EXTRA_MODULES)
 if(NOT HU_ENABLE_PERIPHERALS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/peripherals/arduino.c src/peripherals/stm32.c src/peripherals/rpi.c
-        src/peripherals/factory.c src/hardware.c
+        src/peripherals/factory.c src/peripherals/hardware.c
         src/tools/hardware_info.c src/tools/hardware_memory.c
         src/tools/i2c.c src/tools/peripheral_ctrl.c src/tools/spi.c)
 endif()
@@ -2868,8 +2868,8 @@ if(NOT HU_ENABLE_OTEL)
 endif()
 if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES
-        src/skillforge.c
-        src/skills.c
+        src/skills/skillforge.c
+        src/skills/skills.c
         src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
@@ -2891,7 +2891,7 @@ if(NOT HU_ENABLE_PUSH)
     list(APPEND HU_TEST_EXTRA_MODULES src/gateway/push.c)
 endif()
 if(NOT HU_ENABLE_UPDATE)
-    list(APPEND HU_TEST_EXTRA_MODULES src/update.c)
+    list(APPEND HU_TEST_EXTRA_MODULES src/app/update.c)
 endif()
 if(NOT HU_ENABLE_CRON)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -4105,7 +4105,7 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
 
-add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
+add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
     ${HU_ROOT}/src/gateway
@@ -4456,7 +4456,7 @@ target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wf
 
 # Per-file warning exceptions.
 #
-# src/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
+# src/onboard/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
 # literal that exceeds the 4095-byte ISO C99 minimum for string literals
 # (and so trips -Wpedantic -> -Werror=overlength-strings on Linux GCC). The
 # literal is legitimately large configuration data, not a bug; Apple Clang
@@ -4468,7 +4468,7 @@ target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wf
 # pattern used for data/prompts/safety_rules.txt). Until then, silence the
 # warning for this single file. Tracked: TODO move hu_starter_persona_json
 # into data/personas/starter.json.
-set_source_files_properties(src/onboard.c PROPERTIES
+set_source_files_properties(src/onboard/onboard.c PROPERTIES
     COMPILE_FLAGS "-Wno-overlength-strings")
 
 # Synthetic pressure tests (requires libcurl for real HTTP)

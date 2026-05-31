@@ -477,10 +477,10 @@ When running daemon in production:
 ## Key Paths
 
 - Daemon entry: `src/daemon.c`
-- Lifecycle: `src/daemon_lifecycle.c`
-- Routing: `src/daemon_routing.c`
-- Cron: `src/daemon_cron.c`
-- Proactive: `src/daemon_proactive.c`
+- Lifecycle: `src/daemon/daemon_lifecycle.c`
+- Routing: `src/daemon/daemon_routing.c`
+- Cron: `src/daemon/daemon_cron.c`
+- Proactive: `src/daemon/daemon_proactive.c`
 - Headers: `include/human/daemon*.h`
 - Tests: `tests/test_daemon*.c`
 - Config schema: `docs/standards/engineering/config-schema.md`

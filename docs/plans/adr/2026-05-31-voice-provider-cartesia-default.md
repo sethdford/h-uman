@@ -38,7 +38,7 @@ cloud engine. **Cartesia Sonic** is the chosen engine, and is **already
 integrated** in the codebase (`include/human/tts/cartesia.h`,
 `hu_cartesia_tts_synthesize` with cloned `voice_id` + context-derived `emotion` +
 `nonverbals`, model `sonic-3-2026-01-12`; STT `ink-whisper` via
-`hu_cartesia_stt_transcribe`). Provider routing already exists in `src/voice.c`
+`hu_cartesia_stt_transcribe`). Provider routing already exists in `src/voice/voice.c`
 (keyed on `voice.tts_provider` / `voice.stt_provider` / `voice.local_*_endpoint`).
 
 ### Verified Cartesia facts (2026-05-31; policy quotes via search snippets — confirm directly before contractual reliance)
@@ -114,7 +114,7 @@ The provider integration already exists; the gap is policy/defaults/disclosure:
 2. Make TTS default to Cartesia when an API key is present and `privacy_mode` is
    off; route to local Kokoro when `privacy_mode` is on. Keep STT local regardless.
 3. Graceful local fallback when Cartesia errors / no key (reuse existing fallback
-   chain in `src/voice.c`).
+   chain in `src/voice/voice.c`).
 4. A disclosure hook (M4) the UI/channels can surface; a consent gate (M6) before
    first voice-clone upload.
 5. Tests: precedence (privacy on→local, off+key→Cartesia), fallback, and that STT

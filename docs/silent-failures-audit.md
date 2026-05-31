@@ -111,7 +111,7 @@ if (push_err != HU_OK)
 
 ### 1.5 Webhook dispatcher: channel handler return value ignored
 
-**Location:** `src/main.c` lines 527–541
+**Location:** `src/app/main.c` lines 527–541
 
 **Issue:** `webhook_fn` is called but its return value (if any) is ignored. Channel handlers may signal errors that are never surfaced.
 
@@ -270,11 +270,11 @@ try {
 
 ---
 
-## 5. Config / Main (`src/config.c`, `src/main.c`)
+## 5. Config / Main (`src/config/config.c`, `src/app/main.c`)
 
 ### 5.1 Config defaults: OOM in `set_defaults` produces invalid config
 
-**Location:** `src/config.c` lines 26–172
+**Location:** `src/config/config.c` lines 26–172
 
 **Issue:** `hu_strdup` and `a->alloc` can return NULL. `set_defaults` does not check. Fields like `default_provider`, `default_model`, `memory_backend`, etc. may be NULL. Later code (e.g. `cfg.default_provider`) can crash or behave incorrectly.
 
@@ -288,7 +288,7 @@ try {
 
 ### 5.2 Plugin loading: error logged but execution continues
 
-**Location:** `src/main.c` lines 570–574, 1691–1696
+**Location:** `src/app/main.c` lines 570–574, 1691–1696
 
 **Issue:** `hu_plugin_load` failures are logged with `fprintf(stderr, "warning: failed to load plugin: ...")` but execution continues. This is acceptable for optional plugins, but the user may not see stderr in daemon/service mode.
 
@@ -298,7 +298,7 @@ try {
 
 ### 5.3 Gateway thread: error logged but not propagated
 
-**Location:** `src/main.c` lines 514–518
+**Location:** `src/app/main.c` lines 514–518
 
 **Issue:** `hu_gateway_run` errors are logged to stderr but the main process has no way to react (e.g. exit, restart). The gateway thread just returns.
 

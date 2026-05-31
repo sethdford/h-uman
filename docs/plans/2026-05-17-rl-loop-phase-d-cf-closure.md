@@ -253,8 +253,8 @@ No shared resolver exists. `src/feeds/apple.c::resolve_script_path` uses `HU_PRO
 - `src/daemon.c::hu_service_run` non-test branch starts at line 2187+. Main channel poll loop at 3905-3916. iMessage watchdog at 12217-12243 (30s cadence, only ticks when `poll_fn == hu_imessage_poll`).
 - `hu_imessage_poll_reactions` is **not declared in any public header** under `include/human/`; tests forward-declare it. Implementation: `src/channels/imessage_reactions.c:36-98`. Returns `HU_ERR_NOT_SUPPORTED` when `HU_IS_TEST` or non-Apple or `HU_ENABLE_SQLITE` off.
 - `hu_reaction_handler_set_collector` is `src/agent/reaction_handler.c:38`. `hu_reaction_handler_register_assistant_message_for_production` exists; **never called from `src/daemon.c` today.**
-- Config: `hu_reaction_collection_config_t` already parsed at `src/config_parse.c:210-234` with `enabled`, `poll_interval_seconds` (default 30), `channels[]`.
-- `src/daemon_reaction_poll.c` (entire file `#if HU_IS_TEST`-gated, only built when `HU_ENABLE_RL_FULL`) contains test-only `hu_daemon_tick_for_test`.
+- Config: `hu_reaction_collection_config_t` already parsed at `src/config/config_parse.c:210-234` with `enabled`, `poll_interval_seconds` (default 30), `channels[]`.
+- `src/daemon/daemon_reaction_poll.c` (entire file `#if HU_IS_TEST`-gated, only built when `HU_ENABLE_RL_FULL`) contains test-only `hu_daemon_tick_for_test`.
 
 ### D-4 work
 
@@ -354,7 +354,7 @@ No shared resolver exists. `src/feeds/apple.c::resolve_script_path` uses `HU_PRO
     * Must be an absolute path; relative paths rejected at config-parse time. */
    char chatdb_path[256];
    ```
-   Update `src/config_parse.c::parse_reaction_collection` to parse `reaction_collection.chatdb_path` and reject non-absolute values with `HU_ERR_INVALID_ARGUMENT`. (Mitigates path-traversal risk.)
+   Update `src/config/config_parse.c::parse_reaction_collection` to parse `reaction_collection.chatdb_path` and reject non-absolute values with `HU_ERR_INVALID_ARGUMENT`. (Mitigates path-traversal risk.)
 
 8. **Linux build safety**: ensure all new daemon hooks compile-out cleanly when `HU_HAS_IMESSAGE` is undefined. CI matrix includes Linux x86_64 — must stay green.
 

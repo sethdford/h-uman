@@ -14,7 +14,7 @@ Standards for designing, parsing, and validating configuration in human.
 
 The configuration system drives agent behavior, providers, channels, security policies, and runtime parameters. This standard ensures consistent schema design, validation, and upgrade paths.
 
-**Related code:** `src/config_parse.c`, `include/human/config.h`, `include/human/config_types.h`.
+**Related code:** `src/config/config_parse.c`, `include/human/config.h`, `include/human/config_types.h`.
 
 ---
 
@@ -237,7 +237,7 @@ typedef struct hu_agent_config {
 ### 2. Set Parse-Time Default
 
 ```c
-// src/config_parse.c
+// src/config/config_parse.c
 hu_error_t hu_config_parse_json(const hu_json_object_t *json, hu_config_t *out) {
     // ... existing parsing ...
     
@@ -428,6 +428,6 @@ RIGHT -- Validate all config values before use
 
 - Config header: `include/human/config.h`
 - Config types: `include/human/config_types.h`
-- Parser: `src/config_parse.c`
+- Parser: `src/config/config_parse.c`
 - Policy enforcement: `src/security/policy.c`
 - Tests: `tests/test_config_parse.c`, `tests/test_policy.c`

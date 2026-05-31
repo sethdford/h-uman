@@ -19,7 +19,7 @@ The adapter correctly bridges `hu_embedding_provider_t` (values/dimensions) to `
 
 ### 1. Memory leak when adapter allocation fails (Confidence: 95)
 
-**File:** `src/bootstrap.c` (lines 521–527) + `src/memory/vector/embedder_gemini_adapter.c` (lines 74–77)
+**File:** `src/app/bootstrap.c` (lines 521–527) + `src/memory/vector/embedder_gemini_adapter.c` (lines 74–77)
 
 **Problem:** When `hu_embedder_gemini_adapter_create` fails to allocate its context, the Gemini provider created just before is never deinited. Ownership is effectively transferred to the adapter; if the adapter cannot be created, the provider leaks.
 
@@ -90,7 +90,7 @@ if (result.dimensions == 0) {
 
 ### 3. No fallback to local embedder when adapter creation fails (Confidence: 90)
 
-**File:** `src/bootstrap.c` (lines 521–527)
+**File:** `src/app/bootstrap.c` (lines 521–527)
 
 **Problem:** If `hu_embedder_gemini_adapter_create` fails (e.g. OOM), `bi->embedder` is set to an embedder with `ctx == NULL`. The retrieval engine will then fail on `embed` with `HU_ERR_INVALID_ARGUMENT`. There is no fallback to the local embedder.
 

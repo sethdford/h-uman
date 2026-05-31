@@ -187,7 +187,7 @@ size_t steering_dir_len;
 
 ### 1.5 Configuration surface
 
-One config knob (`include/human/config.h` / `src/config.c`):
+One config knob (`include/human/config.h` / `src/config/config.c`):
 
 ```jsonc
 {
@@ -266,7 +266,7 @@ Key boundary: the persona/personal-model layer does **not** know the on-device m
 | `include/human/agent/frontier_prompt.h` | +4 | New bundle field |
 | `src/agent/agent_turn.c` | +35 | Thread `steering_dir` into the system-prompt composition site (next to existing `humanness_context`); already-existing free path picks up the new bundle field |
 | `include/human/config.h` | +15 | New `hu_steering_config_t` substruct on `hu_personalization_config_t` |
-| `src/config.c` | +45 | Parse + validate the new JSON subtree; defaults match §1.5 |
+| `src/config/config.c` | +45 | Parse + validate the new JSON subtree; defaults match §1.5 |
 | `tests/test_config_parse.c` | +40 | Round-trip tests for the new keys; defaults assertion |
 | `tests/test_frontier_prompt.c` (existing) | +60 | New cases: NOT_SUPPORTED → directive injected; HU_OK → no directive; force_prompt_side=true → directive even when supported |
 | `CMakeLists.txt` | +6 | Add `src/persona/steering.c` and the two new test files to the source/test lists |

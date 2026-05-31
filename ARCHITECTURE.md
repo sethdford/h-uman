@@ -175,7 +175,7 @@ All extension is done via vtable implementation + factory registration:
 | Extension Point | Vtable            | Factory                   | Guide                  |
 | --------------- | ----------------- | ------------------------- | ---------------------- |
 | AI Provider     | `hu_provider_t`   | `src/providers/factory.c` | `AGENTS.md` 7.1        |
-| Channel         | `hu_channel_t`    | `src/channel_catalog.c`   | `AGENTS.md` 7.2        |
+| Channel         | `hu_channel_t`    | `src/channels/channel_catalog.c`   | `AGENTS.md` 7.2        |
 | Tool            | `hu_tool_t`       | `src/tools/factory.c`     | `AGENTS.md` 7.3        |
 | Memory Engine   | `hu_memory_t`     | `src/memory/factory.c`    | `src/memory/CLAUDE.md` |
 | Runtime         | `hu_runtime_t`    | `src/runtime/factory.c`   | `AGENTS.md` 7.5        |
@@ -273,7 +273,7 @@ Per-turn humanness context (`src/agent/humanness.c`, `include/human/agent/humann
 
 ## Music Teasers
 
-`src/music.c` and `src/context/conversation.c` implement proactive music sharing. The daemon detects music-related conversation context, prompts the LLM for song suggestions, validates Apple Music/Spotify URLs, and sends them through the channel. Subject to moderation checks.
+`src/multimodal/music.c` and `src/context/conversation.c` implement proactive music sharing. The daemon detects music-related conversation context, prompts the LLM for song suggestions, validates Apple Music/Spotify URLs, and sends them through the channel. Subject to moderation checks.
 
 ## Paperclip Integration
 
@@ -281,7 +281,7 @@ Per-turn humanness context (`src/agent/humanness.c`, `include/human/agent/humann
 
 ## Evaluation
 
-**Turing-style scoring** (`turing_score.c`) implements an **18-dimension** heuristic (S2S taxonomy) for naturalness and conversational quality, complementing the broader eval harness in `src/eval.c` and adversarial suites.
+**Turing-style scoring** (`turing_score.c`) implements an **18-dimension** heuristic (S2S taxonomy) for naturalness and conversational quality, complementing the broader eval harness in `src/eval/eval.c` and adversarial suites.
 
 ## Key Directories
 

@@ -18,7 +18,7 @@ last_audit: 2026-05-25
 
 | Layer | What it does | Primary code paths |
 |--------|----------------|-------------------|
-| **Skill discovery** | Loads `~/.human/skills/` (and similar) into `hu_skillforge_t` at bootstrap | `src/bootstrap.c` (`hu_skillforge_discover`), `src/skillforge.c` |
+| **Skill discovery** | Loads `~/.human/skills/` (and similar) into `hu_skillforge_t` at bootstrap | `src/app/bootstrap.c` (`hu_skillforge_discover`), `src/skills/skillforge.c` |
 | **Static skill context in prompt** | Injects **name + description** for every **enabled** skill under `## Available Skills` | `src/agent/agent_turn.c` → `hu_prompt_build_system` in `src/agent/prompt.c` (after Intelligence block, before Memory Context) |
 | **Contact-scoped skills** | SQLite-backed learned / contact skills merged into the same skills string | `src/agent/agent_turn.c`, `hu_skill_build_contact_context` (`include/human/intelligence/skills_context.h`) |
 | **Progressive disclosure** | Full **SKILL.md** loaded when the model calls **`skill_run`** (and optional shell command under policy) | `src/tools/skill_run.c` |

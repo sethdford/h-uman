@@ -116,7 +116,7 @@ When an initiative goes to design-done, it must reference this table. New ordina
 
 ### A3 — Init #12 removes `hu_mcp_host_*` family with no shim
 
-**Problem.** Init #12 deletes `hu_mcp_host_create`, `hu_mcp_host_run`, `hu_mcp_host_destroy`. 5 live call sites in `src/main.c:2407-2421` will fail to link.
+**Problem.** Init #12 deletes `hu_mcp_host_create`, `hu_mcp_host_run`, `hu_mcp_host_destroy`. 5 live call sites in `src/app/main.c:2407-2421` will fail to link.
 
 **Fix.** Init #12 design doc §Rename slice expanded to: keep `hu_mcp_host_*` symbols as deprecated shims for one minor version (1.x → forwarded to the renamed `hu_mcp_engine_*`); add `__attribute__((deprecated("rename to hu_mcp_engine_*")))`; remove in the next major. Same pattern as the Phase 0 `hu_dpo_train_step` → `hu_dpo_judge_step` rename.
 

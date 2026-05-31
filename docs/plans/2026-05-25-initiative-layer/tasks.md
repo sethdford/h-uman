@@ -36,7 +36,7 @@ T8 — Slice 2: capture acceptance signal (did Seth reply? edit? ignore?)
 
 ## T1: Skeleton subsystem with governor-only logic
 **AC:** AC-1, AC-6, AC-7
-**Files:** `src/agent/init_proposer.c`, `include/human/agent/init_proposer.h`, registered with cron scheduler in `src/main.c`
+**Files:** `src/agent/init_proposer.c`, `include/human/agent/init_proposer.h`, registered with cron scheduler in `src/app/main.c`
 **Effort:** M (3-5 hrs)
 **Done when:**
 - `hu_init_proposer_create` / `hu_init_proposer_tick` / `hu_init_proposer_deinit` exist and link clean
@@ -71,7 +71,7 @@ T8 — Slice 2: capture acceptance signal (did Seth reply? edit? ignore?)
 
 ## T4: Wire to cron scheduler + iMessage channel
 **AC:** AC-5
-**Files:** `src/main.c` (register cron job), `src/agent/init_proposer.c` (send via channel)
+**Files:** `src/app/main.c` (register cron job), `src/agent/init_proposer.c` (send via channel)
 **Effort:** S (1-2 hrs)
 **Done when:**
 - A new cron job named `initiative_proposer_tick` registered at `tick_interval_sec` cadence.

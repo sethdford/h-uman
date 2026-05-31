@@ -104,7 +104,7 @@ asserts byte-count difference equals the DEAD-field sum.
 }
 ```
 All keys optional; missing keys use the documented defaults. Schema
-parsed in `src/config_parse.c::parse_prompt_budget` (new function).
+parsed in `src/config/config_parse.c::parse_prompt_budget` (new function).
 
 **AC-5: Doctor check exposes statistics.**
 A new doctor check `prompt_budget` registered in
@@ -144,7 +144,7 @@ test that hashes the system prompt for a fixture turn.
 
 - `src/agent/prompt.c::hu_prompt_build_system` — requires non-
   intrusive extension to populate the stats array.
-- `src/config_parse.c` — new top-level config key.
+- `src/config/config_parse.c` — new top-level config key.
 - `src/doctor/registry.c` — new check registration.
 - The 27 field-appender functions in agent_turn.c — only need to
   return their byte counts; no signature changes.

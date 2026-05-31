@@ -124,7 +124,7 @@ authored_for: docs/plans/2026-05-11-full-sota-rl-improvement-loop-design.md
 - Real LoRA primitives in `src/ml/lora.c` (low-rank A/B, apply, backward, save/load).
 - Real preference-data layer in `src/ml/dpo.c` (SQLite `dpo_pairs`, JSONL export).
 - Real hot-swap adapter loading at daemon startup and post-train (`src/daemon.c:2465-2532`, `src/agent/lora_training_runner.c:90-93`).
-- Real eval harness with LLM-as-judge, bootstrap regression detection, nightly W16 bench (`src/eval.c`, `evaluation.yml`).
+- Real eval harness with LLM-as-judge, bootstrap regression detection, nightly W16 bench (`src/eval/eval.c`, `evaluation.yml`).
 
 ## Findings — what Track D Phase 1 (in-flight) was shipping
 

@@ -26,7 +26,7 @@ The design keeps C11 constraints, `hu_` / `snake_case` naming, allocator discipl
 
 **Current pipeline (registry skills)**
 
-- Discovery: `hu_skillforge_discover` (`src/skillforge.c`), typically from `~/.human/skills/` at bootstrap (`src/bootstrap.c`).
+- Discovery: `hu_skillforge_discover` (`src/skills/skillforge.c`), typically from `~/.human/skills/` at bootstrap (`src/app/bootstrap.c`).
 - Prompt injection: `hu_skillforge_build_prompt_catalog` in `src/agent/agent_turn.c` (under `HU_HAS_SKILLS`), merged with optional SQLite-backed **learned** contact context via `hu_skill_build_contact_context` (`include/human/intelligence/skills_context.h`, `src/intelligence/skills.c`).
 - Deep content: `skill_run` tool (`src/tools/skill_run.c`, `include/human/tools/skill_run.h`).
 
@@ -221,7 +221,7 @@ hu_error_t hu_skillforge_build_prompt_catalog_weighted(
     size_t *out_len);
 ```
 
-Implementation: factor shared ranking from `hu_skillforge_build_prompt_catalog` (`src/skillforge.c`) so both paths call a common scorer; keep getenv behavior for `HUMAN_SKILLS_CONTEXT`, `HUMAN_SKILLS_TOP_K`, `HUMAN_SKILLS_CONTEXT_MAX_BYTES` unchanged.
+Implementation: factor shared ranking from `hu_skillforge_build_prompt_catalog` (`src/skills/skillforge.c`) so both paths call a common scorer; keep getenv behavior for `HUMAN_SKILLS_CONTEXT`, `HUMAN_SKILLS_TOP_K`, `HUMAN_SKILLS_CONTEXT_MAX_BYTES` unchanged.
 
 ---
 
@@ -309,7 +309,7 @@ Privacy: document that **on** persists per-contact skill usage to SQLite under t
 ## References
 
 - AutoAgent — structured prompt-level cognition and closed-loop updates: [arXiv:2603.09716](https://arxiv.org/abs/2603.09716)
-- Existing catalog builder: `include/human/skillforge.h`, `src/skillforge.c` — `hu_skillforge_build_prompt_catalog`
+- Existing catalog builder: `include/human/skillforge.h`, `src/skills/skillforge.c` — `hu_skillforge_build_prompt_catalog`
 - Agent integration: `src/agent/agent_turn.c` (skills context assembly; `hu_prompt_build_system` in `src/agent/prompt.c`)
 - Tool surface: `src/tools/skill_run.c`, `include/human/tools/skill_run.h`
 - Related intelligence / SQLite: `src/intelligence/skills.c`, `include/human/intelligence/skills_context.h`

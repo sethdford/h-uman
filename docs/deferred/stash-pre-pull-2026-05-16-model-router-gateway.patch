@@ -122,10 +122,10 @@ index 3d82c3ff..afabc2b3 100644
                                  hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc,
                                                           pol_tn, pol_tn_len, seq_args, strlen(seq_args),
                                                           &seq_hook_res);
-diff --git a/src/main.c b/src/main.c
+diff --git a/src/app/main.c b/src/app/main.c
 index 1328c2a0..ea0b823b 100644
---- a/src/main.c
-+++ b/src/main.c
+--- a/src/app/main.c
++++ b/src/app/main.c
 @@ -16,6 +16,7 @@
  #include "human/agent/awareness.h"
  #include "human/agent/cli.h"

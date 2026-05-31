@@ -27,16 +27,16 @@ consume h-uman as a persona layer.
 ### Implemented? (code exists)
 - Comprehensive MCP module exists:
   - `include/human/mcp_server.h` (83 LOC), `include/human/mcp.h`, `mcp_manager.h`, `mcp_jsonrpc.h`, `mcp_registry.h`, `mcp_resources.h`, `mcp_transport.h`, `mcp_context.h`.
-  - Sources: `src/mcp.c`, `src/mcp_server.c` (656 LOC), `src/mcp_manager.c`, `src/mcp_jsonrpc.c`, `src/mcp_registry.c`, `src/mcp_resources.c`, `src/mcp_transport_http.c`, `src/mcp_transport_sse.c`, `src/mcp_transport_stdio.c`, `src/mcp_tool_wrapper.c`, `src/gateway/mcp_context.c`, `src/tools/mcp_resource_tools.c`, `src/security/mcp_audit.c`.
+  - Sources: `src/mcp/mcp.c`, `src/mcp/mcp_server.c` (656 LOC), `src/mcp/mcp_manager.c`, `src/mcp/mcp_jsonrpc.c`, `src/mcp/mcp_registry.c`, `src/mcp/mcp_resources.c`, `src/mcp/mcp_transport_http.c`, `src/mcp/mcp_transport_sse.c`, `src/mcp/mcp_transport_stdio.c`, `src/mcp/mcp_tool_wrapper.c`, `src/gateway/mcp_context.c`, `src/tools/mcp_resource_tools.c`, `src/security/mcp_audit.c`.
 - Config integration: `include/human/config.h` lines 277–292 define `hu_mcp_server_entry_t`; line 657 declares `hu_mcp_server_entry_t mcp_servers[HU_MCP_SERVERS_MAX]`.
 
 ### Proven? (tests exist)
 - Eight dedicated test files: `tests/test_mcp.c`, `test_mcp_audit.c`, `test_mcp_http_integration.c`, `test_mcp_jsonrpc.c`, `test_mcp_manager.c`, `test_mcp_resource_tools.c`, `test_mcp_resources.c`, `test_mcp_transport.c`, `test_mcp_transport_sse.c`.
 
 ### Wired? (called in runtime path / dispatch)
-- `src/main.c` line 42 includes `"human/mcp_server.h"` and `"human/mcp_resources.h"`.
+- `src/app/main.c` line 42 includes `"human/mcp_server.h"` and `"human/mcp_resources.h"`.
 - The MCP **client** path (h-uman as a consumer of external MCP servers) appears well-wired via the manager.
-- The **server** path — h-uman exposing itself to Cursor/Claude Code — needs more checking: no `cmd_mcp_serve` or equivalent CLI subcommand surfaced in the main `commands[]` table. The infrastructure exists but the user-facing "run as MCP server" verb was not visible in `src/main.c`'s subcommand registry.
+- The **server** path — h-uman exposing itself to Cursor/Claude Code — needs more checking: no `cmd_mcp_serve` or equivalent CLI subcommand surfaced in the main `commands[]` table. The infrastructure exists but the user-facing "run as MCP server" verb was not visible in `src/app/main.c`'s subcommand registry.
 
 ## Gaps
 - A CLI surface like `human mcp serve` or daemon-flag-driven listen mode for the server side was not located.

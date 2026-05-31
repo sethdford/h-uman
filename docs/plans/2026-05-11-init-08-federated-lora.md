@@ -315,10 +315,10 @@ incur zero binary cost.**
 | 1 | `CMakeLists.txt` | +35 | Add `option(HU_ENABLE_FEDERATION ...)`, `if(HU_ENABLE_FEDERATION)` block, add 11 source files to `human_core` when ON, propagate `HU_HAS_FEDERATION=1` define, **require** `HU_ENABLE_LIBSODIUM=ON` (`message(FATAL_ERROR ...)` otherwise) |
 | 2 | `include/human/core/error.h` | +7 | New `HU_ERR_FED_*` codes (single enum block) |
 | 3 | `include/human/config_types.h` | +20 | Add `hu_federation_config_t` (parallel to `hu_personalization_config_t`) and reference it from `hu_app_config` |
-| 4 | `src/config_parse.c` | +60 | Parse `federation: { enabled, peers, aggregation, dp, mdns_service, quorum }` block |
-| 5 | `src/config_serialize.c` | +50 | Serialize the same block |
-| 6 | `src/config_merge.c` | +20 | Default state (off, empty peers, FedAvg, no DP) |
-| 7 | `src/main.c` | +35 | Register `human fed ...` subcommand dispatch (gated `#ifdef HU_HAS_FEDERATION`) |
+| 4 | `src/config/config_parse.c` | +60 | Parse `federation: { enabled, peers, aggregation, dp, mdns_service, quorum }` block |
+| 5 | `src/config/config_serialize.c` | +50 | Serialize the same block |
+| 6 | `src/config/config_merge.c` | +20 | Default state (off, empty peers, FedAvg, no DP) |
+| 7 | `src/app/main.c` | +35 | Register `human fed ...` subcommand dispatch (gated `#ifdef HU_HAS_FEDERATION`) |
 | 8 | `src/daemon.c` | +50 | Open federation on startup when enabled; register a W14 idle hook that calls `hu_federation_run_round` once per `dp.budget_remaining > 0 && quorum_online` window |
 
 ### `~/.human/federation.json` schema (new)

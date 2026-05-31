@@ -37,7 +37,7 @@ First eval baseline: 25-37% pass rate (judge-noisy, n=4 runs)
    ↓ controlled experiment (Python harness, n=8)
 Bare vs persona-wrapped: 97% length reduction, 100% markdown elimination
    ↓ trace
-src/eval.c:572 passes NULL/0 as system prompt
+src/eval/eval.c:572 passes NULL/0 as system prompt
    ↓ fix
 33f8eaa5: load persona via hu_persona_load + thread through hu_eval_suite_t::system_prompt
    ↓ measure (post-fix)

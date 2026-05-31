@@ -404,7 +404,7 @@ mixing requires every active slot to be already loaded).
 | F12 | `src/persona/molora.c`                            | **new** | 260  | Manifest parser/serializer, expert resolution against `hu_provider_load_adapter_mixture`, hot-path `hu_molora_route_and_apply(agent, ctx)` |
 | F13 | `tests/test_molora_manifest.c`                    | **new** | 180  | Manifest parse/serialize + 4-expert load happy path against the llamacpp stub |
 | F14 | `include/human/config_types.h`                    | modify  | +20  | Add `hu_molora_config_t`; embed pointer in agent config |
-| F15 | `src/config_parse.c` + `src/config_serialize.c` + `src/config_merge.c` | modify | +80 | `molora` block parser, serializer, defaults |
+| F15 | `src/config/config_parse.c` + `src/config/config_serialize.c` + `src/config/config_merge.c` | modify | +80 | `molora` block parser, serializer, defaults |
 | F16 | `tests/test_config_parse.c`                       | modify  | +60  | `test_config_parses_molora_block` + disabled-by-default test |
 | F17 | `include/human/agent/scheduler.h`                 | modify  | +3   | `HU_JOB_MOLORA_ROUTER_TRAIN` enum entry |
 | F18 | `src/persona/molora_runner.c`                     | **new** | 220  | W14 idle runner: pull labelled samples from history → call `hu_lora_router_train` → save → bump scheduler counter |

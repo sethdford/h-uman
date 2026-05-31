@@ -144,7 +144,7 @@ No new code — a test pins `hu_evolved_opinion_build_directive`'s mapping
 
 ### 6. `belief_flexibility` eval metric (AC-7)
 
-Add to `src/eval.c` / `include/human/eval.h` beside the existing
+Add to `src/eval/eval.c` / `include/human/eval.h` beside the existing
 antisycophancy scoring. Scores a transcript:
 - **+** when a genuine-evidence turn produced a belief change
   (opinion_history row written).
@@ -160,7 +160,7 @@ Rubric unit tests pin both extremes (AC-7).
 | `src/agent/belief_update.c` (new) | `hu_belief_update_decide`, evidence-cue helper, `hu_belief_conviction_for` | 1,2,3 |
 | `src/daemon.c` (~:12120) | wire decide → upsert_with_history; stash directive | 1,4,5 |
 | `src/agent/agent_turn.c` (~:2698 pattern) | inject stashed shift directive next turn | 5 |
-| `src/eval.c`, `include/human/eval.h` | `belief_flexibility` score | 7 |
+| `src/eval/eval.c`, `include/human/eval.h` | `belief_flexibility` score | 7 |
 | `tests/test_belief_update.c` (new) | predicate truth table, evidence cue, conviction map | 2,3,4,6 |
 | `tests/test_eval.c` (extend) | belief_flexibility extremes | 7 |
 | `CMakeLists.txt` + `tests/test_main.c` | register new TU under `HU_ENABLE_SQLITE` gate symmetry | 8 |

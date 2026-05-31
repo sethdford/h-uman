@@ -4,7 +4,7 @@ created: 2026-05-10
 status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
-scope: include/human/security/, src/security/, src/memory/, src/main.c (CLI subcommands)
+scope: include/human/security/, src/security/, src/memory/, src/app/main.c (CLI subcommands)
 last_audit: 2026-05-25
 ---
 

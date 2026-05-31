@@ -28,8 +28,8 @@ Twilio voice runs through `src/voice/` + `voice_channel.c`; SMS through
 `signal.c` was GRADUATED in FIX 14 — added `http_url`, `account`,
 `allow_from`, `group_allow_from`, and `group_policy` to
 `hu_signal_channel_config_t`; added the parser in
-`src/config_parse_channels.c`; added the bootstrap block in
-`src/bootstrap.c`. The orphan-audit suite has been updated with three
+`src/config/config_parse_channels.c`; added the bootstrap block in
+`src/app/bootstrap.c`. The orphan-audit suite has been updated with three
 production-wire tests in `tests/test_signal_channel_wire.c`. Production
 configs that set `channels.signal.http_url` and `channels.signal.account`
 will now spin up the signal-cli adapter automatically.
@@ -44,9 +44,9 @@ inflates the surface area auditors must reason about.
 ## How to graduate a channel out of this list
 
 1. Add a config struct in `include/human/config.h`.
-2. Add a parser in `src/config_parse_channels.c`.
+2. Add a parser in `src/config/config_parse_channels.c`.
 3. Add a daemon-config slot in `k_daemon_configs` (`src/daemon.c`).
-4. Add a bootstrap block in `src/bootstrap.c` mirroring an existing channel.
+4. Add a bootstrap block in `src/app/bootstrap.c` mirroring an existing channel.
 5. Add an integration test in `tests/test_bootstrap.c` proving the channel is
    created when the config field is set.
 6. Remove the entry from this table.

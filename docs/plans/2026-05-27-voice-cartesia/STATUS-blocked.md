@@ -36,7 +36,7 @@ place a phone call:
   Gemini-3.x gotcha, this MUST be set before Task 6 to avoid empty replies.
 - **Existing infra confirmed present:** `src/tts/cartesia.c`,
   `src/tts/cartesia_stream.c`, `src/channels/twilio.c`,
-  `src/channels/voice_channel.c`, `src/voice.c` (Whisper STT + optional
+  `src/channels/voice_channel.c`, `src/voice/voice.c` (Whisper STT + optional
   Cartesia STT).
 - **`CARTESIA` is confirmed NOT yet a `hu_voice_mode` value** (current
   modes: `SONATA`, `REALTIME`, `WEBRTC` — `voice_channel.h:32-34`),

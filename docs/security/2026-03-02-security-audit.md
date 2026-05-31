@@ -57,7 +57,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 ### C-03: OAuth Tokens and API Keys Stored in Plaintext
 
-- **Files:** `src/auth.c` (~lines 80–100, 117), `src/config.c` (~lines 164–166, 581–592)
+- **Files:** `src/security/auth.c` (~lines 80–100, 117), `src/config/config.c` (~lines 164–166, 581–592)
 - **OWASP:** A02:2021 — Cryptographic Failures
 - **CWE:** CWE-312 (Cleartext Storage of Sensitive Information)
 - **Description:** Credentials are written to `~/.human/auth.json` and `~/.human/config.json` as plaintext JSON. File permissions not explicitly set (depends on umask). `hu_secret_store` exists but is not used for these files.
@@ -211,7 +211,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 ### H-12: Config Workspace Path Injection
 
-- **File:** `src/config.c` (~lines 602–608)
+- **File:** `src/config/config.c` (~lines 602–608)
 - **OWASP:** A01:2021 — Broken Access Control
 - **CWE:** CWE-22 (Path Traversal)
 - **Description:** `workspace` from JSON used as `workspace_dir` without validation. A crafted config can point to `../../../etc`.
@@ -227,7 +227,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 ### H-14: Diagnostics Flags Can Log Sensitive Data
 
-- **File:** `src/config.c` (~lines 657–660)
+- **File:** `src/config/config.c` (~lines 657–660)
 - **OWASP:** A09:2021 — Security Logging and Monitoring Failures
 - **CWE:** CWE-532
 - **Description:** `log_llm_io`, `log_message_payloads`, etc. dump raw content to logs including PII and secrets.
@@ -404,8 +404,8 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 This audit was conducted via manual static analysis across 4 parallel streams:
 
 1. **Core memory safety** — `src/core/`, `include/human/`
-2. **Security/crypto/auth** — `src/security/`, `src/auth.c`, `src/gateway/`
+2. **Security/crypto/auth** — `src/security/`, `src/security/auth.c`, `src/gateway/`
 3. **Input surfaces/injection** — `src/tools/`, `src/gateway/`, `src/channels/`, `src/sse/`, `src/websocket/`
-4. **Data/config/providers** — `src/memory/`, `src/providers/`, `src/config.c`, `src/observability/`, `src/agent/`
+4. **Data/config/providers** — `src/memory/`, `src/providers/`, `src/config/config.c`, `src/observability/`, `src/agent/`
 
 Findings were deduplicated across streams. Dynamic analysis (fuzzing, pen testing) was not performed and is recommended as a follow-up.

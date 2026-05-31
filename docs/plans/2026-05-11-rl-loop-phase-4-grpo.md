@@ -31,7 +31,7 @@ last_audit: 2026-05-25
 
 4. **CLI** in `src/ml/cli_grpo.c` (~200 LOC). `human ml grpo-train --rollouts N --pairs <jsonl> [--reward-model <dir>] [--reward-fn synthetic|rm|judge] [--clip-eps 0.2] [--kl-beta 0.04] [--backend auto|huml|mlx]`. Same dispatch shape as `cli_kto.c` and `cli_dpo.c`. Two new fields on `hu_rl_trainer_config_t`: `n_rollouts` (default 4 — note we choose 4 not trl's 8, to keep the latency budget on toy GPT under the test-suite delta gate; see §"Hyperparameter rationale" below) and `clip_eps` (default 0.2). The `kl_beta` field reuses the existing `lambda_d` slot's positional convention — actually no, that would conflict with KTO; we add a fresh `kl_beta` field. DPO/KTO impls IGNORE the new fields exactly as they ignore `lambda_d`/`lambda_u`.
 
-CLI surface: `human ml grpo-train --pairs <jsonl> [--rollouts 4] [--backend {auto|huml|mlx}] [--reward-fn {synthetic|rm|judge}] [--reward-model <dir>] [--clip-eps 0.2] [--kl-beta 0.04] [--iters 100]`. Mirrors Phase 2 `human ml dpo-train` and Phase 3 `human ml kto-train` dispatch in `src/main.c::cmd_ml` (≤15 LOC delta).
+CLI surface: `human ml grpo-train --pairs <jsonl> [--rollouts 4] [--backend {auto|huml|mlx}] [--reward-fn {synthetic|rm|judge}] [--reward-model <dir>] [--clip-eps 0.2] [--kl-beta 0.04] [--iters 100]`. Mirrors Phase 2 `human ml dpo-train` and Phase 3 `human ml kto-train` dispatch in `src/app/main.c::cmd_ml` (≤15 LOC delta).
 
 **Tech Stack:** C11, AddressSanitizer + UndefinedBehaviorSanitizer in `dev` preset, the existing `hu_gpt_t` / `hu_lora_t` / `hu_ml_train` ML stack, the existing `hu_rl_trainer_t` vtable + `hu_preference_pair_t` schema (Phase 2 Task 1, unchanged on the field names — additive-only on new fields), `hu_policy_logprobs` (Phase 2 Task 2, unchanged), `hu_reference_model_create_from` (Phase 2 Task 3, unchanged), `hu_reward_model_t` (Phase 3 Task 2, unchanged — composed as the reward source), `hu_reward_model_train` (Phase 3 Task 3, unchanged — Phase 4 just consumes a trained RM via `hu_reward_model_load`), third-party Python package **`mlx-lm-lora`** (introduced in Phase 2 — GRPO trainer expected at `mlx_lm_lora.trainer.grpo_trainer.train_grpo` per the Phase 2 KTO precedent of `kto_trainer.train_kto`; verify at plan-execution Task 0 step 2 with `python3 -c "from mlx_lm_lora.trainer.grpo_trainer import train_grpo"`; if the symbol path differs, update `scripts/grpo_mlx_train.py` accordingly — see R1), Gemma-3-4B-it Q4_K_M GGUF (already fetched by `scripts/fetch-gemma.sh` from Phase 1), `tests/test_framework.h`, conventional commits, the existing `dead-code-finder` + `sprint-auditor` + `spec-verifier` + **mandatory** `aspect-panel` (5-verifier, spec §7 + §10 R5) subagent gates.
 
@@ -96,16 +96,16 @@ CLI surface: `human ml grpo-train --pairs <jsonl> [--rollouts 4] [--backend {aut
 
 ## Phase 4 boundary with in-flight Track D Phase 1 work
 
-Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (3-axis communication-style fidelity), and `src/main.c::cmd_ml` (the actual `human ml *` dispatcher).
+Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (3-axis communication-style fidelity), and `src/app/main.c::cmd_ml` (the actual `human ml *` dispatcher).
 
 Phase 4 ADDS one subcommand and dispatch branch; it does NOT modify Track D's commands. Specifically:
 
-- `src/main.c::cmd_ml` — add `grpo-train` `strcmp` branch (~6 LOC + help-text update at the two existing help sites), preserving every existing branch. Total dispatch delta ≤ 15 LOC per spec §4.5 row 4.
+- `src/app/main.c::cmd_ml` — add `grpo-train` `strcmp` branch (~6 LOC + help-text update at the two existing help sites), preserving every existing branch. Total dispatch delta ≤ 15 LOC per spec §4.5 row 4.
 - `src/ml/cli.c` — NO changes. Phase 4 follows the Phase 2/3 precedent of putting CLI handlers in fresh `src/ml/cli_grpo.c` next to `cli_dpo.c` / `cli_kto.c` / `cli_rm.c`. No further extraction from `cli.c`.
 
 **[SPEC DEVIATION — fix(plan,grpo,spec): AC-1 drift note (spec-verifier SV1)]**
 
-Phase 4 follows the Phase 2/3 precedent of adding the dispatch branch in `src/main.c::cmd_ml` (NOT `src/ml/cli.c`), even though umbrella spec §4.5 says `src/ml/cli.c`. This matches existing Phase 2/3 dispatch pattern already living in `src/main.c::cmd_ml` for `dpo-train` / `kto-train` / `rm-train`; documenting the deviation here for sprint-auditor traceability. The umbrella plan should be updated in Phase 6 close-out to reflect that all four ML subcommand dispatchers live in `src/main.c::cmd_ml`, with the per-subcommand handlers in `src/ml/cli_<name>.c`.
+Phase 4 follows the Phase 2/3 precedent of adding the dispatch branch in `src/app/main.c::cmd_ml` (NOT `src/ml/cli.c`), even though umbrella spec §4.5 says `src/ml/cli.c`. This matches existing Phase 2/3 dispatch pattern already living in `src/app/main.c::cmd_ml` for `dpo-train` / `kto-train` / `rm-train`; documenting the deviation here for sprint-auditor traceability. The umbrella plan should be updated in Phase 6 close-out to reflect that all four ML subcommand dispatchers live in `src/app/main.c::cmd_ml`, with the per-subcommand handlers in `src/ml/cli_<name>.c`.
 
 **Phase 4 must:**
 
@@ -363,7 +363,7 @@ Until extracted, `grpo_mlx.c` mirrors `kto_mlx.c` (Phase 3 Task 7 hardened patte
 
 | Path | Delta | What changes |
 |------|-------|--------------|
-| `src/main.c` | +10 LOC | Add `else if (strcmp(sub, "grpo-train") == 0) { return hu_ml_cli_grpo_train(alloc, argc - 2, (const char **)(argv + 2)); }` (3 LOC) + `#include "human/ml/cli_grpo.h"` (1 LOC) + 2 help-text additions (line 232-style entries at the two existing help sites in `cmd_ml`). Total ≤ 15 LOC delta per spec §4.5 row 4. |
+| `src/app/main.c` | +10 LOC | Add `else if (strcmp(sub, "grpo-train") == 0) { return hu_ml_cli_grpo_train(alloc, argc - 2, (const char **)(argv + 2)); }` (3 LOC) + `#include "human/ml/cli_grpo.h"` (1 LOC) + 2 help-text additions (line 232-style entries at the two existing help sites in `cmd_ml`). Total ≤ 15 LOC delta per spec §4.5 row 4. |
 | `include/human/ml/rl_trainer.h` | +12 LOC | Add `size_t n_rollouts;` / `double clip_eps;` / `double kl_beta;` fields to `hu_rl_trainer_config_t` (D1). Document defaults (4, 0.2, 0.04) and DPO/KTO-ignore semantics in field comments. Add `hu_rl_trainer_create_grpo` extern declaration. |
 | `src/ml/rl_trainer.c` | +30 LOC | Add `mlx_lm_lora_grpo_available()` static helper (mirrors `mlx_dpo_available()` and `mlx_lm_lora_kto_available()`). Add `hu_rl_trainer_create_grpo(alloc, config, *out)` factory entry — dispatches to `hu_grpo_huml_create` / `hu_grpo_mlx_create` analog to `_create_dpo` and `_create_kto`. |
 | `tests/test_main.c` | +12 LOC | Register 4 new `run_*_tests` functions: `run_kl_divergence_tests`, `run_rollout_tests`, `run_grpo_loss_tests`, `run_grpo_e2e_tests`. READ first; APPEND only; do NOT replace existing runners — Phase 2 / Phase 3 burned tokens on this rule and Phase 4 honors it. |
@@ -2656,7 +2656,7 @@ git commit -m "feat(ml,grpo_mlx): MLX subprocess backend + dummy-adapter test mo
 - Create: `src/ml/cli_grpo.c`
 - Create: `tests/test_cli_grpo.c`
 - Create: `tests/fixtures/synthetic_grpo_prompts.jsonl`
-- Modify: `src/main.c` — add `grpo-train` dispatch + help text
+- Modify: `src/app/main.c` — add `grpo-train` dispatch + help text
 - Modify: `CMakeLists.txt`, `tests/test_main.c` (APPEND)
 
 - [ ] **Step 1: Write the failing CLI test**
@@ -2801,7 +2801,7 @@ if (n_rollouts < 4) {
 
 - [ ] **Step 4: Create `tests/fixtures/synthetic_grpo_prompts.jsonl`** (~50 lines, 20 prompt rows like `{"prompt": "1 2 3"}`).
 
-- [ ] **Step 5: Wire into `src/main.c::cmd_ml`**:
+- [ ] **Step 5: Wire into `src/app/main.c::cmd_ml`**:
 
 ```c
 /* Add to includes */
@@ -3034,7 +3034,7 @@ Verify (with file:line evidence for each):
 1. `./build/human ml grpo-train --rollouts 4 --pairs <jsonl>` produces a valid LoRA adapter — point to `test_cli_grpo_synthetic_reward_4_rollouts_completes_successfully` (HUML side) and `test_grpo_mlx_subprocess_produces_safetensors` (MLX side, gated by `HU_HAVE_MLX_LM_GRPO`).
 2. Every GRPO loss formula has a passing FD grad check — point to `test_grpo_loss_finite_diff_matches_analytical_on_lm_head_probe` (Task 6) and `test_kl_k3_backward_finite_diff_matches_analytical` (Task 1).
 3. Every Definition of Done item has implementing code OR a documented deferral note in this plan's "Out of scope" section.
-4. AC-1 (CLI handler location) drift note is present (see SV1: dispatch lives in `src/main.c::cmd_ml`, not `src/ml/cli.c` — documented deviation from umbrella §4.5).
+4. AC-1 (CLI handler location) drift note is present (see SV1: dispatch lives in `src/app/main.c::cmd_ml`, not `src/ml/cli.c` — documented deviation from umbrella §4.5).
 5. AC-2 (.safetensors scope) clarification on DoD items 5/6 is present (HUML synthetic-reward N=4 e2e VERIFIED by DoD 5; .safetensors adapter VERIFIED via MLX path by DoD 6).
 
 Per umbrella §7: spec-verifier is the intent-vs-impl check (distinct from `verifier`, which is behavior-vs-test; distinct from `critic`, which is code-review). Phase 4 needs all three.

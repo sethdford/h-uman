@@ -65,10 +65,10 @@ no leaks reported by ASan.
 Files:
 - `include/human/config.h` — add `hu_prompt_budget_config_t` struct
   + `prompt_budget` field on `hu_config_t`.
-- `src/config_parse.c` — `parse_prompt_budget()` function, called
+- `src/config/config_parse.c` — `parse_prompt_budget()` function, called
   from the main parser. Wire string-array parsing for the
   allowlist/denylist.
-- `src/config_merge.c` — init the new fields to defaults in
+- `src/config/config_merge.c` — init the new fields to defaults in
   `hu_config_init_defaults`.
 
 Tests:

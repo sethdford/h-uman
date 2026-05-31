@@ -13,7 +13,7 @@ last_audit: 2026-05-25
 
 ## Executive Summary
 
-6 **ABI-BREAKING** findings were discovered. 3 additional issues require **NEEDS-WRITE-CONFIRMATION**. The most serious are: (1) `hu_personal_model_ingest` gains a required new parameter in Init #09 — 4 existing call sites will not compile without updates; (2) four independent initiatives all claim to append an enum value at `HU_JOB_KIND_MAX` in `hu_job_kind_t` without coordinating ordinal assignments, producing guaranteed value collisions; (3) Init #12 removes the existing `hu_mcp_host_t` symbol family from `mcp_server.h` without a shim, breaking `src/main.c` and `src/mcp_server.c`. The architects' "strictly additive" claim is false for at least Init #09 and Init #12.
+6 **ABI-BREAKING** findings were discovered. 3 additional issues require **NEEDS-WRITE-CONFIRMATION**. The most serious are: (1) `hu_personal_model_ingest` gains a required new parameter in Init #09 — 4 existing call sites will not compile without updates; (2) four independent initiatives all claim to append an enum value at `HU_JOB_KIND_MAX` in `hu_job_kind_t` without coordinating ordinal assignments, producing guaranteed value collisions; (3) Init #12 removes the existing `hu_mcp_host_t` symbol family from `mcp_server.h` without a shim, breaking `src/app/main.c` and `src/mcp/mcp_server.c`. The architects' "strictly additive" claim is false for at least Init #09 and Init #12.
 
 ---
 
@@ -151,8 +151,8 @@ last_audit: 2026-05-25
 
 | Header | Before | After | Callers Affected | Breaking? |
 |--------|--------|-------|-----------------|-----------|
-| `include/human/mcp.h` — `hu_mcp_server_t` | The MCP CLIENT type (wraps a child process) | Renamed to `hu_mcp_client_t`; deprecated shim left | **19 refs in `src/mcp.c`; 2 refs in `src/mcp_manager.c`; tests** — see §3 | **YES — type rename, 21+ call sites** |
-| `include/human/mcp_server.h` — `hu_mcp_host_t` | `hu_mcp_host_create`, `hu_mcp_host_set_resources`, `hu_mcp_host_set_prompts`, `hu_mcp_host_run`, `hu_mcp_host_destroy` | Entire file replaced; `hu_mcp_host_t` removed with NO SHIM | `src/mcp_server.c` (14 uses of `hu_mcp_host_t`); `src/main.c:2407-2421` (5 uses); `tests/test_mcp.c` | **YES — symbol removal, no compatibility shim** |
+| `include/human/mcp.h` — `hu_mcp_server_t` | The MCP CLIENT type (wraps a child process) | Renamed to `hu_mcp_client_t`; deprecated shim left | **19 refs in `src/mcp/mcp.c`; 2 refs in `src/mcp/mcp_manager.c`; tests** — see §3 | **YES — type rename, 21+ call sites** |
+| `include/human/mcp_server.h` — `hu_mcp_host_t` | `hu_mcp_host_create`, `hu_mcp_host_set_resources`, `hu_mcp_host_set_prompts`, `hu_mcp_host_run`, `hu_mcp_host_destroy` | Entire file replaced; `hu_mcp_host_t` removed with NO SHIM | `src/mcp/mcp_server.c` (14 uses of `hu_mcp_host_t`); `src/app/main.c:2407-2421` (5 uses); `tests/test_mcp.c` | **YES — symbol removal, no compatibility shim** |
 | `include/human/mcp_server.h` — `hu_mcp_server_t` (new vtable) | Does not exist | New vtable type introduced | None — new surface | **NO** |
 | `include/human/mcp/consent.h`, `mcp/engine.h`, `mcp/discovery.h`, `mcp/server_audit.h` (new) | Do not exist | New headers | None | **NO** |
 
@@ -218,12 +218,12 @@ The existing `hu_mcp_server_t` (defined in `include/human/mcp.h:17`) is the MCP 
 | File | Lines | Reference type |
 |------|-------|----------------|
 | `include/human/mcp.h` | 17, 19, 20, 21, 24, 27, 31, 35 | Type definition + 6 function signatures |
-| `src/mcp.c` | 41, 79, 162, 165, 181, 272, 416, 519, 544, 593, 620, 721, 725, 729, 734, 738, 844, 863 | Implementation + local variables |
-| `src/mcp_manager.c` | 23, 251 | Struct field, `hu_mcp_server_create` call |
+| `src/mcp/mcp.c` | 41, 79, 162, 165, 181, 272, 416, 519, 544, 593, 620, 721, 725, 729, 734, 738, 844, 863 | Implementation + local variables |
+| `src/mcp/mcp_manager.c` | 23, 251 | Struct field, `hu_mcp_server_create` call |
 | `tests/test_mcp.c` | multiple | Test fixtures |
 | `tests/test_modules_coverage.c` | multiple | Coverage assertions |
 
-**Total `hu_mcp_server_t` unique source references: ~28 (1 definition + 6 header signatures + ~18 in `src/mcp.c` + 2 in `src/mcp_manager.c` + 2 test files).**
+**Total `hu_mcp_server_t` unique source references: ~28 (1 definition + 6 header signatures + ~18 in `src/mcp/mcp.c` + 2 in `src/mcp/mcp_manager.c` + 2 test files).**
 
 The design doc acknowledges this with: "A `typedef hu_mcp_client_t hu_mcp_server_t HU_DEPRECATED` shim is left behind for one release cycle." However, the shim only applies to the **renamed client type**. It does NOT cover the separately-broken `hu_mcp_host_t` family — see below.
 
@@ -233,13 +233,13 @@ The existing `include/human/mcp_server.h` defines `hu_mcp_host_t` with these pub
 
 | Symbol | Current location | Used at |
 |--------|-----------------|---------|
-| `hu_mcp_host_create` | `include/human/mcp_server.h:13` | `src/main.c:2408`, `src/mcp_server.c:28` |
-| `hu_mcp_host_set_resources` | `include/human/mcp_server.h:16` | `src/main.c:2416`, `src/mcp_server.c:46` |
-| `hu_mcp_host_set_prompts` | `include/human/mcp_server.h:17` | `src/main.c:2417`, `src/mcp_server.c:51` |
-| `hu_mcp_host_run` | `include/human/mcp_server.h:19` | `src/main.c:2419`, `src/mcp_server.c:565` |
-| `hu_mcp_host_destroy` | `include/human/mcp_server.h:21` | `src/main.c:2421`, `src/mcp_server.c:651` |
+| `hu_mcp_host_create` | `include/human/mcp_server.h:13` | `src/app/main.c:2408`, `src/mcp/mcp_server.c:28` |
+| `hu_mcp_host_set_resources` | `include/human/mcp_server.h:16` | `src/app/main.c:2416`, `src/mcp/mcp_server.c:46` |
+| `hu_mcp_host_set_prompts` | `include/human/mcp_server.h:17` | `src/app/main.c:2417`, `src/mcp/mcp_server.c:51` |
+| `hu_mcp_host_run` | `include/human/mcp_server.h:19` | `src/app/main.c:2419`, `src/mcp/mcp_server.c:565` |
+| `hu_mcp_host_destroy` | `include/human/mcp_server.h:21` | `src/app/main.c:2421`, `src/mcp/mcp_server.c:651` |
 
-Init #12 replaces `mcp_server.h` entirely with the new `hu_mcp_server_t` vtable. **No `HU_DEPRECATED` typedef or compatibility wrapper is provided for `hu_mcp_host_t`.** The entrypoint in `src/main.c:2407-2421` will fail to compile. The init doc must include a migration path: either (a) provide `hu_mcp_host_t` → `hu_mcp_server_default_create` adapter shims, or (b) require a coordinated update of `src/main.c` in the same PR.
+Init #12 replaces `mcp_server.h` entirely with the new `hu_mcp_server_t` vtable. **No `HU_DEPRECATED` typedef or compatibility wrapper is provided for `hu_mcp_host_t`.** The entrypoint in `src/app/main.c:2407-2421` will fail to compile. The init doc must include a migration path: either (a) provide `hu_mcp_host_t` → `hu_mcp_server_default_create` adapter shims, or (b) require a coordinated update of `src/app/main.c` in the same PR.
 
 ---
 
@@ -470,8 +470,8 @@ Under semantic versioning, a major-version bump (X.0.0) is required for any chan
 | NEEDS-WRITE-CONFIRMATION findings | 3 |
 | ABI-SAFE initiatives | 6 |
 | `hu_episode_t` name-collision call sites | **9** (2 header definitions + 2 src + 1 test + 2 function signatures + 2 daemon call sites) |
-| `hu_mcp_server_t` name-collision call sites | **28** (1 definition + 6 function signatures + ~18 `src/mcp.c` + 2 `src/mcp_manager.c` + 2 test files) |
-| `hu_mcp_host_t` removal call sites (no shim) | **7** (`src/main.c`: 5 calls; `src/mcp_server.c:28,651` public functions) |
+| `hu_mcp_server_t` name-collision call sites | **28** (1 definition + 6 function signatures + ~18 `src/mcp/mcp.c` + 2 `src/mcp/mcp_manager.c` + 2 test files) |
+| `hu_mcp_host_t` removal call sites (no shim) | **7** (`src/app/main.c`: 5 calls; `src/mcp/mcp_server.c:28,651` public functions) |
 | Total name-collision call sites | **37** |
 
 ## Appendix B — Preconditions Before Any Initiative Merges
@@ -480,7 +480,7 @@ Under semantic versioning, a major-version bump (X.0.0) is required for any chan
 2. **Resolve `hu_episode_t` triple-definition** — Init #10 must ship first among any initiative that uses episodic memory types. No other initiative should introduce further `hu_episode_t` references.
 3. **Establish `hu_provider_vtable_t` canonical tail order** — one precondition PR locks in the field ordering for `apply_steering`, `load_adapter_mixture`, `set_adapter_mixture`, `active_mixture`, `caps`. All provider implementors must be audited to use designated initializers.
 4. **Init #09 must provide migration path for `hu_personal_model_ingest`** — the 4 call sites in `src/` must be updated atomically in the same PR that changes the signature. Consider providing an inline wrapper that passes `NULL` provenance for legacy callers.
-5. **Init #12 must provide a `hu_mcp_host_t` migration** — either shims in `mcp_server.h` or coordinated update of `src/main.c` in the same PR.
+5. **Init #12 must provide a `hu_mcp_host_t` migration** — either shims in `mcp_server.h` or coordinated update of `src/app/main.c` in the same PR.
 
 BASE: `include/human/*.h` (current workspace)  
 HEAD: proposed changes per `docs/plans/2026-05-11-init-*.md`

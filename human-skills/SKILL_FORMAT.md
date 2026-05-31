@@ -55,7 +55,7 @@ Plain markdown instructions injected into the agent system prompt when the skill
 
 ### Optional YAML frontmatter
 
-Frontmatter is **not required**, but **recommended for discoverability**: when present, SkillForge (`src/skillforge.c`) reads the opening `---` … `---` block and applies `name:` and `description:` lines to override the values from `.skill.json` for that skill’s catalog metadata. If you omit frontmatter, `name` and `description` come only from the manifest.
+Frontmatter is **not required**, but **recommended for discoverability**: when present, SkillForge (`src/skills/skillforge.c`) reads the opening `---` … `---` block and applies `name:` and `description:` lines to override the values from `.skill.json` for that skill’s catalog metadata. If you omit frontmatter, `name` and `description` come only from the manifest.
 
 Use this shape at the very top of `SKILL.md`:
 

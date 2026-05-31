@@ -7,7 +7,7 @@ last_audit: 2026-05-25
 
 ## Summary
 
-SkillForge today builds a compact **Available Skills** catalog for the system prompt (`hu_skillforge_build_prompt_catalog` in `src/skillforge.c`), optionally ranking with **keyword overlap** when `HUMAN_SKILLS_CONTEXT=top_k`. Full playbooks load on demand via the **`skill_run`** tool (`src/tools/skill_run.c`). That stack is fast and dependency-light, but **lexical routing** misses paraphrases and emotional or conceptual overlap, and **skills are independent**—there is no first-class way to blend complementary playbooks or hint multi-step pipelines.
+SkillForge today builds a compact **Available Skills** catalog for the system prompt (`hu_skillforge_build_prompt_catalog` in `src/skills/skillforge.c`), optionally ranking with **keyword overlap** when `HUMAN_SKILLS_CONTEXT=top_k`. Full playbooks load on demand via the **`skill_run`** tool (`src/tools/skill_run.c`). That stack is fast and dependency-light, but **lexical routing** misses paraphrases and emotional or conceptual overlap, and **skills are independent**—there is no first-class way to blend complementary playbooks or hint multi-step pipelines.
 
 This proposal defines a **three-tier upgrade**: (1) **embedding-based retrieval** over a small per-skill text bundle, stored in the existing **`hu_vector_store_t`** (in-memory backend first) and queried with **`hu_embedder_t`**; (2) **multi-skill blending** (up to three skills per turn) guided by optional manifest metadata; (3) **experience-weighted re-ranking** when **`skill_profiles`** (see `docs/plans/2026-03-21-evolving-cognition.md`) exists, with cold-start neutrality. Optional **composition hints** (`sequence_after`) improve mid-pipeline suggestions from recent **`skill_run`** history.
 
@@ -23,7 +23,7 @@ All implementation remains **C11**, **vtable-driven**, **ASan-clean**, and **fai
 **Current behavior (codebase).**
 
 - Discovery: `hu_skillforge_discover` scans for `*.skill.json`; `hu_skill_t` holds `name`, `description`, paths, `enabled` (`include/human/skillforge.h`).
-- Catalog: `hu_skillforge_build_prompt_catalog` respects `HUMAN_SKILLS_CONTEXT`, `HUMAN_SKILLS_TOP_K` (default 12), `HUMAN_SKILLS_CONTEXT_MAX_BYTES` (default 8192) (`src/skillforge.c`).
+- Catalog: `hu_skillforge_build_prompt_catalog` respects `HUMAN_SKILLS_CONTEXT`, `HUMAN_SKILLS_TOP_K` (default 12), `HUMAN_SKILLS_CONTEXT_MAX_BYTES` (default 8192) (`src/skills/skillforge.c`).
 - Deep content: `hu_skillforge_load_instructions` / **`skill_run`** for full `SKILL.md`.
 
 **Gap.**
@@ -255,7 +255,7 @@ Example:
 | Component | Change |
 |-----------|--------|
 | `include/human/skillforge.h` | Declare `hu_skillforge_embed_catalog`, `hu_skillforge_build_prompt_catalog_semantic`; extend `hu_skill_t` for optional metadata |
-| `src/skillforge.c` | Implement embedding index, hybrid scoring, blending string builder; factor keyword scorer for shared use |
+| `src/skills/skillforge.c` | Implement embedding index, hybrid scoring, blending string builder; factor keyword scorer for shared use |
 | `src/agent/agent_turn.c` | After SkillForge init/discover, call **`hu_skillforge_embed_catalog`** once; per turn call **semantic** builder when `HUMAN_SKILLS_ROUTING=semantic` (or auto-detect embedder non-NULL) |
 | `hu_embedder_t` / factories | No vtable change expected—use existing providers (Gemini, Ollama, Voyage, etc.) configured like memory embedders |
 | `hu_vector_store_t` | Use **`hu_vector_store_mem_create`**; optional future: dedicated small store per agent to avoid ID collision |
@@ -299,7 +299,7 @@ Example:
 
 ## References
 
-- `include/human/skillforge.h`, `src/skillforge.c` — catalog and discovery
+- `include/human/skillforge.h`, `src/skills/skillforge.c` — catalog and discovery
 - `include/human/memory/vector.h` — `hu_embedder_t`, `hu_embedding_t`, `hu_vector_store_t`, `hu_cosine_similarity`
 - `src/tools/skill_run.c` — progressive disclosure
 - `docs/plans/2026-03-21-evolving-cognition.md` — `skill_profiles`, invocation logging, `hu_skillforge_build_prompt_catalog_weighted` (complementary; merge formulas carefully)
