@@ -2672,18 +2672,27 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          *   SHADOW: rank directives, log kept-vs-suppressed; observation only, no behavior change
          *   LIVE   : rank directives, FILTER the assembled prompt to keep only selected directives
          *
-         * GATE: Live activation requires Story D (blind A/B measurement) to show
-         * that the filtered persona is judged superior by real humans before
-         * flipping HU_SALIENCE_LIVE to default-ON in production. */
+         * GATE: Activated 2026-05-31 after blind A/B (g2g) — LIVE by default. The
+         * never-suppress safety floor below (required/safety/crisis/grief directives
+         * always pass; INVARIANT violation reverts to OFF via goto skip_salience)
+         * makes default-LIVE safe. Override: HU_SALIENCE=off|shadow|live (legacy
+         * HU_SALIENCE_LIVE / HU_SALIENCE_SHADOW still honored). */
         enum hu_salience_mode {
             HU_SALIENCE_OFF = 0,
             HU_SALIENCE_SHADOW = 1,
             HU_SALIENCE_LIVE = 2
         } sal_mode = HU_SALIENCE_OFF;
 
-        const char *sal_mode_str = getenv("HU_SALIENCE_LIVE") != NULL
-                                       ? "live"
-                                       : (getenv("HU_SALIENCE_SHADOW") != NULL ? "shadow" : "off");
+        const char *sal_env = getenv("HU_SALIENCE");
+        const char *sal_mode_str;
+        if (sal_env && *sal_env)
+            sal_mode_str = sal_env; /* explicit off|shadow|live */
+        else if (getenv("HU_SALIENCE_LIVE") != NULL)
+            sal_mode_str = "live";
+        else if (getenv("HU_SALIENCE_SHADOW") != NULL)
+            sal_mode_str = "shadow";
+        else
+            sal_mode_str = "live"; /* default LIVE post-blind-A/B */
         if (strcmp(sal_mode_str, "live") == 0)
             sal_mode = HU_SALIENCE_LIVE;
         else if (strcmp(sal_mode_str, "shadow") == 0)
