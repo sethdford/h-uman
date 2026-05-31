@@ -38,12 +38,19 @@ cmake --build build --target human -j"$(nproc)"   # production #else path compil
 13198/13198, 0 ASan; `human` production binary links clean. No new config key —
 `local_tts_endpoint` / `tts_model` / `tts_voice` already parse and map.
 
-## Slice 3 — Duplex / barge-in polish over local path (planned)
+## Slice 3 — Duplex / barge-in polish over local path (SCOPED / DEFERRED)
 
-| # | Task | Notes |
-|---|------|-------|
-| 8 | End-to-end latency budget for the local STT→LLM→TTS loop; tune `semantic_eot` thresholds for the local path. | uses slice 1+2 |
-| 9 | Barge-in correctness when the local server is slower than cloud. | |
+A verify-first audit found `duplex.c` and `semantic_eot.c` are mature and pure,
+with no concrete defect — and that the eventual local-path tuning needs a
+**real-audio test harness** (not unit tests). Slice 3 is therefore scoped into
+precise, verifiable tasks and **deferred**; see
+[slice-3-duplex-barge-in.md](slice-3-duplex-barge-in.md) for the findings, the
+`silence_ms = 0` anti-pattern warning, and tasks 3a–3d.
+
+| # | Task | Notes | Status |
+|---|------|-------|--------|
+| 8 | End-to-end latency budget for the local STT→LLM→TTS loop; tune `semantic_eot` thresholds for the local path. | → tasks 3b/3c in findings doc | scoped, deferred (needs real-audio harness) |
+| 9 | Barge-in correctness when the local server is slower than cloud. | → tasks 3a/3d in findings doc | scoped, deferred (needs real-audio harness) |
 
 ## Slice 4 — Optional: Opus for self-hosted WebRTC (optional)
 
