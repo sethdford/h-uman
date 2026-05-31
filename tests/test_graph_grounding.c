@@ -15,25 +15,25 @@ static void seed_run(sqlite3 *db, const char *sql) {
         sqlite3_free(emsg);
 }
 
-static const char *kSeedSchema =
+static const char *seed_schema_sql =
     "CREATE TABLE IF NOT EXISTS community_summaries ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id TEXT NOT NULL DEFAULT '',"
     "community_id INTEGER NOT NULL, summary_text TEXT NOT NULL,"
     "entity_count INTEGER NOT NULL DEFAULT 0, edge_count INTEGER NOT NULL DEFAULT 0,"
     "generated_at INTEGER NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1)";
 
-static const char *kSeedRows = "INSERT INTO community_summaries (contact_id, community_id, "
-                               "summary_text, entity_count, edge_count, generated_at) VALUES"
-                               "('alice', 1, 'Climbing partner since 2019.', 9, 12, 1),"
-                               "('alice', 2, 'Talks in short bursts.',        3,  4, 1),"
-                               "('bob',   1, 'Should not appear.',            9,  9, 1)";
+static const char *seed_rows_sql = "INSERT INTO community_summaries (contact_id, community_id, "
+                                   "summary_text, entity_count, edge_count, generated_at) VALUES"
+                                   "('alice', 1, 'Climbing partner since 2019.', 9, 12, 1),"
+                                   "('alice', 2, 'Talks in short bursts.',        3,  4, 1),"
+                                   "('bob',   1, 'Should not appear.',            9,  9, 1)";
 
 static void test_graph_ground_load_returns_contact_summaries(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    seed_run(db, kSeedSchema);
-    seed_run(db, kSeedRows);
+    seed_run(db, seed_schema_sql);
+    seed_run(db, seed_rows_sql);
     hu_memory_loader_t loader;
     hu_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
     char *out = NULL;

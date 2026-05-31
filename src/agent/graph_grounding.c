@@ -63,7 +63,17 @@ hu_error_t hu_graph_ground_load(hu_memory_loader_t *loader, const char *contact_
         return HU_OK;
     }
     buf[pos] = '\0';
-    *out = buf;
+    /* Return a buffer sized EXACTLY to the content so callers freeing
+     * (*out_len + 1) match the allocation size (codebase free-size contract). */
+    char *exact = loader->alloc->alloc(loader->alloc->ctx, pos + 1);
+    if (!exact) {
+        loader->alloc->free(loader->alloc->ctx, buf, max_chars + 1);
+        return HU_OK; /* fail-open */
+    }
+    memcpy(exact, buf, pos);
+    exact[pos] = '\0';
+    loader->alloc->free(loader->alloc->ctx, buf, max_chars + 1);
+    *out = exact;
     *out_len = pos;
 #endif
     return HU_OK;
