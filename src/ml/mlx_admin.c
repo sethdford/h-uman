@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -173,6 +174,135 @@ static void record_swap_outcome(const char *adapter_path, size_t adapter_path_le
                      label);
 }
 
+/* ── LoRA scale safety gate (lora-scale-default-or-die.md) ─────────────── */
+
+hu_lora_scale_class_t hu_lora_scale_classify(double scale) {
+    if (scale > 8.0)
+        return HU_LORA_SCALE_REJECT;
+    if (scale > 4.0)
+        return HU_LORA_SCALE_WARN;
+    return HU_LORA_SCALE_SAFE;
+}
+
+hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapter_dir,
+                                        size_t adapter_dir_len, double *out_scale) {
+    if (!alloc || !adapter_dir || adapter_dir_len == 0 || !out_scale)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_scale = 0.0;
+
+    /* adapter_dir may be a directory OR a file path: production swap callers
+     * pass the weights file (".../adapters.safetensors"), but adapter_config.json
+     * lives in the adapter DIRECTORY. Resolve to the parent directory when the
+     * path denotes a file so the guard finds the config on the swap path —
+     * including when the weights file is missing/unreadable (the guard runs
+     * BEFORE the swap, so the file may not exist yet / anymore). */
+    char dir[1200];
+    if (adapter_dir_len >= sizeof(dir))
+        return HU_ERR_INVALID_ARGUMENT;
+    memcpy(dir, adapter_dir, adapter_dir_len);
+    dir[adapter_dir_len] = '\0';
+
+    const char *base = strrchr(dir, '/');
+    base = base ? base + 1 : dir;
+    bool treat_as_file;
+    struct stat st;
+    if (stat(dir, &st) == 0) {
+        /* Path exists: the filesystem is authoritative about file vs dir. */
+        treat_as_file = S_ISREG(st.st_mode);
+    } else {
+        /* Path does not exist (weights file already removed, or about to be
+         * written): a '.' extension in the last component (".safetensors",
+         * ".npz", ".bin") means it's a file, so look in the parent dir. A
+         * component with no extension is treated as a directory — it reads
+         * its OWN (possibly absent) config, never a sibling's, so a missing
+         * directory can't pick up a stray config from its parent. */
+        treat_as_file = (strchr(base, '.') != NULL);
+    }
+    if (treat_as_file) {
+        char *slash = strrchr(dir, '/');
+        if (slash)
+            *slash = '\0'; /* ".../adapters.safetensors" -> ".../" */
+        else
+            dir[0] = '\0'; /* bare filename -> current directory */
+    }
+
+    char path[1300];
+    int n = dir[0] ? snprintf(path, sizeof(path), "%s/adapter_config.json", dir)
+                   : snprintf(path, sizeof(path), "adapter_config.json");
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return HU_ERR_NOT_FOUND;
+
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return HU_ERR_NOT_FOUND;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return HU_ERR_NOT_FOUND;
+    }
+    long sz = ftell(f);
+    if (sz <= 0 || sz > (1L << 20)) { /* adapter_config.json is tiny; cap at 1 MiB */
+        fclose(f);
+        return HU_ERR_NOT_FOUND;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return HU_ERR_NOT_FOUND;
+    }
+    char *raw = alloc->alloc(alloc->ctx, (size_t)sz + 1);
+    if (!raw) {
+        fclose(f);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t rd = fread(raw, 1, (size_t)sz, f);
+    fclose(f);
+    raw[rd] = '\0';
+
+    hu_json_value_t *root = NULL;
+    hu_error_t e = hu_json_parse(alloc, raw, rd, &root);
+    alloc->free(alloc->ctx, raw, (size_t)sz + 1);
+    if (e != HU_OK)
+        return e; /* OOM / JSON_PARSE: propagate the real cause. Masking it as
+                     NOT_FOUND would fail-open the scale guard under memory
+                     pressure or on a corrupt config — exactly the leak it exists
+                     to prevent. */
+    if (!root)
+        return HU_ERR_NOT_FOUND;
+
+    /* mlx_lm_lora writes {"lora_parameters": {"scale": N, ...}, ...};
+     * some configs put scale at top level. Try nested first. */
+    double scale = -1.0;
+    const hu_json_value_t *lp = hu_json_object_get(root, "lora_parameters");
+    if (lp)
+        scale = hu_json_get_number(lp, "scale", -1.0);
+    if (scale < 0.0)
+        scale = hu_json_get_number(root, "scale", -1.0);
+    hu_json_free(alloc, root);
+
+    if (scale < 0.0)
+        return HU_ERR_NOT_FOUND;
+    *out_scale = scale;
+    return HU_OK;
+}
+
+hu_error_t hu_lora_scale_guard_serveable(hu_allocator_t *alloc, const char *adapter_path,
+                                         size_t adapter_path_len) {
+    double scale = 0.0;
+    hu_error_t e = hu_lora_adapter_config_scale(alloc, adapter_path, adapter_path_len, &scale);
+    if (e == HU_ERR_NOT_FOUND)
+        return HU_OK; /* no readable config — adapter predates the scale field; fail-open */
+    if (e != HU_OK)
+        return e; /* OOM / invalid-arg are real errors — do NOT silently serve over-scaled */
+    if (hu_lora_scale_classify(scale) == HU_LORA_SCALE_REJECT) {
+        hu_log_warn("mlx_admin", NULL,
+                    "refusing to serve adapter at %.*s: lora scale=%.1f exceeds the 8.0 "
+                    "ceiling (lora-scale-default-or-die.md) — would collapse "
+                    "instruction-following. Retrain with scale<=2.0.",
+                    (int)adapter_path_len, adapter_path, scale);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    return HU_OK;
+}
+
 #ifndef HU_ENABLE_CURL
 /* When curl is disabled (release minimal builds, fuzz-only configs)
  * the admin layer is a NOT_SUPPORTED stub — matching the M3 dispatcher
@@ -292,6 +422,20 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
         !result)
         return HU_ERR_INVALID_ARGUMENT;
     memset(result, 0, sizeof(*result));
+
+    /* Refuse to serve a catastrophically over-scaled adapter (scale>8.0)
+     * before it ever reaches the model server. The guard fails OPEN (HU_OK)
+     * only when there's no readable adapter_config.json; an over-scale refusal
+     * is HU_ERR_INVALID_ARGUMENT, while a real read failure (OOM / JSON_PARSE)
+     * comes back as itself. Surface whatever the guard returns verbatim — a
+     * memory failure must NOT be mislabeled as an over-scale refusal in the
+     * return value or the swap-outcome observability. See
+     * lora-scale-default-or-die.md. */
+    hu_error_t guard = hu_lora_scale_guard_serveable(alloc, adapter_path, adapter_path_len);
+    if (guard != HU_OK) {
+        record_swap_outcome(adapter_path, adapter_path_len, guard, 0, 0);
+        return guard;
+    }
 
     char *url = join_url(alloc, base_url, base_url_len, "adapters/swap");
     if (!url)

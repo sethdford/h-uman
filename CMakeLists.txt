@@ -3926,6 +3926,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_reaction_paired_train_e2e.c
     tests/test_dpo_collector.c
     tests/test_proactive_outcomes.c
     tests/test_e2e_learning_loop.c

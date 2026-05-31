@@ -762,6 +762,7 @@ void run_self_rag_tests(void);
 void run_memory_tiers_tests(void);
 void run_process_reward_tests(void);
 void run_dpo_tests(void);
+void run_reaction_paired_train_e2e_tests(void);
 void run_dpo_collector_tests(void);
 void run_proactive_outcomes_tests(void);
 void run_e2e_learning_loop_tests(void);
@@ -1704,6 +1705,7 @@ int main(int argc, char **argv) {
     run_memory_tiers_tests();
     run_process_reward_tests();
     run_dpo_tests();
+    run_reaction_paired_train_e2e_tests();
     run_dpo_collector_tests();
     run_proactive_outcomes_tests();
     run_e2e_learning_loop_tests();
