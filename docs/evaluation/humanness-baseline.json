@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "description": "Humanness measurement baseline for the deterministic PR gate (measurement-loop spec tasks 1-4). `expected` is seeded from the first local run of scripts/run_humanness_deterministic.py; thresholds are conservative margins to catch real regressions without firing on normal variance.",
+    "measured_date": "2026-05-31",
+    "measured_via": "scripts/run_humanness_deterministic.py",
+    "note": "Only axes with real evaluated data (n>0) on the synthetic set are gated. `anti_ai` (the structural shape AI-tell classifier) is the load-bearing deterministic signal. `relationship`/`fidelity` are NOT gated here: they need a target register/persona absent from the synthetic set (n=0), so they belong to the scheduled secrets/persona tier (spec tasks 5-6). A metric with no signal must not appear in a gate as a vacuous always-0.0."
+  },
+  "metrics": {
+    "anti_ai": {
+      "expected": 0.8875,
+      "threshold": 0.05,
+      "description": "Structural shape classifier: higher = more human (fewer AI-tell patterns). Deterministic, offline, secret-free. Regression = current < 0.8875 - 0.05."
+    },
+    "aggregate": {
+      "expected": 0.8875,
+      "threshold": 0.05,
+      "description": "Mean of the gated deterministic metrics (currently anti_ai alone). Regression = current < 0.8875 - 0.05."
+    }
+  }
+}
