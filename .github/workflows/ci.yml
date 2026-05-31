@@ -295,6 +295,14 @@ jobs:
             echo "::error::Binary size ${KB}KB exceeds 2600KB budget"
             exit 1
           fi
+      - name: Doc binary-size drift gate
+        # Phase 5 self-healing: the build-free metrics-drift gate (doc-fleet +
+        # pre-push) cannot measure binary size, so the docs' "~NNNNN KB" claims
+        # drifted to a stale debug-build number (~23209 KB) while the real
+        # release binary is ~2468 KB — a 9x overstatement that undercut the
+        # "impossibly small" headline. This is the ONLY job with a MinSizeRel
+        # binary, so the binary-size claims are gated here (15% tolerance).
+        run: bash scripts/check-metrics-drift.sh --binary build/human
 
   # build-ios (HumanKit swift test + XCUITest) intentionally removed from CI:
   # the iOS app is not a current focus, and its XCUITest suite carries
