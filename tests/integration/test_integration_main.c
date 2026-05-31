@@ -10,6 +10,12 @@ int hu__suite_active = 1;
 const char *hu__suite_filter = NULL;
 const char *hu__test_filter = NULL;
 jmp_buf hu__jmp;
+/* Flaky-quarantine harness globals (declared extern in test_framework.h).
+ * The integration binary doesn't use HU_RUN_TEST_FLAKY, but HU_FAIL and the
+ * summary macros reference these, so they must be defined in this TU too. */
+int hu__flaky_retries = 0;
+int hu__flaky_recovered = 0;
+int hu__quiet_fail = 0;
 
 void run_integration_http_tests(void);
 void run_integration_sqlite_tests(void);
