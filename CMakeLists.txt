@@ -575,20 +575,20 @@ set(HU_CORE_SOURCES
     src/sse/sse_client.c
     src/websocket/websocket.c
     src/net_security.c
-    src/config.c
-    src/config_schema.c
-    src/config_merge.c
-    src/config_migrate.c
-    src/config_serialize.c
-    src/config_getters.c
-    src/config_validate.c
-    src/config_types.c
-    src/config_mutator.c
-    src/config_parse.c
-    src/config_parse_channels.c
-    src/config_parse_providers.c
-    src/config_parse_agent.c
-    src/config_parse_behavior.c
+    src/config/config.c
+    src/config/config_schema.c
+    src/config/config_merge.c
+    src/config/config_migrate.c
+    src/config/config_serialize.c
+    src/config/config_getters.c
+    src/config/config_validate.c
+    src/config/config_types.c
+    src/config/config_mutator.c
+    src/config/config_parse.c
+    src/config/config_parse_channels.c
+    src/config/config_parse_providers.c
+    src/config/config_parse_agent.c
+    src/config/config_parse_behavior.c
     src/capabilities.c
     src/channel_catalog.c
     src/channel_adapters.c
@@ -612,11 +612,11 @@ set(HU_CORE_SOURCES
     src/memory/evolved_opinions.c
     src/status.c
     src/http_util.c
-    src/mcp.c
-    src/mcp_jsonrpc.c
-    src/mcp_transport_stdio.c
-    src/mcp_transport_sse.c
-    src/mcp_transport_http.c
+    src/mcp/mcp.c
+    src/mcp/mcp_jsonrpc.c
+    src/mcp/mcp_transport_stdio.c
+    src/mcp/mcp_transport_sse.c
+    src/mcp/mcp_transport_http.c
     src/multimodal.c
     src/multimodal/calendar.c
     src/multimodal/document.c
@@ -892,8 +892,8 @@ set(HU_CORE_SOURCES
     src/cognition/intrinsic_drive.c
     src/agent/prosocial_routine.c
     src/permission.c
-    src/mcp_manager.c
-    src/mcp_tool_wrapper.c
+    src/mcp/mcp_manager.c
+    src/mcp/mcp_tool_wrapper.c
     src/agent/compaction_structured.c
     src/agent/session_persist.c
     src/agent/instruction_discover.c
@@ -1189,7 +1189,7 @@ set(HU_CORE_SOURCES
     src/tools/declarative.c
     src/tools/mcp_resource_tools.c
     src/tools/cron_session_tools.c
-    src/mcp_server.c
+    src/mcp/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
     src/channels/behavior_class.c
@@ -1205,7 +1205,7 @@ set(HU_CORE_SOURCES
     src/skills/skill_scaffold.c
     src/context/context_engine.c
     src/context/context_engine_rag.c
-    src/mcp_registry.c
+    src/mcp/mcp_registry.c
     src/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
@@ -1361,7 +1361,7 @@ list(APPEND HU_CORE_SOURCES
     src/eval/longmemeval.c
     src/eval_judge.c
     src/eval_benchmarks.c
-    src/mcp_resources.c
+    src/mcp/mcp_resources.c
     src/eval_dashboard.c
     src/memory/corrective_rag.c
     src/memory/adaptive_rag.c
