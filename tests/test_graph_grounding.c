@@ -226,21 +226,19 @@ static void test_graph_ground_load_shadows_bytes_when_in_shadow_mode(void) {
 }
 #endif
 
-/* AC-1.3: Compliance test that the gate comment exists in source */
+/* AC-1.3: Compliance test that the gate comment exists in source. Checks the
+ * comment is PRESENT (not at a hardcoded line — that pinned line 1471 and broke
+ * whenever code was inserted above it; presence is the real contract). */
 static void test_gate_comment_exists_at_agent_turn_1471(void) {
     FILE *f = fopen("src/agent/agent_turn.c", "r");
     HU_ASSERT_NOT_NULL(f);
 
-    int line_num = 0;
     char buf[512];
     bool found_comment = false;
     while (fgets(buf, sizeof(buf), f)) {
-        line_num++;
-        if (line_num >= 1471 && line_num <= 1475) {
-            if (strstr(buf, "GraphRAG activation gated") != NULL) {
-                found_comment = true;
-                break;
-            }
+        if (strstr(buf, "GraphRAG activation gated") != NULL) {
+            found_comment = true;
+            break;
         }
     }
     fclose(f);

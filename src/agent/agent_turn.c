@@ -794,6 +794,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
      * hu_agent_internal_emit_behavior_record at stash time. */
     hu_agent_turn_state_reset(agent);
 
+    /* Clear the last rejected draft so DPO pairing only captures rejections from THIS turn.
+     * Per-turn pairing prevents stale cross-turn alternatives from contaminating the dataset. */
+    if (agent->sota.last_rejected_draft) {
+        agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
+                           agent->sota.last_rejected_draft_len + 1);
+        agent->sota.last_rejected_draft = NULL;
+        agent->sota.last_rejected_draft_len = 0;
+    }
+
     /* Free any previously-built humanness context, then build fresh for this turn */
     hu_agent_free_turn_context(agent);
     hu_agent_build_turn_context(agent);
@@ -6015,7 +6024,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         agent->alloc->free(agent->alloc->ctx, critique, critique_len + 1);
 
                         /* DPO: save the rejected response for pairing with the
-                         * chosen response after retry succeeds. */
+                         * chosen response after retry succeeds. Also persist in the agent
+                         * so production reaction handlers can access it for complete pairs. */
                         if (agent->sota.sota_initialized && resp.content && resp.content_len > 0) {
                             if (dpo_rejected_resp)
                                 agent->alloc->free(agent->alloc->ctx, dpo_rejected_resp,
@@ -6023,6 +6033,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             dpo_rejected_resp =
                                 hu_strndup(agent->alloc, resp.content, resp.content_len);
                             dpo_rejected_resp_len = resp.content_len;
+
+                            /* Store in the agent's sota extension so reaction handlers can access
+                             * the rejected draft for production DPO pairing. This is a SEPARATE
+                             * copy from dpo_rejected_resp (which gets freed after retry). */
+                            if (agent->sota.last_rejected_draft)
+                                agent->alloc->free(agent->alloc->ctx,
+                                                   agent->sota.last_rejected_draft,
+                                                   agent->sota.last_rejected_draft_len + 1);
+                            agent->sota.last_rejected_draft =
+                                hu_strndup(agent->alloc, resp.content, resp.content_len);
+                            agent->sota.last_rejected_draft_len = resp.content_len;
+
                             hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg, msg_len,
                                                         resp.content, resp.content_len, false);
                         }

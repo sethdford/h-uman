@@ -135,6 +135,9 @@ typedef struct hu_agent_extensions {
     hu_checkpoint_store_t checkpoint_store;
     hu_scratchpad_t scratchpad;
     hu_escalate_protocol_t escalate_protocol;
+
+    char *last_rejected_draft; /* owned; the response rejected by response guard on the last turn */
+    size_t last_rejected_draft_len; /* length of last_rejected_draft (excluding null terminator) */
 } hu_agent_extensions_t;
 
 typedef struct hu_frontier_state {
