@@ -120,10 +120,10 @@ macOS: `IOKit` for battery. Linux: `/sys/class/power_supply`. Windows: `GetSyste
 
 ### Job runners (registered at scheduler_open)
 
-- `HU_JOB_AUTODREAM_*` → existing `src/agent/autodream.c` functions.
+- `HU_JOB_AUTODREAM_*` → existing `src/agent/simulation/autodream.c` functions.
 - `HU_JOB_KV_CACHE_*` → W10 module.
 - `HU_JOB_LORA_TRAINING` → W13 `hu_learner_train`.
-- `HU_JOB_COUNTERFACTUAL_REHEARSAL` → new in `src/agent/counterfactual.c`.
+- `HU_JOB_COUNTERFACTUAL_REHEARSAL` → new in `src/agent/simulation/counterfactual.c`.
 - `HU_JOB_BELIEF_REVERIFICATION` → W11 `hu_self_rag_verify` over stale beliefs.
 
 ### Counterfactual rehearsal (new module)
