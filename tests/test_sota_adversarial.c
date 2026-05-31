@@ -315,9 +315,12 @@ static void dpo_feedback_trivially_short_response_rejected(void) {
     HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "k", 1, true) == HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "GO", 2, true) == HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "SKIP", 4, true) == HU_OK);
-    size_t count = 0;
+    /* 2026-05-31: single-sided feedback routes to feedback_signals, so dpo_pairs
+     * stays empty. The 4-byte accept boundary is still pinned by the HU_OK above
+     * (k/GO refused, SKIP accepted) — it just lands in the signals table now. */
+    size_t count = 99;
     hu_dpo_pair_count(&col, &count);
-    HU_ASSERT(count == 1);
+    HU_ASSERT(count == 0);
     hu_dpo_collector_deinit(&col);
 }
 
@@ -330,9 +333,11 @@ static void dpo_feedback_max_length_truncation(void) {
     hu_error_t err =
         hu_dpo_record_from_feedback(&col, huge, sizeof(huge), huge, sizeof(huge), true);
     HU_ASSERT(err == HU_OK);
-    size_t count = 0;
+    /* 2026-05-31: feedback routes to feedback_signals (no overflow on huge input);
+     * dpo_pairs stays empty. */
+    size_t count = 99;
     hu_dpo_pair_count(&col, &count);
-    HU_ASSERT(count == 1);
+    HU_ASSERT(count == 0);
     hu_dpo_collector_deinit(&col);
 }
 
@@ -388,9 +393,11 @@ static void dpo_rapid_fire_many_records(void) {
     for (int i = 0; i < 200; i++) {
         hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, i % 2 == 0);
     }
-    size_t count = 0;
+    /* 2026-05-31: 200 single-sided feedbacks route to feedback_signals (stress:
+     * no crash/leak); dpo_pairs stays empty so the DPO corpus isn't poisoned. */
+    size_t count = 99;
     hu_dpo_pair_count(&col, &count);
-    HU_ASSERT(count == 200);
+    HU_ASSERT(count == 0);
     hu_dpo_collector_deinit(&col);
 }
 
