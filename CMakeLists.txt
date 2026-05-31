@@ -448,6 +448,10 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_action_facts.c)
 # daemon TCP server (Phase 3) and tests/test_imessage_private_protocol.c
 # reference it on every platform.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_private/protocol.c)
+# iMessage private-API daemon-side client (Phase 3): pure JSON command builders
+# (the wire contract the Swift helper dylib parses) + backend-selection
+# predicate. Pure/cross-platform; tests/test_imessage_private_client.c covers it.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_private/client.c)
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
     set(HU_HAS_PWA_FLAG TRUE)
@@ -3416,6 +3420,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_reply_style.c
     tests/test_imessage_reply_fallback_quote.c
     tests/test_imessage_private_protocol.c
+    tests/test_imessage_private_client.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
