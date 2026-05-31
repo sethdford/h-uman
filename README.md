@@ -248,7 +248,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                                   | Any sandbox backend                                       |
 | **Identity**      | `IdentityConfig` | OpenClaw (markdown), AIEOS v1.1 (JSON)                                                                                                                                | Any identity format                                       |
 | **Tunnel**        | `Tunnel`         | None, Cloudflare, Tailscale, ngrok, Custom                                                                                                                            | Any tunnel binary                                         |
-| **Heartbeat**     | Engine           | [`src/heartbeat.c`](src/heartbeat.c) periodic tasks                                                                                                                   | —                                                         |
+| **Heartbeat**     | Engine           | [`src/observability/heartbeat.c`](src/observability/heartbeat.c) periodic tasks                                                                                                                   | —                                                         |
 | **Skills**        | Loader           | TOML manifests + SKILL.md instructions                                                                                                                                | Community skill packs                                     |
 | **Peripherals**   | `Peripheral`     | Serial, Arduino, Raspberry Pi GPIO, STM32/Nucleo                                                                                                                      | Any hardware interface                                    |
 | **Cron**          | Scheduler        | Cron expressions + one-shot timers with JSON persistence                                                                                                              | —                                                         |
@@ -686,8 +686,8 @@ cmake --build .
 
 Channel CJM coverage (ingress parsing/filtering, session key routing, account propagation, bus handoff) is validated by tests in:
 
-- `src/channel_manager.c` (runtime channel registration/start semantics + listener mode wiring)
-- `src/config.c` (OpenClaw-compatible `channels.*.accounts` parsing, multi-account selection/ordering, aliases)
+- `src/channels/channel_manager.c` (runtime channel registration/start semantics + listener mode wiring)
+- `src/config/config.c` (OpenClaw-compatible `channels.*.accounts` parsing, multi-account selection/ordering, aliases)
 - `src/gateway/gateway.c` (Telegram/WhatsApp/LINE/Lark routed session keys from webhook payloads)
 - `src/daemon.c` (gateway-loop inbound route resolution for Discord/QQ/OneBot/Mattermost/MaixCam)
 - `src/channels/discord.c`, `src/channels/mattermost.c`, `src/channels/qq.c`, `src/channels/onebot.c`, `src/channels/signal.c`, `src/channels/line.c`, `src/channels/whatsapp.c` (per-channel inbound/outbound contracts)

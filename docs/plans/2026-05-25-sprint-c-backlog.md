@@ -141,7 +141,7 @@ and the agent replied" inside 5 minutes.
 - `~/.human/onboard-state.json` persists progress
 
 **Files:**
-- `src/onboard.c` (extensive rewrite, ~1500 LoC)
+- `src/onboard/onboard.c` (extensive rewrite, ~1500 LoC)
 - `include/human/onboard.h` (new state-machine API)
 - `tests/test_onboard.c` (state-machine transitions, resume from
   each step, ~400 LoC)
@@ -189,7 +189,7 @@ that users run when something feels off.
   re-init social_state.json, etc.) with explicit confirmation
 
 **Files:**
-- `src/doctor.c` (rewrite of the existing diagnostic, ~1200 LoC)
+- `src/doctor/doctor.c` (rewrite of the existing diagnostic, ~1200 LoC)
 - `include/human/doctor.h` (check registry API; each check is a
   vtable with `name`, `run`, `fix`)
 - `tests/test_doctor.c` (registry + per-check happy + sad paths,
@@ -284,7 +284,7 @@ walk-through close the discovery gap.
 **Files:**
 - `docs/guides/getting-started.md` (new, ~400 lines)
 - `docs/guides/img/` (new, ~5 PNG screenshots)
-- `src/cli_commands.c` (`human help getting-started` handler,
+- `src/app/cli_commands.c` (`human help getting-started` handler,
   ~200 LoC)
 - `README.md` (updated)
 

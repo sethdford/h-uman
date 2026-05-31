@@ -12,9 +12,9 @@ This design composes existing primitives. The novel surface is small:
 |---|---|---|
 | `hu_proactive_throttle` | `src/agent/proactive_throttle.c` (referenced in `src/daemon.c:1006`) | Per-contact recency cap, daily budget, quiet hours |
 | `hu_proactive_budget_t` | `src/daemon.c:493`, `src/daemon.c:497` | `daily_max`, `cool_off_hours`, backoff on unanswered |
-| `hu_proactive_context_t` | `src/agent/proactive.c`, `src/daemon_proactive.c` | Per-contact ring of recent moments, dedup state |
+| `hu_proactive_context_t` | `src/agent/proactive.c`, `src/daemon/daemon_proactive.c` | Per-contact ring of recent moments, dedup state |
 | `hu_proactive_check_events` | `src/agent/proactive.c:432`, called at `src/daemon.c:1577` | Inbound-event-driven proactive (different trigger shape) |
-| Cron job framework | `src/main.c:1366`, `hu_cron_scheduler_t` | Schedules family check-ins at 10am |
+| Cron job framework | `src/app/main.c:1366`, `hu_cron_scheduler_t` | Schedules family check-ins at 10am |
 | `hu_prompt_build_system` | `src/agent/prompt.c:109` | The 25+ field context assembler — initiative reuses this |
 | F30/F31/F129 compute layers | `src/agent/proactive_ext.c` (per `2026-05-25-proactive-ext-completion.md`) | Curiosity / callback / disclosure detectors — INPUTS to initiative |
 | Autoresponder quiet hours | `~/.human/autoresponder.json::schedules` | Already enforces 22:00-07:00 quiet |

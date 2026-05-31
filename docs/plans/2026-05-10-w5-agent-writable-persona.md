@@ -108,8 +108,8 @@ Adds `eval_suites/persona_adaptation.json` with 20 paired tasks: same prompt, tw
 | `src/agent/self_improve.c` | Extend — emit `hu_persona_delta_t` proposals |
 | `include/human/agent/persona_evolver.h` | New |
 | `src/agent/persona_evolver.c` | New — weekly cycle, evidence gathering |
-| `src/main.c` | `human persona deltas/propose/apply/reject/revert/history` |
-| `src/config.c` | New `persona.auto_apply_high_confidence` flag |
+| `src/app/main.c` | `human persona deltas/propose/apply/reject/revert/history` |
+| `src/config/config.c` | New `persona.auto_apply_high_confidence` flag |
 | `ui/src/views/persona-deltas-view.ts` | New tab in memory-view |
 | `tests/test_persona_delta.c` | New |
 | `tests/test_persona_evolver.c` | New |

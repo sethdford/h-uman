@@ -33,7 +33,7 @@ feedback signal detection. Features F77-F82, F94-F101.
   online_learning,self_improve,trust,value_learning,weakness,
   weakness_analyzer,world_model}.c`
 - `src/skills/skill_scaffold.c`
-- `src/skill_registry.c`, `src/skillforge.c`, `src/skills.c`
+- `src/skills/skill_registry.c`, `src/skills/skillforge.c`, `src/skills/skills.c`
 
 ### Proven? (tests exist)
 - `tests/test_skills.c`

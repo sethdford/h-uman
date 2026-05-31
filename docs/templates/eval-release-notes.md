@@ -34,7 +34,7 @@ Separate what the **Human runtime** (prompts, tool wiring, harness) is responsib
 - **Same suite + judge, different models**: If you change only `HUMAN_MODEL`, differences in pass rate are primarily **model** effects, not regressions in Human’s C code or default prompts.
 - **Smaller / cheaper models** (e.g. `gpt-4o-mini`) often underperform on: warm refusal of romantic or intimate roleplay, strict “no fabricated live data” discipline, and subtle legal or epistemic boundaries—even when system safety text says the right thing.
 - **Stronger chat models** (e.g. `gpt-4o`, Claude Sonnet-class) are expected to align better with those probes under the same system prompt.
-- **Static `human eval run`**: Suites such as [`eval_suites/adversarial.json`](../../eval_suites/adversarial.json) and [`eval_suites/reasoning_basic.json`](../../eval_suites/reasoning_basic.json) use `match_mode: llm_judge`. The runner asks the configured provider to judge each task; when a task includes a `rubric`, it is combined with the gold `expected` string in the judge prompt (see `hu_eval_run_suite` in `src/eval.c`).
+- **Static `human eval run`**: Suites such as [`eval_suites/adversarial.json`](../../eval_suites/adversarial.json) and [`eval_suites/reasoning_basic.json`](../../eval_suites/reasoning_basic.json) use `match_mode: llm_judge`. The runner asks the configured provider to judge each task; when a task includes a `rubric`, it is combined with the gold `expected` string in the judge prompt (see `hu_eval_run_suite` in `src/eval/eval.c`).
 
 When publishing numbers, state both **agent model** and **judge model** so readers can reproduce and interpret failures.
 

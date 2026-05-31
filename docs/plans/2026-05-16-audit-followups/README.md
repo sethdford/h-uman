@@ -5,7 +5,7 @@ security, and architectural gaps. The two highest-impact fixes were landed
 in the same session ([commit-ready in this worktree]):
 
 - **Unknown-tool permission masquerading** — introduced `HU_PERM_DENY` sentinel
-  ([commit ref: src/permission.c]). 4 adversarial tests were rewritten because
+  ([commit ref: src/security/permission.c]). 4 adversarial tests were rewritten because
   they had been pinning the buggy contract.
 - **Sandbox deny-by-default** — `src/tools/shell.c` fork path no longer falls
   through to bare `/bin/sh` when sandbox is configured but unavailable. Pure

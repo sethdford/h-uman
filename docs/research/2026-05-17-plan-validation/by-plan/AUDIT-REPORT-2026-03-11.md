@@ -46,7 +46,7 @@ Sampled 10+ cited symbols across pillars — every file and symbol still exists:
   all present (F70+, F116+, F125+)
 - Phase plans `2026-03-10-human-fidelity-phase{1..9}-*.md` and master design
   `2026-03-10-human-fidelity-design.md` and `-missing-seven.md` all exist
-- `src/onboard.c` (post-dates this audit but consistent with §7 trajectory)
+- `src/onboard/onboard.c` (post-dates this audit but consistent with §7 trajectory)
 
 ### Proven? (tests exist)
 - This document is itself the test inventory; CLAUDE.md states

@@ -67,7 +67,7 @@ Per spec §1.5.3 and the umbrella plan §"Coordination with In-Flight Track D Ph
 
 1. **`src/ml/cli.c`** — Track D Phase 1 owns `lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`. Phase 2 EXTRACTS the existing `hu_ml_cli_dpo_train` body into a new `src/ml/cli_dpo.c` and adds `hu_ml_cli_dpo_real` alongside, leaving Track D's commands untouched.
 2. **`src/memory/personal_model.{h,c}`** — Track D Phase 1 owns the v4 work (still 3-axis at plan-authoring time per `personal_model.c:1340-1357`). Phase 2 does NOT add the 4th decision-style axis here — that's Phase 5 (`docs/plans/2026-05-11-full-sota-rl-improvement-loop-design.md` §4.6 line 349). Phase 2 reads `personal_model` only via existing public APIs.
-3. **`src/main.c::cmd_ml`** — the actual `human ml *` dispatcher (NOT `cli.c` as the spec claimed at §4.3 line 293). Phase 2's CLI dispatcher delta is in `main.c:218-284`, ≤ 30 LOC additive (one new `strcmp` branch for `dpo-judge`, one for `dpo-real`, swap `dpo-train` to dispatch to the new selector).
+3. **`src/app/main.c::cmd_ml`** — the actual `human ml *` dispatcher (NOT `cli.c` as the spec claimed at §4.3 line 293). Phase 2's CLI dispatcher delta is in `main.c:218-284`, ≤ 30 LOC additive (one new `strcmp` branch for `dpo-judge`, one for `dpo-real`, swap `dpo-train` to dispatch to the new selector).
 
 **Phase 2 must:**
 
@@ -174,7 +174,7 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 
 | Path | Delta | What changes |
 |------|-------|--------------|
-| `src/main.c` | +25 LOC at `cmd_ml` (lines 218-284) | Add `dpo-judge` and ensure `dpo-train` routes to `hu_ml_cli_dpo_real`; help text updated |
+| `src/app/main.c` | +25 LOC at `cmd_ml` (lines 218-284) | Add `dpo-judge` and ensure `dpo-train` routes to `hu_ml_cli_dpo_real`; help text updated |
 | `src/ml/cli.c` | -110 LOC at lines 484-595 | EXTRACT existing `hu_ml_cli_dpo_train` body into `cli_dpo.c::hu_ml_cli_dpo_judge`; leave a 6-line forwarding shim for backward C-API compat |
 | `src/channels/imessage.c` | +180 LOC near line 3765 (parallel poll) | Add `hu_imessage_poll_reactions` query branch (`WHERE (associated_message_type BETWEEN 2000 AND 2006 OR associated_message_type BETWEEN 3000 AND 3006) AND associated_message_guid IS NOT NULL`); call `hu_reaction_handler_handle_event` for each row |
 | `src/channels/slack.c` | +90 LOC near line 1219 (webhook event dispatch) | Add `event.type == "reactions.added"` and `"reactions.removed"` branches; emit `hu_reaction_event_t`; respect bot-user filter |
@@ -1914,7 +1914,7 @@ git commit -m "test(ml): pin MLX safetensors round-trips through llama.cpp adapt
 **Files:**
 - Create: `src/ml/cli_dpo.c`, `include/human/ml/cli_dpo.h`
 - Modify: `src/ml/cli.c` (extract body, leave 6-line forwarder)
-- Modify: `src/main.c` (dispatch)
+- Modify: `src/app/main.c` (dispatch)
 - Test: `tests/test_cli_dpo.c`
 
 - [ ] **Step 1: Write the failing test**
@@ -2055,10 +2055,10 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
 }
 ```
 
-- [ ] **Step 4: Add `dpo-judge` dispatch in `src/main.c::cmd_ml`**
+- [ ] **Step 4: Add `dpo-judge` dispatch in `src/app/main.c::cmd_ml`**
 
 ```c
-/* src/main.c, near line 246 */
+/* src/app/main.c, near line 246 */
 if (strcmp(sub, "dpo-train") == 0)
     return hu_ml_cli_dpo_real(alloc, argc - 2, (const char **)(argv + 2));
 if (strcmp(sub, "dpo-judge") == 0)
@@ -2086,7 +2086,7 @@ Expected: prints the old judge help text.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add include/human/ml/cli_dpo.h src/ml/cli_dpo.c src/ml/cli.c src/main.c tests/test_cli_dpo.c CMakeLists.txt tests/test_main.c
+git add include/human/ml/cli_dpo.h src/ml/cli_dpo.c src/ml/cli.c src/app/main.c tests/test_cli_dpo.c CMakeLists.txt tests/test_main.c
 git commit -m "feat(ml,cli): split dpo-train into dpo-real (default) + dpo-judge (legacy) (Phase 2 Task 8)"
 ```
 

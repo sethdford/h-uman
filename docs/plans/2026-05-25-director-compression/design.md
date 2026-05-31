@@ -127,7 +127,7 @@ for (size_t i = 0; i < HU_PROMPT_FIELD_COUNT; i++) {
 ## Config Parsing
 
 ```c
-/* src/config_parse.c (new function) */
+/* src/config/config_parse.c (new function) */
 static hu_error_t parse_prompt_budget(hu_allocator_t *a,
                                       hu_config_t *cfg,
                                       const hu_json_value_t *obj) {

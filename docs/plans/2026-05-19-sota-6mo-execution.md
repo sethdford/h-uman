@@ -151,7 +151,7 @@ modality:
 - text → as today
 
 The policy classifier is a Python prototype; the production wiring will
-be a port to C following `src/follow_up.c::ci_contains_word` style word-
+be a port to C following `src/agent/follow_up.c::ci_contains_word` style word-
 boundary classifiers (per `substring-classifier-pitfalls.md`).
 
 ### Month 6 — Integration & ablation studies

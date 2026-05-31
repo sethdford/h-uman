@@ -24,7 +24,7 @@ Give h-uman REM sleep. A scheduled idle subagent runs while the user is away and
 
 ## Motivation
 
-`src/memory/consolidation_engine.c` runs from `src/daemon.c` and `src/main.c`. Today it is a one-shot dedupe + recovery pass. It is not the AutoDream / Cognee `memify` shape: there's no scheduled idle window, no second-order derivation, no summary generation. `hu_graph_leiden_communities` and `hu_graph_build_communities` already cluster; `hu_graph_query_temporal` already reads time ranges; `hu_episodic_*` (`include/human/memory/episodic.h`) already captures contact-scoped narratives. None of these get woven into a periodic refinement pass.
+`src/memory/consolidation_engine.c` runs from `src/daemon.c` and `src/app/main.c`. Today it is a one-shot dedupe + recovery pass. It is not the AutoDream / Cognee `memify` shape: there's no scheduled idle window, no second-order derivation, no summary generation. `hu_graph_leiden_communities` and `hu_graph_build_communities` already cluster; `hu_graph_query_temporal` already reads time ranges; `hu_episodic_*` (`include/human/memory/episodic.h`) already captures contact-scoped narratives. None of these get woven into a periodic refinement pass.
 
 Effects:
 
@@ -185,8 +185,8 @@ CLI: `human autodream --dry-run` triggers a one-shot run for inspection; `human 
 | `src/memory/retrieval/qmd.c` | Route global queries to community summaries |
 | `src/memory/retrieval/engine.c` | Read summaries when QMD signals |
 | `src/daemon.c` | Idle detector + invocation; persist `last_autodream_run` |
-| `src/main.c` | `human autodream` subcommand |
-| `src/config.c` | Parse new config block |
+| `src/app/main.c` | `human autodream` subcommand |
+| `src/config/config.c` | Parse new config block |
 | `include/human/config.h` | Config struct fields |
 | `tests/test_autodream.c` | New — phases under `HU_IS_TEST` with stub summary writer |
 | `tests/test_community_summary.c` | New — CRUD + retrieval-routing |

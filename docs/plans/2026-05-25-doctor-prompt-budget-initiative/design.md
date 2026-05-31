@@ -15,7 +15,7 @@
 | `hu_prompt_budget_doctor_data_t` | Carries everything the renderers need: status enum, observation_count, snapshot_age_seconds, field_count, field_stats[], warning strings. | `include/human/doctor.h` |
 | `hu_doctor_check_prompt_budget` | Reads snapshot, populates data struct, derives diag_items for human render. | `src/doctor/check_prompt_budget.c` |
 | `hu_doctor_render_prompt_budget_json` | Serializes data struct to JSON via `human/json_util.h`. | same file |
-| CLI dispatch | Add `prompt_budget` to focused-subcommand block in `cmd_doctor`; add global `--json` flag. | `src/main.c` |
+| CLI dispatch | Add `prompt_budget` to focused-subcommand block in `cmd_doctor`; add global `--json` flag. | `src/app/main.c` |
 | Registry wiring | Add to `hu_doctor_registry_register_defaults`. | `src/doctor/registry.c` |
 
 ### Part B: init_outcome → dpo_pairs bridge

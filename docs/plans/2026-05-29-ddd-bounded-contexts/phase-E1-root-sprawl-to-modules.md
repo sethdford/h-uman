@@ -83,11 +83,11 @@ and each singleton group.
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 mkdir -p src/config
-git mv src/config.c src/config_getters.c src/config_merge.c src/config_migrate.c \
-       src/config_mutator.c src/config_parse.c src/config_parse_agent.c \
-       src/config_parse_behavior.c src/config_parse_channels.c \
-       src/config_parse_providers.c src/config_schema.c src/config_serialize.c \
-       src/config_types.c src/config_validate.c  src/config/
+git mv src/config/config.c src/config/config_getters.c src/config/config_merge.c src/config/config_migrate.c \
+       src/config/config_mutator.c src/config/config_parse.c src/config/config_parse_agent.c \
+       src/config/config_parse_behavior.c src/config/config_parse_channels.c \
+       src/config/config_parse_providers.c src/config/config_schema.c src/config/config_serialize.c \
+       src/config/config_types.c src/config/config_validate.c  src/config/
 ```
 
 - [ ] **Step 2: Rewrite the CMake source paths (scripted — N=14 ≥ 9 ⇒ script per `agent-task-sizing.md`)**

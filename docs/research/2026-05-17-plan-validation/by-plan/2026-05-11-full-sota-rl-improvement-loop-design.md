@@ -38,7 +38,7 @@ Design spec for the closed-loop RL & neural improvement loop: reaction → DPO/K
 ### Wired? (called in runtime path / dispatch)
 - `validate-rl-sota.sh` runs the full RL preset suite; demo-rl-loop.sh runs the user-visible demo CLI.
 - iMessage tapbacks + Slack reactji → `reaction_event.c` → `reaction_handler.c` → `dpo_pairs` SQLite.
-- Daemon polling via `src/daemon_reaction_poll.c` integrated in `src/daemon.c:+43`.
+- Daemon polling via `src/daemon/daemon_reaction_poll.c` integrated in `src/daemon.c:+43`.
 - LoRA training runner wired to eval gate at `src/agent/lora_training_runner.c`.
 - **Gap (PARTIAL):** No dedicated `rl_nightly.yml` GitHub workflow. The eval.yml weekly cron and validate-rl-sota.sh exist; nightly RL training is not automated in CI.
 

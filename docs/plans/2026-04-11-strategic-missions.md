@@ -51,7 +51,7 @@ The AI assistant landscape has converged. Gemini Agent browses the web and manag
 - `src/context/conversation.c`: disfluency, context modifiers always compiled
 - `src/tools/factory.c`: persona tool always registered
 - `src/gateway/cp_admin.c`: persona.set always available
-- `src/cli_commands.c`: `human init` creates config + starter persona with channel overlays
+- `src/app/cli_commands.c`: `human init` creates config + starter persona with channel overlays
 - Tests: guards removed from test_main, test_e2e, test_conversation, test_bth_e2e, etc.
 
 **Remaining phases:**
@@ -65,7 +65,7 @@ The AI assistant landscape has converged. Gemini Agent browses the web and manag
 | 1.5 | **Zero-config onboarding** | First-run CLI flow: "Tell me about yourself" → generate persona. 5 questions, 2 minutes. Optional — starter persona works without it. | Next sprint |
 | 1.6 | **A/B validation** | Blind A/B between persona-on and persona-off across 50 test conversations. Target: 80% preference for persona-on. | After 1.5 |
 
-**Key files:** `src/persona/`, `include/human/persona.h`, `src/agent/agent_turn.c`, `src/config.c`, `src/config_merge.c`, `src/daemon.c`, `CMakeLists.txt`
+**Key files:** `src/persona/`, `include/human/persona.h`, `src/agent/agent_turn.c`, `src/config/config.c`, `src/config/config_merge.c`, `src/daemon.c`, `CMakeLists.txt`
 
 **Risk (updated):** Reduced from High to Medium. ABI change is done. Remaining risk: minimal/embedded builds with `HU_ENABLE_PERSONA=OFF` need testing (persona sources not linked, but header types still available).
 
@@ -184,7 +184,7 @@ The AI assistant landscape has converged. Gemini Agent browses the web and manag
 | 4.5 | **Iterate on feedback** | Fix top 5 friction points. Re-measure. | Week 8-10 |
 | 4.6 | **Open beta (100 users)** | Public beta. Track DAU, conversations/day, retention at day 7 and day 30, API cost per user per day. | Week 10-14 |
 
-**Key files:** `src/main.c`, `src/config.c`, `src/config_merge.c`, `website/`, `README.md`
+**Key files:** `src/app/main.c`, `src/config/config.c`, `src/config/config_merge.c`, `website/`, `README.md`
 
 **Depends on:** M1 (persona must be default for the "wow" moment — a generic chatbot won't retain)
 
@@ -237,7 +237,7 @@ The AI assistant landscape has converged. Gemini Agent browses the web and manag
 | 6.3 | **Channel-specific persona tuning** | iMessage: tapbacks, read receipts, typing bubbles, reaction timing. Discord: thread awareness, emoji reactions, server context. Telegram: inline keyboards, reply threading. CLI: prompt flow, formatting, progress indicators. Web: real-time, rich media. | Week 3-6 |
 | 6.4 | **Channel excellence eval** | Create per-channel eval suites: 20 conversations per Tier 1 channel, scored on naturalness, persona consistency, timing appropriateness, feature utilization. Target: 8/10 average across all Tier 1 channels. | Week 4-8 |
 
-**Key files:** `src/channels/`, `src/channel_catalog.c`, `src/persona/persona.c` (overlays)
+**Key files:** `src/channels/`, `src/channels/channel_catalog.c`, `src/persona/persona.c` (overlays)
 
 **Risk:** Low-medium. This is primarily prioritization and polish, not new architecture. Risk is in under-investing in Tier 2/3 channels that specific users depend on.
 

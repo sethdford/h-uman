@@ -31,7 +31,7 @@ Single `hu_memory_facade_t` read/write/erase surface for structured memory kinds
 
 ### Wired? (called in runtime path / dispatch)
 - `src/agent/agent_turn.c` calls `hu_w7_facade_memory_handle(agent->w7_facade)` at lines 3875, 4769, 4855, 5880, 6120, 6136
-- `src/cli_commands.c:539-544` uses facade for memory export
+- `src/app/cli_commands.c:539-544` uses facade for memory export
 - `src/daemon.c:3248, 3263` uses facade in AutoDream contexts
 - Phase 1 inventory: zero direct `hu_graph_*` API calls remain under `src/agent/`, `src/persona/`, `src/feeds/`
 

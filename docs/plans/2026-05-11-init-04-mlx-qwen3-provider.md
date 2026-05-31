@@ -387,7 +387,7 @@ Estimated total: **9 new C/H files, 1 new Python script, 2 modifications, 4 test
 | `src/ml/cli.c` | ~15 | Dispatch `lora-convert` subcommand to `cli_lora_convert.c`. New file used to avoid growing `cli.c` past its existing ~2,000 LOC. |
 | `CMakeLists.txt` | ~25 | `option(HU_ENABLE_MLX_QWEN3 ...)`; conditionally compile the 4 new C files; install `scripts/mlx_qwen3_serve.py` next to the binary |
 | `CMakePresets.json` | ~20 | New `mlx_perf` preset with `HU_ENABLE_MLX_QWEN3=ON` and `HU_ENABLE_ML=ON` |
-| `src/config_parse.c` | ~50 | Parse `mlx_qwen3` block (model_path, quant, helper script path) in personalization config — additive, no schema break |
+| `src/config/config_parse.c` | ~50 | Parse `mlx_qwen3` block (model_path, quant, helper script path) in personalization config — additive, no schema break |
 | `include/human/config_types.h` | ~15 | `hu_mlx_qwen3_config_t` mirror struct in user config |
 | `src/providers/CLAUDE.md` | ~10 | Document the new provider key |
 | `docs/plans/2026-05-10-m3-frontier-model-bridge.md` | ~30 | Track row: Bridge B Phase B.1 + B.2 now backed by this initiative |

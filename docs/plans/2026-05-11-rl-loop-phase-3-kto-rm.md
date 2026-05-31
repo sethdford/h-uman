@@ -19,7 +19,7 @@ last_audit: 2026-05-25
 
 3. **KTO trainer** in `src/ml/kto.c` reuses `hu_rl_trainer_t` (Phase 2 Task 1) and adds `lambda_d` / `lambda_u` (default 1.0 each) to `hu_rl_trainer_config_t`. DPO ignores these new fields; KTO consults them. Factory `hu_rl_trainer_create_kto` is the analog of `hu_rl_trainer_create_dpo` (Phase 2 Task 1). KTO MLX subprocess wraps the third-party `mlx-lm-lora` KTO trainer (separate Python file `scripts/kto_mlx_train.py` for clarity — see Risk register R7).
 
-CLI surface: `human ml kto-train --pairs <jsonl> [--backend {auto|huml|mlx}] [--lambda-d 1.0] [--lambda-u 1.0]` and `human ml rm-train --pairs <jsonl> [--backend {huml|mlx}] [--save <path>]`. Both mirror Phase 2 `human ml dpo-train` dispatch in `src/main.c::cmd_ml` (≤30 LOC delta total across `cli.c` + `main.c`). RM inference latency budget < 50ms / 512-token completion is pinned in `tests/test_reward_model_inference.c` (HUML path always runs; MLX path gated by `HU_HAVE_MLX_LM` + Qwen GGUF presence, mirrors Phase 2 Task 7's safetensors test).
+CLI surface: `human ml kto-train --pairs <jsonl> [--backend {auto|huml|mlx}] [--lambda-d 1.0] [--lambda-u 1.0]` and `human ml rm-train --pairs <jsonl> [--backend {huml|mlx}] [--save <path>]`. Both mirror Phase 2 `human ml dpo-train` dispatch in `src/app/main.c::cmd_ml` (≤30 LOC delta total across `cli.c` + `main.c`). RM inference latency budget < 50ms / 512-token completion is pinned in `tests/test_reward_model_inference.c` (HUML path always runs; MLX path gated by `HU_HAVE_MLX_LM` + Qwen GGUF presence, mirrors Phase 2 Task 7's safetensors test).
 
 **Tech Stack:** C11, AddressSanitizer + UndefinedBehaviorSanitizer in `dev` preset, the existing `hu_gpt_t` / `hu_lora_t` / `hu_ml_train` ML stack, the existing `dpo_pairs` SQLite schema (Phase 2 still owns it), the existing `hu_rl_trainer_t` vtable + `hu_preference_pair_t` schema (Phase 2 Task 1, unchanged), `hu_reference_model` + `hu_policy_logprobs` (Phase 2 Tasks 3 and 2, unchanged), third-party Python package **`mlx-lm-lora`** (same package Phase 2 introduced — KTO trainer lives at `mlx_lm_lora.trainer.kto_trainer.train_kto`, verify at plan-execution start with `python3 -c "from mlx_lm_lora.trainer.kto_trainer import train_kto, KTOTrainingArgs"`; if the symbol path differs, update `scripts/kto_mlx_train.py` accordingly — see R1), Qwen-2.5-0.5B-Instruct Q4_K_M GGUF (~400 MB, fetched lazily via a new `scripts/fetch-qwen-rm.sh` mirroring `scripts/fetch-gemma.sh` from Phase 1), `tests/test_framework.h`, conventional commits, the existing `dead-code-finder` + `sprint-auditor` + `spec-verifier` + mandatory `aspect-panel` (5-verifier, spec §7) subagent gates.
 
@@ -79,11 +79,11 @@ CLI surface: `human ml kto-train --pairs <jsonl> [--backend {auto|huml|mlx}] [--
 
 ## Phase 3 boundary with in-flight Track D Phase 1 work
 
-Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (3-axis communication-style fidelity), and `src/main.c::cmd_ml` (the actual `human ml *` dispatcher).
+Track D Phase 1 still owns `src/ml/cli.c` (`lora-baseline`, `lora-ab`, `lora-persona`, `lora-runner`, `fidelity-status`, `apply-adapter`), `src/memory/personal_model.{h,c}` (3-axis communication-style fidelity), and `src/app/main.c::cmd_ml` (the actual `human ml *` dispatcher).
 
 Phase 3 ADDS subcommands and dispatch branches; it does NOT modify Track D's commands. Specifically:
 
-- `src/main.c::cmd_ml` — add `kto-train` and `rm-train` `strcmp` branches (~12 LOC), preserving every existing branch.
+- `src/app/main.c::cmd_ml` — add `kto-train` and `rm-train` `strcmp` branches (~12 LOC), preserving every existing branch.
 - `src/ml/cli.c` — add `#include "human/ml/cli_kto.h"` and `#include "human/ml/cli_rm.h"`, plus `hu_ml_cli_kto_train` / `hu_ml_cli_rm_train` forwarder declarations if needed (~10 LOC).
 
 Total dispatch delta ≤ 30 LOC per spec §4.4 row. Phase 2 already extracted DPO CLI bodies into `src/ml/cli_dpo.c`; KTO and RM CLI bodies live in NEW siblings `src/ml/cli_kto.c` and `src/ml/cli_rm.c` (NO further extraction from `cli.c`).
@@ -258,9 +258,9 @@ Phase 2's sprint-auditor flagged in the PASS_WITH_NOTES verdict: `hu_dpo_real_ml
 
 | Path | Delta | What changes |
 |------|-------|--------------|
-| `src/main.c` | +12 LOC at `cmd_ml` | Add `else if (strcmp(sub, "kto-train") == 0) { return hu_ml_cli_kto_train(argc - 2, argv + 2); }` and analogous `rm-train` branch. Help text updates to mention the new subcommands. |
+| `src/app/main.c` | +12 LOC at `cmd_ml` | Add `else if (strcmp(sub, "kto-train") == 0) { return hu_ml_cli_kto_train(argc - 2, argv + 2); }` and analogous `rm-train` branch. Help text updates to mention the new subcommands. |
 | `src/ml/cli.c` | +5 LOC (forwarder shim, optional) | If symbols are statically linked through `cli.c` for some downstream caller, add forwarder; otherwise no change. (Confirm at Task 11 by `rg -n 'hu_ml_cli_kto_train\|hu_ml_cli_rm_train' src/` — if no extant caller, skip this file entirely.) |
-| `src/main.c` (additional) | +0 LOC | Already counted above; total ≤ 30 LOC delta as required by spec §4.4 row 10. |
+| `src/app/main.c` (additional) | +0 LOC | Already counted above; total ≤ 30 LOC delta as required by spec §4.4 row 10. |
 | `src/ml/dpo_real_mlx.c` | +20 LOC (Task 0 fold-in) | Add `mlx_lm_lora_available()` static helper + create-time probe in `hu_dpo_real_mlx_create`. Returns `HU_ERR_NOT_SUPPORTED` cleanly if probe fails (D6). |
 | `src/ml/rl_trainer.c` | +30 LOC | Add `hu_rl_trainer_create_kto(alloc, config, *out)` factory entry (Task 4) — dispatches to `hu_kto_huml_create` / `hu_kto_mlx_create` analog to `_create_dpo`. Add KTO MLX probe `mlx_lm_lora_kto_available()` (or reuse the same probe symbol if compatible). |
 | `CMakeLists.txt` | +25 LOC | **AC-5 gating contract:** the new core source files (`kto.c`, `value_head.c`, `reward_model.c`, `reward_model_train.c`, `cli_kto.c`, `cli_rm.c`) are added to `HU_CORE_SOURCES` inside the existing `if(HU_ENABLE_RL_FULL)` guard block established by Phase 2 for `dpo_real_huml.c` / `dpo_real_mlx.c` (cf. spec §4.10 line 473). The MLX-only files (`kto_mlx.c`, `reward_model_mlx.c`) are additionally gated under `HU_ENABLE_MLX_TRAINER` (spec §4.10 line 474) — same nesting Phase 2 used for `dpo_real_mlx.c`. **Default `release` preset stays at flags OFF**, so binary delta is exactly the rl_trainer.h `lambda_d`/`lambda_u` field additions (~16 bytes per `hu_rl_trainer_config_t` instance) — well within the spec §4.10 line 487 hard sanity gate of ≤ +250 KB. Only the `rl_sota` preset compiles the new code. Test sources for `tests/test_{kto_loss,value_head,reward_model_train,reward_model_inference}.c` follow the same gating. **AC-5 + M2 fix for the test-flag options:** `option(HU_HAVE_MLX_LM_KTO ...)` is wired to `tests/test_kto_loss.c::test_kto_huml_50_signal_e2e_chosen_delta_increases_over_iters` MLX cross-check at the test-level via `target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_KTO=1)` when ON; `option(HU_HAVE_QWEN_RM_GGUF ...)` is wired to `tests/test_reward_model_inference.c::test_rm_mlx_inference_under_latency_budget` as a *fallback compile-time skip* (in addition to the runtime `access(qwen_path, R_OK)` check) so dead-code-finder sees both option and consumer; defining the option without a consumer triggers Task 12's audit. |
@@ -1906,16 +1906,16 @@ git commit -m "feat(ml,cli_rm): human ml rm-train subcommand handler (Phase 3 Ta
 
 ---
 
-### Task 11: `src/ml/cli.c` + `src/main.c::cmd_ml` dispatch updates
+### Task 11: `src/ml/cli.c` + `src/app/main.c::cmd_ml` dispatch updates
 
 **Files:**
-- Modify: `src/main.c` (+12 LOC at `cmd_ml`)
+- Modify: `src/app/main.c` (+12 LOC at `cmd_ml`)
 - Modify: `src/ml/cli.c` (+5 LOC if any forwarder is needed; likely zero)
 
 - [ ] **Step 1: Locate `cmd_ml` dispatcher**
 
 ```bash
-rg -n 'cmd_ml|"dpo-train"|"dpo-judge"' src/main.c
+rg -n 'cmd_ml|"dpo-train"|"dpo-judge"' src/app/main.c
 ```
 
 - [ ] **Step 2: Add dispatch branches**
@@ -1961,7 +1961,7 @@ All four invocations should produce non-error output.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/main.c src/ml/cli.c
+git add src/app/main.c src/ml/cli.c
 git commit -m "feat(main,ml): dispatch human ml kto-train + rm-train subcommands (Phase 3 Task 11)"
 ```
 
@@ -2062,7 +2062,7 @@ Per the writing-plans skill self-review checklist:
 - §4.4 row NEW `src/ml/reward_model_train.c` → Task 3 ✅
 - §4.4 row NEW `src/ml/cli_kto.c` → Task 9 ✅
 - §4.4 row NEW `src/ml/cli_rm.c` → Task 10 ✅
-- §4.4 row MODIFY `src/ml/cli.c` (≤30 LOC delta total with `src/main.c`) → Task 11 ✅ (delta is in `src/main.c::cmd_ml`, NOT `cli.c`; `cli.c` may be zero-delta — same correction Phase 2 documented in §"Phase 2 boundary with Track D")
+- §4.4 row MODIFY `src/ml/cli.c` (≤30 LOC delta total with `src/app/main.c`) → Task 11 ✅ (delta is in `src/app/main.c::cmd_ml`, NOT `cli.c`; `cli.c` may be zero-delta — same correction Phase 2 documented in §"Phase 2 boundary with Track D")
 - §4.4 row NEW `tests/test_kto_loss.c` → Tasks 5 + 6 ✅
 - §4.4 row NEW `tests/test_value_head.c` → Task 1 ✅
 - §4.4 row NEW `tests/test_reward_model_train.c` → Tasks 2 + 3 (smoke + convergence in same file) ✅

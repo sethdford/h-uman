@@ -5,7 +5,7 @@ status: closed
 parent: 2026-05-10-memory-roadmap-overview.md
 depends_on: 2026-05-10-w1-bitemporal-foundation.md
 risk: medium
-scope: src/agent/, src/memory/, ui/, src/main.c
+scope: src/agent/, src/memory/, ui/, src/app/main.c
 last_audit: 2026-05-25
 ---
 
@@ -126,7 +126,7 @@ EU AI Act audit-trail (10 years for high-risk): conflicts with Article 17. Docum
 | `src/gateway/gateway.c` | New endpoints |
 | `ui/src/views/memory-view.ts` | New view |
 | `ui/src/demo-gateway.ts` | Mock responses |
-| `src/main.c` | `human memory view/list/delete/edit/audit` subcommands |
+| `src/app/main.c` | `human memory view/list/delete/edit/audit` subcommands |
 | `tests/test_response_verifier.c` | New |
 | `tests/test_provenance.c` | New |
 | `tests/test_memory_erase.c` | New — cascade, log, GDPR scenarios |

@@ -26,11 +26,11 @@ side-by-side. Binary-budget delta ≤ 8 KB CLI plumbing only.
 ## Evidence
 
 ### Implemented? (code exists)
-- LongMemEval: `include/human/eval/longmemeval.h`, `src/eval/longmemeval.c`, `src/evaluation/evaluation_longmemeval.c`. Wired into the CLI registry: `src/cli_evaluation.c` line 41–42 registers `"longmemeval"`.
+- LongMemEval: `include/human/eval/longmemeval.h`, `src/eval/longmemeval.c`, `src/evaluation/evaluation_longmemeval.c`. Wired into the CLI registry: `src/eval/cli_evaluation.c` line 41–42 registers `"longmemeval"`.
 - LoCoMo: `src/evaluation/evaluation_locomo.c`, `src/evaluation/evaluation_locomo_facade.c`. CLI registers `"locomo"` (L39–40) and `"locomo-facade"` (L56–58).
 - MemoryAgentBench: `src/evaluation/evaluation_memoryagentbench.c`, registered at L47–48 (CLI label says `"stub"`).
 - KnowU-Bench, EMPA, ProAgentBench: **not found**. No matching files, no CLI registry entries.
-- `src/cli_evaluation.c` is the `human evaluation ...` subcommand surface; `src/main.c` line 492 registers it.
+- `src/eval/cli_evaluation.c` is the `human evaluation ...` subcommand surface; `src/app/main.c` line 492 registers it.
 
 ### Proven? (tests exist)
 - `tests/test_longmemeval.c`, `tests/test_w16_evaluation.c`, `tests/test_w16_eval_cli.c` exist.

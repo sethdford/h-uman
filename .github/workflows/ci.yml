@@ -482,7 +482,7 @@ jobs:
         run: bash -n completions/human.bash
       - name: Verify completions cover all subcommands
         run: |
-          CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
+          CMDS=$(grep -oP '\{"[a-z-]+", "' src/app/main.c | sed 's/{"//;s/", "//' | sort)
           for cmd in $CMDS; do
             grep -q "$cmd" completions/human.bash || { echo "MISSING in bash: $cmd"; exit 1; }
             grep -q "$cmd" completions/_human || { echo "MISSING in zsh: $cmd"; exit 1; }

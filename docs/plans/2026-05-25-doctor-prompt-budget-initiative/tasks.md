@@ -12,7 +12,7 @@ budget. No fanout.
 | T2 | Implement T1's new functions in `src/agent/prompt_budget.c` (or new `prompt_budget_io.c` if size grows). Atomic write per Personal Model precedent. | AC-1, AC-4, AC-5 | pending | Use `human/json_util.h`; reference `hu_personal_model_save` for atomic shape. |
 | T3 | Wire daemon flush call site in `src/daemon.c` near the existing verifier_metrics flush (~line 3482). Every 60s call `hu_prompt_budget_save_snapshot` with the agent's `hu_prompt_budget_t`. | AC-4 | pending | `touch src/daemon.c` after edit (D10). |
 | T4 | Implement `hu_doctor_check_prompt_budget` + `hu_doctor_render_prompt_budget_json` in new `src/doctor/check_prompt_budget.c`. Populates doctor_data struct from snapshot; derives diag_items for human render; serializes data struct directly for JSON. Stale mtime > 120s → WARN. | AC-1, AC-2, AC-3, AC-5, AC-6 | pending | Both renderers consume the same doctor_data — pinned by AC-6 test. |
-| T5 | CLI wiring in `src/main.c::cmd_doctor`: add `prompt_budget` to focused-subcommand dispatch block (~line 737), parse `--json` flag globally, suppress banner/color on stdout when set. Update `--help` text. | AC-5, AC-7 | pending | Errors still go to stderr in JSON mode. |
+| T5 | CLI wiring in `src/app/main.c::cmd_doctor`: add `prompt_budget` to focused-subcommand dispatch block (~line 737), parse `--json` flag globally, suppress banner/color on stdout when set. Update `--help` text. | AC-5, AC-7 | pending | Errors still go to stderr in JSON mode. |
 | T6 | Registry wiring: register `hu_doctor_check_prompt_budget` in `hu_doctor_registry_register_defaults` (`src/doctor/registry.c`). | AC-7 | pending | Default doctor flow includes the section. |
 
 ## Part B — init_outcome → dpo bridge

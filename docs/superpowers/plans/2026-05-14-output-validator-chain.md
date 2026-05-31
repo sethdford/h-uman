@@ -66,7 +66,7 @@ description: Refactor scattered output sanitizers into a composable validator-ch
 - `src/agent/agent_turn.c:5587-5664` — replace stripper sequence with chain execution
 - `src/agent/agent_stream.c:1409-1467, 2140-2200` — replace stripper sequence with chain execution
 - `src/daemon.c:1068-1070, 1712-1715, 2052, 9201-9204, 10539-10541, 11562-11565` — replace stripper sequence with chain execution
-- `src/daemon_cron.c:286` — replace single stripper with chain
+- `src/daemon/daemon_cron.c:286` — replace single stripper with chain
 - `src/channels/imessage.c:909, format.c:141` — replace single stripper with chain
 - `src/gateway/openai_compat.c:620-622` — replace stripper sequence with chain execution
 - `CMakeLists.txt` — add new source files
@@ -998,7 +998,7 @@ git commit -m "feat(agent): <validator_name> validator wraps <existing_function>
 - `src/agent/agent_turn.c:5587-5664`
 - `src/agent/agent_stream.c:1409-1467, 2140-2200`
 - `src/daemon.c:1068-1070, 1712-1715, 2052, 9201-9204, 10539-10541, 11562-11565`
-- `src/daemon_cron.c:286`
+- `src/daemon/daemon_cron.c:286`
 - `src/channels/imessage.c:909`
 - `src/channels/format.c:141`
 - `src/gateway/openai_compat.c:620-622`

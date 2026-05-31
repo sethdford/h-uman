@@ -31,7 +31,7 @@ last_audit: 2026-05-25
 | | |
 |--|--|
 | **Outcome** | Same user, same **policy and preferences** across sessions; memory is **attributed** and **revocable** where privacy requires it. |
-| **Anchors** | `src/memory/`, `hu_memory_t`; `src/security/policy`; config merge `src/config.c`; optional long-horizon work in [`2026-03-08-better-than-human.md`](2026-03-08-better-than-human.md) (promotion, consolidation). |
+| **Anchors** | `src/memory/`, `hu_memory_t`; `src/security/policy`; config merge `src/config/config.c`; optional long-horizon work in [`2026-03-08-better-than-human.md`](2026-03-08-better-than-human.md) (promotion, consolidation). |
 | **Workstreams** | (1) Document and test “memory read vs write” boundaries per backend (SQLite, markdown, etc.). (2) Ensure policy gates (autonomy, tool risk) apply consistently in agent + gateway paths. (3) Ship one “preference persistence” E2E path per primary surface (CLI + one channel) with tests. |
 | **Metrics** | Tests for policy + memory integration; user-facing docs accurate; optional: session-resume correctness tests. |
 

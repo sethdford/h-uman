@@ -36,7 +36,7 @@
   sends (`hu_conversation_flush_scheduled_for`, `daemon.c:1476-1525`) pass
   `NULL, 0` for parent guid (`daemon.c:1523`) — proactive and follow-up messages
   land as free-floating new messages, not thread replies.
-- **Banter speed**: `hu_followup_compute_send_time` (`src/follow_up.c:39-89`)
+- **Banter speed**: `hu_followup_compute_send_time` (`src/agent/follow_up.c:39-89`)
   implements warmth-based base delay, seeded jitter, chronotype hour-snapping
   (which already covers 3am avoidance), and a 24h staleness cutoff — but NO
   register-aware fast path: a one-word banter reply is delayed on the same

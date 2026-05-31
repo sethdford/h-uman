@@ -88,7 +88,7 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 | P2-2 | CRITICAL | `emotional_state.c:181-188` (src/context/ at audit time; since relocated by the DDD refactor) | Replace 60-char window with LLM-extracted noun phrase OR emotion keyword |
 | P2-3 | CRITICAL | [daemon.c:9976-9984](../../../src/daemon.c) | Inner-thought store must store extracted topic, not raw 127-byte memcpy; this is a prompt-injection vector |
 | P2-4 | HIGH | [proactive.c:552-574](../../../src/agent/proactive.c) | `hu_proactive_build_starter` must LLM-rephrase memory content before prompt injection |
-| P2-5 | HIGH | [daemon_proactive.c:227-241](../../../src/daemon_proactive.c) | `hu_daemon_build_callback_context` must not inject raw `content` bytes |
+| P2-5 | HIGH | [daemon_proactive.c:227-241](../../../src/daemon/daemon_proactive.c) | `hu_daemon_build_callback_context` must not inject raw `content` bytes |
 | P2-6 | HIGH | [fact_extract.c:14-71](../../../src/memory/fact_extract.c) | Heuristic fact patterns that capture first-person confessions ("i am a", "when i'm") must store paraphrased third-person facts, not raw substrings |
 | P2-7 | HIGH | [conversation.c:2420](../../../src/context/conversation.c) | Expand stopword list: add `hey, doing, you, me, my, feel, feeling, lost, lonely, sad, ok, omg`; reject single-word topics under 5 chars |
 | P2-8 | HIGH | [humanness.c:437-439](../../../src/humanness.c) | Curiosity template ("How is the %s going?") must take a structured noun phrase, not raw substring |
@@ -133,8 +133,8 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 
 | ID | Severity | File | Fix |
 | --- | --- | --- | --- |
-| P6-1 | HIGH | [daemon_proactive.c:275](../../../src/daemon_proactive.c) | Apply channel overlay (formality, length, emoji_usage) to proactive prompts |
-| P6-2 | HIGH | [daemon_proactive.c:275](../../../src/daemon_proactive.c) | Include `relationship_type` and `dunbar_layer` in proactive prompts (currently invisible to model) |
+| P6-1 | HIGH | [daemon_proactive.c:275](../../../src/daemon/daemon_proactive.c) | Apply channel overlay (formality, length, emoji_usage) to proactive prompts |
+| P6-2 | HIGH | [daemon_proactive.c:275](../../../src/daemon/daemon_proactive.c) | Include `relationship_type` and `dunbar_layer` in proactive prompts (currently invisible to model) |
 | P6-3 | HIGH | [daemon.c:1219-1236](../../../src/daemon.c) | Check emotional tone of last received message before firing proactive trigger |
 | P6-4 | MED | [humanness.c:268-284](../../../src/humanness.c) | Replace "I'm here." / "I hear you." literals with LLM call routed through persona |
 | P6-5 | HIGH | [agent_stream.c:563](../../../src/agent/agent_stream.c) | Move absolute-rules block to a shared module so proactive path inherits it |
@@ -160,7 +160,7 @@ critic review, merge to parent worktree.
 ## 6. Files Touched (high level)
 
 - `src/daemon.c` (heavy — most proactive paths)
-- `src/daemon_proactive.c` (overlay + relationship_type injection)
+- `src/daemon/daemon_proactive.c` (overlay + relationship_type injection)
 - `src/agent/proactive.c`, `src/agent/proactive_ext.c`
 - `src/agent/goals.c`, `src/agent/scheduler.c`, `src/agent/task_store.c`, `src/agent/world_model.c`, `src/agent/ab_response.c`
 - `src/context/emotional_state.c`, `src/context/authentic.c`, `src/context/conversation.c`, `src/context/self_awareness.c`

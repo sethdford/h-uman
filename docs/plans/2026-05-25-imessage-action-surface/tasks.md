@@ -64,7 +64,7 @@ Tasks are ordered by dependency. Each task lists the AC(s) it satisfies, the fil
 
 ### T-A5: New config keys + parser + one-shot disabled-warn
 - **AC:** supports AC-4, AC-7, AC-9 (config gate)
-- **Files:** `src/config_parse.c` (add `iMessage.action_surface_v2.*`), `src/config.c` (defaults), `include/human/config.h` (struct fields)
+- **Files:** `src/config/config_parse.c` (add `iMessage.action_surface_v2.*`), `src/config/config.c` (defaults), `include/human/config.h` (struct fields)
 - **Per [silent-config-gated-subsystems.md](../../../.claude/rules/silent-config-gated-subsystems.md):** emit one-shot disabled-warn log at first invocation
 - **Verify:** new test `tests/test_config_action_surface.c` parses both defaults and overrides; logs assert
 - **Size:** ~120 LOC across 3 files + ~80 LOC test

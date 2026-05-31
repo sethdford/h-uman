@@ -12,7 +12,7 @@
 
 - `hu_persona_select_examples` (src/persona/examples.c:228) scores few-shot examples **only** by topic keyword overlap — ignores the learned style fingerprint.
 - `hu_personal_model_build_prompt` IS injected (src/agent/agent_turn.c:3577) as a separate ~8KB block — so learned style reaches the model, but uncoordinated with example selection.
-- `mr_mlx_local_enabled` is "Opt-in; default false" (src/config_parse_agent.c:390); `mlx_local.streaming_enabled = false` (src/config_merge.c:477). **Default live path = cloud Gemini.**
+- `mr_mlx_local_enabled` is "Opt-in; default false" (src/config/config_parse_agent.c:390); `mlx_local.streaming_enabled = false` (src/config/config_merge.c:477). **Default live path = cloud Gemini.**
 - `hu_mlx_admin_swap_adapter` is curl-gated (src/ml/mlx_admin.c:194). `HU_ENABLE_CURL` is ON in the release preset, OFF in dev/test presets — so swap works in shipped binaries but not in dev builds.
 - `reaction_collection.enabled` and `learning.nightly_lora_enabled` zero-init to false (not seeded in config_merge.c).
 - The v4-repair LoRA adapter already proved **+27pp** persona fidelity offline (commit 9ab9b86e). The artifact works; it just isn't the default serving path.

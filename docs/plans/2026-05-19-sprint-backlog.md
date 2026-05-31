@@ -39,7 +39,7 @@ estimated leverage descending; dependencies noted where they matter.
 **Files to create / modify:**
 - `include/human/predictive_drafts.h` (new)
 - `src/predictive/drafts.c` (new, ~350 LoC)
-- `src/cli_commands.c` (add subcommand handler, ~50 LoC)
+- `src/app/cli_commands.c` (add subcommand handler, ~50 LoC)
 - `tests/test_predictive_drafts.c` (new, ~250 LoC)
 
 **Dependencies:** per-contact signatures (in progress this session); identity-resolver (in progress) for cross-channel contact unification.
@@ -92,7 +92,7 @@ estimated leverage descending; dependencies noted where they matter.
 **Files:**
 - `include/human/autoresponder.h` (new)
 - `src/agent/autoresponder.c` (new, ~400 LoC)
-- `src/config_parse.c` (allowlist + schedule schema)
+- `src/config/config_parse.c` (allowlist + schedule schema)
 - `tests/test_autoresponder.c` (new, ~300 LoC)
 
 **Dependencies:** None hard, but per-contact signatures (in progress) lets the responder match per-contact tone.
@@ -118,7 +118,7 @@ estimated leverage descending; dependencies noted where they matter.
 **Files:**
 - `include/human/research/contact_narrative.h` (new)
 - `src/research/contact_narrative.c` (new, ~500 LoC)
-- `src/cli_commands.c` (CLI subcommand)
+- `src/app/cli_commands.c` (CLI subcommand)
 - `tests/test_contact_narrative.c` (new, ~300 LoC)
 
 **Dependencies:** identity resolution (this session); local LLM provider must be working.
@@ -219,7 +219,7 @@ estimated leverage descending; dependencies noted where they matter.
 **Files:**
 - `include/human/persona/portability.h` (new)
 - `src/persona/portability.c` (new, ~500 LoC)
-- `src/cli_commands.c` (3 subcommands)
+- `src/app/cli_commands.c` (3 subcommands)
 - `tests/test_persona_portability.c` (new, ~350 LoC)
 
 **Dependencies:** None directly, but the more Tier-1/2 work that's shipped, the more there is to export.

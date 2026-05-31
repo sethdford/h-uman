@@ -329,7 +329,7 @@ ALTER TABLE commitments ADD COLUMN proactive_due_at INTEGER;
 
 ### R8.2 — scheduler scan for due commitments (1hr)
 
-**Where**: `src/daemon_cron.c`.
+**Where**: `src/daemon/daemon_cron.c`.
 
 **Logic**: every N minutes, SELECT commitments WHERE proactive_due_at <
 now AND status='open'. For each: queue a follow-up draft.
@@ -459,7 +459,7 @@ historical message timestamps to infer when they're typically active.
 
 ### R10.3 — multi-turn proactive scheduler (2hr)
 
-**Where**: extend `src/daemon_cron.c`.
+**Where**: extend `src/daemon/daemon_cron.c`.
 
 **Logic** combines:
 - Commitments from R8 (already scheduled)

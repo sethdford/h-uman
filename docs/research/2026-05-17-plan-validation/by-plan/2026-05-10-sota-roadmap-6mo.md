@@ -51,7 +51,7 @@ Status: `draft`.
 - **B1 multi-tier routing:** `src/agent/model_router.c` enumerates the four
   tiers (REFLEXIVE/CONVERSATIONAL/ANALYTICAL/DEEP) at lines 180–203, but
   no E4B-local-first routing path verified
-- **C1 onboarding:** `src/onboard.c` present (499 LOC per CLAUDE.md);
+- **C1 onboarding:** `src/onboard/onboard.c` present (499 LOC per CLAUDE.md);
   starter-persona presets keyword search returned zero matches — preset
   library not yet authored
 - **B2 bench scripts:** `scripts/bench-gemma-perf.py`, `bench-all-backends.py`

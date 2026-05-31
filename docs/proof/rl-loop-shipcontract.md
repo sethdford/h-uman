@@ -85,7 +85,7 @@ Phase 1 sanity gate: `scripts/run-gemma-sanity-gate.sh` — 20-prompt gate with 
 
 Provider implementation: `src/providers/llamacpp.c::hu_llamacpp_chat_with_system` — real `llama_decode` + KV cache + Metal acceleration.
 
-CLI dispatch: `src/main.c::cmd_chat` honors `--provider llamacpp --model gemma-3-4b-it-Q4_K_M`.
+CLI dispatch: `src/app/main.c::cmd_chat` honors `--provider llamacpp --model gemma-3-4b-it-Q4_K_M`.
 
 Auto-fetch: `scripts/fetch-gemma.sh` — SHA-verified, ~2.4 GB download.
 
@@ -249,7 +249,7 @@ The close-out sprint-auditor on commit `010763ef` flagged the items below. They 
 |----|-------------|------------------------|----------------|
 | ~~CF-1~~ | ~~CLI stubs~~ | **CLOSED (Phase D)** — `human eval competitive / gate / leaderboard` wired in `src/eval/cli_eval.c` to `hu_persona_rollout_run`, `competitive_harness`, `hu_eval_gate_decide_from_arrays_for_test`, and `hu_leaderboard_*`. Pinned by `tests/test_cli_eval_phase5.c` (6 tests). | DoD-9 ✅ |
 | ~~CF-2~~ | ~~Demo evidence stubs~~ | **CLOSED (Phase D, PASS_WITH_NOTES)** — `src/ml/cli_demo.c::write_evidence_dir` emits measured JSON/markdown for all nine files; `persona_delta` and gate verdict come from rollout + `hu_eval_gate`. Demo uses **10** fixed prompts (gate floor); spec §8 asked for 20 — tracked as **CF-2-R** below. Pinned by `tests/test_cli_demo_evidence.c`. | DoD-10 ✅ (notes: CF-2-R) |
-| ~~CF-3~~ | ~~Daemon iMessage reaction poll test-only~~ | **CLOSED (Phase D)** — `hu_daemon_tick_reaction_poll` in `src/daemon_reaction_poll.c`; wired in `src/daemon.c` main loop; `hu_reaction_handler_set_collector` at startup when `sota_initialized`; outbound `register_assistant_message_for_production` on send. Public `include/human/channels/imessage_reactions.h`. Pinned by `tests/test_daemon_reaction_poll_production.c` + config `chatdb_path` guard. | Phase 2 F-2-2 ✅ |
+| ~~CF-3~~ | ~~Daemon iMessage reaction poll test-only~~ | **CLOSED (Phase D)** — `hu_daemon_tick_reaction_poll` in `src/daemon/daemon_reaction_poll.c`; wired in `src/daemon.c` main loop; `hu_reaction_handler_set_collector` at startup when `sota_initialized`; outbound `register_assistant_message_for_production` on send. Public `include/human/channels/imessage_reactions.h`. Pinned by `tests/test_daemon_reaction_poll_production.c` + config `chatdb_path` guard. | Phase 2 F-2-2 ✅ |
 | ~~CF-4~~ | ~~Synthetic gate inputs in lora runner~~ | **CLOSED (Phase D)** — shared `hu_persona_rollout_run` (`src/eval/persona_rollout.c`); `run_promotion_gate` in `lora_training_runner.c` uses real rollout when `eval_provider` is set; synthetic `0.75` array only when `eval_use_synthetic_for_test` in `HU_IS_TEST`. `hu_ml_cli_lora_runner` delegates chat loop to the helper. Pinned by `tests/test_persona_rollout.c` + `tests/test_lora_training_runner_eval_gate.c`. | DoD-8 second half ✅ |
 | ~~CF-5~~ | ~~KTO single-cell grad check~~ | **CLOSED (Phase D)** — `test_kto_loss_analytical_grad_matches_finite_diff_per_param` sweeps all 512 lm_head cells via chain-rule analytical vs centered FD (`kto_compute_grad_scalar_for_test` + `kto_compute_logprob_pol_for_test`). | Phase 2 AC1 ✅ |
 | ~~CF-6~~ | ~~Judge factories without unavailable reason~~ | **CLOSED (Phase D)** — `hu_eval_judge_create_apple_fm` / `_gemini_nano` accept `const char **out_reason` with compile-time stub strings; tests in `test_eval_judge_external.c`. | DoD-14 ✅ |

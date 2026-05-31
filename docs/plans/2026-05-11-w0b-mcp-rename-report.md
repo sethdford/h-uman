@@ -57,8 +57,8 @@ Fresh grep counts after the rename:
 | `hu_mcp_server_{create,connect,destroy,list_tools,call_tool,reconnect,refresh_tools}` | **0** code references | All renamed to `hu_mcp_client_*`. |
 | `hu_mcp_host_t` (identifier) | **2** — the `typedef hu_mcp_engine_t hu_mcp_host_t;` shim line + 1 comment in `mcp_server.h`. | No `.c` callers. |
 | `hu_mcp_host_{create,set_resources,set_prompts,run,destroy}` | **5** — the five `static inline` deprecation shim definitions in `mcp_server.h`. | No external `.c` callers. |
-| `hu_mcp_client_t` | **23** (typedef + 7 public signatures in `mcp.h` + ~15 call sites in `src/mcp.c`/`src/mcp_manager.c` + tests) | All migrated. |
-| `hu_mcp_engine_t` | **19** (typedef + 5 public signatures + ~13 in `src/mcp_server.c` + 1 in `src/main.c` + tests) | All migrated. |
+| `hu_mcp_client_t` | **23** (typedef + 7 public signatures in `mcp.h` + ~15 call sites in `src/mcp/mcp.c`/`src/mcp/mcp_manager.c` + tests) | All migrated. |
+| `hu_mcp_engine_t` | **19** (typedef + 5 public signatures + ~13 in `src/mcp/mcp_server.c` + 1 in `src/app/main.c` + tests) | All migrated. |
 
 The api-contract-watcher's pre-slice estimate of "28 `hu_mcp_server_t` call
 sites + 5 `hu_mcp_host_*` call sites in main.c" matched what fresh grep
@@ -128,10 +128,10 @@ W0b-owned (mechanical rename only):
 ```text
 M  include/human/mcp.h
 M  include/human/mcp_server.h
-M  src/mcp.c
-M  src/mcp_manager.c
-M  src/mcp_server.c
-M  src/main.c                 (5-call MCP block at lines 2407–2421)
+M  src/mcp/mcp.c
+M  src/mcp/mcp_manager.c
+M  src/mcp/mcp_server.c
+M  src/app/main.c                 (5-call MCP block at lines 2407–2421)
 M  src/tools/factory.c        (one type-name update on the local mcp_configs[] array)
 M  tests/test_mcp.c           (client + engine tests; mock vtable + suite labels)
 M  tests/test_modules_coverage.c   (two client test functions + their HU_RUN_TEST lines)

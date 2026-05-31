@@ -401,8 +401,8 @@ git -C /Users/sethford/Projects/h-uman commit -am "test(channels/imessage): para
 
 **Files:**
 - Modify: `include/human/config.h`
-- Modify: `src/config.c`
-- Modify: `src/config_parse.c`
+- Modify: `src/config/config.c`
+- Modify: `src/config/config_parse.c`
 - Create: `tests/test_config_action_surface.c`
 - Modify: `tests/test_main.c`, `CMakeLists.txt`
 
@@ -421,9 +421,9 @@ struct {
 
 - [ ] **Step 2: Add parser entries**
 
-In `src/config_parse.c`, locate the iMessage block and add the 5 new keys following the existing pattern (search for an existing string-key parse like `"poll_seconds"` to copy the shape).
+In `src/config/config_parse.c`, locate the iMessage block and add the 5 new keys following the existing pattern (search for an existing string-key parse like `"poll_seconds"` to copy the shape).
 
-- [ ] **Step 3: Set defaults in `src/config.c`**
+- [ ] **Step 3: Set defaults in `src/config/config.c`**
 
 In the iMessage defaults block (search for `c->imessage.poll_seconds = `), append:
 ```c

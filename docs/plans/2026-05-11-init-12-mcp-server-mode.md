@@ -50,11 +50,11 @@ waste budget and produce naming collisions. The honest map:
 | File | Status | Role in this design |
 |---|---|---|
 | `include/human/mcp_server.h` | Stub: declares `hu_mcp_host_t` (a non-vtable concrete type) | **Replaced**: the file path is reused for the new vtable surface; the old `hu_mcp_host_t` type is renamed to `hu_mcp_engine_t` and demoted to internal `include/human/mcp/engine.h` |
-| `src/mcp_server.c` (`hu_mcp_host_*` family) | Working stdio JSON-RPC dispatcher, ~657 LOC | **Kept and refactored.** Becomes the *engine* the new vtable wraps. ~80 LOC delta to extract `hu_mcp_engine_handle_request(engine, req_json, peer, out)` so a policy layer can wrap each call |
+| `src/mcp/mcp_server.c` (`hu_mcp_host_*` family) | Working stdio JSON-RPC dispatcher, ~657 LOC | **Kept and refactored.** Becomes the *engine* the new vtable wraps. ~80 LOC delta to extract `hu_mcp_engine_handle_request(engine, req_json, peer, out)` so a policy layer can wrap each call |
 | `include/human/mcp.h` (`hu_mcp_server_t`) | Pre-existing struct that is **actually a client connection** to an external MCP server (badly named) | **Renamed in M0**: `hu_mcp_server_t → hu_mcp_client_t` with one-release `typedef ... HU_DEPRECATED` shim so the symbol is freed for our new vtable |
-| `src/mcp_transport_stdio.c` / `mcp_transport_http.c` / `mcp_transport_sse.c` | Working transports for the **client** | **Reused as-is.** New code adds a fourth transport (TCP-listener) on the **server** side; keeps existing client transports untouched |
+| `src/mcp/mcp_transport_stdio.c` / `mcp_transport_http.c` / `mcp_transport_sse.c` | Working transports for the **client** | **Reused as-is.** New code adds a fourth transport (TCP-listener) on the **server** side; keeps existing client transports untouched |
 | `src/security/mcp_audit.c` (`hu_mcp_audit_*`) | Static-analysis pass over **incoming** tool descriptions (red-team helper, not a wire-audit log) | **Kept unchanged.** New audit log uses the distinct `hu_mcp_server_audit_*` namespace to avoid confusion |
-| `src/main.c::cmd_mcp` | Currently runs the stdio engine in pass-through mode with no consent / pairing / audit | **Replaced.** Becomes a subcommand dispatcher (`serve`, `peers`, `consent`, `audit`, `pair`) |
+| `src/app/main.c::cmd_mcp` | Currently runs the stdio engine in pass-through mode with no consent / pairing / audit | **Replaced.** Becomes a subcommand dispatcher (`serve`, `peers`, `consent`, `audit`, `pair`) |
 
 Bottom line: **we are not building from scratch; we are putting policy, transport,
 and CLI scaffolding around code that already parses JSON-RPC correctly.** That's
@@ -307,10 +307,10 @@ hu_error_t hu_mcp_discovery_write(hu_allocator_t *alloc, const char *path,
 
 | # | Path | Δ LOC | Why |
 |---|---|---|---|
-| M1 | `src/mcp_server.c` | +60 / −10 | Extract `hu_mcp_engine_handle_request(engine, req_json, peer, out_response)`; rename type `hu_mcp_host_t → hu_mcp_engine_t` (typedef shim left behind for one release) |
+| M1 | `src/mcp/mcp_server.c` | +60 / −10 | Extract `hu_mcp_engine_handle_request(engine, req_json, peer, out_response)`; rename type `hu_mcp_host_t → hu_mcp_engine_t` (typedef shim left behind for one release) |
 | M2 | `include/human/mcp.h` | +6 | `hu_mcp_server_t → hu_mcp_client_t` rename + `typedef` shim with `HU_DEPRECATED` |
-| M3 | `src/mcp.c`, `src/mcp_manager.c`, `src/mcp_tool_wrapper.c`, `src/mcp_registry.c` | +0 / +12 lines total | Update all `hu_mcp_server_t` call sites to `hu_mcp_client_t` (compat shim makes this gradual) |
-| M4 | `src/main.c::cmd_mcp` | +30 / −60 | Replace inline body with call to new `hu_mcp_cli_run` from `src/mcp/cli.c`; preserve the legacy stdio behavior as the implicit `serve --transport=stdio` default so `human mcp` (one-arg form) keeps working for existing IDE configs |
+| M3 | `src/mcp/mcp.c`, `src/mcp/mcp_manager.c`, `src/mcp/mcp_tool_wrapper.c`, `src/mcp/mcp_registry.c` | +0 / +12 lines total | Update all `hu_mcp_server_t` call sites to `hu_mcp_client_t` (compat shim makes this gradual) |
+| M4 | `src/app/main.c::cmd_mcp` | +30 / −60 | Replace inline body with call to new `hu_mcp_cli_run` from `src/mcp/cli.c`; preserve the legacy stdio behavior as the implicit `serve --transport=stdio` default so `human mcp` (one-arg form) keeps working for existing IDE configs |
 | M5 | `CMakeLists.txt` | +15 | Add the 9 new sources; add `HU_ENABLE_MCP_SERVER_TCP` option (default `ON`) gating `server_transport_tcp.c` and the TCP test for the embedded build |
 | M6 | `src/security/pairing.c` | +0 | Reused unmodified — the new flow constructs a fresh `hu_pairing_guard_t` per server |
 | M7 | `src/gateway/cp_admin.c` (`metrics.snapshot`) | +12 | Add four counters: `mcp_server.connections`, `.requests`, `.audit_bytes`, `.consent_denials` |
@@ -700,7 +700,7 @@ a subprocess are unbroken.
 | `src/mcp/server_transport_tcp.c` (gated by `HU_ENABLE_MCP_SERVER_TCP`) | 380 | 8 |
 | `src/mcp/cli.c` (subcommand router, edit-in-EDITOR, atomic save) | 410 | 6 |
 | Public + internal headers (≈ 275 LOC, all inline) | — | 0 |
-| `src/mcp_server.c` engine refactor (rename + extract) | +60 / −10 net | 0 (no new code) |
+| `src/mcp/mcp_server.c` engine refactor (rename + extract) | +60 / −10 net | 0 (no new code) |
 | **Total C-side add** | **2 530 product LOC** | **≈ 50 KB** |
 
 **Headroom against the 56 KB budget: 6 KB.** The CMake option
@@ -765,13 +765,13 @@ first connect for everything else).
 
 - [ ] Rename `hu_mcp_server_t → hu_mcp_client_t` in `include/human/mcp.h`
 - [ ] Add `typedef hu_mcp_client_t hu_mcp_server_t HU_DEPRECATED` shim with one-release lifetime
-- [ ] Update internal callers (`src/mcp.c`, `src/mcp_manager.c`, `src/mcp_tool_wrapper.c`, `src/mcp_registry.c`)
+- [ ] Update internal callers (`src/mcp/mcp.c`, `src/mcp/mcp_manager.c`, `src/mcp/mcp_tool_wrapper.c`, `src/mcp/mcp_registry.c`)
 - [ ] Run **api-contract-watcher** to confirm no external surface broke
 - [ ] Tests: existing MCP-client tests must continue green
 
 ### Phase 1 — Engine extraction (1 PR, ≈ 1 day)
 
-- [ ] Rename `hu_mcp_host_t → hu_mcp_engine_t` in `src/mcp_server.c` + the existing header
+- [ ] Rename `hu_mcp_host_t → hu_mcp_engine_t` in `src/mcp/mcp_server.c` + the existing header
 - [ ] Add `hu_mcp_engine_handle_request(engine, peer_or_null, req_json, req_len, out_resp, out_len)` factoring out the per-method dispatch
 - [ ] Move `hu_mcp_engine_t` declaration to internal `include/human/mcp/engine.h`
 - [ ] Re-route the existing `hu_mcp_host_run` (legacy stdio loop) through the new function
@@ -806,7 +806,7 @@ first connect for everything else).
 - [ ] `src/mcp/cli.c` (`serve`, `peers`, `consent`, `audit tail`, `pair`)
 - [ ] `src/mcp/server_discovery.c` + `~/.human/mcp_server.json`
 - [ ] `scripts/install-{cursor,claude-code}-mcp.sh`
-- [ ] Update `src/main.c::cmd_mcp` to dispatch
+- [ ] Update `src/app/main.c::cmd_mcp` to dispatch
 - [ ] `tests/test_mcp_server_discovery.c`
 
 ### Phase 6 — Fuzz + observability + docs (1 PR, ≈ 1 day)

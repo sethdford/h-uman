@@ -16,7 +16,7 @@ last_audit: 2026-05-25
 |---|---|---|---|
 | Channel-layer outbound dedup ring (120s window) | `src/channels/imessage.c` | `tests/test_imessage_outbound_dedup.c` (7 tests) | ✅ shipped |
 | A1: long-message false-positive fix (`sent_ring_full_len[]`) | `src/channels/imessage.c` | `tests/test_imessage_outbound_dedup.c::long_messages_sharing_prefix_*` + `::long_message_retry_*` | ✅ shipped |
-| `session.identity_links` JSON loader | `src/config_parse.c` | `tests/test_config_identity_links.c` (9 tests) | ✅ shipped |
+| `session.identity_links` JSON loader | `src/config/config_parse.c` | `tests/test_config_identity_links.c` (9 tests) | ✅ shipped |
 | Memory writes scope to `memory->current_session_id` | `src/intelligence/experience.c`, `src/context/context_engine_rag.c` | `tests/test_memory_session_scoping.c` (3 tests) | ✅ shipped |
 | SQLite recall filter excludes NULL session_id on scoped queries | `src/memory/engines/sqlite_lucid.c` (FTS + LIKE paths) | _no test yet_ (see follow-up FU-3) | ✅ shipped |
 | Intentional-global writers documented | `src/agent/preferences.c`, `src/pwa/learner.c`, `src/memory/lifecycle/summarizer.c` | _comments only_ | ✅ shipped |

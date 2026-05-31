@@ -7,7 +7,7 @@
 
 ## Why
 
-Recon turned up an unexpected truth: **cross-channel synthesis is already half-shipped**. h-uman has identity resolution with 4-tier confidence, a `cross_channel_ctx` builder gated on `HU_ENABLE_SQLITE` at `src/daemon.c:6525-6815`, contact graph linking platform handles to canonical IDs, `relationship_type` and `dunbar_layer` populated on contact profiles, and Dunbar-aware proactive surfacing at `src/daemon_proactive.c:606`. The "knows about other channels" half is real, in production, and wired into the turn pipeline.
+Recon turned up an unexpected truth: **cross-channel synthesis is already half-shipped**. h-uman has identity resolution with 4-tier confidence, a `cross_channel_ctx` builder gated on `HU_ENABLE_SQLITE` at `src/daemon.c:6525-6815`, contact graph linking platform handles to canonical IDs, `relationship_type` and `dunbar_layer` populated on contact profiles, and Dunbar-aware proactive surfacing at `src/daemon/daemon_proactive.c:606`. The "knows about other channels" half is real, in production, and wired into the turn pipeline.
 
 What's not done — and the gap this spec closes — is the **trust property that makes cross-channel safe to ship to users**: deterministic privacy ACL gating that prevents family/partner facts from being included in work-channel context. Today, those facts CAN reach the LLM in coworker conversations; we rely on the LLM to "not mention them." That's not a property; that's a hope. For M4 (ship to users) the property must be structural.
 
