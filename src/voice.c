@@ -68,10 +68,15 @@ const char *hu_voice_privacy_disclosure(hu_voice_tts_backend_t backend) {
     }
 }
 
-/* Effective privacy for one egress decision: per-config privacy_mode OR the
- * process-global kill-switch (human/core/privacy.h). `config` may be NULL. */
+/* Effective privacy for one egress decision. Privacy is a PROCESS-WIDE setting,
+ * latched to the global kill-switch (human/core/privacy.h) at every config build and
+ * on reload — so egress decides on the GLOBAL only, never a per-call config's cached
+ * privacy_mode, which can go stale (e.g. a long-lived agent config after a reload that
+ * flips privacy off would otherwise keep blocking). `config` is retained for signature
+ * stability and future per-call overrides. */
 static bool voice_privacy_active(const hu_voice_config_t *config) {
-    return (config && config->privacy_mode) || hu_privacy_enforced();
+    (void)config;
+    return hu_privacy_enforced();
 }
 
 hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *config,

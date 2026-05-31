@@ -401,43 +401,46 @@ static void voice_privacy_disclosure_reflects_backend(void) {
 static void voice_tts_privacy_mode_blocks_cloud(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_voice_config_t cfg = {0};
-    cfg.privacy_mode = true;
     cfg.tts_provider = "cartesia";
     cfg.api_key = "sk-test";
     cfg.api_key_len = 7;
     void *audio = NULL;
     size_t alen = 0;
+    hu_privacy_set_enforced(true);
     HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(audio);
+    hu_privacy_set_enforced(false);
 }
 
 /* privacy_mode + a local endpoint -> uses the on-device local path. */
 static void voice_tts_privacy_mode_uses_local(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_voice_config_t cfg = {0};
-    cfg.privacy_mode = true;
     cfg.local_tts_endpoint = "http://127.0.0.1:9/tts";
-    cfg.tts_provider = "cartesia"; /* ignored under privacy_mode */
+    cfg.tts_provider = "cartesia"; /* ignored under privacy mode */
     void *audio = NULL;
     size_t alen = 0;
+    hu_privacy_set_enforced(true);
     HU_ASSERT_EQ(hu_voice_tts(&alloc, &cfg, "hi", 2, &audio, &alen), HU_OK);
     HU_ASSERT_NOT_NULL(audio);
     HU_ASSERT_EQ(alen, 0u);
     alloc.free(alloc.ctx, audio, 1);
+    hu_privacy_set_enforced(false);
 }
 
 /* privacy_mode forbids cloud STT egress too: no local endpoint -> NOT_SUPPORTED, never Cartesia. */
 static void voice_stt_privacy_mode_blocks_cloud(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_voice_config_t cfg = {0};
-    cfg.privacy_mode = true;
     cfg.stt_provider = "cartesia";
     cfg.api_key = "sk-test";
     cfg.api_key_len = 7;
     char *text = NULL;
     size_t len = 0;
+    hu_privacy_set_enforced(true);
     HU_ASSERT_EQ(hu_voice_stt_file(&alloc, &cfg, "/tmp/x.wav", &text, &len), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(text);
+    hu_privacy_set_enforced(false);
 }
 
 /* privacy_mode must also block the DIRECT Gemini transcription/description egress point
@@ -446,14 +449,15 @@ static void voice_stt_privacy_mode_blocks_cloud(void) {
 static void voice_stt_gemini_privacy_mode_blocks_cloud(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_voice_config_t cfg = {0};
-    cfg.privacy_mode = true;
     cfg.api_key = "sk-test";
     cfg.api_key_len = 7;
     char *text = NULL;
     size_t len = 0;
+    hu_privacy_set_enforced(true);
     HU_ASSERT_EQ(hu_voice_stt_gemini(&alloc, &cfg, "AAAA", 4, "audio/webm", &text, &len),
                  HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(text);
+    hu_privacy_set_enforced(false);
 }
 
 /* The process-global kill-switch blocks cloud egress even when the per-call config does
