@@ -6041,6 +6041,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_dpo_record_from_retry(&agent->sota.dpo_collector, msg, msg_len,
                                              dpo_rejected_resp, dpo_rejected_resp_len, resp.content,
                                              resp.content_len);
+                    /* B2 go-live: carry this rejected draft so a later tapback on the
+                     * sent reply forms a COMPLETE DPO pair (chosen = sent reply,
+                     * rejected = this draft). The daemon reads it at reaction register
+                     * (src/daemon.c) and clears it at the next turn start. */
+                    hu_agent_sota_note_rejected_draft(agent, dpo_rejected_resp,
+                                                      dpo_rejected_resp_len);
                     agent->alloc->free(agent->alloc->ctx, dpo_rejected_resp,
                                        dpo_rejected_resp_len + 1);
                     dpo_rejected_resp = NULL;

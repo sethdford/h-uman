@@ -16,12 +16,14 @@
  *      Task 14's daemon dispatch) silently absorb this code, making the
  *      drop user-invisible. The per-turn flag is NOT set on a miss.
  */
+#include "human/agent.h" /* hu_agent_t + hu_agent_sota_note/clear_rejected_draft (B2) */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
 #include "human/ml/dpo.h"
 #include "test_framework.h"
 #include <sqlite3.h>
+#include <string.h>
 
 static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -279,6 +281,126 @@ static void test_reaction_handler_handle_event_null_returns_invalid_argument(voi
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* B2 go-live (capture wire): hu_agent_sota_note_rejected_draft is the production
+ * function agent_turn.c calls on a reflection-retry loser; the daemon reads the
+ * resulting agent->sota.last_rejected_draft at reaction registration. Proves the
+ * field the daemon now threads is actually populated by the turn, that the most-
+ * recent meaningful draft wins, that sub-4-byte fragments are ignored (mirroring
+ * the hu_dpo_export per-side floor), and that clear/NULL paths are leak-free. */
+static void test_sota_note_rejected_draft_populates_then_clears(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+
+    /* Precondition: a freshly-zeroed agent carries no draft. */
+    HU_ASSERT_TRUE(agent.sota.last_rejected_draft == NULL);
+    HU_ASSERT_EQ(agent.sota.last_rejected_draft_len, (size_t)0);
+
+    /* A real (>= 4-byte) rejected draft is recorded verbatim. */
+    const char *draft = "Let me check and get back to you.";
+    hu_agent_sota_note_rejected_draft(&agent, draft, strlen(draft));
+    HU_ASSERT_NOT_NULL(agent.sota.last_rejected_draft);
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, draft);
+    HU_ASSERT_EQ(agent.sota.last_rejected_draft_len, strlen(draft));
+
+    /* Most-recent meaningful draft wins (prior is freed — ASan-checked, no leak). */
+    const char *draft2 = "Sure, 3pm works for me.";
+    hu_agent_sota_note_rejected_draft(&agent, draft2, strlen(draft2));
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, draft2);
+    HU_ASSERT_EQ(agent.sota.last_rejected_draft_len, strlen(draft2));
+
+    /* Sub-4-byte drafts are ignored: the previous meaningful draft is retained,
+     * NOT clobbered with a fragment that hu_dpo_export would drop anyway. */
+    hu_agent_sota_note_rejected_draft(&agent, "ok", 2);
+    HU_ASSERT_STR_EQ(agent.sota.last_rejected_draft, draft2);
+
+    /* Clear empties it (this is the daemon's per-turn-start reset). */
+    hu_agent_sota_clear_rejected_draft(&agent);
+    HU_ASSERT_TRUE(agent.sota.last_rejected_draft == NULL);
+    HU_ASSERT_EQ(agent.sota.last_rejected_draft_len, (size_t)0);
+
+    /* Idempotent + NULL-safe (no crash, no double-free). */
+    hu_agent_sota_clear_rejected_draft(&agent);
+    hu_agent_sota_clear_rejected_draft(NULL);
+    hu_agent_sota_note_rejected_draft(NULL, draft, strlen(draft));
+}
+
+/* B2 go-live (END-TO-END): the value the daemon threads —
+ * agent->sota.last_rejected_draft — flows through reaction registration into a
+ * COMPLETE, exportable DPO pair. Demonstrates the 0->1 production fix directly:
+ * a turn with NO captured draft exports 0 pairs (the old "" placeholder bug);
+ * a turn with a captured draft exports exactly 1. The register argument below is
+ * the SAME expression src/daemon.c now passes at the
+ * register_assistant_message_for_production call site. */
+static void test_captured_draft_flows_to_exportable_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 1024, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    const char *prompt = "Can you make 3pm?";
+    const char *sent = "Yep, 3pm works.";
+
+    /* (a) Turn produced NO rejected draft → daemon passes "" → positive tapback
+     *     writes a single-sided row that hu_dpo_export DROPS (the original bug). */
+    hu_agent_sota_clear_rejected_draft(&agent);
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "chat_a", "msg_a", prompt, sent,
+        agent.sota.last_rejected_draft ? agent.sota.last_rejected_draft : "");
+    hu_reaction_event_t e0 = {.channel_id = "imessage",
+                              .target_thread_id = "chat_a",
+                              .target_message_ref = "msg_a",
+                              .sender_handle = "+15551234567",
+                              .kind = HU_REACTION_LOVE,
+                              .polarity = HU_REACTION_POSITIVE,
+                              .is_removal = 0};
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e0), HU_OK);
+    hu_dpo_export_t exp0 = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &exp0), HU_OK);
+    HU_ASSERT_EQ(exp0.count, (size_t)0); /* old bug: nothing trainable from the reaction */
+    hu_dpo_export_free(&alloc, &exp0);
+
+    /* (b) Turn produced a rejected draft (as agent_turn.c does on retry) → the
+     *     daemon threads it as the alternative → positive tapback yields a
+     *     COMPLETE pair that survives export: chosen = sent, rejected = draft. */
+    const char *rejected_draft = "I could do 4pm instead.";
+    hu_agent_sota_note_rejected_draft(&agent, rejected_draft, strlen(rejected_draft));
+    HU_ASSERT_NOT_NULL(agent.sota.last_rejected_draft);
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "chat_b", "msg_b", prompt, sent,
+        agent.sota.last_rejected_draft ? agent.sota.last_rejected_draft : "");
+    hu_reaction_event_t e1 = {.channel_id = "imessage",
+                              .target_thread_id = "chat_b",
+                              .target_message_ref = "msg_b",
+                              .sender_handle = "+15551234567",
+                              .kind = HU_REACTION_LOVE,
+                              .polarity = HU_REACTION_POSITIVE,
+                              .is_removal = 0};
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e1), HU_OK);
+
+    hu_dpo_export_t exp1 = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &exp1), HU_OK);
+    HU_ASSERT_EQ(exp1.count, (size_t)1); /* the fix: one real trainable pair survives */
+    HU_ASSERT_TRUE(exp1.pairs[0].chosen_len >= 4 && exp1.pairs[0].rejected_len >= 4);
+    HU_ASSERT_STR_EQ(exp1.pairs[0].chosen, sent);
+    HU_ASSERT_STR_EQ(exp1.pairs[0].rejected, rejected_draft);
+    hu_dpo_export_free(&alloc, &exp1);
+
+    hu_agent_sota_clear_rejected_draft(&agent);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
@@ -287,4 +409,6 @@ void run_reaction_handler_e2e_tests(void) {
     HU_RUN_TEST(test_positive_tapback_with_alternative_creates_complete_pair);
     HU_RUN_TEST(test_negative_tapback_with_alternative_creates_complete_pair);
     HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
+    HU_RUN_TEST(test_sota_note_rejected_draft_populates_then_clears);
+    HU_RUN_TEST(test_captured_draft_flows_to_exportable_pair);
 }

@@ -1641,6 +1641,36 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
         *claims_flagged = agent ? agent->self_rag_claims_flagged : 0;
 }
 
+void hu_agent_sota_note_rejected_draft(hu_agent_t *agent, const char *draft, size_t draft_len) {
+    if (!agent)
+        return;
+    /* Ignore too-short drafts: a < 4-byte candidate is a label/fragment, not a
+     * real contrastive response (mirrors the floor in hu_dpo_export and
+     * hu_dpo_record_from_retry). Most-recent meaningful draft wins. */
+    if (!draft || draft_len < 4)
+        return;
+    if (agent->sota.last_rejected_draft) {
+        agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
+                           agent->sota.last_rejected_draft_len + 1);
+        agent->sota.last_rejected_draft = NULL;
+        agent->sota.last_rejected_draft_len = 0;
+    }
+    char *copy = hu_strndup(agent->alloc, draft, draft_len);
+    if (!copy)
+        return; /* best-effort: no pair this turn rather than a partial draft */
+    agent->sota.last_rejected_draft = copy;
+    agent->sota.last_rejected_draft_len = draft_len;
+}
+
+void hu_agent_sota_clear_rejected_draft(hu_agent_t *agent) {
+    if (!agent || !agent->sota.last_rejected_draft)
+        return;
+    agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
+                       agent->sota.last_rejected_draft_len + 1);
+    agent->sota.last_rejected_draft = NULL;
+    agent->sota.last_rejected_draft_len = 0;
+}
+
 void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
@@ -1811,6 +1841,8 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }
+    /* B2: free any rejected draft carried for a not-yet-registered turn. */
+    hu_agent_sota_clear_rejected_draft(agent);
     /* Scratchpad's max_bytes is set in hu_agent_init (agent.c:629) and
      * populated per-turn by hu_agent_turn (agent_turn.c:8601). Without
      * an explicit deinit, the heap copies of each turn's metadata leak

@@ -122,6 +122,15 @@ typedef struct hu_agent_extensions {
     hu_contextual_bandit_t
         *bandit; /* Contextual bandit for per-contact humanization param selection */
     int64_t current_trajectory_id; /* ML trajectory for RL training (0 = inactive) */
+    /* B2 go-live: most-recent same-prompt rejected draft from THIS turn's
+     * generation (the loser of a reflection/PRM retry). Owned; NULL when none.
+     * The daemon reads it at reaction registration so a later tapback forms a
+     * COMPLETE DPO pair (chosen = sent reply, rejected = this draft) instead of
+     * a single-sided row that hu_dpo_export drops. Set via
+     * hu_agent_sota_note_rejected_draft on the agent_turn retry path, cleared at
+     * each turn boundary + consumed at register, freed on agent deinit. */
+    char *last_rejected_draft;
+    size_t last_rejected_draft_len;
     bool sota_initialized;
 
     hu_gvr_config_t gvr_config;
@@ -844,6 +853,16 @@ void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg);
 /* Run one conversation turn: send to provider, process tool calls, iterate. */
 hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out);
+
+/* B2 go-live: record the most-recent same-prompt rejected draft for the current
+ * turn (the loser of a reflection/PRM retry). Frees any prior draft, then copies
+ * `draft`. Drafts shorter than 4 bytes are ignored (mirrors the per-side floor in
+ * hu_dpo_export / hu_dpo_record_from_retry). NULL-safe on agent and draft. */
+void hu_agent_sota_note_rejected_draft(hu_agent_t *agent, const char *draft, size_t draft_len);
+
+/* B2 go-live: clear the recorded rejected draft (called at each turn boundary and
+ * after the daemon consumes it at reaction registration). NULL-safe. */
+void hu_agent_sota_clear_rejected_draft(hu_agent_t *agent);
 
 /* Optional: if non-NULL, called for each streaming token delta (CLI mode).
  * Provider must support streaming. When provided, uses stream_chat when available. */

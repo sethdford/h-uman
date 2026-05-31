@@ -10889,6 +10889,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->tool_specs_count = 0;
                         }
                         if (!retried) {
+                            /* B2: turn start — drop any draft carried from a prior turn. */
+                            hu_agent_sota_clear_rejected_draft(agent);
                             err = hu_agent_turn_stream_v2(agent, combined, combined_len,
                                                           daemon_stream_event_cb, &stream_ctx,
                                                           &response, &response_len);
@@ -13281,12 +13283,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
                                                      (long long)time(NULL));
                                         }
+                                        /* B2 go-live: alternative = this turn's rejected
+                                         * draft → tapback forms a COMPLETE pair (f==0-guarded
+                                         * above, so attached once, not per fragment). */
                                         hu_reaction_handler_register_assistant_message_for_production(
                                             ch_name, batch_key, msg_ref,
                                             combined[0] ? combined : "", fragments[f].text,
-                                            /* TODO(B2-wire): thread dpo_rejected_resp from the turn
-                                               here to populate the alternative */
-                                            "");
+                                            agent->sota.last_rejected_draft
+                                                ? agent->sota.last_rejected_draft
+                                                : "");
                                     }
                                 }
 #endif
