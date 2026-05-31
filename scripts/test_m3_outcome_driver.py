@@ -215,7 +215,9 @@ def test_full_loop_with_simulate_train(tmpdir: Path):
             f"got {accepted_phs}")
 
         # 2. Adapter artifact should exist (simulate-train produced it).
-        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("*.safetensors"))
+        # mlx_lm adapters are a DIRECTORY (m3-driver-<ts>/) containing
+        # adapters.safetensors — recurse to find the nested checkpoint.
+        adapters = list((tmpdir / ".human" / "training-data" / "adapters").rglob("*.safetensors"))
         _ok("exactly 1 adapter written", len(adapters) == 1,
             f"got {[str(p) for p in adapters]}")
 
@@ -224,9 +226,12 @@ def test_full_loop_with_simulate_train(tmpdir: Path):
             f"got {FakeMLX.SWAPS}")
         if FakeMLX.SWAPS:
             swapped_path = FakeMLX.SWAPS[0].get("adapter_path", "")
-            _ok("swap path matches adapter file",
-                adapters and swapped_path == str(adapters[0]),
-                f"swap={swapped_path!r} adapter={adapters[0] if adapters else None}")
+            # The daemon swaps to the adapter DIRECTORY (mlx_lm --adapter-path
+            # contract), which is the parent of the .safetensors checkpoint.
+            adapter_dir = adapters[0].parent if adapters else None
+            _ok("swap path matches adapter directory",
+                adapter_dir is not None and swapped_path == str(adapter_dir),
+                f"swap={swapped_path!r} adapter_dir={adapter_dir}")
 
         # 4. State file should have advanced the watermark.
         state_path = tmpdir / ".human" / "m3_driver_state.json"
@@ -318,7 +323,9 @@ def test_mlx_offline_is_soft_failure(tmpdir: Path):
             f"stdout={result.stdout!r}")
 
         # Adapter still gets written.
-        adapters = list((tmpdir / ".human" / "training-data" / "adapters").glob("*.safetensors"))
+        # mlx_lm adapters are a DIRECTORY (m3-driver-<ts>/) containing
+        # adapters.safetensors — recurse to find the nested checkpoint.
+        adapters = list((tmpdir / ".human" / "training-data" / "adapters").rglob("*.safetensors"))
         _ok("adapter still written when MLX offline",
             len(adapters) == 1, f"got {[str(p) for p in adapters]}")
     finally:
