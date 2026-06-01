@@ -76,9 +76,12 @@ static void test_graph_ground_load_empty_is_failopen(void) {
 #endif
 
 static void test_graph_grounding_mode_parse(void) {
-    /* Activated 2026-05-31 after blind A/B: ON by default (unset => ON). */
+    /* Default SHADOW as of 2026-05-31: the grounding A/B (n=30, ON-win-rate 43.3%,
+     * CI [27.4,60.8]) did NOT substantiate injection, so unset => SHADOW until a
+     * measurement clears 50%. See src/agent/graph_grounding.c +
+     * docs/research/2026-05-31-graphrag-grounding-ab.md. */
     unsetenv("HU_GRAPH_GROUNDING");
-    HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_ON);
+    HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_SHADOW);
     setenv("HU_GRAPH_GROUNDING", "shadow", 1);
     HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_SHADOW);
     setenv("HU_GRAPH_GROUNDING", "on", 1);

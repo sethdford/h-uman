@@ -4,15 +4,22 @@
 #include <string.h>
 
 hu_graph_grounding_mode_t hu_graph_grounding_mode(void) {
-    /* Activated 2026-05-31 after blind A/B (g2g): ON by default. Override via
-     * HU_GRAPH_GROUNDING=shadow (observe-only) or =off (disable). The L4
-     * memory-grounding moat surfaces community summaries into the local prompt;
-     * hu_graph_ground_load fails open (no graph wired -> empty), so default-ON is safe. */
+    /* Default SHADOW as of 2026-05-31. A paired ON-vs-OFF A/B over 30 real
+     * iMessage pairs (blinded Gemini judge; scripts/grounding_ab.py) measured
+     * grounding's MARGINAL effect at a 43.3% ON-win-rate (ON 13 / OFF 17, 95%
+     * Wilson CI [27.4, 60.8]) — i.e. NOT above 50%, CI crossing 50%, ON in fact
+     * slightly losing. Per .claude/rules/feature-gate-requires-measurement.md, a
+     * behavior that shapes the sent reply may not stay default-ON on an unproven
+     * (here, negative) result: it runs in SHADOW (loaded + logged, NOT injected)
+     * until a measurement substantiates it. Override: HU_GRAPH_GROUNDING=on
+     * re-enables injection, =off disables entirely. hu_graph_ground_load fails
+     * open (no graph wired -> empty). See
+     * docs/research/2026-05-31-graphrag-grounding-ab.md. */
     const char *v = getenv("HU_GRAPH_GROUNDING");
-    if (!v || !*v || strcmp(v, "on") == 0 || strcmp(v, "1") == 0)
-        return HU_GRAPH_GROUNDING_ON;
-    if (strcmp(v, "shadow") == 0)
+    if (!v || !*v || strcmp(v, "shadow") == 0)
         return HU_GRAPH_GROUNDING_SHADOW;
+    if (strcmp(v, "on") == 0 || strcmp(v, "1") == 0)
+        return HU_GRAPH_GROUNDING_ON;
     return HU_GRAPH_GROUNDING_OFF; /* "off" or any other value */
 }
 

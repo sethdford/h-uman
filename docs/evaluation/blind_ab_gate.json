@@ -1,17 +1,26 @@
 {
   "schema_version": 1,
-  "commit": null,
+  "commit": "ae4ce790845d79c65da9a78eb74c47e704b74126",
   "proxy": {
     "tool": "eval_blinded_ab.py",
-    "verdict": "ABSENT",
-    "mode": "ADVISORY",
+    "timestamp": "2026-05-31T23:06:00",
+    "measurement": "graphrag_grounding_marginal_ab",
+    "verdict": "FAIL",
+    "mode": "ENFORCING",
+    "on_win_rate": 43.333333333333336,
+    "ci_lo": 27.37723743061511,
+    "ci_hi": 60.80299045459127,
+    "n_decisions": 30,
+    "n_pairs": 71,
+    "ties": 5,
+    "contacts": [
+      "+447914633409",
+      "+12393005206",
+      "+18018285260",
+      "+14845661687"
+    ],
     "fool_rate": null,
-    "baseline_fool_rate": null,
-    "n_trials": 0,
-    "n_real_pairs": 0,
-    "fail_under": 45,
-    "max_regression": 5,
-    "timestamp": null
+    "n_real_pairs": 30
   },
   "human": {
     "tool": "blind_ab/score.py",
@@ -21,5 +30,5 @@
     "n": 0,
     "timestamp": null
   },
-  "effective_verdict": "ADVISORY"
+  "effective_verdict": "FAIL"
 }

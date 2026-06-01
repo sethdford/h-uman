@@ -123,6 +123,8 @@ eval_results.json
 eval_baselines.json
 eval_blinded_results.json
 eval_success_criteria.json
+# grounding_ab.py per-trial output contains real message text (PII) — never commit
+data/grounding_ab.json
 
 # Training data and model weights
 convo-training-*/
