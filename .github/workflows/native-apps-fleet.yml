@@ -33,7 +33,7 @@ env:
 jobs:
   human-kit-swift:
     name: HumanKit · Swift PM
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -42,7 +42,7 @@ jobs:
 
   ios-simulator-fleet:
     name: iOS · ${{ matrix.slug }}
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -102,6 +102,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The Android emulator needs /dev/kvm for CPU acceleration. Without it the
+      # AVD never boots ("adb: device 'emulator-5554' not found" until timeout).
+      # GitHub's ubuntu-latest runners support nested virtualization but do not
+      # expose KVM with the right permissions by default — this udev rule does.
+      # (Canonical step from reactivecircus/android-emulator-runner's README.)
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -144,7 +155,7 @@ jobs:
 
   macos-app-build:
     name: macOS app · Swift
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -153,7 +164,7 @@ jobs:
 
   macos-app-archive:
     name: macOS app · Archive + codesign
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 25
     # The `secrets` context is NOT permitted inside step-level `if:` conditions
     # — referencing it there fails the ENTIRE workflow at startup
