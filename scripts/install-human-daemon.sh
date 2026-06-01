@@ -119,6 +119,25 @@ if [[ "$SKIP_INSTALL" == "false" ]]; then
 fi
 
 # ── Render / update launchd plist ────────────────────────────────────────
+# Snapshot operator-set EnvironmentVariables BEFORE the heredoc overwrites the
+# plist. The template below only writes the base infra env (HOME/PATH/HU_DEBUG/
+# ASAN_OPTIONS); without this, a reinstall silently DROPS any feature gates an
+# operator activated in the plist (e.g. HU_GRAPH_GROUNDING=on, HU_TERSENESS=live,
+# HU_PROACTIVE_CONTEXTUAL=on). We capture every non-base key now and re-apply it
+# after rendering. See ~/.claude/rules/silent-config-gated-subsystems.md.
+PRESERVED_ENV_KEYS=()
+PRESERVED_ENV_VALS=()
+if [[ -f "$PLIST_PATH" ]]; then
+    while IFS= read -r _k; do
+        [[ -z "$_k" ]] && continue
+        case "$_k" in HOME | PATH | HU_DEBUG | ASAN_OPTIONS) continue ;; esac
+        _v="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:$_k" "$PLIST_PATH" 2>/dev/null)" || continue
+        PRESERVED_ENV_KEYS+=("$_k")
+        PRESERVED_ENV_VALS+=("$_v")
+    done < <(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" 2>/dev/null |
+        sed -n 's/^[[:space:]][[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\1/p')
+fi
+
 echo "==> launchd plist → $PLIST_PATH"
 cat > "$PLIST_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -164,6 +183,26 @@ cat > "$PLIST_PATH" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Re-apply operator-set env vars captured above, so activated feature gates
+# survive the reinstall instead of being silently dropped.
+if [[ ${#PRESERVED_ENV_KEYS[@]} -gt 0 ]]; then
+    _i=0
+    while [[ $_i -lt ${#PRESERVED_ENV_KEYS[@]} ]]; do
+        _k="${PRESERVED_ENV_KEYS[$_i]}"
+        _v="${PRESERVED_ENV_VALS[$_i]}"
+        /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:$_k string $_v" "$PLIST_PATH" 2>/dev/null ||
+            /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:$_k $_v" "$PLIST_PATH"
+        _i=$((_i + 1))
+    done
+    echo "==> preserved ${#PRESERVED_ENV_KEYS[@]} operator env var(s): ${PRESERVED_ENV_KEYS[*]}"
+fi
+
+# Validate the rendered plist parses before bootstrapping launchd against it.
+if ! plutil -lint "$PLIST_PATH" >/dev/null; then
+    echo "error: rendered plist failed plutil -lint — aborting before reload." >&2
+    exit 1
+fi
 
 echo "==> launchctl bootstrap (idempotent)"
 # Best-effort bootout. Returns 3/EIO if not loaded — both are fine.
