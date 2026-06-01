@@ -868,6 +868,7 @@ set(HU_CORE_SOURCES
     src/agent/proactive.c
     src/agent/proactive_ext.c
     src/agent/proactive_throttle.c
+    src/agent/contextual_proactive.c
     src/agent/inner_thoughts.c
     src/agent/weather_awareness.c
     src/agent/weather_fetch.c
@@ -3632,6 +3633,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_commitment.c
     tests/test_pattern_radar.c
     tests/test_proactive.c
+    tests/test_contextual_proactive.c
     tests/test_proactive_throttle.c
     tests/test_inner_thoughts.c
     tests/test_weather_awareness.c

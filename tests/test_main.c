@@ -514,6 +514,7 @@ void run_consolidation_tests(void);
 void run_verify_claim_tests(void);
 void run_deep_extract_tests(void);
 void run_commitment_tests(void);
+void run_contextual_proactive_tests(void);
 void run_pattern_radar_tests(void);
 void run_proactive_tests(void);
 void run_proactive_throttle_tests(void);
@@ -1510,6 +1511,7 @@ int main(int argc, char **argv) {
     run_verify_claim_tests();
     run_deep_extract_tests();
     run_commitment_tests();
+    run_contextual_proactive_tests();
     run_pattern_radar_tests();
     run_proactive_tests();
     run_proactive_throttle_tests();
