@@ -140,6 +140,7 @@
  * defines. Pinned by the daemon rebuild path. */
 #include "human/follow_up.h"
 
+#include "human/agent/contextual_proactive.h"
 #include "human/agent/governor.h"
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/proactive.h"
@@ -5856,6 +5857,98 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                     combined[combined_len] = '\0';
+                }
+
+                /* ── Contextual (context-driven) proactive outreach ───────────
+                 * The schedule-driven proactive path checks in "because it's
+                 * 10am Tuesday". This closes the gap to context-driven outreach:
+                 * detect a future-dated event in the inbound message ("interview
+                 * is Friday") and schedule a post-event "how'd it go?" through the
+                 * EXISTING governed scheduled-send path. The scheduled-delivery
+                 * loop runs inside hu_service_run_proactive_checkins, behind the
+                 * master_enabled gate + backoff governor + outbound sanitizer +
+                 * validator chain — so contextual proactives inherit ALL of that
+                 * governance; we never bypass it here.
+                 *
+                 * The message text is FROZEN here from the detected topic and is
+                 * never regenerated at send time — the no-invented-FACTS guard
+                 * against cross-contact bleed (the specific always comes from the
+                 * stored obligation).
+                 *
+                 * Gated OFF -> SHADOW -> ON via HU_PROACTIVE_CONTEXTUAL, default
+                 * OFF. Promotion to ON is gated on a blind A/B measurement that
+                 * unprompted contextual outreach reads as more human, not less —
+                 * do NOT flip the default without it (unprompted texting as the
+                 * user is the highest-stakes behavior in the system).
+                 * See .claude/rules/feature-gate-requires-measurement.md. */
+                {
+                    hu_contextual_proactive_mode_t cp_mode = hu_contextual_proactive_mode();
+                    const char *cp_channel =
+                        (ch->channel && ch->channel->vtable && ch->channel->vtable->name)
+                            ? ch->channel->vtable->name(ch->channel->ctx)
+                            : NULL;
+                    if (cp_mode != HU_CONTEXTUAL_PROACTIVE_OFF && combined_len > 0 && cp_channel) {
+                        /* One-shot operator banner: confirm the subsystem is live and
+                         * in which mode, so SHADOW/ON is a discoverable fact in the
+                         * service log (silent-config-gated-subsystems.md). */
+                        static atomic_bool cp_mode_announced = false;
+                        hu_log_info_once(&cp_mode_announced, "human",
+                                         agent ? agent->observer : NULL,
+                                         "contextual-proactive active: mode=%s "
+                                         "(set HU_PROACTIVE_CONTEXTUAL=off to disable)",
+                                         hu_contextual_proactive_mode_str(cp_mode));
+                        hu_contextual_proactive_result_t cpr;
+                        if (hu_contextual_proactive_decide(alloc, combined, combined_len,
+                                                           (int64_t)time(NULL), &cpr) == HU_OK) {
+                            size_t cp_ch_len = strlen(cp_channel);
+                            /* SHADOW metric: structured decision-distribution capture
+                             * for offline measurement (hu_salience_summarize shape). */
+                            if (cp_mode == HU_CONTEXTUAL_PROACTIVE_SHADOW && cpr.count > 0) {
+                                char cp_metric[512];
+                                if (hu_contextual_proactive_shadow_summary(&cpr, batch_key, cp_metric,
+                                                                           sizeof(cp_metric)) > 0)
+                                    hu_log_info("human", agent ? agent->observer : NULL, "%s",
+                                                cp_metric);
+                            }
+                            for (size_t cpi = 0; cpi < cpr.count; cpi++) {
+                                const hu_contextual_proactive_decision_t *cpd = &cpr.items[cpi];
+                                size_t cp_msg_len = strlen(cpd->message);
+                                if (cp_mode == HU_CONTEXTUAL_PROACTIVE_SHADOW) {
+                                    /* SHADOW: log what WOULD be sent; never enqueue. */
+                                    hu_log_info(
+                                        "human", agent ? agent->observer : NULL,
+                                        "[contextual-proactive SHADOW] would schedule to %s via %s "
+                                        "at %lld: %s",
+                                        batch_key, cp_channel,
+                                        (long long)(cpd->send_at_ms / 1000), cpd->message);
+                                    continue;
+                                }
+                                /* ON: dedup against the existing schedule queue so a
+                                 * repeated mention doesn't double-fire, then enqueue
+                                 * via the governed scheduled-send path. */
+                                bool cp_dup = false;
+                                for (size_t si = 0; si < HU_SCHED_MAX; si++) {
+                                    const hu_sched_slot_t *slot = hu_conversation_sched_slot(si);
+                                    if (slot && slot->active &&
+                                        strcmp(slot->contact_id, batch_key) == 0 &&
+                                        strcmp(slot->message, cpd->message) == 0) {
+                                        cp_dup = true;
+                                        break;
+                                    }
+                                }
+                                if (cp_dup)
+                                    continue;
+                                hu_error_t cp_serr = hu_conversation_schedule_message_on(
+                                    batch_key, key_len, cp_channel, cp_ch_len, cpd->message,
+                                    cp_msg_len, (uint64_t)cpd->send_at_ms);
+                                hu_log_info(
+                                    "human", agent ? agent->observer : NULL,
+                                    "[contextual-proactive] %s to %s via %s at %lld: %s",
+                                    cp_serr == HU_OK ? "scheduled" : "schedule FAILED", batch_key,
+                                    cp_channel, (long long)(cpd->send_at_ms / 1000), cpd->message);
+                            }
+                        }
+                    }
                 }
 
 #ifdef HU_ENABLE_SQLITE
