@@ -1,3 +1,11 @@
+---
+title: "GraphRAG Grounding A/B — does per-contact community grounding earn default-ON?"
+created: 2026-05-31
+status: final
+measurement: graphrag_grounding_marginal_ab
+verdict: NOT SUBSTANTIATED (ON-win-rate 43.3%, 95% CI [27.4, 60.8]) → default flipped ON→SHADOW
+---
+
 # GraphRAG Grounding A/B — does per-contact community grounding earn default-ON?
 
 **Date:** 2026-05-31
