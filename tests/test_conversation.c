@@ -2802,6 +2802,41 @@ static void cold_restart_one_hour_gap_no_hint(void) {
     HU_ASSERT_EQ(0, (int)len);
 }
 
+/* Pins the month-boundary regression: a 13h gap that straddles 05-31 -> 06-01.
+ * The old (d2-d1) day-of-month math computed a large NEGATIVE gap here (d=01
+ * minus d=31) and suppressed the hint. Uses hardcoded dates so it exercises the
+ * boundary on EVERY run, not only when time(NULL) happens to land on the 1st. */
+static void cold_restart_month_boundary_gap_emits_hint(void) {
+    hu_channel_history_entry_t entries[2];
+    memset(entries, 0, sizeof(entries));
+    entries[0].from_me = true;
+    strncpy(entries[0].text, "night", sizeof(entries[0].text) - 1);
+    strncpy(entries[0].timestamp, "2026-05-31 20:00", sizeof(entries[0].timestamp) - 1);
+    entries[1].from_me = false;
+    strncpy(entries[1].text, "morning", sizeof(entries[1].text) - 1);
+    strncpy(entries[1].timestamp, "2026-06-01 09:00", sizeof(entries[1].timestamp) - 1);
+    char buf[512];
+    size_t len = hu_conversation_build_cold_restart_hint(entries, 2, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_TRUE(strstr(buf, "COLD RESTART") != NULL);
+}
+
+/* Year-boundary sibling: 12-31 -> 01-01 must also emit (gap is real, not negative). */
+static void cold_restart_year_boundary_gap_emits_hint(void) {
+    hu_channel_history_entry_t entries[2];
+    memset(entries, 0, sizeof(entries));
+    entries[0].from_me = true;
+    strncpy(entries[0].text, "happy nye", sizeof(entries[0].text) - 1);
+    strncpy(entries[0].timestamp, "2025-12-31 22:00", sizeof(entries[0].timestamp) - 1);
+    entries[1].from_me = false;
+    strncpy(entries[1].text, "happy new year", sizeof(entries[1].text) - 1);
+    strncpy(entries[1].timestamp, "2026-01-01 10:00", sizeof(entries[1].timestamp) - 1);
+    char buf[512];
+    size_t len = hu_conversation_build_cold_restart_hint(entries, 2, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_TRUE(strstr(buf, "COLD RESTART") != NULL);
+}
+
 /* ── GIF humor calibration tests ─────────────────────────────────────── */
 
 static void gif_cal_hit_rate_default(void) {
@@ -4886,6 +4921,8 @@ void run_conversation_tests(void) {
     /* Cold restart with real time gaps */
     HU_RUN_TEST(cold_restart_six_hour_gap);
     HU_RUN_TEST(cold_restart_one_hour_gap_no_hint);
+    HU_RUN_TEST(cold_restart_month_boundary_gap_emits_hint);
+    HU_RUN_TEST(cold_restart_year_boundary_gap_emits_hint);
 
     /* GIF humor calibration */
     HU_RUN_TEST(gif_cal_hit_rate_default);

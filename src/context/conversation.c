@@ -7136,28 +7136,34 @@ size_t hu_conversation_build_cold_restart_hint(const hu_channel_history_entry_t 
     if (last_their < 0 || prev_any < 0)
         return 0;
 
-    /* Parse timestamps "YYYY-MM-DD HH:MM:SS" */
-    int h1 = 0, m1 = 0, h2 = 0, m2 = 0;
-    int d1 = 0, d2 = 0;
+    /* Parse "YYYY-MM-DD HH:MM[:SS]" into epoch seconds and take a real delta.
+     * The previous (d2 - d1) day-of-month math broke across month/year
+     * boundaries: e.g. 05-31 -> 06-01 gave d2-d1 = -30, a large negative gap
+     * that the single "+1440 wrapped past midnight" correction could not
+     * recover, so the cold-restart hint was wrongly suppressed on the 1st of
+     * every month. timegm on both timestamps yields a tz-independent delta. */
     const char *t1 = entries[prev_any].timestamp;
     const char *t2 = entries[last_their].timestamp;
-    if (strlen(t1) >= 16 && strlen(t2) >= 16) {
-        /* Day: chars 8-9, Hour: chars 11-12, Minute: chars 14-15 */
-        d1 = (t1[8] - '0') * 10 + (t1[9] - '0');
-        h1 = (t1[11] - '0') * 10 + (t1[12] - '0');
-        m1 = (t1[14] - '0') * 10 + (t1[15] - '0');
-        d2 = (t2[8] - '0') * 10 + (t2[9] - '0');
-        h2 = (t2[11] - '0') * 10 + (t2[12] - '0');
-        m2 = (t2[14] - '0') * 10 + (t2[15] - '0');
-    } else {
+    struct tm tm1, tm2;
+    memset(&tm1, 0, sizeof(tm1));
+    memset(&tm2, 0, sizeof(tm2));
+    if (sscanf(t1, "%d-%d-%d %d:%d", &tm1.tm_year, &tm1.tm_mon, &tm1.tm_mday, &tm1.tm_hour,
+               &tm1.tm_min) != 5 ||
+        sscanf(t2, "%d-%d-%d %d:%d", &tm2.tm_year, &tm2.tm_mon, &tm2.tm_mday, &tm2.tm_hour,
+               &tm2.tm_min) != 5) {
         return 0;
     }
-
-    int gap_minutes = (d2 - d1) * 1440 + (h2 - h1) * 60 + (m2 - m1);
-    if (gap_minutes < 0)
-        gap_minutes += 1440; /* wrapped past midnight */
+    tm1.tm_year -= 1900;
+    tm1.tm_mon -= 1;
+    tm2.tm_year -= 1900;
+    tm2.tm_mon -= 1;
+    time_t e1 = timegm(&tm1);
+    time_t e2 = timegm(&tm2);
+    if (e1 == (time_t)-1 || e2 == (time_t)-1)
+        return 0;
+    long gap_minutes = (long)((e2 - e1) / 60);
     if (gap_minutes < 240)
-        return 0; /* less than 4 hours, not a cold restart */
+        return 0; /* less than 4 hours (or out of order), not a cold restart */
 
     int n;
     if (gap_minutes >= 1440) {
