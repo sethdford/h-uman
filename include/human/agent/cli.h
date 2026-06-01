@@ -10,6 +10,11 @@ typedef struct hu_parsed_agent_args {
     const char *config_path;
     const char *message;
     const char *session_id;
+    const char *contact_id; /* --contact: binds agent->memory_session_id so
+                             * per-contact memory recall + GraphRAG community-
+                             * summary grounding fire on a one-shot CLI turn.
+                             * The daemon binds this from the channel contact;
+                             * the CLI previously had no equivalent seam. */
     const char *provider_override;
     const char *model_override;
     double temperature_override;

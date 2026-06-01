@@ -305,6 +305,39 @@ static void test_agent_cli_config_flag_parsing(void) {
     HU_ASSERT_STR_EQ(out.config_path, "/custom/path/config.json");
 }
 
+/* --contact lands in contact_id and is DISTINCT from session_id. This is the
+ * parse half of the GraphRAG grounding seam: cli.c binds agent->memory_session_id
+ * from contact_id (NOT session_id), which is what gates community-summary
+ * grounding on a one-shot CLI turn. The prior assumption that -s/--session would
+ * attribute the turn was wrong — these are separate fields. */
+static void test_agent_cli_contact_flag_parsing(void) {
+    const char *argv[] = {"agent", "--contact", "+15551234567"};
+    hu_parsed_agent_args_t out;
+    memset(&out, 0, sizeof(out));
+    HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 3, &out), HU_OK);
+    HU_ASSERT_NOT_NULL(out.contact_id);
+    HU_ASSERT_STR_EQ(out.contact_id, "+15551234567");
+    HU_ASSERT_NULL(out.session_id); /* contact is not session */
+}
+
+static void test_agent_cli_contact_distinct_from_session(void) {
+    const char *argv[] = {"agent", "-s", "sess1", "--contact", "+1999", "-m", "hi"};
+    hu_parsed_agent_args_t out;
+    memset(&out, 0, sizeof(out));
+    HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 7, &out), HU_OK);
+    HU_ASSERT_STR_EQ(out.session_id, "sess1");
+    HU_ASSERT_STR_EQ(out.contact_id, "+1999");
+    HU_ASSERT_STR_EQ(out.message, "hi");
+}
+
+static void test_agent_cli_no_contact_is_null(void) {
+    const char *argv[] = {"agent", "-m", "hi"};
+    hu_parsed_agent_args_t out;
+    memset(&out, 0, sizeof(out));
+    HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 3, &out), HU_OK);
+    HU_ASSERT_NULL(out.contact_id); /* default: no contact bound → grounding off */
+}
+
 static void test_agent_cli_prompt_once_parsing(void) {
     const char *argv[] = {"agent", "--prompt", "Research AI", "--once", "--message", "Check feeds", "--channel", "cli"};
     hu_parsed_agent_args_t args; memset(&args, 0, sizeof(args));
@@ -491,6 +524,9 @@ void run_cli_tests(void) {
     HU_RUN_TEST(test_agent_cli_demo_flag_parsing);
     HU_RUN_TEST(test_agent_cli_no_demo_flag);
     HU_RUN_TEST(test_agent_cli_config_flag_parsing);
+    HU_RUN_TEST(test_agent_cli_contact_flag_parsing);
+    HU_RUN_TEST(test_agent_cli_contact_distinct_from_session);
+    HU_RUN_TEST(test_agent_cli_no_contact_is_null);
     HU_RUN_TEST(test_agent_cli_demo_overrides_provider);
     HU_RUN_TEST(test_agent_cli_prompt_once_parsing);
     HU_RUN_TEST(test_agent_cli_prompt_without_once);
