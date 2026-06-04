@@ -93,7 +93,11 @@ jobs:
 
   android-emulator-fleet:
     name: Android · API ${{ matrix.api-level }}
-    runs-on: ubuntu-latest
+    # ubuntu-22.04, NOT ubuntu-latest (24.04): the Android emulator fails to boot
+    # ("Timeout waiting for emulator to boot") on the 24.04 runner image even with
+    # KVM enabled — a widely-reported android-emulator-runner regression. 22.04 is
+    # the documented stable image for emulator CI.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
