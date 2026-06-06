@@ -60,6 +60,8 @@ ITERS=50
 RANK=8
 LEARNING_RATE=5e-5
 BATCH_SIZE=1
+OBJECTIVE="sft"      # sft (m3_gce_train_remote.py) | orpo (m3_gce_orpo_remote.py)
+BETA=0.1             # ORPO odds-ratio weight (only used when --objective orpo)
 BASE_MODEL=""        # default chosen below based on HF_TOKEN availability
 PAIRS=""
 ADAPTER_OUT="$HOME/.human/training-data/adapters/gce-$(date +%Y%m%d-%H%M%S)"
@@ -78,12 +80,30 @@ while [ $# -gt 0 ]; do
         --rank)           RANK="$2"; shift 2 ;;
         --learning-rate)  LEARNING_RATE="$2"; shift 2 ;;
         --batch-size)     BATCH_SIZE="$2"; shift 2 ;;
+        --objective)      OBJECTIVE="$2"; shift 2 ;;
+        --beta)           BETA="$2"; shift 2 ;;
         --confirm-spend)  CONFIRM_SPEND=1; DRY_RUN=0; shift ;;
         --dry-run)        DRY_RUN=1; CONFIRM_SPEND=0; shift ;;
         -h|--help)        sed -n '2,30p' "$0"; exit 0 ;;
         *)                echo "Unknown arg: $1" >&2; exit 2 ;;
     esac
 done
+
+# Objective -> which remote trainer to upload + run, and any extra args.
+case "$OBJECTIVE" in
+    sft)
+        REMOTE_TRAINER="m3_gce_train_remote.py"
+        OBJECTIVE_ARGS=""
+        ;;
+    orpo)
+        REMOTE_TRAINER="m3_gce_orpo_remote.py"
+        # ORPO (reference-free, penalizes the rejected deliberation preamble)
+        # passes --beta; needs both chosen+rejected columns in --pairs.
+        OBJECTIVE_ARGS="--beta $BETA"
+        ;;
+    *)
+        echo "Unknown --objective: $OBJECTIVE (expected: sft | orpo)" >&2; exit 2 ;;
+esac
 
 # ─────────────────────────────────────────────────────────────────────
 # Pre-flight
@@ -286,7 +306,7 @@ log "VM ready; GPU detected"
 banner "Step 3 — upload pairs + remote training script"
 gcloud compute scp "$PAIRS" "${VM_NAME}:/tmp/pairs.jsonl" \
     --zone="$ZONE" --project="$PROJECT" --quiet 2>&1 | tail -2
-gcloud compute scp "$REPO_ROOT/scripts/m3_gce_train_remote.py" \
+gcloud compute scp "$REPO_ROOT/scripts/$REMOTE_TRAINER" \
     "${VM_NAME}:/tmp/train.py" \
     --zone="$ZONE" --project="$PROJECT" --quiet 2>&1 | tail -2
 # Upload HF token so gated models (gemma) can be downloaded.
@@ -321,7 +341,7 @@ TRAIN_CMD='PY=/opt/conda/bin/python3; \
         --base-model "'"$BASE_MODEL"'" \
         --iters '"$ITERS"' --rank '"$RANK"' \
         --batch-size '"$BATCH_SIZE"' \
-        --learning-rate '"$LEARNING_RATE"' 2>&1 | tee /tmp/train.log'
+        --learning-rate '"$LEARNING_RATE"' '"$OBJECTIVE_ARGS"' 2>&1 | tee /tmp/train.log'
 
 if ! gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT" \
         --command="$TRAIN_CMD" --quiet; then
