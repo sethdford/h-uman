@@ -210,10 +210,27 @@ final class HumaniOSFleetUITests: XCTestCase {
         )
     }
 
-    /// Row for an overflow tab inside the system **More** list.
-    private func moreListCell(for label: String) -> XCUIElement {
+    /// Locates an overflow tab entry across iOS versions. Pre-iOS-18 the system
+    /// **More** overflow was a `UITableView`; iOS 18 / 26 present it via other
+    /// containers (collection view / list rows / plain buttons), so a
+    /// `app.tables`-only query silently misses the row. Try every plausible
+    /// container and fall back to any labeled descendant.
+    private func overflowTabElement(for label: String) -> XCUIElement? {
         let byLabel = NSPredicate(format: "label == %@", label)
-        return app.tables.cells.containing(byLabel).firstMatch
+        let candidates: [XCUIElement] = [
+            app.tables.cells.containing(byLabel).firstMatch,
+            app.tables.staticTexts[label].firstMatch,
+            app.collectionViews.cells.containing(byLabel).firstMatch,
+            app.collectionViews.staticTexts[label].firstMatch,
+            app.cells.containing(byLabel).firstMatch,
+            app.buttons[label].firstMatch,
+            app.staticTexts[label].firstMatch,
+            app.descendants(matching: .any).matching(byLabel).firstMatch,
+        ]
+        for candidate in candidates where candidate.waitForExistence(timeout: 4) {
+            return candidate
+        }
+        return nil
     }
 
     /// Selects a root tab, using **More** when the item is not on the main tab bar (six tabs on iPhone).
@@ -249,14 +266,19 @@ final class HumaniOSFleetUITests: XCTestCase {
     }
 
     private func tapOverflowTabRow(_ label: String) {
-        let cell = moreListCell(for: label)
-        if cell.waitForExistence(timeout: Timeout.tabItem) {
-            tapReachable(cell, context: "More list row \(label)")
+        if let row = overflowTabElement(for: label) {
+            tapReachable(row, context: "More list row \(label)")
             return
         }
-        let alt = app.tables.staticTexts[label].firstMatch
-        XCTAssertTrue(alt.waitForExistence(timeout: 8), "Expected \(label) in More tab list")
-        tapReachable(alt, context: "More list row \(label)")
+        // Last resort: the broad cross-version resolver (button by id/label
+        // anywhere in the tree). Covers iOS 26 presentations where the overflow
+        // entry is neither a table nor a collection-view row.
+        let resolved = tabBarButton(for: label)
+        XCTAssertTrue(
+            resolved.waitForExistence(timeout: 8),
+            "Expected \(label) reachable in tab overflow (tried table/collection/cell/button/any)",
+        )
+        tapReachable(resolved, context: "Overflow tab \(label)")
     }
 
     // MARK: - Tests
