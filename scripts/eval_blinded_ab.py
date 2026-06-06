@@ -20,6 +20,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "johnb-2025")
@@ -65,10 +66,21 @@ USE_MLX = "--mlx" in sys.argv
 USE_GATE = "--gate" in sys.argv
 GATE_DRY_RUN = "--gate-dry-run" in sys.argv
 MAX_TRIALS = 50
+# Gemini judge runs concurrently in a thread pool while MLX generation (serial,
+# model_lock-bound) continues — see the main loop. Default kept modest to stay
+# gentle on the judge API; raise with --judge-workers=N.
+JUDGE_WORKERS = 6
+# Seeding the A/B coin per pair index makes the human/AI assignment reproducible
+# AND order-independent (safe under concurrent judging). Override with --seed=N.
+SEED = 1337
 
 for arg in sys.argv:
     if arg.startswith("--max-trials="):
         MAX_TRIALS = int(arg.split("=")[1])
+    elif arg.startswith("--judge-workers="):
+        JUDGE_WORKERS = max(1, int(arg.split("=")[1]))
+    elif arg.startswith("--seed="):
+        SEED = int(arg.split("=")[1])
 
 import blind_ab_gate as _gate
 _GATE_PATH = os.environ.get("HU_BLIND_AB_GATE_PATH", _gate.GATE_PATH)
@@ -324,63 +336,85 @@ def main():
     human_detected_correctly = 0
     total = 0
 
-    for i, pair in enumerate(pairs):
-        incoming = pair["incoming"]
-        real_seth = pair["seth_reply"]
+    # MLX generation holds the server's model_lock, so it CANNOT be parallelized
+    # — it is the hard serial floor. The Gemini judge, by contrast, is an
+    # independent network call per pair. So we generate serially (in order, to
+    # show progress as the model grinds) and dispatch each judge to a thread pool
+    # the instant its generation completes: judge(i) then overlaps gen(i+1..n)
+    # and falls off the critical path. The A/B coin is seeded per pair index so
+    # the human/AI assignment is reproducible and order-independent. Results are
+    # collected in completion order (tally counts are order-independent) and
+    # re-sorted by pair index before saving for stable output.
+    with ThreadPoolExecutor(max_workers=JUDGE_WORKERS) as pool:
+        futures = {}  # future -> meta dict
+        for i, pair in enumerate(pairs):
+            incoming = pair["incoming"]
+            real_seth = pair["seth_reply"]
 
-        print(f"\n{'─' * 70}")
-        print(f"  [{i+1}/{len(pairs)}] Incoming: \"{incoming}\"")
-        print(f"  Real Seth: \"{real_seth}\"")
-        sys.stdout.flush()
+            print(f"\n{'─' * 70}")
+            print(f"  [{i+1}/{len(pairs)}] Incoming: \"{incoming}\"")
+            print(f"  Real Seth: \"{real_seth}\"")
+            sys.stdout.flush()
 
-        ai_response = get_ai_response(incoming)
-        print(f"  AI Seth:   \"{ai_response}\"")
+            ai_response = get_ai_response(incoming)  # serial — model_lock floor
+            print(f"  AI Seth:   \"{ai_response}\"")
 
-        if ai_response.startswith("("):
-            print(f"  SKIP: AI response failed")
-            continue
+            if ai_response.startswith("("):
+                print(f"  SKIP: AI response failed")
+                continue
 
-        coin = random.random() < 0.5
-        if coin:
-            response_a, response_b = real_seth, ai_response
-            human_is = "A"
-        else:
-            response_a, response_b = ai_response, real_seth
-            human_is = "B"
-
-        time.sleep(0.5)
-
-        try:
-            judgment = blinded_judge(incoming, response_a, response_b)
-            choice = judgment.get("choice", "?")
-            confidence = judgment.get("confidence", 0)
-
-            chose_human = (choice == human_is)
-            if chose_human:
-                human_detected_correctly += 1
+            coin = random.Random(f"{SEED}:{i}").random() < 0.5
+            if coin:
+                response_a, response_b = real_seth, ai_response
+                human_is = "A"
             else:
-                ai_detected_correctly += 1
-            total += 1
+                response_a, response_b = ai_response, real_seth
+                human_is = "B"
 
-            label = "CORRECT (detected human)" if chose_human else "FOOLED (picked AI as human)"
-            print(f"  Judge: picked {choice} as human (confidence {confidence}/10) — {label}")
-            print(f"  Reasoning: {judgment.get('reasoning', '?')}")
+            fut = pool.submit(blinded_judge, incoming, response_a, response_b)
+            futures[fut] = {
+                "i": i, "incoming": incoming, "real_seth": real_seth,
+                "ai_response": ai_response, "human_is": human_is, "pair": pair,
+            }
 
-            results.append({
-                "incoming": incoming,
-                "real_seth": real_seth,
-                "ai_response": ai_response,
-                "human_was": human_is,
-                "judge_choice": choice,
-                "judge_correct": chose_human,
-                "confidence": confidence,
-                "judgment": judgment,
-                "is_synthetic": "seth_reply" in pair and "chat_id" not in pair,
-            })
-        except Exception as e:
-            print(f"  Judge error: {e}")
+        # Drain the judge pool in completion order. Runs in the main thread, so
+        # the tally/append below need no locking.
+        for fut in as_completed(futures):
+            meta = futures[fut]
+            try:
+                judgment = fut.result()
+                choice = judgment.get("choice", "?")
+                confidence = judgment.get("confidence", 0)
 
-        time.sleep(0.5)
+                chose_human = (choice == meta["human_is"])
+                if chose_human:
+                    human_detected_correctly += 1
+                else:
+                    ai_detected_correctly += 1
+                total += 1
+
+                label = "CORRECT (detected human)" if chose_human else "FOOLED (picked AI as human)"
+                print(f"  [{meta['i']+1}] Judge: picked {choice} as human "
+                      f"(confidence {confidence}/10) — {label}")
+                print(f"      Reasoning: {judgment.get('reasoning', '?')}")
+
+                results.append({
+                    "i": meta["i"],
+                    "incoming": meta["incoming"],
+                    "real_seth": meta["real_seth"],
+                    "ai_response": meta["ai_response"],
+                    "human_was": meta["human_is"],
+                    "judge_choice": choice,
+                    "judge_correct": chose_human,
+                    "confidence": confidence,
+                    "judgment": judgment,
+                    "is_synthetic": "seth_reply" in meta["pair"] and "chat_id" not in meta["pair"],
+                })
+            except Exception as e:
+                print(f"  [{meta['i']+1}] Judge error: {e}")
+
+    # Stable, pair-index order for the saved artifact (judges finished out of order).
+    results.sort(key=lambda r: r["i"])
 
     print(f"\n{'=' * 70}")
     print("  BLINDED A/B RESULTS")
