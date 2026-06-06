@@ -150,10 +150,12 @@ fi
 # ── Download adapter + log ────────────────────────────────────────────
 banner "Step 4 — download adapter + log"
 mkdir -p "$ADAPTER_OUT"
-scp "${SCP_OPTS[@]}" -r "$HOST:/tmp/orpo_adapter/*" "$ADAPTER_OUT/" 2>&1 | tail -2 || true
+scp "${SCP_OPTS[@]}" -r "$HOST:/tmp/orpo_adapter/*" "$ADAPTER_OUT/" 2>&1 | tail -2 || \
+    die "Adapter download failed" 4
 scp "${SCP_OPTS[@]}" "$HOST:/tmp/orpo_train.log" "$ADAPTER_OUT/" 2>/dev/null || true
 
-if [ -n "$(ls -A "$ADAPTER_OUT" 2>/dev/null)" ]; then
+# Verify actual adapter artifacts (not just log file) were downloaded
+if [ -f "$ADAPTER_OUT/adapter_model.safetensors" ] || [ -f "$ADAPTER_OUT/adapter_model.bin" ] || [ -f "$ADAPTER_OUT/adapter_config.json" ]; then
     banner "DONE"
     log "Adapter: $ADAPTER_OUT"
     ls -la "$ADAPTER_OUT" | head -8
@@ -161,5 +163,5 @@ if [ -n "$(ls -A "$ADAPTER_OUT" 2>/dev/null)" ]; then
     log "Next: evaluate vs seth-lora-v4-repair on the casual+multiturn sweep,"
     log "then load via the daemon's /v1/adapters/swap if it reduces deliberation."
 else
-    die "no adapter files downloaded — check $ADAPTER_OUT/orpo_train.log" 3
+    die "no adapter artifacts downloaded (expected adapter_model.safetensors or adapter_config.json) — check $ADAPTER_OUT/orpo_train.log" 4
 fi
