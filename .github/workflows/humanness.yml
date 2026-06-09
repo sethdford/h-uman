@@ -20,7 +20,7 @@ jobs:
     name: Humanness (deterministic PR gate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up build environment
         run: |
@@ -43,7 +43,7 @@ jobs:
 
       - name: Upload humanness scores artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: humanness-scores
           path: /tmp/humanness-scores.json
@@ -56,7 +56,7 @@ jobs:
     name: Humanness (live-judge, scheduled)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check secrets availability
         id: check-secrets
@@ -84,7 +84,7 @@ jobs:
 
       - name: Upload blind-A/B artifact
         if: always() && steps.check-secrets.outputs.secrets_available == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blind-ab-scores
           path: /tmp/blind-ab-scores.json

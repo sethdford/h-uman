@@ -38,7 +38,7 @@ jobs:
       apps: ${{ steps.f.outputs.apps }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: f
         with:
           filters: |
@@ -636,7 +636,7 @@ jobs:
           lcov --list coverage.info | tail -20
       - name: Upload to Codecov
         if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
