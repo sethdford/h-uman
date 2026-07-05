@@ -292,6 +292,194 @@ def _finalize_prompt_cache(full_prompt_ids, generated_ids) -> None:
     _PROMPT_CACHE_IDS = list(full_prompt_ids) + list(generated_ids)
 
 
+# ---------------------------------------------------------------------------
+# Activation steering (persona vectors).
+#
+# The h-uman daemon sends an optional per-request field
+#   "steering": {"formality": f, "verbosity": f, "warmth": f, "humor": f}
+# (doubles in [-1, 1]; see src/providers/compatible.c). Each trait with a
+# loaded persona vector is applied as residual-stream injection: the decoder
+# layer named by the vector file gets alpha * v_hat added to its hidden-state
+# output on every forward pass, where
+#   alpha = coefficient * HU_MLX_STEER_RATIO * residual_norm[layer].
+# The ratio (default 0.22) is the model-invariant dose: ~22% of the measured
+# per-token residual norm steers visibly without degrading fluency (validated
+# on gemma-2-2b and gemma-4-26b-a4b in persona-steering-lab, 2026-07-05).
+# On MoE models only EARLY-layer vectors are safe — late-layer injection
+# disrupts expert routing. The layer choice lives in the vector file.
+#
+# Vectors load from --steering-dir / HU_MLX_STEERING_DIR: one <trait>.npz per
+# trait (keys: v_hat, layer, residual_norm). Feature is fully inert when the
+# dir is unset, empty, or a requested trait has no vector.
+#
+# KV-cache correctness: KV prefilled under one steering configuration is
+# invalid for another (the injection shifts every cached hidden state), so
+# the prompt cache is invalidated whenever the effective steering signature
+# changes — the same rule as an adapter swap.
+_STEERING_VECTORS: dict = {}   # trait -> {"v": ndarray, "layer": int, "base_alpha": float}
+_STEERING_LAST_SIG: tuple = ()
+
+
+def _steering_ratio() -> float:
+    try:
+        return float(os.environ.get("HU_MLX_STEER_RATIO", "0.22"))
+    except ValueError:
+        return 0.22
+
+
+def _init_steering_vectors(dir_path: str) -> None:
+    """Load every <trait>.npz in dir_path into the registry. Best-effort:
+    a bad file is skipped with a log line; no vectors == feature off."""
+    global _STEERING_VECTORS
+    _STEERING_VECTORS = {}
+    if not dir_path:
+        return
+    try:
+        import numpy as np
+        import glob as _glob
+    except ImportError:
+        print("[mlx-server] steering disabled: numpy unavailable", flush=True)
+        return
+    for path in sorted(_glob.glob(os.path.join(os.path.expanduser(dir_path), "*.npz"))):
+        trait = os.path.splitext(os.path.basename(path))[0]
+        try:
+            data = np.load(path)
+            v_hat = np.asarray(data["v_hat"], dtype=np.float32)
+            layer = int(data["layer"])
+            if "residual_norm" in data:
+                base_alpha = _steering_ratio() * float(data["residual_norm"][layer])
+            else:
+                base_alpha = 1.0
+                print(f"[mlx-server] steering vector '{trait}' has no "
+                      "residual_norm; base_alpha=1.0 (probably too weak)", flush=True)
+            _STEERING_VECTORS[trait] = {
+                "v": v_hat, "layer": layer, "base_alpha": base_alpha,
+            }
+            print(f"[mlx-server] steering vector loaded: {trait} "
+                  f"(layer {layer}, base_alpha {base_alpha:.1f}, d {v_hat.shape[0]})",
+                  flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mlx-server] steering vector {path} skipped: {exc}", flush=True)
+
+
+def _parse_steering(raw, available) -> list:
+    """Pure: raw request field + available trait names -> sorted plan
+    [(trait, coeff)] with coeffs clamped to [-1, 1], zero/malformed/unknown
+    entries dropped. Sorted so the signature is order-invariant."""
+    if not isinstance(raw, dict):
+        return []
+    plan = []
+    for trait, coeff in raw.items():
+        if trait not in available:
+            continue
+        try:
+            c = float(coeff)
+        except (TypeError, ValueError):
+            continue
+        c = max(-1.0, min(1.0, c))
+        if c == 0.0:
+            continue
+        plan.append((str(trait), c))
+    return sorted(plan)
+
+
+def _steering_cache_guard(plan) -> None:
+    """Invalidate the prompt cache when the steering configuration changed —
+    KV computed under different steering is stale. Called BEFORE
+    _prepare_prompt_cache (ahead of any trim logic)."""
+    global _STEERING_LAST_SIG
+    sig = tuple(plan)
+    if sig != _STEERING_LAST_SIG:
+        _invalidate_prompt_cache("steering change")
+        _STEERING_LAST_SIG = sig
+
+
+def _steering_layer_list(model):
+    """Return the decoder-layer list, or None (stub / unknown arch)."""
+    for path in (("model",), ("language_model", "model"), ()):
+        obj = model
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is not None and isinstance(getattr(obj, "layers", None), list) \
+                and obj.layers:
+            return obj
+    return None
+
+
+class _SteeredLayer:
+    """Delegating decoder-layer wrapper: adds alpha * v_hat to the hidden
+    state on every forward pass. gemma4 blocks return (h, kvs, offset)
+    tuples; gemma2-style return the tensor directly."""
+
+    def __init__(self, inner, v_hat, alpha: float):
+        object.__setattr__(self, "inner", inner)
+        import mlx.core as mx
+        object.__setattr__(self, "_v", mx.array(v_hat))
+        object.__setattr__(self, "_alpha", float(alpha))
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "inner"), name)
+
+    def __call__(self, x, *args, **kwargs):
+        import mlx.core as mx
+        out = self.inner(x, *args, **kwargs)
+        h = out[0] if isinstance(out, tuple) else out
+        steered = h + mx.array(self._alpha, dtype=h.dtype) * self._v.astype(h.dtype)
+        if isinstance(out, tuple):
+            return (steered, *out[1:])
+        return steered
+
+
+class _steering_scope:
+    """Context manager bracketing generation: parses the request's steering
+    field, guards the prompt cache, installs wrappers, and ALWAYS restores
+    the original layers on exit (including client-disconnect exceptions).
+    Yields {trait: coeff} for the response's steering_applied field."""
+
+    def __init__(self, body):
+        self._plan = _parse_steering(body.get("steering"), _STEERING_VECTORS)
+        self._restore = []
+
+    def __enter__(self):
+        # Guard runs even for an empty plan: steered -> unsteered is also
+        # a signature change that must drop the cache.
+        _steering_cache_guard(self._plan)
+        if not self._plan or _MLX_MODEL is None:
+            return {}
+        owner = _steering_layer_list(_MLX_MODEL)
+        if owner is None:
+            print("[mlx-server] steering skipped: cannot locate decoder layers",
+                  flush=True)
+            return {}
+        applied = {}
+        try:
+            for trait, coeff in self._plan:
+                spec = _STEERING_VECTORS[trait]
+                idx = spec["layer"]
+                alpha = coeff * spec["base_alpha"]
+                original = owner.layers[idx]
+                owner.layers[idx] = _SteeredLayer(original, spec["v"], alpha)
+                self._restore.append((owner, idx, original))
+                applied[trait] = coeff
+            if applied:
+                print(f"[mlx-server] steering applied: "
+                      + ", ".join(f"{t}={c:+.2f}" for t, c in applied.items()),
+                      flush=True)
+        except Exception as exc:  # noqa: BLE001 — restore what we installed
+            self.__exit__(None, None, None)
+            print(f"[mlx-server] steering install failed (no-op): {exc}", flush=True)
+            return {}
+        return applied
+
+    def __exit__(self, *_exc):
+        while self._restore:
+            owner, idx, original = self._restore.pop()
+            owner.layers[idx] = original
+        return False
+
+
 def _stream_generate_iter(full_ids, suffix_ids, max_tokens, prompt_cache):
     """Build an mlx_lm.stream_generate iterator, degrading gracefully when an
     older mlx_lm rejects optional kwargs (prompt_cache, draft_model).
@@ -704,26 +892,30 @@ def _chat_completion_inline(body):
             # next turn's prefix diff, costing a needless cache reset).
             full_ids = tok.encode(prompt)
             prompt_tokens = len(full_ids)
-            suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
-            iterator, used_cache = _stream_generate_iter(
-                full_ids, suffix_ids, max_tokens, prompt_cache)
-            parts = []
-            generated_ids = []
-            for item in iterator:
-                delta = getattr(item, "text", None)
-                if delta is None and isinstance(item, str):
-                    delta = item
-                if delta is None:
-                    delta = str(item)
-                if delta:
-                    parts.append(delta)
-                    completion_tokens += 1
-                tok_id = getattr(item, "token", None)
-                if tok_id is not None:
-                    generated_ids.append(tok_id)
-            text = "".join(parts)
-            if used_cache:
-                _finalize_prompt_cache(full_ids, generated_ids)
+            # Steering scope brackets BOTH cache prep and iterator
+            # consumption: the cache guard must run before reuse planning,
+            # and the wrappers must stay installed until the last token.
+            with _steering_scope(body) as steering_applied:
+                suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+                iterator, used_cache = _stream_generate_iter(
+                    full_ids, suffix_ids, max_tokens, prompt_cache)
+                parts = []
+                generated_ids = []
+                for item in iterator:
+                    delta = getattr(item, "text", None)
+                    if delta is None and isinstance(item, str):
+                        delta = item
+                    if delta is None:
+                        delta = str(item)
+                    if delta:
+                        parts.append(delta)
+                        completion_tokens += 1
+                    tok_id = getattr(item, "token", None)
+                    if tok_id is not None:
+                        generated_ids.append(tok_id)
+                text = "".join(parts)
+                if used_cache:
+                    _finalize_prompt_cache(full_ids, generated_ids)
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
@@ -733,8 +925,9 @@ def _chat_completion_inline(body):
         # this branch; bench callers can detect stub mode by health probe.
         last = messages[-1].get("content", "") if messages else ""
         text = f"[stub] echoing {len(last)} chars from last user message"
+        steering_applied = {}
 
-    return 200, {
+    resp = {
         "id": "chatcmpl-mlx-inline",
         "object": "chat.completion",
         "model": body.get("model", "mlx-inline"),
@@ -749,6 +942,9 @@ def _chat_completion_inline(body):
             "total_tokens": prompt_tokens + completion_tokens,
         },
     }
+    if steering_applied:
+        resp["steering_applied"] = steering_applied
+    return 200, resp
 
 
 def _count_safetensors(path: str) -> int:
@@ -879,7 +1075,7 @@ class SwapHandler(BaseHTTPRequestHandler):
         # streaming until the closing [DONE] sentinel.
         self.end_headers()
 
-        def emit(delta_text: str, finish_reason=None, usage=None):
+        def emit(delta_text: str, finish_reason=None, usage=None, steering=None):
             chunk = {
                 "id": "chatcmpl-mlx-inline",
                 "object": "chat.completion.chunk",
@@ -894,6 +1090,8 @@ class SwapHandler(BaseHTTPRequestHandler):
             }
             if usage is not None:
                 chunk["usage"] = usage
+            if steering:
+                chunk["steering_applied"] = steering
             payload = "data: " + json.dumps(chunk) + "\n\n"
             try:
                 self.wfile.write(payload.encode("utf-8"))
@@ -905,6 +1103,7 @@ class SwapHandler(BaseHTTPRequestHandler):
 
         prompt_tokens = 0
         completion_tokens = 0
+        steering_applied = {}
         try:
             if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
                 try:
@@ -936,27 +1135,31 @@ class SwapHandler(BaseHTTPRequestHandler):
                     # the divergent suffix is prefilled. Phase 3b — pass the
                     # draft model when loaded for speculative decoding. The
                     # iterator helper degrades gracefully on older mlx_lm.
-                    suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
-                    iterator, used_cache = _stream_generate_iter(
-                        full_ids, suffix_ids, max_tokens, prompt_cache)
-                    generated_ids = []
-                    for item in iterator:
-                        # mlx_lm yields different shapes across versions:
-                        # newer GenerationResponse objects have `.text`;
-                        # older paths yield bare strings.
-                        delta = getattr(item, "text", None)
-                        if delta is None and isinstance(item, str):
-                            delta = item
-                        if delta is None:
-                            delta = str(item)
-                        tok_id = getattr(item, "token", None)
-                        if tok_id is not None:
-                            generated_ids.append(tok_id)
-                        if delta:
-                            emit(delta)
-                            completion_tokens += 1
-                    if used_cache:
-                        _finalize_prompt_cache(full_ids, generated_ids)
+                    # Steering scope brackets cache prep AND iterator
+                    # consumption (stream_generate is lazy); restore runs on
+                    # client disconnect via the with-exit.
+                    with _steering_scope(body) as steering_applied:
+                        suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+                        iterator, used_cache = _stream_generate_iter(
+                            full_ids, suffix_ids, max_tokens, prompt_cache)
+                        generated_ids = []
+                        for item in iterator:
+                            # mlx_lm yields different shapes across versions:
+                            # newer GenerationResponse objects have `.text`;
+                            # older paths yield bare strings.
+                            delta = getattr(item, "text", None)
+                            if delta is None and isinstance(item, str):
+                                delta = item
+                            if delta is None:
+                                delta = str(item)
+                            tok_id = getattr(item, "token", None)
+                            if tok_id is not None:
+                                generated_ids.append(tok_id)
+                            if delta:
+                                emit(delta)
+                                completion_tokens += 1
+                        if used_cache:
+                            _finalize_prompt_cache(full_ids, generated_ids)
                 elif stream_generate is not None:
                     # Tokenizer.encode failed; fall back to string prompt with
                     # no cache reuse (still streams).
@@ -1008,7 +1211,7 @@ class SwapHandler(BaseHTTPRequestHandler):
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
-            })
+            }, steering=steering_applied)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -1022,7 +1225,7 @@ class SwapHandler(BaseHTTPRequestHandler):
 
 
 def _run_inline_server(port: int, initial_adapter: str, model_id: str,
-                       draft_model: str = ""):
+                       draft_model: str = "", steering_dir: str = ""):
     """Boot the in-process HTTP server. This is the path that satisfies
     AC-M3-1 (a): we OWN the swap endpoint definition.
     """
@@ -1031,6 +1234,9 @@ def _run_inline_server(port: int, initial_adapter: str, model_id: str,
     # Phase 1c — optionally swap in the TurboKV compressed cache factory
     # BEFORE any cache is built. No-op unless HU_MLX_TURBO_KV=1.
     _maybe_enable_turbo_kv()
+
+    # Activation steering — inert unless a vectors dir is configured.
+    _init_steering_vectors(steering_dir)
 
     # Try to load the model if it's available. Failures are tolerated —
     # the swap endpoint still works against a stub state so tests can
@@ -1093,6 +1299,11 @@ def main():
     ap.add_argument("--model", default=os.environ.get(
                         "HUMAN_MLX_MODEL", "mlx-community/gemma-4-26b-a4b-it-4bit"),
                     help="Model id to load (only used when mlx_lm is installed)")
+    ap.add_argument("--steering-dir",
+                    default=os.environ.get("HU_MLX_STEERING_DIR", ""),
+                    help="directory of <trait>.npz persona steering vectors; "
+                         "unset = steering disabled (requests' steering field "
+                         "is ignored, matching pre-steering behavior)")
     ap.add_argument("--draft-model", default=os.environ.get("HU_MLX_DRAFT_MODEL", ""),
                     help="Speculative-decoding draft model id or local path. When "
                          "set, loaded alongside the target and passed to "
@@ -1150,7 +1361,8 @@ def main():
     # Default path (and AC-M3-1 (a)): inline swap server. The draft model
     # for speculative decoding is resolved + loaded + tokenizer-checked
     # inside _run_inline_server, AFTER the target loads (Phase 1b).
-    _run_inline_server(args.port, args.adapter, args.model, args.draft_model)
+    _run_inline_server(args.port, args.adapter, args.model, args.draft_model,
+                       args.steering_dir)
     return 0
 
 
