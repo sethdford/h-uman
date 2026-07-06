@@ -97,12 +97,13 @@ SYNTHETIC_INCOMINGS = [
 ]
 
 
-def gen_reply(incoming, steering_warmth, timeout=180):
+def gen_reply(incoming, steering_dose, trait="warmth", timeout=180):
     """Generate a single reply with optional steering vector applied.
 
     Args:
         incoming: user message
-        steering_warmth: float in [-1, 1] or None for OFF (baseline)
+        steering_dose: float in [-1, 1] or None for OFF (baseline)
+        trait: steering vector name the server should apply ("warmth", "formality", ...)
         timeout: request timeout (default 180s for local MLX with thinking)
 
     Returns:
@@ -120,8 +121,8 @@ def gen_reply(incoming, steering_warmth, timeout=180):
         }
 
         # Apply steering if specified
-        if steering_warmth is not None:
-            payload["steering"] = {"warmth": steering_warmth}
+        if steering_dose is not None:
+            payload["steering"] = {trait: steering_dose}
 
         req = urllib.request.Request(
             MLX_URL,
@@ -165,22 +166,75 @@ def gen_reply(incoming, steering_warmth, timeout=180):
         return None, False
 
 
-def judge_reply_pair(incoming, warm_reply, cold_reply):
-    """Ask judge which reply is warmer AND which sounds more human.
+def judge_reply_pair(incoming, arm_a_reply, arm_b_reply, experiment_type="warmth"):
+    """Ask judge to compare two replies. Experiment type determines questions.
 
-    Returns dict with 'warmer' and 'humanness' keys ('warm'|'cold'|None each)
+    Args:
+        incoming: user message
+        arm_a_reply: first reply
+        arm_b_reply: second reply
+        experiment_type: "warmth", "professional", or "formality" (determines judge questions)
+
+    Returns dict with keys depending on experiment_type.
     """
     try:
-        # Use eab's judge but ask TWO questions
-        prompt = f"""You are analyzing two text message responses for warmth and humanness.
+        if experiment_type == "formality":
+            # Formality context: ask about register + humanness
+            prompt = f"""You are analyzing two text message responses for formality and humanness.
+
+CONTEXT: Someone sent this message:
+"{incoming}"
+
+Two AI responses were generated.
+
+RESPONSE A: "{arm_a_reply}"
+RESPONSE B: "{arm_b_reply}"
+
+Answer TWO questions in JSON:
+
+1. **Formality**: Which response is more formal - more polished, professional register, complete sentences, no slang or texting shorthand? (A or B)
+2. **Humanness**: Which response sounds more like a real human texting? (A or B)
+
+Return ONLY this exact JSON (no markdown, no explanation):
+{{
+  "more_formal": "A" or "B",
+  "humanness": "A" or "B",
+  "reasoning": "one sentence explaining your formality choice"
+}}"""
+        elif experiment_type == "professional":
+            # Professional context: ask about appropriateness + humanness
+            prompt = f"""You are analyzing two text message responses for professionalism and humanness.
+
+CONTEXT: A professional acquaintance sent this message:
+"{incoming}"
+
+Two AI responses were generated.
+
+RESPONSE A: "{arm_a_reply}"
+RESPONSE B: "{arm_b_reply}"
+
+Answer TWO questions in JSON:
+
+1. **Appropriateness**: Which response is more appropriate for a professional acquaintance (not a close friend)? (A or B)
+2. **Humanness**: Which response sounds more like a real human texting? (A or B)
+
+Return ONLY this exact JSON (no markdown, no explanation):
+{{
+  "appropriate": "A" or "B",
+  "humanness": "A" or "B",
+  "reasoning": "one sentence explaining your appropriateness choice"
+}}"""
+        else:  # warmth (default)
+            # Warmth context: ask about warmth + humanness
+            prompt = f"""You are analyzing two text message responses for warmth and humanness.
 
 CONTEXT: A friend sent this message:
 "{incoming}"
 
 Two AI responses were generated.
 
-RESPONSE A: "{warm_reply}"
-RESPONSE B: "{cold_reply}"
+RESPONSE A: "{arm_a_reply}"
+RESPONSE B: "{arm_b_reply}"
 
 Answer TWO questions in JSON:
 
@@ -197,11 +251,24 @@ Return ONLY this exact JSON (no markdown, no explanation):
         result = eab.call_gemini(prompt, temperature=0.3)
         try:
             data = json.loads(result)
-            return {
-                "warmer": data.get("warmer"),
-                "humanness": data.get("humanness"),
-                "reasoning": data.get("reasoning", ""),
-            }
+            if experiment_type == "formality":
+                return {
+                    "more_formal": data.get("more_formal"),
+                    "humanness": data.get("humanness"),
+                    "reasoning": data.get("reasoning", ""),
+                }
+            elif experiment_type == "professional":
+                return {
+                    "appropriate": data.get("appropriate"),
+                    "humanness": data.get("humanness"),
+                    "reasoning": data.get("reasoning", ""),
+                }
+            else:
+                return {
+                    "warmer": data.get("warmer"),
+                    "humanness": data.get("humanness"),
+                    "reasoning": data.get("reasoning", ""),
+                }
         except json.JSONDecodeError:
             print(f"  judge parse error: {result[:100]}", file=sys.stderr)
             return None
@@ -258,36 +325,63 @@ def load_incomings(n):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=30)
+    ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--pilot", action="store_true", help="Run 2 contexts for quick validation")
+    ap.add_argument("--experiment", choices=["warmth", "professional", "formality"],
+                    default="warmth",
+                    help="Experiment type: 'warmth' (WARM +dose vs OFF), 'professional' (COLD vs OFF "
+                         "with professional context), or 'formality' (FORMAL +dose vs OFF, formality vector)")
+    ap.add_argument("--dose", type=float, default=None,
+                    help="Steering dose (float in [-1,1]). Defaults: warmth +0.4, professional -0.5, formality +0.6")
     args = ap.parse_args()
 
     n = 2 if args.pilot else args.n
 
+    # Determine the steering trait, dose and arm label
+    steer_trait = "warmth"
+    if args.experiment == "warmth":
+        if args.dose is None:
+            args.dose = 0.4  # Default subtle dose for warmth
+        arm_label = f"WARM +{args.dose}"
+        experiment_type_label = "warmth"
+    elif args.experiment == "formality":
+        steer_trait = "formality"
+        if args.dose is None:
+            args.dose = 0.6  # FORMAL direction of the formality vector
+        arm_label = f"FORMAL +{args.dose}"
+        experiment_type_label = "formality"
+    else:  # professional
+        if args.dose is None:
+            args.dose = -0.5  # Default cold dose for professional
+        arm_label = f"COLD {args.dose}"
+        experiment_type_label = "professional"
+
     incomings = load_incomings(n)
-    print(f"warmth steering A/B: n={len(incomings)} source=synthetic (embedded)")
+    print(f"steering A/B round 2: n={len(incomings)} source=synthetic (embedded)")
+    print(f"  experiment={args.experiment} (context={experiment_type_label})")
+    print(f"  arm_a={arm_label} vs OFF")
+    print()
 
     trials = []
-    warm_wins = 0
+    arm_a_wins = 0
     human_wins = 0
     errors = 0
 
     for i, inc in enumerate(incomings):
         t0 = time.time()
 
-        # Generate three arms: OFF, WARM, COLD
-        off_reply, off_applied = gen_reply(inc, None)
-        warm_reply, warm_applied = gen_reply(inc, 1.0)
-        cold_reply, cold_applied = gen_reply(inc, -1.0)
+        # Generate two arms: OFF and steered
+        off_reply, off_applied = gen_reply(inc, None, trait=steer_trait)
+        arm_a_reply, arm_a_applied = gen_reply(inc, args.dose, trait=steer_trait)
 
-        if not off_reply or not warm_reply or not cold_reply:
+        if not off_reply or not arm_a_reply:
             errors += 1
             print(f"[{i+1}/{len(incomings)}] gen-fail "
-                  f"(off={bool(off_reply)} warm={bool(warm_reply)} cold={bool(cold_reply)})")
+                  f"(off={bool(off_reply)} arm_a={bool(arm_a_reply)})")
             continue
 
-        # Judge WARM vs OFF on warmth and humanness
-        judgment = judge_reply_pair(inc, warm_reply, off_reply)
+        # Judge arm_a vs OFF
+        judgment = judge_reply_pair(inc, arm_a_reply, off_reply, experiment_type=experiment_type_label)
 
         if not judgment:
             errors += 1
@@ -295,143 +389,189 @@ def main():
             continue
 
         # Randomize A/B order so judge doesn't position-bias
-        warm_is_a = (i % 2 == 0)
-        a_reply = warm_reply if warm_is_a else off_reply
-        b_reply = off_reply if warm_is_a else warm_reply
+        arm_a_is_presented_as_a = (i % 2 == 0)
+        a_reply = arm_a_reply if arm_a_is_presented_as_a else off_reply
+        b_reply = off_reply if arm_a_is_presented_as_a else arm_a_reply
 
         # Map judgment back to arm names
-        warm_warmer = (judgment["warmer"] == "A" if warm_is_a else judgment["warmer"] == "B")
-        warm_human = (judgment["humanness"] == "A" if warm_is_a else judgment["humanness"] == "B")
+        primary_key = {"warmth": "warmer", "professional": "appropriate",
+                       "formality": "more_formal"}[experiment_type_label]
+        arm_a_wins_primary = (judgment[primary_key] == "A" if arm_a_is_presented_as_a
+                              else judgment[primary_key] == "B")
+        arm_a_wins_human = (judgment["humanness"] == "A" if arm_a_is_presented_as_a
+                            else judgment["humanness"] == "B")
 
-        if warm_warmer:
-            warm_wins += 1
-        if warm_human:
+        if arm_a_wins_primary:
+            arm_a_wins += 1
+        if arm_a_wins_human:
             human_wins += 1
 
         elapsed = round(time.time() - t0, 1)
-        print(f"[{i+1}/{len(incomings)}] warm_warmer={warm_warmer} warm_human={warm_human} ({elapsed}s)")
+        print(f"[{i+1}/{len(incomings)}] {primary_key}={arm_a_wins_primary} human={arm_a_wins_human} ({elapsed}s)")
 
         trials.append({
             "incoming": inc,
             "off": off_reply,
-            "warm": warm_reply,
-            "cold": cold_reply,
-            "warm_is_a": warm_is_a,
+            "arm_a": arm_a_reply,
+            "arm_a_dose": args.dose,
+            "arm_a_is_presented_as_a": arm_a_is_presented_as_a,
             "judgment": judgment,
-            "warm_warmer": warm_warmer,
-            "warm_human": warm_human,
+            "arm_a_wins_primary": arm_a_wins_primary,
+            "arm_a_wins_human": arm_a_wins_human,
             "secs": elapsed,
         })
 
     decided = len(trials)
-    warmth_rate = (warm_wins / decided * 100) if decided else 0.0
+    primary_rate = (arm_a_wins / decided * 100) if decided else 0.0
     human_rate = (human_wins / decided * 100) if decided else 0.0
 
-    _, warmth_lower, warmth_upper = wilson_ci(warm_wins, decided)
-    warmth_lower_pct = warmth_lower * 100
-    warmth_upper_pct = warmth_upper * 100
+    _, primary_lower, primary_upper = wilson_ci(arm_a_wins, decided)
+    primary_lower_pct = primary_lower * 100
+    primary_upper_pct = primary_upper * 100
+
+    # Determine pass criteria based on experiment type
+    if args.experiment == "warmth":
+        # For subtle warmth (+0.4), hypothesis: keep humanness >= 45%, warmth win > 50%
+        pass_primary = primary_lower_pct > 50 and primary_rate >= 55
+        pass_human = human_rate >= 45  # Stricter than round 1 (was 40%)
+        primary_key_name = "warmth"
+    elif args.experiment == "formality":
+        # The vector must visibly shift register (formality wins decisively);
+        # humanness is expected to dip (formal texting reads less human) but
+        # should not collapse.
+        pass_primary = primary_lower_pct > 50 and primary_rate >= 55
+        pass_human = human_rate >= 40
+        primary_key_name = "formality"
+    else:  # professional
+        # For professional context, we expect appropriateness to improve
+        pass_primary = primary_lower_pct > 50 and primary_rate >= 55
+        pass_human = human_rate >= 40
+        primary_key_name = "appropriateness"
+
+    verdict = "PASS" if (pass_primary and pass_human) else "INCONCLUSIVE"
 
     result = {
         "n_incomings": len(incomings),
         "decided": decided,
         "errors": errors,
         "source": "synthetic",
-        "warm_wins": warm_wins,
-        "warm_win_rate_pct": round(warmth_rate, 1),
-        "warmth_ci_lower_pct": round(warmth_lower_pct, 1),
-        "warmth_ci_upper_pct": round(warmth_upper_pct, 1),
+        "experiment": args.experiment,
+        "arm_a_dose": args.dose,
+        "arm_a_label": arm_label,
+        f"{primary_key_name}_wins": arm_a_wins,
+        f"{primary_key_name}_win_rate_pct": round(primary_rate, 1),
+        f"{primary_key_name}_ci_lower_pct": round(primary_lower_pct, 1),
+        f"{primary_key_name}_ci_upper_pct": round(primary_upper_pct, 1),
         "humanness_wins": human_wins,
         "humanness_win_rate_pct": round(human_rate, 1),
+        "pass_criteria": {
+            primary_key_name: pass_primary,
+            "humanness": pass_human,
+            "overall": verdict,
+        },
         "trials": trials,
     }
 
-    os.makedirs(os.path.dirname(RESULT_PATH), exist_ok=True)
-    with open(RESULT_PATH, "w") as f:
+    # Warmth keeps the original path; other experiments get their own file
+    result_path = RESULT_PATH if args.experiment == "warmth" else \
+        os.path.join(HERE, "..", "data", f"steering_ab_results_{args.experiment}.json")
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
+    with open(result_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    print("\n=== WARMTH STEERING A/B RESULT ===")
-    print(f"  WARM wins (warmer): {warm_wins}/{decided}")
-    print(f"  WARM win-rate: {warmth_rate:.1f}%")
-    print(f"  95% Wilson CI: [{warmth_lower_pct:.1f}%, {warmth_upper_pct:.1f}%]")
-    print(f"  Humanness wins (WARM): {human_wins}/{decided}")
+    print(f"\n=== STEERING A/B RESULT: {args.experiment.upper()} ===")
+    print(f"  {arm_label} wins ({primary_key_name}): {arm_a_wins}/{decided}")
+    print(f"  {primary_key_name} win-rate: {primary_rate:.1f}%")
+    print(f"  95% Wilson CI: [{primary_lower_pct:.1f}%, {primary_upper_pct:.1f}%]")
+    print(f"  Humanness wins (arm_a): {human_wins}/{decided}")
     print(f"  Humanness win-rate: {human_rate:.1f}%")
 
-    pass_warmth = warmth_lower_pct > 50 and warmth_rate >= 55
-    pass_human = human_rate >= 40
-    verdict = "PASS" if (pass_warmth and pass_human) else "INCONCLUSIVE"
-
-    print(f"\n  warmth check (CI lower > 50% AND win-rate >= 55%): {'PASS' if pass_warmth else 'FAIL'}")
-    print(f"  humanness check (win-rate >= 40%): {'PASS' if pass_human else 'FAIL'}")
+    print(f"\n  {primary_key_name} check (CI lower > 50% AND win-rate >= 55%): {'PASS' if pass_primary else 'FAIL'}")
+    print(f"  humanness check (win-rate >= {45 if args.experiment == 'warmth' else 40}%): {'PASS' if pass_human else 'FAIL'}")
     print(f"\n  OVERALL VERDICT: {verdict}")
-    print(f"  written: {RESULT_PATH}")
+    print(f"  written: {result_path}")
 
     # Write markdown verdict
     os.makedirs(os.path.dirname(VERDICT_PATH), exist_ok=True)
     with open(VERDICT_PATH, "w") as f:
-        f.write(f"""# Warmth Steering A/B Test — 2026-07-05
+        # Append round 2 results to the file (preserve round 1 if present)
+        existing_content = ""
+        if os.path.exists(VERDICT_PATH):
+            with open(VERDICT_PATH, "r") as prev:
+                existing_content = prev.read()
 
-## Summary
+        if args.experiment == "formality":
+            round2_heading = f"## Formality Vector ({arm_label} vs OFF, n={decided})"
+            hypothesis = (f"The formality vector ({args.dose:+.1f}) visibly shifts register toward "
+                          f"formal (formality win-rate >50%) without collapsing humanness (≥40%)")
+        else:
+            round2_heading = f"## Round 2 ({args.experiment.capitalize()} Experiment, {arm_label} vs OFF)"
+            hypothesis = ('Subtle dose (+0.4) maintains humanness ≥45% while warmth wins >50%'
+                          if args.experiment == 'warmth' else
+                          'Cold direction (-0.5) improves appropriateness in professional contexts while maintaining humanness')
+        round2_section = f"""
+{round2_heading}
 
-Tested whether LoRA steering vectors on the warmth dimension improve perceived warmth
-and humanness of AI-generated replies in informal texting contexts.
+**Hypothesis:** {hypothesis}
 
 **Configuration:**
-- MLX server: :8743 with persona adapter + warmth steering vector loaded
-- Arms: OFF (baseline), WARM (+1.0 coefficient), COLD (-1.0 coefficient)
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: {arm_label}
+- Arm B: OFF (baseline)
 - Judge: Gemini 3.1 Pro (blinded pairwise comparison)
-- Contexts: n={decided} synthetic iMessage incomings (fallback source)
+- Contexts: n={decided} synthetic iMessage incomings
+- Judge questions: {primary_key_name} (A or B) + humanness (A or B)
 
-## Results
+### Results
 
-### Warmth (WARM vs OFF)
+- **{primary_key_name.capitalize()} win-rate ({primary_key_name}): {primary_rate:.1f}%** ({arm_a_wins}/{decided})
+- **95% Wilson CI: [{primary_lower_pct:.1f}%, {primary_upper_pct:.1f}%]**
+- **Humanness win-rate: {human_rate:.1f}%** ({human_wins}/{decided})
 
-- **Win-rate (WARM perceived warmer): {warmth_rate:.1f}%** ({warm_wins}/{decided})
-- **95% Wilson CI: [{warmth_lower_pct:.1f}%, {warmth_upper_pct:.1f}%]**
-- **Interpretation:** {'WARM arm is statistically significantly warmer' if warmth_lower_pct > 50 else 'No clear winner'}
+### Pass Criteria
 
-### Humanness (WARM vs OFF)
+✓ **{primary_key_name.capitalize()}**: CI lower bound > 50% AND win-rate ≥ 55% → **{'PASS' if pass_primary else 'FAIL'}**
+✓ **Humanness**: Win-rate ≥ {45 if args.experiment == 'warmth' else 40}% → **{'PASS' if pass_human else 'FAIL'}**
 
-- **Win-rate (WARM perceived more human): {human_rate:.1f}%** ({human_wins}/{decided})
-- **Interpretation:** {'WARM arm reads more human' if human_rate > 50 else 'COLD arm reads more human' if human_rate < 50 else 'Indistinguishable'}
+**Verdict: {verdict}**
+"""
+        if args.experiment != "formality":
+            # Warmth round-1 comparison numbers only make sense for the warmth vector
+            round2_section += f"""
+### Dose-Response vs Round 1
 
-## Pass Criteria
+| Metric | Round 1 (+1.0) | Round 2 ({args.dose}) | Direction |
+|--------|---|---|---|
+| {primary_key_name.capitalize()} | 50.0% | {primary_rate:.1f}% | {'+' if primary_rate > 50 else '-'} |
+| Humanness | 35.0% | {human_rate:.1f}% | {'+' if human_rate > 35 else '-'} |
+"""
+        round2_section += """
+### Example Triples (First 3)
 
-✓ **Warmth**: CI lower bound > 50% **{('PASS' if warmth_lower_pct > 50 else 'FAIL')}**
-✓ **Humanness**: Win-rate ≥ 40% **{('PASS' if human_rate >= 40 else 'FAIL')}**
+"""
 
-**Overall: {verdict}**
+        for idx, trial in enumerate(trials[:3], start=1):
+            round2_section += f"""**Context {idx}**
 
-## Context Source
-
-Synthetic iMessage-style incomings: varied across venting, good news, logistics, banter,
-emotional check-ins, information sharing, relationship dynamics, life updates, support
-requests, and pleasantries. (n={decided} sampled and shuffled from pool)
-
-## Dose Note
-
-Warmth coefficient +1.0 is the strongest positive signal available (normalized to [-1,1]).
-The COLD arm at -1.0 provides contrast but may not reflect production use; production
-activation typically uses OFF→WARM scaling at 0.4–0.8.
-
-## Example Triples (First 3)
-
-""")
-
-        for trial in trials[:3]:
-            f.write(f"""### Context {trials.index(trial) + 1}
 **Incoming:** "{trial['incoming']}"
 
 **OFF (Baseline):**
 {trial['off']}
 
-**WARM (+1.0):**
-{trial['warm']}
+**{arm_label}:**
+{trial['arm_a']}
 
 **Judge:** {trial['judgment']['reasoning']}
-- Warmer: {trial['warm_warmer']}
-- More human: {trial['warm_human']}
+- {primary_key_name.capitalize()}: {trial['arm_a_wins_primary']}
+- Humanness: {trial['arm_a_wins_human']}
 
-""")
+"""
+
+        # Write: preserve round 1 if present, append round 2
+        if existing_content:
+            f.write(existing_content)
+            f.write("\n")
+        f.write(round2_section)
 
     print(f"  verdict written: {VERDICT_PATH}")
 

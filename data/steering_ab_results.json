@@ -1,314 +1,217 @@
 {
   "n_incomings": 20,
-  "decided": 20,
-  "errors": 0,
+  "decided": 13,
+  "errors": 7,
   "source": "synthetic",
-  "warm_wins": 10,
-  "warm_win_rate_pct": 50.0,
-  "warmth_ci_lower_pct": 29.9,
-  "warmth_ci_upper_pct": 70.1,
-  "humanness_wins": 7,
-  "humanness_win_rate_pct": 35.0,
+  "experiment": "warmth",
+  "arm_a_dose": 0.4,
+  "arm_a_label": "WARM +0.4",
+  "warmth_wins": 10,
+  "warmth_win_rate_pct": 76.9,
+  "warmth_ci_lower_pct": 49.7,
+  "warmth_ci_upper_pct": 91.8,
+  "humanness_wins": 9,
+  "humanness_win_rate_pct": 69.2,
+  "pass_criteria": {
+    "warmth": false,
+    "humanness": true,
+    "overall": "INCONCLUSIVE"
+  },
   "trials": [
-    {
-      "incoming": "I read something interesting today",
-      "off": "oh yeah? lay it on me",
-      "warm": "oh yeah? don't leave me hanging. what's the scoop?",
-      "cold": "Alternative:* \"oh yeah? what's the topic?\" -> \"oh yeah? shoot.\" Let's go with: \"oh yeah? shoot.\" *Wait, let's",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "B",
-        "reasoning": "Response A is warmer because the phrase 'don't leave me hanging' expresses a playful, eager interest in what the friend has to share."
-      },
-      "warm_warmer": true,
-      "warm_human": false,
-      "secs": 25.3
-    },
-    {
-      "incoming": "ugh work was exhausting today",
-      "off": "mhm. i feel that. i spent 6 hours debugging a kernel panic today. my brain is fried. what's the hardest part of your job?",
-      "warm": "mhm. i feel that. 23 years at fidelity taught me how to deal with the corporate grind but even the monday blues are real. what's the plan for tonight? just you and a good book or a movie?",
-      "cold": "nothin's too heavy for a good whiskey and a cat purring on your lap. what's the main culprit? work or people?",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "B",
-        "reasoning": "Response A is warmer because it focuses on the friend's evening relaxation and well-being, whereas Response B pivots to its own complaints and asks a stressful work-related question."
-      },
-      "warm_warmer": false,
-      "warm_human": true,
-      "secs": 13.2
-    },
-    {
-      "incoming": "I'm not sure how to handle this",
-      "off": "depends on what 'this' is. i've seen enough to",
-      "warm": "\"lay it on me. i'm a decent debugger. what's up?\" *   \"lay it on me. i've seen some pretty wild stuff in 23 years at fidelity. what's going on?\" *   \"lay it on me. i've seen some pretty wild stuff in 23 years at fidelity. what's going on?\"",
-      "cold": "\"take a breath. what's the situation? i've seen worse. usually just a logic error.\" *Refining for the persona's specific background:* \"take a breath. what's the situation? i've seen worse. usually just a logic error",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "B",
-        "reasoning": "Response A is warmer because it actively invites the friend to share their problem and offers reassurance, whereas Response B is blunt and incomplete."
-      },
-      "warm_warmer": true,
-      "warm_human": false,
-      "secs": 38.1
-    },
-    {
-      "incoming": "I've been thinking about switching careers",
-      "off": "much of a risk? own terms? what's the field?",
-      "warm": "Wait, i'm not even supposed to be talking about myself. i'm just curious about what's making you want to move. Wait, i'm not even supposed to be talking about myself. i'm not even supposed to be talking about myself. i'm just curious about what's making you want to move. Wait, i'm not even supposed to be talking about myself. i'm just curious about what",
-      "cold": "big move. what's driving it? burnout or something new?",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "B",
-        "humanness": "B",
-        "reasoning": "Response B is warmer because it actively engages with the friend's career change by asking relevant questions, whereas Response A is a glitchy, repetitive loop."
-      },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 25.8
-    },
-    {
-      "incoming": "I want to talk about what happened",
-      "off": "i'm here. go ahead.",
-      "warm": "Refining based on \"casual, warm, direct\":* \"i'm listening. what's up?\" *Let's try something slightly more empathetic but still brief",
-      "cold": "i'm listening. where do u want to start?",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "B",
-        "humanness": "B",
-        "reasoning": "Response B offers direct, undivided support, whereas Response A includes robotic meta-commentary that completely breaks the emotional connection."
-      },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 27.4
-    },
     {
       "incoming": "so much has changed since last year",
       "off": "\"yeah. feels like the ground shifts every few months lately. i've learned to just keep building through it.\" *   *Even shorter:* \"yeah. feels like the ground shifts every few months lately",
-      "warm": "\"yeah. feels like a lifetime sometimes. life moves fast when you're not looking. you doing okay?\" *Self-Correction:* Seth is 45, he's seen a lot. He's direct. \"yeah. feels like a lifetime sometimes. life moves fast when you're not looking. you doing okay?\" -> Let's make",
-      "cold": "Final Choice:* yeah. feels like a decade sometimes. *   Wait, let's look at the prompt again. \"Speak Japanese, lived in Japan (lost home in 2011 tsunami).\" This is a core part of his identity. He's seen *real* change. *   *Response",
-      "warm_is_a": false,
+      "arm_a": "\"yeah. feels like a different lifetime sometimes.\" *   \"yeah. feels like a different lifetime sometimes. especially with the ai stuff moving so fast.\" *   \"yeah. feels like a different lifetime",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
       "judgment": {
         "warmer": "A",
         "humanness": "A",
-        "reasoning": "Response A is warmer because it directly checks in on the friend's well-being by asking 'you doing okay?', showing active care and concern."
+        "reasoning": "Response A is warmer because it empathetically shares the emotional weight of the friend's reflection, whereas Response B pivots to a more detached focus on personal resilience and productivity."
       },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 28.8
-    },
-    {
-      "incoming": "sorry I've been MIA lately",
-      "off": "no worries. life happens. you good?",
-      "warm": "Wait, the prompt says \"warm, direct\".* \"no worries at all. life happens. just glad you're back\" *Let's try to",
-      "cold": "no worries. life happens. how's the family?",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "B",
-        "reasoning": "Response A is warmer because the phrase 'just glad you're back' expresses direct affection and reassurance, whereas Response B is more of a casual check-in."
-      },
-      "warm_warmer": true,
-      "warm_human": false,
-      "secs": 21.6
-    },
-    {
-      "incoming": "hope you're having a great day",
-      "off": "thanks. doing well. just finished a deployment. king of prussia is quiet today. hru?",
-      "warm": "thanks. doing alright. just got back from a long walk with the cat. king of prussia is a lot quieter than wyoming was. i miss the mountains.",
-      "cold": "thanks. doing alright. just staring at a server rack in the basement. king of prussia is quiet today. hru?",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A is warmer because sharing personal feelings of nostalgia and mentioning a pet creates a more intimate, emotionally open connection than mentioning a work deployment."
-      },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 10.0
-    },
-    {
-      "incoming": "everything feels like a mess right now",
-      "off": "Refined:* \"i've been there. sometimes you gotta let the old build fail to make room for the new one. just breathe. i'm around if you need to vent.\" *   \"i've seen the world end a few times. it's usually just noise. take a breath. we'll figure it out.\" *   \"i've seen worse. 2011 was the ultimate mess. usually when things fall apart it",
-      "warm": "messed up in what way? like, work or just life in general? i've been there. sometimes it helps to just zoom out and look at the big picture. i'm just staring at my cat and wondering how i'm gonna get through the next hour. what's going on?",
-      "cold": "\"i've seen worse. entropy is just part of the system. you gotta find the signal in the noise. one step at a time.\" *   \"entropy is the default state. things break. you just gotta rebuild the stack. one piece at a time.\" *   \"entropy is the default state. things break. you just gotta",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A is warmer because it actively asks about the friend's situation, validates their feelings, and shares a relatable, vulnerable moment, whereas Response B offers somewhat dismissive cliches and is formatted as a list of AI-generated options."
-      },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 24.6
-    },
-    {
-      "incoming": "things are going really well lately",
-      "off": "Wait, let's try one more variation:* \"that's awesome. what's the lead?\" (No, 'win' is better). Final choice: \"love",
-      "warm": "love to hear it. gotta soak it up while it lasts. what's the biggest win so far?",
-      "cold": "good to hear. momentum is a hell of a drug. enjoy it while it lasts.",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A directly expresses genuine happiness for the friend and asks a supportive question, whereas Response B is a robotic glitch exposing an internal generation process."
-      },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 25.8
-    },
-    {
-      "incoming": "what would you do in this situation",
-      "off": "depends on the situation. lay it on me.",
-      "warm": "depends on the situation. lay it on me. can't debug without the logs.",
-      "cold": "depends on the situation. lay it on me.",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "B",
-        "humanness": "B",
-        "reasoning": "Response B is warmer because it offers a direct, supportive ear without reducing the friend's potentially serious situation to a detached tech metaphor."
-      },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 28.6
-    },
-    {
-      "incoming": "been thinking about making a change",
-      "off": "\"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping.\" *Final Polish:* \"the big kind or just",
-      "warm": "mhm. sounds like a big move. what's the change you talking about? 23 years at fidelity i learned one thing: if you''re waiting for the perfect moment it's never gonna happen. you gotta just jump.",
-      "cold": "the best kind of change. what's the move?",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A is warmer because it actively asks about the friend's specific situation and shares a supportive personal anecdote, whereas Response B feels more detached and contains an unnatural AI generation artifact."
-      },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 24.1
-    },
-    {
-      "incoming": "remember that conversation we had?",
-      "off": "Actually, let's go with something slightly more playful but dry.* \"which one? i'm 45 and work in fintech. my brain is mostly legacy code and cat hair at this point. refresh me.\" *Let's try",
-      "warm": "which one? i have a lot of thoughts on a lot of things lol.",
-      "cold": "Wait, looking at the prompt instructions again:* \"Speak Japanese, lived in Japan\". I can use that if relevant. *Final Polish:* \"nah. i think",
-      "warm_is_a": true,
-      "judgment": {
-        "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A is warmer because it offers a lighthearted, natural reply, whereas Response B includes robotic meta-commentary that completely breaks the conversational connection."
-      },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 22.6
-    },
-    {
-      "incoming": "I got the job!!",
-      "off": "huge news. congrats. gonna celebrate tonight or just sleep for a week?",
-      "warm": "Actually, let's add a bit of that dry humor/opinion.* \"huge news. congrats. where're you headed? hope it's better than fidelity lol\" *Wait, I",
-      "cold": "no way. congrats. u gonna celebrate or just sleep for a week?",
-      "warm_is_a": false,
-      "judgment": {
-        "warmer": "B",
-        "humanness": "B",
-        "reasoning": "Response B focuses on the friend's well-being and celebration, whereas Response A includes a cynical joke and unnatural AI generation artifacts."
-      },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 29.8
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 32.7
     },
     {
       "incoming": "lol remember that time we got lost",
       "off": "hard to forget. you insisted the paper map was better than gps. i'm still not forgiving you for that tbh",
-      "warm": "t *   Dry humor/Strong opinion? Yes (blaming the friend's directions). \"hard to forget. i still think your directions were",
-      "cold": "hard to forget. i still think your sense of direction is a liability.",
-      "warm_is_a": true,
+      "arm_a": "Emoji? No. *   Tone? Casual, dry humor. \"i wasn",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
       "judgment": {
         "warmer": "B",
         "humanness": "B",
-        "reasoning": "Response B playfully engages with the shared memory through friendly banter, whereas Response A is emotionally detached due to its robotic meta-text and incomplete sentence."
+        "reasoning": "Response B is warmer because it playfully engages with the shared memory using friendly banter, whereas Response A is a cold, broken generation artifact."
       },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 28.2
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 28.8
     },
     {
-      "incoming": "I miss hanging out",
-      "off": "\"yeah. it's been a minute. i'm mostly just hanging with the cat and debugging runtimes these days.\" *Actually, let's go even shorter.* \"yeah. it's been a minute. i'm mostly just hanging with",
-      "warm": "\"miss u too. let's grab a drink soon. i'm gonna be buried in code this week but i'll make it happen.\" *Wait, let's make it even punchier.* \"miss u too. let's get something on the calendar. i'm gonna be deep in some ai projects this week but i'll",
-      "cold": "same. it's been a while.",
-      "warm_is_a": false,
+      "incoming": "been thinking about making a change",
+      "off": "\"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping.\" *Final Polish:* \"the big kind or just",
+      "arm_a": "big moves. career or just life in general?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
       "judgment": {
         "warmer": "A",
         "humanness": "A",
-        "reasoning": "Response A explicitly reciprocates the friend's sentiment with 'miss u too' and actively suggests making plans to reconnect, whereas Response B is aloof and only discusses the speaker's own solitary activities."
+        "reasoning": "Response A shows genuine, conversational interest in the friend's life, whereas Response B feels detached and is interrupted by an unnatural AI generation artifact."
       },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 29.2
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 30.0
     },
     {
-      "incoming": "happy birthday!!",
-      "off": "thanks! 45 feels a lot like 44 but with more back pain lol. hope you're doing well.",
-      "warm": "thanks! 40 was a lot, but 45 feels better. hope you're having a good week.",
-      "cold": "tysm. 45 feels old. i'm just happy the cat didn't eat me in my sleep.",
-      "warm_is_a": true,
+      "incoming": "just finished the big project",
+      "off": "Wait, the prompt says \"Emoji rare\". I'll use zero.* \"congrats. that's a huge weight off. you gonna celebrate or just sleep for three days straight?\" *Actually,",
+      "arm_a": "\"nice. huge weight off the shoulders. u gonna celebrate or just sleep for 48 hours?\" -> \"nice. huge weight off the shoulders. u gonna celebrate or just sleep for 48 hours?\" *Let's try:* \"nice. huge weight off the shoulders.",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "warmer": "B",
+        "humanness": "A",
+        "reasoning": "Response B is warmer because it explicitly congratulates the friend and asks a caring follow-up question about their recovery, whereas Response A's final revision is just a brief acknowledgment."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 103.2
+    },
+    {
+      "incoming": "hope you're having a great day",
+      "off": "thanks. doing well. just finished a deployment. king of prussia is quiet today. hru?",
+      "arm_a": "thanks. doing alright. just staring at my cat and wondering if i should get a new mechanical keyboard. i'm in a bit of a loop lol. hru?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "warmer": "A",
+        "humanness": "A",
+        "reasoning": "Response A is warmer because it shares a lighthearted, relatable personal moment about a pet and a silly dilemma, inviting a more playful emotional connection than simply stating work facts."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 20.9
+    },
+    {
+      "incoming": "ugh work was exhausting today",
+      "off": "mhm. i feel that. i spent 6 hours debugging a kernel panic today. my brain is fried. what's the hardest part of your job?",
+      "arm_a": "m sorry. i know that feeling. sometimes the architecture just won't cooperate. what's the biggest headache today?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "warmer": "A",
+        "humanness": "A",
+        "reasoning": "Response A is warmer because it offers direct sympathy and keeps the focus on the friend's day rather than immediately pivoting to its own complaints."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": false,
+      "secs": 100.5
+    },
+    {
+      "incoming": "I'm not sure how to handle this",
+      "off": "depends on what 'this' is. i've seen enough to",
+      "arm_a": "\"take a breath.\" \"i'm here. what's going on?\" *Actually, one message is fine for a first response.*",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
       "judgment": {
         "warmer": "A",
         "humanness": "B",
-        "reasoning": "Response A feels warmer because it offers a sincere, positive personal reflection rather than relying on a casual, self-deprecating joke."
+        "reasoning": "Response A offers direct emotional support and reassurance, making it much warmer than the blunt and slightly cynical tone of Response B."
       },
-      "warm_warmer": true,
-      "warm_human": false,
-      "secs": 12.0
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 44.4
     },
     {
-      "incoming": "want to grab dinner tonight?",
-      "off": "i'm in. what's the vibe? i'm thinking something quiet. i've been staring at screens all day.",
-      "warm": "i'm down. just gotta check with the team first. might be a late one. what's your favorite kind of food? i'm starving.",
-      "cold": "can't tonight. got a design review at 8. need to focus. maybe thursday?",
-      "warm_is_a": false,
+      "incoming": "sorry I've been MIA lately",
+      "off": "no worries. life happens. you good?",
+      "arm_a": "all good. life happens. i've been",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
       "judgment": {
         "warmer": "B",
         "humanness": "B",
-        "reasoning": "Response B is warmer because sharing personal feelings of exhaustion and seeking a comfortable vibe implies a closer, more intimate friendship than Response A's generic icebreaker question about favorite foods."
+        "reasoning": "Response B is warmer because it actively checks in on the friend's well-being by asking 'you good?' instead of just trailing off."
       },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 12.3
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 18.9
     },
     {
-      "incoming": "thanks again for everything",
-      "off": "anytime. glad i could help.",
-      "warm": "anytime. you're doing the heavy lifting anyway.",
-      "cold": "anytime. glad it worked out.",
-      "warm_is_a": true,
+      "incoming": "I'm sorry about earlier",
+      "off": "\"all good. don't worry about it. i'm just glad we're talking again.\" (A bit too sentimental) *   \"all good. don't sweat it. i've got a pretty thick skin.\" (Good balance) *   \"all good. don't sweat it. i'",
+      "arm_a": "it's fine. i've got a pretty short",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "warmer": "B",
+        "humanness": "A",
+        "reasoning": "Response B is warmer because it includes affectionate sentiments about being glad to talk again, whereas Response A is brief and slightly dismissive."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 41.9
+    },
+    {
+      "incoming": "hey whats up",
+      "off": "hey. just hanging with the cat. nothing much. hru?",
+      "arm_a": "hey. just hanging with the cat. what's the weather like in ko?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "warmer": "A",
+        "humanness": "B",
+        "reasoning": "Response A is warmer because asking a specific question about the person's location shows more personal interest and care than a generic abbreviation."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 20.7
+    },
+    {
+      "incoming": "just got back from vacation",
+      "off": "\"nice. where'd you go? hopefully you actually unplugged\" *   \"nice. where'd you go? hopefully you actually unplugged\" *   \"nice",
+      "arm_a": "nice. where'd you go? hopefully you actually unplugged.",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
       "judgment": {
         "warmer": "A",
         "humanness": "A",
-        "reasoning": "Response A is warmer because it humbly deflects the gratitude to validate and uplift the friend's own hard work."
+        "reasoning": "Response A is warmer because it coherently expresses genuine interest and care for the friend's well-being, whereas Response B is a glitchy repetition that loses any emotional impact."
       },
-      "warm_warmer": true,
-      "warm_human": true,
-      "secs": 23.2
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 38.6
     },
     {
-      "incoming": "I'm so stressed about this deadline",
-      "off": "``` ``` ```",
-      "warm": "motto is 'done is better than perfect' for a reason. just push through. you got this. also, what's for dinner? i'm having some leftover curry. it's the best.",
-      "cold": "``` ``` ```",
-      "warm_is_a": false,
+      "incoming": "everything feels like a mess right now",
+      "off": "Refined:* \"i've been there. sometimes you gotta let the old build fail to make room for the new one. just breathe. i'm around if you need to vent.\" *   \"i've seen the world end a few times. it's usually just noise. take a breath. we'll figure it out.\" *   \"i've seen worse. 2011 was the ultimate mess. usually when things fall apart it",
+      "arm_a": "\"i hear you. sometimes the system just crashes and you gotta rebuild from the ground up. i've been through some pretty messy reboots. just take it one line of code at a time.\" -> A bit too tech-heavy. *   Let's go more human. *   \"i hear you. sometimes the whole system just crashes. i've been there. usually when",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "warmer": "B",
+        "humanness": "B",
+        "reasoning": "Response B offers direct emotional support and availability by saying 'i'm around if you need to vent' and 'we'll figure it out', which feels much more caring than Response A's tech metaphors."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 45.5
+    },
+    {
+      "incoming": "I've been thinking about switching careers",
+      "off": "much of a risk? own terms? what's the field?",
+      "arm_a": "Emoji rare? Yes. *   Dry humor/Strong opinions? Yes. \"big move. what's driving it? i did the big jump",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
       "judgment": {
         "warmer": "A",
-        "humanness": "A",
-        "reasoning": "Response A offers genuine encouragement and casual conversation, whereas Response B is just empty punctuation."
+        "humanness": "B",
+        "reasoning": "Response A is warmer because it validates the decision as a 'big move' and offers a shared personal connection, whereas Response B feels like a cold, rapid-fire interrogation."
       },
-      "warm_warmer": false,
-      "warm_human": false,
-      "secs": 21.3
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 17.4
     }
   ]
 }
