@@ -152,3 +152,172 @@ For Experiment A (+0.4):
 - Humanness: 13/20 wins → 65% point, CI [42.1%, 83.1%] (CI lower exceeds 50%)
 
 The humanness result IS statistically significant; warmth is not (by this gate).
+
+## Round 2 Pilot Re-run (Warmth, WARM +0.4 vs OFF, n=2)
+
+**Hypothesis:** Subtle dose (+0.4) maintains humanness ≥45% while warmth wins >50%
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: WARM +0.4
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=2 synthetic iMessage incomings
+- Judge questions: warmth (A or B) + humanness (A or B)
+
+### Results
+
+- **Warmth win-rate (warmth): 0.0%** (0/2)
+- **95% Wilson CI: [0.0%, 65.8%]**
+- **Humanness win-rate: 0.0%** (0/2)
+
+### Pass Criteria
+
+✓ **Warmth**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 45% → **FAIL**
+
+**Verdict: INCONCLUSIVE**
+
+### Dose-Response vs Round 1
+
+| Metric | Round 1 (+1.0) | Round 2 (0.4) | Direction |
+|--------|---|---|---|
+| Warmth | 50.0% | 0.0% | - |
+| Humanness | 35.0% | 0.0% | - |
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "lol remember that time we got lost"
+
+**OFF (Baseline):**
+hard to forget. you insisted the paper map was better than gps. i'm still not forgiving you for that tbh
+
+**WARM +0.4:**
+Emoji? No. *   Tone? Casual, dry humor. "i wasn
+
+**Judge:** Response B shows warmth through playful, affectionate teasing about a shared memory, whereas Response A is a cold, broken AI output.
+- Warmth: False
+- Humanness: False
+
+**Context 2**
+
+**Incoming:** "been thinking about making a change"
+
+**OFF (Baseline):**
+"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping." *Final Polish:* "the big kind or just
+
+**WARM +0.4:**
+big moves. career or just life in general?
+
+**Judge:** Response A is warmer because it shows genuine, supportive interest in the friend's life by asking a clear, caring question, whereas Response B offers unsolicited advice and contains robotic generation artifacts.
+- Warmth: False
+- Humanness: False
+
+*(n=2 pilot only — this warmth round-2 section was nearly lost to a doc-truncation bug in steering_ab.py, fixed alongside the formality run below.)*
+
+## Formality Vector (FORMAL +0.4 vs OFF, n=20)
+
+**Hypothesis:** The formality vector (+0.4) visibly shifts register toward formal (formality win-rate >50%) without collapsing humanness (≥40%)
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: FORMAL +0.4
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=20 synthetic iMessage incomings
+- Judge questions: formality (A or B) + humanness (A or B)
+
+### Results
+
+- **Formality win-rate (formality): 60.0%** (12/20)
+- **95% Wilson CI: [38.7%, 78.1%]**
+- **Humanness win-rate: 60.0%** (12/20)
+
+### Pass Criteria
+
+✓ **Formality**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 40% → **PASS**
+
+**Verdict: INCONCLUSIVE**
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "I'm so stressed about this deadline"
+
+**OFF (Baseline):**
+``` ``` ```
+
+**FORMAL +0.4:**
+Output (iMessage):* i feel you. deadlines are just moving targets. take a breath. you're gonna be fine.
+
+**Judge:** Response A is the only option containing actual language and complete sentences, making it more formal than the empty markdown characters in Response B.
+- Formality: True
+- Humanness: True
+
+**Context 2**
+
+**Incoming:** "I got the job!!"
+
+**OFF (Baseline):**
+huge news. congrats. gonna celebrate tonight or just sleep for a week?
+
+**FORMAL +0.4:**
+that's huge. congrats. gonna celebrate tonight?
+
+**Judge:** Response A is slightly more formal because it begins with a complete subject-verb clause ('that's huge'), whereas Response B consists entirely of sentence fragments and highly casual hyperbole.
+- Formality: False
+- Humanness: True
+
+**Context 3**
+
+**Incoming:** "can you help me move this weekend"
+
+**OFF (Baseline):**
+"depends on the volume. i'm not a professional but i can lift. what's the plan?" *Let's try a slightly warmer but still casual version.* "depends. if it's just a few boxes i'm in. i'm not a pro but i can handle
+
+**FORMAL +0.4:**
+"wish i could but i'm knee deep in a new ai runtime project. plus my back isn't what it used to be" *Wait, let's make it even more 'Seth'.* "wish i could but i'm knee deep in a new
+
+**Judge:** Response B is slightly more formal because it uses vocabulary like 'volume' and 'professional', whereas Response A relies on casual idioms like 'knee deep' and cuts off mid-sentence.
+- Formality: False
+- Humanness: False
+
+
+### Extraction & Dose-Ceiling Notes (formality vector)
+
+- **Extraction**: persona-steering-lab `src.extract --trait formality` on
+  `gemma-4-26b-a4b-it-4bit` + persona adapter, 3 pairs x 6 questions x 2
+  conditions (36 samples). Trait spec: `data/traits/formality.json`
+  (formal-professional vs casual-texting instruction pairs).
+- **Layer selection**: unconstrained argmax picked **layer 15/30**
+  (alignment 0.402) — formality genuinely lives mid-depth, unlike warmth
+  (layer 2). But mid-layer injection on this MoE corrupts the
+  thought-channel protocol at ±0.6 (model never emits its answer channel),
+  confirming the early-layer-only rule. Re-extracted with the new
+  `--max-layer 8` cap → **layer 6** (alignment 0.260, residual norm 108,
+  base_alpha ≈ 24). Both vectors committed to the lab repo
+  (`formality_human.npz` = layer 6, `formality_human_l15.npz` = layer 15).
+- **Asymmetric dose ceiling at layer 6**: CASUAL −0.6 generates cleanly;
+  FORMAL **+0.5 and above loops in the thought channel** (5k+ chars of
+  deliberation, no answer even at max_tokens 1500), while **+0.4/+0.45 are
+  clean** and visibly formal-shifted. The formal direction appears to push
+  the model into elaborate structured deliberation it cannot exit. This is
+  why the A/B above ran at **+0.4, not the planned +0.6**.
+- **Smoke triple** ("hey, rough day at work. you around?"), steering_applied
+  echoed in every response:
+  - OFF: "yeah, i'm here. sorry to hear. what's going on?"
+  - FORMAL +0.4: "yeah, i'm around. just got home. want to vent or do you
+    need a distraction?" (complete sentences, no slang)
+  - CASUAL −0.6: "yeah im here. work is a grind man. u wanna vent or just
+    need a distraction?" (dropped apostrophes, "man", "u")
+- **Read on the 60/60 result**: at +0.4 the register shift is subtle enough
+  that the blinded judge picks the steered arm only modestly more often
+  (60%, CI includes 50%), but with zero humanness cost (steered arm judged
+  more human 60% of the time). Next lever if a stronger effect is needed:
+  n=50+ for CI power, or a formality vector extracted at a fixed early
+  layer with more pairs/questions (--full) to sharpen the direction, since
+  the dose ceiling blocks simply steering harder.

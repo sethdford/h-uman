@@ -491,15 +491,15 @@ def main():
     print(f"\n  OVERALL VERDICT: {verdict}")
     print(f"  written: {result_path}")
 
-    # Write markdown verdict
+    # Write markdown verdict — read the existing content BEFORE opening for
+    # write: open(..., "w") truncates immediately, so reading inside that
+    # block always sees an empty file and silently discards prior rounds.
     os.makedirs(os.path.dirname(VERDICT_PATH), exist_ok=True)
+    existing_content = ""
+    if os.path.exists(VERDICT_PATH):
+        with open(VERDICT_PATH, "r") as prev:
+            existing_content = prev.read()
     with open(VERDICT_PATH, "w") as f:
-        # Append round 2 results to the file (preserve round 1 if present)
-        existing_content = ""
-        if os.path.exists(VERDICT_PATH):
-            with open(VERDICT_PATH, "r") as prev:
-                existing_content = prev.read()
-
         if args.experiment == "formality":
             round2_heading = f"## Formality Vector ({arm_label} vs OFF, n={decided})"
             hypothesis = (f"The formality vector ({args.dose:+.1f}) visibly shifts register toward "
