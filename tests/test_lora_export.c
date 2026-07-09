@@ -100,6 +100,73 @@ static void test_export_returns_not_supported_in_test_build(void) {
     HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_SUPPORTED);
 }
 
+/* ── KTO single-sided export (the severed-link fix) ─────────────────── */
+
+static void test_render_kto_positive_label_emits_true(void) {
+    hu_lora_export_kto_t r;
+    memset(&r, 0, sizeof(r));
+    snprintf(r.prompt, sizeof(r.prompt), "you free this weekend?");
+    snprintf(r.completion, sizeof(r.completion), "yeah probably, what's up");
+    r.label = true; /* 👍 desirable */
+    r.timestamp = 1700000000;
+    char buf[512] = {0};
+    size_t n = hu_lora_export_render_kto_jsonl_line(&r, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\"prompt\":\"you free this weekend?\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"completion\":\"yeah probably, what's up\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"label\":true") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"label\":false") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"ts\":1700000000") != NULL);
+}
+
+static void test_render_kto_negative_label_emits_false(void) {
+    hu_lora_export_kto_t r;
+    memset(&r, 0, sizeof(r));
+    snprintf(r.prompt, sizeof(r.prompt), "thanks!");
+    snprintf(r.completion, sizeof(r.completion), "You are most welcome, I am delighted to assist.");
+    r.label = false; /* 👎 undesirable (too formal) */
+    r.timestamp = 1700000001;
+    char buf[512] = {0};
+    size_t n = hu_lora_export_render_kto_jsonl_line(&r, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\"label\":false") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"label\":true") == NULL);
+}
+
+static void test_render_kto_drops_unusable(void) {
+    hu_lora_export_kto_t r;
+    char buf[256] = {0};
+    /* No prompt → drop. */
+    memset(&r, 0, sizeof(r));
+    snprintf(r.completion, sizeof(r.completion), "answer");
+    r.label = true;
+    HU_ASSERT_EQ((int)hu_lora_export_render_kto_jsonl_line(&r, buf, sizeof(buf)), 0);
+    /* No completion → drop. */
+    memset(&r, 0, sizeof(r));
+    snprintf(r.prompt, sizeof(r.prompt), "q");
+    HU_ASSERT_EQ((int)hu_lora_export_render_kto_jsonl_line(&r, buf, sizeof(buf)), 0);
+}
+
+static void test_render_kto_escapes_fields(void) {
+    hu_lora_export_kto_t r;
+    memset(&r, 0, sizeof(r));
+    snprintf(r.prompt, sizeof(r.prompt), "say \"hi\"\nthen bye");
+    snprintf(r.completion, sizeof(r.completion), "ok\tdone");
+    r.label = true;
+    char buf[512] = {0};
+    HU_ASSERT_TRUE(hu_lora_export_render_kto_jsonl_line(&r, buf, sizeof(buf)) > 0);
+    HU_ASSERT_TRUE(strstr(buf, "\\\"hi\\\"") != NULL); /* quotes escaped */
+    HU_ASSERT_TRUE(strstr(buf, "\\n") != NULL);        /* newline escaped */
+    HU_ASSERT_TRUE(strstr(buf, "\\t") != NULL);        /* tab escaped */
+}
+
+static void test_kto_export_returns_not_supported_in_test_build(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t count = 0;
+    hu_error_t err = hu_lora_export_kto_signals(&alloc, "/tmp/x.db", "/tmp/x.jsonl", 0, &count);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_SUPPORTED);
+}
+
 void run_lora_export_tests(void) {
     HU_TEST_SUITE("lora_export");
     HU_RUN_TEST(test_json_escape_plain_ascii_passthrough);
@@ -111,4 +178,9 @@ void run_lora_export_tests(void) {
     HU_RUN_TEST(test_render_jsonl_without_rejected_sft_shape);
     HU_RUN_TEST(test_render_jsonl_drops_unusable);
     HU_RUN_TEST(test_export_returns_not_supported_in_test_build);
+    HU_RUN_TEST(test_render_kto_positive_label_emits_true);
+    HU_RUN_TEST(test_render_kto_negative_label_emits_false);
+    HU_RUN_TEST(test_render_kto_drops_unusable);
+    HU_RUN_TEST(test_render_kto_escapes_fields);
+    HU_RUN_TEST(test_kto_export_returns_not_supported_in_test_build);
 }

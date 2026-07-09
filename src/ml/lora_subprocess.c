@@ -143,7 +143,7 @@ size_t hu_lora_subprocess_build_argv(const hu_lora_subprocess_config_t *cfg, con
 
     /* Wire format:
      *   python3 -m mlx_lm.lora --model <id> --train
-     *     --data <jsonl> --batch-size N --iters N --lora-layers N
+     *     --data <jsonl> --batch-size N --iters N --num-layers N
      *     --adapter-path <dir>
      *
      * This mirrors the M3 runbook's canonical invocation. Older
@@ -174,13 +174,30 @@ size_t hu_lora_subprocess_build_argv(const hu_lora_subprocess_config_t *cfg, con
         return 0;
     if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, num_buf[1]))
         return 0;
-    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "--lora-layers"))
+    /* 2026-07-05 CLI-drift fix: modern mlx_lm.lora renamed --lora-layers to
+     * --num-layers; the stale flag made every nightly train exit 2 with a
+     * usage error (three no-op nights, Jun 12-14). */
+    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "--num-layers"))
         return 0;
     if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, num_buf[2]))
         return 0;
     if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "--adapter-path"))
         return 0;
     if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, cfg->adapter_output_dir))
+        return 0;
+
+    /* lora-scale-default-or-die: always pass a -c config pinning
+     * lora_parameters.scale=2.0 — omitting it inherits mlx_lm's catastrophic
+     * scale=20 default (instruction-following collapse). The exec layer
+     * writes this file before spawning. */
+    char cfg_path[HU_LORA_SUBPROCESS_PATH_MAX + 32];
+    int cn =
+        snprintf(cfg_path, sizeof(cfg_path), "%s/hu_lora_config.yaml", cfg->adapter_output_dir);
+    if (cn < 0 || (size_t)cn >= sizeof(cfg_path))
+        return 0;
+    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "-c"))
+        return 0;
+    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, cfg_path))
         return 0;
 
     argv_out[idx] = NULL;
@@ -204,6 +221,26 @@ hu_error_t hu_lora_subprocess_train(hu_allocator_t *alloc, const hu_lora_subproc
 
     unsigned int timeout = cfg->timeout_sec > 0 ? cfg->timeout_sec : HU_LORA_DEFAULT_TIMEOUT_SEC;
     int max_retries = cfg->max_retries >= 0 ? cfg->max_retries : HU_LORA_DEFAULT_MAX_RETRIES;
+
+    /* Write the scale-pinning config the argv references (-c ...). Doing it
+     * here (exec layer) keeps build_argv pure. lora-scale-default-or-die:
+     * without this file mlx_lm trains at its catastrophic scale=20 default. */
+    {
+        char cfg_yaml_path[HU_LORA_SUBPROCESS_PATH_MAX + 32];
+        int yn = snprintf(cfg_yaml_path, sizeof(cfg_yaml_path), "%s/hu_lora_config.yaml",
+                          cfg->adapter_output_dir);
+        if (yn < 0 || (size_t)yn >= sizeof(cfg_yaml_path))
+            return HU_ERR_INVALID_ARGUMENT;
+        (void)mkdir(cfg->adapter_output_dir, 0700); /* nightly usually made it already */
+        FILE *yf = fopen(cfg_yaml_path, "w");
+        if (!yf) {
+            hu_log_error("lora-subprocess", NULL, "cannot write %s: config-file open failed",
+                         cfg_yaml_path);
+            return HU_ERR_IO;
+        }
+        fputs("lora_parameters:\n  rank: 8\n  dropout: 0.0\n  scale: 2.0\n", yf);
+        fclose(yf);
+    }
 
     /* Storage for argv across the loop — re-built each attempt because
      * hu_process_run_with_timeout doesn't take ownership. */

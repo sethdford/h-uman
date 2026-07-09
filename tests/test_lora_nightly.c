@@ -207,12 +207,253 @@ static void test_nightly_orchestrator_creates_checkpoint_directory(void) {
 
 static void test_adapter_swap_placeholder(void) {
     /* Placeholder for AC-106 tests (full tests in test_adapter_swap.c).
-     * This ensures the test suite doesn't fail when looking for swap tests. */
-    HU_ASSERT_TRUE(true);
+     * Verify that the swap decision predicate correctly identifies that
+     * a passed measurement allows live swap. This is the concrete
+     * integration point: when gate reads PASS from file, swap proceeds. */
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(true, HU_LORA_GATE_PASS, false),
+                 (int)HU_LORA_PROMOTE_LIVE);
+}
+
+/* ── blind-A/B gate verdict parser ──────────────────────────────────── */
+
+static void test_gate_verdict_parse_pass(void) {
+    const char *json = "{\"human\":{\"verdict\":\"PASS\",\"detection\":0.55}}";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_PASS);
+}
+
+static void test_gate_verdict_parse_fail(void) {
+    const char *json = "{\"human\":{\"verdict\":\"FAIL\",\"detection\":0.85}}";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_FAIL);
+}
+
+static void test_gate_verdict_parse_inconclusive_maps_to_absent(void) {
+    const char *json = "{\"human\":{\"verdict\":\"INCONCLUSIVE\",\"detection\":0.70}}";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_missing_verdict_key(void) {
+    const char *json = "{\"human\":{\"detection\":0.55}}";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_missing_human_object(void) {
+    const char *json = "{\"proxy\":{\"verdict\":\"PASS\"}}";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_malformed_json(void) {
+    const char *json = "{\"human\":{\"verdict\":\"PASS\"";
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(json, strlen(json));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_null_pointer(void) {
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(NULL, 0);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_empty_string(void) {
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse("", 0);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_parse_oversized_input(void) {
+    /* Input > 16KB cap → ABSENT. */
+    char huge_buf[20000];
+    memset(huge_buf, 'x', sizeof(huge_buf));
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_parse(huge_buf, sizeof(huge_buf));
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+/* ── blind-A/B gate verdict file loader ───────────────────────────── */
+
+static void test_gate_verdict_from_file_missing_file(void) {
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file("/tmp/nonexistent_blind_ab_gate_xyz.json");
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+}
+
+static void test_gate_verdict_from_file_valid_pass(void) {
+    char tmpfile[256];
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/hu_gate_verdict_pass_%d.json", (int)getpid());
+    FILE *f = fopen(tmpfile, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fprintf(f, "{\"human\":{\"verdict\":\"PASS\",\"detection\":0.52}}");
+    fclose(f);
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file(tmpfile);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_PASS);
+    unlink(tmpfile);
+}
+
+static void test_gate_verdict_from_file_valid_fail(void) {
+    char tmpfile[256];
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/hu_gate_verdict_fail_%d.json", (int)getpid());
+    FILE *f = fopen(tmpfile, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fprintf(f, "{\"human\":{\"verdict\":\"FAIL\",\"detection\":0.78}}");
+    fclose(f);
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file(tmpfile);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_FAIL);
+    unlink(tmpfile);
+}
+
+static void test_gate_verdict_from_file_empty_file(void) {
+    char tmpfile[256];
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/hu_gate_verdict_empty_%d.json", (int)getpid());
+    FILE *f = fopen(tmpfile, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fclose(f);
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file(tmpfile);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+    unlink(tmpfile);
+}
+
+static void test_gate_verdict_from_file_malformed_json(void) {
+    char tmpfile[256];
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/hu_gate_verdict_bad_%d.json", (int)getpid());
+    FILE *f = fopen(tmpfile, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fprintf(f, "{ invalid json");
+    fclose(f);
+    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file(tmpfile);
+    HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
+    unlink(tmpfile);
+}
+
+/* ── measurement-gated promotion truth table ────────────────────────── */
+
+/* Adversarial-review finding 2026-06-10: a verdict file from a PREVIOUS
+ * measurement must not judge a NEWER adapter. Fresh iff verdict_mtime >=
+ * adapter_mtime. */
+static void test_verdict_fresh_truth_table(void) {
+    /* verdict written after the adapter → fresh */
+    HU_ASSERT_TRUE(hu_lora_gate_verdict_fresh(2000, 1000));
+    /* same instant → fresh (measurement may land in the same second) */
+    HU_ASSERT_TRUE(hu_lora_gate_verdict_fresh(1000, 1000));
+    /* verdict predates the adapter → STALE */
+    HU_ASSERT_TRUE(!hu_lora_gate_verdict_fresh(999, 1000));
+}
+
+static void test_promotion_invalid_adapter_always_rejects(void) {
+    /* An invalid adapter is rejected regardless of measurement. */
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(false, HU_LORA_GATE_PASS, true),
+                 (int)HU_LORA_PROMOTE_REJECT);
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(false, HU_LORA_GATE_ABSENT, false),
+                 (int)HU_LORA_PROMOTE_REJECT);
+}
+
+static void test_promotion_failed_measurement_rejects(void) {
+    /* A measured regression NEVER reaches live — this is the guard that
+     * blocks a degenerate (loss-collapsed) adapter from poisoning prod. */
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(true, HU_LORA_GATE_FAIL, true),
+                 (int)HU_LORA_PROMOTE_REJECT);
+}
+
+static void test_promotion_passed_measurement_goes_live(void) {
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(true, HU_LORA_GATE_PASS, false),
+                 (int)HU_LORA_PROMOTE_LIVE);
+}
+
+static void test_promotion_unmeasured_holds_by_default(void) {
+    /* The safe default: no measurement → stage on disk, do NOT swap live. */
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(true, HU_LORA_GATE_ABSENT, false),
+                 (int)HU_LORA_PROMOTE_HOLD);
+}
+
+static void test_promotion_unmeasured_promotes_only_with_optin(void) {
+    /* Operator opt-in restores auto-promote of unmeasured adapters. */
+    HU_ASSERT_EQ((int)hu_lora_nightly_promotion_allowed(true, HU_LORA_GATE_ABSENT, true),
+                 (int)HU_LORA_PROMOTE_LIVE);
+}
+
+/* ── KTO auto-train handoff (pending marker for kto-train-window.sh) ─── */
+
+static void test_kto_pending_written_with_fields(void) {
+    char kto_path[256];
+    snprintf(kto_path, sizeof(kto_path), "/tmp/hu_kto_pending_%d.jsonl", (int)getpid());
+    char pending_path[300];
+    snprintf(pending_path, sizeof(pending_path), "%s.pending", kto_path);
+    remove(pending_path);
+
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(kto_path, 42, 1700000000), HU_OK);
+
+    FILE *f = fopen(pending_path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[512] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, kto_path));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"signals\":42"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"exported_unix\":1700000000"));
+    remove(pending_path);
+}
+
+static void test_kto_pending_rejects_zero_signals(void) {
+    char kto_path[256];
+    snprintf(kto_path, sizeof(kto_path), "/tmp/hu_kto_pending0_%d.jsonl", (int)getpid());
+    char pending_path[300];
+    snprintf(pending_path, sizeof(pending_path), "%s.pending", kto_path);
+    remove(pending_path);
+
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(kto_path, 0, 1700000000),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(NULL, 5, 1700000000),
+                 HU_ERR_INVALID_ARGUMENT);
+    FILE *f = fopen(pending_path, "r");
+    HU_ASSERT_NULL(f);
+    if (f)
+        fclose(f);
+}
+
+static void test_kto_pending_overwrites_stale_marker(void) {
+    char kto_path[256];
+    snprintf(kto_path, sizeof(kto_path), "/tmp/hu_kto_pending2_%d.jsonl", (int)getpid());
+    char pending_path[300];
+    snprintf(pending_path, sizeof(pending_path), "%s.pending", kto_path);
+
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(kto_path, 7, 1700000000), HU_OK);
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(kto_path, 99, 1700086400), HU_OK);
+
+    FILE *f = fopen(pending_path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[512] = {0};
+    (void)!fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"signals\":99"));
+    HU_ASSERT_NULL(strstr(buf, "\"signals\":7"));
+    remove(pending_path);
 }
 
 void run_lora_nightly_tests(void) {
     HU_TEST_SUITE("lora_nightly");
+    HU_RUN_TEST(test_kto_pending_written_with_fields);
+    HU_RUN_TEST(test_kto_pending_rejects_zero_signals);
+    HU_RUN_TEST(test_kto_pending_overwrites_stale_marker);
+    HU_RUN_TEST(test_gate_verdict_parse_pass);
+    HU_RUN_TEST(test_gate_verdict_parse_fail);
+    HU_RUN_TEST(test_gate_verdict_parse_inconclusive_maps_to_absent);
+    HU_RUN_TEST(test_gate_verdict_parse_missing_verdict_key);
+    HU_RUN_TEST(test_gate_verdict_parse_missing_human_object);
+    HU_RUN_TEST(test_gate_verdict_parse_malformed_json);
+    HU_RUN_TEST(test_gate_verdict_parse_null_pointer);
+    HU_RUN_TEST(test_gate_verdict_parse_empty_string);
+    HU_RUN_TEST(test_gate_verdict_parse_oversized_input);
+    HU_RUN_TEST(test_gate_verdict_from_file_missing_file);
+    HU_RUN_TEST(test_gate_verdict_from_file_valid_pass);
+    HU_RUN_TEST(test_gate_verdict_from_file_valid_fail);
+    HU_RUN_TEST(test_gate_verdict_from_file_empty_file);
+    HU_RUN_TEST(test_gate_verdict_from_file_malformed_json);
+    HU_RUN_TEST(test_verdict_fresh_truth_table);
+    HU_RUN_TEST(test_promotion_invalid_adapter_always_rejects);
+    HU_RUN_TEST(test_promotion_failed_measurement_rejects);
+    HU_RUN_TEST(test_promotion_passed_measurement_goes_live);
+    HU_RUN_TEST(test_promotion_unmeasured_holds_by_default);
+    HU_RUN_TEST(test_promotion_unmeasured_promotes_only_with_optin);
     HU_RUN_TEST(test_should_run_below_min_pairs_false);
     HU_RUN_TEST(test_should_run_never_run_with_enough_pairs);
     HU_RUN_TEST(test_should_run_more_than_24h_ago_true);
