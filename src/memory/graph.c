@@ -2282,6 +2282,21 @@ hu_error_t hu_graph_query_causal(hu_graph_t *g, hu_allocator_t *alloc, const cha
     return HU_ERR_NOT_SUPPORTED;
 }
 
+hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id,
+                                       size_t contact_id_len, int64_t entity_id,
+                                       const char *description, size_t desc_len,
+                                       int64_t occurred_at, int64_t duration_sec) {
+    (void)g;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)entity_id;
+    (void)description;
+    (void)desc_len;
+    (void)occurred_at;
+    (void)duration_sec;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 /* ── Phase 3b: Leiden-inspired hierarchical community detection ─────── */
