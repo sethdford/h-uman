@@ -360,7 +360,7 @@ static hu_error_t mi_execute(void *ctx, hu_allocator_t *alloc, const hu_json_val
 
         char auth_buf[1024];
         char url[512];
-        const char *nb_model = "gemini-3-flash-preview";
+        const char *nb_model = "gemini-3.5-flash"; /* 3-flash-preview superseded; see CLAUDE.md model lineup */
 
         if (api_key && api_key[0]) {
             /* API keys in query strings leak via Referer, logs, and proxies; Vertex + ADC is preferred. */
