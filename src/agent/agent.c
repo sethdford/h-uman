@@ -599,7 +599,8 @@ hu_error_t hu_agent_from_config(
     out->policy = policy;
     out->temperature = temperature;
     out->max_tool_iterations = max_tool_iterations ? max_tool_iterations : 25;
-    out->max_history_messages = max_history_messages ? max_history_messages : 50;
+    out->max_history_messages =
+        max_history_messages ? max_history_messages : HU_COMPACTION_DEFAULT_MAX_HISTORY;
     out->auto_save = auto_save;
     out->autonomy_level = autonomy_level;
     out->permission_level = HU_PERM_DANGER_FULL_ACCESS;

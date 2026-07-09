@@ -36,7 +36,13 @@ typedef struct hu_compaction_config {
 #define HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS 2000
 #define HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS  12000
 #define HU_COMPACTION_DEFAULT_TOKEN_LIMIT       32000
-#define HU_COMPACTION_DEFAULT_MAX_HISTORY       50
+/* Conversation-history window fed into the prompt. Bumped 50 -> 120 (2026-06-06):
+ * the SQLite session store holds hundreds of messages per contact, but only the
+ * last N reach the prompt. 50 (~25 exchanges) made long iMessage threads lose
+ * earlier context. 120 casual messages is ~3-6 KB (well under the 32K history
+ * token budget that still governs compaction), so this widens coherence at
+ * negligible token cost. */
+#define HU_COMPACTION_DEFAULT_MAX_HISTORY       120
 
 /* Initialize config with defaults. */
 void hu_compaction_config_default(hu_compaction_config_t *cfg);

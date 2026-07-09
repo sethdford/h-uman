@@ -535,6 +535,62 @@ static void test_w7_anticipatory_analyze_memory_matches_graph(void) {
     close_facade(g, m);
 }
 
+/* --- temporal-event WRITE path (previously dead, reader was live) ------ */
+
+/* hu_graph_add_temporal_event had NO production caller while
+ * hu_graph_query_temporal was wired into anticipatory.c — so the graph
+ * timeline was permanently empty. The new facade write method closes that
+ * gap. This pins the write->read round-trip: an event added through the
+ * facade must be visible to the same facade's query_temporal reader. */
+static void test_w7_add_temporal_event_is_visible_to_query(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t now = (int64_t)time(NULL);
+    int64_t when = now + (int64_t)2 * 24 * 3600; /* two days out */
+    const char *desc = "dentist appointment";
+
+    /* Pre-condition: reader is empty before any write. */
+    char *before = NULL;
+    size_t before_len = 0;
+    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600, 10,
+                                                 &before, &before_len),
+                 HU_OK);
+    bool empty_before = (before == NULL) || (strstr(before, desc) == NULL);
+    HU_ASSERT_TRUE(empty_before);
+    if (before)
+        A()->free(A()->ctx, before, before_len + 1);
+
+    /* Write through the newly-wired path. */
+    HU_ASSERT_EQ(
+        hu_memory_facade_add_temporal_event(m, "u", 1, desc, strlen(desc), when, 0), HU_OK);
+
+    /* Post-condition: the reader now surfaces the event. */
+    char *after = NULL;
+    size_t after_len = 0;
+    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600, 10,
+                                                 &after, &after_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(after);
+    HU_ASSERT_TRUE(strstr(after, desc) != NULL);
+    if (after)
+        A()->free(A()->ctx, after, after_len + 1);
+
+    close_facade(g, m);
+}
+
+static void test_w7_add_temporal_event_rejects_null_args(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    HU_ASSERT_EQ(hu_memory_facade_add_temporal_event(NULL, "u", 1, "x", 1, 1, 0),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_add_temporal_event(m, "u", 1, NULL, 0, 1, 0),
+                 HU_ERR_INVALID_ARGUMENT);
+    close_facade(g, m);
+}
+
 /* --- case rowid via hu_memory_facade_last_case_rowid (no raw graph sqlite in case_based.c) --- */
 
 static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
@@ -1085,6 +1141,8 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_p2g_null_provenance_uses_default_variance);
     HU_RUN_TEST(test_w7_facade_relation_belief_get_set_matches_graph);
     HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
+    HU_RUN_TEST(test_w7_add_temporal_event_is_visible_to_query);
+    HU_RUN_TEST(test_w7_add_temporal_event_rejects_null_args);
     HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
     HU_RUN_TEST(test_w7_list_entities_returns_inserted_entity);
     HU_RUN_TEST(test_w7_list_entities_null_args_rejected);

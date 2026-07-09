@@ -301,6 +301,19 @@ hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t
                                             const char *contact_id, size_t contact_id_len,
                                             int64_t from_ts, int64_t to_ts, size_t limit,
                                             char **out, size_t *out_len);
+
+/* Record an entity-linked temporal event in the knowledge graph so the
+ * anticipatory reader (hu_memory_facade_query_temporal -> anticipatory.c) can
+ * surface it. The event is anchored to the contact as a PERSON entity (the
+ * reader INNER-JOINs entities, so a bare event would be invisible). This is the
+ * write half of the temporal-event path; previously only the read half was
+ * wired, leaving the graph timeline permanently empty. `occurred_at` is the
+ * resolved Unix timestamp of the event; `duration_sec` may be 0. */
+hu_error_t hu_memory_facade_add_temporal_event(hu_memory_facade_t *m, const char *contact_id,
+                                               size_t contact_id_len, const char *description,
+                                               size_t description_len, int64_t occurred_at,
+                                               int64_t duration_sec);
+
 hu_error_t hu_memory_facade_query_causal(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                         const char *contact_id, size_t contact_id_len,
                                         int64_t entity_id, size_t max_results, char **out,

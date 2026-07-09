@@ -156,6 +156,7 @@ typedef enum hu_init_field {
  * stack-allocated bundles get a self-contained reflection slice without
  * a separate allocation. Don't free content[REFLECTION] either. */
 #define HU_INIT_REFLECTION_BUF_MAX 1024
+#define HU_INIT_PERSONA_BUF_MAX    256
 typedef struct hu_init_context_bundle {
     /* Per-source content pointers (any may be NULL if the field is empty). */
     const char *content[HU_INIT_FIELD_COUNT];
@@ -168,6 +169,13 @@ typedef struct hu_init_context_bundle {
      * observations worth of bullets — beyond that the proposer drops
      * the overflow. */
     char reflection_buf[HU_INIT_REFLECTION_BUF_MAX];
+    /* Inline storage for a compact persona summary (name + identity). The
+     * proposer previously left the PERSONA field stubbed-to-zero, so the
+     * silence-biased prompt saw "thin context" and returned should_propose=
+     * false every tick. A one-line persona descriptor gives the model the
+     * "who am I / who am I texting" grounding it needs to decide. Aliased by
+     * content[HU_INIT_FIELD_PERSONA]; owned by the bundle — do not free. */
+    char persona_buf[HU_INIT_PERSONA_BUF_MAX];
 } hu_init_context_bundle_t;
 
 /* Forward-declared so we don't pull include/human/agent.h into this header
@@ -324,6 +332,14 @@ typedef struct hu_proactive_compose_inputs {
     size_t calendar_context_len;
     const char *feeds_context;
     size_t feeds_context_len;
+    /* Due follow-ups: concrete triggers from stored commitments with
+     * due times. Caller (daemon) populates this by querying
+     * hu_superhuman_delayed_followup_list_due and formatting as
+     * "- <topic> (due <timestamp>)\n". init_proposer includes it
+     * as a labeled section so the proposer sees concrete reasons to
+     * reach out (F25 concrete triggers). Empty = no due followups. */
+    const char *due_followups_context;
+    size_t due_followups_context_len;
 
     /* Optional defensive callback: if non-NULL, init_proposer calls it
      * on memory_context before inclusion and treats a `false` return as

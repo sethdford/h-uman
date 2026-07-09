@@ -68,6 +68,13 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id);
 void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitment_t *arr,
                                    size_t count);
+/* Promise-keeper ledger: per-contact kept / pending / overdue counts.
+ * who filters to "me" or "them"; NULL counts both. Overdue = still pending
+ * with a deadline in the past — the "broken unless acted on" bucket. */
+hu_error_t hu_superhuman_commitment_ledger_stats(void *sqlite_ctx, const char *contact_id,
+                                                 size_t contact_id_len, const char *who,
+                                                 int64_t now_ts, uint32_t *kept_out,
+                                                 uint32_t *pending_out, uint32_t *overdue_out);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Temporal patterns

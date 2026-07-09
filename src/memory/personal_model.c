@@ -1,5 +1,7 @@
 #include "human/memory/personal_model.h"
+#include "human/core/log.h"
 #include "human/memory/anticipatory.h"
+#include "human/memory/fact_extract_llm.h" /* LLM fact-extraction fallback (casual-text recall) */
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
 #include "human/memory/identity_continuity.h"
@@ -40,6 +42,76 @@ static const hu_identity_graph_t *s_identity_graph_for_prompt = NULL;
 
 void hu_personal_model_set_identity_graph(const void *graph) {
     s_identity_graph_for_prompt = (const hu_identity_graph_t *)graph;
+}
+
+/* LLM fact-extraction fallback — process-lifetime borrows injected by the
+ * daemon/agent at startup. NULL provider (the default) disables the fallback.
+ * See hu_personal_model_set_llm_extractor in the header. */
+static hu_allocator_t *s_llm_extract_alloc = NULL;
+static hu_provider_t *s_llm_extract_provider = NULL;
+static char s_llm_extract_model[80] = {0};
+
+void hu_personal_model_set_llm_extractor(void *alloc, void *provider, const char *model,
+                                         size_t model_len) {
+    s_llm_extract_alloc = (hu_allocator_t *)alloc;
+    s_llm_extract_provider = (hu_provider_t *)provider;
+    size_t n = model_len < sizeof(s_llm_extract_model) - 1 ? model_len
+                                                           : sizeof(s_llm_extract_model) - 1;
+    if (model && n > 0)
+        memcpy(s_llm_extract_model, model, n);
+    s_llm_extract_model[n] = '\0';
+}
+
+/* Runtime gate: 0=off (default), 1=shadow, 2=live. Mirrors the off|shadow|on
+ * convention used by HU_SALIENCE / HU_TOM_DIRECTIVE / HU_GRAPH_GROUNDING. */
+static int llm_fact_extract_gate(void) {
+    const char *v = getenv("HU_LLM_FACT_EXTRACT");
+    if (!v || !*v)
+        return 0;
+    if (strcmp(v, "on") == 0 || strcmp(v, "live") == 0)
+        return 2;
+    if (strcmp(v, "shadow") == 0)
+        return 1;
+    return 0;
+}
+
+/* Minimum message length worth an LLM round-trip. Short acks ("ok", "C?",
+ * "lol") rarely carry extractable facts and the regex pass already missed
+ * them — skip to keep the fallback cheap and the daemon poll loop responsive. */
+#define HU_LLM_FACT_EXTRACT_MIN_LEN 16u
+
+/* Fallback entry point, called from hu_personal_model_ingest ONLY when the
+ * regex fast-path produced zero facts. On LIVE it overwrites *extracted with
+ * the LLM result (so the caller's existing stamp/promote/merge flow handles
+ * it); on SHADOW it logs what it WOULD extract and leaves *extracted empty.
+ * Soft-fails (provider error, empty/malformed JSON) leave *extracted empty —
+ * never breaks ingest. */
+static void maybe_llm_fact_fallback(const char *message, size_t message_len, int64_t timestamp,
+                                    hu_fact_extract_result_t *extracted) {
+    int gate = llm_fact_extract_gate();
+    if (gate == 0)
+        return;
+    if (!s_llm_extract_provider || !s_llm_extract_alloc)
+        return;
+    if (message_len < HU_LLM_FACT_EXTRACT_MIN_LEN)
+        return;
+
+    hu_fact_extract_result_t llm = {0};
+    hu_error_t err = hu_fact_extract_llm(s_llm_extract_alloc, s_llm_extract_provider,
+                                         s_llm_extract_model, strlen(s_llm_extract_model), message,
+                                         message_len, timestamp, &llm);
+    if (err != HU_OK || llm.fact_count == 0)
+        return;
+
+    if (gate == 1) {
+        /* SHADOW: observe, do not merge. */
+        hu_log_info("llm_fact_extract", NULL,
+                    "shadow: would extract %zu fact(s) from a regex-missed message",
+                    llm.fact_count);
+        return;
+    }
+    /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow. */
+    *extracted = llm;
 }
 
 void hu_personal_model_init(hu_personal_model_t *model) {
@@ -1382,6 +1454,17 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
     hu_error_t err = hu_fact_extract(message, message_len, &extracted);
     if (err != HU_OK)
         return err;
+
+    /* LLM fact-extraction fallback. The regex pass above matches ~43
+     * first-person prefixes; casual/indirect text ("Did you not get the
+     * email?") yields nothing — which is why the production graph held only
+     * 67 relations over 1796 messages. When the fast-path found NO facts and
+     * an LLM extractor has been injected, fall back to it. Gated OFF -> SHADOW
+     * -> LIVE by HU_LLM_FACT_EXTRACT (default OFF, zero cost). On LIVE this
+     * overwrites `extracted`, so the stamp/promote/merge flow below treats the
+     * LLM facts exactly like regex facts. */
+    if (extracted.fact_count == 0)
+        maybe_llm_fact_fallback(message, message_len, timestamp, &extracted);
 
     /* Stamp provenance on every extracted fact before merge — the
      * checked merge consults `fact->provenance.tier` for the overwrite

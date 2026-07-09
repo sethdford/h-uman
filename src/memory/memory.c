@@ -534,6 +534,33 @@ hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t
     return hu_graph_query_temporal(g, alloc, cid, cid_len, from_ts, to_ts, limit, out, out_len);
 }
 
+hu_error_t hu_memory_facade_add_temporal_event(hu_memory_facade_t *m, const char *contact_id,
+                                               size_t contact_id_len, const char *description,
+                                               size_t description_len, int64_t occurred_at,
+                                               int64_t duration_sec) {
+    if (!m || !description || description_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = m->graph;
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    const char *cid = contact_id ? contact_id : "";
+    size_t cid_len = contact_id ? contact_id_len : 0;
+    /* The reader (hu_graph_query_temporal) INNER-JOINs entities, so every
+     * temporal event must hang off a real entity. Anchor it on the contact as
+     * a PERSON entity — the timeline then renders "<contact>: <description>",
+     * exactly the shape the anticipatory reader parses. upsert is idempotent,
+     * so repeated events for one contact reuse the same entity row. */
+    int64_t ent_id = 0;
+    hu_error_t e =
+        hu_graph_upsert_entity(g, cid, cid_len, cid, cid_len, HU_ENTITY_PERSON, NULL, &ent_id);
+    if (e != HU_OK)
+        return e;
+    if (ent_id <= 0)
+        return HU_ERR_IO;
+    return hu_graph_add_temporal_event(g, cid, cid_len, ent_id, description, description_len,
+                                       occurred_at, duration_sec);
+}
+
 hu_error_t hu_memory_facade_query_causal(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                          const char *contact_id, size_t contact_id_len,
                                          int64_t entity_id, size_t max_results, char **out,

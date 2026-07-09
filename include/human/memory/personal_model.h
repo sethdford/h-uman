@@ -236,6 +236,27 @@ size_t hu_personal_model_build_prompt_with_reflection(const hu_personal_model_t 
  * dep tree; callers MUST pass a (hu_identity_graph_t *). */
 void hu_personal_model_set_identity_graph(const void *graph);
 
+/* Inject the LLM fact-extraction fallback used by hu_personal_model_ingest
+ * when the regex fast-path (hu_fact_extract) finds NO facts in a substantive
+ * message. The regex extractor matches ~43 first-person prefixes; casual /
+ * indirect text ("Did you not get the email?") yields nothing — this fallback
+ * recovers those facts via an LLM call.
+ *
+ * Like hu_personal_model_set_identity_graph, this is a process-lifetime borrow
+ * stored in file-scope statics (single-threaded daemon → no lock). The types
+ * are opaque void* to keep provider.h out of personal_model.h's dep tree;
+ * callers MUST pass (hu_allocator_t *) and (hu_provider_t *). Passing NULL for
+ * either disables the fallback (the default). `model`/`model_len` is the model
+ * id handed to the provider ("" allowed).
+ *
+ * Activation is gated at RUNTIME by HU_LLM_FACT_EXTRACT (off|shadow|on,
+ * default off) per ~/.claude/rules/feature-gate-requires-measurement.md — the
+ * promotion to default-on is gated on the blind A/B (does richer extracted
+ * memory read as more human?). The fallback only ADDS facts to memory; it
+ * never suppresses outbound content, so no safety floor applies. */
+void hu_personal_model_set_llm_extractor(void *alloc, void *provider, const char *model,
+                                         size_t model_len);
+
 /* Track D D2.2 — acknowledgment-directive variant telemetry.
  *
  * Every time the prompt builder fires the recently-completed

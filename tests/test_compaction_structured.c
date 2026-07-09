@@ -426,11 +426,23 @@ static void test_compaction_with_structured_flag_disabled(void) {
     free(history);
 }
 
+/* The default conversation-history window was widened 50 -> 120 (2026-06-06)
+ * so long iMessage threads keep earlier context. Pin the generous default so a
+ * future edit can't silently shrink it back. */
+static void test_compaction_default_history_window_is_generous(void) {
+    hu_compaction_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_compaction_config_default(&cfg);
+    HU_ASSERT_EQ((int)cfg.max_history_messages, (int)HU_COMPACTION_DEFAULT_MAX_HISTORY);
+    HU_ASSERT_TRUE(cfg.max_history_messages >= 120); /* not the old 50 cap */
+}
+
 /* ── Test Runner ──────────────────────────────────────────────────────── */
 
 void run_compaction_structured_tests(void) {
     HU_TEST_SUITE("compaction_structured");
 
+    HU_RUN_TEST(test_compaction_default_history_window_is_generous);
     HU_RUN_TEST(test_strip_analysis_basic);
     HU_RUN_TEST(test_strip_analysis_multiple);
     HU_RUN_TEST(test_strip_analysis_no_close);

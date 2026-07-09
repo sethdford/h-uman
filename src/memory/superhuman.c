@@ -340,6 +340,50 @@ void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitme
         alloc->free(alloc->ctx, arr, count * sizeof(hu_superhuman_commitment_t));
 }
 
+hu_error_t hu_superhuman_commitment_ledger_stats(void *sqlite_ctx, const char *contact_id,
+                                                 size_t contact_id_len, const char *who,
+                                                 int64_t now_ts, uint32_t *kept_out,
+                                                 uint32_t *pending_out, uint32_t *overdue_out) {
+    if (!sqlite_ctx || !contact_id || contact_id_len == 0 || !kept_out || !pending_out ||
+        !overdue_out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *kept_out = 0;
+    *pending_out = 0;
+    *overdue_out = 0;
+
+    sqlite3 *db = get_db(sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        db,
+        "SELECT "
+        "SUM(status='followed_up'),"
+        "SUM(status='pending' AND (deadline IS NULL OR deadline=0 OR deadline>?1)),"
+        "SUM(status='pending' AND deadline>0 AND deadline<=?1) "
+        "FROM commitments WHERE contact_id=?2 AND (?3 IS NULL OR who=?3)",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+
+    sqlite3_bind_int64(stmt, 1, now_ts);
+    sqlite3_bind_text(stmt, 2, contact_id, (int)contact_id_len, NULL);
+    if (who)
+        sqlite3_bind_text(stmt, 3, who, -1, NULL);
+    else
+        sqlite3_bind_null(stmt, 3);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        *kept_out = (uint32_t)sqlite3_column_int64(stmt, 0);
+        *pending_out = (uint32_t)sqlite3_column_int64(stmt, 1);
+        *overdue_out = (uint32_t)sqlite3_column_int64(stmt, 2);
+    }
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_ROW || rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Temporal patterns
  * ────────────────────────────────────────────────────────────────────────── */
@@ -1683,6 +1727,24 @@ void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitme
     (void)alloc;
     (void)arr;
     (void)count;
+}
+
+hu_error_t hu_superhuman_commitment_ledger_stats(void *sqlite_ctx, const char *contact_id,
+                                                 size_t contact_id_len, const char *who,
+                                                 int64_t now_ts, uint32_t *kept_out,
+                                                 uint32_t *pending_out, uint32_t *overdue_out) {
+    if (kept_out)
+        *kept_out = 0;
+    if (pending_out)
+        *pending_out = 0;
+    if (overdue_out)
+        *overdue_out = 0;
+    (void)sqlite_ctx;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)who;
+    (void)now_ts;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
 hu_error_t hu_superhuman_temporal_record(void *sqlite_ctx, const char *contact_id,
