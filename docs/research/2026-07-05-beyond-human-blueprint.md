@@ -1,3 +1,9 @@
+---
+title: "Beyond-Human Blueprint — seven mechanisms past indistinguishability"
+created: 2026-07-05
+status: active
+---
+
 # Beyond Human — the bar-raising blueprint (2026-07-05)
 
 Premise (measured, not aspirational): parity with Seth's voice is the *ceiling*

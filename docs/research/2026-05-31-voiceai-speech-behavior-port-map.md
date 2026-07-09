@@ -1,3 +1,9 @@
+---
+title: "voiceai Speech-Quirk Layer -> h-uman Port Map"
+created: 2026-05-31
+status: final
+---
+
 # voiceai → h-uman: Speech-Behavior Port-Map (VERIFIED)
 
 **Date:** 2026-05-31

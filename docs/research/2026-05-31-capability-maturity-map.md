@@ -1,3 +1,9 @@
+---
+title: "Capability Maturity Map — where h-uman is vs where it is going"
+created: 2026-05-31
+status: final
+---
+
 # h-uman Capability Maturity Map: Where We Are vs Where We're Going
 
 **Date:** 2026-05-31

@@ -60,6 +60,7 @@ _human() {
                 autoresponder:Manage the DND autoresponder
                 ctl:Runtime kill-switch inspector
                 export-dpo:Export collector dpo_pairs to JSONL
+                export-kto:Export single-sided feedback_signals to KTO JSONL
                 inference-status:Show effective inference throughput config
                 initiative:Inspect init_proposer JSONL
                 narrate:Generate a long-horizon narrative for a contact
