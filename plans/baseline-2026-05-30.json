@@ -1,0 +1,25 @@
+{
+  "captured": "2026-05-30",
+  "purpose": "Pre-arbitration humanness baseline (Gap 1 plan P0). Real LLM-judge, test/CI mode explicitly disabled (env -u CI -u HU_IS_TEST). Per-task verdicts read back from ~/.human/memory.db:eval_results.",
+  "binary": "build/human",
+  "persona": "seth / channel imessage (system prompt 2617 bytes)",
+  "provider": "configured (reliable model_fallback chain); key not inspected",
+  "suites_valid": [
+    { "suite": "human_likeness",     "tasks": 8,  "pass_rate": 0.88, "outputs": "real" },
+    { "suite": "imessage_humanness", "tasks": 8,  "pass_rate": 1.00, "outputs": "real" },
+    { "suite": "adversarial_turing", "tasks": 30, "pass_rate": 0.90, "outputs": "real" },
+    { "suite": "tier1_naturalness",  "tasks": 24, "pass_rate": 0.50, "outputs": "real (mixed)" },
+    { "suite": "multi_turn",         "tasks": 6,  "pass_rate": 0.67,
+      "note": "DEPRESSED BY ARTIFACT: 2 of 6 tasks had EMPTY output (harness bug). Of the 4 tasks that generated, 4/4 passed -> real quality ~1.00. Sample outputs were genuinely human ('man that sucks. losing a dog you grew up with is brutal'; refused a brute-force tool request with 'nah ... lol')." }
+  ],
+  "suites_recovered_after_bugfix": [
+    { "suite": "fidelity",     "was": 0.00, "now": 0.72, "tasks": 18, "blank_outputs_now": 0,
+      "note": "FIXED 2026-05-30. Root cause: post-hoc timeout (eval.c:591) discarded valid slow generations; fidelity omitted timeout_ms -> inherited 5000ms default vs ~21s real latency. 0.72 is now a real number." },
+    { "suite": "longitudinal", "was": 0.00, "now": 0.44, "tasks": 9,  "blank_outputs_now": 0,
+      "note": "FIXED 2026-05-30. Same root cause (10-15s timeouts vs ~30s latency). 0.44 is a GENUINE soft spot (cross-session consistency) — now measurable." }
+  ],
+  "headline": "On EVERY suite where generation actually occurred, h-uman scores 0.44-1.00. The two 0.00 suites were a post-hoc-timeout HARNESS bug (now fixed), not capability failures. The automated proxies cannot locate a '5%' gap; the genuine soft spots are tier1_naturalness (0.50) and longitudinal (0.44).",
+  "actionable_bug_FIXED": "RESOLVED 2026-05-30: eval.c post-hoc timeout discarded non-empty output (recorded as 0.00). Fix: keep slow-but-non-empty output; added pure predicate hu_eval_run_empty_invalid + run->invalid guard + loud warning so >50%-empty runs are flagged INVALID instead of scored 0.00. Full suite 13325/13325; fidelity 0.00->0.72, longitudinal 0.00->0.44.",
+  "still_the_only_real_gap": "Blind human discrimination vs Seth's real texts. Harness built + verified at scripts/blind_ab/. Every automated number is a proxy; this is the ground truth and the only place a real 'feels off' gap could still hide.",
+  "implication": "Confidence that the arbitration build is the top lever is now LOW on the evidence. Do the blind human A/B first; let its number decide whether to build arbitration at all."
+}

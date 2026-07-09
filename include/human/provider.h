@@ -220,11 +220,13 @@ typedef struct hu_chat_request {
     /* Activation-steering coefficients for on-device serving (residual-stream
      * trait control). When steering_present is false, no "steering" field is
      * sent (server treats absent as a no-op). Coeffs are in the measured-safe
-     * range [-1, 1]; the local server also clamps. Only the validated traits
-     * (formality, verbosity) are carried. */
+     * range [-1, 1]; the local server also clamps. Four traits supported:
+     * formality, verbosity (Phase 2 validated), warmth, humor (Phase 6). */
     bool steering_present;
     double steer_formality;
     double steer_verbosity;
+    double steer_warmth;
+    double steer_humor;
 } hu_chat_request_t;
 
 /* ──────────────────────────────────────────────────────────────────────────

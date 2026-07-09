@@ -49,6 +49,10 @@ static void test_build_argv_happy_path_shape(void) {
     bool saw_model_flag = false;
     bool saw_train_flag = false;
     bool saw_adapter_path = false;
+    bool saw_num_layers = false;
+    bool saw_stale_lora_layers = false;
+    bool saw_config_flag = false;
+    const char *config_path = NULL;
     for (size_t i = 0; i < n; i++) {
         if (strcmp(argv[i], "--model") == 0)
             saw_model_flag = true;
@@ -56,10 +60,30 @@ static void test_build_argv_happy_path_shape(void) {
             saw_train_flag = true;
         if (strcmp(argv[i], "--adapter-path") == 0)
             saw_adapter_path = true;
+        if (strcmp(argv[i], "--num-layers") == 0)
+            saw_num_layers = true;
+        if (strcmp(argv[i], "--lora-layers") == 0)
+            saw_stale_lora_layers = true;
+        if (strcmp(argv[i], "-c") == 0 && i + 1 < n) {
+            saw_config_flag = true;
+            config_path = argv[i + 1];
+        }
     }
     HU_ASSERT_TRUE(saw_model_flag);
     HU_ASSERT_TRUE(saw_train_flag);
     HU_ASSERT_TRUE(saw_adapter_path);
+    /* 2026-07-05 CLI-drift fix: modern mlx_lm.lora renamed --lora-layers to
+     * --num-layers; the stale flag made every nightly train exit 2 with a
+     * usage error (3 no-op nights, Jun 12-14). Pin the new flag AND the
+     * absence of the old one. */
+    HU_ASSERT_TRUE(saw_num_layers);
+    HU_ASSERT_TRUE(!saw_stale_lora_layers);
+    /* lora-scale-default-or-die: the invocation MUST carry a -c config (which
+     * the exec layer writes with lora_parameters scale 2.0) — omitting it
+     * inherits mlx_lm's catastrophic scale=20 default. */
+    HU_ASSERT_TRUE(saw_config_flag);
+    HU_ASSERT_NOT_NULL(config_path);
+    HU_ASSERT_TRUE(strstr(config_path, "hu_lora_config.yaml") != NULL);
     /* argv must be NULL-terminated. */
     HU_ASSERT_TRUE(argv[n] == NULL);
 }
@@ -108,7 +132,7 @@ static void test_build_argv_zero_hyperparams_use_defaults(void) {
             batch_default_seen = true;
         if (strcmp(argv[i], "--iters") == 0 && strcmp(argv[i + 1], "200") == 0)
             iters_default_seen = true;
-        if (strcmp(argv[i], "--lora-layers") == 0 && strcmp(argv[i + 1], "8") == 0)
+        if (strcmp(argv[i], "--num-layers") == 0 && strcmp(argv[i + 1], "8") == 0)
             layers_default_seen = true;
     }
     HU_ASSERT_TRUE(batch_default_seen);
@@ -132,7 +156,7 @@ static void test_build_argv_explicit_hyperparams_win(void) {
             batch_override_seen = true;
         if (strcmp(argv[i], "--iters") == 0 && strcmp(argv[i + 1], "500") == 0)
             iters_override_seen = true;
-        if (strcmp(argv[i], "--lora-layers") == 0 && strcmp(argv[i + 1], "16") == 0)
+        if (strcmp(argv[i], "--num-layers") == 0 && strcmp(argv[i + 1], "16") == 0)
             layers_override_seen = true;
     }
     HU_ASSERT_TRUE(batch_override_seen);

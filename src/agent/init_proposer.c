@@ -33,11 +33,14 @@
  * enabled. Guards are process-scoped via atomic_bool. */
 static atomic_bool g_warned_disabled = false;
 static atomic_bool g_warned_enabled = false;
+/* Guard for DND-gate diagnostic: alert when no config but gate fires */
+static atomic_bool g_warned_no_dnd_config = false;
 
 void hu_init_proposer_reset_warn_guards_for_test(void) {
 #if HU_IS_TEST
     atomic_store(&g_warned_disabled, false);
     atomic_store(&g_warned_enabled, false);
+    atomic_store(&g_warned_no_dnd_config, false);
 #endif
 }
 
@@ -46,9 +49,24 @@ hu_init_proposer_governor_check_only(const struct hu_initiative_config *cfg,
                                      const struct hu_autoresponder_config *ar_cfg,
                                      int32_t tz_offset_seconds, struct hu_proactive_budget *budget,
                                      int64_t last_inbound_unix, int64_t now_unix) {
-    /* Quiet hours (NULL ar_cfg = operator opted out). */
-    if (ar_cfg && hu_autoresponder_in_dnd_window(ar_cfg, now_unix, tz_offset_seconds))
+    /* Quiet hours (NULL ar_cfg = operator opted out, NO configured schedule = no DND).
+     * Per silent-config-gated-subsystems.md: alert once when ar_cfg exists with
+     * schedule_count=0 but somehow DND gate fires (diagnostic signal of a logic bug). */
+    if (ar_cfg && hu_autoresponder_in_dnd_window(ar_cfg, now_unix, tz_offset_seconds)) {
+        /* Sanity check: log once if we gate QUIET despite no configured DND.
+         * Normal path: ar_cfg with schedule_count=0 returns false, so this
+         * block doesn't execute. If it does, the DND check has a bug. */
+        if (ar_cfg->schedule_count == 0) {
+            hu_log_info_once(&g_warned_no_dnd_config, "init_proposer", NULL,
+                             "DIAGNOSTIC: GATED_QUIET fired despite schedule_count=0 — "
+                             "this indicates a bug in hu_autoresponder_in_dnd_window; "
+                             "proactive outreach is gated despite no DND config. "
+                             "Create ~/.human/autoresponder.json with "
+                             "\"schedules\":[{\"start\":\"22:00\",\"end\":\"08:00\"},...] "
+                             "to configure quiet hours explicitly.");
+        }
         return HU_INIT_RESULT_GATED_QUIET;
+    }
 
     /* Daily proactive budget (NULL budget = operator opted out). */
     if (budget && !hu_governor_has_budget(budget, (uint64_t)now_unix * 1000ULL))
@@ -186,11 +204,34 @@ hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64
     out->content[HU_INIT_FIELD_INSTRUCTION] = agent->custom_instructions;
     out->bytes[HU_INIT_FIELD_INSTRUCTION] = agent->custom_instructions_len;
 
-    /* T2 stub: persona/memory/personal_model/awareness/stm fields land
-     * when their corresponding extractor outputs are wired into a stable
-     * agent-cached location. For now those slots stay zero — that's
-     * meaningful telemetry by itself (the proposer can see what's
-     * unwired). */
+    /* PERSONA (2026-06-06 un-stub) — a compact "name + identity" descriptor.
+     * Previously this field stayed zero, so combined with the empty
+     * memory/awareness/stm slots the proposer's user message was nearly
+     * empty; the silence-biased system prompt ("if context is thin, propose
+     * nothing") then returned should_propose=false with confidence 0.000 on
+     * every tick (317 NEGATIVE proposals observed in production). Grounding
+     * the model in who it is + who it's addressing is the cheapest real
+     * signal and unblocks a non-trivial decision. */
+    if (agent->persona && agent->persona->name && agent->persona->name_len > 0) {
+        const char *ident = agent->persona->identity ? agent->persona->identity
+                            : agent->persona->core_anchor ? agent->persona->core_anchor
+                                                          : "";
+        int pn = snprintf(out->persona_buf, sizeof(out->persona_buf), "%.*s%s%s",
+                          (int)agent->persona->name_len, agent->persona->name,
+                          ident[0] ? " — " : "", ident);
+        if (pn > 0) {
+            size_t plen = (size_t)pn < sizeof(out->persona_buf) ? (size_t)pn
+                                                                : sizeof(out->persona_buf) - 1;
+            out->content[HU_INIT_FIELD_PERSONA] = out->persona_buf;
+            out->bytes[HU_INIT_FIELD_PERSONA] = plen;
+        }
+    }
+
+    /* T2 stub (remaining): memory/personal_model/awareness/stm fields land
+     * when their extractor outputs are wired into a stable agent-cached
+     * location. The send path (hu_init_proposer_tick_with_provider_ex)
+     * already receives memory_context directly; those slots staying zero
+     * here is meaningful telemetry (the proposer can see what's unwired). */
 
     /* T8 of docs/plans/2026-05-26-reflection-loop: pull unsurfaced
      * reflection patterns into the inline reflection_buf when the agent
@@ -295,6 +336,12 @@ static const char *const s_system_prompt =
     "Consider only the context provided in the user message below. Do NOT invent "
     "facts. If the context is empty or thin, propose nothing.\n"
     "\n"
+    "Concrete triggers DO warrant a proposal: an established contact, a stored "
+    "commitment or temporal event with a due time, a notable gap since last contact "
+    "with real shared context, reasonable hours. A warm check-in after a significant "
+    "silence with grounded context is acceptable. Focus on trigger-based outreach "
+    "(commitments due, stored events arriving) over generic pondering.\n"
+    "\n"
     "Return ONLY a single JSON object on a single line — no prose, no preamble, "
     "no markdown code fences (no triple-backticks, no ```json wrapper). The "
     "very first character of your output MUST be `{` and the last must be `}`. "
@@ -306,8 +353,10 @@ static const char *const s_system_prompt =
     "  \"reason\": \"<one short sentence why — when should_propose=false>\"\n"
     "}\n"
     "\n"
-    "Set confidence >= 0.85 ONLY when you have a clear, specific, "
-    "time-sensitive reason. Otherwise, set should_propose=false.";
+    "Score confidence honestly on a 0.0-1.0 scale: how certain are you that "
+    "this outreach would be welcome and appropriate? The configured confidence "
+    "threshold (typically 0.85) gates the send; your job is to provide an honest "
+    "confidence score, not to second-guess the threshold.";
 
 size_t hu_init_proposer_build_propose_prompt(const hu_init_context_bundle_t *bundle,
                                              char *out_system_prompt, size_t system_prompt_cap,
@@ -831,7 +880,9 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
      * can see WHICH source contributed what. Memory is filtered through
      * the optional content_is_safe predicate if present — risk-mitigation
      * for the daemon_proactive callback path that previously leaked
-     * first-person memory entries to family contacts. */
+     * first-person memory entries to family contacts.
+     * due_followups provides concrete triggers: stored commitments with
+     * due dates that the proposer can use as a triggering signal (F25). */
     struct {
         const char *label;
         const char *body;
@@ -842,6 +893,7 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         {"weather", inputs->weather_context, inputs->weather_context_len, false},
         {"calendar", inputs->calendar_context, inputs->calendar_context_len, false},
         {"feeds", inputs->feeds_context, inputs->feeds_context_len, false},
+        {"due_followups", inputs->due_followups_context, inputs->due_followups_context_len, false},
     };
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
         if (!fields[i].body || fields[i].body_len == 0)

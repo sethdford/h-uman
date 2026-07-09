@@ -499,6 +499,55 @@ static void steering_coeffs_negative_tier_scale_is_zero(void) {
     HU_ASSERT_EQ((int)(v * 1000), 0);
 }
 
+/* Phase 6: warmth and humor steering coefficients */
+static void steering_coeffs_v2_warm_is_positive(void) {
+    double w = -9;
+    hu_persona_steering_coeffs_v2(NULL, NULL, "warm", NULL, 1.0, NULL, NULL, &w, NULL);
+    HU_ASSERT(w > 0.0);
+}
+
+static void steering_coeffs_v2_cold_is_negative(void) {
+    double w = 9;
+    hu_persona_steering_coeffs_v2(NULL, NULL, "cold", NULL, 1.0, NULL, NULL, &w, NULL);
+    HU_ASSERT(w < 0.0);
+}
+
+static void steering_coeffs_v2_humor_frequent_is_positive(void) {
+    double h = -9;
+    hu_persona_steering_coeffs_v2(NULL, NULL, NULL, "frequent", 1.0, NULL, NULL, NULL, &h);
+    HU_ASSERT(h > 0.0);
+}
+
+static void steering_coeffs_v2_humor_none_is_negative(void) {
+    double h = 9;
+    hu_persona_steering_coeffs_v2(NULL, NULL, NULL, "none", 1.0, NULL, NULL, NULL, &h);
+    HU_ASSERT(h < 0.0);
+}
+
+static void steering_coeffs_v2_all_traits_nonzero(void) {
+    /* Verify that all four traits (formality, verbosity, warmth, humor) flow through v2 */
+    double f = 0, v = 0, w = 0, h = 0;
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "playful", 1.0,
+                                  &f, &v, &w, &h);
+    HU_ASSERT(f > 0.0);  /* formal */
+    HU_ASSERT(v > 0.0);  /* detailed */
+    HU_ASSERT(w > 0.0);  /* warm */
+    HU_ASSERT(h > 0.0);  /* playful */
+}
+
+static void steering_coeffs_v2_tier_scale_damps_all(void) {
+    /* All traits should scale down by tier_scale */
+    double f1, v1, w1, h1, f2, v2, w2, h2;
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 1.0,
+                                  &f1, &v1, &w1, &h1);
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 0.5,
+                                  &f2, &v2, &w2, &h2);
+    HU_ASSERT(f1 > f2); /* lower tier_scale -> smaller magnitude */
+    HU_ASSERT(v1 > v2);
+    HU_ASSERT(w1 > w2);
+    HU_ASSERT(h1 > h2);
+}
+
 /* TAIL B — eval-path faithfulness: the COMPACT prompt that the blind-A/B
  * generation path runs (build/human eval run -> hu_persona_build_prompt_compact)
  * must append the SAME formality-aware absolute-rules block the live reactive
@@ -595,4 +644,10 @@ void run_persona_overlay_render_tests(void) {
     HU_RUN_TEST(steering_coeffs_clamped_to_safe_envelope);
     HU_RUN_TEST(steering_coeffs_null_and_unknown_are_zero);
     HU_RUN_TEST(steering_coeffs_negative_tier_scale_is_zero);
+    HU_RUN_TEST(steering_coeffs_v2_warm_is_positive);
+    HU_RUN_TEST(steering_coeffs_v2_cold_is_negative);
+    HU_RUN_TEST(steering_coeffs_v2_humor_frequent_is_positive);
+    HU_RUN_TEST(steering_coeffs_v2_humor_none_is_negative);
+    HU_RUN_TEST(steering_coeffs_v2_all_traits_nonzero);
+    HU_RUN_TEST(steering_coeffs_v2_tier_scale_damps_all);
 }

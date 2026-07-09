@@ -35,6 +35,7 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_narrate(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_autoresponder(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv);
+hu_error_t cmd_export_kto(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_hula(hu_allocator_t *alloc, int argc, char **argv);
 
 #endif /* HU_CLI_COMMANDS_H */

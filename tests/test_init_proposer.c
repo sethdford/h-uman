@@ -621,7 +621,112 @@ static void arbiter_skip_returns_skip_when_user_texted_long_ago(void) {
     HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
 }
 
+/* 2026-06-06 un-stub: the PERSONA field was always zero, leaving the proposer's
+ * context thin -> silence-biased prompt -> NEGATIVE 0.000 every tick. A persona
+ * must now populate it. */
+static void test_assemble_context_populates_persona_field(void) {
+    struct hu_agent agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.name = "Seth";
+    persona.name_len = 4;
+    persona.identity = "Chief Architect, blunt and curious";
+    agent.persona = &persona;
+
+    hu_init_context_bundle_t bundle;
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 1779700000, 0, &bundle), HU_OK);
+
+    HU_ASSERT(bundle.bytes[HU_INIT_FIELD_PERSONA] > 0);
+    HU_ASSERT_NOT_NULL(bundle.content[HU_INIT_FIELD_PERSONA]);
+    HU_ASSERT(strstr(bundle.content[HU_INIT_FIELD_PERSONA], "Seth") != NULL);
+    HU_ASSERT(strstr(bundle.content[HU_INIT_FIELD_PERSONA], "Chief Architect") != NULL);
+}
+
+/* No persona configured -> field stays empty, no crash. */
+static void test_assemble_context_no_persona_leaves_field_empty(void) {
+    struct hu_agent agent;
+    memset(&agent, 0, sizeof(agent)); /* persona == NULL */
+    hu_init_context_bundle_t bundle;
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(&agent, 0, 0, &bundle), HU_OK);
+    HU_ASSERT_EQ((int)bundle.bytes[HU_INIT_FIELD_PERSONA], 0);
+}
+
 void run_init_proposer_tests(void);
+/* Truth table tests for quiet-hours gate. Per
+ * .claude/rules/security-predicate-extraction.md and
+ * .claude/rules/silent-config-gated-subsystems.md: the decision predicate
+ * must be testable without crossing the daemon boundary, and the contract
+ * must be locked here. */
+
+static void test_quiet_gate_null_ar_cfg_returns_skip(void) {
+    /* NULL ar_cfg = operator opted out. Should NOT gate. */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, /*ar_cfg=*/NULL, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/0, /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
+}
+
+static void test_quiet_gate_empty_dnd_config_returns_skip(void) {
+    /* ar_cfg present but schedule_count=0 (no DND configured).
+     * Should NOT gate. This is the core fix for the blocker. */
+    hu_autoresponder_config_t ar_cfg;
+    memset(&ar_cfg, 0, sizeof(ar_cfg));
+    ar_cfg.enabled = true;
+    ar_cfg.schedule_count = 0; /* empty DND = no quiet gating */
+
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, &ar_cfg, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/0, /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
+}
+
+static void test_quiet_gate_outside_dnd_window_returns_skip(void) {
+    /* ar_cfg with one DND schedule (22:00-08:00 daily).
+     * Test at 12:00 UTC (noon, outside window). Should NOT gate. */
+    hu_autoresponder_config_t ar_cfg;
+    memset(&ar_cfg, 0, sizeof(ar_cfg));
+    ar_cfg.enabled = true;
+    ar_cfg.schedule_count = 1;
+    ar_cfg.dnd_schedule[0].start_minute_of_day = 22 * 60; /* 22:00 = 1320 min */
+    ar_cfg.dnd_schedule[0].end_minute_of_day = 8 * 60;    /* 08:00 = 480 min */
+    ar_cfg.dnd_schedule[0].days_of_week_mask = 0x7F;      /* daily */
+
+    /* now = unix 1779700000 = 2026-04-22 12:00:00 UTC (noon, outside 22:00-08:00).
+     * With tz_offset=0, local time = UTC = 12:00. */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, &ar_cfg, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/0, /*now=*/1779700000);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_SKIP);
+}
+
+static void test_quiet_gate_inside_dnd_window_returns_gated_quiet(void) {
+    /* ar_cfg with one DND schedule (22:00-08:00 daily).
+     * Test at 23:00 UTC (11 PM, inside window). Should gate QUIET.
+     * 1779700000 = 2026-04-22 12:00:00 UTC = minute 720 of that day
+     * 23:00 = 1380 minutes of the day
+     * So we need to add (1380 - 720) * 60 = 660 * 60 = 39600 seconds
+     * But let's just use a simpler approach: create a timestamp for midnight
+     * + 23 hours.
+     * Unix epoch = Thu 1970-01-01, so day N starts at N*86400.
+     * 2026-04-22 is day ~20595 of the epoch.
+     * midnight on that day = 20595 * 86400 = 1779696000
+     * 23:00 on that day = 1779696000 + 23*3600 = 1779779600 */
+    hu_autoresponder_config_t ar_cfg;
+    memset(&ar_cfg, 0, sizeof(ar_cfg));
+    ar_cfg.enabled = true;
+    ar_cfg.schedule_count = 1;
+    ar_cfg.dnd_schedule[0].start_minute_of_day = 22 * 60; /* 22:00 = 1320 min */
+    ar_cfg.dnd_schedule[0].end_minute_of_day = 8 * 60;    /* 08:00 = 480 min */
+    ar_cfg.dnd_schedule[0].days_of_week_mask = 0x7F;      /* daily */
+
+    int64_t now_23h = 1779696000 + (23 * 3600); /* midnight + 23 hours = 11 PM */
+    hu_init_proposer_result_t r = hu_init_proposer_governor_check_only(
+        /*cfg=*/NULL, &ar_cfg, /*tz=*/0, /*budget=*/NULL,
+        /*last_inbound=*/0, /*now=*/now_23h);
+    HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_GATED_QUIET);
+}
+
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
     HU_RUN_TEST(arbiter_skip_returns_skip_for_all_null_clear_args);
@@ -637,6 +742,8 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_format_summary_null_args_safe);
     HU_RUN_TEST(test_format_summary_tiny_buffer_truncates_safely);
     HU_RUN_TEST(test_assemble_context_null_out_returns_invalid);
+    HU_RUN_TEST(test_assemble_context_populates_persona_field);
+    HU_RUN_TEST(test_assemble_context_no_persona_leaves_field_empty);
     HU_RUN_TEST(test_assemble_context_null_agent_returns_empty_bundle);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_assemble_context_pulls_reflection_patterns_from_memory_db);
@@ -664,4 +771,8 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_evaluate_propose_with_empty_draft_treated_as_low_confidence);
     HU_RUN_TEST(test_evaluate_null_decision_returns_llm_error);
     HU_RUN_TEST(test_tick_with_provider_null_provider_behaves_like_t1_tick);
+    HU_RUN_TEST(test_quiet_gate_null_ar_cfg_returns_skip);
+    HU_RUN_TEST(test_quiet_gate_empty_dnd_config_returns_skip);
+    HU_RUN_TEST(test_quiet_gate_outside_dnd_window_returns_skip);
+    HU_RUN_TEST(test_quiet_gate_inside_dnd_window_returns_gated_quiet);
 }

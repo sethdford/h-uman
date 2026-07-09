@@ -311,15 +311,24 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
     }
 
     /* Activation-steering coefficients (on-device serving only). The agent
-     * computes these from the persona overlay; the provider just serializes
-     * them. Absent field => server no-op. Only the validated traits are sent. */
+     * computes these from the persona overlay; the provider just serializes them.
+     * Absent field => server no-op. Included only if nonzero: formality, verbosity
+     * (Phase 2 validated), warmth, humor (Phase 6). */
     if (request->steering_present) {
         hu_json_value_t *steering = hu_json_object_new(alloc);
         if (steering) {
-            hu_json_object_set(alloc, steering, "formality",
-                               hu_json_number_new(alloc, request->steer_formality));
-            hu_json_object_set(alloc, steering, "verbosity",
-                               hu_json_number_new(alloc, request->steer_verbosity));
+            if (request->steer_formality != 0.0)
+                hu_json_object_set(alloc, steering, "formality",
+                                   hu_json_number_new(alloc, request->steer_formality));
+            if (request->steer_verbosity != 0.0)
+                hu_json_object_set(alloc, steering, "verbosity",
+                                   hu_json_number_new(alloc, request->steer_verbosity));
+            if (request->steer_warmth != 0.0)
+                hu_json_object_set(alloc, steering, "warmth",
+                                   hu_json_number_new(alloc, request->steer_warmth));
+            if (request->steer_humor != 0.0)
+                hu_json_object_set(alloc, steering, "humor",
+                                   hu_json_number_new(alloc, request->steer_humor));
             hu_json_object_set(alloc, root, "steering", steering);
         }
     }

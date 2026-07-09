@@ -67,6 +67,35 @@ hu_error_t hu_lora_export_dpo_pairs(hu_allocator_t *alloc, const char *db_path,
                                     const char *out_file_path, int64_t since_unix,
                                     size_t *out_count);
 
+/* ── KTO (single-sided reaction) export ─────────────────────────────────
+ *
+ * DPO needs {chosen, rejected} PAIRS. The richest real-time human signal —
+ * iMessage 👍/👎 reactions — is SINGLE-SIDED (a label on ONE reply), so
+ * dpo_export drops it and the nightly loop trains on ~0 fresh rows. KTO
+ * (Kahneman-Tversky Optimization) consumes single-sided labels directly.
+ * This export bridges the `feedback_signals` table to the KTO trainer's
+ * input format: {"prompt": ..., "completion": ..., "label": true|false}
+ * where label=true is desirable (a positive reaction). */
+typedef struct hu_lora_export_kto {
+    char prompt[HU_LORA_EXPORT_PROMPT_MAX];
+    char completion[HU_LORA_EXPORT_RESP_MAX];
+    bool label; /* true = desirable (👍), false = undesirable (👎) */
+    int64_t timestamp;
+} hu_lora_export_kto_t;
+
+/* Pure: render one KTO row as a single JSONL line (no trailing newline).
+ * Returns bytes written, or 0 when `out` is too small or prompt/completion
+ * is empty (an unusable KTO example — same drop gate the DPO renderer
+ * applies). Exposed for unit testing. */
+size_t hu_lora_export_render_kto_jsonl_line(const hu_lora_export_kto_t *row, char *out, size_t cap);
+
+/* Read feedback_signals from a SQLite database, filter by timestamp window,
+ * and write KTO JSONL to `out_file_path`. Returns the number of rows written
+ * via *out_count. Returns HU_ERR_NOT_SUPPORTED on builds without SQLite. */
+hu_error_t hu_lora_export_kto_signals(hu_allocator_t *alloc, const char *db_path,
+                                      const char *out_file_path, int64_t since_unix,
+                                      size_t *out_count);
+
 #ifdef __cplusplus
 }
 #endif

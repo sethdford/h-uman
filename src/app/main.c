@@ -565,6 +565,8 @@ static const hu_command_t commands[] = {
     {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
     {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative},
     {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo},
+    {"export-kto", "Export single-sided reaction signals to KTO JSONL (continual learning)",
+     cmd_export_kto},
     {"workspace", "Workspace management", cmd_workspace},
     {"config", "Configuration reference (schema)", cmd_config},
     {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule},

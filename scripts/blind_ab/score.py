@@ -111,6 +111,22 @@ def load_sheets(paths):
     return rows
 
 
+def compute_gate_verdict(detection):
+    """Compute LoRA gate verdict based on detection rate.
+
+    Policy:
+      detection <= 0.65 → PASS (indistinguishable enough)
+      detection >= 0.75 → FAIL (too distinguishable)
+      between → INCONCLUSIVE (awaiting more data, parses as ABSENT in C code)
+    """
+    if detection <= 0.65:
+        return "PASS"
+    elif detection >= 0.75:
+        return "FAIL"
+    else:
+        return "INCONCLUSIVE"
+
+
 def report(agg):
     print(f"items scored      : {agg['n']}")
     print(f"detection rate    : {agg['detect']:.3f}   (0.50 = indistinguishable)")
@@ -236,6 +252,29 @@ def main():
             "verdict": verdict,
         })
         print(f"\nWrote human gate half ({verdict}) to {a.emit_gate}")
+
+    # Write the LoRA gate verdict to ~/.human/blind_ab_gate.json.
+    # This verdict is consumed by hu_lora_gate_verdict_from_file() in the C code.
+    # Policy: detection <= 0.65 → PASS, >= 0.75 → FAIL, between → INCONCLUSIVE.
+    lora_gate_verdict = compute_gate_verdict(agg["detect"])
+    lora_gate_path = os.path.expanduser("~/.human/blind_ab_gate.json")
+    try:
+        os.makedirs(os.path.dirname(lora_gate_path), exist_ok=True)
+        with open(lora_gate_path, 'w') as f:
+            gate_data = {
+                "human": {
+                    "verdict": lora_gate_verdict,
+                    "detection": round(agg["detect"], 4),
+                    "ci_lo": round(agg["ci_lo"], 4),
+                    "n": agg["n"],
+                    "timestamp": None,  # Operator may populate this
+                }
+            }
+            json.dump(gate_data, f, indent=2)
+        print(f"\nWrote LoRA gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+    except Exception as e:
+        print(f"Warning: failed to write LoRA gate JSON to {lora_gate_path}: {e}", file=sys.stderr)
+
     sys.exit(0 if verdict == "PASS" else 1)
 
 

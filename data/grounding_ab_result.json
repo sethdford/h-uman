@@ -1,0 +1,82 @@
+{
+  "contact": "+18018983303",
+  "n_incomings": 10,
+  "source": "synthetic",
+  "on_wins": 3,
+  "off_wins": 6,
+  "errors": 1,
+  "on_win_rate_pct": 33.3,
+  "decided": 9,
+  "trials": [
+    {
+      "incoming": "hey whats up",
+      "on": "Actually, looking at the history, it seems like a simulated chat. The user is playing the other person saying \"hey whats up\".",
+      "off": "\"not much, just",
+      "winner": "off",
+      "secs": 110.7
+    },
+    {
+      "incoming": "want to grab dinner tonight?",
+      "on": "Seth is at home with his cat on a Sunday evening (7",
+      "off": "\"already eating,",
+      "winner": "off",
+      "secs": 142.9
+    },
+    {
+      "incoming": "I got the job!!",
+      "on": "Mother.",
+      "off": "All lowercase? Yes (Rule 2",
+      "winner": "on",
+      "secs": 110.8
+    },
+    {
+      "incoming": "I'm so stressed about this deadline",
+      "on": "\"",
+      "off": "*",
+      "winner": "off",
+      "secs": 116.9
+    },
+    {
+      "incoming": "did you see that game last night",
+      "on": "Did Seth see",
+      "off": "Seth needs to respond as a",
+      "winner": "on",
+      "secs": 122.9
+    },
+    {
+      "incoming": "can you help me move this weekend",
+      "on": "*Draft 1:* I'm in Pennsylvania, Mom. How would that even work?",
+      "off": "*",
+      "winner": "off",
+      "secs": 109.6
+    },
+    {
+      "incoming": "I've been thinking about switching careers",
+      "on": "Lower",
+      "off": "React emotionally first",
+      "winner": "on",
+      "secs": 126.2
+    },
+    {
+      "incoming": "lol remember that time we got lost in SF",
+      "on": "*",
+      "off": "\"ha yeah we were completely",
+      "winner": "off",
+      "secs": 119.9
+    },
+    {
+      "incoming": "happy birthday!!",
+      "on": "\"All lowercase unless SHOUTING",
+      "off": "\"",
+      "winner": "off",
+      "secs": 108.0
+    },
+    {
+      "incoming": "sorry I've been MIA lately",
+      "on": "Rule",
+      "off": "*",
+      "winner": null,
+      "secs": 131.1
+    }
+  ]
+}

@@ -5,6 +5,7 @@
 
 #include "human/ml/lora_nightly.h"
 
+#include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/ml/lora_export.h"
 #include "human/ml/lora_subprocess.h"
@@ -33,6 +34,8 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
     snprintf(cfg->adapters_dir, sizeof(cfg->adapters_dir), "%s/.human/adapters", home);
     snprintf(cfg->current_symlink, sizeof(cfg->current_symlink), "%s/.human/adapter-current", home);
     snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), "http://127.0.0.1:8741/v1");
+    snprintf(cfg->gate_verdict_path, sizeof(cfg->gate_verdict_path), "%s/.human/blind_ab_gate.json",
+             home);
     /* Default base model — same as the M3 runbook example. Users on
      * different hardware (more/less VRAM) should override via the
      * struct or via the future daemon config block. */
@@ -49,6 +52,88 @@ bool hu_lora_nightly_should_run(int64_t now_unix, int64_t last_run_unix, int32_t
     if (last_run_unix == 0)
         return true;
     return (now_unix - last_run_unix) >= HU_LORA_NIGHTLY_MIN_INTERVAL_SEC;
+}
+
+/* ── blind-A/B gate verdict parsing ────────────────────────────────── */
+
+hu_lora_gate_verdict_t hu_lora_gate_verdict_parse(const char *json, size_t len) {
+    if (!json || len == 0 || len > 16384)
+        return HU_LORA_GATE_ABSENT;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(&alloc, json, len, &root);
+    if (err != HU_OK || !root)
+        return HU_LORA_GATE_ABSENT;
+
+    /* Navigate to "human" → "verdict". */
+    hu_json_value_t *human_obj = hu_json_object_get(root, "human");
+    if (!human_obj || human_obj->type != HU_JSON_OBJECT) {
+        hu_json_free(&alloc, root);
+        return HU_LORA_GATE_ABSENT;
+    }
+
+    const char *verdict_str = hu_json_get_string(human_obj, "verdict");
+    if (!verdict_str) {
+        hu_json_free(&alloc, root);
+        return HU_LORA_GATE_ABSENT;
+    }
+
+    /* Map verdict string to enum. */
+    hu_lora_gate_verdict_t result = HU_LORA_GATE_ABSENT;
+    if (strcmp(verdict_str, "PASS") == 0) {
+        result = HU_LORA_GATE_PASS;
+    } else if (strcmp(verdict_str, "FAIL") == 0) {
+        result = HU_LORA_GATE_FAIL;
+    }
+    /* Any other value (including "INCONCLUSIVE") → ABSENT (fail-safe). */
+
+    hu_json_free(&alloc, root);
+    return result;
+}
+
+hu_lora_gate_verdict_t hu_lora_gate_verdict_from_file(const char *path) {
+    if (!path || !*path)
+        return HU_LORA_GATE_ABSENT;
+
+    /* Read file with a bounded size cap. */
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return HU_LORA_GATE_ABSENT;
+
+    char buf[16384];
+    size_t nread = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+
+    if (nread == 0)
+        return HU_LORA_GATE_ABSENT;
+
+    buf[nread] = '\0';
+    return hu_lora_gate_verdict_parse(buf, nread);
+}
+
+/* Freshness guard (adversarial-review finding 2026-06-10): a verdict file
+ * left over from a PREVIOUS measurement must not promote a NEWER adapter it
+ * never judged. Pure predicate: the verdict counts only when its mtime is
+ * at or after the adapter's mtime; otherwise the caller demotes it to
+ * ABSENT (→ HOLD by default). */
+bool hu_lora_gate_verdict_fresh(int64_t verdict_mtime, int64_t adapter_mtime) {
+    return verdict_mtime >= adapter_mtime;
+}
+
+/* ── measurement-gated promotion (pure) ─────────────────────────────── */
+
+hu_lora_promotion_decision_t hu_lora_nightly_promotion_allowed(bool adapter_valid,
+                                                               hu_lora_gate_verdict_t measurement,
+                                                               bool allow_unmeasured) {
+    if (!adapter_valid)
+        return HU_LORA_PROMOTE_REJECT;
+    if (measurement == HU_LORA_GATE_FAIL)
+        return HU_LORA_PROMOTE_REJECT;
+    if (measurement == HU_LORA_GATE_PASS)
+        return HU_LORA_PROMOTE_LIVE;
+    /* measurement == ABSENT */
+    return allow_unmeasured ? HU_LORA_PROMOTE_LIVE : HU_LORA_PROMOTE_HOLD;
 }
 
 /* ── atomic symlink rotation ────────────────────────────────────────── */
@@ -100,6 +185,33 @@ static bool pick_next_version_dir(const char *adapters_dir, char *out, size_t ca
     return false;
 }
 
+/* ── KTO auto-train handoff ─────────────────────────────────────────── */
+
+hu_error_t hu_lora_nightly_write_kto_pending(const char *kto_jsonl_path, size_t signal_count,
+                                             int64_t now_unix) {
+    if (!kto_jsonl_path || !*kto_jsonl_path || signal_count == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char pending_path[HU_LORA_NIGHTLY_PATH_MAX];
+    int n = snprintf(pending_path, sizeof(pending_path), "%s.pending", kto_jsonl_path);
+    if (n <= 0 || (size_t)n >= sizeof(pending_path))
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char tmp_path[HU_LORA_NIGHTLY_PATH_MAX + 8];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", pending_path);
+    FILE *f = fopen(tmp_path, "w");
+    if (!f)
+        return HU_ERR_IO;
+    fprintf(f, "{\"data\":\"%s\",\"signals\":%zu,\"exported_unix\":%lld}\n", kto_jsonl_path,
+            signal_count, (long long)now_unix);
+    fclose(f);
+    if (rename(tmp_path, pending_path) != 0) {
+        remove(tmp_path);
+        return HU_ERR_IO;
+    }
+    return HU_OK;
+}
+
 /* ── end-to-end orchestrator ────────────────────────────────────────── */
 
 hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_config_t *cfg,
@@ -125,7 +237,34 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
     if (out_pair_count)
         *out_pair_count = count;
     if (count == 0) {
-        hu_log_info("lora-nightly", NULL, "no pairs to train on — skipping");
+        /* No fresh DPO pairs. Fall back to the single-sided reaction signal:
+         * export feedback_signals to KTO training data so the loop is no
+         * longer starved (the previously-severed link — reactions are
+         * single-sided and dpo_export drops them). We do NOT auto-launch the
+         * trainer here: co-running a 31B train with the live MLX server OOMs
+         * the box (verified 2026-06-06), so the KTO train is a deliberate
+         * windowed step. Surfacing the ready data + the exact command is what
+         * closes the loop safely. */
+        char kto_path[HU_LORA_NIGHTLY_PATH_MAX];
+        int kn = snprintf(kto_path, sizeof(kto_path), "%s.kto.jsonl", cfg->pairs_jsonl_path);
+        size_t kto_count = 0;
+        if (kn > 0 && (size_t)kn < sizeof(kto_path)) {
+            hu_error_t ke = hu_lora_export_kto_signals(alloc, cfg->db_path, kto_path, 0, &kto_count);
+            if (ke == HU_OK && kto_count > 0) {
+                /* Hand off to the maintenance-window trainer instead of
+                 * launching here (co-training a 31B with the live server
+                 * OOMs the box — see hu_lora_nightly_write_kto_pending). */
+                hu_error_t pe = hu_lora_nightly_write_kto_pending(kto_path, kto_count, now_unix);
+                hu_log_info("lora-nightly", NULL,
+                            "no DPO pairs, but exported %zu single-sided reaction signals to %s — "
+                            "%s (kto-train-window consumes %s.pending at 04:40; manual: "
+                            "`human ml kto-train --pairs %s --backend mlx`)",
+                            kto_count, kto_path,
+                            pe == HU_OK ? "pending marker written" : "pending marker write FAILED",
+                            kto_path, kto_path);
+            }
+        }
+        hu_log_info("lora-nightly", NULL, "no DPO pairs to train on — skipping nightly train");
         return HU_ERR_NOT_FOUND;
     }
     hu_log_info("lora-nightly", NULL, "exported %zu pairs to %s", count, cfg->pairs_jsonl_path);
@@ -196,6 +335,47 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
     int an = snprintf(adapter_file, sizeof(adapter_file), "%s/adapters.safetensors", next_dir);
     if (an < 0 || (size_t)an >= sizeof(adapter_file))
         return HU_ERR_IO;
+
+    /* Measurement-gated promotion. A freshly-trained adapter is NOT swapped
+     * onto the live server unconditionally — a degenerate/regressing train
+     * (e.g. the loss-collapse over-fit seen 2026-06-06) would otherwise poison
+     * production. The blind-A/B verdict is read from the gate file; if not
+     * present (ABSENT), the adapter is HELD unless the operator opts in. */
+    struct stat ast;
+    bool adapter_valid = (stat(adapter_file, &ast) == 0) && ast.st_size > 0;
+    const char *unmeasured_env = getenv("HU_LORA_ALLOW_UNMEASURED_PROMOTION");
+    bool allow_unmeasured = unmeasured_env && *unmeasured_env && strcmp(unmeasured_env, "0") != 0 &&
+                            strcmp(unmeasured_env, "off") != 0;
+    hu_lora_gate_verdict_t gate_verdict = hu_lora_gate_verdict_from_file(cfg->gate_verdict_path);
+    /* Freshness guard: a verdict file written BEFORE this adapter existed
+     * judged a previous adapter — it must not promote (or reject) this one.
+     * Stale verdict demotes to ABSENT → default HOLD until re-measured. */
+    if (gate_verdict != HU_LORA_GATE_ABSENT && adapter_valid) {
+        struct stat gst;
+        if (stat(cfg->gate_verdict_path, &gst) != 0 ||
+            !hu_lora_gate_verdict_fresh((int64_t)gst.st_mtime, (int64_t)ast.st_mtime)) {
+            hu_log_info("lora-nightly", NULL,
+                        "blind-A/B verdict is STALE (predates the new adapter) — treating as "
+                        "ABSENT; re-run the measurement against %s",
+                        adapter_file);
+            gate_verdict = HU_LORA_GATE_ABSENT;
+        }
+    }
+    hu_lora_promotion_decision_t decision =
+        hu_lora_nightly_promotion_allowed(adapter_valid, gate_verdict, allow_unmeasured);
+    hu_log_info("lora-nightly", NULL, "blind-A/B gate verdict: %s",
+                (gate_verdict == HU_LORA_GATE_PASS) ? "PASS"
+                : (gate_verdict == HU_LORA_GATE_FAIL) ? "FAIL"
+                : "ABSENT");
+    if (decision != HU_LORA_PROMOTE_LIVE) {
+        hu_log_info(
+            "lora-nightly", NULL,
+            "promotion %s: adapter %s staged but NOT swapped to live (no passing blind-A/B "
+            "measurement). Run the gate, or set HU_LORA_ALLOW_UNMEASURED_PROMOTION=1 to opt in.",
+            decision == HU_LORA_PROMOTE_REJECT ? "REJECTED" : "HELD", adapter_file);
+        (void)now_unix;
+        return HU_OK; /* rotation succeeded; live swap deliberately withheld */
+    }
 
     hu_mlx_admin_swap_result_t res;
     memset(&res, 0, sizeof(res));

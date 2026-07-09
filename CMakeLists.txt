@@ -1237,6 +1237,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
+    src/daemon/daemon_promise_keeper.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -3204,6 +3205,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract_llm.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
+    tests/test_personal_model_llm_extract.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-
@@ -3353,6 +3355,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_daemon_promise_keeper.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_proactive_policy.c

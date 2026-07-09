@@ -208,6 +208,11 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     out->body_cap = w.cap;
     out->status_code = status;
     out->owned = true;
+    if (status < 200 || status >= 300) {
+        int head = w.len > 200 ? 200 : (int)w.len;
+        hu_log_warn("http", NULL, "HTTP %ld from %s — body head: %.*s", status, url, head,
+                    w.buf ? w.buf : "");
+    }
     return HU_OK;
 }
 
@@ -279,6 +284,16 @@ static hu_error_t hu_http_get_ex_impl(hu_allocator_t *alloc, const char *url,
     out->body_cap = w.cap;
     out->status_code = status;
     out->owned = true;
+    /* Operator visibility on provider errors (2026-07-05): the June
+     * initiative LLM_ERROR took a month + a debug hook to diagnose because
+     * non-2xx responses were swallowed silently here. Log status + a bounded
+     * head of the RESPONSE body (server-produced error text; request
+     * auth/secrets never appear in it). */
+    if (status < 200 || status >= 300) {
+        int head = w.len > 200 ? 200 : (int)w.len;
+        hu_log_warn("http", NULL, "HTTP %ld from %s — body head: %.*s", status, url, head,
+                    w.buf ? w.buf : "");
+    }
     return HU_OK;
 }
 
@@ -377,6 +392,11 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
     out->body_cap = w.cap;
     out->status_code = status;
     out->owned = true;
+    if (status < 200 || status >= 300) {
+        int head = w.len > 200 ? 200 : (int)w.len;
+        hu_log_warn("http", NULL, "HTTP %ld from %s — body head: %.*s", status, url, head,
+                    w.buf ? w.buf : "");
+    }
     return HU_OK;
 }
 
@@ -590,6 +610,11 @@ hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *m
     out->body_cap = w.cap;
     out->status_code = status;
     out->owned = true;
+    if (status < 200 || status >= 300) {
+        int head = w.len > 200 ? 200 : (int)w.len;
+        hu_log_warn("http", NULL, "HTTP %ld from %s — body head: %.*s", status, url, head,
+                    w.buf ? w.buf : "");
+    }
     return HU_OK;
 }
 #else

@@ -63,6 +63,7 @@
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
+#include "human/daemon/promise_keeper.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/intelligence_facade.h"
@@ -264,6 +265,20 @@ __attribute__((unused)) static const hu_autoresponder_config_t *daemon_autorespo
         g_autoresponder_cfg.allowlist_count == 0)
         return NULL;
     return &g_autoresponder_cfg;
+}
+
+/* Local-timezone offset for autoresponder DND window math. The proactive
+ * call sites previously hardcoded tz_offset_seconds=0, so the 22:00-07:00
+ * DND schedule was evaluated in UTC — gating 18:00-03:00 EDT, i.e. every
+ * evening (the "~50% GATED_QUIET with no apparent reason" bug, root-caused
+ * 2026-06-10: GATED_QUIET fired at 20:22 local because 00:22 UTC is inside
+ * the window). Mirrors the tm_gmtoff use in the feeds path above. */
+__attribute__((unused)) static int32_t daemon_local_tz_offset_seconds(int64_t now_unix) {
+    time_t t = (time_t)now_unix;
+    struct tm lt;
+    if (!localtime_r(&t, &lt))
+        return 0;
+    return (int32_t)lt.tm_gmtoff;
 }
 
 /* Emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
@@ -1090,6 +1105,32 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                        strlen(cp->contact_id), &extract_result,
                                                        (int64_t)now);
                     }
+                    /* Mirror entity-linked events into the knowledge graph so the
+                     * anticipatory reader (hu_memory_facade_query_temporal ->
+                     * anticipatory.c) sees the upcoming timeline. The graph
+                     * temporal writer was previously dead — only the reader was
+                     * wired — so anticipatory memory was blind to scheduled
+                     * events. Reuse the regex event extractor that already fills
+                     * memory.db above. */
+                    hu_memory_facade_t *gm =
+                        agent->w7_facade ? hu_w7_facade_memory_handle(agent->w7_facade) : NULL;
+                    if (gm) {
+                        size_t cid_len = strlen(cp->contact_id);
+                        for (size_t ei = 0; ei < extract_result.event_count; ei++) {
+                            const hu_extracted_event_t *ev = &extract_result.events[ei];
+                            if (!ev->description || ev->description_len == 0 || ev->confidence < 0.3)
+                                continue;
+                            int64_t resolved = 0;
+                            if (ev->temporal_ref && ev->temporal_ref_len > 0)
+                                resolved = hu_temporal_resolve_reference(
+                                    ev->temporal_ref, ev->temporal_ref_len, (int64_t)now);
+                            if (resolved <= 0)
+                                continue; /* graph timeline keys on occurred_at */
+                            (void)hu_memory_facade_add_temporal_event(
+                                gm, cp->contact_id, cid_len, ev->description, ev->description_len,
+                                resolved, 0);
+                        }
+                    }
                 }
 #endif
                 hu_event_extract_result_deinit(&extract_result, alloc);
@@ -1561,6 +1602,45 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     inputs.memory_context_len = unified_mem_ctx_len;
                     inputs.content_is_safe = hu_daemon_callback_content_is_safe;
 
+                    /* Producer for the due_followups field: surface THIS
+                     * contact's due delayed follow-ups (scheduled when a
+                     * commitment with a deadline was stored) as a labeled
+                     * context section, so the proposer has a CONCRETE
+                     * trigger to fire on instead of generic pondering.
+                     * Items are listed (not marked sent) — mark-sent stays
+                     * tied to an actual send (the F31 path at the send
+                     * site), so an unsent item correctly reappears. */
+                    char due_fu_buf[640];
+                    due_fu_buf[0] = '\0';
+                    if (agent->memory) {
+                        hu_delayed_followup_t *due_arr = NULL;
+                        size_t due_n = 0;
+                        if (hu_superhuman_delayed_followup_list_due(agent->memory, alloc,
+                                                                    (int64_t)now, &due_arr,
+                                                                    &due_n) == HU_OK &&
+                            due_arr && due_n > 0) {
+                            size_t pos = 0;
+                            size_t listed = 0;
+                            for (size_t fi = 0; fi < due_n && listed < 4; fi++) {
+                                if (strcmp(due_arr[fi].contact_id, cp->contact_id) != 0)
+                                    continue;
+                                int w = snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
+                                                 "- %s (due %llds ago)\n", due_arr[fi].topic,
+                                                 (long long)((int64_t)now -
+                                                             due_arr[fi].scheduled_at));
+                                if (w <= 0 || (size_t)w >= sizeof(due_fu_buf) - pos)
+                                    break;
+                                pos += (size_t)w;
+                                listed++;
+                            }
+                            if (pos > 0) {
+                                inputs.due_followups_context = due_fu_buf;
+                                inputs.due_followups_context_len = pos;
+                            }
+                            hu_superhuman_delayed_followup_free(alloc, due_arr, due_n);
+                        }
+                    }
+
                     int64_t unified_last_tick = 0;
                     uint64_t unified_tick_id = 0;
                     hu_init_proposer_result_t unified_result = HU_INIT_RESULT_SKIP;
@@ -1568,7 +1648,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     memset(&unified_decision, 0, sizeof(unified_decision));
                     (void)hu_init_proposer_tick_with_provider_ex(
                         &config->initiative, daemon_autoresponder_config(),
-                        /*tz_offset_seconds=*/0, &gov_budget, agent, &agent->provider, alloc,
+                        daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent, &agent->provider, alloc,
                         &inputs, /*last_inbound_unix=*/0, (int64_t)now, &unified_last_tick,
                         &unified_tick_id, &unified_result, &unified_decision);
 
@@ -1618,7 +1698,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     if (!skip) {
                         hu_init_proposer_result_t gate = hu_init_proposer_governor_check_only(
                             /*cfg=*/NULL, daemon_autoresponder_config(),
-                            /*tz_offset_seconds=*/0, &gov_budget,
+                            daemon_local_tz_offset_seconds((int64_t)now), &gov_budget,
                             /*last_inbound_unix=*/0, (int64_t)now);
                         if (gate != HU_INIT_RESULT_SKIP) {
                             const char *why =
@@ -2340,6 +2420,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * NOT an error — we log at info level and leave the reaction handler
      * un-wired, which preserves the prior "no canonicalization" behavior.
      * Only actual parse failures escalate to a warning. */
+
+    /* Inject the LLM fact-extraction fallback into the personal model. The
+     * regex fast-path misses casual/indirect text ("Did you not get the
+     * email?"), starving the knowledge graph; this borrow lets
+     * hu_personal_model_ingest fall back to the local provider when the regex
+     * pass finds nothing. Gated OFF by default via HU_LLM_FACT_EXTRACT —
+     * activation gated on the blind A/B per feature-gate-requires-measurement.
+     * Local provider keeps extraction on-device (privacy by architecture). */
+    if (agent && agent->provider.vtable) {
+        hu_personal_model_set_llm_extractor(alloc, &agent->provider, agent->model_name,
+                                            agent->model_name_len);
+    }
+
     {
         const char *home = getenv("HOME");
         char ident_path[1024];
@@ -5964,6 +6057,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (void)hu_superhuman_commitment_store(
                             agent->memory, alloc, batch_key, key_len, desc_buf,
                             (size_t)strlen(desc_buf), who_buf, (size_t)strlen(who_buf), deadline);
+                        /* Wire commitment deadline → delayed_followup_schedule so the
+                         * commitment becomes a concrete trigger in the proactive proposer's context.
+                         * The scheduled time is the deadline itself; the proposer will list due
+                         * followups and surface them as a triggering signal (F25-2 concrete triggers).
+                         * If deadline is unset (≤ now), schedule immediately. */
+                        if (deadline > 0) {
+                            (void)hu_superhuman_delayed_followup_schedule(
+                                agent->memory, alloc, batch_key, key_len, desc_buf,
+                                (size_t)strlen(desc_buf), deadline);
+                        }
                     }
                     /* F24: Growth celebration — detect positive outcomes, store for later reference
                      */
@@ -12870,6 +12973,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 #endif
+#ifdef HU_ENABLE_SQLITE
+                        /* F25b: Promise-keeper outbound scan — one scan of the final
+                         * reply before the choreo/fragment split covers every bubble
+                         * path. HU_PROMISE_KEEPER gated OFF by default; see
+                         * src/daemon/daemon_promise_keeper.c. */
+                        if (agent && agent->memory && send_len > 0)
+                            (void)hu_daemon_promise_keeper_scan_outbound(
+                                agent->memory, alloc, batch_key, key_len, send_ptr, send_len,
+                                hu_promise_keeper_mode_from_env(getenv("HU_PROMISE_KEEPER")),
+                                agent->observer, NULL);
+#endif
                         /* Split response into natural multi-message fragments */
                         uint32_t split_max = 0;
                         if (ch->channel->vtable->get_response_constraints) {
@@ -14401,7 +14515,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_init_decision_t init_decision;
             memset(&init_decision, 0, sizeof(init_decision));
             (void)hu_init_proposer_tick_with_provider(
-                &config->initiative, ar_cfg_init, /*tz_offset_seconds=*/0, &gov_budget, agent,
+                &config->initiative, ar_cfg_init, daemon_local_tz_offset_seconds(now_unix_init), &gov_budget, agent,
                 agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
                 &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
 

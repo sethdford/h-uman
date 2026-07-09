@@ -851,6 +851,7 @@ void run_daemon_cron_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+void run_daemon_promise_keeper_tests(void);
 void run_daemon_reply_fallback_tests(void);
 void run_reply_dedup_tests(void);
 void run_proactive_policy_tests(void);
@@ -888,6 +889,7 @@ void run_dpo_extractor_integration_tests(void);
 void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
+void run_personal_model_llm_extract_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
@@ -1833,6 +1835,7 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+    run_daemon_promise_keeper_tests();
     run_daemon_reply_fallback_tests();
     run_reply_dedup_tests();
     run_proactive_policy_tests();
@@ -1860,6 +1863,7 @@ int main(int argc, char **argv) {
     run_fact_extract_llm_tests();
     run_fact_extract_tests();
     run_personal_model_tests();
+    run_personal_model_llm_extract_tests();
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
