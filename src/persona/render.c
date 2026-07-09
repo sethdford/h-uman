@@ -317,12 +317,20 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
 
 void hu_persona_steering_coeffs(const char *formality, const char *avg_length, double tier_scale,
                                 double *out_formality, double *out_verbosity) {
-    double f = 0.0, v = 0.0;
-    /* Only the two traits the Phase-2 activation-steering sweep validated are
-     * mapped: verbosity (monotonic) and formality (directional). warmth/humor
-     * stay unset pending better validation. Word-boundary matching avoids the
-     * "informal" ⊃ "formal" trap (substring-classifier-pitfalls.md): check
-     * casual BEFORE formal. */
+    /* Delegate to v2, omitting warmth/humor for backward compat. */
+    hu_persona_steering_coeffs_v2(formality, avg_length, NULL, NULL, tier_scale,
+                                  out_formality, out_verbosity, NULL, NULL);
+}
+
+void hu_persona_steering_coeffs_v2(const char *formality, const char *avg_length,
+                                   const char *warmth_config, const char *humor_config,
+                                   double tier_scale, double *out_formality, double *out_verbosity,
+                                   double *out_warmth, double *out_humor) {
+    double f = 0.0, v = 0.0, w = 0.0, h = 0.0;
+
+    /* Phase-2 validated traits: verbosity and formality.
+     * Word-boundary matching avoids the "informal" ⊃ "formal" trap
+     * (substring-classifier-pitfalls.md): check casual BEFORE formal. */
     if (formality && *formality) {
         if (hu_str_contains_word_ci(formality, "casual") ||
             hu_str_contains_word_ci(formality, "informal") ||
@@ -343,18 +351,57 @@ void hu_persona_steering_coeffs(const char *formality, const char *avg_length, d
                  hu_str_contains_word_ci(avg_length, "verbose"))
             v = 0.6;
     }
+
+    /* Phase-6 traits: warmth and humor. Same word-boundary matching discipline. */
+    if (warmth_config && *warmth_config) {
+        /* Warmth keywords: measure closeness/empathy */
+        if (hu_str_contains_word_ci(warmth_config, "cold") ||
+            hu_str_contains_word_ci(warmth_config, "distant") ||
+            hu_str_contains_word_ci(warmth_config, "detached"))
+            w = -0.6;
+        else if (hu_str_contains_word_ci(warmth_config, "warm") ||
+                 hu_str_contains_word_ci(warmth_config, "close") ||
+                 hu_str_contains_word_ci(warmth_config, "empathetic") ||
+                 hu_str_contains_word_ci(warmth_config, "caring"))
+            w = 0.6;
+    }
+    if (humor_config && *humor_config) {
+        /* Humor keywords: presence/absence and style */
+        if (hu_str_contains_word_ci(humor_config, "none") ||
+            hu_str_contains_word_ci(humor_config, "minimal") ||
+            hu_str_contains_word_ci(humor_config, "serious"))
+            h = -0.6; /* minimize humor */
+        else if (hu_str_contains_word_ci(humor_config, "frequent") ||
+                 hu_str_contains_word_ci(humor_config, "playful") ||
+                 hu_str_contains_word_ci(humor_config, "joking") ||
+                 hu_str_contains_word_ci(humor_config, "dry") ||
+                 hu_str_contains_word_ci(humor_config, "witty"))
+            h = 0.6;
+    }
+
     /* tier_scale damps steering on casual/reflexive turns. Clamp the product to
      * the measured capability-safe envelope [-1, 1] (Phase-2 sweep). */
     if (tier_scale < 0.0)
         tier_scale = 0.0;
     f *= tier_scale;
     v *= tier_scale;
+    w *= tier_scale;
+    h *= tier_scale;
+
+    /* Clamp all to [-1, 1]. */
     f = f > 1.0 ? 1.0 : (f < -1.0 ? -1.0 : f);
     v = v > 1.0 ? 1.0 : (v < -1.0 ? -1.0 : v);
+    w = w > 1.0 ? 1.0 : (w < -1.0 ? -1.0 : w);
+    h = h > 1.0 ? 1.0 : (h < -1.0 ? -1.0 : h);
+
     if (out_formality)
         *out_formality = f;
     if (out_verbosity)
         *out_verbosity = v;
+    if (out_warmth)
+        *out_warmth = w;
+    if (out_humor)
+        *out_humor = h;
 }
 
 /* --- Public entry point --------------------------------------------------- */

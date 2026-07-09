@@ -173,6 +173,10 @@ static void free_overlay(hu_allocator_t *alloc, hu_persona_overlay_t *ov) {
         size_t len = strlen(ov->directness);
         alloc->free(alloc->ctx, ov->directness, len + 1);
     }
+    if (ov->warmth) {
+        size_t len = strlen(ov->warmth);
+        alloc->free(alloc->ctx, ov->warmth, len + 1);
+    }
     if (ov->face_saving) {
         size_t len = strlen(ov->face_saving);
         alloc->free(alloc->ctx, ov->face_saving, len + 1);
@@ -1210,6 +1214,12 @@ static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
     if (s) {
         ov->directness = hu_strdup(a, s);
         if (!ov->directness)
+            goto ov_oom;
+    }
+    s = hu_json_get_string(obj, "warmth");
+    if (s) {
+        ov->warmth = hu_strdup(a, s);
+        if (!ov->warmth)
             goto ov_oom;
     }
     s = hu_json_get_string(obj, "face_saving");

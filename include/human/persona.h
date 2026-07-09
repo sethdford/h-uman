@@ -33,6 +33,11 @@ typedef struct hu_persona_overlay {
     size_t typing_quirks_count;
     /* B15: explicit user-stated pragmatics only (never inferred). */
     char *directness;
+    /* Warmth register for this channel ("warm", "cold", "caring", ...) —
+     * the source for steer_warmth (2026-07-05: previously steering fell
+     * back to `directness`, whose values never contain warmth keywords,
+     * so the warmth trait was live-but-inert). */
+    char *warmth;
     char *face_saving;
     char *disagreement_style;
     char *silence_tolerance;
@@ -728,12 +733,24 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
                                            const char *contact_warmth);
 
 /* Map persona overlay traits to activation-steering coefficients for the local
- * model's residual stream. Only verbosity (avg_length) and formality are mapped
- * — the traits the Phase-2 steering sweep validated; both outputs are clamped to
- * the measured capability-safe range [-1, 1]. tier_scale (>=0) damps magnitude
+ * model's residual stream. Verbosity (avg_length) and formality are from the
+ * Phase-2 validated sweep; warmth and humor are Phase 6. All outputs are clamped
+ * to the measured capability-safe range [-1, 1]. tier_scale (>=0) damps magnitude
  * for casual/reflexive turns. Pure + NULL-safe; out pointers may be NULL. */
 void hu_persona_steering_coeffs(const char *formality, const char *avg_length, double tier_scale,
                                 double *out_formality, double *out_verbosity);
+
+/* Extended version: also computes warmth and humor coefficients.
+ * formality, avg_length: string keywords ("casual", "brief", "verbose", etc.)
+ * warmth_config, humor_config: persona/overlay config strings (type, frequency, etc.)
+ * tier_scale: damp factor per turn tier (causal=lower, analytical=full)
+ * All output pointers are optional (NULL safe).
+ * Warmth: from keywords in warmth_config ("close", "warm", "empathetic", etc.) [-1, 1]
+ * Humor: from keywords in humor_config ("frequent", "dry", "playful", "none", etc.) [-1, 1] */
+void hu_persona_steering_coeffs_v2(const char *formality, const char *avg_length,
+                                   const char *warmth_config, const char *humor_config,
+                                   double tier_scale, double *out_formality, double *out_verbosity,
+                                   double *out_warmth, double *out_humor);
 
 /* Render variant that takes a contact's warmth_level string. The renderer
  * uses hu_persona_effective_formality(overlay->formality, contact_warmth)

@@ -4487,11 +4487,13 @@ static void test_persona_chronotype_and_pragmatics_overlay_prompt(void) {
         "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
         "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
         "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
+        "\"warmth\":\"warm\","
         "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
     HU_ASSERT_EQ((int)p.chronotype, (int)HU_CHRONO_EVENING_OWL);
     HU_ASSERT_EQ(p.overlays_count, 1u);
     HU_ASSERT_STR_EQ(p.overlays[0].directness, "low");
+    HU_ASSERT_STR_EQ(p.overlays[0].warmth, "warm");
     HU_ASSERT_STR_EQ(p.overlays[0].face_saving, "high");
     HU_ASSERT_STR_EQ(p.overlays[0].disagreement_style, "indirect");
     HU_ASSERT_STR_EQ(p.overlays[0].silence_tolerance, "high");

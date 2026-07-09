@@ -1583,13 +1583,22 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             const hu_persona_overlay_t *steer_ov = hu_persona_find_overlay(
                 agent->persona, agent->active_channel, agent->active_channel_len);
             if (steer_ov) {
-                double sf = 0.0, sv = 0.0;
-                hu_persona_steering_coeffs(steer_ov->formality, steer_ov->avg_length, 1.0, &sf,
-                                           &sv);
-                if (sf != 0.0 || sv != 0.0) {
+                double sf = 0.0, sv = 0.0, sw = 0.0, sh = 0.0;
+                /* Gather warmth config from overlay (or persona default if not set per-channel).
+                 * Humor comes from persona.humor profile if available. */
+                const char *warmth_cfg = steer_ov->warmth ? steer_ov->warmth : steer_ov->directness;
+                const char *humor_cfg = NULL;
+                if (agent->persona && agent->persona->humor.frequency)
+                    humor_cfg = agent->persona->humor.frequency;
+                hu_persona_steering_coeffs_v2(steer_ov->formality, steer_ov->avg_length,
+                                              warmth_cfg, humor_cfg, 1.0,
+                                              &sf, &sv, &sw, &sh);
+                if (sf != 0.0 || sv != 0.0 || sw != 0.0 || sh != 0.0) {
                     req.steering_present = true;
                     req.steer_formality = sf;
                     req.steer_verbosity = sv;
+                    req.steer_warmth = sw;
+                    req.steer_humor = sh;
                 }
             }
         }
