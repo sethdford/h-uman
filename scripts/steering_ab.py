@@ -97,6 +97,32 @@ SYNTHETIC_INCOMINGS = [
 ]
 
 
+
+
+# 20-question capability quiz — ensures steering doesn't degrade reasoning/recall
+CAPABILITY_QUIZ = [
+    {"q": "What is the capital of France?", "opts": ["London", "Paris", "Berlin", "Rome"], "ans": "B"},
+    {"q": "What is 7 × 8?", "opts": ["54", "56", "58", "60"], "ans": "B"},
+    {"q": "What does DNA stand for?", "opts": ["Deoxyribonucleic Acid", "Dynamic Nuclear Assembly", "Deoxyribose Nucleotide Array", "Diatomic Nitrogen Acceptor"], "ans": "A"},
+    {"q": "Who wrote Romeo and Juliet?", "opts": ["Jane Austen", "William Shakespeare", "John Milton", "Christopher Marlowe"], "ans": "B"},
+    {"q": "What is the chemical symbol for gold?", "opts": ["Go", "Gd", "Au", "Ag"], "ans": "C"},
+    {"q": "Which planet is closest to the sun?", "opts": ["Venus", "Mercury", "Mars", "Earth"], "ans": "B"},
+    {"q": "What is the square root of 144?", "opts": ["10", "11", "12", "13"], "ans": "C"},
+    {"q": "In what year did World War II end?", "opts": ["1943", "1944", "1945", "1946"], "ans": "C"},
+    {"q": "What is the largest ocean on Earth?", "opts": ["Atlantic", "Indian", "Arctic", "Pacific"], "ans": "D"},
+    {"q": "What is the atomic number of Carbon?", "opts": ["4", "6", "8", "12"], "ans": "B"},
+    {"q": "Which continent is Egypt in?", "opts": ["Asia", "Africa", "Europe", "Australia"], "ans": "B"},
+    {"q": "What is the speed of light approximately?", "opts": ["300,000 km/s", "150,000 km/s", "500,000 km/s", "1,000,000 km/s"], "ans": "A"},
+    {"q": "Who painted the Mona Lisa?", "opts": ["Michelangelo", "Leonardo da Vinci", "Raphael", "Donatello"], "ans": "B"},
+    {"q": "What is the largest country by area?", "opts": ["Canada", "China", "Russia", "USA"], "ans": "C"},
+    {"q": "What is 15 + 28?", "opts": ["41", "42", "43", "44"], "ans": "C"},
+    {"q": "What is the main gas in the Earth's atmosphere?", "opts": ["Oxygen", "Carbon dioxide", "Nitrogen", "Argon"], "ans": "C"},
+    {"q": "What does HTML stand for?", "opts": ["Hypertext Markup Language", "High Tech Modern Layout", "Home Tool Markup Language", "Hyperlink Typed Markup Language"], "ans": "A"},
+    {"q": "What is the capital of Japan?", "opts": ["Osaka", "Tokyo", "Kyoto", "Hiroshima"], "ans": "B"},
+    {"q": "Which vitamin is produced by sun exposure?", "opts": ["Vitamin A", "Vitamin B", "Vitamin C", "Vitamin D"], "ans": "D"},
+    {"q": "What is the smallest prime number?", "opts": ["0", "1", "2", "3"], "ans": "C"},
+]
+
 def gen_reply(incoming, steering_dose, trait="warmth", timeout=180):
     """Generate a single reply with optional steering vector applied.
 
@@ -323,6 +349,66 @@ def load_incomings(n):
     return unique[:n]
 
 
+
+
+def run_capability_check(steered_dose, trait="warmth"):
+    """Run 20-question quiz on both OFF and steered arms. Return (off_score, steered_score, passed)."""
+    print(f"\n=== CAPABILITY CHECK (20 questions) ===")
+    print(f"Testing: OFF vs {trait}@{steered_dose:+.1f}")
+    print()
+
+    off_correct = 0
+    steered_correct = 0
+    
+    for i, q_data in enumerate(CAPABILITY_QUIZ):
+        q = q_data["q"]
+        opts = q_data["opts"]
+        correct_letter = q_data["ans"]
+        correct_idx = ord(correct_letter) - ord('A')
+        
+        # Generate answers for both arms
+        off_reply, _ = gen_reply(q, None, trait=trait, timeout=180)
+        steered_reply, _ = gen_reply(q, steered_dose, trait=trait, timeout=180)
+        
+        if not off_reply or not steered_reply:
+            print(f"[{i+1}/20] gen-fail (off={bool(off_reply)} steered={bool(steered_reply)})")
+            continue
+        
+        # Extract answer letter from reply (look for single A/B/C/D letter surrounded by non-letter)
+        import re
+        off_match = re.search(r'\b([A-D])\b', off_reply.upper())
+        steered_match = re.search(r'\b([A-D])\b', steered_reply.upper())
+        
+        off_letter = off_match.group(1) if off_match else None
+        steered_letter = steered_match.group(1) if steered_match else None
+        
+        off_correct_here = (off_letter == correct_letter)
+        steered_correct_here = (steered_letter == correct_letter)
+        
+        if off_correct_here:
+            off_correct += 1
+        if steered_correct_here:
+            steered_correct += 1
+        
+        status = f"OFF={'✓' if off_correct_here else '✗'} STEERED={'✓' if steered_correct_here else '✗'}"
+        print(f"[{i+1}/20] {status}")
+    
+    off_pct = (off_correct / 20) * 100
+    steered_pct = (steered_correct / 20) * 100
+    delta = off_pct - steered_pct
+    
+    # FAIL criterion: steered accuracy >2 answers (10pp) below OFF
+    passed = delta <= 10  # i.e., steered within 10pp of OFF
+    
+    print(f"\n  OFF accuracy: {off_correct}/20 ({off_pct:.0f}%)")
+    print(f"  STEERED accuracy: {steered_correct}/20 ({steered_pct:.0f}%)")
+    print(f"  Delta (OFF - STEERED): {delta:.0f}pp")
+    print(f"  Threshold: ≤10pp")
+    print(f"  Result: {'PASS' if passed else 'FAIL'} (steered {'within' if passed else 'OUTSIDE'} 10pp of OFF)")
+    
+    return off_correct, steered_correct, passed
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20)
@@ -333,6 +419,8 @@ def main():
                          "with professional context), or 'formality' (FORMAL +dose vs OFF, formality vector)")
     ap.add_argument("--dose", type=float, default=None,
                     help="Steering dose (float in [-1,1]). Defaults: warmth +0.4, professional -0.5, formality +0.6")
+    ap.add_argument("--capability-check", action="store_true",
+                    help="Run 20-question knowledge quiz on both arms to verify steering doesn't degrade reasoning")
     args = ap.parse_args()
 
     n = 2 if args.pilot else args.n
@@ -355,6 +443,15 @@ def main():
             args.dose = -0.5  # Default cold dose for professional
         arm_label = f"COLD {args.dose}"
         experiment_type_label = "professional"
+
+    # Run capability check if requested
+    if args.capability_check:
+        off_correct, steered_correct, cap_passed = run_capability_check(args.dose, steer_trait)
+        if not cap_passed:
+            print(f"\n❌ CAPABILITY CHECK FAILED: steering degrades reasoning by >{10}pp")
+            print(f"   Aborting A/B test.")
+            return
+        print(f"\n✓ Capability check passed; proceeding with A/B test")
 
     incomings = load_incomings(n)
     print(f"steering A/B round 2: n={len(incomings)} source=synthetic (embedded)")
