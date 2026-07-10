@@ -169,9 +169,11 @@ def test_scope_stub_mode(srv):
 
 
 class _FakeTok:
-    """Tokenizer stub: resolves the two channel markers, nothing else."""
+    """Tokenizer stub: resolves the two channel markers and decodes a tiny
+    vocabulary (enough to distinguish a 'thought' header from content)."""
     unk_token_id = -1
     bos_token_id = 2
+    _VOCAB = {45518: "thought", 900: "final", 107: "\n", 42: " blah", 7: " y"}
 
     def __init__(self, has_markers=True):
         self._ids = {"<|channel>": 100, "<channel|>": 101} if has_markers else {}
@@ -182,6 +184,9 @@ class _FakeTok:
     def encode(self, text):
         return [self.bos_token_id, self._ids[text]] if text in self._ids \
             else [self.bos_token_id, 5, 6]
+
+    def decode(self, ids):
+        return "".join(self._VOCAB.get(t, "?") for t in ids)
 
 
 def test_thought_gate(srv):
@@ -195,27 +200,78 @@ def test_thought_gate(srv):
            "gate: markerless tokenizer resolves to (None, None)")
     srv._CHANNEL_IDS_CACHE = (100, 101)
 
-    # note_token transitions: open disables, close re-enables
+    # note_token transitions (interleaved form: markers bracket name+content).
+    # Gated steering is answer-only: the gate starts DISABLED (prefill and
+    # deliberation unsteered) and engages when the deliberation ends.
+    saved_tok = srv._MLX_TOKENIZER
+    srv._MLX_TOKENIZER = _FakeTok()
     gate = srv._SteerGate()
-    _check(gate.enabled, "gate: starts enabled (prompt + pre-channel steered)")
+    _check(not gate.enabled, "gate: starts disabled (answer-only steering)")
     srv._STEER_GATE = gate
-    srv._steering_note_token(42)
-    _check(gate.enabled, "gate: ordinary token leaves gate enabled")
-    srv._steering_note_token(100)
-    _check(not gate.enabled, "gate: channel-open disables injection")
-    srv._steering_note_token(42)
+    srv._steering_note_token(100)    # model opens its deliberation span
+    _check(not gate.enabled, "gate: channel-open keeps injection off")
+    srv._steering_note_token(45518)  # 'thought'
+    srv._steering_note_token(42)     # deliberation content
     _check(not gate.enabled, "gate: stays disabled inside the thought span")
     srv._steering_note_token(101)
-    _check(gate.enabled, "gate: channel-close re-enables injection")
+    _check(gate.enabled,
+           "gate: close after interleaved thought enables (answer follows)")
+
+    # No-deliberation path: first generated token is NOT the open marker,
+    # so the reply starts immediately and must be steered.
+    gate = srv._SteerGate()
+    srv._STEER_GATE = gate
+    srv._steering_note_token(42)
+    _check(gate.enabled, "gate: non-marker first token enables (no thought)")
+
+    # Header form: '<|channel>thought\n<channel|>' -> content FOLLOWS the
+    # close marker, so the gate must stay disabled until the next header.
+    for t in (100, 45518, 107, 101):
+        srv._steering_note_token(t)
+    _check(not gate.enabled, "gate: bare thought header keeps gate disabled")
+    srv._steering_note_token(42)     # thought content after the header
+    _check(not gate.enabled, "gate: header-form thought content unsteered")
+    for t in (100, 900, 101):        # '<|channel>final<channel|>'
+        srv._steering_note_token(t)
+    _check(gate.enabled, "gate: non-thought header re-enables injection")
+
     srv._STEER_GATE = None
     srv._steering_note_token(100)  # must not raise with no active gate
     _check(True, "gate: note_token is a no-op without an active gate")
 
-    # env kill-switch
-    os.environ["HU_MLX_STEER_GATE_THOUGHT"] = "off"
-    _check(not srv._thought_gating_enabled(), "gate: env off-switch honored")
+    # Opt-in env switch: gating removes the steered prefill, which carries
+    # most of the register effect, so it defaults OFF (measured baselines
+    # are ungated). HU_MLX_STEER_GATE_THOUGHT=on enables it.
+    _check(not srv._thought_gating_enabled(), "gate: default is disabled (opt-in)")
+    os.environ["HU_MLX_STEER_GATE_THOUGHT"] = "on"
+    _check(srv._thought_gating_enabled(), "gate: env on-switch honored")
     os.environ.pop("HU_MLX_STEER_GATE_THOUGHT")
-    _check(srv._thought_gating_enabled(), "gate: default is enabled")
+
+    # Prompt-tail priming: primer templates end the prompt with the thought
+    # HEADER, so the first generated token is deliberation content, not the
+    # open marker — priming clears awaiting_first so that content doesn't
+    # get mistaken for a no-deliberation reply.
+    gate = srv._SteerGate()
+    srv._STEER_GATE = gate
+    srv._steering_prime_gate([5, 6, 100, 45518, 107, 101])  # thought primer
+    _check(not gate.enabled and not gate.awaiting_first,
+           "prime: thought-header primer keeps gate disabled for the thought")
+    srv._steering_note_token(42)    # thought content right after the primer
+    _check(not gate.enabled, "prime: post-primer content stays unsteered")
+    srv._steering_note_token(100)   # model re-opens its own thought span
+    srv._steering_note_token(45518)
+    srv._steering_note_token(42)
+    srv._steering_note_token(101)   # interleaved close -> answer follows
+    _check(gate.enabled, "prime: generated close marker enables for answer")
+    gate = srv._SteerGate()
+    srv._STEER_GATE = gate
+    srv._steering_prime_gate([5, 6, 7])              # no markers at all
+    _check(not gate.enabled and gate.awaiting_first,
+           "prime: markerless prompt defers to the first-token watch")
+    srv._STEER_GATE = None
+    srv._steering_prime_gate([100, 45518, 101])      # no active gate: no-op
+    _check(True, "prime: no-op without an active gate")
+    srv._MLX_TOKENIZER = saved_tok
 
 
 def test_gated_layer(srv):
@@ -314,6 +370,125 @@ def test_scope_gate_wiring(srv):
     srv._STEERING_LAST_SIG = ()
 
 
+def test_expert_registry(srv):
+    try:
+        import numpy as np
+    except ImportError:
+        print("  SKIP  expert registry tests (numpy unavailable)")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        np.savez(os.path.join(td, "warmth.npz"),
+                 v_hat=np.ones(8, dtype=np.float32), layer=2,
+                 residual_norm=np.full(4, 100.0, dtype=np.float32))
+        np.savez(os.path.join(td, "warmth_experts.npz"),
+                 layers=np.array([13, 13, 22], dtype=np.int32),
+                 experts=np.array([65, 83, 101], dtype=np.int32),
+                 signs=np.array([1.0, 1.0, -1.0], dtype=np.float32),
+                 base_bias=np.float32(2.0))
+        with open(os.path.join(td, "humor_experts.npz"), "w") as f:
+            f.write("not an npz")
+        srv._STEERING_EXPERTS.clear()
+        srv._init_steering_vectors(td)
+        _check("warmth" in srv._STEERING_EXPERTS,
+               "expert registry: spec loaded from <trait>_experts.npz")
+        _check("warmth_experts" not in srv._STEERING_VECTORS,
+               "expert registry: expert file not loaded as residual vector")
+        _check("humor" not in srv._STEERING_EXPERTS,
+               "expert registry: corrupt spec skipped without crash")
+        spec = srv._STEERING_EXPERTS.get("warmth", {})
+        _check(spec.get("layers", {}).get(13) == [(65, 1.0), (83, 1.0)],
+               "expert registry: layer grouping preserved")
+        _check(spec.get("layers", {}).get(22) == [(101, -1.0)],
+               "expert registry: negative-sign expert preserved")
+        _check(spec.get("base_bias") == 2.0, "expert registry: base_bias")
+    srv._STEERING_EXPERTS.clear()
+    srv._STEERING_VECTORS = {}
+
+
+def test_scope_expert_mode(srv):
+    try:
+        import numpy as np
+    except ImportError:
+        print("  SKIP  scope expert mode (numpy unavailable)")
+        return
+
+    class FakeRouterConfig:
+        num_experts = 128
+        top_k_experts = 8
+
+    class FakeRouter:
+        config = FakeRouterConfig()
+
+        def __call__(self, x):
+            return "idx", "w"
+
+    class FakeMoEBlock:
+        def __init__(self):
+            self.router = FakeRouter()
+            self.enable_moe = True
+
+        def __call__(self, x, *a, **kw):
+            return x
+
+    class FakeDenseBlock:
+        def __call__(self, x, *a, **kw):
+            return x
+
+    class FakeInner:
+        def __init__(self):
+            self.layers = [FakeMoEBlock() if i != 1 else FakeDenseBlock()
+                           for i in range(4)]
+
+    class FakeModel:
+        def __init__(self):
+            self.model = FakeInner()
+
+    saved_model = srv._MLX_MODEL
+    srv._MLX_MODEL = FakeModel()
+    srv._STEERING_EXPERTS.clear()
+    srv._STEERING_EXPERTS["warmth"] = {
+        "layers": {0: [(65, 1.0)], 3: [(5, 1.0), (9, -1.0)]},
+        "base_bias": 2.0}
+    srv._STEERING_VECTORS = {"warmth": {
+        "v": np.ones(4, dtype=np.float32), "layer": 1, "base_alpha": 2.0}}
+    srv._STEERING_LAST_SIG = ()
+
+    inner = srv._MLX_MODEL.model
+    orig_routers = [getattr(b, "router", None) for b in inner.layers]
+
+    with srv._steering_scope({"steering": {"warmth": 0.5},
+                              "steering_mode": "expert"}) as applied:
+        _check(applied.get("warmth") == 0.5, "expert scope: coeff applied")
+        _check(type(inner.layers[0].router).__name__ == "_BiasedRouter",
+               "expert scope: router wrapped on spec layer")
+        _check(inner.layers[2].router is orig_routers[2],
+               "expert scope: unlisted MoE layer untouched")
+        bias = np.array(object.__getattribute__(
+            inner.layers[3].router, "_bias"))
+        _check(abs(bias[5] - 1.0) < 1e-6 and abs(bias[9] + 1.0) < 1e-6,
+               "expert scope: bias = coeff*base_bias*sign per expert")
+        _check(abs(float(bias.sum())) < 1e-6 + 2.0,
+               "expert scope: only listed experts biased")
+    _check(inner.layers[0].router is orig_routers[0],
+           "expert scope: router restored on exit")
+    _check(("mode:expert" in srv._STEERING_LAST_SIG[1]),
+           "expert scope: mode folded into cache signature")
+
+    # Residual mode ignores expert-only traits and vice versa: a trait
+    # present in BOTH registries resolves per request mode.
+    with srv._steering_scope({"steering": {"warmth": 0.5}}) as applied:
+        _check(type(inner.layers[1]).__name__ == "_SteeredLayer" or
+               applied.get("warmth") == 0.5,
+               "expert scope: residual mode still installs _SteeredLayer")
+    _check(inner.layers[0].router is orig_routers[0],
+           "expert scope: no router wrap in residual mode")
+
+    srv._MLX_MODEL = saved_model
+    srv._STEERING_EXPERTS.clear()
+    srv._STEERING_VECTORS = {}
+    srv._STEERING_LAST_SIG = ()
+
+
 def main() -> int:
     srv = _load_server_module()
     print("[test_mlx_steering] parse")
@@ -332,6 +507,10 @@ def main() -> int:
     test_gated_layer(srv)
     print("[test_mlx_steering] scope gate wiring")
     test_scope_gate_wiring(srv)
+    print("[test_mlx_steering] expert registry")
+    test_expert_registry(srv)
+    print("[test_mlx_steering] scope expert mode")
+    test_scope_expert_mode(srv)
     print(f"[test_mlx_steering] {_PASSED} passed, {_FAILED} failed")
     return 1 if _FAILED else 0
 
