@@ -319,6 +319,81 @@ def _finalize_prompt_cache(full_prompt_ids, generated_ids) -> None:
 _STEERING_VECTORS: dict = {}   # trait -> {"v": ndarray, "layer": int, "base_alpha": float}
 _STEERING_LAST_SIG: tuple = ()
 
+# Thought-channel gating. gemma-4 emits a deliberation span bracketed by the
+# special tokens '<|channel>' (open) and '<channel|>' (close); the visible
+# answer follows the close marker. Steering the deliberation tokens is what
+# breaks large doses — the steered residual makes the thinking more elaborate
+# until the model never exits the channel (observed: formality +0.5 at layer 6
+# looped for 5k+ chars without ever emitting the answer). Gating the injection
+# OFF inside channel spans keeps the deliberation native while still steering
+# the prompt and the visible reply, which unlocks doses the ungated path
+# cannot survive. Default ON; set HU_MLX_STEER_GATE_THOUGHT=off to restore
+# steer-everything behavior. Single-threaded HTTPServer => plain shared state.
+_STEER_GATE = None             # _SteerGate while a gated request is generating
+_CHANNEL_IDS_CACHE: tuple | None = None   # (open_id, close_id) once resolved
+
+
+class _SteerGate:
+    """Mutable enabled-flag shared between the generation loop (which watches
+    token ids) and _SteeredLayer (which skips injection while disabled)."""
+    __slots__ = ("enabled",)
+
+    def __init__(self):
+        self.enabled = True
+
+
+def _thought_gating_enabled() -> bool:
+    return os.environ.get("HU_MLX_STEER_GATE_THOUGHT", "on").lower() \
+        not in ("off", "0", "false", "no")
+
+
+def _resolve_channel_ids(tok) -> tuple:
+    """Resolve ('<|channel>', '<channel|>') to token ids, or (None, None) when
+    the tokenizer has no such markers (non-thinking model) — gating then
+    degrades to steer-everything, the pre-gating behavior."""
+    global _CHANNEL_IDS_CACHE
+    if _CHANNEL_IDS_CACHE is not None:
+        return _CHANNEL_IDS_CACHE
+    ids = []
+    for marker in ("<|channel>", "<channel|>"):
+        tid = None
+        if tok is not None:
+            conv = getattr(tok, "convert_tokens_to_ids", None)
+            if callable(conv):
+                try:
+                    got = conv(marker)
+                    unk = getattr(tok, "unk_token_id", None)
+                    if isinstance(got, int) and got >= 0 and got != unk:
+                        tid = got
+                except Exception:  # noqa: BLE001
+                    pass
+            if tid is None:
+                try:
+                    bos = getattr(tok, "bos_token_id", None)
+                    enc = [t for t in tok.encode(marker) if t != bos]
+                    if len(enc) == 1:
+                        tid = enc[0]
+                except Exception:  # noqa: BLE001
+                    pass
+        ids.append(tid)
+    resolved = (None, None) if None in ids else tuple(ids)
+    _CHANNEL_IDS_CACHE = resolved
+    return resolved
+
+
+def _steering_note_token(tok_id) -> None:
+    """Feed each generated token id to the active gate: channel-open disables
+    injection (entering deliberation), channel-close re-enables it (the
+    answer follows). No-op when no gated request is in flight."""
+    gate = _STEER_GATE
+    if gate is None or tok_id is None or _CHANNEL_IDS_CACHE is None:
+        return
+    open_id, close_id = _CHANNEL_IDS_CACHE
+    if tok_id == open_id:
+        gate.enabled = False
+    elif tok_id == close_id:
+        gate.enabled = True
+
 
 def _steering_ratio() -> float:
     try:
@@ -383,12 +458,13 @@ def _parse_steering(raw, available) -> list:
     return sorted(plan)
 
 
-def _steering_cache_guard(plan) -> None:
+def _steering_cache_guard(plan, gate_sig: str = "") -> None:
     """Invalidate the prompt cache when the steering configuration changed —
     KV computed under different steering is stale. Called BEFORE
-    _prepare_prompt_cache (ahead of any trim logic)."""
+    _prepare_prompt_cache (ahead of any trim logic). gate_sig includes gate
+    threshold info to ensure KV is invalidated when gates change."""
     global _STEERING_LAST_SIG
-    sig = tuple(plan)
+    sig = (tuple(plan), gate_sig)
     if sig != _STEERING_LAST_SIG:
         _invalidate_prompt_cache("steering change")
         _STEERING_LAST_SIG = sig
@@ -411,22 +487,64 @@ def _steering_layer_list(model):
 class _SteeredLayer:
     """Delegating decoder-layer wrapper: adds alpha * v_hat to the hidden
     state on every forward pass. gemma4 blocks return (h, kvs, offset)
-    tuples; gemma2-style return the tensor directly."""
+    tuples; gemma2-style return the tensor directly.
 
-    def __init__(self, inner, v_hat, alpha: float):
+    Optional gating (CAST-style): when gate_threshold is set, applies
+    steering only to token positions where |cosine_sim(x, v_hat)| >= threshold.
+    Positions below the threshold remain untouched (elementwise mask via mx.where)."""
+
+    def __init__(self, inner, v_hat, alpha: float, gate=None, gate_threshold: float | None = None):
         object.__setattr__(self, "inner", inner)
         import mlx.core as mx
         object.__setattr__(self, "_v", mx.array(v_hat))
         object.__setattr__(self, "_alpha", float(alpha))
+        # Thought-channel gating (pre-existing feature)
+        object.__setattr__(self, "_gate", gate)
+        # CAST-style cosine-similarity gating (new feature)
+        # Clamp gate_threshold to [0, 1] if provided
+        if gate_threshold is not None:
+            gate_threshold = max(0.0, min(1.0, float(gate_threshold)))
+        object.__setattr__(self, "_gate_threshold", gate_threshold)
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "inner"), name)
 
     def __call__(self, x, *args, **kwargs):
         import mlx.core as mx
+        # Check thought-channel gate first (pre-existing feature)
+        gate = object.__getattribute__(self, "_gate")
+        if gate is not None and not gate.enabled:
+            return self.inner(x, *args, **kwargs)
+        
         out = self.inner(x, *args, **kwargs)
         h = out[0] if isinstance(out, tuple) else out
-        steered = h + mx.array(self._alpha, dtype=h.dtype) * self._v.astype(h.dtype)
+
+        gate_threshold = object.__getattribute__(self, "_gate_threshold")
+        if gate_threshold is not None:
+            # Compute cosine similarity between x and v_hat
+            # x shape: (..., d), v_hat shape: (d,)
+            # Normalize both and compute dot product
+            v = object.__getattribute__(self, "_v")
+            x_norm = mx.sqrt(mx.sum(x * x, axis=-1, keepdims=True) + 1e-8)
+            v_norm = mx.sqrt(mx.sum(v * v) + 1e-8)
+            x_normalized = x / x_norm
+            v_normalized = v / v_norm
+            # Dot product over the last dimension
+            cos_sim = mx.sum(x_normalized * v_normalized.reshape((1,) * (x.ndim - 1) + (-1,)), axis=-1)
+            # Take absolute value and create mask
+            mask = mx.abs(cos_sim) >= gate_threshold
+            # Expand mask to match h's shape for broadcasting
+            mask_expanded = mask.reshape(mask.shape + (1,) * (h.ndim - mask.ndim))
+            # Apply steering only where mask is True
+            alpha = object.__getattribute__(self, "_alpha")
+            delta = mx.array(alpha, dtype=h.dtype) * v.astype(h.dtype)
+            steered = mx.where(mask_expanded, h + delta, h)
+        else:
+            # Unconditional steering (original behavior)
+            alpha = object.__getattribute__(self, "_alpha")
+            v = object.__getattribute__(self, "_v")
+            steered = h + mx.array(alpha, dtype=h.dtype) * v.astype(h.dtype)
+
         if isinstance(out, tuple):
             return (steered, *out[1:])
         return steered
@@ -440,12 +558,25 @@ class _steering_scope:
 
     def __init__(self, body):
         self._plan = _parse_steering(body.get("steering"), _STEERING_VECTORS)
+        # Parse optional steering gate: {"threshold": 0.05} (float 0-1)
+        gate_config = body.get("steering_gate", {})
+        if isinstance(gate_config, dict) and "threshold" in gate_config:
+            try:
+                self._gate_threshold = float(gate_config["threshold"])
+                # Clamp to [0, 1]
+                self._gate_threshold = max(0.0, min(1.0, self._gate_threshold))
+            except (TypeError, ValueError):
+                self._gate_threshold = None
+        else:
+            self._gate_threshold = None
         self._restore = []
 
     def __enter__(self):
         # Guard runs even for an empty plan: steered -> unsteered is also
         # a signature change that must drop the cache.
-        _steering_cache_guard(self._plan)
+        # Create gate signature for cache invalidation
+        gate_sig = f"gate:{self._gate_threshold}" if self._gate_threshold is not None else ""
+        _steering_cache_guard(self._plan, gate_sig)
         if not self._plan or _MLX_MODEL is None:
             return {}
         owner = _steering_layer_list(_MLX_MODEL)
@@ -454,19 +585,31 @@ class _steering_scope:
                   flush=True)
             return {}
         applied = {}
+        gate = None
+        if _thought_gating_enabled() and \
+                _resolve_channel_ids(_MLX_TOKENIZER) != (None, None):
+            gate = _SteerGate()
         try:
             for trait, coeff in self._plan:
                 spec = _STEERING_VECTORS[trait]
                 idx = spec["layer"]
                 alpha = coeff * spec["base_alpha"]
                 original = owner.layers[idx]
-                owner.layers[idx] = _SteeredLayer(original, spec["v"], alpha)
+                owner.layers[idx] = _SteeredLayer(original, spec["v"], alpha, gate, self._gate_threshold)
                 self._restore.append((owner, idx, original))
                 applied[trait] = coeff
             if applied:
-                print(f"[mlx-server] steering applied: "
-                      + ", ".join(f"{t}={c:+.2f}" for t, c in applied.items()),
-                      flush=True)
+                # Include gate threshold in the response if gating is enabled
+                if self._gate_threshold is not None:
+                    applied["_gate"] = self._gate_threshold
+                global _STEER_GATE
+                _STEER_GATE = gate
+                log_msg = f"[mlx-server] steering applied: " + ", ".join(f"{t}={c:+.2f}" for t, c in applied.items() if t != "_gate")
+                if self._gate_threshold is not None:
+                    log_msg += f" (gate @{self._gate_threshold:.2f})"
+                if gate is not None:
+                    log_msg += " (thought-gated)"
+                print(log_msg, flush=True)
         except Exception as exc:  # noqa: BLE001 — restore what we installed
             self.__exit__(None, None, None)
             print(f"[mlx-server] steering install failed (no-op): {exc}", flush=True)
@@ -474,6 +617,8 @@ class _steering_scope:
         return applied
 
     def __exit__(self, *_exc):
+        global _STEER_GATE
+        _STEER_GATE = None
         while self._restore:
             owner, idx, original = self._restore.pop()
             owner.layers[idx] = original
@@ -913,6 +1058,7 @@ def _chat_completion_inline(body):
                     tok_id = getattr(item, "token", None)
                     if tok_id is not None:
                         generated_ids.append(tok_id)
+                        _steering_note_token(tok_id)
                 text = "".join(parts)
                 if used_cache:
                     _finalize_prompt_cache(full_ids, generated_ids)
@@ -1155,6 +1301,7 @@ class SwapHandler(BaseHTTPRequestHandler):
                             tok_id = getattr(item, "token", None)
                             if tok_id is not None:
                                 generated_ids.append(tok_id)
+                                _steering_note_token(tok_id)
                             if delta:
                                 emit(delta)
                                 completion_tokens += 1
