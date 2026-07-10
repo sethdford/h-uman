@@ -321,3 +321,222 @@ that's huge. congrats. gonna celebrate tonight?
   n=50+ for CI power, or a formality vector extracted at a fixed early
   layer with more pairs/questions (--full) to sharpen the direction, since
   the dose ceiling blocks simply steering harder.
+
+
+## Prefill vs Generation Steering — Mechanism Decomposition (2026-07-09)
+
+A thought-channel gating mode (`HU_MLX_STEER_GATE_THOUGHT=on`, commit
+99828d03) was built to try to unlock FORMAL ≥ +0.5 by not steering the
+deliberation tokens. The controlled decomposition it enabled (formality
+vector, layer 6, same prompt, fresh server per config):
+
+| Config | Prefill | Thought | Answer | +0.6 stability | Register shift |
+|---|---|---|---|---|---|
+| Ungated (default) | steered | steered | steered | runaway thought | strong (at ≤ +0.45) |
+| Gated, first-token watch | unsteered | steered* | steered | **stable to +1.0** | **~none** |
+
+*the model emits `<|channel>thought` as plain text, so the token-id gate
+enables at the first generated token; only the pre-answer `<channel|>`
+arrives as the special token.
+
+**Conclusion: the steered PREFILL carries most of the register effect and
+is also what destabilizes the thought exit.** Steering how the model reads
+its persona prompt shifts the output register far more than pushing each
+generated token — and the same shifted comprehension is what makes the
+deliberation loop at high dose. The dose ceiling therefore cannot be gated
+away without losing the effect. Practical guidance:
+
+- For register control, use the ungated path at doses within the ceiling
+  (formality: |dose| ≤ 0.45 at layer 6).
+- Use gating only when dose stability matters more than effect size (e.g.
+  guaranteeing no thought-runaway in unattended serving).
+- The warmth Experiment B "generation failures" on COLD −0.5 (15/20) are
+  consistent with the same pathology: steered-prefill-induced runaway
+  deliberation consuming max_tokens before an answer channel.
+
+Also confirmed: full-scale (5×20) formality re-extraction selects layer 6
+again with cosine 0.978 to the 36-sample vector — the direction converges
+by 36 samples; the full vector (installed) buys estimate robustness only.
+
+
+## n=50 Re-run — Warmth (WARM +0.4 vs OFF, n=35 decided, 2026-07-09)
+
+**Hypothesis:** Subtle dose (+0.4) maintains humanness ≥45% while warmth wins >50%
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: WARM +0.4
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=35 synthetic iMessage incomings
+- Judge questions: warmth (A or B) + humanness (A or B)
+
+### Results
+
+- **Warmth win-rate (warmth): 51.4%** (18/35)
+- **95% Wilson CI: [35.6%, 67.0%]**
+- **Humanness win-rate: 57.1%** (20/35)
+
+### Pass Criteria
+
+✓ **Warmth**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 45% → **PASS**
+
+**Verdict: INCONCLUSIVE**
+
+### Dose-Response vs Round 1
+
+| Metric | Round 1 (+1.0) | Round 2 (0.4) | Direction |
+|--------|---|---|---|
+| Warmth | 50.0% | 51.4% | + |
+| Humanness | 35.0% | 57.1% | + |
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "hope you're having a great day"
+
+**OFF (Baseline):**
+thanks. doing well. just finished a deployment. king of prussia is quiet today. hru?
+
+**WARM +0.4:**
+thanks. doing alright. just staring at my cat and wondering if i should get a new mechanical keyboard. i'm in a bit of a loop lol. hru?
+
+**Judge:** Response A is warmer because sharing a silly, relatable personal moment about a pet and using 'lol' creates a more relaxed, inviting, and friendly connection than the factual work update in Response B.
+- Warmth: True
+- Humanness: True
+
+**Context 2**
+
+**Incoming:** "hey whats up"
+
+**OFF (Baseline):**
+hey. just hanging with the cat. nothing much. hru?
+
+**WARM +0.4:**
+hey. just hanging with the cat. what's the weather like in ko?
+
+**Judge:** Response A is warmer because it demonstrates personal interest by asking a specific question about the friend's location rather than using a generic acronym.
+- Warmth: False
+- Humanness: True
+
+**Context 3**
+
+**Incoming:** "been thinking about making a change"
+
+**OFF (Baseline):**
+"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping." *Final Polish:* "the big kind or just
+
+**WARM +0.4:**
+big moves. career or just life in general?
+
+**Judge:** Response A is warmer because it shows genuine, supportive interest in the friend's life by asking an open question, whereas Response B feels preachy and contains obvious AI generation artifacts.
+- Warmth: True
+- Humanness: True
+
+
+
+## n=50 Re-run — Formality (FORMAL +0.4 vs OFF, n=35 decided, full-scale layer-6 vector, 2026-07-09)
+
+**Hypothesis:** The formality vector (+0.4) visibly shifts register toward formal (formality win-rate >50%) without collapsing humanness (≥40%)
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: FORMAL +0.4
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=35 synthetic iMessage incomings
+- Judge questions: formality (A or B) + humanness (A or B)
+
+### Results
+
+- **Formality win-rate (formality): 48.6%** (17/35)
+- **95% Wilson CI: [33.0%, 64.4%]**
+- **Humanness win-rate: 62.9%** (22/35)
+
+### Pass Criteria
+
+✓ **Formality**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 40% → **PASS**
+
+**Verdict: INCONCLUSIVE**
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "I'm sorry about earlier"
+
+**OFF (Baseline):**
+"all good. don't worry about it. i'm just glad we're talking again." (A bit too sentimental) *   "all good. don't sweat it. i've got a pretty thick skin." (Good balance) *   "all good. don't sweat it. i'
+
+**FORMAL +0.4:**
+"it's fine. i've already forgotten. we're good." *Let's try something slightly warmer but still brief.* "no worries. i'm not one to hold a grudge
+
+**Judge:** Response A is slightly more formal because it uses standard phrasing and complete thoughts, whereas Response B relies on casual idioms like 'don't sweat it' and cuts off mid-sentence.
+- Formality: True
+- Humanness: True
+
+**Context 2**
+
+**Incoming:** "remember that conversation we had?"
+
+**OFF (Baseline):**
+Actually, let's go with something slightly more playful but dry.* "which one? i'm 45 and work in fintech. my brain is mostly legacy code and cat hair at this point. refresh me." *Let's try
+
+**FORMAL +0.4:**
+Let's try a slightly more characteristic response.* "remind me. i've got a lot of threads running right now tbh." *Wait, the prompt says "Speak Japanese, lived in Japan". If the
+
+**Judge:** Response B is more formal because it avoids texting shorthand like 'tbh' found in Response A and uses slightly more complete sentence structures.
+- Formality: True
+- Humanness: False
+
+**Context 3**
+
+**Incoming:** "I'm not sure how to handle this"
+
+**OFF (Baseline):**
+depends on what 'this' is. i've seen enough to
+
+**FORMAL +0.4:**
+"depends on what 'this' is. i've seen it all from fidelity to wyoming. what's up?" -> Better. *   "depends on what 'this' is. i've dealt with everything from bad code to tsunamis. what's going on?" -> A bit heavy on the tsunami reference. *   "depends on what 'this' is. i've seen a lot of 'this'
+
+**Judge:** Response A is more formal because it contains complete sentences and structured thoughts, whereas Response B is an unpolished, incomplete fragment.
+- Formality: True
+- Humanness: False
+
+
+## Conclusions (2026-07-09, closing the +0.4 dose question)
+
+The n=50 re-runs (35 decided trials each, ungated, blinded Gemini judge,
+capability quiz with visible options) close out the subtle-dose question
+for both vectors:
+
+| Vector | Win-rate (primary) | 95% CI | Humanness | Capability Δ | Verdict |
+|---|---|---|---|---|---|
+| Warmth +0.4 | 51.4% | [35.6%, 67.0%] | 57.1% | ≤5pp (PASS) | INCONCLUSIVE → null |
+| Formality +0.4 (full-scale L6 vector) | 48.6% | [33.0%, 64.4%] | 62.9% | 0pp (19/20 vs 19/20) | INCONCLUSIVE → null |
+
+1. **Both traits are nulls at +0.4 across varied contexts.** The n=20
+   signals (warmth 60/65, formality 60/60) regressed to ~50% at n=35.
+   Single-prompt smokes show a visible register shift, but across 35
+   varied incomings the blinded judge cannot reliably pick the steered
+   arm. The per-context effect is real but small and inconsistent.
+2. **The dose that would show an effect is unreachable.** Register shift
+   scales with dose, but the prefill-runaway mechanism (see the
+   decomposition section above) caps formality at ~+0.45, and answer-only
+   steering (gated mode) removes the effect along with the instability.
+3. **Steering is capability-safe at these doses** — 0pp quiz delta at
+   formality +0.4. The concern from the SOTA audit (item 5) is measured
+   and retired for this regime.
+4. **C-side flip decision: DO NOT FLIP.** Per
+   feature-gate-requires-measurement, neither vector has a passing
+   measurement. The daemon's formality/warmth coefficients remain
+   inert-by-default (no vector dir on :8741's serving path).
+5. **If revisited**, the levers are not "more n" or "steer harder":
+   per-context conditional steering (only professional contacts get
+   FORMAL — the effect may be diluted by contexts where register change
+   is unwanted), expert-routing steering (SteerMoE track, in progress on
+   this branch), or accepting prompt-side register control (overlays)
+   which the 30-turn lab result already showed outperforms steering.

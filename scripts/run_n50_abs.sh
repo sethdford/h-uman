@@ -11,14 +11,15 @@ RESULTS_DIR="${WORKTREE_DIR}/results/logs"
 # Create results directory
 mkdir -p "${RESULTS_DIR}"
 
-echo "[pipeline] starting n=50 steering A/B pipeline"
+export MLX_URL="http://127.0.0.1:8745/v1/chat/completions"
+echo "[pipeline] starting n=50 steering A/B pipeline (dedicated :8745)"
 echo "[pipeline] working in ${WORKTREE_DIR}"
 
 # Gate on server readiness — a prior run burned all 100 trials against a
 # still-loading server (216 connection-refused errors -> 0.0% "verdicts").
 echo "[pipeline] waiting for :8743 health"
 for i in $(seq 1 60); do
-  if curl -s --max-time 3 http://127.0.0.1:8743/health | grep -q '"model_loaded": true'; then
+  if curl -s --max-time 3 http://127.0.0.1:8745/health | grep -q '"model_loaded": true'; then
     echo "[pipeline] server ready"
     break
   fi

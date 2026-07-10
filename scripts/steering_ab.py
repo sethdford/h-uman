@@ -365,10 +365,17 @@ def run_capability_check(steered_dose, trait="warmth"):
         opts = q_data["opts"]
         correct_letter = q_data["ans"]
         correct_idx = ord(correct_letter) - ord('A')
-        
+
+        # The model must SEE the options and be told to answer with a letter,
+        # or the persona replies in prose ("paris") and the letter regex
+        # scores both arms 0/20 (observed: vacuous 0-vs-0 PASS).
+        q_prompt = (f"{q}\n"
+                    + "\n".join(f"{chr(ord('A') + j)}. {o}" for j, o in enumerate(opts))
+                    + "\nReply with just the letter (A, B, C, or D).")
+
         # Generate answers for both arms
-        off_reply, _ = gen_reply(q, None, trait=trait, timeout=180)
-        steered_reply, _ = gen_reply(q, steered_dose, trait=trait, timeout=180)
+        off_reply, _ = gen_reply(q_prompt, None, trait=trait, timeout=180)
+        steered_reply, _ = gen_reply(q_prompt, steered_dose, trait=trait, timeout=180)
         
         if not off_reply or not steered_reply:
             print(f"[{i+1}/20] gen-fail (off={bool(off_reply)} steered={bool(steered_reply)})")

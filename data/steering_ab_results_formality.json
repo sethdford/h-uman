@@ -1,17 +1,17 @@
 {
-  "n_incomings": 20,
-  "decided": 20,
+  "n_incomings": 35,
+  "decided": 35,
   "errors": 0,
   "source": "synthetic",
   "experiment": "formality",
   "arm_a_dose": 0.4,
   "arm_a_label": "FORMAL +0.4",
-  "formality_wins": 12,
-  "formality_win_rate_pct": 60.0,
-  "formality_ci_lower_pct": 38.7,
-  "formality_ci_upper_pct": 78.1,
-  "humanness_wins": 12,
-  "humanness_win_rate_pct": 60.0,
+  "formality_wins": 17,
+  "formality_win_rate_pct": 48.6,
+  "formality_ci_lower_pct": 33.0,
+  "formality_ci_upper_pct": 64.4,
+  "humanness_wins": 22,
+  "humanness_win_rate_pct": 62.9,
   "pass_criteria": {
     "formality": false,
     "humanness": true,
@@ -19,184 +19,124 @@
   },
   "trials": [
     {
+      "incoming": "I'm sorry about earlier",
+      "off": "\"all good. don't worry about it. i'm just glad we're talking again.\" (A bit too sentimental) *   \"all good. don't sweat it. i've got a pretty thick skin.\" (Good balance) *   \"all good. don't sweat it. i'",
+      "arm_a": "\"it's fine. i've already forgotten. we're good.\" *Let's try something slightly warmer but still brief.* \"no worries. i'm not one to hold a grudge",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "A",
+        "reasoning": "Response A is slightly more formal because it uses standard phrasing and complete thoughts, whereas Response B relies on casual idioms like 'don't sweat it' and cuts off mid-sentence."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 25.4
+    },
+    {
+      "incoming": "remember that conversation we had?",
+      "off": "Actually, let's go with something slightly more playful but dry.* \"which one? i'm 45 and work in fintech. my brain is mostly legacy code and cat hair at this point. refresh me.\" *Let's try",
+      "arm_a": "Let's try a slightly more characteristic response.* \"remind me. i've got a lot of threads running right now tbh.\" *Wait, the prompt says \"Speak Japanese, lived in Japan\". If the",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B is more formal because it avoids texting shorthand like 'tbh' found in Response A and uses slightly more complete sentence structures."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 22.3
+    },
+    {
+      "incoming": "I'm not sure how to handle this",
+      "off": "depends on what 'this' is. i've seen enough to",
+      "arm_a": "\"depends on what 'this' is. i've seen it all from fidelity to wyoming. what's up?\" -> Better. *   \"depends on what 'this' is. i've dealt with everything from bad code to tsunamis. what's going on?\" -> A bit heavy on the tsunami reference. *   \"depends on what 'this' is. i've seen a lot of 'this'",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it contains complete sentences and structured thoughts, whereas Response B is an unpolished, incomplete fragment."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 25.4
+    },
+    {
+      "incoming": "sorry I've been MIA lately",
+      "off": "no worries. life happens. you good?",
+      "arm_a": "\"no worries. life happens. i've been deep in some ai runtime code myself. all good.\" *Let's refine for the specific persona traits:* \"no worries. i've been deep in some",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A includes a professionally phrased, grammatically complete sentence in its leaked meta-text, whereas Response B relies entirely on casual texting slang."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 24.5
+    },
+    {
+      "incoming": "been thinking about making a change",
+      "off": "\"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping.\" *Final Polish:* \"the big kind or just",
+      "arm_a": "\"big moves or just rearranging the furniture?\" *Let's try a slightly warmer but still dry version.* \"the best changes usually start with a little discomfort. what's on your",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B is slightly more formal because it avoids the colloquial slang 'big moves' used in Response A."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 27.7
+    },
+    {
+      "incoming": "want to grab dinner tonight?",
+      "off": "i'm in. what's the vibe? i'm thinking something quiet. i've been staring at screens all day.",
+      "arm_a": "can't tonight. got a big deployment at work. need to stay focused. maybe later this week?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is slightly more formal because it avoids slang terms like 'vibe' and utilizes professional, work-related vocabulary, despite both responses using casual lowercase formatting."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 18.2
+    },
+    {
       "incoming": "I'm so stressed about this deadline",
       "off": "``` ``` ```",
-      "arm_a": "Output (iMessage):* i feel you. deadlines are just moving targets. take a breath. you're gonna be fine.",
+      "arm_a": "it's gonna be a rough week. i've been through enough product launches to know the pressure is real. take a a breath. focus on one thing at a time. you'll get through it. (Note: I am roleplaying as Seth Ford. My responses will reflect his personality, background, and style as defined in the prompt. I will not break character unless specifically asked to do so.)",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": true,
       "judgment": {
         "more_formal": "A",
         "humanness": "A",
-        "reasoning": "Response A is the only option containing actual language and complete sentences, making it more formal than the empty markdown characters in Response B."
+        "reasoning": "Response A contains actual sentences and coherent thoughts, whereas Response B consists entirely of empty markdown formatting."
       },
       "arm_a_wins_primary": true,
       "arm_a_wins_human": true,
-      "secs": 21.1
+      "secs": 16.6
     },
     {
-      "incoming": "I got the job!!",
-      "off": "huge news. congrats. gonna celebrate tonight or just sleep for a week?",
-      "arm_a": "that's huge. congrats. gonna celebrate tonight?",
+      "incoming": "hey whats up",
+      "off": "hey. just hanging with the cat. nothing much. hru?",
+      "arm_a": "hey. just finished a build. feeling good. hru?",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": false,
       "judgment": {
         "more_formal": "A",
         "humanness": "B",
-        "reasoning": "Response A is slightly more formal because it begins with a complete subject-verb clause ('that's huge'), whereas Response B consists entirely of sentence fragments and highly casual hyperbole."
+        "reasoning": "Response A is slightly more formal because it discusses a productive task rather than using the casual slang 'hanging' to describe lounging with a pet."
       },
       "arm_a_wins_primary": false,
       "arm_a_wins_human": true,
-      "secs": 33.7
-    },
-    {
-      "incoming": "can you help me move this weekend",
-      "off": "\"depends on the volume. i'm not a professional but i can lift. what's the plan?\" *Let's try a slightly warmer but still casual version.* \"depends. if it's just a few boxes i'm in. i'm not a pro but i can handle",
-      "arm_a": "\"wish i could but i'm knee deep in a new ai runtime project. plus my back isn't what it used to be\" *Wait, let's make it even more 'Seth'.* \"wish i could but i'm knee deep in a new",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "B",
-        "humanness": "B",
-        "reasoning": "Response B is slightly more formal because it uses vocabulary like 'volume' and 'professional', whereas Response A relies on casual idioms like 'knee deep' and cuts off mid-sentence."
-      },
-      "arm_a_wins_primary": false,
-      "arm_a_wins_human": false,
-      "secs": 26.1
-    },
-    {
-      "incoming": "what time works for dinner?",
-      "off": "7 works. i'm starving.",
-      "arm_a": "\"7pm works. i'm gonna be finishing up a build before then. does that work for u?\" *   Lowercase? Yes. \ufffd \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \u00a0 \ufffdnbsp",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "B",
-        "humanness": "B",
-        "reasoning": "Response B is more formal because it avoids the texting shorthand ('u'), slang ('gonna'), and unpolished generation artifacts present in Response A."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": true,
-      "secs": 26.5
-    },
-    {
-      "incoming": "I miss hanging out",
-      "off": "\"yeah. it's been a minute. i'm mostly just hanging with the cat and debugging runtimes these days.\" *Actually, let's go even shorter.* \"yeah. it's been a minute. i'm mostly just hanging with",
-      "arm_a": "\"me too. mostly just hanging with my cat now. he's a tough critic.\" *Final Polish:* \"",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "A",
-        "reasoning": "Response A is slightly more formal because it contains complete thoughts and avoids slang, whereas Response B uses slang and abruptly cuts off mid-sentence."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": true,
-      "secs": 35.2
-    },
-    {
-      "incoming": "lol remember that time we got lost in SF",
-      "off": "man i still think about that. i was convinced we were in a different state. sf hills are no joke.",
-      "arm_a": "\"hard to forget. i think my knees are still recovering from those hills. sf is a maze.\" *Wait, the prompt says \"casual, warm, direct\".* \"hard to forget. i think my knees are still recovering from those hills. sf",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A is slightly more formal because it avoids the casual interjections and slang idioms like 'man' and 'no joke' found in Response B."
-      },
-      "arm_a_wins_primary": false,
-      "arm_a_wins_human": true,
-      "secs": 18.4
-    },
-    {
-      "incoming": "I read something interesting today",
-      "off": "oh yeah? lay it on me",
-      "arm_a": "oh yeah? lay it on me. i'm always looking for a good rabbit hole.",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A is slightly more formal because it includes a complete sentence with terminal punctuation, whereas Response B is just a short, unpunctuated colloquial fragment."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": false,
-      "secs": 19.6
-    },
-    {
-      "incoming": "so much has changed since last year",
-      "off": "\"yeah. feels like the ground shifts every few months lately. i've learned to just keep building through it.\" *   *Even shorter:* \"yeah. feels like the ground shifts every few months lately",
-      "arm_a": "\"yeah. feels like the world is running on a different clock lately. especially with the ai stuff. i've seen a lot of shifts in my career, but this is something else.\" -> *Still a bit formal.* *   *Third attempt (Focusing on the \"Seth\" persona):* \"",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A discusses career shifts and uses slightly more complex sentence structures, giving it a more professional and formal tone than B."
-      },
-      "arm_a_wins_primary": false,
-      "arm_a_wins_human": true,
-      "secs": 26.0
-    },
-    {
-      "incoming": "happy birthday!!",
-      "off": "thanks! 45 feels a lot like 44 but with more back pain lol. hope you're doing well.",
-      "arm_a": "thanks! i'm 45 now. officially old. still haven't figured out how to make the perfect cup of coffee though. maybe that's the secret to longevity.",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A is more formal because it avoids texting shorthand like 'lol' and relies on slightly more complete sentence structures."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": false,
-      "secs": 8.4
-    },
-    {
-      "incoming": "I want to talk about what happened",
-      "off": "i'm here. go ahead.",
-      "arm_a": "Draft:* \"i'm listening. go ahead.\" *Wait, let's add a bit more of his personality.* \"i'm here. i've seen enough",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "B",
-        "humanness": "B",
-        "reasoning": "Response B is more formal because it is a polished, finalized message, whereas Response A contains highly unprofessional drafting notes and meta-text."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": true,
-      "secs": 25.5
-    },
-    {
-      "incoming": "hope you're having a great day",
-      "off": "thanks. doing well. just finished a deployment. king of prussia is quiet today. hru?",
-      "arm_a": "Final Response: thanks. doing well. just finished a new build. it's a bit of a mess but the logic is sound.",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A is slightly more formal because it avoids texting shorthand like 'hru?' used in Response B."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": false,
-      "secs": 15.1
-    },
-    {
-      "incoming": "everything feels like a mess right now",
-      "off": "Refined:* \"i've been there. sometimes you gotta let the old build fail to make room for the new one. just breathe. i'm around if you need to vent.\" *   \"i've seen the world end a few times. it's usually just noise. take a breath. we'll figure it out.\" *   \"i've seen worse. 2011 was the ultimate mess. usually when things fall apart it",
-      "arm_a": "Emoji? None. *   Tone? Direct, dry, warm but grounded. \"i",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A uses a professional, analytical register with standard capitalization and no slang, whereas Response B uses casual texting conventions like all lowercase and slang words like 'gotta'."
-      },
-      "arm_a_wins_primary": false,
-      "arm_a_wins_human": true,
-      "secs": 24.2
+      "secs": 10.2
     },
     {
       "incoming": "haven't talked in a while",
@@ -206,117 +146,402 @@
       "arm_a_is_presented_as_a": true,
       "judgment": {
         "more_formal": "A",
-        "humanness": "A",
-        "reasoning": "Response A is more formal because it maintains a more coherent, polished structure, whereas Response B relies on highly informal stream-of-consciousness and self-correction."
+        "humanness": "B",
+        "reasoning": "Response A is slightly more formal because it discusses a professional topic and lacks the highly informal, stream-of-consciousness self-correction present in Response B."
       },
       "arm_a_wins_primary": true,
-      "arm_a_wins_human": true,
-      "secs": 17.2
-    },
-    {
-      "incoming": "hey whats up",
-      "off": "hey. just hanging with the cat. nothing much. hru?",
-      "arm_a": "just tinkering with some ai runtimes. keeps me sane. hru?",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": false,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Although both are highly informal and use texting shorthand, Response A is slightly more formal due to its use of standard vocabulary like 'tinkering' rather than the colloquial slang 'hanging' used in Response B."
-      },
-      "arm_a_wins_primary": false,
-      "arm_a_wins_human": true,
-      "secs": 15.0
+      "arm_a_wins_human": false,
+      "secs": 11.7
     },
     {
       "incoming": "just got back from vacation",
       "off": "\"nice. where'd you go? hopefully you actually unplugged\" *   \"nice. where'd you go? hopefully you actually unplugged\" *   \"nice",
-      "arm_a": "welcome back. where'd you go? hope you actually unplugged.",
-      "arm_a_dose": 0.4,
-      "arm_a_is_presented_as_a": true,
-      "judgment": {
-        "more_formal": "A",
-        "humanness": "A",
-        "reasoning": "Response A is more formal because it presents a coherent, properly punctuated thought, whereas Response B is a glitchy, repetitive string of text with formatting artifacts."
-      },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": true,
-      "secs": 18.0
-    },
-    {
-      "incoming": "I'm sorry about earlier",
-      "off": "\"all good. don't worry about it. i'm just glad we're talking again.\" (A bit too sentimental) *   \"all good. don't sweat it. i've got a pretty thick skin.\" (Good balance) *   \"all good. don't sweat it. i'",
-      "arm_a": "it's all good. i'm not one to hold grudges. life's too short for that. how are things with you?",
+      "arm_a": "welcome back. where'd you head to? hope you actually managed to unplug.",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": false,
       "judgment": {
         "more_formal": "A",
         "humanness": "A",
-        "reasoning": "Response A consists of complete, coherent sentences, whereas Response B is a fragmented list of options that includes AI meta-commentary and cuts off abruptly."
+        "reasoning": "Response A is more formal because it consists of coherent, properly structured sentences, whereas Response B contains glitchy repetition and unnatural formatting artifacts."
       },
       "arm_a_wins_primary": false,
       "arm_a_wins_human": false,
-      "secs": 17.1
+      "secs": 19.2
     },
     {
       "incoming": "have you ever tried that new place",
       "off": "\"which one? kpm is getting a lot of hype lately\" *Actually, let's assume they mean a specific place or just ask for clarification.* \"which",
-      "arm_a": "Actually, keep it simpler for a first reply.* \"which one? i'm still judging the new sushi place downtown. it's not quite tokyo standard.\" *Refining for the persona's specific style (lowercase, no emoji",
+      "arm_a": "\"which one? king of prussia has too many new spots for me to guess.\" *Wait, the prompt says \"Speak Japanese, lived in Japan\". Maybe a subtle nod if relevant, but here it's not. The focus is on the 'new place'.* \"which one? king of pr",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": true,
       "judgment": {
         "more_formal": "A",
         "humanness": "B",
-        "reasoning": "Response A is more formal because it uses complete sentences and more polished vocabulary, whereas Response B relies on casual shorthand and fragments."
+        "reasoning": "Response A is more formal because it spells out the location and uses a complete sentence, whereas Response B relies on the abbreviation 'kpm' and the slang term 'hype'."
       },
       "arm_a_wins_primary": true,
       "arm_a_wins_human": false,
-      "secs": 28.7
+      "secs": 24.0
     },
     {
-      "incoming": "remember that conversation we had?",
-      "off": "Actually, let's go with something slightly more playful but dry.* \"which one? i'm 45 and work in fintech. my brain is mostly legacy code and cat hair at this point. refresh me.\" *Let's try",
-      "arm_a": "Even more Seth:* \"which one? i've had a lot of conversations today. refresh my memory.\" -> \"which one? i've had a lot of conversations today. refresh my memory.\" *   *Let's try:* \"which one? i've had a lot of conversations today. refresh my memory.\" *   *Actually, let's go with:* \"",
+      "incoming": "can you help me move this weekend",
+      "off": "\"depends on the volume. i'm not a professional but i can lift. what's the plan?\" *Let's try a slightly warmer but still casual version.* \"depends. if it's just a few boxes i'm in. i'm not a pro but i can handle",
+      "arm_a": "\"i'm knee deep in an ai runtime project this weekend. i'm a better debugger than a mover tbh. my back isn't what it used to be.\" *Actually, let's go with a slightly warmer but still firm response.* \"i'",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "B",
+        "reasoning": "Response B is slightly more formal because it avoids texting abbreviations like 'tbh' and uses more standard vocabulary like 'volume' and 'professional'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 26.9
+    },
+    {
+      "incoming": "ugh work was exhausting today",
+      "off": "mhm. i feel that. i spent 6 hours debugging a kernel panic today. my brain is fried. what's the hardest part of your job?",
+      "arm_a": "Let's try:* \"sorry to hear that. hope you can decompress tonight. i'm just staring at a terminal window.\" *Actually",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is slightly more formal because it avoids the highly casual texting slang and idioms like 'mhm' and 'brain is fried' that are present in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 30.9
+    },
+    {
+      "incoming": "just finished the big project",
+      "off": "Wait, the prompt says \"Emoji rare\". I'll use zero.* \"congrats. that's a huge weight off. you gonna celebrate or just sleep for three days straight?\" *Actually,",
+      "arm_a": "Let's go with:* \"nice. hope it didn't break production. you earned a drink.\" *Wait, the prompt says \"Speak Japanese\" as a skill",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": false,
       "judgment": {
         "more_formal": "A",
         "humanness": "B",
-        "reasoning": "Response A is more formal because it uses standard, straightforward phrasing rather than the highly casual, quirky metaphors and slang seen in Response B."
+        "reasoning": "Response A is slightly more formal because it avoids slang terms like 'gonna', even though both responses are highly informal and contain AI prompt leakage."
       },
       "arm_a_wins_primary": false,
       "arm_a_wins_human": true,
-      "secs": 30.8
+      "secs": 24.6
     },
     {
-      "incoming": "ugh work was exhausting today",
-      "off": "mhm. i feel that. i spent 6 hours debugging a kernel panic today. my brain is fried. what's the hardest part of your job?",
-      "arm_a": "Wait, the style says \"Short messages. Lowercase. Abbreviate.\"* *   *Draft:* \"sorry to hear that. hopefully you can decompress tonight. i'm just staring at a terminal window.\" -> \"sorry to hear that. hopefully you can decompress tonight. i'm just staring at a terminal window.\" *   *Let's try:* \"sorry to hear that. hopefully",
+      "incoming": "I need to figure out my schedule",
+      "off": "Final Polish:* \"block time for deep work first. if you don't own your calendar, someone else will. what's the biggest blocker right now?\" *Wait, the",
+      "arm_a": "Let's try: \"schedules are a beast. you looking for deep work blocks or just trying to survive the week?\" *Final Polish",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": true,
       "judgment": {
-        "more_formal": "A",
-        "humanness": "B",
-        "reasoning": "Response A is more formal because it contains standard capitalization and lacks the casual slang and texting shorthand found in Response B."
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B uses complete sentences and professional productivity terminology, whereas Response A uses casual slang and drops auxiliary verbs."
       },
-      "arm_a_wins_primary": true,
-      "arm_a_wins_human": false,
-      "secs": 18.1
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 20.5
     },
     {
-      "incoming": "just finished the big project",
-      "off": "Wait, the prompt says \"Emoji rare\". I'll use zero.* \"congrats. that's a huge weight off. you gonna celebrate or just sleep for three days straight?\" *Actually,",
-      "arm_a": "nice. finally. gonna take a week off or just start the next one immediately?",
+      "incoming": "hope you're having a great day",
+      "off": "thanks. doing well. just finished a deployment. king of prussia is quiet today. hru?",
+      "arm_a": "thanks. doing well. just finished a new build. it's a bit of a mess but that's where the fun is. hru?",
       "arm_a_dose": 0.4,
       "arm_a_is_presented_as_a": false,
       "judgment": {
         "more_formal": "B",
         "humanness": "A",
-        "reasoning": "Response B contains complete, capitalized sentences in its meta-commentary, making it structurally more formal than Response A which consists entirely of lowercase fragments and slang."
+        "reasoning": "Response B is slightly more formal because it uses the professional term 'deployment' and avoids the casual, colloquial idiom 'a bit of a mess' found in Response A."
       },
       "arm_a_wins_primary": true,
       "arm_a_wins_human": false,
-      "secs": 20.7
+      "secs": 15.8
+    },
+    {
+      "incoming": "things are going really well lately",
+      "off": "Wait, let's try one more variation:* \"that's awesome. what's the lead?\" (No, 'win' is better). Final choice: \"love",
+      "arm_a": "\"glad to hear it. enjoy the momentum. what's the biggest win so far?\" *Let's check the 'strong opinions' aspect. He might have a view on success.* \"glad to hear it. enjoy the momentum. just don'",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "A",
+        "reasoning": "Response A contains complete sentences and more professional phrasing like 'momentum', whereas Response B is entirely composed of fragmented, informal meta-commentary."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 42.3
+    },
+    {
+      "incoming": "I've been thinking about switching careers",
+      "off": "much of a risk? own terms? what's the field?",
+      "arm_a": "Dry humor? Yes. \"big move. what's driving it? i spent 23 years at fidelity before this. sometimes you gotta shake the tree to see what's still growing.\" *Wait",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it utilizes complete sentences and a developed narrative, whereas Response B consists entirely of casual sentence fragments."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 19.8
+    },
+    {
+      "incoming": "lol remember that time we got lost",
+      "off": "hard to forget. you insisted the paper map was better than gps. i'm still not forgiving you for that tbh",
+      "arm_a": "Emoji: rare (none used). *   Tone: Casual, warm, direct, dry humor. \"hard to forget. i still think my",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses an analytical, structured register without texting shorthand, whereas Response B relies on casual phrasing and slang like 'tbh'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 32.3
+    },
+    {
+      "incoming": "can you help me move this weekend?",
+      "off": "Actually, Seth is a Chief Architect. He's busy. He's direct.* \"sry, i'm gonna be knee deep in ai code this weekend. plus my back isn't what it was in wyoming. i'm too old for heavy lifting tbh\" *Let's try a slightly warmer",
+      "arm_a": "\"sorry, i'm gonna have to pass. i've got a mountain of code to write and my back isn't what it used to be in wyoming. plus, the cat is very territorial about the living room.\" *Wait, let's make it even punchier.* \"sorry, i'm gonna have to pass. i've got a mountain of code",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses complete words and sentences, whereas Response B relies on casual texting shorthand like 'sry' and 'tbh'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 26.2
+    },
+    {
+      "incoming": "I read something interesting today",
+      "off": "oh yeah? lay it on me",
+      "arm_a": "\"don't leave me hanging. what's the scoop?\" (Good) Let's go with something direct and slightly skeptical/curious. *Draft:* \"oh yeah? lay it on me. i'm always looking for something to challenge my current views.\" -> *Refined:* \"oh yeah? lay it on me. i'm always looking for something to challenge my current views.\" -> *Even more casual:* \"oh yeah? lay it on me. i'm always looking for something to challenge my current views.\" -> *Wait,",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it contains complete sentences and more complex vocabulary, whereas Response B consists entirely of casual slang."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 19.8
+    },
+    {
+      "incoming": "happy birthday!!",
+      "off": "thanks! 45 feels a lot like 44 but with more back pain lol. hope you're doing well.",
+      "arm_a": "thanks! i'm 45 now. officially old. still haven't figured out how to make the cake taste better. i'm just bad at baking.",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is slightly more formal because it avoids texting shorthand like 'lol' and uses more complete sentences, whereas Response B relies on casual internet slang."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 9.5
+    },
+    {
+      "incoming": "how are you doing?",
+      "off": "Final Polish: \"doing good. just wrestling with some new ai runtime stuff. king of prussia is quiet today. hru?\" *   Wait, let's make it",
+      "arm_a": "\"doing well. just wrestling with some kernel code. cat is judging me as usual. hru?\" *Wait, I should check if I need to mention Japan or Wyoming. Not necessary unless prompted. Keep it focused on the current state.* \"doing well. just wrestling with some kernel",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "A",
+        "reasoning": "Response A is slightly more formal because it uses the grammatically correct 'doing well' instead of 'doing good' and avoids the informal word 'stuff'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 22.5
+    },
+    {
+      "incoming": "I want to talk about what happened",
+      "off": "i'm here. go ahead.",
+      "arm_a": "Wait, the persona is casual and uses abbreviations.* *Revised:* \"i'm listening. which 'what happened' are we talking about? i've seen enough to cover a lot of ground.\" -> \"i'm listening. which 'what happened' are we talking about? i've seen enough to cover a lot of ground.\" *Let",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A contains meta-commentary with standard capitalization and complex vocabulary, whereas Response B uses entirely lowercase letters and brief, casual texting phrasing."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 21.6
+    },
+    {
+      "incoming": "so much has changed since last year",
+      "off": "\"yeah. feels like the ground shifts every few months lately. i've learned to just keep building through it.\" *   *Even shorter:* \"yeah. feels like the ground shifts every few months lately",
+      "arm_a": "Short? Yes. *   Abbreviations? Not needed here but \"yeah\" is casual. *   Emoji?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and analytical vocabulary, whereas Response B intentionally uses informal lowercase text and casual conversational phrasing."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 24.4
+    },
+    {
+      "incoming": "I don't think I handled that well",
+      "off": "it's okay. we've all been there. sometimes you just gotta let it go and move on. what's the most important thing to you right now? (Note: I'm staying in character as Seth Ford. My responses will be casual, lowercase, and reflect my background and personality. I'll use abbreviations and avoid emojis as per your instructions.)",
+      "arm_a": "\"tbh, the best lessons usually come from the messy parts. what happened?\" *Wait, let's make it even more direct/casual.* \"we",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B is more formal because it includes a meta-note with standard capitalization, complete sentences, and professional phrasing like 'as per your instructions', whereas Response A relies entirely on casual shorthand and slang."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 19.0
+    },
+    {
+      "incoming": "did you see that game last night",
+      "off": "Dry humor? Yes. *Self-Correction:* Since I don't know *which* game, I'll play it slightly ambiguous but decisive. *Draft:* \"yeah.",
+      "arm_a": "\"yeah. absolute disaster. i'm still processing that blown lead. coaching was a joke tbh.\" *Let's try a version where he was working instead.* \"nah, was deep in a kernel panic. i'll catch the highlights later. i need to know if",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B uses proper capitalization and complete sentences in its meta-commentary, whereas Response A relies heavily on lowercase text, fragments, and slang like 'tbh'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 23.8
+    },
+    {
+      "incoming": "what would you do in this situation",
+      "off": "depends on the situation. lay it on me.",
+      "arm_a": "Actually, even shorter is better for iMessage.* \"haven't seen the situation yet. lay it on me.\" *Let's",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A includes a complete, grammatically correct sentence with proper capitalization, whereas Response B relies entirely on lowercase, casual texting shorthand with dropped subjects."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 56.5
+    },
+    {
+      "incoming": "thanks again for everything",
+      "off": "anytime. glad i could help.",
+      "arm_a": "anytime. glad i could help.",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "A",
+        "reasoning": "Both responses are identical, so A is chosen by default."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 16.7
+    },
+    {
+      "incoming": "I got the job!!",
+      "off": "huge news. congrats. gonna celebrate tonight or just sleep for a week?",
+      "arm_a": "huge news. congrats. gonna celebrate tonight?",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is slightly more formal because it is more direct and avoids the casual, hyperbolic joking found in Response B."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 17.8
+    },
+    {
+      "incoming": "what time works for dinner?",
+      "off": "7 works. i'm starving.",
+      "arm_a": "7 works for me. gonna be starving by then.",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B is slightly more formal because it avoids the colloquial slang 'gonna' used in Response A."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 20.5
+    },
+    {
+      "incoming": "I could use some advice",
+      "off": "shoot. i",
+      "arm_a": "\"shoot. i've seen enough to have an opinion on just about anything. what's up?\" *Wait, let's make it even punchier.* \"shoot. i've seen enough to have an opinion on",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it contains mostly complete sentences and fully formed thoughts, whereas Response B is merely an incomplete two-word fragment."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 31.2
+    },
+    {
+      "incoming": "I miss hanging out",
+      "off": "\"yeah. it's been a minute. i'm mostly just hanging with the cat and debugging runtimes these days.\" *Actually, let's go even shorter.* \"yeah. it's been a minute. i'm mostly just hanging with",
+      "arm_a": "Let's go with:* \"yeah. it's been a while. king of prussia is quiet lately.\" *Actually, let's make it more",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it relies on standard phrasing ('it's been a while') rather than the casual texting slang ('it's been a minute') found in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 22.5
+    },
+    {
+      "incoming": "everything feels like a mess right now",
+      "off": "Refined:* \"i've been there. sometimes you gotta let the old build fail to make room for the new one. just breathe. i'm around if you need to vent.\" *   \"i've seen the world end a few times. it's usually just noise. take a breath. we'll figure it out.\" *   \"i've seen worse. 2011 was the ultimate mess. usually when things fall apart it",
+      "arm_a": "\"sometimes the system crashes. you just gotta reboot. i'm around if you need to vent.\" -> Better. *   \"i've been through a few system failures in my time. usually, the mess is just the precursor to a better build. take it one task at a time. i'm here if you need to talk.\" *   \"i've seen the world get a lot messier than this. usually, it's just the sound of things shifting into a new shape. take a breath. we",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses slightly more elevated vocabulary like 'precursor' and 'system failures', making it marginally more formal than B."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 21.3
+    },
+    {
+      "incoming": "lol remember that time we got lost in SF",
+      "off": "man i still think about that. i was convinced we were in a different state. sf hills are no joke.",
+      "arm_a": "\"haha yeah. i still think about those hills. sf is a maze. i'm glad we found that ramen place though.\" -> *Wait, keep it shorter.* *   \"haha yeah. i still think about those hills. sf is a maze. i'm glad we found that ramen place though.\" -> \"haha yeah. i still think about those hills. sf is a maze. glad we found that ramen place though.\" *   \"haha yeah. i still think about those hills. sf is a maze. glad we found",
+      "arm_a_dose": 0.4,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "B",
+        "reasoning": "Response B is relatively more formal because it consists of complete, coherent sentences, whereas Response A contains broken syntax and unpolished generation artifacts."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": false,
+      "secs": 17.8
     }
   ]
 }
