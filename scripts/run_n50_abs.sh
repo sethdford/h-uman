@@ -14,6 +14,21 @@ mkdir -p "${RESULTS_DIR}"
 echo "[pipeline] starting n=50 steering A/B pipeline"
 echo "[pipeline] working in ${WORKTREE_DIR}"
 
+# Gate on server readiness — a prior run burned all 100 trials against a
+# still-loading server (216 connection-refused errors -> 0.0% "verdicts").
+echo "[pipeline] waiting for :8743 health"
+for i in $(seq 1 60); do
+  if curl -s --max-time 3 http://127.0.0.1:8743/health | grep -q '"model_loaded": true'; then
+    echo "[pipeline] server ready"
+    break
+  fi
+  if [ "$i" -eq 60 ]; then
+    echo "[pipeline] FATAL: server not ready after 10 min" >&2
+    exit 1
+  fi
+  sleep 10
+done
+
 # Stage 1: warmth A/B
 echo "[pipeline] stage 1/2 starting: warmth A/B (n=50, dose=0.4)"
 cd "${WORKTREE_DIR}"
