@@ -318,16 +318,20 @@ def _finalize_prompt_cache(full_prompt_ids, generated_ids) -> None:
 # changes — the same rule as an adapter swap.
 _STEERING_VECTORS: dict = {}   # trait -> {"v": ndarray, "layer": int, "base_alpha": float}
 # Expert-level steering (MoE models; SteerMoE, arXiv 2509.09660). Residual
-# injection at mid/late layers collapses gemma-4-26b-a4b into token
+# injection at mid layers can collapse gemma-4-26b-a4b into token
 # repetition because every MoE block's router reads the hidden state the
-# injection perturbs (RASA, arXiv 2602.04448: the collapse is routing
-# disruption). Expert steering leaves the residual stream untouched and
-# instead biases the ROUTER LOGITS of experts whose activation frequency
-# differs between trait-positive and trait-negative generations (profiled
-# by scripts/moe_expert_profiler.py, exported by
+# injection perturbs (RASA, arXiv 2602.04448) — measured 2026-07-09 as a
+# STOCHASTIC 2x-dose failure (1/4 questions at alpha=42; stable at the
+# calibrated 1x dose). Expert steering leaves the residual stream untouched
+# and instead biases the ROUTER LOGITS of experts whose activation
+# frequency differs between trait-positive and trait-negative generations
+# (profiled by scripts/moe_expert_profiler.py, exported by
 # scripts/moe_export_expert_steering.py as <trait>_experts.npz with keys
 # layers/experts/signs/base_bias). Request opt-in: "steering_mode":
 # "expert"; bias_e = coefficient * base_bias * sign_e added before top-k.
+# Measured caveat (docs/research/2026-07-09-moe-expert-steering.md): this
+# mode is collapse-proof but did NOT move judged warmth on its first
+# profile — keep it instrumented/opt-in; residual remains the default.
 _STEERING_EXPERTS: dict = {}   # trait -> {"layers": {li: [(expert, sign)]}, "base_bias": float}
 _STEERING_LAST_SIG: tuple = ()
 

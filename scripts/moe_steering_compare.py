@@ -49,12 +49,9 @@ DEFAULT_ARMS = ("baseline,resid_L2,resid_L22@21,resid_L22@42,resid_L22@-21,"
 
 
 def judge_score(eval_prompt: str, question: str, answer: str):
-    prompt = eval_prompt.replace("[QUESTION]", question).replace("[ANSWER]", answer)
-    raw = judge_mod._judge_claude(prompt) if judge_mod.backend() == "claude" \
-        else judge_mod._judge_local(prompt)
-    import re
-    m = re.search(r"\d{1,3}", raw or "")
-    return int(m.group()) if m else None
+    # judge_one handles the {question}/{answer} template substitution,
+    # REFUSAL filtering, and numeric parsing.
+    return judge_mod.judge_one(eval_prompt, question, answer)
 
 
 def main() -> None:
