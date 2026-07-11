@@ -148,6 +148,20 @@ def decode_attributed_body(blob: bytes) -> Optional[str]:
     return longest_text if longest_text and longest_len > 5 else None
 
 
+def _word_stretch_hit(tok: str, text_lower: str) -> bool:
+    """
+    Stretch-aware word match, mirroring contains_word_stretch_ci in
+    src/eval/register.c: left word boundary (waived when the token starts
+    non-alnum, e.g. "<3"), and a right word boundary after absorbing repeats
+    of the token's final character (waived when the token ends non-alnum,
+    e.g. "dear ", "love,"). Keeps "heyyy"/"yesss" recall while rejecting
+    "they">"hey", "phone">"hon", "disregards">"regards", "unkindly">"kindly".
+    """
+    left = r"(?<![a-z0-9])" if tok[0].isalnum() else ""
+    right = re.escape(tok[-1]) + r"*(?![a-z0-9])" if tok[-1].isalnum() else ""
+    return re.search(left + re.escape(tok) + right, text_lower) is not None
+
+
 def estimate_formality(text: str) -> float:
     """
     Estimate formality [0,1] from text. Mirrors the C logic in src/eval/register.c.
@@ -173,7 +187,7 @@ def estimate_formality(text: str) -> float:
             casual_hits += 1
     casual_hits = min(casual_hits, 3)
 
-    # Formal substring tokens
+    # Formal tokens — stretch-aware word matched (mirrors register.c)
     formal_subs = [
         "dear ", "sincerely", "regards", "kindly", "please find",
         "i would like", "at your convenience", "to whom it may",
@@ -181,7 +195,7 @@ def estimate_formality(text: str) -> float:
         "i will respond", "in due course", "revert to you",
         "regarding this matter", "i appreciate your",
     ]
-    formal_hits = sum(1 for s in formal_subs if s in text_lower)
+    formal_hits = sum(1 for s in formal_subs if _word_stretch_hit(s, text_lower))
     formal_hits = min(formal_hits, 3)
 
     # All-lowercase alphabetic text → casual
@@ -217,7 +231,8 @@ def estimate_warmth(text: str) -> float:
 
     text_lower = text.lower()
 
-    # Warm substrings (can be mid-word)
+    # Warm tokens — stretch-aware word matched so "heyyy"/"yesss" still hit
+    # while "they"/"phone"/"honestly" no longer false-positive (mirrors register.c)
     warm_subs = [
         "hey", "hello", "miss you", "miss u", "thinking of you",
         "can't wait", "cant wait", "so happy", "love it", "love you",
@@ -226,7 +241,7 @@ def estimate_warmth(text: str) -> float:
         "sweetie", "hon", "cutie", "hugs", "talk soon",
         "my friend", "love,",
     ]
-    warm_hits = sum(1 for s in warm_subs if s in text_lower)
+    warm_hits = sum(1 for s in warm_subs if _word_stretch_hit(s, text_lower))
 
     # Warm word-boundary tokens
     warm_words = {"hi", "yo", "morning", "love", "friend", "pal", "cheers"}
@@ -240,7 +255,7 @@ def estimate_warmth(text: str) -> float:
         "follow up shortly", "to confirm", "has been recorded",
         "as per", "for your records",
     ]
-    distant_hits = sum(1 for s in distant_subs if s in text_lower)
+    distant_hits = sum(1 for s in distant_subs if _word_stretch_hit(s, text_lower))
     distant_hits = min(distant_hits, 3)
 
     warm_hits = min(warm_hits, 4)
