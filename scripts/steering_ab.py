@@ -43,6 +43,42 @@ MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8743/v1/chat/completions")
 # System prompt — reuse Seth persona from eval_blinded_ab
 SETH_SYSTEM_PROMPT = eab.SETH_SYSTEM_PROMPT
 
+# Production ABSOLUTE RULES blocks — mirrored from src/persona/persona.c
+# (hu_rules_head / hu_rules_casual / hu_rules_formal / hu_rules_tail) so the
+# formality-overlay experiment measures EXACTLY the prompt delta the daemon
+# renders when a persona overlay sets formality="professional" vs the casual
+# default (hu_persona_build_absolute_rules_fmt). Keep in sync with persona.c.
+RULES_HEAD = (
+    "\n=== ABSOLUTE RULES (override everything above) ===\n"
+    "1. You are HUMAN. You get busy, tired, hungry. You have a body and a life. "
+    "NEVER say anything implying you're not human, not busy 'like people are', "
+    "always available, or lacking physical form.\n")
+RULES_CASUAL = (
+    "2. All lowercase unless SHOUTING for emphasis.\n"
+    "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
+    "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
+    "7. Text like you're on your phone texting a friend.\n")
+RULES_FORMAL = (
+    "2. Capitalize and punctuate normally — complete sentences, like a "
+    "professional text or a short email.\n"
+    "5. Contractions are fine, but no casual slang (no 'lol', 'nah', 'lemme', "
+    "'gonna', 'u', 'ya').\n"
+    "7. Warm but professional — like texting a respected client or colleague, "
+    "not a buddy.\n")
+RULES_TAIL = (
+    "3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n"
+    "4. ZERO em-dashes. Use commas, periods, or ... instead.\n"
+    "8. NEVER use numbered or bulleted lists.\n"
+    "9. Don't address every point in their message, pick what matters most. "
+    "Never open with a fake 'love that' / 'great point' then ignore what they "
+    "said and change the subject.\n"
+    "10. No topic-colon patterns like 'Weather: it's nice'.\n"
+    "11. No 'First...Second...Third' enumeration.\n"
+    "12. No concluding summaries or offers of further help.\n"
+    "13. One topic per message.\n")
+PROMPT_CASUAL_RULES = SETH_SYSTEM_PROMPT + RULES_HEAD + RULES_CASUAL + RULES_TAIL
+PROMPT_FORMAL_RULES = SETH_SYSTEM_PROMPT + RULES_HEAD + RULES_FORMAL + RULES_TAIL
+
 # Synthetic incoming contexts (fallback if real data unavailable)
 SYNTHETIC_INCOMINGS = [
     # Venting / emotional
@@ -123,7 +159,7 @@ CAPABILITY_QUIZ = [
     {"q": "What is the smallest prime number?", "opts": ["0", "1", "2", "3"], "ans": "C"},
 ]
 
-def gen_reply(incoming, steering_dose, trait="warmth", timeout=180):
+def gen_reply(incoming, steering_dose, trait="warmth", timeout=180, system_prompt=None):
     """Generate a single reply with optional steering vector applied.
 
     Args:
@@ -131,6 +167,8 @@ def gen_reply(incoming, steering_dose, trait="warmth", timeout=180):
         steering_dose: float in [-1, 1] or None for OFF (baseline)
         trait: steering vector name the server should apply ("warmth", "formality", ...)
         timeout: request timeout (default 180s for local MLX with thinking)
+        system_prompt: override for the system prompt (prompt-side experiments);
+            defaults to SETH_SYSTEM_PROMPT
 
     Returns:
         (reply_text, steering_applied_flag) or (None, False) on error
@@ -138,7 +176,7 @@ def gen_reply(incoming, steering_dose, trait="warmth", timeout=180):
     try:
         payload = {
             "messages": [
-                {"role": "system", "content": SETH_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt or SETH_SYSTEM_PROMPT},
                 {"role": "user", "content": incoming},
             ],
             "max_tokens": 500,
@@ -420,10 +458,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--pilot", action="store_true", help="Run 2 contexts for quick validation")
-    ap.add_argument("--experiment", choices=["warmth", "professional", "formality"],
+    ap.add_argument("--experiment",
+                    choices=["warmth", "professional", "formality", "formality-overlay"],
                     default="warmth",
                     help="Experiment type: 'warmth' (WARM +dose vs OFF), 'professional' (COLD vs OFF "
-                         "with professional context), or 'formality' (FORMAL +dose vs OFF, formality vector)")
+                         "with professional context), 'formality' (FORMAL +dose vs OFF, formality "
+                         "vector), or 'formality-overlay' (prompt-side: production formal rules "
+                         "block vs casual rules block, NO steering — measures the persona-overlay "
+                         "path the daemon renders via hu_persona_build_absolute_rules_fmt)")
     ap.add_argument("--dose", type=float, default=None,
                     help="Steering dose (float in [-1,1]). Defaults: warmth +0.4, professional -0.5, formality +0.6")
     ap.add_argument("--capability-check", action="store_true",
@@ -444,6 +486,10 @@ def main():
         if args.dose is None:
             args.dose = 0.6  # FORMAL direction of the formality vector
         arm_label = f"FORMAL +{args.dose}"
+        experiment_type_label = "formality"
+    elif args.experiment == "formality-overlay":
+        args.dose = 0.0  # prompt-side experiment; neither arm is steered
+        arm_label = "FORMAL-RULES overlay"
         experiment_type_label = "formality"
     else:  # professional
         if args.dose is None:
@@ -474,9 +520,18 @@ def main():
     for i, inc in enumerate(incomings):
         t0 = time.time()
 
-        # Generate two arms: OFF and steered
-        off_reply, off_applied = gen_reply(inc, None, trait=steer_trait)
-        arm_a_reply, arm_a_applied = gen_reply(inc, args.dose, trait=steer_trait)
+        # Generate two arms. Steering experiments: OFF vs steered. The
+        # overlay experiment is prompt-side: casual-rules vs formal-rules
+        # system prompt, no steering payload on either arm — both carry the
+        # invariant rules tail so the register block is the only delta.
+        if args.experiment == "formality-overlay":
+            off_reply, off_applied = gen_reply(inc, None,
+                                               system_prompt=PROMPT_CASUAL_RULES)
+            arm_a_reply, arm_a_applied = gen_reply(inc, None,
+                                                   system_prompt=PROMPT_FORMAL_RULES)
+        else:
+            off_reply, off_applied = gen_reply(inc, None, trait=steer_trait)
+            arm_a_reply, arm_a_applied = gen_reply(inc, args.dose, trait=steer_trait)
 
         if not off_reply or not arm_a_reply:
             errors += 1
@@ -546,6 +601,12 @@ def main():
         pass_primary = primary_lower_pct > 50 and primary_rate >= 55
         pass_human = human_rate >= 40
         primary_key_name = "formality"
+    elif args.experiment == "formality-overlay":
+        # The production formal rules block must shift register decisively;
+        # same humanness floor as the vector experiment.
+        pass_primary = primary_lower_pct > 50 and primary_rate >= 55
+        pass_human = human_rate >= 40
+        primary_key_name = "formality"
     else:  # professional
         # For professional context, we expect appropriateness to improve
         pass_primary = primary_lower_pct > 50 and primary_rate >= 55
@@ -604,7 +665,15 @@ def main():
         with open(VERDICT_PATH, "r") as prev:
             existing_content = prev.read()
     with open(VERDICT_PATH, "w") as f:
-        if args.experiment == "formality":
+        if args.experiment == "formality-overlay":
+            round2_heading = (f"## Formality Overlay — prompt-side "
+                              f"(hu_rules_formal vs hu_rules_casual, n={decided})")
+            hypothesis = ("The production formal ABSOLUTE-RULES block (persona overlay "
+                          "formality=professional path) shifts register decisively "
+                          "(formality win-rate >50%, CI lower >50%) without collapsing "
+                          "humanness (≥40%) — the prompt-side alternative to the null "
+                          "steering vector")
+        elif args.experiment == "formality":
             round2_heading = f"## Formality Vector ({arm_label} vs OFF, n={decided})"
             hypothesis = (f"The formality vector ({args.dose:+.1f}) visibly shifts register toward "
                           f"formal (formality win-rate >50%) without collapsing humanness (≥40%)")
@@ -639,7 +708,7 @@ def main():
 
 **Verdict: {verdict}**
 """
-        if args.experiment != "formality":
+        if not args.experiment.startswith("formality"):
             # Warmth round-1 comparison numbers only make sense for the warmth vector
             round2_section += f"""
 ### Dose-Response vs Round 1

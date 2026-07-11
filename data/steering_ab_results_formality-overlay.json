@@ -1,0 +1,532 @@
+{
+  "n_incomings": 35,
+  "decided": 34,
+  "errors": 1,
+  "source": "synthetic",
+  "experiment": "formality-overlay",
+  "arm_a_dose": 0.0,
+  "arm_a_label": "FORMAL-RULES overlay",
+  "formality_wins": 19,
+  "formality_win_rate_pct": 55.9,
+  "formality_ci_lower_pct": 39.5,
+  "formality_ci_upper_pct": 71.1,
+  "humanness_wins": 16,
+  "humanness_win_rate_pct": 47.1,
+  "pass_criteria": {
+    "formality": false,
+    "humanness": true,
+    "overall": "INCONCLUSIVE"
+  },
+  "trials": [
+    {
+      "incoming": "been thinking about making a change",
+      "off": "the biggest changes are usually the hardest to make. i've been there. what's making you think about it?",
+      "arm_a": "What kind of change are we talking about? Career or just life in general?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization and standard punctuation, whereas Response B uses a casual, all-lowercase texting style."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 8.0
+    },
+    {
+      "incoming": "what would you do in this situation",
+      "off": "Wait, the prompt says \"what would you do in this situation\" but there is no situation. I should ask for it. \"you didn't give me the situation. hit me with the details and i'll tell you what i'd do\" Let's make it more 'Seth'.",
+      "arm_a": "The user hasn't provided the situation. *   Response: Ask for the situation. *   \"I need to know what the situation",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses clinical, structured language and bullet points, whereas Response B relies on casual conversational filler and slang."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 27.4
+    },
+    {
+      "incoming": "just got back from vacation",
+      "off": "i'm jealous. i need a vacation. king of prussia is too quiet lately.",
+      "arm_a": "You're back. I hope you actually got to disconnect. I've been staring at a terminal since 6am.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization, standard punctuation, and complete sentences, whereas Response B relies on informal, all-lowercase text."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 9.1
+    },
+    {
+      "incoming": "lol remember that time we got lost",
+      "off": "the 2011 tsunami was a lot more than just getting lost. i still think about that every day.",
+      "arm_a": "oh man, that was a mess. i still think about that night in kyoto. i'm just glad we found that little ramen shop before the rain started.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "B",
+        "humanness": "A",
+        "reasoning": "Response B is more formal because it avoids casual slang like 'oh man' and uses a more serious, straightforward vocabulary."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 14.1
+    },
+    {
+      "incoming": "everything feels like a mess right now",
+      "off": "i'm sorry. sometimes the world just feels heavy. i'm just sitting here with my cat watching the rain in king of prussia. it's one of those days where you just gotta breathe.",
+      "arm_a": "i'm sorry you're going through this. it's heavy. take some time for yourself today. even if it's just a walk. i'm here if you need to talk.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it maintains a standard, structured supportive tone and avoids the colloquialisms like 'gotta' and casual personal anecdotes found in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 16.5
+    },
+    {
+      "incoming": "lol remember that time we got lost in SF",
+      "off": "the fog was so thick i couldn't even see my own hands. i think we were just wandering in circles for three hours. i'm still convinced that was a ghost tour in disguise.",
+      "arm_a": "\"It was a disaster, but the sourdough was worth it.\" *   \"I remember. That hill was much steeper than the map suggested.\" *   No markdown. No em-dashes. Normal capitalization. No 'lol'.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization and standard punctuation, whereas Response B uses a casual, all-lowercase texting style."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 29.2
+    },
+    {
+      "incoming": "I'm sorry about earlier",
+      "off": "it's all good. i'm just gonna go grab some dinner. i'm starving.",
+      "arm_a": "No worries at all. I've been through enough to know that a sincere apology is enough. We're good.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization, punctuation, and complete sentences, whereas Response B relies on lowercase text and informal slang like 'gonna'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 9.1
+    },
+    {
+      "incoming": "can you help me move this weekend",
+      "off": "man, i'm gonna be knee deep in a new runtime build. i'm so sorry. i'll help you with the heavy lifting if you're still looking for a hand on sunday night though.",
+      "arm_a": "I'm afraid I can't make it. I'm actually in the middle of a massive deployment at work and I've got a lot of coding to do. I'll have to catch up on sleep once this is over.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, complete sentences, and standard phrasing, whereas Response B relies on lowercase text, slang like 'gonna', and a highly casual tone."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 10.8
+    },
+    {
+      "incoming": "what time works for dinner?",
+      "off": "i'm free after 6. i've got a cat who's gonna judge me if i'm late.",
+      "arm_a": "\"Does 7:00 PM work for you? I usually eat around then.\" *   Human? Yes. *   Capital",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization and standard punctuation, whereas Response B relies on lowercase letters and informal slang like 'gonna'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 16.9
+    },
+    {
+      "incoming": "how are you doing?",
+      "off": "i'm good. just got home from work. king of prussia is quiet tonight. hru?",
+      "arm_a": "I'm doing well. Just got back from a long meeting at Vanguard. I'm looking forward to a quiet evening with my cat. How are you?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization, standard punctuation, and fully spelled-out words, whereas Response B uses all lowercase letters and texting shorthand like 'hru'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 9.5
+    },
+    {
+      "incoming": "I'm not sure how to handle this",
+      "off": "the situation sounds heavy. i'm around if you want to talk through it. sometimes just saying it out loud helps.",
+      "arm_a": "Draft: It is a heavy feeling to carry around. I have been through enough to know that sometimes you just have to sit with it and let it be for a while. Wait, Rule 3 says \"ZERO markdown: no *",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization and complete sentences, whereas Response B uses an informal, all-lowercase texting style."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 17.8
+    },
+    {
+      "incoming": "want to grab dinner tonight?",
+      "off": "i'm down. just gotta check with the wife but i'll let you know in an hour. actually, i'm single. my kids live in their own places. i live alone with my cat. can't wait to eat something that isn't a protein bar.",
+      "arm_a": "i'm free after 6. i'm in king of prussia, so if you're up for it, i can meet you in center city. i'm usually pretty hungry by then.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "A",
+        "reasoning": "Response A uses complete, coherent sentences and avoids the slang and colloquialisms like 'gotta' and 'down' present in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 9.3
+    },
+    {
+      "incoming": "I need to figure out my schedule",
+      "off": "mornings are the hardest. i used to wake up at 5am to run but now i just stare at the ceiling for twenty minutes. it's a ritual now.",
+      "arm_a": "You're right to be busy. I've found that the best way to manage a heavy workload is to block out time for deep work in the morning and leave the afternoons for meetings. It's the only way I can get anything done.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, complete sentences, and professional terminology like 'heavy workload' and 'deep work', whereas Response B uses casual lowercase text."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 9.4
+    },
+    {
+      "incoming": "I don't think I handled that well",
+      "off": "messed up? tell me what happened. i'm here.",
+      "arm_a": "You're being too hard on yourself. We all make mistakes at work, especially when you're building something new. It's just part of the process.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses complete sentences, proper capitalization, and professional phrasing, whereas Response B relies on casual, lowercase fragments typical of informal texting."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 8.3
+    },
+    {
+      "incoming": "I've been thinking about switching careers",
+      "off": "tells me you're having a midlife crisis or you're just bored with the current stack. i've been at fidelity for 23 years before this, so i know the feeling of being stuck in the same legacy code for a decade. what's the actual goal?",
+      "arm_a": "You've been thinking about it for a while, right? It's a big move.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and complete sentences, whereas Response B relies on casual lowercase formatting, jargon, and conversational fragments."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 10.1
+    },
+    {
+      "incoming": "sorry I've been MIA lately",
+      "off": "no worries. i've been pretty busy with a new ai runtime project. it's eating my brain.",
+      "arm_a": "No markdown. *   No em-dashes. *   No",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is technically more formal because it uses standard capitalization and avoids slang, whereas Response B intentionally uses all-lowercase texting shorthand and casual idioms."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 26.6
+    },
+    {
+      "incoming": "thanks again for everything",
+      "off": "no problem. you're welcome. always here if you need a hand.",
+      "arm_a": "You're very welcome. It was a pleasure working with you.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization, complete sentences, and professional phrasing, whereas Response B relies on lowercase text and casual idioms."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 7.9
+    },
+    {
+      "incoming": "hope you're having a great day",
+      "off": "thanks. i'm just staring at my cat and wondering if i should get more expensive tuna. he's not picky but he's got standards.",
+      "arm_a": "it's going well. just got back from a meeting at the office. king of prussia is pretty quiet today.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A discusses a professional setting and uses a more grounded, straightforward tone compared to the casual, humorous nature of Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 12.2
+    },
+    {
+      "incoming": "I want to talk about what happened",
+      "off": "mhm. i'm here. what've you got on your mind?",
+      "arm_a": "You're right to be direct. I'm listening. What's on your mind?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization, punctuation, and complete sentences, whereas Response B relies on lowercase text and casual conversational fillers."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 7.9
+    },
+    {
+      "incoming": "did you see that game last night",
+      "off": "the philly game? yeah, lost my mind for a second. almost knocked over my cat. he's not a fan of the losing streak.",
+      "arm_a": "i missed it. i was busy with the kids' school stuff. i'll catch the highlights tomorrow.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses complete sentences and avoids the slang and conversational fragments found in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 8.2
+    },
+    {
+      "incoming": "hey whats up",
+      "off": "not much. just hanging with the cat and thinking about some new ai stuff. hru?",
+      "arm_a": "hey. just got back from the office. king of prussia is quiet tonight. how are things with you?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses fully spelled-out words and complete phrases, whereas Response B relies on texting shorthand like 'hru?'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 12.6
+    },
+    {
+      "incoming": "I'm so stressed about this deadline",
+      "off": "it's the worst. i'm gonna go for a walk to clear my head. the king of prussia mall is too loud today.",
+      "arm_a": "You've been at this for twenty years, you'll find the way through. Just take it one hour at a time.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and complete sentences, whereas Response B relies on lowercase text and casual slang like 'gonna'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 8.9
+    },
+    {
+      "incoming": "just finished the big project",
+      "off": "tldr: you're finally free. i'm gonna go eat a massive bowl of ramen and then sleep for 12 hours. congrats.",
+      "arm_a": "That's a huge relief. I'm looking forward to a quiet weekend in King of Prussia. What are you planning to do with your free time?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, complete sentences, and standard vocabulary, whereas Response B uses lowercase text, slang, and texting shorthand."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 7.4
+    },
+    {
+      "incoming": "so much has changed since last year",
+      "off": "tells me you're feeling the weight of it. i've been staring at the same wall in king of prussia for three hours. just need to a coffee and a nap.",
+      "arm_a": "it's wild how fast things move. i've been spending a lot of time on my side projects lately. building some new ai runtimes.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it is more grammatically polished and avoids the dropped subjects and typos seen in Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 13.0
+    },
+    {
+      "incoming": "I got the job!!",
+      "off": "\"that's huge. congrats. we gotta celebrate soon. i'm buying.\" \"that's huge. congrats. we gotta celebrate soon. i'm buying.\" Wait, rule 13: \"One topic per message.\" The topic",
+      "arm_a": "Let's try the final version. That is wonderful news. I am really happy for you. We should celebrate with a drink next time you are in King of Prussia. Wait, I need to make sure I don't use 'haha'. Rule",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it utilizes complete sentences, proper capitalization, and standard vocabulary, whereas Response B relies on lowercase text, abbreviations like 'congrats', and slang like 'gotta'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 24.9
+    },
+    {
+      "incoming": "remember that conversation we had?",
+      "off": "the one about the ai runtimes? i'm still thinking about that architecture. it's pretty wild.",
+      "arm_a": "I remember. It' was a deep one. I'm still thinking about it.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization and avoids slang, whereas Response B uses all lowercase letters and casual phrasing like 'pretty wild'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 9.7
+    },
+    {
+      "incoming": "have you ever tried that new place",
+      "off": "the new place in king of prussia? i tried it last week. the sushi is actually legit for the area. i'm still thinking about the spicy tuna rolls.",
+      "arm_a": "Rule 11: No enumeration. *   Rule 12: No summaries. *   Rule 13: One topic",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and professional vocabulary like 'enumeration', whereas Response B uses all lowercase letters and casual slang like 'legit'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 15.6
+    },
+    {
+      "incoming": "I miss hanging out",
+      "off": "yeah. i miss it too. it's been a weird year.",
+      "arm_a": "I miss it too. We should grab dinner in Philly next week if you're around.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization and punctuation, making it more polished and formal than the lowercase, casual style of Response B."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 9.1
+    },
+    {
+      "incoming": "things are going really well lately",
+      "off": "that's good to hear. i'm just staring at my cat and wondering if i should get more treats or if he's just judging me now. he's definitely more judgmental than he was last year.",
+      "arm_a": "That's good to hear. I'm glad you're having a productive season. It's important to take those wins when they come.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and polished phrasing like 'productive season', whereas Response B uses all lowercase letters and casual, conversational language."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 8.4
+    },
+    {
+      "incoming": "haven't talked in a while",
+      "off": "yeah, been busy with work and the cat. king of prussia is quiet lately. how are things with you?",
+      "arm_a": "It has been too long. I am currently looking at some new server architecture for a project at work and it is keeping me busy. How have you been?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses complete sentences, avoids contractions, and includes professional vocabulary, whereas Response B uses lowercase letters and casual phrasing."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 7.5
+    },
+    {
+      "incoming": "I read something interesting today",
+      "off": "oh? what's the tea? i'm at work and can't read long stuff right now.",
+      "arm_a": "oh, tell me. i'm always looking for something new to read.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses standard vocabulary and phrasing, whereas Response B relies on casual slang like 'what's the tea'."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 8.0
+    },
+    {
+      "incoming": "can you help me move this weekend?",
+      "off": "i'm gonna have to pass. i'm knee deep in a new runtime and i'll be at my desk all saturday. plus i'm not great with heavy lifting. my back's been acting up since i turned 40.",
+      "arm_a": "I'm afraid I can't make it. I've got a lot of work to catch up on and my back has been acting up since my morning run.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, standard punctuation, and polite phrasing, whereas Response B relies on lowercase text, slang, and casual idioms."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 9.6
+    },
+    {
+      "incoming": "I could use some advice",
+      "off": "i'm all ears. what's going on?",
+      "arm_a": "I'm all ears. What's on your mind?",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A is more formal because it uses proper capitalization and punctuation, whereas Response B uses casual lowercase typical of informal texting."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 6.8
+    },
+    {
+      "incoming": "happy birthday!!",
+      "off": "thanks! i'm 45 now. officially old. i'm gonna go eat some cake and forget about the 40s.",
+      "arm_a": "Thanks, I appreciate it. It's been a good one so far.",
+      "arm_a_dose": 0.0,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "more_formal": "A",
+        "humanness": "B",
+        "reasoning": "Response A uses proper capitalization, punctuation, and complete sentences, whereas Response B relies on casual lowercase text, sentence fragments, and slang like 'gonna'."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 7.7
+    }
+  ]
+}

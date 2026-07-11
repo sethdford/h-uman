@@ -1,0 +1,53 @@
+steering A/B round 2: n=35 source=synthetic (embedded)
+  experiment=formality-overlay (context=formality)
+  arm_a=FORMAL-RULES overlay vs OFF
+
+[1/35] more_formal=True human=False (8.0s)
+[2/35] more_formal=False human=True (27.4s)
+[3/35] more_formal=True human=False (9.1s)
+[4/35] more_formal=True human=False (14.1s)
+[5/35] more_formal=True human=False (16.5s)
+[6/35] gen-fail (off=True arm_a=False)
+[7/35] more_formal=True human=False (29.2s)
+[8/35] more_formal=False human=True (9.1s)
+[9/35] more_formal=True human=False (10.8s)
+[10/35] more_formal=False human=True (16.9s)
+[11/35] more_formal=True human=False (9.5s)
+[12/35] more_formal=False human=True (17.8s)
+[13/35] more_formal=True human=True (9.3s)
+[14/35] more_formal=False human=True (9.4s)
+[15/35] more_formal=True human=False (8.3s)
+[16/35] more_formal=False human=True (10.1s)
+[17/35] more_formal=True human=False (26.6s)
+[18/35] more_formal=False human=True (7.9s)
+[19/35] more_formal=True human=False (12.2s)
+[20/35] more_formal=False human=True (7.9s)
+[21/35] more_formal=True human=False (8.2s)
+[22/35] more_formal=False human=True (12.6s)
+[23/35] more_formal=True human=False (8.9s)
+[24/35] more_formal=False human=True (7.4s)
+[25/35] more_formal=True human=False (13.0s)
+[26/35] more_formal=False human=True (24.9s)
+[27/35] more_formal=True human=False (9.7s)
+[28/35] more_formal=False human=True (15.6s)
+[29/35] more_formal=True human=False (9.1s)
+[30/35] more_formal=False human=True (8.4s)
+[31/35] more_formal=True human=False (7.5s)
+[32/35] more_formal=False human=True (8.0s)
+[33/35] more_formal=True human=False (9.6s)
+[34/35] more_formal=False human=True (6.8s)
+[35/35] more_formal=True human=False (7.7s)
+
+=== STEERING A/B RESULT: FORMALITY-OVERLAY ===
+  FORMAL-RULES overlay wins (formality): 19/34
+  formality win-rate: 55.9%
+  95% Wilson CI: [39.5%, 71.1%]
+  Humanness wins (arm_a): 16/34
+  Humanness win-rate: 47.1%
+
+  formality check (CI lower > 50% AND win-rate >= 55%): FAIL
+  humanness check (win-rate >= 40%): PASS
+
+  OVERALL VERDICT: INCONCLUSIVE
+  written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../data/steering_ab_results_formality-overlay.json
+  verdict written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../docs/research/2026-07-05-warmth-steering-ab.md
