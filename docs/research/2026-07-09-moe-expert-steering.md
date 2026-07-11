@@ -200,6 +200,32 @@ headroom to win pairwise and its off-manifold nudges cost humanness.
 This matches the L2@+0.4 n=50 null exactly — the null is about the
 **production context**, not about the vector's potency.
 
+## n=34 cold-direction A/B in professional contexts (the last use-case — also NULL)
+
+The one surviving hypothesis after the warmth-up nulls was the
+cold/guardrail direction: does COLD steering (L22 @ −1.0, α≈−21) win
+"appropriateness" against professional acquaintances? Same pipeline,
+Gemini pairwise judge, capability quiz PASS:
+
+- **Appropriateness win-rate: 50.0%** (17/34, Wilson CI [34.1%, 65.9%]) —
+  exactly chance.
+- **Humanness win-rate: 47.1%** — PASSES the floor: cooling is
+  humanness-neutral (unlike warm up-steering at 40%), it just doesn't
+  help.
+- **Verdict: INCONCLUSIVE / do not wire.** Per
+  `feature-gate-requires-measurement.md` the `hu_persona_steering_coeffs`
+  warmth mapping stays unset. Artifact:
+  `persona-steering-lab/results/steering_ab_results_l22_cold-1.0_professional_n34.json`.
+
+With this, **every steering direction, dose, mechanism, and context has
+been measured on the production stack and none wins a blind A/B**:
+warm-up L2@0.4 (n=50), warm-up L22@1.0 (n=35), cold L22@−1.0
+professional (n=34), expert bias (3 selectors × 2 shapes). Register
+control belongs to persona OVERLAYS (objectively 79.4% on the same
+stack, 2026-07-11). The steering machinery's residual value is
+diagnostic: trait probes, routing maps, and the guarded serving path
+for any future vector that does earn a measurement.
+
 ## Verdict
 
 - **The mechanism is real; the up-lever use-case is dead.** Mid-layer
