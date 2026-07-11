@@ -100,6 +100,8 @@ extern const unsigned char data_prompts_persona_reinforcement_txt[];
 extern const size_t data_prompts_persona_reinforcement_txt_len;
 extern const unsigned char data_prompts_reasoning_instruction_txt[];
 extern const size_t data_prompts_reasoning_instruction_txt_len;
+extern const unsigned char data_prompts_safety_rules_compact_txt[];
+extern const size_t data_prompts_safety_rules_compact_txt_len;
 extern const unsigned char data_prompts_safety_rules_txt[];
 extern const size_t data_prompts_safety_rules_txt_len;
 extern const unsigned char data_prompts_tone_hints_json[];
@@ -149,13 +151,14 @@ static const hu_embedded_data_entry_t hu_embedded_data_registry[] = {
     { "prompts/group_chat_hint.txt", data_prompts_group_chat_hint_txt, &data_prompts_group_chat_hint_txt_len },
     { "prompts/persona_reinforcement.txt", data_prompts_persona_reinforcement_txt, &data_prompts_persona_reinforcement_txt_len },
     { "prompts/reasoning_instruction.txt", data_prompts_reasoning_instruction_txt, &data_prompts_reasoning_instruction_txt_len },
+    { "prompts/safety_rules_compact.txt", data_prompts_safety_rules_compact_txt, &data_prompts_safety_rules_compact_txt_len },
     { "prompts/safety_rules.txt", data_prompts_safety_rules_txt, &data_prompts_safety_rules_txt_len },
     { "prompts/tone_hints.json", data_prompts_tone_hints_json, &data_prompts_tone_hints_json_len },
     { "security/command_lists.json", data_security_command_lists_json, &data_security_command_lists_json_len },
     { NULL, NULL, NULL }  /* Sentinel */
 };
 
-static const size_t hu_embedded_data_count = 38;  /* excluding sentinel */
+static const size_t hu_embedded_data_count = 39;  /* excluding sentinel */
 
 typedef struct {
     const char *path;

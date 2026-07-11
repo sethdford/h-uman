@@ -738,6 +738,7 @@ set(HU_CORE_SOURCES
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
+    src/agent/prompt_trim.c
     src/agent/graph_grounding.c
     src/agent/memory_loader.c
     src/agent/channel_trust.c
@@ -1905,6 +1906,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/embedded_registry.c
     src/data/data_prompts_group_chat_hint_txt.c
     src/data/data_prompts_safety_rules_txt.c
+    src/data/data_prompts_safety_rules_compact_txt.c
     src/data/data_prompts_default_identity_txt.c
     src/data/data_prompts_reasoning_instruction_txt.c
     src/data/data_prompts_autonomy_full_txt.c
@@ -3406,6 +3408,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_prompt.c
+    tests/test_prompt_trim.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c

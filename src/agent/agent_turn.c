@@ -290,6 +290,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/proactive.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
+#include "human/agent/prompt_trim.h"
 #include "human/agent/salience.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
@@ -4398,8 +4399,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * we land well inside the safe zone. Truncate at the last newline
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
-        if (err == HU_OK && system_prompt && system_prompt_len > 16384) {
-            size_t budget = 16384;
+        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
+            size_t budget = HU_PROMPT_TRIM_BUDGET_BYTES;
             /* Find the last newline within [0, budget) so we cut at a
              * logical boundary rather than mid-token. */
             size_t cut = budget;

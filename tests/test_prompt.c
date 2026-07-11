@@ -1,11 +1,14 @@
 #include "human/agent/memory_loader.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_trim.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory.h"
+#include "human/persona.h"
 #include "human/tools/factory.h"
 #include "human/tools/shell.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* ─── Prompt builder tests ───────────────────────────────────────────────── */
@@ -362,6 +365,161 @@ static void test_prompt_graph_context_present_immersive(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* ─── Immersive value-aware trim + compact safety section (HU_PROMPT_TRIM) ──
+ *
+ * Pre/post contract per integration-done-contract.md: gate OFF preserves
+ * today's behavior (prompt stays over budget, oldest memory intact); gate
+ * LIVE lands under HU_PROMPT_TRIM_BUDGET_BYTES by dropping MIDDLE bytes
+ * while the persona head and the CRITICAL REMINDER tail survive. */
+
+/* Builds a >16K memory context: an OLDEST marker line, filler lines, and a
+ * NEWEST marker line. Caller frees (len + 1). */
+static char *big_memory_context(hu_allocator_t *alloc, size_t *out_len) {
+    const size_t target = 20000;
+    char *buf = (char *)alloc->alloc(alloc->ctx, target + 64);
+    HU_ASSERT_NOT_NULL(buf);
+    size_t len = 0;
+    static const char oldest[] = "- OLDEST_FACT_MARKER first thing learned\n";
+    memcpy(buf + len, oldest, sizeof(oldest) - 1);
+    len += sizeof(oldest) - 1;
+    static const char filler[] = "- remembered detail about a shared plan and a place\n";
+    while (len < target - 128) {
+        memcpy(buf + len, filler, sizeof(filler) - 1);
+        len += sizeof(filler) - 1;
+    }
+    static const char newest[] = "- NEWEST_FACT_MARKER latest thing learned\n";
+    memcpy(buf + len, newest, sizeof(newest) - 1);
+    len += sizeof(newest) - 1;
+    buf[len] = '\0';
+    *out_len = len;
+    return buf;
+}
+
+static hu_prompt_config_t immersive_cfg(const char *memory_ctx, size_t memory_ctx_len,
+                                        const hu_persona_t *persona) {
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.persona_immersive = true;
+    cfg.persona_prompt = "PERSONA_HEAD_MARKER you text like yourself.";
+    cfg.persona_prompt_len = strlen(cfg.persona_prompt);
+    cfg.memory_context = memory_ctx;
+    cfg.memory_context_len = memory_ctx_len;
+    cfg.persona = persona;
+    cfg.suppress_prompt_budget_diagnostic = true;
+    return cfg;
+}
+
+static void test_prompt_immersive_trim_live_drops_middle_keeps_tail(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t mem_len = 0;
+    char *mem = big_memory_context(&alloc, &mem_len);
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, mem_len, &persona);
+
+    setenv("HU_PROMPT_TRIM", "live", 1);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    unsetenv("HU_PROMPT_TRIM");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Post: under the budget the positional cut would otherwise enforce. */
+    HU_ASSERT_TRUE(out_len <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    /* Head (persona) and tail (CRITICAL REMINDER) survive... */
+    HU_ASSERT_TRUE(strstr(out, "PERSONA_HEAD_MARKER") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "CRITICAL REMINDER") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "TAIL_REMINDER_MARKER") != NULL);
+    /* ...middle memory bytes are dropped oldest-first, newest kept. */
+    HU_ASSERT_TRUE(strstr(out, "OLDEST_FACT_MARKER") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "NEWEST_FACT_MARKER") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    alloc.free(alloc.ctx, mem, 20000 + 64);
+}
+
+static void test_prompt_immersive_trim_off_preserves_positional_behavior(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t mem_len = 0;
+    char *mem = big_memory_context(&alloc, &mem_len);
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, mem_len, &persona);
+
+    unsetenv("HU_PROMPT_TRIM");
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Pre: the builder does NOT trim when the gate is off — the prompt stays
+     * over budget (the positional cut downstream is today's behavior) and
+     * the oldest memory line is still present. */
+    HU_ASSERT_TRUE(out_len > (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_TRUE(strstr(out, "OLDEST_FACT_MARKER") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    alloc.free(alloc.ctx, mem, 20000 + 64);
+}
+
+static void test_prompt_immersive_trim_shadow_output_unchanged(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t mem_len = 0;
+    char *mem = big_memory_context(&alloc, &mem_len);
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, mem_len, &persona);
+
+    setenv("HU_PROMPT_TRIM", "shadow", 1);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    unsetenv("HU_PROMPT_TRIM");
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Shadow logs the plan but must not change the emitted prompt. */
+    HU_ASSERT_TRUE(out_len > (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_TRUE(strstr(out, "OLDEST_FACT_MARKER") != NULL);
+    /* And no safety section either — shadow may not add content. */
+    HU_ASSERT_TRUE(strstr(out, "Boundaries (stay in voice)") == NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    alloc.free(alloc.ctx, mem, 20000 + 64);
+}
+
+static void test_prompt_immersive_safety_section_live_only_and_early(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* Small memory context: no trimming needed, isolates the safety append. */
+    static const char mem[] = "- MEMFACT_MARKER a small remembered detail\n";
+    hu_prompt_config_t cfg = immersive_cfg(mem, sizeof(mem) - 1, NULL);
+
+    setenv("HU_PROMPT_TRIM", "live", 1);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    unsetenv("HU_PROMPT_TRIM");
+    HU_ASSERT_EQ(err, HU_OK);
+    const char *safety = strstr(out, "Boundaries (stay in voice)");
+    const char *memfact = strstr(out, "MEMFACT_MARKER");
+    HU_ASSERT_NOT_NULL((void *)safety);
+    HU_ASSERT_NOT_NULL((void *)memfact);
+    /* Early placement: right after the persona head, BEFORE memory. */
+    HU_ASSERT_TRUE(safety < memfact);
+    alloc.free(alloc.ctx, out, out_len + 1);
+
+    /* Gate OFF: exact current behavior — no safety section. */
+    out = NULL;
+    out_len = 0;
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(out, "Boundaries (stay in voice)") == NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
@@ -370,6 +528,10 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_graph_context_present);
     HU_RUN_TEST(test_prompt_graph_context_absent_is_noop);
     HU_RUN_TEST(test_prompt_graph_context_present_immersive);
+    HU_RUN_TEST(test_prompt_immersive_trim_live_drops_middle_keeps_tail);
+    HU_RUN_TEST(test_prompt_immersive_trim_off_preserves_positional_behavior);
+    HU_RUN_TEST(test_prompt_immersive_trim_shadow_output_unchanged);
+    HU_RUN_TEST(test_prompt_immersive_safety_section_live_only_and_early);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);
