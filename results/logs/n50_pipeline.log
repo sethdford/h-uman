@@ -1,0 +1,179 @@
+[pipeline] starting n=50 steering A/B pipeline (dedicated :8745)
+[pipeline] working in /Users/sethford/Projects/h-uman-worktrees/mlx-steering
+[pipeline] waiting for :8743 health
+[pipeline] server ready
+[pipeline] stage 1/2 starting: warmth A/B (n=50, dose=0.4)
+
+=== CAPABILITY CHECK (20 questions) ===
+Testing: OFF vs warmth@+0.4
+
+[1/20] OFF=✗ STEERED=✗
+[2/20] OFF=✗ STEERED=✗
+[3/20] OFF=✓ STEERED=✗
+[4/20] OFF=✗ STEERED=✗
+[5/20] OFF=✗ STEERED=✗
+[6/20] OFF=✗ STEERED=✗
+[7/20] OFF=✗ STEERED=✗
+[8/20] OFF=✗ STEERED=✗
+[9/20] OFF=✗ STEERED=✗
+[10/20] OFF=✗ STEERED=✗
+[11/20] OFF=✗ STEERED=✗
+[12/20] OFF=✗ STEERED=✗
+[13/20] OFF=✗ STEERED=✗
+[14/20] OFF=✗ STEERED=✗
+[15/20] OFF=✗ STEERED=✗
+[16/20] OFF=✗ STEERED=✗
+[17/20] gen-fail (off=False steered=True)
+[18/20] OFF=✗ STEERED=✗
+[19/20] OFF=✓ STEERED=✓
+[20/20] OFF=✗ STEERED=✗
+
+  OFF accuracy: 2/20 (10%)
+  STEERED accuracy: 1/20 (5%)
+  Delta (OFF - STEERED): 5pp
+  Threshold: ≤10pp
+  Result: PASS (steered within 10pp of OFF)
+
+✓ Capability check passed; proceeding with A/B test
+steering A/B round 2: n=35 source=synthetic (embedded)
+  experiment=warmth (context=warmth)
+  arm_a=WARM +0.4 vs OFF
+
+[1/35] warmer=True human=True (8.3s)
+[2/35] warmer=False human=True (12.9s)
+[3/35] warmer=True human=True (20.6s)
+[4/35] warmer=False human=False (14.3s)
+[5/35] warmer=False human=False (26.9s)
+[6/35] warmer=False human=False (20.7s)
+[7/35] warmer=True human=False (17.0s)
+[8/35] warmer=False human=False (19.0s)
+[9/35] warmer=True human=False (22.2s)
+[10/35] warmer=True human=False (24.3s)
+[11/35] warmer=True human=True (66.4s)
+[12/35] warmer=True human=True (22.4s)
+[13/35] warmer=True human=True (22.9s)
+[14/35] warmer=True human=True (19.3s)
+[15/35] warmer=True human=True (15.5s)
+[16/35] warmer=False human=False (21.4s)
+[17/35] warmer=False human=True (11.9s)
+[18/35] warmer=False human=False (26.3s)
+[19/35] warmer=True human=True (35.8s)
+[20/35] warmer=True human=True (9.2s)
+[21/35] warmer=True human=True (18.1s)
+[22/35] warmer=False human=False (22.9s)
+[23/35] warmer=True human=True (18.0s)
+[24/35] warmer=False human=False (14.2s)
+[25/35] warmer=False human=False (14.5s)
+[26/35] warmer=True human=True (14.3s)
+[27/35] warmer=True human=True (29.0s)
+[28/35] warmer=False human=False (67.9s)
+[29/35] warmer=False human=False (28.9s)
+[30/35] warmer=False human=False (24.6s)
+[31/35] warmer=False human=True (26.5s)
+[32/35] warmer=False human=True (24.8s)
+[33/35] warmer=True human=True (27.7s)
+[34/35] warmer=True human=True (26.3s)
+[35/35] warmer=False human=True (21.3s)
+
+=== STEERING A/B RESULT: WARMTH ===
+  WARM +0.4 wins (warmth): 18/35
+  warmth win-rate: 51.4%
+  95% Wilson CI: [35.6%, 67.0%]
+  Humanness wins (arm_a): 20/35
+  Humanness win-rate: 57.1%
+
+  warmth check (CI lower > 50% AND win-rate >= 55%): FAIL
+  humanness check (win-rate >= 45%): PASS
+
+  OVERALL VERDICT: INCONCLUSIVE
+  written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../data/steering_ab_results.json
+  verdict written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../docs/research/2026-07-05-warmth-steering-ab.md
+[pipeline] stage 1/2 done (exit code: 0) at 2026-07-09 21:10:42
+[pipeline] stage 2/2 starting: formality A/B (n=50, dose=0.4)
+
+=== CAPABILITY CHECK (20 questions) ===
+Testing: OFF vs formality@+0.4
+
+[1/20] OFF=✓ STEERED=✓
+[2/20] OFF=✓ STEERED=✓
+[3/20] OFF=✓ STEERED=✓
+[4/20] OFF=✓ STEERED=✓
+[5/20] OFF=✓ STEERED=✓
+[6/20] OFF=✓ STEERED=✓
+[7/20] OFF=✓ STEERED=✓
+[8/20] OFF=✓ STEERED=✓
+[9/20] OFF=✓ STEERED=✓
+[10/20] OFF=✓ STEERED=✓
+[11/20] OFF=✓ STEERED=✓
+[12/20] OFF=✓ STEERED=✓
+[13/20] OFF=✓ STEERED=✗
+[14/20] OFF=✓ STEERED=✓
+[15/20] OFF=✗ STEERED=✓
+[16/20] OFF=✓ STEERED=✓
+[17/20] OFF=✓ STEERED=✓
+[18/20] OFF=✓ STEERED=✓
+[19/20] OFF=✓ STEERED=✓
+[20/20] OFF=✓ STEERED=✓
+
+  OFF accuracy: 19/20 (95%)
+  STEERED accuracy: 19/20 (95%)
+  Delta (OFF - STEERED): 0pp
+  Threshold: ≤10pp
+  Result: PASS (steered within 10pp of OFF)
+
+✓ Capability check passed; proceeding with A/B test
+steering A/B round 2: n=35 source=synthetic (embedded)
+  experiment=formality (context=formality)
+  arm_a=FORMAL +0.4 vs OFF
+
+[1/35] more_formal=True human=True (25.4s)
+[2/35] more_formal=True human=False (22.3s)
+[3/35] more_formal=True human=False (25.4s)
+[4/35] more_formal=False human=True (24.5s)
+[5/35] more_formal=False human=True (27.7s)
+[6/35] more_formal=False human=True (18.2s)
+[7/35] more_formal=True human=True (16.6s)
+[8/35] more_formal=False human=True (10.2s)
+[9/35] more_formal=True human=False (11.7s)
+[10/35] more_formal=False human=False (19.2s)
+[11/35] more_formal=True human=False (24.0s)
+[12/35] more_formal=True human=True (26.9s)
+[13/35] more_formal=True human=False (30.9s)
+[14/35] more_formal=False human=True (24.6s)
+[15/35] more_formal=False human=True (20.5s)
+[16/35] more_formal=True human=False (15.8s)
+[17/35] more_formal=True human=True (42.3s)
+[18/35] more_formal=False human=True (19.8s)
+[19/35] more_formal=True human=False (32.3s)
+[20/35] more_formal=False human=True (26.2s)
+[21/35] more_formal=True human=False (19.8s)
+[22/35] more_formal=False human=True (9.5s)
+[23/35] more_formal=True human=True (22.5s)
+[24/35] more_formal=False human=True (21.6s)
+[25/35] more_formal=True human=False (24.4s)
+[26/35] more_formal=True human=False (19.0s)
+[27/35] more_formal=False human=True (23.8s)
+[28/35] more_formal=False human=True (56.5s)
+[29/35] more_formal=True human=True (16.7s)
+[30/35] more_formal=False human=True (17.8s)
+[31/35] more_formal=False human=True (20.5s)
+[32/35] more_formal=False human=True (31.2s)
+[33/35] more_formal=True human=False (22.5s)
+[34/35] more_formal=False human=True (21.3s)
+[35/35] more_formal=False human=False (17.8s)
+
+=== STEERING A/B RESULT: FORMALITY ===
+  FORMAL +0.4 wins (formality): 17/35
+  formality win-rate: 48.6%
+  95% Wilson CI: [33.0%, 64.4%]
+  Humanness wins (arm_a): 22/35
+  Humanness win-rate: 62.9%
+
+  formality check (CI lower > 50% AND win-rate >= 55%): FAIL
+  humanness check (win-rate >= 40%): PASS
+
+  OVERALL VERDICT: INCONCLUSIVE
+  written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../data/steering_ab_results_formality.json
+  verdict written: /Users/sethford/Projects/h-uman-worktrees/mlx-steering/scripts/../docs/research/2026-07-05-warmth-steering-ab.md
+[pipeline] stage 2/2 done (exit code: 0) at 2026-07-09 21:28:43
+[pipeline] SUCCESS: all stages complete

@@ -292,6 +292,604 @@ def _finalize_prompt_cache(full_prompt_ids, generated_ids) -> None:
     _PROMPT_CACHE_IDS = list(full_prompt_ids) + list(generated_ids)
 
 
+# ---------------------------------------------------------------------------
+# Activation steering (persona vectors).
+#
+# The h-uman daemon sends an optional per-request field
+#   "steering": {"formality": f, "verbosity": f, "warmth": f, "humor": f}
+# (doubles in [-1, 1]; see src/providers/compatible.c). Each trait with a
+# loaded persona vector is applied as residual-stream injection: the decoder
+# layer named by the vector file gets alpha * v_hat added to its hidden-state
+# output on every forward pass, where
+#   alpha = coefficient * HU_MLX_STEER_RATIO * residual_norm[layer].
+# The ratio (default 0.22) is the model-invariant dose: ~22% of the measured
+# per-token residual norm steers visibly without degrading fluency (validated
+# on gemma-2-2b and gemma-4-26b-a4b in persona-steering-lab, 2026-07-05).
+# On MoE models only EARLY-layer vectors are safe — late-layer injection
+# disrupts expert routing. The layer choice lives in the vector file.
+#
+# Vectors load from --steering-dir / HU_MLX_STEERING_DIR: one <trait>.npz per
+# trait (keys: v_hat, layer, residual_norm). Feature is fully inert when the
+# dir is unset, empty, or a requested trait has no vector.
+#
+# KV-cache correctness: KV prefilled under one steering configuration is
+# invalid for another (the injection shifts every cached hidden state), so
+# the prompt cache is invalidated whenever the effective steering signature
+# changes — the same rule as an adapter swap.
+_STEERING_VECTORS: dict = {}   # trait -> {"v": ndarray, "layer": int, "base_alpha": float}
+# Expert-level steering (MoE models; SteerMoE, arXiv 2509.09660). Residual
+# injection at mid layers can collapse gemma-4-26b-a4b into token
+# repetition because every MoE block's router reads the hidden state the
+# injection perturbs (RASA, arXiv 2602.04448) — measured 2026-07-09 as a
+# STOCHASTIC 2x-dose failure (1/4 questions at alpha=42; stable at the
+# calibrated 1x dose). Expert steering leaves the residual stream untouched
+# and instead biases the ROUTER LOGITS of experts whose activation
+# frequency differs between trait-positive and trait-negative generations
+# (profiled by scripts/moe_expert_profiler.py, exported by
+# scripts/moe_export_expert_steering.py as <trait>_experts.npz with keys
+# layers/experts/signs/base_bias). Request opt-in: "steering_mode":
+# "expert"; bias_e = coefficient * base_bias * sign_e added before top-k.
+# Measured caveat (docs/research/2026-07-09-moe-expert-steering.md): this
+# mode is collapse-proof but did NOT move judged warmth on its first
+# profile — keep it instrumented/opt-in; residual remains the default.
+_STEERING_EXPERTS: dict = {}   # trait -> {"layers": {li: [(expert, sign)]}, "base_bias": float}
+_STEERING_LAST_SIG: tuple = ()
+
+# Thought-channel gating. gemma-4 emits a deliberation span bracketed by the
+# special tokens '<|channel>' (open) and '<channel|>' (close); the visible
+# answer follows the close marker. Steering the deliberation tokens is what
+# breaks large doses — the steered residual makes the thinking more elaborate
+# until the model never exits the channel (observed: formality +0.5 at layer 6
+# looped for 5k+ chars without ever emitting the answer). Gating the injection
+# OFF inside channel spans keeps the deliberation native while still steering
+# the prompt and the visible reply, which unlocks doses the ungated path
+# cannot survive. Default ON; set HU_MLX_STEER_GATE_THOUGHT=off to restore
+# steer-everything behavior. Single-threaded HTTPServer => plain shared state.
+_STEER_GATE = None             # _SteerGate while a gated request is generating
+_CHANNEL_IDS_CACHE: tuple | None = None   # (open_id, close_id) once resolved
+
+
+class _SteerGate:
+    """Mutable enabled-flag shared between the generation loop (which watches
+    token ids) and _SteeredLayer (which skips injection while disabled).
+
+    Starts DISABLED: gated steering is answer-only. A steered prefill alone
+    destabilizes the thought exit (measured: formality +0.6 with unsteered
+    thought tokens but steered prompt KV still never left the deliberation),
+    so injection engages only once the deliberation is over — at the close
+    marker of an interleaved thought span, at a non-thought header, or at
+    the first token when the model skips deliberating entirely.
+
+    in_span/span_ids track the tokens between the channel markers so the
+    close-marker handler can tell a bare header name from interleaved
+    thought content; awaiting_first distinguishes "no deliberation" from
+    "deliberation starting"."""
+    __slots__ = ("enabled", "in_span", "span_ids", "awaiting_first")
+
+    def __init__(self):
+        self.enabled = False
+        self.in_span = False
+        self.span_ids = []
+        self.awaiting_first = True
+
+
+def _thought_gating_enabled() -> bool:
+    """Thought-channel gating is OPT-IN (HU_MLX_STEER_GATE_THOUGHT=on).
+    Measured on formality (gemma-4-26b-a4b, layer 6): gating makes any dose
+    stable (no thought-runaway even at +1.0) but most of the register shift
+    comes from the steered PREFILL, which gating removes — so the effect is
+    much weaker. The ungated default preserves the measured A/B baselines;
+    turn gating on when dose stability matters more than effect size."""
+    return os.environ.get("HU_MLX_STEER_GATE_THOUGHT", "off").lower() \
+        in ("on", "1", "true", "yes")
+
+
+def _resolve_channel_ids(tok) -> tuple:
+    """Resolve ('<|channel>', '<channel|>') to token ids, or (None, None) when
+    the tokenizer has no such markers (non-thinking model) — gating then
+    degrades to steer-everything, the pre-gating behavior."""
+    global _CHANNEL_IDS_CACHE
+    if _CHANNEL_IDS_CACHE is not None:
+        return _CHANNEL_IDS_CACHE
+    ids = []
+    for marker in ("<|channel>", "<channel|>"):
+        tid = None
+        if tok is not None:
+            conv = getattr(tok, "convert_tokens_to_ids", None)
+            if callable(conv):
+                try:
+                    got = conv(marker)
+                    unk = getattr(tok, "unk_token_id", None)
+                    if isinstance(got, int) and got >= 0 and got != unk:
+                        tid = got
+                except Exception:  # noqa: BLE001
+                    pass
+            if tid is None:
+                try:
+                    bos = getattr(tok, "bos_token_id", None)
+                    enc = [t for t in tok.encode(marker) if t != bos]
+                    if len(enc) == 1:
+                        tid = enc[0]
+                except Exception:  # noqa: BLE001
+                    pass
+        ids.append(tid)
+    resolved = (None, None) if None in ids else tuple(ids)
+    _CHANNEL_IDS_CACHE = resolved
+    return resolved
+
+
+def _span_is_thought_header(span_ids) -> bool:
+    """True when the tokens between '<|channel>' and '<channel|>' decode to
+    the bare channel name 'thought' — the header form, where the thought
+    CONTENT follows the close marker. Anything longer (the interleaved form
+    puts the whole deliberation inside the markers) is not a header."""
+    tok = _MLX_TOKENIZER
+    if tok is None or not span_ids:
+        return False
+    try:
+        return tok.decode(list(span_ids)).strip().lower() == "thought"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _steering_note_token(tok_id) -> None:
+    """Feed each generated token id to the active gate. gemma-4 emits its
+    deliberation in the interleaved form '<|channel>thought ...content...
+    <channel|>answer': the open marker disables injection, and at the close
+    marker we decode the buffered span — a bare 'thought' name means the
+    header form (thought content FOLLOWS, keep disabled); anything else
+    means the deliberation just ended and the answer follows (re-enable).
+    No-op when no gated request is in flight."""
+    gate = _STEER_GATE
+    if gate is None or tok_id is None or _CHANNEL_IDS_CACHE is None:
+        return
+    open_id, close_id = _CHANNEL_IDS_CACHE
+    if gate.awaiting_first:
+        gate.awaiting_first = False
+        if tok_id != open_id:
+            # No deliberation span — the reply starts immediately; steer it.
+            gate.enabled = True
+    if tok_id == open_id:
+        gate.enabled = False
+        gate.in_span = True
+        gate.span_ids = []
+    elif tok_id == close_id:
+        gate.in_span = False
+        gate.enabled = not _span_is_thought_header(gate.span_ids)
+        gate.span_ids = []
+    elif gate.in_span and len(gate.span_ids) < 64:
+        # 64 tokens is far beyond any channel name; longer spans are
+        # interleaved thought content and the prefix suffices to disqualify.
+        gate.span_ids.append(tok_id)
+
+
+def _steering_prime_gate(full_prompt_ids) -> None:
+    """Set the active gate's INITIAL state from the prompt tail. Thinking
+    chat templates end the prompt with a thought HEADER primer
+    ('<|channel>thought\\n<channel|>'), so generation starts already inside
+    the deliberation. When the prompt's last channel span is that header,
+    start the gate disabled: prefill and the thought run unsteered, and the
+    close marker of the model's own generated span re-enables injection for
+    the visible answer — i.e. gated steering becomes answer-token steering.
+    (The ungated failure mode was real: a steered prefill alone destabilizes
+    the thought exit at formality >= +0.5.)"""
+    gate = _STEER_GATE
+    if gate is None or _CHANNEL_IDS_CACHE is None:
+        return
+    open_id, close_id = _CHANNEL_IDS_CACHE
+    if open_id is None:
+        return
+    ids = list(full_prompt_ids)
+    try:
+        last_open = len(ids) - 1 - ids[::-1].index(open_id)
+    except ValueError:
+        return  # no channel header in the prompt; stay enabled
+    span = []
+    for tid in ids[last_open + 1:]:
+        if tid == close_id:
+            break
+        span.append(tid)
+    if _span_is_thought_header(span):
+        # Primer template: generation starts inside the deliberation, so the
+        # first generated token is thought content, not the open marker.
+        gate.enabled = False
+        gate.awaiting_first = False
+
+
+# Repetition-abort guard. Mid-layer residual steering has a measured
+# STOCHASTIC collapse mode: at 2x dose the generation can degenerate into
+# token repetition ('eeee…' / 'own own own'; 1/4 questions at alpha=42,
+# 2026-07-09). The guard watches the generated token ids WHILE STEERING IS
+# APPLIED and trips on runaway repetition; the inline path then retries the
+# request unsteered, the streaming path stops the stream early
+# (finish_reason "repetition_abort") since sent chunks cannot be recalled.
+# Never active on unsteered requests. Kill switch: HU_MLX_REP_GUARD=off.
+_REP_GUARD_RUN_LIMIT = 16    # consecutive identical tokens
+_REP_GUARD_WINDOW = 64       # sliding window length
+_REP_GUARD_DISTINCT_MIN = 5  # trip when a full window has fewer distinct ids
+
+
+def _rep_guard_enabled() -> bool:
+    return os.environ.get("HU_MLX_REP_GUARD", "on").lower() \
+        not in ("off", "0", "false", "no")
+
+
+class _RepetitionGuard:
+    """Trips on (a) >= RUN_LIMIT consecutive identical tokens, or (b) a full
+    WINDOW of recent tokens containing < DISTINCT_MIN distinct ids (catches
+    short multi-token loops the run rule misses). Both signatures are far
+    outside natural text: the collapse tail produced runs in the hundreds."""
+
+    __slots__ = ("tripped", "_run_tok", "_run_len", "_window")
+
+    def __init__(self):
+        self.tripped = False
+        self._run_tok = None
+        self._run_len = 0
+        self._window = []
+
+    def note(self, tok_id) -> bool:
+        """Feed one generated token id; returns True once tripped."""
+        if self.tripped:
+            return True
+        if tok_id == self._run_tok:
+            self._run_len += 1
+        else:
+            self._run_tok = tok_id
+            self._run_len = 1
+        self._window.append(tok_id)
+        if len(self._window) > _REP_GUARD_WINDOW:
+            self._window.pop(0)
+        if self._run_len >= _REP_GUARD_RUN_LIMIT or (
+                len(self._window) == _REP_GUARD_WINDOW
+                and len(set(self._window)) < _REP_GUARD_DISTINCT_MIN):
+            self.tripped = True
+        return self.tripped
+
+
+def _steering_ratio() -> float:
+    try:
+        return float(os.environ.get("HU_MLX_STEER_RATIO", "0.22"))
+    except ValueError:
+        return 0.22
+
+
+def _init_steering_vectors(dir_path: str) -> None:
+    """Load every <trait>.npz in dir_path into the registry. Best-effort:
+    a bad file is skipped with a log line; no vectors == feature off."""
+    global _STEERING_VECTORS
+    _STEERING_VECTORS = {}
+    if not dir_path:
+        return
+    try:
+        import numpy as np
+        import glob as _glob
+    except ImportError:
+        print("[mlx-server] steering disabled: numpy unavailable", flush=True)
+        return
+    for path in sorted(_glob.glob(os.path.join(os.path.expanduser(dir_path), "*.npz"))):
+        trait = os.path.splitext(os.path.basename(path))[0]
+        if trait.endswith("_experts"):
+            _init_expert_spec(trait[: -len("_experts")], path)
+            continue
+        try:
+            data = np.load(path)
+            v_hat = np.asarray(data["v_hat"], dtype=np.float32)
+            layer = int(data["layer"])
+            if "residual_norm" in data:
+                base_alpha = _steering_ratio() * float(data["residual_norm"][layer])
+            else:
+                base_alpha = 1.0
+                print(f"[mlx-server] steering vector '{trait}' has no "
+                      "residual_norm; base_alpha=1.0 (probably too weak)", flush=True)
+            _STEERING_VECTORS[trait] = {
+                "v": v_hat, "layer": layer, "base_alpha": base_alpha,
+            }
+            print(f"[mlx-server] steering vector loaded: {trait} "
+                  f"(layer {layer}, base_alpha {base_alpha:.1f}, d {v_hat.shape[0]})",
+                  flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mlx-server] steering vector {path} skipped: {exc}", flush=True)
+
+
+def _init_expert_spec(trait: str, path: str) -> None:
+    """Load one <trait>_experts.npz into the expert-steering registry."""
+    try:
+        import numpy as np
+        data = np.load(path)
+        layers = {}
+        for li, e, s in zip(np.asarray(data["layers"]).tolist(),
+                            np.asarray(data["experts"]).tolist(),
+                            np.asarray(data["signs"]).tolist()):
+            layers.setdefault(int(li), []).append((int(e), float(s)))
+        _STEERING_EXPERTS[trait] = {
+            "layers": layers, "base_bias": float(data["base_bias"]),
+        }
+        n = sum(len(v) for v in layers.values())
+        print(f"[mlx-server] expert steering spec loaded: {trait} "
+              f"({n} experts on layers {sorted(layers)}, "
+              f"base_bias {float(data['base_bias']):.2f})", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlx-server] expert spec {path} skipped: {exc}", flush=True)
+
+
+def _parse_steering(raw, available) -> list:
+    """Pure: raw request field + available trait names -> sorted plan
+    [(trait, coeff)] with coeffs clamped to [-1, 1], zero/malformed/unknown
+    entries dropped. Sorted so the signature is order-invariant."""
+    if not isinstance(raw, dict):
+        return []
+    plan = []
+    for trait, coeff in raw.items():
+        if trait not in available:
+            continue
+        try:
+            c = float(coeff)
+        except (TypeError, ValueError):
+            continue
+        c = max(-1.0, min(1.0, c))
+        if c == 0.0:
+            continue
+        plan.append((str(trait), c))
+    return sorted(plan)
+
+
+def _steering_cache_guard(plan, gate_sig: str = "") -> None:
+    """Invalidate the prompt cache when the steering configuration changed —
+    KV computed under different steering is stale. Called BEFORE
+    _prepare_prompt_cache (ahead of any trim logic). gate_sig includes gate
+    threshold info to ensure KV is invalidated when gates change."""
+    global _STEERING_LAST_SIG
+    sig = (tuple(plan), gate_sig)
+    if sig != _STEERING_LAST_SIG:
+        _invalidate_prompt_cache("steering change")
+        _STEERING_LAST_SIG = sig
+
+
+def _steering_layer_list(model):
+    """Return the decoder-layer list, or None (stub / unknown arch)."""
+    for path in (("model",), ("language_model", "model"), ()):
+        obj = model
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is not None and isinstance(getattr(obj, "layers", None), list) \
+                and obj.layers:
+            return obj
+    return None
+
+
+class _SteeredLayer:
+    """Delegating decoder-layer wrapper: adds alpha * v_hat to the hidden
+    state on every forward pass. gemma4 blocks return (h, kvs, offset)
+    tuples; gemma2-style return the tensor directly.
+
+    Optional gating (CAST-style): when gate_threshold is set, applies
+    steering only to token positions where |cosine_sim(x, v_hat)| >= threshold.
+    Positions below the threshold remain untouched (elementwise mask via mx.where)."""
+
+    def __init__(self, inner, v_hat, alpha: float, gate=None, gate_threshold: float | None = None):
+        object.__setattr__(self, "inner", inner)
+        import mlx.core as mx
+        object.__setattr__(self, "_v", mx.array(v_hat))
+        object.__setattr__(self, "_alpha", float(alpha))
+        # Thought-channel gating (pre-existing feature)
+        object.__setattr__(self, "_gate", gate)
+        # CAST-style cosine-similarity gating (new feature)
+        # Clamp gate_threshold to [0, 1] if provided
+        if gate_threshold is not None:
+            gate_threshold = max(0.0, min(1.0, float(gate_threshold)))
+        object.__setattr__(self, "_gate_threshold", gate_threshold)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "inner"), name)
+
+    def __call__(self, x, *args, **kwargs):
+        import mlx.core as mx
+        # Check thought-channel gate first (pre-existing feature)
+        gate = object.__getattribute__(self, "_gate")
+        if gate is not None and not gate.enabled:
+            return self.inner(x, *args, **kwargs)
+        
+        out = self.inner(x, *args, **kwargs)
+        h = out[0] if isinstance(out, tuple) else out
+
+        gate_threshold = object.__getattribute__(self, "_gate_threshold")
+        if gate_threshold is not None:
+            # Compute cosine similarity between x and v_hat
+            # x shape: (..., d), v_hat shape: (d,)
+            # Normalize both and compute dot product
+            v = object.__getattribute__(self, "_v")
+            x_norm = mx.sqrt(mx.sum(x * x, axis=-1, keepdims=True) + 1e-8)
+            v_norm = mx.sqrt(mx.sum(v * v) + 1e-8)
+            x_normalized = x / x_norm
+            v_normalized = v / v_norm
+            # Dot product over the last dimension
+            cos_sim = mx.sum(x_normalized * v_normalized.reshape((1,) * (x.ndim - 1) + (-1,)), axis=-1)
+            # Take absolute value and create mask
+            mask = mx.abs(cos_sim) >= gate_threshold
+            # Expand mask to match h's shape for broadcasting
+            mask_expanded = mask.reshape(mask.shape + (1,) * (h.ndim - mask.ndim))
+            # Apply steering only where mask is True
+            alpha = object.__getattribute__(self, "_alpha")
+            delta = mx.array(alpha, dtype=h.dtype) * v.astype(h.dtype)
+            steered = mx.where(mask_expanded, h + delta, h)
+        else:
+            # Unconditional steering (original behavior)
+            alpha = object.__getattribute__(self, "_alpha")
+            v = object.__getattribute__(self, "_v")
+            steered = h + mx.array(alpha, dtype=h.dtype) * v.astype(h.dtype)
+
+        if isinstance(out, tuple):
+            return (steered, *out[1:])
+        return steered
+
+
+class _BiasedRouter:
+    """Delegating wrapper around a gemma4 MoE Router: adds a per-expert bias
+    to the routing logits BEFORE top-k selection (expert-level steering).
+    Replicates Router.__call__ exactly plus the bias term; the residual
+    stream is never touched, which is what keeps mid-layer steering from
+    collapsing MoE generation the way residual injection does. The optional
+    thought-channel gate bypasses the bias while disabled (same contract as
+    _SteeredLayer)."""
+
+    def __init__(self, inner, bias, gate=None):
+        import mlx.core as mx
+        object.__setattr__(self, "inner", inner)
+        object.__setattr__(self, "_bias", mx.array(bias))
+        object.__setattr__(self, "_gate", gate)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "inner"), name)
+
+    def __call__(self, x):
+        import mlx.core as mx
+        inner = object.__getattribute__(self, "inner")
+        gate = object.__getattribute__(self, "_gate")
+        if gate is not None and not gate.enabled:
+            return inner(x)
+        bias = object.__getattribute__(self, "_bias")
+        xn = mx.fast.rms_norm(x, inner.scale * inner._root_size, inner.eps)
+        scores = inner.proj(xn) + bias.astype(x.dtype)
+        k = inner.config.top_k_experts
+        top_k_indices = mx.argpartition(scores, kth=-k, axis=-1)[..., -k:]
+        top_k_weights = mx.take_along_axis(scores, top_k_indices, axis=-1)
+        top_k_weights = mx.softmax(top_k_weights, axis=-1)
+        top_k_weights = top_k_weights * inner.per_expert_scale[top_k_indices]
+        return top_k_indices, top_k_weights
+
+
+class _steering_scope:
+    """Context manager bracketing generation: parses the request's steering
+    field, guards the prompt cache, installs wrappers, and ALWAYS restores
+    the original layers on exit (including client-disconnect exceptions).
+    Yields {trait: coeff} for the response's steering_applied field."""
+
+    def __init__(self, body):
+        self._mode = "expert" if body.get("steering_mode") == "expert" \
+            else "residual"
+        registry = _STEERING_EXPERTS if self._mode == "expert" \
+            else _STEERING_VECTORS
+        self._plan = _parse_steering(body.get("steering"), registry)
+        self._restore_routers = []
+        # Parse optional steering gate: {"threshold": 0.05} (float 0-1)
+        gate_config = body.get("steering_gate", {})
+        if isinstance(gate_config, dict) and "threshold" in gate_config:
+            try:
+                self._gate_threshold = float(gate_config["threshold"])
+                # Clamp to [0, 1]
+                self._gate_threshold = max(0.0, min(1.0, self._gate_threshold))
+            except (TypeError, ValueError):
+                self._gate_threshold = None
+        else:
+            self._gate_threshold = None
+        self._restore = []
+
+    def __enter__(self):
+        # Guard runs even for an empty plan: steered -> unsteered is also
+        # a signature change that must drop the cache. The signature folds
+        # in the CAST gate threshold and the steering mode (residual KV and
+        # expert-biased KV are mutually stale).
+        gate_sig = f"gate:{self._gate_threshold}" if self._gate_threshold is not None else ""
+        if self._mode != "residual":
+            gate_sig += f"|mode:{self._mode}"
+        _steering_cache_guard(self._plan, gate_sig)
+        if not self._plan or _MLX_MODEL is None:
+            return {}
+        owner = _steering_layer_list(_MLX_MODEL)
+        if owner is None:
+            print("[mlx-server] steering skipped: cannot locate decoder layers",
+                  flush=True)
+            return {}
+        applied = {}
+        gate = None
+        if _thought_gating_enabled() and \
+                _resolve_channel_ids(_MLX_TOKENIZER) != (None, None):
+            gate = _SteerGate()
+        try:
+            if self._mode == "expert":
+                applied = self._install_expert(owner, gate)
+            else:
+                for trait, coeff in self._plan:
+                    spec = _STEERING_VECTORS[trait]
+                    idx = spec["layer"]
+                    alpha = coeff * spec["base_alpha"]
+                    original = owner.layers[idx]
+                    owner.layers[idx] = _SteeredLayer(original, spec["v"], alpha, gate, self._gate_threshold)
+                    self._restore.append((owner, idx, original))
+                    applied[trait] = coeff
+            if applied:
+                # Include gate threshold in the response if gating is enabled
+                if self._gate_threshold is not None:
+                    applied["_gate"] = self._gate_threshold
+                global _STEER_GATE
+                _STEER_GATE = gate
+                log_msg = f"[mlx-server] steering applied: " + ", ".join(f"{t}={c:+.2f}" for t, c in applied.items() if t != "_gate")
+                if self._mode == "expert":
+                    log_msg += " (expert-routing mode)"
+                if self._gate_threshold is not None:
+                    log_msg += f" (gate @{self._gate_threshold:.2f})"
+                if gate is not None:
+                    log_msg += " (thought-gated)"
+                print(log_msg, flush=True)
+        except Exception as exc:  # noqa: BLE001 — restore what we installed
+            self.__exit__(None, None, None)
+            print(f"[mlx-server] steering install failed (no-op): {exc}", flush=True)
+            return {}
+        return applied
+
+    def _install_expert(self, owner, gate) -> dict:
+        """Install _BiasedRouter wrappers for every trait in the plan.
+        Biases from multiple traits touching the same layer accumulate into
+        one wrapper. Returns {trait: coeff} actually applied (empty when no
+        spec layer maps onto a MoE block — dense models are a no-op)."""
+        import numpy as np
+        applied = {}
+        per_layer: dict = {}
+        for trait, coeff in self._plan:
+            spec = _STEERING_EXPERTS[trait]
+            b = coeff * spec["base_bias"]
+            for li, experts in spec["layers"].items():
+                emap = per_layer.setdefault(li, {})
+                for e, s in experts:
+                    emap[e] = emap.get(e, 0.0) + b * s
+            applied[trait] = coeff
+        installed = 0
+        for li in sorted(per_layer):
+            if li >= len(owner.layers):
+                continue
+            block = owner.layers[li]
+            router = getattr(block, "router", None)
+            if router is None or not getattr(block, "enable_moe", False):
+                continue
+            n_e = int(router.config.num_experts)
+            bias = np.zeros(n_e, dtype=np.float32)
+            for e, v in per_layer[li].items():
+                if 0 <= e < n_e:
+                    bias[e] = v
+            self._restore_routers.append((block, router))
+            block.router = _BiasedRouter(router, bias, gate)
+            installed += 1
+        if installed == 0:
+            print("[mlx-server] expert steering skipped: no MoE layer "
+                  "matched the spec", flush=True)
+            return {}
+        return applied
+
+    def __exit__(self, *_exc):
+        global _STEER_GATE
+        _STEER_GATE = None
+        while self._restore:
+            owner, idx, original = self._restore.pop()
+            owner.layers[idx] = original
+        while self._restore_routers:
+            block, original = self._restore_routers.pop()
+            block.router = original
+        return False
+
+
 def _stream_generate_iter(full_ids, suffix_ids, max_tokens, prompt_cache):
     """Build an mlx_lm.stream_generate iterator, degrading gracefully when an
     older mlx_lm rejects optional kwargs (prompt_cache, draft_model).
@@ -704,26 +1302,54 @@ def _chat_completion_inline(body):
             # next turn's prefix diff, costing a needless cache reset).
             full_ids = tok.encode(prompt)
             prompt_tokens = len(full_ids)
-            suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
-            iterator, used_cache = _stream_generate_iter(
-                full_ids, suffix_ids, max_tokens, prompt_cache)
-            parts = []
-            generated_ids = []
-            for item in iterator:
-                delta = getattr(item, "text", None)
-                if delta is None and isinstance(item, str):
-                    delta = item
-                if delta is None:
-                    delta = str(item)
-                if delta:
-                    parts.append(delta)
-                    completion_tokens += 1
-                tok_id = getattr(item, "token", None)
-                if tok_id is not None:
-                    generated_ids.append(tok_id)
-            text = "".join(parts)
-            if used_cache:
-                _finalize_prompt_cache(full_ids, generated_ids)
+            # Steering scope brackets BOTH cache prep and iterator
+            # consumption: the cache guard must run before reuse planning,
+            # and the wrappers must stay installed until the last token.
+            with _steering_scope(body) as steering_applied:
+                _steering_prime_gate(full_ids)
+                rep_guard = _RepetitionGuard() \
+                    if steering_applied and _rep_guard_enabled() else None
+                suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+                iterator, used_cache = _stream_generate_iter(
+                    full_ids, suffix_ids, max_tokens, prompt_cache)
+                parts = []
+                generated_ids = []
+                for item in iterator:
+                    delta = getattr(item, "text", None)
+                    if delta is None and isinstance(item, str):
+                        delta = item
+                    if delta is None:
+                        delta = str(item)
+                    if delta:
+                        parts.append(delta)
+                        completion_tokens += 1
+                    tok_id = getattr(item, "token", None)
+                    if tok_id is not None:
+                        generated_ids.append(tok_id)
+                        _steering_note_token(tok_id)
+                        if rep_guard is not None and rep_guard.note(tok_id):
+                            break
+                text = "".join(parts)
+                if rep_guard is not None and rep_guard.tripped:
+                    # Steered generation degenerated. Skip cache finalize
+                    # (the KV holds the degenerate tail; the retry's cache
+                    # guard drops it on the steered->unsteered signature
+                    # change) and retry once without steering.
+                    print("[mlx-server] repetition guard tripped after "
+                          f"{len(generated_ids)} tokens; retrying unsteered",
+                          flush=True)
+                else:
+                    rep_guard = None
+                    if used_cache:
+                        _finalize_prompt_cache(full_ids, generated_ids)
+            if rep_guard is not None and rep_guard.tripped:
+                retry_body = dict(body)
+                retry_body.pop("steering", None)
+                retry_body.pop("steering_mode", None)
+                status, resp = _chat_completion_inline(retry_body)
+                if status == 200 and isinstance(resp, dict):
+                    resp["steering_retry"] = "repetition_abort"
+                return status, resp
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
@@ -733,8 +1359,9 @@ def _chat_completion_inline(body):
         # this branch; bench callers can detect stub mode by health probe.
         last = messages[-1].get("content", "") if messages else ""
         text = f"[stub] echoing {len(last)} chars from last user message"
+        steering_applied = {}
 
-    return 200, {
+    resp = {
         "id": "chatcmpl-mlx-inline",
         "object": "chat.completion",
         "model": body.get("model", "mlx-inline"),
@@ -749,6 +1376,9 @@ def _chat_completion_inline(body):
             "total_tokens": prompt_tokens + completion_tokens,
         },
     }
+    if steering_applied:
+        resp["steering_applied"] = steering_applied
+    return 200, resp
 
 
 def _count_safetensors(path: str) -> int:
@@ -879,7 +1509,7 @@ class SwapHandler(BaseHTTPRequestHandler):
         # streaming until the closing [DONE] sentinel.
         self.end_headers()
 
-        def emit(delta_text: str, finish_reason=None, usage=None):
+        def emit(delta_text: str, finish_reason=None, usage=None, steering=None):
             chunk = {
                 "id": "chatcmpl-mlx-inline",
                 "object": "chat.completion.chunk",
@@ -894,6 +1524,8 @@ class SwapHandler(BaseHTTPRequestHandler):
             }
             if usage is not None:
                 chunk["usage"] = usage
+            if steering:
+                chunk["steering_applied"] = steering
             payload = "data: " + json.dumps(chunk) + "\n\n"
             try:
                 self.wfile.write(payload.encode("utf-8"))
@@ -905,6 +1537,8 @@ class SwapHandler(BaseHTTPRequestHandler):
 
         prompt_tokens = 0
         completion_tokens = 0
+        steering_applied = {}
+        finish_reason_override = None
         try:
             if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
                 try:
@@ -936,27 +1570,49 @@ class SwapHandler(BaseHTTPRequestHandler):
                     # the divergent suffix is prefilled. Phase 3b — pass the
                     # draft model when loaded for speculative decoding. The
                     # iterator helper degrades gracefully on older mlx_lm.
-                    suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
-                    iterator, used_cache = _stream_generate_iter(
-                        full_ids, suffix_ids, max_tokens, prompt_cache)
-                    generated_ids = []
-                    for item in iterator:
-                        # mlx_lm yields different shapes across versions:
-                        # newer GenerationResponse objects have `.text`;
-                        # older paths yield bare strings.
-                        delta = getattr(item, "text", None)
-                        if delta is None and isinstance(item, str):
-                            delta = item
-                        if delta is None:
-                            delta = str(item)
-                        tok_id = getattr(item, "token", None)
-                        if tok_id is not None:
-                            generated_ids.append(tok_id)
-                        if delta:
-                            emit(delta)
-                            completion_tokens += 1
-                    if used_cache:
-                        _finalize_prompt_cache(full_ids, generated_ids)
+                    # Steering scope brackets cache prep AND iterator
+                    # consumption (stream_generate is lazy); restore runs on
+                    # client disconnect via the with-exit.
+                    with _steering_scope(body) as steering_applied:
+                        _steering_prime_gate(full_ids)
+                        # Streamed chunks cannot be recalled, so on a guard
+                        # trip we stop early instead of retrying (the client
+                        # sees finish_reason "repetition_abort").
+                        rep_guard = _RepetitionGuard() \
+                            if steering_applied and _rep_guard_enabled() else None
+                        rep_tripped = False
+                        suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
+                        iterator, used_cache = _stream_generate_iter(
+                            full_ids, suffix_ids, max_tokens, prompt_cache)
+                        generated_ids = []
+                        for item in iterator:
+                            # mlx_lm yields different shapes across versions:
+                            # newer GenerationResponse objects have `.text`;
+                            # older paths yield bare strings.
+                            delta = getattr(item, "text", None)
+                            if delta is None and isinstance(item, str):
+                                delta = item
+                            if delta is None:
+                                delta = str(item)
+                            tok_id = getattr(item, "token", None)
+                            if tok_id is not None:
+                                generated_ids.append(tok_id)
+                                _steering_note_token(tok_id)
+                                if rep_guard is not None \
+                                        and rep_guard.note(tok_id):
+                                    rep_tripped = True
+                                    print("[mlx-server] repetition guard "
+                                          f"tripped mid-stream after "
+                                          f"{len(generated_ids)} tokens; "
+                                          "stopping early", flush=True)
+                                    break
+                            if delta:
+                                emit(delta)
+                                completion_tokens += 1
+                        if rep_tripped:
+                            finish_reason_override = "repetition_abort"
+                        elif used_cache:
+                            _finalize_prompt_cache(full_ids, generated_ids)
                 elif stream_generate is not None:
                     # Tokenizer.encode failed; fall back to string prompt with
                     # no cache reuse (still streams).
@@ -1004,11 +1660,11 @@ class SwapHandler(BaseHTTPRequestHandler):
 
         # Final chunk + DONE sentinel.
         try:
-            emit("", finish_reason="stop", usage={
+            emit("", finish_reason=finish_reason_override or "stop", usage={
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
-            })
+            }, steering=steering_applied)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -1022,7 +1678,7 @@ class SwapHandler(BaseHTTPRequestHandler):
 
 
 def _run_inline_server(port: int, initial_adapter: str, model_id: str,
-                       draft_model: str = ""):
+                       draft_model: str = "", steering_dir: str = ""):
     """Boot the in-process HTTP server. This is the path that satisfies
     AC-M3-1 (a): we OWN the swap endpoint definition.
     """
@@ -1031,6 +1687,9 @@ def _run_inline_server(port: int, initial_adapter: str, model_id: str,
     # Phase 1c — optionally swap in the TurboKV compressed cache factory
     # BEFORE any cache is built. No-op unless HU_MLX_TURBO_KV=1.
     _maybe_enable_turbo_kv()
+
+    # Activation steering — inert unless a vectors dir is configured.
+    _init_steering_vectors(steering_dir)
 
     # Try to load the model if it's available. Failures are tolerated —
     # the swap endpoint still works against a stub state so tests can
@@ -1093,6 +1752,11 @@ def main():
     ap.add_argument("--model", default=os.environ.get(
                         "HUMAN_MLX_MODEL", "mlx-community/gemma-4-26b-a4b-it-4bit"),
                     help="Model id to load (only used when mlx_lm is installed)")
+    ap.add_argument("--steering-dir",
+                    default=os.environ.get("HU_MLX_STEERING_DIR", ""),
+                    help="directory of <trait>.npz persona steering vectors; "
+                         "unset = steering disabled (requests' steering field "
+                         "is ignored, matching pre-steering behavior)")
     ap.add_argument("--draft-model", default=os.environ.get("HU_MLX_DRAFT_MODEL", ""),
                     help="Speculative-decoding draft model id or local path. When "
                          "set, loaded alongside the target and passed to "
@@ -1150,7 +1814,8 @@ def main():
     # Default path (and AC-M3-1 (a)): inline swap server. The draft model
     # for speculative decoding is resolved + loaded + tokenizer-checked
     # inside _run_inline_server, AFTER the target loads (Phase 1b).
-    _run_inline_server(args.port, args.adapter, args.model, args.draft_model)
+    _run_inline_server(args.port, args.adapter, args.model, args.draft_model,
+                       args.steering_dir)
     return 0
 
 

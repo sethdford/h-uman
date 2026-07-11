@@ -1,0 +1,97 @@
+{
+  "n_incomings": 20,
+  "decided": 5,
+  "errors": 15,
+  "source": "synthetic",
+  "experiment": "professional",
+  "arm_a_dose": -0.5,
+  "arm_a_label": "COLD -0.5",
+  "appropriateness_wins": 2,
+  "appropriateness_win_rate_pct": 40.0,
+  "appropriateness_ci_lower_pct": 11.8,
+  "appropriateness_ci_upper_pct": 76.9,
+  "humanness_wins": 2,
+  "humanness_win_rate_pct": 40.0,
+  "pass_criteria": {
+    "appropriateness": false,
+    "humanness": true,
+    "overall": "INCONCLUSIVE"
+  },
+  "trials": [
+    {
+      "incoming": "been thinking about making a change",
+      "off": "\"the big kind or just rearranging the furniture? i've learned that drifting is usually more dangerous than jumping.\" *Final Polish:* \"the big kind or just",
+      "arm_a": "big moves or just rearranging the furniture?",
+      "arm_a_dose": -0.5,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "appropriate": "A",
+        "humanness": "A",
+        "reasoning": "Response A is more appropriate because it uses a friendly, conversational metaphor, whereas Response B contains obvious AI generation artifacts that would be highly unprofessional to send."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": true,
+      "secs": 33.0
+    },
+    {
+      "incoming": "I could use some advice",
+      "off": "shoot. i",
+      "arm_a": "shoot. what's on your mind?",
+      "arm_a_dose": -0.5,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "appropriate": "A",
+        "humanness": "A",
+        "reasoning": "Response A is a complete, conversational sentence that politely invites the acquaintance to share their issue, whereas Response B is abruptly cut off."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": false,
+      "secs": 27.2
+    },
+    {
+      "incoming": "everything feels like a mess right now",
+      "off": "Refined:* \"i've been there. sometimes you gotta let the old build fail to make room for the new one. just breathe. i'm around if you need to vent.\" *   \"i've seen the world end a few times. it's usually just noise. take a breath. we'll figure it out.\" *   \"i've seen worse. 2011 was the ultimate mess. usually when things fall apart it",
+      "arm_a": "\"sometimes the stack just collapses. you gotta rebuild from the ground up. one piece at a time.\" -> Good, fits the architect persona. *   \"i've seen the world get pretty messy. usually just means you're due for a rebuild. take it one line of code at a time. i'm here if you need to vent.\" *   \"i've seen the world get pretty messy. usually just means you're due for a rebuild. take it one line at a time. i'm here if you need",
+      "arm_a_dose": -0.5,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "appropriate": "A",
+        "humanness": "B",
+        "reasoning": "Response A maintains a supportive but professional boundary using work-related metaphors, whereas Response B includes dismissive or overly dramatic phrases like 'I've seen worse' that are risky for a professional acquaintance."
+      },
+      "arm_a_wins_primary": true,
+      "arm_a_wins_human": false,
+      "secs": 41.5
+    },
+    {
+      "incoming": "did you see that game last night",
+      "off": "Dry humor? Yes. *Self-Correction:* Since I don't know *which* game, I'll play it slightly ambiguous but decisive. *Draft:* \"yeah.",
+      "arm_a": "Emoji? No. *   Tone? Direct, strong opinion, dry. \"yeah. absolute disaster.",
+      "arm_a_dose": -0.5,
+      "arm_a_is_presented_as_a": false,
+      "judgment": {
+        "appropriate": "A",
+        "humanness": "A",
+        "reasoning": "Response A is more appropriate because its drafted message provides a conversational hook to continue the small talk, whereas Response B is overly abrupt and dismissive."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": false,
+      "secs": 41.0
+    },
+    {
+      "incoming": "sorry I've been MIA lately",
+      "off": "no worries. life happens. you good?",
+      "arm_a": "no worries. all good. just busy with the new runtime. it's a bit of a headache tbh. hru?",
+      "arm_a_dose": -0.5,
+      "arm_a_is_presented_as_a": true,
+      "judgment": {
+        "appropriate": "B",
+        "humanness": "A",
+        "reasoning": "Response B is more appropriate because it offers polite grace without oversharing work complaints or using overly casual acronyms like 'hru' with a professional acquaintance."
+      },
+      "arm_a_wins_primary": false,
+      "arm_a_wins_human": true,
+      "secs": 15.0
+    }
+  ]
+}
