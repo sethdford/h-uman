@@ -24,6 +24,11 @@ benchmark-results.json
 *.db
 *.db-journal
 
+# Contact/message data (privacy: never commit raw contact lists or message data)
+data/*.contacts.json
+scripts/contacts*.json
+scripts/message-analysis*.json
+
 # Python
 __pycache__/
 *.pyc
