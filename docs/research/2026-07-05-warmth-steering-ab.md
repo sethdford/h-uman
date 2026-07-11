@@ -1,3 +1,10 @@
+---
+title: "Warmth steering A/B test — dose-response rounds"
+created: 2026-07-05
+status: final
+audience: maintainers, research
+---
+
 # Warmth Steering A/B Test — 2026-07-05
 
 ## Summary

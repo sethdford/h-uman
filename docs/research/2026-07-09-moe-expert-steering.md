@@ -1,3 +1,10 @@
+---
+title: "Routing-aware (expert-level) steering for gemma-4-26b-a4b — measured verdicts"
+created: 2026-07-09
+status: final
+audience: maintainers, research
+---
+
 # Routing-Aware (Expert-Level) Steering for gemma-4-26b-a4b
 
 **Date:** 2026-07-09 · **Branch:** `feat/mlx-steering` · **Status:** measured; expert mode shipped opt-in, residual remains default
