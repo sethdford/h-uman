@@ -241,6 +241,26 @@ static void deinit_frees_expectations(void) {
     HU_ASSERT_EQ(state.expectation_count, 0u);
 }
 
+/* Pins the 2026-07 service-loop SIGABRT: at_append_tom_directive passed an
+ * uninitialized stack struct to hu_tom_init, which historically initialized
+ * beliefs but NOT expectations — hu_tom_deinit then freed garbage
+ * expectations[i].topic pointers. hu_tom_init must fully initialize the
+ * struct without requiring a caller-side memset. */
+static void init_fully_initializes_dirty_struct(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tom_belief_state_t state;
+    memset(&state, 0xAB, sizeof(state)); /* deliberately NOT zeroed */
+
+    HU_ASSERT_EQ(hu_tom_init(&state, &alloc, "ivan", 4), HU_OK);
+    HU_ASSERT_EQ(state.expectation_count, 0u);
+    HU_ASSERT_EQ(state.belief_count, 0u);
+    HU_ASSERT_NULL(state.expectations[0].topic);
+    HU_ASSERT_NULL(state.expectations[HU_TOM_MAX_EXPECTATIONS - 1].topic);
+
+    /* The crash path: deinit on a freshly-inited state must be safe. */
+    hu_tom_deinit(&state, &alloc);
+}
+
 void run_mutual_tom_tests(void) {
     HU_TEST_SUITE("mutual_tom");
     HU_RUN_TEST(record_expectation_stores_topic);
@@ -258,4 +278,5 @@ void run_mutual_tom_tests(void) {
     HU_RUN_TEST(detect_expectation_no_match);
     HU_RUN_TEST(detect_expectation_tracking);
     HU_RUN_TEST(deinit_frees_expectations);
+    HU_RUN_TEST(init_fully_initializes_dirty_struct);
 }

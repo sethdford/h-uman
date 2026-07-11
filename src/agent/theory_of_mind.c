@@ -10,6 +10,10 @@ hu_error_t hu_tom_init(hu_tom_belief_state_t *state, hu_allocator_t *alloc, cons
                        size_t contact_id_len) {
     if (!state || !alloc || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
+    /* Zero the whole struct — callers pass uninitialized stack memory, and a
+     * partial init (beliefs but not expectations) left hu_tom_deinit freeing
+     * garbage expectation pointers (2026-07 service-loop SIGABRT). */
+    memset(state, 0, sizeof(*state));
     size_t len = contact_id_len;
     if (len == 0)
         len = strlen(contact_id);
@@ -18,8 +22,6 @@ hu_error_t hu_tom_init(hu_tom_belief_state_t *state, hu_allocator_t *alloc, cons
         return HU_ERR_OUT_OF_MEMORY;
     state->contact_id = dup;
     state->contact_id_len = strlen(dup);
-    state->belief_count = 0;
-    memset(state->beliefs, 0, sizeof(state->beliefs));
     return HU_OK;
 }
 
