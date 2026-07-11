@@ -113,9 +113,31 @@ text — routers select them **because** warm tokens are present. Forcing
 them into the top-8 on neutral context does not synthesize warmth; it
 mildly misroutes. Steering the residual stream instead changes the
 representation the router reads, which moves both the content *and* the
-routing coherently. (Follow-ups that could rescue expert steering:
-visible-span-only expert sets, per-layer subsets, weight-mass-weighted
-bias, or SteerMoE's full detector rather than our z-score selector.)
+routing coherently.
+
+### Rescue attempts (also negative — the result is robust)
+
+Two selector hypotheses were tested (`scripts/moe_expert_rescue.py`,
+same 4 questions, same judge; results
+`persona-steering-lab/results/moe_rescue_n4.json`):
+
+| rescue arm | exited thought | judged warmth |
+|---|---|---|
+| visible-span selection, ±1 sign, strength 2 | 4/4 | 68.8 |
+| visible-span, strength 3 | **1/4** | 65.0 (n=1) |
+| weight-mass-proportional bias, strength 2 | 4/4 | 72.5 |
+| weight-mass, strength 4 | **2/4** | 50.0 (n=2) |
+
+Every configuration lands at-or-below baseline (75.0), and pushing
+strength trades directly into thought-exit destabilization — the
+visible-span set destabilizes at a *lower* strength (3) than the
+response-span set (4), consistent with those experts sitting closer to
+the output pathway. Across three selectors (response-frequency,
+visible-frequency, mass-differential) and two bias shapes (uniform sign,
+mass-proportional), expert-routing bias never moved warmth upward.
+A rescue would now require a causal detector (SteerMoE's full method) or
+a different intervention class entirely; correlational selection is
+exhausted.
 
 ## Judged head-to-head (trait judge gemma-3-4b local, warmth 0–100, greedy, 4 questions)
 
@@ -153,24 +175,52 @@ Per `feature-gate-requires-measurement.md`: expert mode ships **opt-in
 per-request** (the OFF-equivalent); promotion to default requires a blind
 A/B on real traffic, which this doc's judge numbers do not substitute for.
 
+## n=35 blind A/B of the L22 vector at 1× dose (the decisive test — NULL)
+
+The L22 vector was exported as a servable artifact
+(`vectors/warmth_human_l22.npz`) and run through the same blind-A/B
+pipeline as the 2026-07-09 n=50 nulls, on a dedicated :8747 instance
+(Gemini pairwise judge, Seth persona prompt, synthetic incoming contexts,
+dose 1.0 = α≈21, temperature 0.7):
+
+- **Capability quiz: PASS** (steered within 10pp of OFF — full-dose
+  mid-layer steering is capability-safe).
+- **Warmth win-rate: 45.7%** (16/35, Wilson CI [30.5%, 61.8%]) — null,
+  not even directionally positive.
+- **Humanness win-rate: 40.0%** — below the 45% floor.
+- **Verdict: INCONCLUSIVE / do not ship.** Artifacts:
+  `persona-steering-lab/results/steering_ab_results_l22_dose1.0_n35.json`.
+
+Reconciling with the +12 trait-probe result: the probes measure *absolute
+warmth on bare trait questions with no persona prompt*; the A/B measures
+*pairwise preference on Seth-persona replies*. With the persona prompt +
+adapter in play the replies are already at the warmth ceiling (the
+2026-07-05 demo saw baseline judged 92/100), so up-steering has no
+headroom to win pairwise and its off-manifold nudges cost humanness.
+This matches the L2@+0.4 n=50 null exactly — the null is about the
+**production context**, not about the vector's potency.
+
 ## Verdict
 
-- **The premise inverted under measurement.** Mid-layer (L22) residual
-  steering at the calibrated 0.22×norm dose is stable and by far the
-  strongest warmth lever measured (+12/−15 vs baseline; the shipped L2
-  workaround moves +2.5). The collapse is real but only appeared at 2×
-  dose, stochastically (1/4 questions).
-- **Expert-routing steering, as built (frequency-differential z-score
-  selection, ±2-logit bias), is a negative result for trait control**: it
-  never collapses, but it also didn't move warmth in the intended
-  direction, and at high bias it traps the thought channel. It ships
-  opt-in and instrumented, not as the replacement.
-- **Recommended production change:** re-extract warmth WITHOUT the
-  `--max-layer` early-layer cap, select by alignment (likely mid-layer),
-  serve at 1× dose with the thought-gate on, and add a cheap
-  repetition-abort guard in the server for the residual tail risk. Gate
-  any default-on flip behind the blind A/B per
-  `feature-gate-requires-measurement.md`.
+- **The mechanism is real; the up-lever use-case is dead.** Mid-layer
+  (L22) residual steering is stable at 1× dose, capability-safe, and
+  moves trait probes strongly (+12/−15) — but warmth **up**-steering
+  loses the blind A/B in the production persona context at every dose and
+  layer tried (L2@0.4 n=50, L22@1.0 n=35), because the adapter+prompt
+  already saturate warmth. The surviving production value of residual
+  steering is the **cold/guardrail direction and register control**
+  (resid_L22@−21 → 60.0 on probes; "modulation, not amplification" — the
+  2026-07-05 conclusion, now confirmed at the strongest dose).
+- **Expert-routing steering is a robust negative for trait control**:
+  three selectors (response-freq, visible-freq, mass-differential) × two
+  bias shapes never moved warmth above baseline, and every strength
+  increase traded into thought-exit destabilization. It stays opt-in +
+  instrumented; the profiler's routing maps remain useful diagnostics.
+- **The collapse tail is handled**: mid-layer vectors are safe to serve —
+  1× dose never collapsed, and the repetition-abort guard
+  (`_RepetitionGuard`, HU_MLX_REP_GUARD, suite 77/77) converts the
+  stochastic 2×-dose tail into a logged unsteered retry (inline) or an
+  early stream stop.
 
 ## Repro
 
