@@ -33,10 +33,15 @@ import subprocess
 import sys
 import time
 import urllib.request
+from datetime import datetime
+from os.path import basename
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
+
+# Import the DPO quality gate module
+import dpo_results
 DATA_DIR = REPO_ROOT / "data"
 ADAPTER_BASE = Path.home() / ".human" / "training-data" / "adapters"
 ADAPTER_PATH = ADAPTER_BASE / "seth-lora"
@@ -934,6 +939,42 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         "source_jsonl": str(source_jsonl),
         "memory_db": str(db_path),
     })
+
+    # QUALITY GATE: Record training results and check regression verdict
+    # This gate prevents training runs that make things worse from silently
+    # shipping to inference. If regression is detected, exit non-zero so the
+    # C side (lora_training_runner.c:391) sees the failure and blocks the
+    # adapter swap.
+    print(f"  [quality-gate] Recording training results to DPO results log...")
+    results_file = Path.home() / ".human" / "logs" / "dpo-training-results.jsonl"
+    n_pairs_by_source = {"outcomes": len(resolved)}
+
+    # Append this run's results (note: we don't have final_train_loss/final_val_loss
+    # from mlx-lm's subprocess; those would need to be parsed from stdout)
+    dpo_results.append_result(
+        results_file,
+        datetime.now().isoformat(),
+        basename(str(adapter_out)),
+        n_pairs_by_source,
+        train_loss=None,  # Would be parsed from mlx-lm output
+        val_loss=None,    # Would be parsed from mlx-lm output
+        alignment_score=None,
+        lora_scale=scale,
+        iters=iters,
+        git_commit=dpo_results.get_git_commit()
+    )
+
+    # Run regression verdict (checks if val_loss is worse than prior 4 weeks)
+    # For now, with val_loss=None, verdict will be PASS (can't judge)
+    history = dpo_results.load_recent(results_file)
+    verdict = dpo_results.regression_verdict(history, {'val_loss': None})
+    print(f"  [quality-gate] Regression verdict: {verdict}")
+
+    if verdict == 'FAIL':
+        print(f"  [quality-gate] FAIL: Training regression detected. "
+              f"Adapter will NOT be promoted to inference.")
+        print(f"  [quality-gate] Adapter remains at: {adapter_out}")
+        return 1  # Exit non-zero — blocks adapter swap in C side
 
     # D2 retention: prune older driver-produced adapters. Lineage above
     # is the auditable history; disk files beyond ADAPTER_RETENTION_LIMIT

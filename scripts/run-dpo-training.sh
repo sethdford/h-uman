@@ -1,7 +1,10 @@
 #!/bin/bash
 #
-# run-dpo-training.sh — Wrapper around dpo_mlx_train.py that captures results
-#                       and runs regression quality gate.
+# run-dpo-training.sh — Wrapper around dpo_mlx_train.py for manual/standalone training runs.
+#
+# PRODUCTION PATH: For automated training via the daemon, use scripts/training_loop.py
+# directly (spawned by src/agent/lora_training_runner.c:385). This wrapper is for
+# manual testing and iteration.
 #
 # Usage:
 #   bash scripts/run-dpo-training.sh \

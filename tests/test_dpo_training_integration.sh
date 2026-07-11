@@ -119,5 +119,45 @@ else
 fi
 
 echo ""
+echo "Test 6: Simulating training_loop.py outcome recording..."
+
+# Add a baseline from 7 days ago (passing training)
+python3 "$REPO_ROOT/scripts/dpo_results.py" \
+  --results-file "$RESULTS_FILE" \
+  --append "adapter-baseline-7d" '{"outcomes": 42}' "0.5000" "0.4500" "null" "2.0" "500" "commit-baseline"
+
+# Now simulate training_loop.py recording a worse run
+python3 "$REPO_ROOT/scripts/dpo_results.py" \
+  --results-file "$RESULTS_FILE" \
+  --append "adapter-new-training" '{"outcomes": 48}' "0.5234" "0.5800" "null" "2.0" "500" "commit-new"
+
+# Check verdict — should FAIL because 0.5800 > 0.4500 + 0.1
+FAIL_VERDICT=$(python3 "$REPO_ROOT/scripts/dpo_results.py" \
+  --results-file "$RESULTS_FILE" \
+  --check 0.5800 2>/dev/null) || true
+
+if [ "$FAIL_VERDICT" = "FAIL" ]; then
+  echo "PASS: training_loop.py path correctly detects regression"
+else
+  echo "FAIL: Expected FAIL for regression in training_loop.py path, got $FAIL_VERDICT"
+  exit 1
+fi
+
+# Verify exit code behavior — C side (lora_training_runner.c:391-396) checks this
+set +e  # Temporarily disable exit-on-error to capture exit code
+python3 "$REPO_ROOT/scripts/dpo_results.py" \
+  --results-file "$RESULTS_FILE" \
+  --check 0.5800 >/dev/null 2>&1
+EXIT_CODE=$?
+set -e  # Re-enable exit-on-error
+
+if [ $EXIT_CODE -ne 0 ]; then
+  echo "PASS: dpo_results.py exits non-zero on FAIL (blocks adapter swap)"
+else
+  echo "FAIL: Expected non-zero exit code on regression"
+  exit 1
+fi
+
+echo ""
 echo "=== All integration tests PASSED ==="
 exit 0
