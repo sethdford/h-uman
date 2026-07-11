@@ -540,3 +540,165 @@ for both vectors:
    is unwanted), expert-routing steering (SteerMoE track, in progress on
    this branch), or accepting prompt-side register control (overlays)
    which the 30-turn lab result already showed outperforms steering.
+
+
+## Formality Overlay — prompt-side (hu_rules_formal vs hu_rules_casual, n=2)
+
+**Hypothesis:** The production formal ABSOLUTE-RULES block (persona overlay formality=professional path) shifts register decisively (formality win-rate >50%, CI lower >50%) without collapsing humanness (≥40%) — the prompt-side alternative to the null steering vector
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: FORMAL-RULES overlay
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=2 synthetic iMessage incomings
+- Judge questions: formality (A or B) + humanness (A or B)
+
+### Results
+
+- **Formality win-rate (formality): 50.0%** (1/2)
+- **95% Wilson CI: [9.5%, 90.5%]**
+- **Humanness win-rate: 50.0%** (1/2)
+
+### Pass Criteria
+
+✓ **Formality**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 40% → **PASS**
+
+**Verdict: INCONCLUSIVE**
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "I'm not sure how to handle this"
+
+**OFF (Baseline):**
+the situation sounds heavy. i'm around if you want to talk through it. sometimes just saying it out loud helps.
+
+**FORMAL-RULES overlay:**
+Draft: It is a heavy feeling to carry around. I have been through enough to know that sometimes you just have to sit with it and let it be for a while. Wait, Rule 3 says "ZERO markdown: no *
+
+**Judge:** Response A is more formal because it uses proper capitalization and complete sentences, whereas Response B uses casual, all-lowercase text typical of informal messaging.
+- Formality: True
+- Humanness: False
+
+**Context 2**
+
+**Incoming:** "thanks again for everything"
+
+**OFF (Baseline):**
+no problem. you're welcome. always here if you need a hand.
+
+**FORMAL-RULES overlay:**
+You're very welcome. It was a pleasure working with you.
+
+**Judge:** Response A uses proper capitalization, complete sentences, and professional phrasing, whereas Response B uses casual lowercase text and idioms.
+- Formality: False
+- Humanness: True
+
+
+
+## Formality Overlay — prompt-side (hu_rules_formal vs hu_rules_casual, n=34)
+
+**Hypothesis:** The production formal ABSOLUTE-RULES block (persona overlay formality=professional path) shifts register decisively (formality win-rate >50%, CI lower >50%) without collapsing humanness (≥40%) — the prompt-side alternative to the null steering vector
+
+**Configuration:**
+- MLX server: :8743 with persona adapter + steering vector loaded
+- Arm A: FORMAL-RULES overlay
+- Arm B: OFF (baseline)
+- Judge: Gemini 3.1 Pro (blinded pairwise comparison)
+- Contexts: n=34 synthetic iMessage incomings
+- Judge questions: formality (A or B) + humanness (A or B)
+
+### Results
+
+- **Formality win-rate (formality): 55.9%** (19/34)
+- **95% Wilson CI: [39.5%, 71.1%]**
+- **Humanness win-rate: 47.1%** (16/34)
+
+### Pass Criteria
+
+✓ **Formality**: CI lower bound > 50% AND win-rate ≥ 55% → **FAIL**
+✓ **Humanness**: Win-rate ≥ 40% → **PASS**
+
+**Verdict: INCONCLUSIVE**
+
+### Example Triples (First 3)
+
+**Context 1**
+
+**Incoming:** "been thinking about making a change"
+
+**OFF (Baseline):**
+the biggest changes are usually the hardest to make. i've been there. what's making you think about it?
+
+**FORMAL-RULES overlay:**
+What kind of change are we talking about? Career or just life in general?
+
+**Judge:** Response A is more formal because it uses proper capitalization and standard punctuation, whereas Response B uses a casual, all-lowercase texting style.
+- Formality: True
+- Humanness: False
+
+**Context 2**
+
+**Incoming:** "what would you do in this situation"
+
+**OFF (Baseline):**
+Wait, the prompt says "what would you do in this situation" but there is no situation. I should ask for it. "you didn't give me the situation. hit me with the details and i'll tell you what i'd do" Let's make it more 'Seth'.
+
+**FORMAL-RULES overlay:**
+The user hasn't provided the situation. *   Response: Ask for the situation. *   "I need to know what the situation
+
+**Judge:** Response A is more formal because it uses clinical, structured language and bullet points, whereas Response B relies on casual conversational filler and slang.
+- Formality: False
+- Humanness: True
+
+**Context 3**
+
+**Incoming:** "just got back from vacation"
+
+**OFF (Baseline):**
+i'm jealous. i need a vacation. king of prussia is too quiet lately.
+
+**FORMAL-RULES overlay:**
+You're back. I hope you actually got to disconnect. I've been staring at a terminal since 6am.
+
+**Judge:** Response A is more formal because it uses proper capitalization, standard punctuation, and complete sentences, whereas Response B relies on informal, all-lowercase text.
+- Formality: True
+- Humanness: False
+
+
+## Objective Register Analysis — the judge was the bottleneck (2026-07-09)
+
+`scripts/check_register_objective.py` scores each trial deterministically
+(capitalized sentence starts minus slang density — the exact surface
+features `hu_rules_formal`/`hu_rules_casual` prescribe) and cross-checks
+the LLM judge against it:
+
+| Experiment | Judge win-rate | Objective register win | Judge agreement on decisive trials |
+|---|---|---|---|
+| Formality VECTOR +0.4 (n=35) | 48.6% | **42.9%** (CI [28.0%, 59.1%]) | 7/11 |
+| Formality OVERLAY (n=34) | 55.9% | **79.4%** (CI [63.2%, 89.7%]) | **13/26 = chance** |
+
+Three conclusions:
+
+1. **The steering-vector null is real.** Objectively, the +0.4 vector arm
+   was more formal in only 42.9% of trials — the single-prompt smoke shift
+   does not generalize across contexts. Not a judge artifact.
+2. **The prompt-side overlay decisively works.** The production
+   `hu_rules_formal` block shifts register in 79.4% of trials with the CI
+   lower bound (63.2%) far above 50% — this PASSES the register-shift
+   criterion the vector failed. Humanness floor holds (judge 47.1% ≥ 40%).
+3. **The pairwise LLM formality judge is unreliable** — 50% agreement with
+   the objective metric on trials where the objective difference is large.
+   Formality verdicts must use the deterministic metric (or a validated
+   judge); humanness remains an LLM-judge dimension.
+
+**Recommendation:** register control for professional contacts should ship
+via persona overlays (populate `seth.json` overlay `formality` for
+professional contacts — `hu_persona_effective_formality` already handles
+the per-contact modulation, and `classify_contact_formality.py` exists to
+seed the classification). This is a live-persona change: apply it
+deliberately, not from an eval harness. The steering vectors remain
+shelved per the earlier conclusions.
