@@ -49,6 +49,38 @@ def test_parse_rejects_other_letters():
     assert rd.parse_answer("AB") is None
 
 
+# ── lenient forms (chip design default: "option a", "first one" → A) ─────
+
+def test_parse_lenient_option_forms():
+    assert rd.parse_answer("option a") == ("A", 3)
+    assert rd.parse_answer("Option B") == ("B", 3)
+    assert rd.parse_answer("option a 4") == ("A", 4)
+
+def test_parse_lenient_ordinal_forms():
+    assert rd.parse_answer("first") == ("A", 3)
+    assert rd.parse_answer("first one") == ("A", 3)
+    assert rd.parse_answer("the first one") == ("A", 3)
+    assert rd.parse_answer("1st") == ("A", 3)
+    assert rd.parse_answer("second") == ("B", 3)
+    assert rd.parse_answer("the second one") == ("B", 3)
+    assert rd.parse_answer("2nd") == ("B", 3)
+
+def test_parse_lenient_ordinal_with_confidence():
+    assert rd.parse_answer("the first one 4") == ("A", 4)
+    assert rd.parse_answer("second one, 5") == ("B", 5)
+
+def test_parse_lenient_still_rejects_prose():
+    # Whole-message anchoring: prose containing an ordinal must NOT parse.
+    assert rd.parse_answer("the first one is better tbh") is None
+    assert rd.parse_answer("first thing tomorrow") is None
+    assert rd.parse_answer("option c") is None
+    # "a second" reads as "wait a second" — ambiguous, reject (re-ask instead).
+    assert rd.parse_answer("a second") is None
+    # Bare digits are ambiguous (confidence-only? stray?) — reject.
+    assert rd.parse_answer("1") is None
+    assert rd.parse_answer("2") is None
+
+
 # ── sheet helpers ───────────────────────────────────────────────────────
 
 FIELDS = ["id", "context", "option_A", "option_B", "choice", "confidence"]

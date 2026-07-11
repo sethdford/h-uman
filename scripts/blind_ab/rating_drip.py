@@ -54,7 +54,8 @@ SEND_HOUR_END = 21  # exclusive
 # ── pure helpers (unit-tested) ──────────────────────────────────────────
 
 
-def load_sheet(path=SHEET):
+def load_sheet(path=None):
+    path = path or SHEET  # resolved at call time so tests can patch SHEET
     with open(path, newline="") as f:
         return list(csv.DictReader(f)), csv.DictReader(open(path)).fieldnames
 
@@ -82,19 +83,38 @@ def compose_question(row, answered, total):
     )
 
 
-ANSWER_RE = re.compile(r"^\s*([ABab])\s*[\),.:]?\s*([1-5])?\s*$")
+# Whole-message anchored: the entire (stripped) reply must BE an answer.
+# In a self-chat both directions are "from me", so this anchor + the length
+# cap are the only boundary between an answer and an ordinary note-to-self.
+ANSWER_RE = re.compile(
+    r"^(?:"
+    r"(?:option\s+)?(?P<letter>[ab])"
+    r"|(?:the\s+)?(?P<ordinal>first|1st|second|2nd)(?:\s+one)?"
+    r")\s*[\),.:]?\s*(?P<conf>[1-5])?$",
+    re.IGNORECASE,
+)
+MAX_ANSWER_CHARS = 18  # longest legit form: "the second one, 5" (17 chars)
 
 
 def parse_answer(text):
-    """Strict-start A/B parser. Returns (choice, confidence) or None.
-    Accepts: "A", "b", "A 4", "B)", "a5". Rejects prose ("maybe A?"),
-    anything long, and the drip's own question text."""
-    if not text or len(text) > 12:
+    """Lenient but enumerable A/B parser. Returns (choice, confidence) or None.
+    Accepts: "A", "b", "A 4", "B)", "a5", "option a", "first one",
+    "the second one 4". Rejects prose ("maybe A?", "first thing tomorrow"),
+    ambiguous forms ("a second", bare digits), anything long, and the drip's
+    own question text. Un-parseable replies are handled by the 24h re-ask."""
+    if not text:
+        return None
+    text = text.strip()
+    if not text or len(text) > MAX_ANSWER_CHARS:
         return None
     m = ANSWER_RE.match(text)
     if not m:
         return None
-    return m.group(1).upper(), int(m.group(2)) if m.group(2) else 3
+    if m.group("letter"):
+        choice = m.group("letter").upper()
+    else:
+        choice = "A" if m.group("ordinal").lower() in ("first", "1st") else "B"
+    return choice, int(m.group("conf")) if m.group("conf") else 3
 
 
 def within_send_hours(hour):
