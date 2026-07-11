@@ -34,23 +34,52 @@
  * by the snprintf below; if you grow it past ~1.5 KB, bump the stack
  * buffer or promote to alloc. */
 #define HU_FACT_LLM_SYS                                                            \
-    "You are a personal-fact extractor. Read the user's message and output ONLY "  \
-    "a JSON object listing personal facts you can extract. Output nothing else — " \
-    "no preamble, no explanation, no markdown fences."
+    "You are a personal-fact extractor for text-message conversations. Read the "  \
+    "message and output ONLY a JSON object listing personal facts you can "        \
+    "extract. Output the JSON immediately — no preamble, no reasoning, no "        \
+    "explanation, no markdown fences."
 
+/* Predicate vocabulary: the original preference/state set alone measured
+ * ~0 facts on the real iMessage corpus (2026-07-11, :8744 base-model
+ * measurement) — casual texts carry EVENTS and plans ("I finally graduate
+ * sunday", "are you still moving", "found a place to rent in Tampa?"), and
+ * a schema-faithful model correctly returns {"facts":[]} when no predicate
+ * fits. The event/plan predicates below are what make the extractor recover
+ * signal on real traffic. */
 #define HU_FACT_LLM_USER_TEMPLATE                                                                 \
     "Extract personal facts from this message. Output JSON of the shape:\n"                       \
     "{\"facts\": [\n"                                                                             \
     "  "                                                                                          \
     "{\"subject\":\"user\",\"predicate\":\"<verb>\",\"object\":\"<value>\",\"confidence\":<0-1>}" \
     "\n]}\n"                                                                                      \
-    "Predicates use short forms: likes, hates, lives_in, works_at, owns, uses, prefers, "         \
-    "avoids, knows, learning. Confidence 0.0-1.0 reflects how unambiguous the statement is.\n\n"  \
+    "Predicates use short forms — states: likes, hates, lives_in, works_at, owns, uses, "         \
+    "prefers, avoids, knows, learning; events and plans: graduating, moving_to, visiting, "       \
+    "attending, planning, expecting, celebrating, asking_about. Subject \"user\" means the "      \
+    "message author. Questions the author asks count as asking_about facts. Output "              \
+    "{\"facts\":[]} only when the message truly carries no personal content (bare "               \
+    "acknowledgments like \"ok\"). Confidence 0.0-1.0 reflects how unambiguous the "              \
+    "statement is.\n\n"                                                                           \
     "Message:\n%.*s\n\nOutput:\n"
 
-/* Find the first '{' or '[' in `text` — covers the common case where
- * the LLM prepends prose ("Here's the JSON:") or wraps in a fence. */
+/* Find the start of the answer JSON. Thinking-style local models (gemma-4
+ * thought channel) ECHO the requested schema inside their reasoning before
+ * emitting the real object, so "first '{' in the response" can land inside
+ * the thought text and the first-{..last-} span fails to parse (measured
+ * 2026-07-11 on the real corpus). Prefer the LAST occurrence of the
+ * `{"facts"` envelope — the actual answer — and only fall back to the first
+ * '{'/'[' when no envelope is present (bare-array responses). */
 static const char *find_json_start(const char *text, size_t len) {
+    static const char envelope[] = "{\"facts\"";
+    const size_t elen = sizeof(envelope) - 1;
+    const char *last = NULL;
+    if (len >= elen) {
+        for (size_t i = 0; i + elen <= len; i++) {
+            if (memcmp(text + i, envelope, elen) == 0)
+                last = text + i;
+        }
+    }
+    if (last)
+        return last;
     for (size_t i = 0; i < len; i++) {
         if (text[i] == '{' || text[i] == '[')
             return text + i;
