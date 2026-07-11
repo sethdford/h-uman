@@ -40,8 +40,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 
-# Import the DPO quality gate module
+# Import the DPO quality gate module and adapter registry
 import dpo_results
+import adapter_registry
 DATA_DIR = REPO_ROOT / "data"
 ADAPTER_BASE = Path.home() / ".human" / "training-data" / "adapters"
 ADAPTER_PATH = ADAPTER_BASE / "seth-lora"
@@ -977,6 +978,23 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         iters=iters,
         git_commit=dpo_results.get_git_commit()
     )
+
+    # Record training result to adapter registry
+    try:
+        adapter_registry.record_training(
+            adapter_id=basename(str(adapter_out)),
+            metrics={
+                "n_pairs": sum(n_pairs_by_source.values()),
+                "n_pairs_by_source": n_pairs_by_source,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "lora_scale": scale,
+                "iters": iters,
+            },
+            timestamp=datetime.now().isoformat()
+        )
+    except Exception as e:
+        print(f"  [WARNING] Failed to record training to registry: {e}", file=sys.stderr)
 
     # Run regression verdict (checks if val_loss is worse than prior 4 weeks)
     history = dpo_results.load_recent(results_file)

@@ -43,7 +43,13 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
+
+try:
+    import adapter_registry
+except ImportError:
+    adapter_registry = None
 
 HUMAN_HOME = Path.home() / ".human"
 LINEAGE_PATH = HUMAN_HOME / "training-data" / "adapter_lineage.jsonl"
@@ -210,6 +216,19 @@ def cmd_promote(args):
     append_lineage("promote", current, args.adapter, ok, body)
     if ok:
         print(f"  Promoted: {current or '(none)'} → {args.adapter}")
+
+        # Record promotion to adapter registry
+        if adapter_registry:
+            try:
+                adapter_name = Path(args.adapter).name
+                adapter_registry.record_promotion(
+                    adapter_id=adapter_name,
+                    evidence=getattr(args, "evidence", None) or "(manual via CLI)",
+                    timestamp=datetime.now().isoformat()
+                )
+            except Exception as e:
+                print(f"  WARN: Could not record promotion to registry: {e}", file=sys.stderr)
+
         return 0
     print(f"  PROMOTE FAILED: {body}", file=sys.stderr)
     return 2
@@ -267,6 +286,8 @@ def main():
     p_promote.add_argument("--allow-missing", action="store_true",
                             help="Allow promoting an adapter path that doesn't exist locally "
                                  "(MLX server may resolve it on its own machine)")
+    p_promote.add_argument("--evidence", type=str, default=None,
+                            help="Evidence/gate reference for promotion (e.g., 'blind-a-b-gate-pass')")
 
     p_rollback = sub.add_parser("rollback",
                                   help="Revert to the previous adapter from lineage")

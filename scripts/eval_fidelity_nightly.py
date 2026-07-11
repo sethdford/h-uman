@@ -40,6 +40,7 @@ from eval_fidelity_helpers import (
     compute_persona_fidelity_scores,
     load_held_out_prompts_from_jsonl,
 )  # noqa: E402
+import adapter_registry
 
 # Defaults
 DEFAULT_FIXTURE = Path(__file__).parent.parent / "docs/plans/2026-05-26-sprint-56-gemma-as-seth/data/heldout-prompts.jsonl"
@@ -350,6 +351,20 @@ def main():
     log_file = args.log_dir / f"eval-fidelity-{datetime.now().strftime('%Y-%m-%d')}.json"
     log_file.write_text(json.dumps(verdict, indent=2))
     print(f"[INFO] Log written to {log_file}", flush=True)
+
+    # Record evaluation result to adapter registry
+    try:
+        adapter_name = Path(args.adapter_path).name
+        adapter_registry.record_eval(
+            adapter_id=adapter_name,
+            eval_name="fidelity-nightly",
+            score=post_mean,
+            verdict=final_verdict,
+            timestamp=datetime.now().isoformat()
+        )
+        print(f"[INFO] Eval result recorded to adapter registry", flush=True)
+    except Exception as e:
+        print(f"[WARN] Failed to record eval to registry: {e}", file=sys.stderr, flush=True)
 
     return exit_code
 
