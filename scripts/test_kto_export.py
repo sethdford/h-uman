@@ -5,7 +5,7 @@ Tests for kto_export.py
 Creates a synthetic temporary SQLite database with test feedback_signals,
 then validates export behavior against the contract.
 
-Run: pytest scripts/test_kto_export.py -v
+Run: pytest scripts/test_kto_export.py -v (cwd-independent)
 """
 
 import json
@@ -14,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+KTO_EXPORT = str(Path(__file__).resolve().parent / "kto_export.py")
 
 
 def create_test_db(db_path: str, n_rows: int = 100, source: str = "user_feedback"):
@@ -69,7 +71,7 @@ def test_export_happy_path():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
@@ -110,7 +112,7 @@ def test_export_below_threshold():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
@@ -140,7 +142,7 @@ def test_export_idempotency():
             result = subprocess.run(
                 [
                     sys.executable,
-                    "scripts/kto_export.py",
+                    KTO_EXPORT,
                     "--db", str(db_path),
                     "--output", str(output_path),
                     "--min-threshold", "50",
@@ -171,7 +173,7 @@ def test_export_format_validation():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
@@ -215,7 +217,7 @@ def test_export_dry_run():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
@@ -270,7 +272,7 @@ def test_export_multiple_sources():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
@@ -320,7 +322,7 @@ def test_export_with_empty_db():
         result = subprocess.run(
             [
                 sys.executable,
-                "scripts/kto_export.py",
+                KTO_EXPORT,
                 "--db", str(db_path),
                 "--output", str(output_path),
                 "--min-threshold", "50",
