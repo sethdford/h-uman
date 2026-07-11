@@ -192,6 +192,17 @@ jobs:
       - name: Show gate verdict
         run: |
           python3 -c "import json; d=json.load(open('docs/evaluation/blind_ab_gate.json')); print('effective_verdict=', d['effective_verdict'], 'proxy.mode=', d['proxy']['mode'])"
+      # Evidence-recency gate: CI can never run the REAL measurement (the model
+      # serves on local hardware), so instead of letting the ADVISORY dry-run
+      # pass green forever, fail loudly when the COMMITTED verdict artifact has
+      # no real (non-ADVISORY proxy, or scored human) measurement within 14
+      # days. The runner-local dry-run write above does not count: it stamps
+      # mode=ADVISORY and is never committed. Checked against the checkout, so
+      # this audits what the repo claims, not what this job just wrote.
+      - name: Measurement freshness gate (fails when evidence is stale)
+        run: |
+          git checkout -- docs/evaluation/blind_ab_gate.json
+          python3 scripts/check_measurement_freshness.py --max-age-days 14
       - name: Upload gate report
         if: always()
         uses: actions/upload-artifact@v7
