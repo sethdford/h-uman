@@ -332,6 +332,92 @@ class TestRatingSheet(unittest.TestCase):
         self.assertIn("choice", fields)
 
 
+class TestIngestEndToEnd(unittest.TestCase):
+    """End-to-end: synthetic reply in a fixture chat.db -> ingest() writes the
+    sheet, increments state['answered'] (the field the rating-drip sensor
+    reads), clears pending_row, and a re-run is a no-op (idempotent)."""
+
+    BASE_APPLE_NS = 100 * 1e9
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        # fixture chat.db: drip question at t=100s, Seth's lenient reply at +1s
+        self.db_path = os.path.join(self.temp_dir, "chat.db")
+        con = sqlite3.connect(self.db_path)
+        cur = con.cursor()
+        cur.execute("CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT)")
+        cur.execute(
+            """CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY, text TEXT, attributedBody BLOB,
+                date INTEGER, is_from_me INTEGER)"""
+        )
+        cur.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER)")
+        cur.execute("INSERT INTO chat (chat_identifier) VALUES (?)", ("sethford@me.com",))
+        chat_id = cur.lastrowid
+        msgs = [
+            ("[h-uman rating 1/2] which sounds more like you?\nA) hello\nB) hi",
+             int(self.BASE_APPLE_NS)),
+            ("the first one 4", int(self.BASE_APPLE_NS + 1e9)),
+        ]
+        for text, date in msgs:
+            cur.execute("INSERT INTO message (text, date, is_from_me) VALUES (?, ?, 1)",
+                        (text, date))
+            cur.execute("INSERT INTO chat_message_join VALUES (?, ?)", (chat_id, cur.lastrowid))
+        con.commit()
+        con.close()
+
+        # fixture sheet + state
+        self.sheet_path = os.path.join(self.temp_dir, "rating_sheet.csv")
+        with open(self.sheet_path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["id", "context", "option_A", "option_B",
+                                              "choice", "confidence"])
+            w.writeheader()
+            w.writerows([
+                {"id": "t001", "context": "hi", "option_A": "hello", "option_B": "hey",
+                 "choice": "", "confidence": ""},
+                {"id": "t002", "context": "yo", "option_A": "sup", "option_B": "hi",
+                 "choice": "", "confidence": ""},
+            ])
+        self.state_path = os.path.join(self.temp_dir, "drip_state.json")
+        question_unix = ingest.apple_ts_to_unix(self.BASE_APPLE_NS)
+        with open(self.state_path, "w") as f:
+            json.dump({"target": "sethford@me.com", "pending_row": "t001",
+                       "question_unix": question_unix, "sent": 1, "answered": 0,
+                       "complete": False, "asks": 2}, f)
+
+        self._orig = (ingest.SHEET, ingest.STATE, ingest.CHAT_DB, ingest.SHEET_DIR)
+        ingest.SHEET, ingest.STATE = self.sheet_path, self.state_path
+        ingest.CHAT_DB, ingest.SHEET_DIR = self.db_path, self.temp_dir
+
+    def tearDown(self):
+        ingest.SHEET, ingest.STATE, ingest.CHAT_DB, ingest.SHEET_DIR = self._orig
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _state(self):
+        with open(self.state_path) as f:
+            return json.load(f)
+
+    def test_ingest_writes_sheet_and_increments_answered(self):
+        ingest.ingest()
+        rows, _ = ingest.load_sheet(self.sheet_path)
+        t001 = next(r for r in rows if r["id"] == "t001")
+        self.assertEqual(t001["choice"], "A")       # "the first one 4" -> A
+        self.assertEqual(t001["confidence"], "4")
+        st = self._state()
+        self.assertEqual(st["answered"], 1)         # the sensor reads this
+        self.assertIsNone(st["pending_row"])
+        self.assertEqual(st["question_unix"], 0)
+
+    def test_ingest_rerun_is_idempotent(self):
+        ingest.ingest()
+        ingest.ingest()  # no pending question anymore -> must be a no-op
+        st = self._state()
+        self.assertEqual(st["answered"], 1)
+        rows, _ = ingest.load_sheet(self.sheet_path)
+        self.assertEqual(sum(1 for r in rows if r["choice"]), 1)
+
+
 class TestState(unittest.TestCase):
     """Test state file operations."""
 

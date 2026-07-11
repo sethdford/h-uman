@@ -17,11 +17,14 @@ Usage:
 import csv
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
-import time
+
+# One parser, one clock: rating_drip owns the answer grammar (lenient but
+# enumerable — "A", "option a", "the first one 4") so the send and harvest
+# halves can never drift apart on what counts as an answer.
+from rating_drip import APPLE_EPOCH, apple_ts_to_unix, parse_answer  # noqa: F401
 
 HOME = os.path.expanduser("~")
 SHEET_DIR = os.path.join(HOME, ".human", "blind_ab_human")
@@ -32,31 +35,11 @@ CHAT_DB = os.path.join(HOME, "Library", "Messages", "chat.db")
 SCORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.py")
 
 DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat
-APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
-
-# Regex to parse A/B answers: "A", "b", "A 4", "B)", "a5", etc.
-ANSWER_RE = re.compile(r"^\s*([ABab])\s*[\),.:]?\s*([1-5])?\s*$")
 
 
-def apple_ts_to_unix(apple_ns):
-    """chat.db message.date is nanoseconds since 2001-01-01."""
-    return apple_ns / 1e9 + APPLE_EPOCH
-
-
-def parse_answer(text):
-    """Strict-start A/B parser. Returns (choice, confidence) or None.
-    Accepts: "A", "b", "A 4", "B)", "a5". Rejects prose ("maybe A?"),
-    anything long, and the drip's own question text."""
-    if not text or len(text) > 12:
-        return None
-    m = ANSWER_RE.match(text)
-    if not m:
-        return None
-    return m.group(1).upper(), int(m.group(2)) if m.group(2) else 3
-
-
-def load_sheet(path=SHEET):
+def load_sheet(path=None):
     """Load rating sheet CSV as list of dicts."""
+    path = path or SHEET  # resolved at call time so tests can patch SHEET
     if not os.path.exists(path):
         return [], []
     with open(path, newline="") as f:
@@ -230,8 +213,10 @@ def ingest(dry_run=False):
                     ingested.append(msg_rowid)
                     st["ingested_rowids"] = ingested
                     print(f"ingested: row {st['pending_row']} = {choice} (conf {conf})")
+                    st["answered"] = st.get("answered", 0) + 1  # the sensor reads this
                     st["pending_row"] = None
                     st["question_unix"] = 0
+                    st["asks"] = 1
                     # Reload sheet with the new answer
                     rows, _ = load_sheet()
                 elif dry_run:
