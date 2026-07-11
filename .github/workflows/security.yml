@@ -12,7 +12,7 @@ jobs:
     name: Build + Test (UBSan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           build-dir: build-ubsan
@@ -29,7 +29,7 @@ jobs:
     name: Build + Test (ASan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           enable-asan: "true"
@@ -48,7 +48,7 @@ jobs:
     name: Release Build Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           build-type: MinSizeRel
@@ -67,7 +67,7 @@ jobs:
     name: Fuzz Testing (30s each)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           build-dir: build-fuzz
@@ -96,7 +96,7 @@ jobs:
     name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: chmod +x scripts/generate-sbom.sh && ./scripts/generate-sbom.sh . sbom.json
       - uses: actions/upload-artifact@v7
         with:
@@ -107,7 +107,7 @@ jobs:
     name: Verify Audit Log Integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/run-tests
 
@@ -115,7 +115,7 @@ jobs:
     name: JS Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -130,7 +130,7 @@ jobs:
     name: FIPS Crypto Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           extra-apt: libssl-dev
