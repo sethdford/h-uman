@@ -1,3 +1,38 @@
+/* Declarative Tool Executor
+ *
+ * Four execution types:
+ *   HU_DECL_EXEC_HTTP     — fetch from URL with placeholder substitution
+ *   HU_DECL_EXEC_SHELL    — run shell command with args templating
+ *   HU_DECL_EXEC_TRANSFORM — template output: {{arg}} → value from input args
+ *   HU_DECL_EXEC_CHAIN    — invoke another tool (not yet wired; see notes below)
+ *
+ * TRANSFORM format: a template string where {{placeholder}} is replaced with the
+ * corresponding field from the input JSON args object. Missing fields substitute
+ * to empty string. Example:
+ *   transform: "Converted temperature: {{value}} degrees Celsius"
+ *   input args: {"value": "25"}
+ *   output: "Converted temperature: 25 degrees Celsius"
+ *
+ * CHAIN design limitation (not yet wired):
+ * CHAIN execution would invoke other tools from within this tool. The design
+ * requires:
+ * 1. A pointer to the tools array/registry in the declarative context
+ * 2. This registry must be populated at declarative-tool creation time
+ * 3. But the factory creates all tools sequentially in one array, so at the
+ *    point when a declarative tool is created, the tools array is incomplete
+ *
+ * Solution path (not implemented):
+ * - Add a tool_registry field to hu_declarative_tool_ctx_t
+ * - Modify hu_declarative_tool_create to accept the registry (API change)
+ * - Modify the factory to:
+ *   a) Create non-declarative tools first in a temporary array
+ *   b) Create declarative tools with that partial registry
+ *   c) Merge both arrays
+ *   This requires restructuring factory.c (high-risk change)
+ * For now, CHAIN fails with a message directing the user to file:line of the
+ * design constraint.
+ */
+
 #include "human/tools/declarative.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
@@ -37,21 +72,6 @@ void hu_declarative_tool_def_free(hu_declarative_tool_def_t *def, hu_allocator_t
     free_nonnull_str(alloc, def->exec_chain);
     free_nonnull_str(alloc, def->exec_transform);
     memset(def, 0, sizeof(*def));
-}
-
-#if !(defined(HU_IS_TEST) && HU_IS_TEST)
-static hu_decl_exec_type_t parse_exec_type(const char *t) {
-    if (!t)
-        return HU_DECL_EXEC_HTTP;
-    if (strcmp(t, "http") == 0)
-        return HU_DECL_EXEC_HTTP;
-    if (strcmp(t, "shell") == 0)
-        return HU_DECL_EXEC_SHELL;
-    if (strcmp(t, "chain") == 0)
-        return HU_DECL_EXEC_CHAIN;
-    if (strcmp(t, "transform") == 0)
-        return HU_DECL_EXEC_TRANSFORM;
-    return HU_DECL_EXEC_HTTP;
 }
 
 /* POSIX sh: wrap a value as a single shell word using single quotes; internal ' -> '\'' */
@@ -218,6 +238,21 @@ static int decl_template_text_suspicious(const char *tmpl) {
         return 1;
     return 0;
 }
+
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+static hu_decl_exec_type_t parse_exec_type(const char *t) {
+    if (!t)
+        return HU_DECL_EXEC_HTTP;
+    if (strcmp(t, "http") == 0)
+        return HU_DECL_EXEC_HTTP;
+    if (strcmp(t, "shell") == 0)
+        return HU_DECL_EXEC_SHELL;
+    if (strcmp(t, "chain") == 0)
+        return HU_DECL_EXEC_CHAIN;
+    if (strcmp(t, "transform") == 0)
+        return HU_DECL_EXEC_TRANSFORM;
+    return HU_DECL_EXEC_HTTP;
+}
 #endif /* !(HU_IS_TEST) */
 
 static hu_error_t copy_def(hu_allocator_t *alloc, const hu_declarative_tool_def_t *src,
@@ -277,11 +312,29 @@ static hu_error_t decl_execute(void *ctx, hu_allocator_t *alloc, const hu_json_v
         return HU_ERR_INVALID_ARGUMENT;
 
     switch (c->def.exec_type) {
-    case HU_DECL_EXEC_CHAIN:
-    case HU_DECL_EXEC_TRANSFORM: {
+    case HU_DECL_EXEC_CHAIN: {
         (void)args;
-        static const char msg[] = "chain/transform not yet wired";
+        static const char msg[] = "chain execution requires tool registry injection; "
+                                  "see src/tools/declarative.c:1-50 for design notes";
         *out = hu_tool_result_fail(msg, sizeof(msg) - 1);
+        return HU_OK;
+    }
+    case HU_DECL_EXEC_TRANSFORM: {
+        if (!c->def.exec_transform) {
+            *out = hu_tool_result_fail("missing transform template", 24);
+            return HU_OK;
+        }
+        if (decl_template_text_suspicious(c->def.exec_transform)) {
+            *out = hu_tool_result_fail("transform template rejected", 27);
+            return HU_OK;
+        }
+        char *result = NULL;
+        size_t result_len = 0;
+        hu_error_t se =
+            substitute_placeholders(alloc, c->def.exec_transform, args, 0, &result, &result_len);
+        if (se != HU_OK)
+            return se;
+        *out = hu_tool_result_ok_owned(result, result_len);
         return HU_OK;
     }
     case HU_DECL_EXEC_HTTP:
