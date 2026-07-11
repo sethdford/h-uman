@@ -51,6 +51,12 @@ RETAIN=30
 
 MULTITURN="${REPO}/scripts/eval_multiturn_local.py"
 FIDELITY="${REPO}/scripts/eval_fidelity_nightly.py"
+BLIND_AB="${REPO}/scripts/eval_blinded_ab.py"
+BLIND_AB_GATE="${REPO}/docs/evaluation/blind_ab_gate.json"
+GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
+
+# Auto-commit refreshed blind_ab_gate.json after stage 3 (env-overridable)
+HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-1}
 
 DRY_RUN=0
 SMOKE=0
@@ -89,6 +95,16 @@ adc_present() {
   [ -f "/Users/sethford/.config/gcloud/application_default_credentials.json" ]
 }
 
+# ---- Stage 3 precondition checks ------------------------------------------------
+ground_truth_exists() {
+  [ -f "$GROUND_TRUTH" ] && [ -s "$GROUND_TRUTH" ]
+}
+
+judge_creds_present() {
+  # Judge uses ADC if GEMINI_API_KEY is not set
+  [ -n "${GEMINI_API_KEY:-}" ] || adc_present
+}
+
 # ---- Verdict archive + prune ------------------------------------------------
 archive_verdict() {
   local harness="$1" latest_json="$2"
@@ -117,12 +133,16 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  python3:       $PY ($($PY --version 2>&1))"
   log "  multiturn:     $MULTITURN"
   log "  fidelity:      $FIDELITY"
+  log "  blind_ab:      $BLIND_AB"
   log "  :8741 server:  $(server_up && echo UP || echo DOWN)"
   log "  judge ADC:     $(adc_present && echo PRESENT || echo ABSENT)"
+  log "  ground truth:  $(ground_truth_exists && echo FOUND || echo MISSING)"
+  log "  judge creds:   $(judge_creds_present && echo AVAILABLE || echo UNAVAILABLE)"
   log "  adapter:       ${ADAPTER:-'(none found for '"$ADAPTER_GLOB"')'}"
   log "  archive dir:   $ARCHIVE_DIR (retain last $RETAIN per harness)"
   log "  lock dir:      $LOCK_DIR ($([ -d "$LOCK_DIR" ] && echo HELD || echo free))"
-  log "  plan: multiturn first (needs :8741), then fidelity (loads own model), serial"
+  log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
+  log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (loads own model), [3/3] blind-ab gate refresh (REAL measurement), serial"
   exit 0
 fi
 
@@ -140,7 +160,7 @@ log "=== nightly_eval start (smoke=$SMOKE) ==="
 # ---- 1) rung-3 multi-turn coherence (uses :8741) ----------------------------
 MT_OUT="${LOG_DIR}/eval-multiturn-local.json"
 if server_up; then
-  log "[1/2] multi-turn: :8741 UP — running"
+  log "[1/3] multi-turn: :8741 UP — running"
   MT_ARGS=(--server-url "$SERVER_URL" --output-json "$MT_OUT")
   if [ "$SMOKE" -eq 1 ]; then
     MT_ARGS+=(--limit-scenarios 1 --max-turns 3)
@@ -149,20 +169,20 @@ if server_up; then
   set +e
   "$PY" "$MULTITURN" "${MT_ARGS[@]}"; mt_rc=$?
   set -e
-  log "[1/2] multi-turn exit=$mt_rc ($(case $mt_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED-server-down;;3)echo SKIPPED-judge;;*)echo "rc=$mt_rc";;esac))"
+  log "[1/3] multi-turn exit=$mt_rc ($(case $mt_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED-server-down;;3)echo SKIPPED-judge;;*)echo "rc=$mt_rc";;esac))"
   archive_verdict multiturn "$MT_OUT"
 else
-  log "[1/2] multi-turn: :8741 DOWN — deferring (mlx-server not running)"
+  log "[1/3] multi-turn: :8741 DOWN — deferring (mlx-server not running)"
 fi
 
 # ---- 2) persona-fidelity SOTA gate (loads its own model; serial after #1) ---
 if [ "$SMOKE" -eq 1 ]; then
-  log "[2/2] fidelity: skipped (--smoke)"
+  log "[2/3] fidelity: skipped (--smoke)"
 elif [ -z "$ADAPTER" ]; then
-  log "[2/2] fidelity: skipped (no adapter matched $ADAPTER_GLOB)"
+  log "[2/3] fidelity: skipped (no adapter matched $ADAPTER_GLOB)"
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
-  log "[2/2] fidelity: adapter=$ADAPTER — running"
+  log "[2/3] fidelity: adapter=$ADAPTER — running"
   set +e
   "$PY" "$FIDELITY" \
     --adapter-path "$ADAPTER" \
@@ -170,8 +190,69 @@ else
     --output-json "$FID_OUT" \
     --log-dir "$LOG_DIR"; fid_rc=$?
   set -e
-  log "[2/2] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS-or-SKIP;;1)echo FAIL;;*)echo "rc=$fid_rc";;esac))"
+  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS-or-SKIP;;1)echo FAIL;;*)echo "rc=$fid_rc";;esac))"
   archive_verdict fidelity "$FID_OUT"
+fi
+
+# ---- 3) REAL blind-A/B gate refresh (local serving via :8741 + Gemini judge) ---
+# This stage runs the REAL proxy blind-A/B, not a dry-run, so the measurement
+# refreshes the committed verdict artifact. Only skipped on --smoke; precondition
+# failures log loudly but do NOT fail the wrapper (contract: run evals, don't gate).
+if [ "$SMOKE" -eq 1 ]; then
+  log "[3/3] blind-ab: skipped (--smoke)"
+else
+  # Pre-flight: ground truth pairs, :8741 health, judge credentials
+  stage3_skip=0
+  if ! ground_truth_exists; then
+    log "[3/3] blind-ab: SKIPPED — ground truth file missing or empty"
+    log "           path: $GROUND_TRUTH"
+    log "           generate with: python3 $REPO/scripts/extract_imessage_pairs.py"
+    stage3_skip=1
+  fi
+  if [ "$stage3_skip" -eq 0 ] && ! server_up; then
+    log "[3/3] blind-ab: SKIPPED — :8741 server not responding"
+    stage3_skip=1
+  fi
+  if [ "$stage3_skip" -eq 0 ] && ! judge_creds_present; then
+    log "[3/3] blind-ab: SKIPPED — judge credentials unavailable (no GEMINI_API_KEY, no ADC)"
+    stage3_skip=1
+  fi
+
+  if [ "$stage3_skip" -eq 0 ]; then
+    log "[3/3] blind-ab: all preconditions met — running REAL gate measurement"
+    # Capture the gate file state BEFORE the run
+    gate_before=""
+    [ -f "$BLIND_AB_GATE" ] && gate_before=$(cat "$BLIND_AB_GATE")
+
+    set +e
+    "$PY" "$BLIND_AB" --gate --mlx; ab_rc=$?
+    set -e
+
+    log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"
+
+    # Auto-commit if the gate file changed
+    if [ "$HU_NIGHTLY_AUTOPUSH" -eq 1 ] && [ -f "$BLIND_AB_GATE" ]; then
+      gate_after=$(cat "$BLIND_AB_GATE")
+      if [ "$gate_before" != "$gate_after" ]; then
+        log "[3/3] blind-ab: gate artifact changed — staging auto-commit"
+        if git -C "$REPO" add "$BLIND_AB_GATE" 2>/dev/null; then
+          if git -C "$REPO" commit -m "chore(eval): nightly blind-ab gate refresh" 2>/dev/null; then
+            if git -C "$REPO" push origin main 2>/dev/null; then
+              log "[3/3] blind-ab: committed + pushed $BLIND_AB_GATE"
+            else
+              log "[3/3] blind-ab: committed but push failed — may need rebase"
+            fi
+          else
+            log "[3/3] blind-ab: staging succeeded but commit failed (dirty tree?)"
+          fi
+        else
+          log "[3/3] blind-ab: could not stage $BLIND_AB_GATE"
+        fi
+      else
+        log "[3/3] blind-ab: gate artifact unchanged, no commit needed"
+      fi
+    fi
+  fi
 fi
 
 log "=== nightly_eval done ==="
