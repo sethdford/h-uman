@@ -708,6 +708,7 @@ set(HU_CORE_SOURCES
     src/voice/emotion_voice_map.c
     src/voice/audio_emotion.c
     src/persona/persona_fuse.c
+    src/persona/relationship_tone.c
     src/persona/humor.c
     src/persona/markdown_loader.c
     src/persona/somatic.c
@@ -3950,6 +3951,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_eval_history.c
     tests/test_eval_shape.c
     tests/test_register.c
+    tests/test_relationship_tone.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

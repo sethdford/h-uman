@@ -347,6 +347,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/memory/tiers.h"
 #include "human/permission.h"
 #include "human/persona.h"
+#include "human/persona/relationship_tone.h"
 #include "human/provider.h"
 #include "human/security.h"
 #include "human/security/causal_armor.h"
@@ -381,6 +382,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/pwa_context.h"
 #endif
 #include <ctype.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3063,25 +3065,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
     }
-    /* Relationship-based tone: inject warmth/vulnerability guidance from contact profile */
+    /* Relationship-based tone: inject warmth/vulnerability guidance from contact
+     * profile. Decision lives in hu_persona_relationship_tone_note (pure predicate).
+     * Warmth-vocabulary activation (HU_WARMTH_TONE_VOCAB: live/shadow/off, default
+     * off) gated on the blind-A/B HUMAN tier per feature-gate-requires-measurement.md
+     * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
+     * fires on real personas, so the warmth vocabulary is what makes this note live. */
     if (persona_prompt && agent->persona && agent->memory_session_id) {
-        const char *tone_note = NULL;
         const hu_contact_profile_t *cp = hu_persona_find_contact(
             agent->persona, agent->memory_session_id, agent->memory_session_id_len);
-        if (cp) {
-            if (cp->relationship_stage && strstr(cp->relationship_stage, "deep"))
-                tone_note = "\n\n[Relationship: deep — be genuinely present, "
-                            "anticipate needs, use shared references freely.]";
-            else if (cp->relationship_stage && strstr(cp->relationship_stage, "trusted"))
-                tone_note = "\n\n[Relationship: trusted — be candid and proactive. "
-                            "Share insights freely and be direct.]";
-            else if (cp->relationship_stage && strstr(cp->relationship_stage, "familiar"))
-                tone_note = "\n\n[Relationship: familiar — reference past conversations "
-                            "when relevant. Be warmer than default.]";
-            else if (cp->warmth_level && strstr(cp->warmth_level, "intimate"))
-                tone_note = "\n\n[Relationship: intimate — respond with genuine warmth "
-                            "and personal connection. Use inside references.]";
-        }
+        const char *wt_env = getenv("HU_WARMTH_TONE_VOCAB");
+        bool wt_live =
+            wt_env && (strcasecmp(wt_env, "live") == 0 || strcasecmp(wt_env, "on") == 0);
+        bool wt_shadow = wt_env && strcasecmp(wt_env, "shadow") == 0;
+        const char *tone_note = hu_persona_relationship_tone_note(cp, wt_live);
+        if (wt_shadow && !tone_note && hu_persona_relationship_tone_note(cp, true))
+            hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
         if (tone_note) {
             size_t tn_len = strlen(tone_note);
             size_t new_len = persona_prompt_len + tn_len;
