@@ -489,6 +489,44 @@ def test_scope_expert_mode(srv):
     srv._STEERING_LAST_SIG = ()
 
 
+def test_repetition_guard(srv):
+    # Run rule: RUN_LIMIT consecutive identical tokens trips
+    g = srv._RepetitionGuard()
+    for i in range(srv._REP_GUARD_RUN_LIMIT - 1):
+        _check_last = g.note(7)
+    _check(not g.tripped, "rep guard: below run limit stays untripped")
+    _check(g.note(7) and g.tripped, "rep guard: run limit trips")
+    _check(g.note(99), "rep guard: stays tripped after trip")
+
+    # Window rule: a 2-token loop never satisfies the run rule but fills
+    # the window with <DISTINCT_MIN distinct ids
+    g = srv._RepetitionGuard()
+    for i in range(srv._REP_GUARD_WINDOW - 1):
+        g.note(i % 2)
+    _check(not g.tripped, "rep guard: loop below full window untripped")
+    _check(g.note(1) and g.tripped, "rep guard: 2-token loop trips on full window")
+
+    # Natural text: distinct ids never trip either rule
+    g = srv._RepetitionGuard()
+    for i in range(srv._REP_GUARD_WINDOW * 3):
+        g.note(i)
+    _check(not g.tripped, "rep guard: distinct stream never trips")
+
+    # Interleaved repeats with enough diversity stay untripped
+    g = srv._RepetitionGuard()
+    for i in range(srv._REP_GUARD_WINDOW * 2):
+        g.note(i % (srv._REP_GUARD_DISTINCT_MIN + 1))
+    _check(not g.tripped, "rep guard: DISTINCT_MIN+1 loop is tolerated")
+
+    # Env kill switch
+    os.environ["HU_MLX_REP_GUARD"] = "off"
+    try:
+        _check(not srv._rep_guard_enabled(), "rep guard: env kill switch")
+    finally:
+        del os.environ["HU_MLX_REP_GUARD"]
+    _check(srv._rep_guard_enabled(), "rep guard: default on")
+
+
 def main() -> int:
     srv = _load_server_module()
     print("[test_mlx_steering] parse")
@@ -511,6 +549,8 @@ def main() -> int:
     test_expert_registry(srv)
     print("[test_mlx_steering] scope expert mode")
     test_scope_expert_mode(srv)
+    print("[test_mlx_steering] repetition guard")
+    test_repetition_guard(srv)
     print(f"[test_mlx_steering] {_PASSED} passed, {_FAILED} failed")
     return 1 if _FAILED else 0
 

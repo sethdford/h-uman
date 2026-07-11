@@ -496,6 +496,57 @@ def _steering_prime_gate(full_prompt_ids) -> None:
         gate.awaiting_first = False
 
 
+# Repetition-abort guard. Mid-layer residual steering has a measured
+# STOCHASTIC collapse mode: at 2x dose the generation can degenerate into
+# token repetition ('eeee…' / 'own own own'; 1/4 questions at alpha=42,
+# 2026-07-09). The guard watches the generated token ids WHILE STEERING IS
+# APPLIED and trips on runaway repetition; the inline path then retries the
+# request unsteered, the streaming path stops the stream early
+# (finish_reason "repetition_abort") since sent chunks cannot be recalled.
+# Never active on unsteered requests. Kill switch: HU_MLX_REP_GUARD=off.
+_REP_GUARD_RUN_LIMIT = 16    # consecutive identical tokens
+_REP_GUARD_WINDOW = 64       # sliding window length
+_REP_GUARD_DISTINCT_MIN = 5  # trip when a full window has fewer distinct ids
+
+
+def _rep_guard_enabled() -> bool:
+    return os.environ.get("HU_MLX_REP_GUARD", "on").lower() \
+        not in ("off", "0", "false", "no")
+
+
+class _RepetitionGuard:
+    """Trips on (a) >= RUN_LIMIT consecutive identical tokens, or (b) a full
+    WINDOW of recent tokens containing < DISTINCT_MIN distinct ids (catches
+    short multi-token loops the run rule misses). Both signatures are far
+    outside natural text: the collapse tail produced runs in the hundreds."""
+
+    __slots__ = ("tripped", "_run_tok", "_run_len", "_window")
+
+    def __init__(self):
+        self.tripped = False
+        self._run_tok = None
+        self._run_len = 0
+        self._window = []
+
+    def note(self, tok_id) -> bool:
+        """Feed one generated token id; returns True once tripped."""
+        if self.tripped:
+            return True
+        if tok_id == self._run_tok:
+            self._run_len += 1
+        else:
+            self._run_tok = tok_id
+            self._run_len = 1
+        self._window.append(tok_id)
+        if len(self._window) > _REP_GUARD_WINDOW:
+            self._window.pop(0)
+        if self._run_len >= _REP_GUARD_RUN_LIMIT or (
+                len(self._window) == _REP_GUARD_WINDOW
+                and len(set(self._window)) < _REP_GUARD_DISTINCT_MIN):
+            self.tripped = True
+        return self.tripped
+
+
 def _steering_ratio() -> float:
     try:
         return float(os.environ.get("HU_MLX_STEER_RATIO", "0.22"))
@@ -1256,6 +1307,8 @@ def _chat_completion_inline(body):
             # and the wrappers must stay installed until the last token.
             with _steering_scope(body) as steering_applied:
                 _steering_prime_gate(full_ids)
+                rep_guard = _RepetitionGuard() \
+                    if steering_applied and _rep_guard_enabled() else None
                 suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
                 iterator, used_cache = _stream_generate_iter(
                     full_ids, suffix_ids, max_tokens, prompt_cache)
@@ -1274,9 +1327,29 @@ def _chat_completion_inline(body):
                     if tok_id is not None:
                         generated_ids.append(tok_id)
                         _steering_note_token(tok_id)
+                        if rep_guard is not None and rep_guard.note(tok_id):
+                            break
                 text = "".join(parts)
-                if used_cache:
-                    _finalize_prompt_cache(full_ids, generated_ids)
+                if rep_guard is not None and rep_guard.tripped:
+                    # Steered generation degenerated. Skip cache finalize
+                    # (the KV holds the degenerate tail; the retry's cache
+                    # guard drops it on the steered->unsteered signature
+                    # change) and retry once without steering.
+                    print("[mlx-server] repetition guard tripped after "
+                          f"{len(generated_ids)} tokens; retrying unsteered",
+                          flush=True)
+                else:
+                    rep_guard = None
+                    if used_cache:
+                        _finalize_prompt_cache(full_ids, generated_ids)
+            if rep_guard is not None and rep_guard.tripped:
+                retry_body = dict(body)
+                retry_body.pop("steering", None)
+                retry_body.pop("steering_mode", None)
+                status, resp = _chat_completion_inline(retry_body)
+                if status == 200 and isinstance(resp, dict):
+                    resp["steering_retry"] = "repetition_abort"
+                return status, resp
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
@@ -1465,6 +1538,7 @@ class SwapHandler(BaseHTTPRequestHandler):
         prompt_tokens = 0
         completion_tokens = 0
         steering_applied = {}
+        finish_reason_override = None
         try:
             if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
                 try:
@@ -1501,6 +1575,12 @@ class SwapHandler(BaseHTTPRequestHandler):
                     # client disconnect via the with-exit.
                     with _steering_scope(body) as steering_applied:
                         _steering_prime_gate(full_ids)
+                        # Streamed chunks cannot be recalled, so on a guard
+                        # trip we stop early instead of retrying (the client
+                        # sees finish_reason "repetition_abort").
+                        rep_guard = _RepetitionGuard() \
+                            if steering_applied and _rep_guard_enabled() else None
+                        rep_tripped = False
                         suffix_ids, prompt_cache = _prepare_prompt_cache(full_ids)
                         iterator, used_cache = _stream_generate_iter(
                             full_ids, suffix_ids, max_tokens, prompt_cache)
@@ -1518,10 +1598,20 @@ class SwapHandler(BaseHTTPRequestHandler):
                             if tok_id is not None:
                                 generated_ids.append(tok_id)
                                 _steering_note_token(tok_id)
+                                if rep_guard is not None \
+                                        and rep_guard.note(tok_id):
+                                    rep_tripped = True
+                                    print("[mlx-server] repetition guard "
+                                          f"tripped mid-stream after "
+                                          f"{len(generated_ids)} tokens; "
+                                          "stopping early", flush=True)
+                                    break
                             if delta:
                                 emit(delta)
                                 completion_tokens += 1
-                        if used_cache:
+                        if rep_tripped:
+                            finish_reason_override = "repetition_abort"
+                        elif used_cache:
                             _finalize_prompt_cache(full_ids, generated_ids)
                 elif stream_generate is not None:
                     # Tokenizer.encode failed; fall back to string prompt with
@@ -1570,7 +1660,7 @@ class SwapHandler(BaseHTTPRequestHandler):
 
         # Final chunk + DONE sentinel.
         try:
-            emit("", finish_reason="stop", usage={
+            emit("", finish_reason=finish_reason_override or "stop", usage={
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
