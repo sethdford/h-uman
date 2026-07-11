@@ -96,8 +96,14 @@ adc_present() {
 }
 
 # ---- Stage 3 precondition checks ------------------------------------------------
+# Sufficiency, not existence: the gate stamps ENFORCING only at >= 30 real pairs
+# (ENFORCE_MIN_PAIRS in blind_ab_gate.py); below that a run wastes GPU on an
+# ADVISORY verdict the freshness gate ignores. 2026-07-11: file had rotted to 2
+# pairs while "exists and non-empty" passed. Refresh: scripts/extract_imessage_pairs.py
+GROUND_TRUTH_MIN_PAIRS=30
 ground_truth_exists() {
-  [ -f "$GROUND_TRUTH" ] && [ -s "$GROUND_TRUTH" ]
+  [ -f "$GROUND_TRUTH" ] || return 1
+  [ "$(wc -l < "$GROUND_TRUTH" | tr -d ' ')" -ge "$GROUND_TRUTH_MIN_PAIRS" ]
 }
 
 judge_creds_present() {
@@ -204,7 +210,7 @@ else
   # Pre-flight: ground truth pairs, :8741 health, judge credentials
   stage3_skip=0
   if ! ground_truth_exists; then
-    log "[3/3] blind-ab: SKIPPED — ground truth file missing or empty"
+    log "[3/3] blind-ab: SKIPPED — ground truth missing or < ${GROUND_TRUTH_MIN_PAIRS} pairs (run scripts/extract_imessage_pairs.py)"
     log "           path: $GROUND_TRUTH"
     log "           generate with: python3 $REPO/scripts/extract_imessage_pairs.py"
     stage3_skip=1
