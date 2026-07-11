@@ -14,13 +14,17 @@ Usage:
 """
 import argparse, json, os, re, sqlite3, sys
 
-# Reuse the attributedBody decoder from the sibling exporter.
+# Reuse the attributedBody decoder from the shared imessage_text module.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from export_seth_triples import msg_text  # noqa
-except Exception:
-    def msg_text(text, body):
-        return (text or "").strip() or None
+    from imessage_text import msg_text  # noqa
+except ImportError:
+    # Fallback to the exporter's version if imessage_text is unavailable
+    try:
+        from export_seth_triples import msg_text  # noqa
+    except Exception:
+        def msg_text(text, body):
+            return (text or "").strip() or None
 
 DEFAULT_DB = os.path.expanduser("~/Library/Messages/chat.db")
 SLANG = re.compile(r"\b(lol|lmao|nah|yeah|ya|u|ur|gonna|wanna|lemme|dunno|kinda|"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.human.rating-drip</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/sethford/Projects/h-uman/scripts/blind_ab/rating_drip_tick.sh</string>
+  </array>
+  <key>StartInterval</key><integer>7200</integer>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/sethford/.human/logs/rating-drip.log</string>
+  <key>StandardErrorPath</key><string>/Users/sethford/.human/logs/rating-drip.log</string>
+</dict>
+</plist>
