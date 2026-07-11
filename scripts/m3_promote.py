@@ -204,6 +204,20 @@ def cmd_promote(args):
         return 4
 
     mlx_url = args.mlx_url
+
+    # Promotion requires recorded evidence (gate ref, eval score, A/B verdict).
+    # An evidence-free promotion is exactly the unrecorded-decision failure the
+    # registry exists to prevent; --force-no-evidence records the override.
+    evidence = getattr(args, "evidence", None)
+    if not evidence and not getattr(args, "force_no_evidence", False):
+        print("ERROR: promotion requires --evidence '<gate ref / eval score / A-B verdict>'.\n"
+              "  Check scripts/adapter_registry.py status for recorded measurements.\n"
+              "  To promote anyway (recorded as an unevidenced override), pass --force-no-evidence.",
+              file=sys.stderr)
+        return 2
+    if not evidence:
+        evidence = "(UNEVIDENCED OVERRIDE via --force-no-evidence)"
+
     current = get_current_adapter(mlx_url)
     print(f"  Current adapter: {current or '(none)'}")
     print(f"  Target adapter:  {args.adapter}")
@@ -223,7 +237,7 @@ def cmd_promote(args):
                 adapter_name = Path(args.adapter).name
                 adapter_registry.record_promotion(
                     adapter_id=adapter_name,
-                    evidence=getattr(args, "evidence", None) or "(manual via CLI)",
+                    evidence=evidence,
                     timestamp=datetime.now().isoformat()
                 )
             except Exception as e:
@@ -286,6 +300,8 @@ def main():
     p_promote.add_argument("--allow-missing", action="store_true",
                             help="Allow promoting an adapter path that doesn't exist locally "
                                  "(MLX server may resolve it on its own machine)")
+    p_promote.add_argument("--force-no-evidence", action="store_true",
+                           help="Promote without evidence (recorded as an unevidenced override)")
     p_promote.add_argument("--evidence", type=str, default=None,
                             help="Evidence/gate reference for promotion (e.g., 'blind-a-b-gate-pass')")
 

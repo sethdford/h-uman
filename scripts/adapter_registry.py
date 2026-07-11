@@ -312,6 +312,11 @@ def status(
     lines.append(f"Live adapter ID: {live_adapter_id or '(not configured)'}")
     lines.append("=" * 80)
 
+    if live_adapter_id and live_adapter_id not in registry["adapters"]:
+        lines.append(f"⚠️  WARNING: live adapter '{live_adapter_id}' has NO registry entry — "
+                     "no recorded training metrics, eval, or promotion evidence. "
+                     "It is serving on trust, not measurement.")
+
     if not registry["adapters"]:
         lines.append("No adapters in registry.")
         return "\n".join(lines)
