@@ -66,9 +66,15 @@ hu_error_t hu_daemon_promise_keeper_scan_outbound(void *memory, hu_allocator_t *
     }
     if (stored_out)
         *stored_out = true;
-    if (deadline > 0)
-        (void)hu_superhuman_delayed_followup_schedule(memory, alloc, contact_id, contact_id_len,
-                                                      desc, strlen(desc), deadline);
+    if (deadline > 0) {
+        hu_error_t schedule_err = hu_superhuman_delayed_followup_schedule(
+            memory, alloc, contact_id, contact_id_len, desc, strlen(desc), deadline);
+        if (schedule_err != HU_OK)
+            hu_log_warn("human", observer,
+                        "[promise-keeper] delayed_followup_schedule failed (%d) for %.*s",
+                        (int)schedule_err, (int)(contact_id_len > 20 ? 20 : contact_id_len),
+                        contact_id);
+    }
     hu_log_info("human", observer, "[promise-keeper] stored '%s' for %.*s (deadline %lld)", desc,
                 (int)(contact_id_len > 20 ? 20 : contact_id_len), contact_id,
                 (long long)deadline);

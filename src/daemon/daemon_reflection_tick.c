@@ -148,6 +148,7 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
     int kept = 0, dropped = 0;
     (void)hu_reflection_run(&inputs, /*force=*/false, &status, &kept, &dropped);
 
+    int turns_yielded = hu_reflection_sqlite_turn_source_turns_yielded(src);
     hu_reflection_sqlite_turn_source_dispose(src);
 
     /* Per-tick logging: only emit something when a run actually
@@ -155,8 +156,8 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
      * each iteration. */
     switch (status) {
     case HU_REFLECTION_RUN_OK:
-        hu_log_info("reflection.daemon", NULL, "reflection run complete: kept=%d dropped=%d", kept,
-                    dropped);
+        hu_log_info("reflection.daemon", NULL, "reflection: iter returned %d turns, kept=%d dropped=%d",
+                    turns_yielded, kept, dropped);
         break;
     case HU_REFLECTION_RUN_NO_INPUT:
         /* The `messages` ledger is empty this tick — no conversations to
@@ -166,7 +167,8 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
             static atomic_bool warned_no_input = false;
             hu_log_info_once(&warned_no_input, "reflection.daemon", NULL,
                              "reflection_loop enabled but the conversation ledger is "
-                             "empty (0 turns) — nothing to reflect on yet");
+                             "empty — nothing to reflect on yet (iter returned %d turns)",
+                             turns_yielded);
         }
         break;
     case HU_REFLECTION_RUN_PROVIDER_ERROR:

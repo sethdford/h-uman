@@ -3952,6 +3952,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              "set learning.nightly_lora_enabled=true in "
                                              "config.json instead. Env path still honored for "
                                              "backwards compatibility.");
+                        } else {
+                            static atomic_bool warned_disabled = false;
+                            hu_log_info_once(&warned_disabled, "lora-nightly",
+                                             agent ? agent->observer : NULL,
+                                             "nightly LoRA training disabled by config "
+                                             "(cfg->learning.nightly_lora_enabled=false); set "
+                                             "learning.nightly_lora_enabled=true in config.json "
+                                             "to activate");
                         }
                     }
                     if (lt_nightly && gate_on) {
@@ -12978,11 +12986,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * reply before the choreo/fragment split covers every bubble
                          * path. HU_PROMISE_KEEPER gated OFF by default; see
                          * src/daemon/daemon_promise_keeper.c. */
-                        if (agent && agent->memory && send_len > 0)
-                            (void)hu_daemon_promise_keeper_scan_outbound(
+                        hu_promise_keeper_mode_t pk_mode = hu_promise_keeper_mode_from_env(getenv("HU_PROMISE_KEEPER"));
+                        if (pk_mode == HU_PROMISE_KEEPER_OFF) {
+                            static atomic_bool warned_disabled = false;
+                            hu_log_info_once(&warned_disabled, "daemon",
+                                             agent ? agent->observer : NULL,
+                                             "promise-keeper subsystem disabled by config "
+                                             "(HU_PROMISE_KEEPER env not set); set "
+                                             "HU_PROMISE_KEEPER=on or HU_PROMISE_KEEPER=shadow "
+                                             "to activate");
+                        } else if (agent && agent->memory && send_len > 0) {
+                            hu_error_t pk_err = hu_daemon_promise_keeper_scan_outbound(
                                 agent->memory, alloc, batch_key, key_len, send_ptr, send_len,
-                                hu_promise_keeper_mode_from_env(getenv("HU_PROMISE_KEEPER")),
-                                agent->observer, NULL);
+                                pk_mode, agent->observer, NULL);
+                            if (pk_err != HU_OK)
+                                hu_log_warn("daemon", agent ? agent->observer : NULL,
+                                            "promise-keeper scan failed (%d)", (int)pk_err);
+                        }
 #endif
                         /* Split response into natural multi-message fragments */
                         uint32_t split_max = 0;

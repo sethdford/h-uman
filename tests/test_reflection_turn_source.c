@@ -249,6 +249,43 @@ static void turn_source_feeds_build_input(void) {
     sqlite3_close(db);
 }
 
+/* Observability: turn count available for daemon logging. */
+static void turn_source_tracks_turns_yielded(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = open_mem_db();
+    create_messages_table(db);
+
+    insert_message(db, "imessage", "user", "first", "2026-05-01 09:00:00");
+    insert_message(db, "imessage", "assistant", "second", "2026-05-01 09:01:00");
+    insert_message(db, "telegram", "user", "third", "2026-05-01 10:00:00");
+
+    hu_reflection_sqlite_turn_source_t *src = NULL;
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_init(&src, db, &alloc, 100), HU_OK);
+
+    /* Before any iteration, count is 0. */
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(src), 0);
+
+    hu_reflection_turn_t turn = {0};
+    HU_ASSERT_TRUE(hu_reflection_sqlite_turn_iter(src, &turn));
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(src), 1);
+
+    HU_ASSERT_TRUE(hu_reflection_sqlite_turn_iter(src, &turn));
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(src), 2);
+
+    HU_ASSERT_TRUE(hu_reflection_sqlite_turn_iter(src, &turn));
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(src), 3);
+
+    /* After exhausting the stream, count stays at 3. */
+    HU_ASSERT_FALSE(hu_reflection_sqlite_turn_iter(src, &turn));
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(src), 3);
+
+    /* NULL source returns 0 safely. */
+    HU_ASSERT_EQ(hu_reflection_sqlite_turn_source_turns_yielded(NULL), 0);
+
+    hu_reflection_sqlite_turn_source_dispose(src);
+    sqlite3_close(db);
+}
+
 void run_reflection_turn_source_tests(void) {
     HU_TEST_SUITE("reflection_turn_source");
     HU_RUN_TEST(turn_source_yields_messages_oldest_first);
@@ -257,6 +294,7 @@ void run_reflection_turn_source_tests(void) {
     HU_RUN_TEST(turn_source_nonpositive_max_uses_default);
     HU_RUN_TEST(turn_source_null_args_are_safe);
     HU_RUN_TEST(turn_source_feeds_build_input);
+    HU_RUN_TEST(turn_source_tracks_turns_yielded);
 }
 
 #else /* !HU_ENABLE_SQLITE */

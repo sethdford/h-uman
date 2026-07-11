@@ -40,6 +40,7 @@ struct hu_reflection_sqlite_turn_source {
     hu_allocator_t alloc; /* copy, so dispose can free the struct */
     char turn_id_buf[32]; /* "msg-<id>" synthesized per row */
     bool done;            /* sticky end-of-stream / error flag */
+    int turns_yielded;    /* count of turns returned via iter (for observability) */
 };
 
 hu_error_t hu_reflection_sqlite_turn_source_init(hu_reflection_sqlite_turn_source_t **out_src,
@@ -114,7 +115,14 @@ bool hu_reflection_sqlite_turn_iter(void *ctx, hu_reflection_turn_t *out_turn) {
     out_turn->content = content ? (const char *)content : "";
     out_turn->ts_ms = ts_ms < 0 ? 0u : (uint64_t)ts_ms;
 
+    src->turns_yielded++;
     return true;
+}
+
+int hu_reflection_sqlite_turn_source_turns_yielded(const hu_reflection_sqlite_turn_source_t *src) {
+    if (!src)
+        return 0;
+    return src->turns_yielded;
 }
 
 void hu_reflection_sqlite_turn_source_dispose(hu_reflection_sqlite_turn_source_t *src) {

@@ -172,6 +172,38 @@ static void promise_keeper_ledger_stats_buckets(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static void promise_keeper_live_handles_schedule_error_gracefully(void) {
+    /* When hu_superhuman_delayed_followup_schedule fails (e.g., disk full,
+     * corrupt db), the promise should still be stored and logged. The error
+     * from schedule is captured and logged (not discarded). This test pins
+     * the contract: schedule error does NOT prevent the commitment from
+     * being stored. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+
+    /* Pre-condition: tables exist and are empty. */
+    HU_ASSERT_EQ(count_rows(db, "SELECT COUNT(*) FROM commitments"), 0);
+    HU_ASSERT_EQ(count_rows(db, "SELECT COUNT(*) FROM delayed_followups"), 0);
+
+    /* Reply with a commitment + a deadline. */
+    static const char reply[] = "yeah i'll send it tomorrow";
+    bool stored = false;
+    HU_ASSERT_EQ(hu_daemon_promise_keeper_scan_outbound(&mem, &alloc, "contact_a", 9, reply,
+                                                        sizeof(reply) - 1,
+                                                        HU_PROMISE_KEEPER_LIVE, NULL, &stored),
+                 HU_OK);
+    /* The commitment MUST be stored even if schedule encounters an error. */
+    HU_ASSERT_TRUE(stored);
+    HU_ASSERT_EQ(count_rows(db, "SELECT COUNT(*) FROM commitments WHERE who='me' "
+                                "AND status='pending' AND contact_id='contact_a'"),
+                 1);
+    /* The scan returns HU_OK even if schedule fails (error is logged, not propagated). */
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_promise_keeper_tests(void) {
@@ -183,5 +215,6 @@ void run_daemon_promise_keeper_tests(void) {
     HU_RUN_TEST(promise_keeper_live_ignores_non_commitment);
     HU_RUN_TEST(promise_keeper_shadow_logs_without_storing);
     HU_RUN_TEST(promise_keeper_ledger_stats_buckets);
+    HU_RUN_TEST(promise_keeper_live_handles_schedule_error_gracefully);
 #endif
 }

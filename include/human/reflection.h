@@ -396,6 +396,11 @@ bool hu_reflection_sqlite_turn_iter(void *ctx, hu_reflection_turn_t *out_turn);
 /* Frees the source and finalizes its cursor. NULL is a no-op. */
 void hu_reflection_sqlite_turn_source_dispose(hu_reflection_sqlite_turn_source_t *src);
 
+/* Returns the count of turns yielded by this source via hu_reflection_sqlite_turn_iter.
+ * Useful for observability — lets the daemon log how many turns the reflection loop
+ * actually ingested this tick. Returns 0 if src is NULL. */
+int hu_reflection_sqlite_turn_source_turns_yielded(const hu_reflection_sqlite_turn_source_t *src);
+
 /* Returns the static system prompt text the reflection provider call
  * uses. Always non-NULL. Lifetime: process-static (string literal). */
 const char *hu_reflection_system_prompt(void);
