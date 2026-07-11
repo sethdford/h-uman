@@ -180,36 +180,96 @@ def estimate_warmth(text: str) -> float:
     return max(0.0, min(1.0, score))
 
 
-def read_messages_from_db(db_path: str) -> Dict[str, List[str]]:
+def read_messages_from_db(db_path: str) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
     """
-    Read outgoing messages from macOS Messages database.
-    Returns dict: handle -> list of message texts.
+    Read outgoing messages from macOS Messages database using proper chat linkage.
+
+    For outgoing messages (is_from_me=1), message.handle_id is almost always 0,
+    so we must route through chat_message_join and chat_handle_join to attribute
+    messages to contacts correctly.
+
+    Filters to 1:1 DMs only (chats with exactly one handle) for clean per-contact attribution.
+
+    Returns:
+      (dict: handle -> list of message texts, dict: stats about the data)
 
     Raises FileNotFoundError if db_path doesn't exist or is unreadable.
     """
     messages_by_contact = defaultdict(list)
+    stats = {
+        "total_messages_found": 0,
+        "messages_with_text": 0,
+        "messages_with_attributedBody_only": 0,
+        "one_to_one_chats": 0,
+        "group_chats_skipped": 0,
+    }
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         cursor = conn.cursor()
 
-        # Query outgoing messages (is_from_me = 1)
-        # Join message → handle to get the actual phone/email
+        # First, find all 1:1 chats (chats with exactly one handle)
         cursor.execute("""
-            SELECT m.text, h.id, h.service
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            SELECT cmj.chat_id
+            FROM chat_message_join cmj
+            JOIN message m ON m.ROWID = cmj.message_id
+            JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
             WHERE m.is_from_me = 1
-              AND m.text NOT NULL
-              AND m.text != ''
-              AND m.is_empty = 0
-            ORDER BY h.id, m.date
+            GROUP BY cmj.chat_id
+            HAVING COUNT(DISTINCT chj.handle_id) = 1
         """)
 
-        for text, handle, service in cursor.fetchall():
-            if text and handle:
-                # Use handle as key (phone/email)
+        one_to_one_chat_ids = [row[0] for row in cursor.fetchall()]
+        stats["one_to_one_chats"] = len(one_to_one_chat_ids)
+
+        if not one_to_one_chat_ids:
+            conn.close()
+            return messages_by_contact, stats
+
+        # Placeholder for chat IDs
+        placeholders = ",".join("?" * len(one_to_one_chat_ids))
+
+        # Now get all outgoing messages from those 1:1 chats, with their contact handles
+        query = f"""
+            SELECT h.id, m.text, m.attributedBody, m.date
+            FROM message m
+            JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
+            JOIN handle h ON h.ROWID = chj.handle_id
+            WHERE m.is_from_me = 1
+              AND cmj.chat_id IN ({placeholders})
+              AND m.is_empty = 0
+            ORDER BY h.id, m.date
+        """
+
+        cursor.execute(query, one_to_one_chat_ids)
+
+        for handle, text, attributed_body, date in cursor.fetchall():
+            if not handle:
+                continue
+
+            stats["total_messages_found"] += 1
+
+            # Prefer message.text; fall back to presence of attributedBody
+            if text and text.strip():
                 messages_by_contact[handle].append(text)
+                stats["messages_with_text"] += 1
+            elif attributed_body is not None:
+                # attributedBody is a BLOB (NSAttributedString in binary form)
+                # Decoding is heavy; we'll just note that we skipped it
+                stats["messages_with_attributedBody_only"] += 1
+
+        # Count group chats that were skipped
+        cursor.execute("""
+            SELECT COUNT(DISTINCT cmj.chat_id)
+            FROM chat_message_join cmj
+            JOIN message m ON m.ROWID = cmj.message_id
+            JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
+            WHERE m.is_from_me = 1
+            GROUP BY cmj.chat_id
+            HAVING COUNT(DISTINCT chj.handle_id) > 1
+        """)
+        stats["group_chats_skipped"] = sum(1 for _ in cursor.fetchall())
 
         conn.close()
     except sqlite3.OperationalError as e:
@@ -217,7 +277,7 @@ def read_messages_from_db(db_path: str) -> Dict[str, List[str]]:
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Message database not found at {db_path}") from e
 
-    return messages_by_contact
+    return messages_by_contact, stats
 
 
 def classify_contacts(messages_by_contact: Dict[str, List[str]]) -> List[ContactScore]:
@@ -255,32 +315,39 @@ def classify_contacts(messages_by_contact: Dict[str, List[str]]) -> List[Contact
     return scores
 
 
-def print_proposal_table(scores: List[ContactScore]) -> None:
+def print_proposal_table(scores: List[ContactScore], stats: Dict[str, int]) -> None:
     """
     Print a dry-run proposal table: handle, n_messages, formality, warmth, proposed.
     Privacy: truncate handles to prevent accidental commit of phone numbers.
     """
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 100)
     print("CONTACT FORMALITY CLASSIFICATION — DRY-RUN PROPOSAL")
-    print("=" * 90)
+    print("=" * 100)
 
     formal_count = sum(1 for s in scores if s.proposed_formality() == "formal")
     casual_count = sum(1 for s in scores if s.proposed_formality() == "casual")
     insufficient_count = sum(1 for s in scores if s.proposed_formality() == "insufficient")
 
-    print(f"\nSummary: {formal_count} formal | {casual_count} casual | "
+    print(f"\nData Summary:")
+    print(f"  Total outgoing messages: {stats['total_messages_found']}")
+    print(f"  Messages with text: {stats['messages_with_text']}")
+    print(f"  Messages with attributedBody only (skipped): {stats['messages_with_attributedBody_only']}")
+    print(f"  One-to-one chats analyzed: {stats['one_to_one_chats']}")
+    print(f"  Group chats skipped: {stats['group_chats_skipped']}")
+
+    print(f"\nClassification Summary: {formal_count} formal | {casual_count} casual | "
           f"{insufficient_count} insufficient ({len(scores)} total contacts)\n")
 
     # Header
-    print(f"{'Handle':<20} {'N Msgs':>8} {'Formality':>10} {'Warmth':>10} "
+    print(f"{'Handle':<25} {'N Msgs':>8} {'Formality':>10} {'Warmth':>10} "
           f"{'Register':>10} {'Proposed':<12} {'Confidence':>10}")
-    print("-" * 90)
+    print("-" * 100)
 
     # Formal contacts first
     for s in scores:
         if s.proposed_formality() != "formal":
             continue
-        print(f"{truncate_handle(s.handle):<20} {s.n_messages:>8d} "
+        print(f"{truncate_handle(s.handle):<25} {s.n_messages:>8d} "
               f"{s.formality_score:>10.3f} {s.warmth_score:>10.3f} "
               f"{s.register_avg:>10.3f} {s.proposed_formality():<12} "
               f"{s.confidence():>10.1%}")
@@ -289,7 +356,7 @@ def print_proposal_table(scores: List[ContactScore]) -> None:
     for s in scores:
         if s.proposed_formality() != "casual":
             continue
-        print(f"{truncate_handle(s.handle):<20} {s.n_messages:>8d} "
+        print(f"{truncate_handle(s.handle):<25} {s.n_messages:>8d} "
               f"{s.formality_score:>10.3f} {s.warmth_score:>10.3f} "
               f"{s.register_avg:>10.3f} {s.proposed_formality():<12} "
               f"{s.confidence():>10.1%}")
@@ -298,12 +365,12 @@ def print_proposal_table(scores: List[ContactScore]) -> None:
     for s in scores:
         if s.proposed_formality() != "insufficient":
             continue
-        print(f"{truncate_handle(s.handle):<20} {s.n_messages:>8d} "
+        print(f"{truncate_handle(s.handle):<25} {s.n_messages:>8d} "
               f"{s.formality_score:>10.3f} {s.warmth_score:>10.3f} "
               f"{s.register_avg:>10.3f} {s.proposed_formality():<12} "
               f"{s.confidence():>10.1%}")
 
-    print("-" * 90)
+    print("-" * 100)
     print(f"\nNote: Truncated handles + hashes for privacy. Full data NOT committed to git.")
     print(f"Formality threshold for 'formal' classification: > 0.55")
     print(f"Minimum messages for classification: >= 15")
@@ -331,23 +398,28 @@ def main():
     # Read and classify
     try:
         print("Reading messages from chat.db...")
-        messages_by_contact = read_messages_from_db(db_path)
-        print(f"Found messages from {len(messages_by_contact)} contacts.")
+        messages_by_contact, stats = read_messages_from_db(db_path)
+        print(f"Found {stats['one_to_one_chats']} one-to-one chats with {stats['total_messages_found']} outgoing messages")
+        print(f"  Text messages: {stats['messages_with_text']}")
+        print(f"  AttributedBody-only (not analyzed): {stats['messages_with_attributedBody_only']}")
 
-        print("Scoring formality and warmth...")
+        contacts_classified = sum(1 for msgs in messages_by_contact.values() if msgs)
+        print(f"Contacts with text-based messages: {contacts_classified}")
+
+        print("\nScoring formality and warmth...")
         scores = classify_contacts(messages_by_contact)
         print(f"Classified {len(scores)} contacts with valid data.")
 
         # Print proposal
-        print_proposal_table(scores)
+        print_proposal_table(scores, stats)
 
         if apply:
-            print("\n" + "=" * 90)
+            print("\n" + "=" * 100)
             print("APPLY MODE GUARDED: The --apply flag is recognized but disabled.")
             print("This is a READ-ONLY analysis tool. To seed formal contacts into seth.json,")
             print("review the proposal above and manually edit ~/.human/personas/seth.json")
             print("with warmth_level=\"high\" or relationship_stage=\"close\" for formal contacts.")
-            print("=" * 90)
+            print("=" * 100)
             sys.exit(0)
 
     except FileNotFoundError as e:
