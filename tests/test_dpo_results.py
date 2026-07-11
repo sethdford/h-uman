@@ -229,6 +229,60 @@ class TestAppendResult:
             assert record['iters'] == 100 + i
 
 
+class TestParseMlxLosses:
+    """Test parsing of mlx-lm training output to extract losses."""
+
+    def test_parse_both_losses(self):
+        """Parse both training and validation losses from output."""
+        output = """
+Iter 1: loss 0.8234, chosen_r 10.234, rejected_r 10.456, acc 0.500
+Iter 2: loss 0.7923, chosen_r 11.234, rejected_r 10.856, acc 0.600
+Iter 5: loss 0.5234, chosen_r 15.234, rejected_r 14.856, acc 0.800
+Val loss 0.4567
+Iter 10: loss 0.4123, chosen_r 16.234, rejected_r 16.856, acc 0.900
+        """
+        train_loss, val_loss = dpo_results.parse_mlx_losses(output)
+        assert train_loss == 0.4123  # Last training loss
+        assert val_loss == 0.4567    # Validation loss
+
+    def test_parse_train_loss_only(self):
+        """Handle output with only training loss."""
+        output = """
+Iter 1: loss 0.8234, chosen_r 10.234, acc 0.500
+Iter 5: loss 0.5234, chosen_r 15.234, acc 0.800
+        """
+        train_loss, val_loss = dpo_results.parse_mlx_losses(output)
+        assert train_loss == 0.5234
+        assert val_loss is None
+
+    def test_parse_empty_output(self):
+        """Handle empty or no-loss output."""
+        train_loss, val_loss = dpo_results.parse_mlx_losses("")
+        assert train_loss is None
+        assert val_loss is None
+
+    def test_parse_takes_last_occurrence(self):
+        """Verify parser takes LAST occurrence of each loss type."""
+        output = """
+Iter 1: loss 0.9000
+Iter 2: loss 0.8000
+Val loss 0.5000
+Iter 3: loss 0.7000
+Val loss 0.4000
+Iter 4: loss 0.6000
+        """
+        train_loss, val_loss = dpo_results.parse_mlx_losses(output)
+        assert train_loss == 0.6000  # Last training
+        assert val_loss == 0.4000    # Last validation
+
+    def test_parse_scientific_notation(self):
+        """Handle scientific notation in losses."""
+        output = "Iter 1: loss 1.234e-3\nVal loss 5.67e-2"
+        train_loss, val_loss = dpo_results.parse_mlx_losses(output)
+        assert abs(train_loss - 0.001234) < 1e-6
+        assert abs(val_loss - 0.0567) < 1e-4
+
+
 class TestEndToEnd:
     """End-to-end test of the full workflow."""
 
@@ -280,6 +334,57 @@ class TestEndToEnd:
         # Degenerate run should fail
         new_result = {'val_loss': 0.6931}
         verdict = dpo_results.regression_verdict(history, new_result)
+        assert verdict == 'FAIL'
+
+    def test_parsed_losses_flow_to_fail_verdict(self, tmp_path):
+        """Simulate training_loop.py: parse losses → record → check verdict."""
+        results_file = tmp_path / "results.jsonl"
+
+        # Establish baseline: val_loss=0.50
+        dpo_results.append_result(
+            results_file,
+            (datetime.now() - timedelta(days=7)).isoformat(),
+            'adapter-baseline',
+            {'outcomes': 42},
+            0.45,
+            0.50,
+            0.88,
+            2.0,
+            500,
+            'commit-baseline'
+        )
+
+        # Simulate mlx_lm output with worse val_loss
+        mlx_output = """
+Iter 1: loss 0.8234, chosen_r 10.234, acc 0.500
+Iter 100: loss 0.5234, chosen_r 15.234, acc 0.800
+Val loss 0.6200
+        """
+
+        # Parse like training_loop.py does
+        train_loss, val_loss = dpo_results.parse_mlx_losses(mlx_output)
+        assert train_loss == 0.5234
+        assert val_loss == 0.6200
+
+        # Record the result (as training_loop.py quality gate does)
+        dpo_results.append_result(
+            results_file,
+            datetime.now().isoformat(),
+            'adapter-worse',
+            {'outcomes': 48},
+            train_loss,
+            val_loss,
+            None,
+            2.0,
+            500,
+            'commit-new'
+        )
+
+        # Check regression verdict
+        history = dpo_results.load_recent(results_file)
+        verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
+
+        # Should FAIL because 0.6200 > 0.50 + 0.1
         assert verdict == 'FAIL'
 
 

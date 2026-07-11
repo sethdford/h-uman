@@ -644,7 +644,7 @@ def write_sft_batch_jsonl(resolved: list[dict]) -> str:
 
 
 def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
-                          iters: int = 500, scale: float = 2.0) -> int:
+                          iters: int = 500, scale: float = 2.0) -> Tuple[int, Optional[float], Optional[float]]:
     """Run mlx_lm.lora training on the resolved outcomes.
 
     Args:
@@ -653,18 +653,22 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
         iters: number of training iterations (default 500, 10 for tests)
         scale: LoRA scale multiplier (default 2.0, per mlx_lm default)
 
-    Returns: process exit code (0 = success)
+    Returns: tuple of (exit_code, train_loss, val_loss)
+        exit_code: process exit code (0 = success)
+        train_loss: final training loss parsed from stdout (or None if unparseable)
+        val_loss: final validation loss parsed from stdout (or None if unparseable)
 
     This function:
       1. Builds an SFT batch from resolved outcomes
       2. Creates a temp directory for mlx_lm output
       3. Creates a YAML config file with rank/scale settings
       4. Invokes mlx_lm.lora subprocess
-      5. Moves the output to adapter_out
+      5. Parses stdout to extract final losses
+      6. Moves the output to adapter_out
     """
     if len(resolved) == 0:
         print(f"  No resolved outcomes to train on")
-        return 0
+        return 0, None, None
 
     # Build SFT batch
     sft_batch = write_sft_batch_jsonl(resolved)
@@ -745,28 +749,33 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
         result = subprocess.run(cmd, capture_output=True, text=True)
         rc = result.returncode
 
+        # Print the training output to preserve visibility
+        if result.stdout:
+            print(result.stdout)
+
+        # Parse losses from stdout (works regardless of exit code)
+        train_loss, val_loss = dpo_results.parse_mlx_losses(result.stdout)
+
         if rc != 0:
             print(f"  mlx_lm lora exited with rc={rc}")
-            if result.stdout:
-                print(f"  stdout:\n{result.stdout}")
             if result.stderr:
                 print(f"  stderr:\n{result.stderr}")
-            return rc
+            return rc, train_loss, val_loss
 
         # Check if output exists — mlx_lm writes adapters.safetensors + adapter_config.json
         adapters_file = adapter_out / "adapters.safetensors"
         if not adapters_file.exists():
             print(f"  ERROR: mlx_lm did not produce adapters.safetensors in {adapter_out}")
             print(f"  Directory contents: {list(adapter_out.iterdir())}")
-            return 1
+            return 1, train_loss, val_loss
 
-        print(f"  mlx_lm lora training succeeded")
-        return 0
+        print(f"  mlx_lm lora training succeeded (train_loss={train_loss}, val_loss={val_loss})")
+        return 0, train_loss, val_loss
 
     except FileNotFoundError:
         print(f"  ERROR: mlx_lm not found. Install with: pip install mlx_lm")
         print(f"  Falling back to dry-run adapter")
-        return 1
+        return 1, None, None
     finally:
         # Clean up temp SFT batch and any leftover tmpdir
         try:
@@ -906,7 +915,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         except ValueError:
             print(f"  WARN: HUMAN_LORA_SCALE={scale_env} is not a valid float, using 2.0")
 
-    rc = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
+    rc, train_loss, val_loss = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
@@ -914,6 +923,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
         print(f"  Falling back to empty-tensors safetensors.")
         write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
+        # Still record the failed training attempt with whatever metrics we have
         return 0
 
     # Get the size of the safetensors file
@@ -949,15 +959,19 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     results_file = Path.home() / ".human" / "logs" / "dpo-training-results.jsonl"
     n_pairs_by_source = {"outcomes": len(resolved)}
 
-    # Append this run's results (note: we don't have final_train_loss/final_val_loss
-    # from mlx-lm's subprocess; those would need to be parsed from stdout)
+    # Warn if val_loss parsing failed — regression gate cannot judge this run
+    if val_loss is None:
+        print(f"  [quality-gate] WARNING: val loss unparsed from training output "
+              f"— regression gate cannot judge this run")
+
+    # Append this run's results with the parsed loss metrics
     dpo_results.append_result(
         results_file,
         datetime.now().isoformat(),
         basename(str(adapter_out)),
         n_pairs_by_source,
-        train_loss=None,  # Would be parsed from mlx-lm output
-        val_loss=None,    # Would be parsed from mlx-lm output
+        train_loss=train_loss,
+        val_loss=val_loss,
         alignment_score=None,
         lora_scale=scale,
         iters=iters,
@@ -965,10 +979,9 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     )
 
     # Run regression verdict (checks if val_loss is worse than prior 4 weeks)
-    # For now, with val_loss=None, verdict will be PASS (can't judge)
     history = dpo_results.load_recent(results_file)
-    verdict = dpo_results.regression_verdict(history, {'val_loss': None})
-    print(f"  [quality-gate] Regression verdict: {verdict}")
+    verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
+    print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss})")
 
     if verdict == 'FAIL':
         print(f"  [quality-gate] FAIL: Training regression detected. "

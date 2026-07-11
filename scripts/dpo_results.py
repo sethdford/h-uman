@@ -14,11 +14,55 @@ Regression verdict: PASS/FAIL/FIRST_RUN
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+
+def parse_mlx_losses(stdout: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Parse mlx_lm.lora training output to extract final train and val losses.
+
+    mlx_lm prints progress lines like:
+        Iter 1: loss 0.8234, chosen_r 10.234, rejected_r 10.456, acc 0.500
+        Iter 5: Val loss 0.4567
+
+    Returns (train_loss, val_loss) from the LAST occurrence of each in the output.
+    Returns (None, None) if neither is found.
+    """
+    if not stdout:
+        return None, None
+
+    train_loss = None
+    val_loss = None
+
+    # Pattern for training loss: "Iter N: ... loss X.XXX ..."
+    # Handles formats like "loss 0.8234" or "loss 1.234e-3"
+    train_pattern = re.compile(r'\bIter\s+\d+:.*\bloss\s+([0-9.e\-+]+)')
+
+    # Pattern for validation loss: "Val loss X.XXX" or "Validation loss X.XXX"
+    val_pattern = re.compile(r'\b(?:Val|Validation)\s+loss\s+([0-9.e\-+]+)')
+
+    # Find LAST occurrence of each pattern (training proceeds through iterations)
+    for line in stdout.split('\n'):
+        match = train_pattern.search(line)
+        if match:
+            try:
+                train_loss = float(match.group(1))
+            except ValueError:
+                pass
+
+        match = val_pattern.search(line)
+        if match:
+            try:
+                val_loss = float(match.group(1))
+            except ValueError:
+                pass
+
+    return train_loss, val_loss
 
 
 def get_git_commit() -> str:
