@@ -25,10 +25,39 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
 DATA=$(python3 -c "import json,sys;print(json.load(open('$PENDING'))['data'])" 2>/dev/null)
 SIGNALS=$(python3 -c "import json,sys;print(json.load(open('$PENDING'))['signals'])" 2>/dev/null)
+
+# Phase 1: If data file is missing, try to generate it.
+# This closes the feedback→train loop: export single-sided signals to the path
+# expected by the marker. If generation fails or is below threshold, skip training.
 if [ -z "$DATA" ] || [ ! -f "$DATA" ]; then
-    log "pending marker present but data file missing ($DATA) — clearing marker"
-    mv "$PENDING" "$PENDING.stale-$(date +%s)"
-    exit 0
+    if [ -z "$DATA" ] || [ "$DATA" = "null" ]; then
+        DATA="$HOME/.human/lora-pairs.jsonl.kto.jsonl"
+    fi
+
+    log "Data file missing ($DATA) — attempting to generate via kto_export..."
+    python3 "$HOME/.human-worktrees/close-the-loops/scripts/kto_export.py" \
+        --db "$HOME/.human/memory.db" \
+        --output "$DATA" \
+        --min-threshold 50 \
+        >> "$LOG" 2>&1
+    KTO_EXPORT_RC=$?
+
+    if [ $KTO_EXPORT_RC -eq 2 ]; then
+        log "KTO data below threshold (rc=2) — skipping training window"
+        mv "$PENDING" "$PENDING.stale-$(date +%s)"
+        exit 0
+    elif [ $KTO_EXPORT_RC -ne 0 ]; then
+        log "KTO export failed (rc=$KTO_EXPORT_RC) — clearing marker"
+        mv "$PENDING" "$PENDING.stale-$(date +%s)"
+        exit 0
+    fi
+
+    # Verify the file was created
+    if [ ! -f "$DATA" ]; then
+        log "KTO export succeeded but data file still missing ($DATA) — clearing marker"
+        mv "$PENDING" "$PENDING.stale-$(date +%s)"
+        exit 0
+    fi
 fi
 
 OUT_DIR="$HOME/.human/training-data/adapters/kto-nightly-$(date +%Y%m%d-%H%M%S)"
