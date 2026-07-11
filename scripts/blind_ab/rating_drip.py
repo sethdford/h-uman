@@ -32,6 +32,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -209,12 +210,33 @@ def harvest_answer(target, since_unix, db_path=CHAT_DB):
 # ── send ────────────────────────────────────────────────────────────────
 
 
+def imsg_bin():
+    """Resolve the imsg CLI explicitly. launchd jobs don't inherit the
+    interactive PATH (no /opt/homebrew/bin), and a bare "imsg" then raises
+    FileNotFoundError, which killed every re-ask tick for 4 days while the
+    state sat at sent=1/answered=0 (observed 2026-07-05..09)."""
+    found = shutil.which("imsg")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/imsg", "/usr/local/bin/imsg"):
+        if os.path.exists(candidate):
+            return candidate
+    return "imsg"
+
+
 def send_question(target, text, dry_run=False):
     if dry_run or os.environ.get("HU_IS_TEST"):
         print(f"[dry-run] would send to {target}:\n{text}")
         return True
-    r = subprocess.run(["imsg", "send", "--to", target, "--text", text],
-                       capture_output=True, text=True, timeout=30)
+    try:
+        r = subprocess.run([imsg_bin(), "send", "--to", target, "--text", text],
+                           capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        # A missing CLI must degrade to "send failed" (retry next tick),
+        # never kill the tick before the state is saved.
+        print("send failed: imsg CLI not found on PATH or in Homebrew bins",
+              file=sys.stderr)
+        return False
     if r.returncode != 0:
         print(f"send failed: {r.stderr.strip()[:200]}", file=sys.stderr)
         return False
