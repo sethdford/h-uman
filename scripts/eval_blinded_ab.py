@@ -192,7 +192,11 @@ def get_ai_response_mlx(message):
             MLX_URL, data=payload,
             headers={"Content-Type": "application/json"}, method="POST",
         )
-        resp = urllib.request.urlopen(req, timeout=30)
+        # 120s: a 31B generation under GPU contention regularly exceeds 30s;
+        # 2026-07-11 a 30s timeout abandoned 50/50 requests into the
+        # single-threaded server's queue (each still generated, then
+        # BrokenPipe'd) — degrading live serving for the drain duration.
+        resp = urllib.request.urlopen(req, timeout=120)
         data = json.loads(resp.read())
         choices = data.get("choices", [])
         if choices:
@@ -345,6 +349,12 @@ def main():
     # the human/AI assignment is reproducible and order-independent. Results are
     # collected in completion order (tally counts are order-independent) and
     # re-sorted by pair index before saving for stable output.
+    # Consecutive transport failures mean the SERVER is unwell, not the pairs:
+    # keep going and every remaining request piles onto the single-threaded
+    # server's queue as an abandoned generation (2026-07-11: 50 stacked
+    # timeouts degraded live :8741 for the whole drain). Abort early instead.
+    MAX_CONSECUTIVE_FAILURES = 5
+    consecutive_failures = 0
     with ThreadPoolExecutor(max_workers=JUDGE_WORKERS) as pool:
         futures = {}  # future -> meta dict
         for i, pair in enumerate(pairs):
@@ -361,7 +371,14 @@ def main():
 
             if ai_response.startswith("("):
                 print(f"  SKIP: AI response failed")
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    print(f"\n  ABORT: {consecutive_failures} consecutive AI-response failures — "
+                          "server unhealthy; stopping to avoid stacking abandoned "
+                          "generations on its queue. Fix serving, then re-run.")
+                    break
                 continue
+            consecutive_failures = 0
 
             coin = random.Random(f"{SEED}:{i}").random() < 0.5
             if coin:
@@ -472,6 +489,14 @@ def main():
         banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
                   if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
         print(f"\n  GATE: {banner}")
+        # A run where fewer than half the attempted trials produced a valid
+        # judgment is a HARNESS failure, not a measurement — exit non-zero so
+        # nightly logs record it as failed instead of a polite ADVISORY
+        # (2026-07-11: 0/50 valid exited 0 and read like a completed run).
+        if len(pairs) and total < len(pairs) / 2:
+            print(f"  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
+                  "not a measurement; fix serving/judge and re-run.")
+            sys.exit(1)
         sys.exit(1 if should_fail else 0)
 
 
