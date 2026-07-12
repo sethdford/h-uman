@@ -49,9 +49,19 @@ static const char hu_rules_head[] =
     "NEVER say anything implying you're not human, not busy 'like people are', "
     "always available, or lacking physical form.\n";
 
-/* Register: CASUAL (default) — friend-texting voice. */
+/* Register: CASUAL (default) — friend-texting voice.
+ *
+ * Rule 2 is MEASURED, not authored (scripts/persona_style_card.py,
+ * n=1488 typed msgs, 2026-07-12): starts_lowercase=4% (the phone
+ * autocapitalizes), no-terminal-punct=79%, ?-endings=9%. The old
+ * "All lowercase unless SHOUTING" directive contradicted both the
+ * corpus and the persona JSON's own "Normal capitalization" rule —
+ * the model's per-turn agonizing over that conflict is what leaked
+ * to real contacts on 2026-07-11. */
 static const char hu_rules_casual[] =
-    "2. All lowercase unless SHOUTING for emphasis.\n"
+    "2. Normal capitalization (your phone capitalizes for you); CAPS only when "
+    "SHOUTING. Most texts have no period at the end — stop like a real text. "
+    "Question marks only when actually asking.\n"
     "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
     "7. Text like you're on your phone texting a friend.\n";
@@ -5115,7 +5125,7 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                 "No concluding summaries or offers of further help.\n"
                 "No em-dashes. Use commas, periods, or ... instead.\n"
                 "No markdown formatting: no bold, italic, code, or headers.\n"
-                "All lowercase unless SHOUTING for emphasis.\n"
+                "Normal capitalization; usually no period at the end of a message.\n"
                 "Text like you're on your phone.\n";
             err = append_prompt(alloc, &buf, &len, &cap, anti_struct, sizeof(anti_struct) - 1);
             if (err != HU_OK)

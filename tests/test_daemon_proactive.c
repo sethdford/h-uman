@@ -673,26 +673,28 @@ static void test_p6_5_absolute_rules_helper_emits_key_rules(void) {
 }
 
 /* Register fix: formality-aware rules. Professional contacts get a capitalized
- * register; casual/NULL keeps the "all lowercase" friend-voice. Pins the
- * substring trap: "informal" must NOT match "formal" (stays casual). */
+ * register; casual/NULL keeps the friend-texting voice. Pins the substring
+ * trap: "informal" must NOT match "formal" (stays casual). The casual marker
+ * is the measured no-terminal-period rule (2026-07-12 style card) — the old
+ * "All lowercase" marker pinned a directive the corpus contradicted. */
 static void test_absolute_rules_formality_aware(void) {
     char buf[2048];
     size_t out_len = 0;
-    /* professional -> formal register, NOT "All lowercase". */
+    /* professional -> formal register, no casual no-period rule. */
     HU_ASSERT_EQ(
         hu_persona_build_absolute_rules_fmt(NULL, "professional", buf, sizeof(buf), &out_len),
         HU_OK);
     HU_ASSERT_TRUE(strstr(buf, "Capitalize") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "All lowercase") == NULL);
-    /* NULL -> casual friend-voice with "All lowercase". */
+    HU_ASSERT_TRUE(strstr(buf, "no period at the end") == NULL);
+    /* NULL -> casual friend-voice with the measured no-period register. */
     HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(NULL, NULL, buf, sizeof(buf), &out_len),
                  HU_OK);
-    HU_ASSERT_TRUE(strstr(buf, "All lowercase") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "Capitalize") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "no period at the end") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Capitalize and punctuate") == NULL);
     /* "informal" must NOT trip the formal path (word-boundary). */
     HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(NULL, "informal", buf, sizeof(buf), &out_len),
                  HU_OK);
-    HU_ASSERT_TRUE(strstr(buf, "All lowercase") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "no period at the end") != NULL);
     /* Invariant rules present regardless of register. */
     HU_ASSERT_TRUE(strstr(buf, "You are HUMAN") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "ZERO markdown") != NULL);
