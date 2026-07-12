@@ -156,8 +156,72 @@ static void stage_live_sends_when_nothing_to_shape(void) {
     hu_style_governor_set_mode_for_test(-1);
 }
 
+/* Reactive-path in-place apply — the daemon send path bypasses the outbound
+ * pipeline (2026-07-12 egress audit), so this helper carries the same gate +
+ * shaping to normal replies. OFF/SHADOW never mutate; LIVE shapes in place. */
+static void apply_inplace_off_is_noop(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_style_governor_set_mode_for_test(HU_STYLE_GOVERNOR_OFF);
+    char buf[64] = "Sounds good.";
+    size_t out = hu_style_governor_apply_inplace(&alloc, buf, strlen(buf));
+    HU_ASSERT_EQ(out, (size_t)12);
+    HU_ASSERT_STR_EQ(buf, "Sounds good.");
+    hu_style_governor_set_mode_for_test(-1);
+}
+
+static void apply_inplace_shadow_is_noop(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_style_governor_set_mode_for_test(HU_STYLE_GOVERNOR_SHADOW);
+    char buf[64] = "Sounds good.";
+    size_t out = hu_style_governor_apply_inplace(&alloc, buf, strlen(buf));
+    HU_ASSERT_EQ(out, (size_t)12);
+    HU_ASSERT_STR_EQ(buf, "Sounds good.");
+    hu_style_governor_set_mode_for_test(-1);
+}
+
+static void apply_inplace_live_shapes_terminal_period(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_style_governor_set_mode_for_test(HU_STYLE_GOVERNOR_LIVE);
+    /* "Sounds good." rolls under the 90 gate (deterministic hash), so LIVE
+     * strips the terminal period in place. */
+    char buf[64] = "Sounds good.";
+    unsigned roll = hu_style_governor_roll(buf, strlen(buf));
+    size_t out = hu_style_governor_apply_inplace(&alloc, buf, strlen(buf));
+    if (roll < HU_STYLE_GOV_PERIOD_STRIP_PCT) {
+        HU_ASSERT_EQ(out, (size_t)11);
+        HU_ASSERT_STR_EQ(buf, "Sounds good");
+    } else {
+        HU_ASSERT_EQ(out, (size_t)12);
+    }
+    hu_style_governor_set_mode_for_test(-1);
+}
+
+static void apply_inplace_live_strips_reciprocal_question(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_style_governor_set_mode_for_test(HU_STYLE_GOVERNOR_LIVE);
+    char buf[80] = "Not much, just hanging out. What's up with you?";
+    unsigned roll = hu_style_governor_roll(buf, strlen(buf));
+    size_t out = hu_style_governor_apply_inplace(&alloc, buf, strlen(buf));
+    /* The reciprocal question is always stripped; the exposed terminal
+     * period is then also stripped iff the roll is under the gate. Either
+     * way the "what's up with you" boilerplate is gone. */
+    if (roll < HU_STYLE_GOV_PERIOD_STRIP_PCT) {
+        HU_ASSERT_STR_EQ(buf, "Not much, just hanging out");
+        HU_ASSERT_EQ(out, (size_t)26);
+    } else {
+        HU_ASSERT_STR_EQ(buf, "Not much, just hanging out.");
+        HU_ASSERT_EQ(out, (size_t)27);
+    }
+    HU_ASSERT_TRUE(strstr(buf, "you") == NULL);
+    hu_style_governor_set_mode_for_test(-1);
+}
+
 void run_style_governor_tests(void) {
     HU_TEST_SUITE("style_governor");
+    HU_RUN_TEST(apply_inplace_off_is_noop);
+    HU_RUN_TEST(apply_inplace_shadow_is_noop);
+    HU_RUN_TEST(apply_inplace_live_shapes_terminal_period);
+    HU_RUN_TEST(apply_inplace_live_strips_reciprocal_question);
     HU_RUN_TEST(shape_strips_single_terminal_period);
     HU_RUN_TEST(shape_keeps_period_when_roll_above_gate);
     HU_RUN_TEST(shape_preserves_ellipsis_and_other_terminals);

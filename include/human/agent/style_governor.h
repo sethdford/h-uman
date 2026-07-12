@@ -72,6 +72,16 @@ unsigned hu_style_governor_roll(const char *text, size_t len);
 /* Resolve mode from HU_STYLE_GOVERNOR (cached after first call). */
 hu_style_governor_mode_t hu_style_governor_mode(void);
 
+/* In-place apply for call sites that BYPASS the outbound pipeline — i.e.
+ * the reactive daemon send path, which runs its own inline chain instead
+ * of hu_outbound_pipeline_run and therefore never reaches the
+ * style_governor stage. Resolves the mode, shapes `buf` in place when
+ * LIVE (the governor only ever shrinks, so `buf` needs no extra capacity),
+ * logs the would-do in SHADOW, and is a no-op when OFF. Returns the new
+ * length. Same gate + shaping as the pipeline stage — so promoting
+ * HU_STYLE_GOVERNOR to live shapes reactive AND pipeline paths uniformly. */
+size_t hu_style_governor_apply_inplace(hu_allocator_t *alloc, char *buf, size_t len);
+
 #if HU_IS_TEST
 /* Override the cached mode (tests only). Pass -1 to re-read the env. */
 void hu_style_governor_set_mode_for_test(int mode);

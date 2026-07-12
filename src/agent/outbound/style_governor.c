@@ -180,6 +180,37 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
     return HU_OK;
 }
 
+size_t hu_style_governor_apply_inplace(hu_allocator_t *alloc, char *buf, size_t len) {
+    if (!alloc || !buf || len == 0)
+        return len;
+    hu_style_governor_mode_t mode = hu_style_governor_mode();
+    if (mode == HU_STYLE_GOVERNOR_OFF)
+        return len;
+
+    char *shaped = NULL;
+    size_t shaped_len = 0;
+    unsigned actions = 0;
+    unsigned roll = hu_style_governor_roll(buf, len);
+    if (hu_style_governor_shape(alloc, buf, len, roll, &shaped, &shaped_len, &actions) != HU_OK ||
+        !shaped)
+        return len;
+
+    if (mode == HU_STYLE_GOVERNOR_SHADOW) {
+        hu_log_info("style_governor", NULL,
+                    "shadow: would shape reactive reply (actions=0x%x, %zu -> %zu bytes)", actions,
+                    len, shaped_len);
+        alloc->free(alloc->ctx, shaped, shaped_len + 1);
+        return len;
+    }
+
+    /* LIVE — the governor only ever shrinks, so copying back into `buf`
+     * (which already held `len` bytes) is always in-bounds. */
+    memcpy(buf, shaped, shaped_len);
+    buf[shaped_len] = '\0';
+    alloc->free(alloc->ctx, shaped, shaped_len + 1);
+    return shaped_len;
+}
+
 /* ── Pipeline stage ───────────────────────────────────────────────── */
 
 static atomic_bool s_logged_mode = false;
