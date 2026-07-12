@@ -5,6 +5,7 @@
 #include "human/channel_class.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include "human/filler_recency.h"
 #include "human/memory.h"
 #include "human/persona.h"
@@ -615,9 +616,23 @@ size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint3
 
 /* ── Filler word injection (Rime-research placement) ──────────────────── */
 
+/* Activation gate for the filler injector (off | shadow | live), read from
+ * env HU_FILLERS via the canonical parser (core/gate_mode.h). Default OFF:
+ * the hardcoded fillers ("haha ", "lol ", "yeah ", …) are an unmeasured
+ * send-mutator and must not shape real output until a measurement promotes
+ * them — see ~/.claude/rules/feature-gate-requires-measurement.md. */
+hu_gate_mode_t hu_conversation_fillers_mode(void);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Force the filler gate mode in tests. Pass an hu_gate_mode_t value to
+ * override, or -1 to clear the override and defer to env HU_FILLERS. */
+void hu_conversation_fillers_set_mode_for_test(int mode);
+#endif
+
 /* Probabilistically inject context-appropriate fillers into a response.
  * Placement: utterance start, after first word, before complex words.
  * Channel type controls filler intensity (messaging=high, email=none).
+ * No-op unless hu_conversation_fillers_mode() == HU_GATE_LIVE.
  * Modifies buf in-place. cap is buffer capacity. Returns new length. */
 size_t hu_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
                                      const char *channel_type, size_t channel_type_len);

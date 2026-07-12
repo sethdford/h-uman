@@ -6064,9 +6064,34 @@ static uint32_t filler_lcg(uint32_t *s) {
     return (*s >> 16) & 0x7fff;
 }
 
+/* Filler-injector activation gate (off | shadow | live). Default OFF: the
+ * hardcoded fillers are an unmeasured send-mutator, so they must not shape
+ * real output until a measurement promotes them
+ * (~/.claude/rules/feature-gate-requires-measurement.md). */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static int s_fillers_mode_override = -1; /* -1 = defer to env HU_FILLERS */
+void hu_conversation_fillers_set_mode_for_test(int mode) {
+    s_fillers_mode_override = mode;
+}
+#endif
+
+hu_gate_mode_t hu_conversation_fillers_mode(void) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    if (s_fillers_mode_override >= 0)
+        return (hu_gate_mode_t)s_fillers_mode_override;
+#endif
+    return hu_gate_mode_from_env("HU_FILLERS", HU_GATE_OFF);
+}
+
 size_t hu_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
                                      const char *channel_type, size_t channel_type_len) {
     if (!buf || len == 0 || cap <= len)
+        return len;
+
+    /* Gated OFF by default: unmeasured hardcoded fillers must not mutate real
+     * output until a measurement promotes them to LIVE. SHADOW currently emits
+     * nothing (no would-inject logging wired yet), so only LIVE mutates. */
+    if (hu_conversation_fillers_mode() != HU_GATE_LIVE)
         return len;
 
     /* Skip fillers for formal channels */
