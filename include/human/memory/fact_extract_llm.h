@@ -47,6 +47,22 @@
 extern "C" {
 #endif
 
+/* Outcome classification for one extraction attempt. Soft failures all
+ * return HU_OK with fact_count == 0 (the regex fast-path remains the
+ * fallback), which made "LLM declined" indistinguishable from "LLM
+ * output was garbage" — the 2026-07-12 promotion review needs the
+ * failure RATE observable before HU_LLM_FACT_EXTRACT goes LIVE. */
+typedef enum hu_fact_extract_llm_status {
+    HU_FACT_LLM_OK = 0,         /* response parsed; fact_count is the truth */
+    HU_FACT_LLM_EMPTY_RESPONSE, /* provider returned no content */
+    HU_FACT_LLM_NO_JSON,        /* no JSON body found (e.g. thought-only reply) */
+    HU_FACT_LLM_BAD_JSON,       /* JSON body failed to parse */
+    HU_FACT_LLM_BAD_SHAPE,      /* parsed, but no facts array in either shape */
+} hu_fact_extract_llm_status_t;
+
+/* Stable short name for a status ("ok", "empty_response", ...). */
+const char *hu_fact_extract_llm_status_str(hu_fact_extract_llm_status_t status);
+
 /* Extract facts from `text` by issuing one provider call.
  *
  * `provider`      — non-NULL; must implement chat_with_system
@@ -79,10 +95,14 @@ extern "C" {
  * HU_ERR_PROVIDER_RATE_LIMITED, HU_ERR_PROVIDER_AUTH, etc.). Callers
  * should handle the full provider-error surface, not just
  * HU_ERR_PROVIDER_RESPONSE. CodeRabbit 2026-05-17 finding clarified
- * this contract. */
+ * this contract.
+ *
+ * `status_out` (nullable) — set on every HU_OK return to classify the
+ * attempt (see hu_fact_extract_llm_status_t); untouched on hard error. */
 hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                                size_t model_len, const char *text, size_t text_len, int64_t now_ts,
-                               hu_fact_extract_result_t *result);
+                               hu_fact_extract_result_t *result,
+                               hu_fact_extract_llm_status_t *status_out);
 
 #ifdef __cplusplus
 }

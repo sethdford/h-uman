@@ -142,9 +142,28 @@ static bool fact_from_json_obj(const hu_json_value_t *obj, int64_t now_ts,
     return true;
 }
 
+const char *hu_fact_extract_llm_status_str(hu_fact_extract_llm_status_t status) {
+    switch (status) {
+    case HU_FACT_LLM_OK:
+        return "ok";
+    case HU_FACT_LLM_EMPTY_RESPONSE:
+        return "empty_response";
+    case HU_FACT_LLM_NO_JSON:
+        return "no_json";
+    case HU_FACT_LLM_BAD_JSON:
+        return "bad_json";
+    case HU_FACT_LLM_BAD_SHAPE:
+        return "bad_shape";
+    }
+    return "unknown";
+}
+
 hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                                size_t model_len, const char *text, size_t text_len, int64_t now_ts,
-                               hu_fact_extract_result_t *result) {
+                               hu_fact_extract_result_t *result,
+                               hu_fact_extract_llm_status_t *status_out) {
+    if (status_out)
+        *status_out = HU_FACT_LLM_OK;
     if (!alloc || !provider || !provider->vtable || !provider->vtable->chat_with_system || !text ||
         text_len == 0 || !result)
         return HU_ERR_INVALID_ARGUMENT;
@@ -178,6 +197,8 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
     }
     if (!response || response_len == 0) {
         /* soft fail: provider returned empty */
+        if (status_out)
+            *status_out = HU_FACT_LLM_EMPTY_RESPONSE;
         goto cleanup;
     }
 
@@ -187,6 +208,8 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
         size_t json_end_off = find_json_end(response, response_len);
         if (!json_start || json_end_off == 0 || (size_t)(json_start - response) >= json_end_off) {
             /* soft fail: no JSON body */
+            if (status_out)
+                *status_out = HU_FACT_LLM_NO_JSON;
             goto cleanup;
         }
         size_t json_len = json_end_off - (size_t)(json_start - response);
@@ -194,6 +217,8 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
         hu_error_t perr = hu_json_parse(alloc, json_start, json_len, &root);
         if (perr != HU_OK || !root) {
             /* soft fail: malformed JSON */
+            if (status_out)
+                *status_out = HU_FACT_LLM_BAD_JSON;
             goto cleanup;
         }
     }
@@ -206,6 +231,8 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
         }
         if (!arr || arr->type != HU_JSON_ARRAY) {
             /* soft fail: structure not matched */
+            if (status_out)
+                *status_out = HU_FACT_LLM_BAD_SHAPE;
             goto cleanup;
         }
 

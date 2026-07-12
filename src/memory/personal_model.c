@@ -97,11 +97,31 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
         return;
 
     hu_fact_extract_result_t llm = {0};
+    hu_fact_extract_llm_status_t llm_status = HU_FACT_LLM_OK;
     hu_error_t err = hu_fact_extract_llm(s_llm_extract_alloc, s_llm_extract_provider,
                                          s_llm_extract_model, strlen(s_llm_extract_model), message,
-                                         message_len, timestamp, &llm);
-    if (err != HU_OK || llm.fact_count == 0)
+                                         message_len, timestamp, &llm, &llm_status);
+    /* Per-attempt outcome logging — soft-fails used to be silent, so the
+     * shadow soak had a numerator (would-extract events) but no
+     * denominator. One line per attempt makes the failure rate readable
+     * from the service log before HU_LLM_FACT_EXTRACT promotes to LIVE.
+     * Volume is bounded: this fires only on regex-missed messages of
+     * >= HU_LLM_FACT_EXTRACT_MIN_LEN chars. */
+    const char *mode = (gate == 1) ? "shadow" : "live";
+    if (err != HU_OK) {
+        hu_log_info("llm_fact_extract", NULL, "%s: provider error %s (no facts merged)", mode,
+                    hu_error_string(err));
         return;
+    }
+    if (llm_status != HU_FACT_LLM_OK) {
+        hu_log_info("llm_fact_extract", NULL, "%s: soft-fail %s (no facts merged)", mode,
+                    hu_fact_extract_llm_status_str(llm_status));
+        return;
+    }
+    if (llm.fact_count == 0) {
+        hu_log_info("llm_fact_extract", NULL, "%s: clean zero (schema-faithful empty)", mode);
+        return;
+    }
 
     if (gate == 1) {
         /* SHADOW: observe, do not merge. */
