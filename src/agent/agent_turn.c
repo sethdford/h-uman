@@ -291,6 +291,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
+#include "human/core/gate_mode.h"
 #include "human/agent/salience.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
@@ -405,13 +406,10 @@ static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact
         return HU_ERR_INVALID_ARGUMENT;
     }
 
-    /* Check HU_TOM_DIRECTIVE env var: off (default), shadow, or on */
-    const char *tom_mode_env = getenv("HU_TOM_DIRECTIVE");
-    if (!tom_mode_env)
-        tom_mode_env = "off";
-
-    bool tom_enabled = (strcmp(tom_mode_env, "on") == 0);
-    bool tom_shadow = (strcmp(tom_mode_env, "shadow") == 0);
+    /* HU_TOM_DIRECTIVE: off (default) | shadow | live */
+    hu_gate_mode_t tom_mode = hu_gate_mode_from_env("HU_TOM_DIRECTIVE", HU_GATE_OFF);
+    bool tom_enabled = (tom_mode == HU_GATE_LIVE);
+    bool tom_shadow = (tom_mode == HU_GATE_SHADOW);
 
     if (!tom_enabled && !tom_shadow)
         return HU_OK; /* Mode is off, nothing to do */
@@ -945,11 +943,9 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
         return;
     const hu_contact_profile_t *cp = hu_persona_find_contact(
         agent->persona, agent->memory_session_id, agent->memory_session_id_len);
-    const char *wt_env = getenv("HU_WARMTH_TONE_VOCAB");
-    bool wt_live = wt_env && (strcasecmp(wt_env, "live") == 0 || strcasecmp(wt_env, "on") == 0);
-    bool wt_shadow = wt_env && strcasecmp(wt_env, "shadow") == 0;
-    const char *tone_note = hu_persona_relationship_tone_note(cp, wt_live);
-    if (wt_shadow && !tone_note && hu_persona_relationship_tone_note(cp, true))
+    hu_gate_mode_t wt_mode = hu_gate_mode_from_env("HU_WARMTH_TONE_VOCAB", HU_GATE_OFF);
+    const char *tone_note = hu_persona_relationship_tone_note(cp, wt_mode == HU_GATE_LIVE);
+    if (wt_mode == HU_GATE_SHADOW && !tone_note && hu_persona_relationship_tone_note(cp, true))
         hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
     if (tone_note) {
         /* at_append_owned_directive owns the realloc-append dance (and
@@ -987,12 +983,12 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
     /* Calibrated self-uncertainty: when recent self-assessed confidence is low,
      * nudge the model to hedge rather than overclaim. */
     {
-        const char *su_mode = getenv("HU_SELF_UNCERTAINTY");
-        if (su_mode && (strcmp(su_mode, "on") == 0 || strcmp(su_mode, "shadow") == 0)) {
+        hu_gate_mode_t su_mode = hu_gate_mode_from_env("HU_SELF_UNCERTAINTY", HU_GATE_OFF);
+        if (su_mode != HU_GATE_OFF) {
             hu_self_uncertainty_t su;
             hu_self_uncertainty_assess(
                 hu_metacog_trajectory_confidence(&agent->infra.metacognition), &su);
-            if (strcmp(su_mode, "on") == 0) {
+            if (su_mode == HU_GATE_LIVE) {
                 char *sdir = NULL;
                 size_t sdir_len = 0;
                 if (hu_self_uncertainty_build_directive(agent->alloc, &su, &sdir, &sdir_len) ==
@@ -1009,13 +1005,11 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
     /* Intent-aware response-type: classify the inbound message's intent and steer
      * the reply strategy. Default ON. */
     {
-        const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
-        if (!intent_mode || *intent_mode == '\0')
-            intent_mode = "on";
-        if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
+        hu_gate_mode_t intent_mode = hu_gate_mode_from_env("HU_INTENT_DIRECTIVE", HU_GATE_LIVE);
+        if (intent_mode != HU_GATE_OFF) {
             hu_intent_analysis_t ia;
             hu_intent_analyze(msg, msg_len, &ia);
-            if (strcmp(intent_mode, "on") == 0) {
+            if (intent_mode == HU_GATE_LIVE) {
                 char *idir = NULL;
                 size_t idir_len = 0;
                 if (hu_intent_build_directive(agent->alloc, &ia, &idir, &idir_len) == HU_OK)
@@ -1036,14 +1030,14 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
      * with HU_ENABLE_SELF_MODEL (the log is otherwise a stub) AND there are >=3
      * recorded turns — so it is doubly safe to leave wired. */
     {
-        const char *sm_mode = getenv("HU_SELF_MODEL");
-        if (sm_mode && (strcmp(sm_mode, "on") == 0 || strcmp(sm_mode, "shadow") == 0)) {
+        hu_gate_mode_t sm_mode = hu_gate_mode_from_env("HU_SELF_MODEL", HU_GATE_OFF);
+        if (sm_mode != HU_GATE_OFF) {
             char *smdir = NULL;
             size_t smdir_len = 0;
             if (hu_agent_self_model_build_directive(&agent->behavior_log, agent->alloc, &smdir,
                                                     &smdir_len) == HU_OK &&
                 smdir && smdir_len > 0) {
-                if (strcmp(sm_mode, "on") == 0) {
+                if (sm_mode == HU_GATE_LIVE) {
                     at_append_owned_directive(agent, smdir, smdir_len, system_prompt,
                                               system_prompt_len);
                 } else {

@@ -1,6 +1,7 @@
 #include "human/memory/personal_model.h"
 #include "human/core/log.h"
 #include "human/memory/anticipatory.h"
+#include "human/core/gate_mode.h"
 #include "human/memory/fact_extract_llm.h" /* LLM fact-extraction fallback (casual-text recall) */
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
@@ -65,14 +66,8 @@ void hu_personal_model_set_llm_extractor(void *alloc, void *provider, const char
 /* Runtime gate: 0=off (default), 1=shadow, 2=live. Mirrors the off|shadow|on
  * convention used by HU_SALIENCE / HU_TOM_DIRECTIVE / HU_GRAPH_GROUNDING. */
 static int llm_fact_extract_gate(void) {
-    const char *v = getenv("HU_LLM_FACT_EXTRACT");
-    if (!v || !*v)
-        return 0;
-    if (strcmp(v, "on") == 0 || strcmp(v, "live") == 0)
-        return 2;
-    if (strcmp(v, "shadow") == 0)
-        return 1;
-    return 0;
+    /* Canonical parser; ordinals match this gate's 0=off 1=shadow 2=live. */
+    return (int)hu_gate_mode_from_env("HU_LLM_FACT_EXTRACT", HU_GATE_OFF);
 }
 
 /* Minimum message length worth an LLM round-trip. Short acks ("ok", "C?",

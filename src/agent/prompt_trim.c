@@ -6,18 +6,22 @@
  * events deleting the anti-AI-tell guard tail). */
 #include "human/agent/prompt_trim.h"
 
+#include "human/core/gate_mode.h"
+
 #include <stdlib.h>
 #include <string.h>
 
 hu_prompt_trim_mode_t hu_prompt_trim_mode_parse(const char *value) {
-    if (!value || !*value)
-        return HU_PROMPT_TRIM_OFF;
-    if (strcmp(value, "live") == 0 || strcmp(value, "on") == 0 || strcmp(value, "1") == 0)
+    /* Delegates to the canonical off/shadow/live parser (core/gate_mode.h);
+     * this gate's unset default is OFF per feature-gate-requires-measurement. */
+    switch (hu_gate_mode_parse(value, HU_GATE_OFF)) {
+    case HU_GATE_LIVE:
         return HU_PROMPT_TRIM_LIVE;
-    if (strcmp(value, "shadow") == 0)
+    case HU_GATE_SHADOW:
         return HU_PROMPT_TRIM_SHADOW;
-    /* "off" and anything unrecognized fail closed. */
-    return HU_PROMPT_TRIM_OFF;
+    default:
+        return HU_PROMPT_TRIM_OFF;
+    }
 }
 
 hu_prompt_trim_mode_t hu_prompt_trim_mode(void) {

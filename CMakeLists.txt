@@ -547,6 +547,7 @@ set(HU_CORE_SOURCES
     src/core/allocator.c
     src/core/rand.c
     src/core/error.c
+    src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
     src/core/io_secure.c
@@ -3410,6 +3411,7 @@ set(HU_TEST_SOURCES
     tests/test_retrieval.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
+    tests/test_gate_mode.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c
