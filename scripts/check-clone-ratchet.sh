@@ -10,9 +10,14 @@
 # occurrences, report number of windows appearing 2+ times.
 set -euo pipefail
 
-# Measured 2026-05-31 at the start of Phase 0.
-# Window=6, measuring 1,071 src/**/*.c files across h-uman.
-CLONE_BASELINE=11766
+# Measured 2026-05-31 at the start of Phase 0 (11766); re-measured and
+# lowered 2026-07-12 after switching enumeration to git-tracked files —
+# untracked/ignored generated blobs (e.g. stale embed-data output under
+# src/data/) were inflating local counts by ~650 groups vs the committed
+# tree, so working-tree runs and CI disagreed. Same pass added per-file
+# boundary sentinels (windows no longer span files, killing enumeration-
+# order dependence) and re-measured: 11587.
+CLONE_BASELINE=11587
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -25,11 +30,21 @@ trap "rm -f '$tmp_normalized'" EXIT
 
 # Extract and normalize all lines from src/**/*.c
 {
-    find src -name '*.c' -type f 2>/dev/null \
+    { git ls-files 'src/**/*.c' 'src/*.c' 2>/dev/null \
+          || find src -name '*.c' -type f 2>/dev/null; } \
+        | sort -u \
         | grep -v '/third_party/' \
         | grep -v '/vendor/' \
         | grep -v '_generated\.c$' \
         | while read -r file; do
+            [ -f "$file" ] || continue
+            # Per-file boundary sentinel: the window builder below runs over
+            # one concatenated stream, so without this, windows SPAN file
+            # boundaries and the count depends on enumeration order (find's
+            # filesystem order vs sorted). The sentinel embeds the filename,
+            # so boundary-crossing windows are unique and never count as
+            # clones.
+            printf '###FILE### %s\n' "$file"
             awk -v fname="$file" '
                 NF == 0 { next }                          # blank lines
                 /^[[:space:]]*\/\// { next }              # C++ comments
