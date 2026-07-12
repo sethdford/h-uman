@@ -414,6 +414,7 @@ void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_outbound_pipeline_tests(void);
 void run_outbound_strip_tests(void);
+void run_style_governor_tests(void);
 void run_outbound_shape_tests(void);
 void run_outbound_echo_tests(void);
 void run_outbound_crosstalk_tests(void);
@@ -1424,6 +1425,7 @@ int main(int argc, char **argv) {
     run_response_guard_retry_tests();
     run_outbound_pipeline_tests();
     run_outbound_strip_tests();
+    run_style_governor_tests();
     run_outbound_shape_tests();
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
