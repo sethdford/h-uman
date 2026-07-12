@@ -40,6 +40,15 @@ hu_reflection_quality_t hu_reflection_evaluate(const char *user_query, size_t us
 
 /* Build a self-critique prompt for LLM-based evaluation.
  * Caller owns the returned string. */
+/* Retry-context instruction appended to history after a NEEDS_RETRY
+ * verdict. A REWRITE directive — deliberately free of judge vocabulary
+ * (Evaluate/Score/NEEDS_RETRY): the 2026-07-12 incident showed the retry
+ * generation answers whatever the last user message asks, and when that
+ * message was the judge prompt the "reply" was an evaluation, which got
+ * sent to a real contact. Caller owns *out_prompt (len+1 bytes). */
+hu_error_t hu_reflection_build_retry_prompt(hu_allocator_t *alloc, char **out_prompt,
+                                            size_t *out_prompt_len);
+
 hu_error_t hu_reflection_build_critique_prompt(hu_allocator_t *alloc, const char *user_query,
                                                size_t user_query_len, const char *response,
                                                size_t response_len, char **out_prompt,

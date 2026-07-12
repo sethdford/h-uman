@@ -85,6 +85,26 @@ hu_reflection_quality_t hu_reflection_evaluate(const char *user_query, size_t us
     return HU_QUALITY_GOOD;
 }
 
+hu_error_t hu_reflection_build_retry_prompt(hu_allocator_t *alloc, char **out_prompt,
+                                            size_t *out_prompt_len) {
+    if (!alloc || !out_prompt)
+        return HU_ERR_INVALID_ARGUMENT;
+    static const char instruction[] =
+        "That draft isn't quite right for this conversation. Rewrite your "
+        "reply to their last message from scratch: natural, in your own "
+        "voice, matching their energy and length. Output ONLY the message "
+        "text you would send. Do not judge, explain, or compare drafts.";
+    size_t len = sizeof(instruction) - 1;
+    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, instruction, len + 1);
+    *out_prompt = buf;
+    if (out_prompt_len)
+        *out_prompt_len = len;
+    return HU_OK;
+}
+
 hu_error_t hu_reflection_build_critique_prompt(hu_allocator_t *alloc, const char *user_query,
                                                size_t user_query_len, const char *response,
                                                size_t response_len, char **out_prompt,
