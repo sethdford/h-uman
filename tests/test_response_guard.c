@@ -2592,7 +2592,27 @@ static void g5_absolute_floor_prevents_death_spiral(void) {
         g10_expect_reject("The \"Absolute Rules\" section says: \"Text like");
     }
 
-    static void g10_rejects_style_audit_meta(void) {
+    /* 2026-07-12 14:21-14:22 — reflection-critique echo sent to a family
+ * contact as FOUR split bubbles (chat.db wire format below). The old
+ * defense was prefix-only (hu_response_is_critique_echo); the echo began
+ * "i mean NEEDS_RETRY." and sailed through. Internal verdict tokens and
+ * draft-critique prose have no legitimate use on the persona surface. */
+static void g10_rejects_critique_echo_variants(void) {
+    g10_expect_reject("i mean nEEDS_RETRY.");
+    g10_expect_reject("NEEDS_RETRY");
+    g10_expect_reject("Nobody texts \"GOOD\" as a response to \"Okay.");
+    g10_expect_reject("\"\" It sounds like a grade or a bot.");
+    g10_expect_reject("Should be something natural like \"Cool\" or \"Got it.\"");
+}
+
+static void g10_passes_talking_about_bots_naturally(void) {
+    /* Real conversational uses near the boundary — Seth talks about AI
+     * with these contacts ("my AI is bonkers"); bare bot-talk must pass. */
+    g10_expect_pass("lol that sounded like a bot didn't it");
+    g10_expect_pass("my AI is bonkers sometimes");
+}
+
+static void g10_rejects_style_audit_meta(void) {
         /* L208947 — style-audit self-narration as final output. */
         g10_expect_reject("Contractions used (\"didn");
     }
@@ -2814,6 +2834,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g10_rejects_option_enumeration);
     HU_RUN_TEST(g10_rejects_truncated_rules_reference);
     HU_RUN_TEST(g10_rejects_style_audit_meta);
+    HU_RUN_TEST(g10_rejects_critique_echo_variants);
+    HU_RUN_TEST(g10_passes_talking_about_bots_naturally);
     HU_RUN_TEST(g10_passes_known_clean_corpus);
     HU_RUN_TEST(g10_passes_legit_option_word_without_enumeration);
 }

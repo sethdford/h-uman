@@ -871,6 +871,13 @@ bool hu_guard_audit_self_talk_leak(const char *s, size_t len) {
     return hu_guard_has_self_talk_pattern(s, len);
 }
 
+/* Forward decl — defined below with the G10 detector. */
+static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigned *which);
+
+bool hu_guard_audit_deliberation_leak(const char *s, size_t len) {
+    return hu_guard_detect_deliberation_leak(s, len, NULL);
+}
+
 bool hu_response_is_critique_echo(const char *s, size_t len) {
     /* The reflection-retry critique always begins with a verdict token
      * from reflection.c's prompt template ("NEEDS_RETRY" or lowercase).
@@ -1166,7 +1173,8 @@ static bool hu_guard_has_rule_citation(const char *s, size_t len) {
  *   bit 1 = D2 option enumeration
  *   bit 2 = D3 rule quoting ("absolute rule" or "rule N says")
  *   bit 3 = D4 style-audit self-narration
- *   bit 4 = D5 quoted draft alternatives */
+ *   bit 4 = D5 quoted draft alternatives
+ *   bit 5 = D6 reflection-critique echo (NEEDS_RETRY / draft critique) */
 static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigned *which) {
     if (which)
         *which = 0;
@@ -1195,6 +1203,19 @@ static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigne
         {"ai-speak", 8, 3},
         /* D5 — quoted draft alternatives: `"..." or "..."`. */
         {"\" or \"", 6, 4},
+        /* D6 — reflection-critique echo (2026-07-12 14:21 Mindy incident:
+         * "i mean NEEDS_RETRY. Nobody texts \"GOOD\" as a response to
+         * \"Okay.\" It sounds like a grade or a bot..." split into four
+         * bubbles). The prefix-only hu_response_is_critique_echo missed
+         * mid-string echoes; on the persona surface the verdict token and
+         * draft-critique prose have NO legitimate use — anywhere-match.
+         * Bare bot-talk ("that sounded like a bot lol") stays sendable:
+         * these patterns all carry the meta-critique shape, not the word. */
+        {"needs_retry", 11, 5},
+        {"nobody texts \"", 14, 5},
+        {"as a response to \"", 18, 5},
+        {"sounds like a grade", 19, 5},
+        {"should be something natural like", 32, 5},
     };
     bool hit = false;
     for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {

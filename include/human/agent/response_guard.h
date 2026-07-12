@@ -274,6 +274,10 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
  * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
 bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
 bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+/* G10 detector, exported for the outbound pipeline (the proactive path
+ * never crosses hu_response_guard_check — the 2026-07-12 bare
+ * "NEEDS_RETRY" proactive send is the evidence). */
+bool hu_guard_audit_deliberation_leak(const char *s, size_t len);
 
 /* 2026-05-19 — critique-as-response echo detector.
  *
