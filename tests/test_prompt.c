@@ -1,5 +1,6 @@
 #include "human/agent/memory_loader.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -520,6 +521,32 @@ static void test_prompt_immersive_safety_section_live_only_and_early(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+static void test_prompt_immersive_tracks_field_stats(void) {
+    /* The B3 Phase-1 per-field byte accounting must cover the IMMERSIVE
+     * branch — the persona/daemon path is the only one that truncates, and
+     * untracked immersive turns feed all-zero observations into the budget
+     * accumulator, poisoning the DEAD-field means the structured path's
+     * trim gate keys off. */
+    hu_allocator_t alloc = hu_system_allocator();
+    static const char mem[] = "- MEMFACT_MARKER a small remembered detail\n";
+    hu_prompt_config_t cfg = immersive_cfg(mem, sizeof(mem) - 1, NULL);
+    cfg.graph_context = "Climbing partner since 2019.";
+    cfg.graph_context_len = 28;
+    cfg.stm_context = "recent session notes";
+    cfg.stm_context_len = 20;
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(stats[HU_PROMPT_FIELD_PERSONA_PROMPT].bytes_contributed > 0);
+    HU_ASSERT_TRUE(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed >= sizeof(mem) - 1);
+    HU_ASSERT_TRUE(stats[HU_PROMPT_FIELD_GRAPH_CONTEXT].bytes_contributed >= 28);
+    HU_ASSERT_TRUE(stats[HU_PROMPT_FIELD_STM_CONTEXT].bytes_contributed >= 20);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
@@ -532,6 +559,7 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_immersive_trim_off_preserves_positional_behavior);
     HU_RUN_TEST(test_prompt_immersive_trim_shadow_output_unchanged);
     HU_RUN_TEST(test_prompt_immersive_safety_section_live_only_and_early);
+    HU_RUN_TEST(test_prompt_immersive_tracks_field_stats);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);

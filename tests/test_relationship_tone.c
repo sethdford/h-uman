@@ -11,8 +11,12 @@
  * 2026-07-11.
  */
 
+#include "human/agent.h"
+#include "human/core/string.h"
+#include "human/persona.h"
 #include "human/persona/relationship_tone.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 static hu_contact_profile_t cp_make(const char *stage, const char *warmth) {
@@ -83,6 +87,102 @@ static void test_tone_stage_precedes_warmth_vocab(void) {
     HU_ASSERT_TRUE(strstr(note, "trusted") != NULL);
 }
 
+/* ─── Wiring: hu_agent_apply_relationship_tone (shared by BOTH turn paths) ──
+ * Pins the agent-level augmentation the 2026-07-11 sprint wired into
+ * hu_agent_turn only — dead on the daemon's streaming path. The helper must
+ * behave identically from either caller: LIVE appends the note in place,
+ * SHADOW/OFF leave the prompt byte-identical. */
+
+static void wt_agent_fixture(hu_agent_t *agent, hu_allocator_t *alloc, hu_persona_t *persona,
+                             hu_contact_profile_t *contact, const char *warmth) {
+    memset(contact, 0, sizeof(*contact));
+    contact->contact_id = (char *)"+15551230000";
+    contact->warmth_level = (char *)warmth;
+    memset(persona, 0, sizeof(*persona));
+    persona->contacts = contact;
+    persona->contacts_count = 1;
+    memset(agent, 0, sizeof(*agent));
+    agent->alloc = alloc;
+    agent->persona = persona;
+    agent->memory_session_id = "+15551230000";
+    agent->memory_session_id_len = 12;
+}
+
+static void test_agent_tone_live_appends_note_in_place(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    hu_persona_t persona;
+    hu_contact_profile_t contact;
+    wt_agent_fixture(&agent, &alloc, &persona, &contact, "high");
+    char *pp = hu_strndup(&alloc, "PERSONA_HEAD.", 13);
+    size_t pl = 13;
+    setenv("HU_WARMTH_TONE_VOCAB", "live", 1);
+    hu_agent_apply_relationship_tone(&agent, &pp, &pl);
+    unsetenv("HU_WARMTH_TONE_VOCAB");
+    HU_ASSERT_NOT_NULL(pp);
+    HU_ASSERT_TRUE(pl > 13);
+    HU_ASSERT_TRUE(strstr(pp, "PERSONA_HEAD.") != NULL);
+    HU_ASSERT_TRUE(strstr(pp, "[Relationship: warm") != NULL);
+    alloc.free(alloc.ctx, pp, pl + 1);
+}
+
+static void test_agent_tone_shadow_leaves_prompt_unchanged(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    hu_persona_t persona;
+    hu_contact_profile_t contact;
+    wt_agent_fixture(&agent, &alloc, &persona, &contact, "high");
+    char *pp = hu_strndup(&alloc, "PERSONA_HEAD.", 13);
+    size_t pl = 13;
+    setenv("HU_WARMTH_TONE_VOCAB", "shadow", 1);
+    hu_agent_apply_relationship_tone(&agent, &pp, &pl);
+    unsetenv("HU_WARMTH_TONE_VOCAB");
+    HU_ASSERT_EQ(pl, (size_t)13);
+    HU_ASSERT_STR_EQ(pp, "PERSONA_HEAD.");
+    alloc.free(alloc.ctx, pp, pl + 1);
+}
+
+static void test_agent_tone_off_and_unknown_contact_are_noops(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    hu_persona_t persona;
+    hu_contact_profile_t contact;
+    /* gate unset (default off), warm contact: no change */
+    wt_agent_fixture(&agent, &alloc, &persona, &contact, "high");
+    unsetenv("HU_WARMTH_TONE_VOCAB");
+    char *pp = hu_strndup(&alloc, "PERSONA_HEAD.", 13);
+    size_t pl = 13;
+    hu_agent_apply_relationship_tone(&agent, &pp, &pl);
+    HU_ASSERT_EQ(pl, (size_t)13);
+    HU_ASSERT_STR_EQ(pp, "PERSONA_HEAD.");
+    /* gate live, but session id matches no contact: no change */
+    agent.memory_session_id = "+19998887777";
+    setenv("HU_WARMTH_TONE_VOCAB", "live", 1);
+    hu_agent_apply_relationship_tone(&agent, &pp, &pl);
+    unsetenv("HU_WARMTH_TONE_VOCAB");
+    HU_ASSERT_EQ(pl, (size_t)13);
+    HU_ASSERT_STR_EQ(pp, "PERSONA_HEAD.");
+    alloc.free(alloc.ctx, pp, pl + 1);
+}
+
+static void test_agent_tone_legacy_stage_fires_even_when_gate_off(void) {
+    /* production semantics: legacy stage vocabulary never depended on the
+     * gate; the helper must preserve that on both paths */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    hu_persona_t persona;
+    hu_contact_profile_t contact;
+    wt_agent_fixture(&agent, &alloc, &persona, &contact, NULL);
+    contact.relationship_stage = (char *)"trusted";
+    unsetenv("HU_WARMTH_TONE_VOCAB");
+    char *pp = hu_strndup(&alloc, "PERSONA_HEAD.", 13);
+    size_t pl = 13;
+    hu_agent_apply_relationship_tone(&agent, &pp, &pl);
+    HU_ASSERT_TRUE(pl > 13);
+    HU_ASSERT_TRUE(strstr(pp, "trusted") != NULL);
+    alloc.free(alloc.ctx, pp, pl + 1);
+}
+
 void run_relationship_tone_tests(void) {
     HU_TEST_SUITE("persona relationship tone note");
     HU_RUN_TEST(test_tone_null_profile_returns_null);
@@ -93,4 +193,8 @@ void run_relationship_tone_tests(void) {
     HU_RUN_TEST(test_tone_warmth_low_yields_null);
     HU_RUN_TEST(test_tone_lukewarm_must_not_read_as_warm);
     HU_RUN_TEST(test_tone_stage_precedes_warmth_vocab);
+    HU_RUN_TEST(test_agent_tone_live_appends_note_in_place);
+    HU_RUN_TEST(test_agent_tone_shadow_leaves_prompt_unchanged);
+    HU_RUN_TEST(test_agent_tone_off_and_unknown_contact_are_noops);
+    HU_RUN_TEST(test_agent_tone_legacy_stage_fires_even_when_gate_off);
 }

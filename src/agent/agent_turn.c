@@ -933,6 +933,39 @@ static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_l
     agent->alloc->free(agent->alloc->ctx, dir, dir_len + 1);
 }
 
+/* Relationship tone note — shared by BOTH turn paths (see agent.h). The
+ * 2026-07-11 wiring was inline in hu_agent_turn only, so HU_WARMTH_TONE_VOCAB
+ * was dead on the daemon's streaming path (shadow soak: zero warmth_tone log
+ * lines despite 14 contacts carrying warmth_level). Same bug shape as the
+ * humanness directives before their hoist — hence the same shared-helper fix. */
+void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
+                                      size_t *persona_prompt_len) {
+    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len ||
+        !agent->persona || !agent->memory_session_id)
+        return;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(
+        agent->persona, agent->memory_session_id, agent->memory_session_id_len);
+    const char *wt_env = getenv("HU_WARMTH_TONE_VOCAB");
+    bool wt_live = wt_env && (strcasecmp(wt_env, "live") == 0 || strcasecmp(wt_env, "on") == 0);
+    bool wt_shadow = wt_env && strcasecmp(wt_env, "shadow") == 0;
+    const char *tone_note = hu_persona_relationship_tone_note(cp, wt_live);
+    if (wt_shadow && !tone_note && hu_persona_relationship_tone_note(cp, true))
+        hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
+    if (tone_note) {
+        size_t tn_len = strlen(tone_note);
+        size_t new_len = *persona_prompt_len + tn_len;
+        char *augmented = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+        if (augmented) {
+            memcpy(augmented, *persona_prompt, *persona_prompt_len);
+            memcpy(augmented + *persona_prompt_len, tone_note, tn_len);
+            augmented[new_len] = '\0';
+            agent->alloc->free(agent->alloc->ctx, *persona_prompt, *persona_prompt_len + 1);
+            *persona_prompt = augmented;
+            *persona_prompt_len = new_len;
+        }
+    }
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -3072,30 +3105,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
      * off) gated on the blind-A/B HUMAN tier per feature-gate-requires-measurement.md
      * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
      * fires on real personas, so the warmth vocabulary is what makes this note live. */
-    if (persona_prompt && agent->persona && agent->memory_session_id) {
-        const hu_contact_profile_t *cp = hu_persona_find_contact(
-            agent->persona, agent->memory_session_id, agent->memory_session_id_len);
-        const char *wt_env = getenv("HU_WARMTH_TONE_VOCAB");
-        bool wt_live =
-            wt_env && (strcasecmp(wt_env, "live") == 0 || strcasecmp(wt_env, "on") == 0);
-        bool wt_shadow = wt_env && strcasecmp(wt_env, "shadow") == 0;
-        const char *tone_note = hu_persona_relationship_tone_note(cp, wt_live);
-        if (wt_shadow && !tone_note && hu_persona_relationship_tone_note(cp, true))
-            hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
-        if (tone_note) {
-            size_t tn_len = strlen(tone_note);
-            size_t new_len = persona_prompt_len + tn_len;
-            char *augmented = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-            if (augmented) {
-                memcpy(augmented, persona_prompt, persona_prompt_len);
-                memcpy(augmented + persona_prompt_len, tone_note, tn_len);
-                augmented[new_len] = '\0';
-                agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
-                persona_prompt = augmented;
-                persona_prompt_len = new_len;
-            }
-        }
-    }
+    hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
 
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
