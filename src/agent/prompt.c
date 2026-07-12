@@ -289,9 +289,26 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * is gated on the blind-A/B human tier. Span offsets recorded here
          * feed the trim decision just before the early return below. */
         hu_prompt_trim_mode_t trim_mode = hu_prompt_trim_mode();
-        hu_prompt_trim_span_t memory_span = {0, 0};
-        hu_prompt_trim_span_t exemplars_span = {0, 0};
-        hu_prompt_trim_span_t graph_span = {0, 0};
+        /* Trim spans, indexed by PRIORITY (slot 0 trims first). The set was
+         * exemplars/graph/memory only until the 2026-07-12 shadow soak
+         * showed those three covered only part of the overage on every
+         * over-budget production turn (exemplars/graph empty, memory
+         * small); world_model, relational_episode, moment and
+         * personal_model are the next-least-load-bearing middle sections.
+         * NEVER spanned: persona head, safety, instruction, stm, custom
+         * instructions, contact, conversation, shape rules, CRITICAL
+         * REMINDER, reinforcement. */
+        enum {
+            HU_TRIM_SLOT_EXEMPLARS = 0,
+            HU_TRIM_SLOT_GRAPH,
+            HU_TRIM_SLOT_MEMORY,
+            HU_TRIM_SLOT_WORLD_MODEL,
+            HU_TRIM_SLOT_RELATIONAL_EPISODE,
+            HU_TRIM_SLOT_MOMENT,
+            HU_TRIM_SLOT_PERSONAL_MODEL,
+            HU_TRIM_SLOT_COUNT,
+        };
+        hu_prompt_trim_span_t spans[HU_TRIM_SLOT_COUNT] = {{0, 0}};
 
         /* Compact in-character safety rules, EARLY (right after the persona
          * head) so the 16 KB cap can never delete them. LIVE only — SHADOW
@@ -326,139 +343,81 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 goto fail;
         }
 
-        if (config->memory_context && config->memory_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            memory_span.offset = len;
-            err =
-                append(alloc, &buf, &len, &cap, config->memory_context, config->memory_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            memory_span.length = len - memory_span.offset;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_MEMORY_CONTEXT);
-        }
-        if (config->personal_model_context && config->personal_model_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->personal_model_context,
-                         config->personal_model_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_PERSONAL_MODEL_CONTEXT);
-        }
-        if (config->moment_context && config->moment_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err =
-                append(alloc, &buf, &len, &cap, config->moment_context, config->moment_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_MOMENT_CONTEXT);
-        }
-        if (config->self_exemplars_context && config->self_exemplars_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            exemplars_span.offset = len;
-            err = append(alloc, &buf, &len, &cap,
-                         "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n", 58);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, config->self_exemplars_context,
-                         config->self_exemplars_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n", 1);
-            if (err != HU_OK)
-                goto fail;
-            exemplars_span.length = len - exemplars_span.offset;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_SELF_EXEMPLARS_CONTEXT);
-        }
-        if (config->world_model_context && config->world_model_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->world_model_context,
-                         config->world_model_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_WORLD_MODEL_CONTEXT);
-        }
-        if (config->relational_episode_context && config->relational_episode_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->relational_episode_context,
-                         config->relational_episode_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_RELATIONAL_EPISODE_CONTEXT);
-        }
-        if (config->instruction_context && config->instruction_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->instruction_context,
-                         config->instruction_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_INSTRUCTION_CONTEXT);
-        }
-        if (config->stm_context && config->stm_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, "\n\n### Session Context\n", 22);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, config->stm_context, config->stm_context_len);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_STM_CONTEXT);
-        }
-        if (config->custom_instructions && config->custom_instructions_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->custom_instructions,
-                         config->custom_instructions_len);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_CUSTOM_INSTRUCTIONS);
-        }
-        if (config->graph_context && config->graph_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            graph_span.offset = len;
-            err = append(alloc, &buf, &len, &cap, "\n## Relationship Context\n", 25);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, config->graph_context, config->graph_context_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
-            if (err != HU_OK)
-                goto fail;
-            graph_span.length = len - graph_span.offset;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_GRAPH_CONTEXT);
-        }
-        if (config->contact_context && config->contact_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->contact_context,
-                         config->contact_context_len);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_CONTACT_CONTEXT);
-        }
-        if (config->conversation_context && config->conversation_context_len > 0) {
-            HU_PROMPT_TRACK_BEFORE();
-            err = append(alloc, &buf, &len, &cap, config->conversation_context,
-                         config->conversation_context_len);
-            if (err != HU_OK)
-                goto fail;
-            HU_PROMPT_TRACK_AFTER(HU_PROMPT_FIELD_CONVERSATION_CONTEXT);
+        /* Immersive middle sections, in prompt order. One row per section
+         * collapses what were 12 copy-paste blocks (07-12 review): each row
+         * appends optional header + text + optional trailer, records its
+         * per-field byte stats, and (for trimmable sections) its span. */
+        {
+            static const char k_hdr_exemplars[] =
+                "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n";
+            static const char k_hdr_stm[] = "\n\n### Session Context\n";
+            static const char k_hdr_graph[] = "\n## Relationship Context\n";
+            static const char k_sep2[] = "\n\n";
+            static const char k_sep1[] = "\n";
+            const struct {
+                const char *text;
+                size_t text_len;
+                const char *header;
+                size_t header_len;
+                const char *trailer;
+                size_t trailer_len;
+                hu_prompt_field_t field;
+                int span_slot; /* -1 = protected (never trimmed) */
+            } sections[] = {
+                {config->memory_context, config->memory_context_len, NULL, 0, k_sep2, 2,
+                 HU_PROMPT_FIELD_MEMORY_CONTEXT, HU_TRIM_SLOT_MEMORY},
+                {config->personal_model_context, config->personal_model_context_len, NULL, 0,
+                 k_sep2, 2, HU_PROMPT_FIELD_PERSONAL_MODEL_CONTEXT, HU_TRIM_SLOT_PERSONAL_MODEL},
+                {config->moment_context, config->moment_context_len, NULL, 0, k_sep2, 2,
+                 HU_PROMPT_FIELD_MOMENT_CONTEXT, HU_TRIM_SLOT_MOMENT},
+                {config->self_exemplars_context, config->self_exemplars_context_len,
+                 k_hdr_exemplars, sizeof(k_hdr_exemplars) - 1, k_sep1, 1,
+                 HU_PROMPT_FIELD_SELF_EXEMPLARS_CONTEXT, HU_TRIM_SLOT_EXEMPLARS},
+                {config->world_model_context, config->world_model_context_len, NULL, 0, k_sep2, 2,
+                 HU_PROMPT_FIELD_WORLD_MODEL_CONTEXT, HU_TRIM_SLOT_WORLD_MODEL},
+                {config->relational_episode_context, config->relational_episode_context_len, NULL,
+                 0, k_sep2, 2, HU_PROMPT_FIELD_RELATIONAL_EPISODE_CONTEXT,
+                 HU_TRIM_SLOT_RELATIONAL_EPISODE},
+                {config->instruction_context, config->instruction_context_len, NULL, 0, k_sep2, 2,
+                 HU_PROMPT_FIELD_INSTRUCTION_CONTEXT, -1},
+                {config->stm_context, config->stm_context_len, k_hdr_stm, sizeof(k_hdr_stm) - 1,
+                 NULL, 0, HU_PROMPT_FIELD_STM_CONTEXT, -1},
+                {config->custom_instructions, config->custom_instructions_len, NULL, 0, NULL, 0,
+                 HU_PROMPT_FIELD_CUSTOM_INSTRUCTIONS, -1},
+                {config->graph_context, config->graph_context_len, k_hdr_graph,
+                 sizeof(k_hdr_graph) - 1, k_sep2, 2, HU_PROMPT_FIELD_GRAPH_CONTEXT,
+                 HU_TRIM_SLOT_GRAPH},
+                {config->contact_context, config->contact_context_len, NULL, 0, NULL, 0,
+                 HU_PROMPT_FIELD_CONTACT_CONTEXT, -1},
+                {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
+                 HU_PROMPT_FIELD_CONVERSATION_CONTEXT, -1},
+            };
+            for (size_t i = 0; i < sizeof(sections) / sizeof(sections[0]); i++) {
+                if (!sections[i].text || sections[i].text_len == 0)
+                    continue;
+                HU_PROMPT_TRACK_BEFORE();
+                size_t span_start = len;
+                if (sections[i].header_len > 0) {
+                    err = append(alloc, &buf, &len, &cap, sections[i].header,
+                                 sections[i].header_len);
+                    if (err != HU_OK)
+                        goto fail;
+                }
+                err = append(alloc, &buf, &len, &cap, sections[i].text, sections[i].text_len);
+                if (err != HU_OK)
+                    goto fail;
+                if (sections[i].trailer_len > 0) {
+                    err = append(alloc, &buf, &len, &cap, sections[i].trailer,
+                                 sections[i].trailer_len);
+                    if (err != HU_OK)
+                        goto fail;
+                }
+                if (sections[i].span_slot >= 0) {
+                    spans[sections[i].span_slot].offset = span_start;
+                    spans[sections[i].span_slot].length = len - span_start;
+                }
+                HU_PROMPT_TRACK_AFTER(sections[i].field);
+            }
         }
         if (config->max_response_chars > 0) {
             char lbuf[192];
@@ -562,10 +521,9 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * downstream remains the safety net when the spans can't cover the
          * overage. */
         if (trim_mode != HU_PROMPT_TRIM_OFF && len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            hu_prompt_trim_span_t spans[3] = {exemplars_span, graph_span, memory_span};
-            size_t cuts[3] = {0, 0, 0};
-            size_t planned = hu_prompt_trim_plan(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, spans, 3,
-                                                 cuts);
+            size_t cuts[HU_TRIM_SLOT_COUNT] = {0};
+            size_t planned = hu_prompt_trim_plan(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, spans,
+                                                 HU_TRIM_SLOT_COUNT, cuts);
             size_t positional_cut = len - HU_PROMPT_TRIM_BUDGET_BYTES;
             if (trim_mode == HU_PROMPT_TRIM_SHADOW) {
                 /* The section lens names the NEXT trim-span candidates when the
@@ -574,22 +532,27 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  * short on most). Sizes come straight from the config so no
                  * extra bookkeeping is paid on the happy path. */
                 hu_log_info("prompt_trim", NULL,
-                            "shadow: would trim %zu bytes (exemplars=%zu graph=%zu memory=%zu) "
-                            "of %zu overage; positional cut drops the tail %zu instead; "
-                            "sections pm=%zu wm=%zu rel=%zu moment=%zu stm=%zu conv=%zu "
-                            "contact=%zu instr=%zu custom=%zu",
-                            planned, cuts[0], cuts[1], cuts[2], positional_cut, positional_cut,
-                            config->personal_model_context_len, config->world_model_context_len,
-                            config->relational_episode_context_len, config->moment_context_len,
+                            "shadow: would trim %zu of %zu overage (exemplars=%zu graph=%zu "
+                            "memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu); positional cut drops "
+                            "the tail %zu instead; persona=%zu total=%zu sections stm=%zu "
+                            "conv=%zu contact=%zu instr=%zu custom=%zu",
+                            planned, positional_cut, cuts[HU_TRIM_SLOT_EXEMPLARS],
+                            cuts[HU_TRIM_SLOT_GRAPH], cuts[HU_TRIM_SLOT_MEMORY],
+                            cuts[HU_TRIM_SLOT_WORLD_MODEL], cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE],
+                            cuts[HU_TRIM_SLOT_MOMENT], cuts[HU_TRIM_SLOT_PERSONAL_MODEL],
+                            positional_cut, config->persona_prompt_len, len,
                             config->stm_context_len, config->conversation_context_len,
                             config->contact_context_len, config->instruction_context_len,
                             config->custom_instructions_len);
             } else if (planned > 0) {
-                len = hu_prompt_trim_apply(buf, len, spans, 3, cuts);
+                len = hu_prompt_trim_apply(buf, len, spans, HU_TRIM_SLOT_COUNT, cuts);
                 hu_log_info("prompt_trim", NULL,
-                            "live: trimmed %zu bytes (exemplars=%zu graph=%zu memory=%zu); "
-                            "prompt now %zu bytes",
-                            planned, cuts[0], cuts[1], cuts[2], len);
+                            "live: trimmed %zu bytes (exemplars=%zu graph=%zu memory=%zu "
+                            "wm=%zu rel=%zu moment=%zu pm=%zu); prompt now %zu bytes",
+                            planned, cuts[HU_TRIM_SLOT_EXEMPLARS], cuts[HU_TRIM_SLOT_GRAPH],
+                            cuts[HU_TRIM_SLOT_MEMORY], cuts[HU_TRIM_SLOT_WORLD_MODEL],
+                            cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE], cuts[HU_TRIM_SLOT_MOMENT],
+                            cuts[HU_TRIM_SLOT_PERSONAL_MODEL], len);
             }
         }
         *out = buf;

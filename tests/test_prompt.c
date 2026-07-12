@@ -521,6 +521,45 @@ static void test_prompt_immersive_safety_section_live_only_and_early(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+static void test_prompt_immersive_trim_extends_to_world_model(void) {
+    /* 2026-07-12 soak: on every over-budget production turn the original
+     * three spans covered only part of the overage (exemplars/graph were
+     * empty, memory small). The span set therefore extends into the next
+     * middle sections; world_model is the first (priority after memory).
+     * Fixture: small memory + >16K world model. LIVE must consume memory
+     * whole, then world_model head-first, and land under budget with the
+     * guard tail intact. */
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t wm_len = 0;
+    char *wm = big_memory_context(&alloc, &wm_len); /* reuse builder: OLDEST/NEWEST markers */
+    static const char mem[] = "- MEMFACT_MARKER small remembered detail\n";
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, sizeof(mem) - 1, &persona);
+    cfg.world_model_context = wm;
+    cfg.world_model_context_len = wm_len;
+
+    setenv("HU_PROMPT_TRIM", "live", 1);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    unsetenv("HU_PROMPT_TRIM");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(out_len <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_TRUE(strstr(out, "PERSONA_HEAD_MARKER") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "TAIL_REMINDER_MARKER") != NULL);
+    /* memory (higher trim priority) fully consumed before world model */
+    HU_ASSERT_TRUE(strstr(out, "MEMFACT_MARKER") == NULL);
+    /* world model trimmed head-first: oldest gone, newest kept */
+    HU_ASSERT_TRUE(strstr(out, "OLDEST_FACT_MARKER") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "NEWEST_FACT_MARKER") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    alloc.free(alloc.ctx, wm, 20000 + 64);
+}
+
 static void test_prompt_immersive_tracks_field_stats(void) {
     /* The B3 Phase-1 per-field byte accounting must cover the IMMERSIVE
      * branch — the persona/daemon path is the only one that truncates, and
@@ -559,6 +598,7 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_immersive_trim_off_preserves_positional_behavior);
     HU_RUN_TEST(test_prompt_immersive_trim_shadow_output_unchanged);
     HU_RUN_TEST(test_prompt_immersive_safety_section_live_only_and_early);
+    HU_RUN_TEST(test_prompt_immersive_trim_extends_to_world_model);
     HU_RUN_TEST(test_prompt_immersive_tracks_field_stats);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
