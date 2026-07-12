@@ -16,8 +16,9 @@ set -euo pipefail
 # src/data/) were inflating local counts by ~650 groups vs the committed
 # tree, so working-tree runs and CI disagreed. Same pass added per-file
 # boundary sentinels (windows no longer span files, killing enumeration-
-# order dependence) and re-measured: 11587.
-CLONE_BASELINE=11587
+# order dependence) and re-measured: 11587; 11552 after the
+# immersive-section table refactor (prompt.c) landed the same day.
+CLONE_BASELINE=11552
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"

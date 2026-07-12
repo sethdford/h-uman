@@ -316,13 +316,12 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * (below) only runs on the non-immersive path; this is the ≤1 KB
          * persona-first variant of data/prompts/safety_rules.txt. */
         if (trim_mode == HU_PROMPT_TRIM_LIVE) {
-            char *safety_compact = NULL;
+            const char *safety_compact = NULL;
             size_t safety_compact_len = 0;
-            hu_error_t load_err = hu_data_load_embedded(
-                alloc, "prompts/safety_rules_compact.txt", &safety_compact, &safety_compact_len);
+            hu_error_t load_err = hu_data_borrow_embedded("prompts/safety_rules_compact.txt",
+                                                          &safety_compact, &safety_compact_len);
             if (load_err == HU_OK && safety_compact) {
                 err = append(alloc, &buf, &len, &cap, safety_compact, safety_compact_len);
-                alloc->free(alloc->ctx, safety_compact, safety_compact_len + 1);
                 if (err != HU_OK)
                     goto fail;
             } else {
@@ -493,13 +492,13 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 }
             }
         } else {
-            char *persona_reinforce = NULL;
+            const char *persona_reinforce = NULL;
             size_t persona_reinforce_len = 0;
-            hu_error_t load_err = hu_data_load_embedded(alloc, "prompts/persona_reinforcement.txt",
-                                                        &persona_reinforce, &persona_reinforce_len);
+            hu_error_t load_err = hu_data_borrow_embedded("prompts/persona_reinforcement.txt",
+                                                          &persona_reinforce,
+                                                          &persona_reinforce_len);
             if (load_err == HU_OK && persona_reinforce) {
                 err = append(alloc, &buf, &len, &cap, persona_reinforce, persona_reinforce_len);
-                alloc->free(alloc->ctx, persona_reinforce, persona_reinforce_len + 1);
                 if (err != HU_OK)
                     goto fail;
             } else {

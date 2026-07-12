@@ -463,9 +463,46 @@ static void integration_filler_words_data_valid(void) {
     alloc.free(alloc.ctx, data, data_len + 1);
 }
 
+static void test_data_loader_borrow_embedded_no_alloc(void) {
+    const char *bytes = NULL;
+    size_t blen = 0;
+    hu_error_t err = hu_data_borrow_embedded("prompts/safety_rules_compact.txt", &bytes, &blen);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL((void *)bytes);
+    HU_ASSERT_TRUE(blen > 0);
+    /* borrowed bytes match what the copying loader returns */
+    hu_allocator_t alloc = hu_system_allocator();
+    char *copy = NULL;
+    size_t copy_len = 0;
+    HU_ASSERT_EQ(hu_data_load_embedded(&alloc, "prompts/safety_rules_compact.txt", &copy,
+                                       &copy_len),
+                 HU_OK);
+    HU_ASSERT_EQ(blen, copy_len);
+    HU_ASSERT_TRUE(memcmp(bytes, copy, blen) == 0);
+    alloc.free(alloc.ctx, copy, copy_len + 1);
+    /* borrowing again yields the SAME pointer — proof of no per-call copy */
+    const char *bytes2 = NULL;
+    size_t blen2 = 0;
+    HU_ASSERT_EQ(hu_data_borrow_embedded("prompts/safety_rules_compact.txt", &bytes2, &blen2),
+                 HU_OK);
+    HU_ASSERT_TRUE(bytes2 == bytes);
+}
+
+static void test_data_loader_borrow_embedded_unknown_and_null(void) {
+    const char *bytes = NULL;
+    size_t blen = 0;
+    HU_ASSERT_EQ(hu_data_borrow_embedded("prompts/does_not_exist.txt", &bytes, &blen),
+                 HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(hu_data_borrow_embedded(NULL, &bytes, &blen), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_data_borrow_embedded("prompts/safety_rules.txt", NULL, &blen),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_data_loader_tests(void) {
     HU_TEST_SUITE("data_loader");
     HU_RUN_TEST(test_data_loader_loads_embedded_default);
+    HU_RUN_TEST(test_data_loader_borrow_embedded_no_alloc);
+    HU_RUN_TEST(test_data_loader_borrow_embedded_unknown_and_null);
     HU_RUN_TEST(test_data_loader_unknown_path_returns_error);
     HU_RUN_TEST(test_data_loader_falls_back_to_embedded);
     HU_RUN_TEST(test_data_loader_null_arguments);
