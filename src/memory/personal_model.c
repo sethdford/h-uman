@@ -130,7 +130,12 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
                     llm.fact_count);
         return;
     }
-    /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow. */
+    /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow.
+     * Logged so the live success rate stays countable post-promotion —
+     * without this line only failures and zeros were visible in LIVE
+     * (critic finding, 2026-07-12). */
+    hu_log_info("llm_fact_extract", NULL, "live: merging %zu fact(s) from a regex-missed message",
+                llm.fact_count);
     *extracted = llm;
 }
 

@@ -1328,12 +1328,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
         if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t budget = HU_PROMPT_TRIM_BUDGET_BYTES;
-            size_t cut = budget;
-            while (cut > 0 && system_prompt[cut - 1] != '\n')
-                cut--;
-            if (cut < budget / 2)
-                cut = budget;
+            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
+                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
             static atomic_bool warned_stream_prompt_budget = false;
             hu_log_warn_once(&warned_stream_prompt_budget, "agent_stream", NULL,
                              "system prompt truncated from %zu to %zu bytes "

@@ -51,6 +51,20 @@ size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
     return total;
 }
 
+size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget) {
+    if (!buf || len <= budget)
+        return len;
+    /* Cut at the last newline within [0, budget) for a clean boundary;
+     * accept the hard cap when no newline lies in the budget's upper
+     * half (retreating further would delete too much). */
+    size_t cut = budget;
+    while (cut > 0 && buf[cut - 1] != '\n')
+        cut--;
+    if (cut < budget / 2)
+        cut = budget;
+    return cut;
+}
+
 size_t hu_prompt_trim_apply(char *buf, size_t len, const hu_prompt_trim_span_t *spans,
                             size_t span_count, const size_t *cuts) {
     if (!buf || !spans || !cuts || span_count == 0)

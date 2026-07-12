@@ -155,6 +155,24 @@ static void test_trim_apply_zero_cuts_is_identity(void) {
     HU_ASSERT_STR_EQ(buf, FIX_TEXT);
 }
 
+static void test_positional_cap_under_budget_is_identity(void) {
+    HU_ASSERT_EQ(hu_prompt_positional_cap_point(FIX_TEXT, FIX_LEN, FIX_LEN), FIX_LEN);
+    HU_ASSERT_EQ(hu_prompt_positional_cap_point(FIX_TEXT, FIX_LEN, FIX_LEN + 100), FIX_LEN);
+}
+
+static void test_positional_cap_cuts_at_last_newline_within_budget(void) {
+    /* budget 43 lands mid-"TAIL"; the last newline before it is at byte 41
+     * (end of "gggg\n"), so the cut retreats there. */
+    HU_ASSERT_EQ(hu_prompt_positional_cap_point(FIX_TEXT, FIX_LEN, 43), (size_t)41);
+}
+
+static void test_positional_cap_falls_back_to_hard_budget_without_newline(void) {
+    /* no newline in the upper half of the budget window -> hard cap, mirroring
+     * the cut < budget/2 fallback both turn paths used inline. */
+    static const char no_nl[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    HU_ASSERT_EQ(hu_prompt_positional_cap_point(no_nl, sizeof(no_nl) - 1, 20), (size_t)20);
+}
+
 void run_prompt_trim_tests(void) {
     HU_TEST_SUITE("Prompt trim");
     HU_RUN_TEST(test_trim_mode_parse_unknown_and_empty_default_off);
@@ -169,4 +187,7 @@ void run_prompt_trim_tests(void) {
     HU_RUN_TEST(test_trim_plan_null_inputs_return_zero);
     HU_RUN_TEST(test_trim_apply_removes_planned_middle_keeps_head_tail);
     HU_RUN_TEST(test_trim_apply_zero_cuts_is_identity);
+    HU_RUN_TEST(test_positional_cap_under_budget_is_identity);
+    HU_RUN_TEST(test_positional_cap_cuts_at_last_newline_within_budget);
+    HU_RUN_TEST(test_positional_cap_falls_back_to_hard_budget_without_newline);
 }

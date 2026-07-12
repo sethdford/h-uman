@@ -952,17 +952,13 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
     if (wt_shadow && !tone_note && hu_persona_relationship_tone_note(cp, true))
         hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
     if (tone_note) {
+        /* at_append_owned_directive owns the realloc-append dance (and
+         * frees its input), so dup the static note instead of keeping a
+         * second copy of that logic here (2026-07-12 review). */
         size_t tn_len = strlen(tone_note);
-        size_t new_len = *persona_prompt_len + tn_len;
-        char *augmented = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-        if (augmented) {
-            memcpy(augmented, *persona_prompt, *persona_prompt_len);
-            memcpy(augmented + *persona_prompt_len, tone_note, tn_len);
-            augmented[new_len] = '\0';
-            agent->alloc->free(agent->alloc->ctx, *persona_prompt, *persona_prompt_len + 1);
-            *persona_prompt = augmented;
-            *persona_prompt_len = new_len;
-        }
+        char *owned = hu_strndup(agent->alloc, tone_note, tn_len);
+        if (owned)
+            at_append_owned_directive(agent, owned, tn_len, persona_prompt, persona_prompt_len);
     }
 }
 
@@ -4410,14 +4406,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
         if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t budget = HU_PROMPT_TRIM_BUDGET_BYTES;
-            /* Find the last newline within [0, budget) so we cut at a
-             * logical boundary rather than mid-token. */
-            size_t cut = budget;
-            while (cut > 0 && system_prompt[cut - 1] != '\n')
-                cut--;
-            if (cut < budget / 2)
-                cut = budget; /* no clean cut — accept the hard cap */
+            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
+                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
             static atomic_bool warned_prompt_budget = false;
             hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
                              "system prompt truncated from %zu to %zu bytes "

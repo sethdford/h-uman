@@ -70,4 +70,13 @@ size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
 size_t hu_prompt_trim_apply(char *buf, size_t len, const hu_prompt_trim_span_t *spans,
                             size_t span_count, const size_t *cuts);
 
+/* Positional tail-cap cut point — the pre-trim safety net shared by BOTH
+ * turn paths (agent_turn.c and agent_stream.c previously carried identical
+ * inline copies; 2026-07-12 review). Returns len when len <= budget.
+ * Otherwise returns the cut point at the last newline within the budget,
+ * falling back to the hard budget when no newline lies in its upper half
+ * (a clean cut that far back would delete too much). Pure: no logging,
+ * no mutation — callers NUL-terminate and log. */
+size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget);
+
 #endif /* HU_AGENT_PROMPT_TRIM_H */
