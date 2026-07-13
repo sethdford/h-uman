@@ -4155,10 +4155,35 @@ static bool is_word_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+/* Typo-injector activation gate (off | shadow | live). Default OFF: injecting
+ * character corruptions into clean output is an unmeasured send-mutator, so it
+ * must not shape real output until a measurement promotes it
+ * (~/.claude/rules/feature-gate-requires-measurement.md). */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static int s_typos_mode_override = -1; /* -1 = defer to env HU_TYPOS */
+void hu_conversation_typos_set_mode_for_test(int mode) {
+    s_typos_mode_override = mode;
+}
+#endif
+
+hu_gate_mode_t hu_conversation_typos_mode(void) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    if (s_typos_mode_override >= 0)
+        return (hu_gate_mode_t)s_typos_mode_override;
+#endif
+    return hu_gate_mode_from_env("HU_TYPOS", HU_GATE_OFF);
+}
+
 size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t seed) {
     if (!buf || len == 0)
         return len;
     if (len >= cap)
+        return len;
+
+    /* Gated OFF by default: injecting character corruptions into clean output
+     * is an unmeasured send-mutator, so only LIVE mutates. SHADOW currently
+     * emits nothing (no would-corrupt logging wired yet). */
+    if (hu_conversation_typos_mode() != HU_GATE_LIVE)
         return len;
 
     uint32_t s = seed;
