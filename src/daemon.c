@@ -33,10 +33,10 @@
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
 #include "human/agent/prosocial_routine.h"
-#include "human/agent/style_governor.h"
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
+#include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
@@ -101,9 +101,9 @@
 #include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
-#include "human/daemon_maintenance.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
+#include "human/daemon_maintenance.h"
 #include "human/daemon_proactive.h"
 #include "human/daemon_routing.h"
 /* reaction_handler.h pulled out of the RL_FULL gate: the
@@ -11975,57 +11975,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         response, &response_len, response_len + 1);
 
 #ifndef HU_IS_TEST
-                    /* Apply typing quirks from persona overlay as post-processing.
-                     * This shrinks the buffer in-place; keep original size for free. */
-                    const hu_persona_overlay_t *overlay = NULL;
-                    if (agent->persona && agent->active_channel) {
-                        overlay = hu_persona_find_overlay(agent->persona, agent->active_channel,
-                                                          agent->active_channel_len);
-                        if (overlay && overlay->typing_quirks && overlay->typing_quirks_count > 0) {
-                            response_len = hu_conversation_apply_typing_quirks(
-                                response, response_len, (const char *const *)overlay->typing_quirks,
-                                overlay->typing_quirks_count);
-                        }
-                    }
-
-                    /* BTH Tier 3: Stylometric variance (t3a) — apply contractions */
-                    response_len = hu_conversation_vary_complexity(response, response_len,
-                                                                   (uint32_t)time(NULL));
-
-                    /* BTH Tier 2: Filler injection (t2c) — casual channel fillers */
+                    /* Reactive send-path text shaping: typing quirks -> stylometric
+                     * variance -> fillers -> disfluency -> style governor, as one
+                     * testable unit (hu_daemon_shape_text_inplace,
+                     * src/daemon/daemon_shape.c). These stages used to run inline
+                     * here under #ifndef HU_IS_TEST, so the suite never exercised the
+                     * production shaping ORDER (2026-07-12 egress audit). The overlay
+                     * is resolved here because the typo block below also consults it. */
+                    const hu_persona_overlay_t *overlay =
+                        (agent->persona && agent->active_channel)
+                            ? hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                      agent->active_channel_len)
+                            : NULL;
                     {
-                        size_t filler_cap = response_alloc_len + 1;
-                        if (filler_cap < response_len + 16) {
-                            char *grown = (char *)agent->alloc->realloc(agent->alloc->ctx, response,
-                                                                        response_alloc_len + 1,
-                                                                        response_len + 16);
-                            if (grown) {
-                                response = grown;
-                                response_alloc_len = response_len + 15;
-                                filler_cap = response_len + 16;
-                            }
-                        }
-                        const char *ch_name =
-                            agent->active_channel ? agent->active_channel : "unknown";
-                        size_t ch_name_len = agent->active_channel ? agent->active_channel_len : 7;
-                        response_len = hu_conversation_apply_fillers(
-                            response, response_len, filler_cap, (uint32_t)time(NULL), ch_name,
-                            ch_name_len);
-                    }
-
-                    /* BTH: Text disfluency (F33) — natural imperfections, casual only */
-                    {
-                        size_t disfluency_cap = response_alloc_len + 1;
-                        if (disfluency_cap < response_len + 16) {
-                            char *grown = (char *)agent->alloc->realloc(agent->alloc->ctx, response,
-                                                                        response_alloc_len + 1,
-                                                                        response_len + 16);
-                            if (grown) {
-                                response = grown;
-                                response_alloc_len = response_len + 15;
-                                disfluency_cap = response_len + 16;
-                            }
-                        }
                         const hu_contact_profile_t *contact_profile =
                             (agent->persona && batch_key && key_len > 0)
                                 ? hu_persona_find_contact(agent->persona, batch_key, key_len)
@@ -12033,12 +11995,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *formality =
                             (overlay && overlay->formality) ? overlay->formality : NULL;
                         size_t formality_len = formality ? strlen(formality) : 0;
+                        const char *ch_name =
+                            agent->active_channel ? agent->active_channel : "unknown";
+                        size_t ch_name_len = agent->active_channel ? agent->active_channel_len : 7;
                         float disfluency_freq =
                             agent->persona ? agent->persona->humanization.disfluency_frequency
                                            : 0.15f;
-                        response_len = hu_conversation_apply_disfluency(
-                            response, response_len, disfluency_cap, (uint32_t)time(NULL),
-                            disfluency_freq, contact_profile, formality, formality_len);
+                        /* *cap convention: total allocated bytes = response_alloc_len + 1. */
+                        size_t shape_cap = response_alloc_len + 1;
+                        hu_daemon_shape_text_inplace(agent->alloc, &response, &response_len,
+                                                     &shape_cap, (uint32_t)time(NULL), overlay,
+                                                     contact_profile, formality, formality_len,
+                                                     ch_name, ch_name_len, disfluency_freq);
+                        response_alloc_len = shape_cap - 1;
                     }
 
                     /* Typo simulation: requires "occasional_typos" quirk and buffer capacity */
@@ -12083,17 +12052,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->bth_metrics->typos_applied++;
                         }
                     }
-
-                    /* Style governor — measured-shape enforcement on the reactive
-                     * path. The outbound pipeline (proactive/burst) runs this as a
-                     * stage, but the reactive send path bypasses that pipeline
-                     * (2026-07-12 egress audit), so the shaping the pipeline stage
-                     * applies would never reach normal replies. Same gate
-                     * (HU_STYLE_GOVERNOR: off default / shadow / live) — a no-op
-                     * until promoted, and runs on the coherent reply BEFORE the
-                     * splitter chops it into bubbles. */
-                    response_len =
-                        hu_style_governor_apply_inplace(agent->alloc, response, response_len);
 
                     /* ── F40: Inline reply (quoted text fallback) ─────────────
                      * When classifier says inline reply, prepend "> {quoted}\n\n"
