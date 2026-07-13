@@ -135,7 +135,7 @@ static void llm_extract_parses_well_formed_object(void) {
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
     HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "Rock climbing is my passion.", 28,
-                                     1700000000LL, &r),
+                                     1700000000LL, &r, NULL),
                  HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 2L);
     HU_ASSERT_STR_EQ(r.facts[0].predicate, "likes");
@@ -156,7 +156,7 @@ static void llm_extract_accepts_bare_array(void) {
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
     HU_ASSERT_EQ(
-        hu_fact_extract_llm(&alloc, &stub, "m", 1, "I work at Acme.", 15, 1700000000LL, &r), HU_OK);
+        hu_fact_extract_llm(&alloc, &stub, "m", 1, "I work at Acme.", 15, 1700000000LL, &r, NULL), HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 1L);
     HU_ASSERT_STR_EQ(r.facts[0].object, "Acme");
     stub.vtable->deinit(stub.ctx, &alloc);
@@ -171,7 +171,7 @@ static void llm_extract_strips_prose_preamble(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "I enjoy tea.", 12, 1700000000LL, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "I enjoy tea.", 12, 1700000000LL, &r, NULL),
                  HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 1L);
     HU_ASSERT_STR_EQ(r.facts[0].object, "tea");
@@ -187,7 +187,7 @@ static void llm_extract_strips_markdown_fence(void) {
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
     HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "Got a kayak last weekend.", 25,
-                                     1700000000LL, &r),
+                                     1700000000LL, &r, NULL),
                  HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 1L);
     HU_ASSERT_STR_EQ(r.facts[0].predicate, "owns");
@@ -201,7 +201,7 @@ static void llm_extract_empty_array_returns_zero_facts(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "ok", 2, 0, &r), HU_OK);
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "ok", 2, 0, &r, NULL), HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 0L);
     stub.vtable->deinit(stub.ctx, &alloc);
 }
@@ -213,7 +213,7 @@ static void llm_extract_malformed_json_soft_fails(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, &r), HU_OK);
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, &r, NULL), HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 0L);
     stub.vtable->deinit(stub.ctx, &alloc);
 }
@@ -223,7 +223,7 @@ static void llm_extract_provider_error_propagates(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, "", 0, HU_ERR_PROVIDER_RATE_LIMITED);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, &r, NULL),
                  HU_ERR_PROVIDER_RATE_LIMITED);
     stub.vtable->deinit(stub.ctx, &alloc);
 }
@@ -233,13 +233,13 @@ static void llm_extract_rejects_null_args(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, "{}", 2, HU_OK);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(NULL, &stub, "m", 1, "msg", 3, 0, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(NULL, &stub, "m", 1, "msg", 3, 0, &r, NULL),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, NULL, "m", 1, "msg", 3, 0, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, NULL, "m", 1, "msg", 3, 0, &r, NULL),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, NULL, 0, 0, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, NULL, 0, 0, &r, NULL),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, NULL),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "msg", 3, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     stub.vtable->deinit(stub.ctx, &alloc);
 }
@@ -253,7 +253,7 @@ static void llm_extract_defaults_subject_to_user(void) {
     rec_ctx_t rc;
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
-    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "Meetings drain me.", 18, 0, &r),
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "Meetings drain me.", 18, 0, &r, NULL),
                  HU_OK);
     HU_ASSERT_EQ((long)r.fact_count, 1L);
     HU_ASSERT_STR_EQ(r.facts[0].subject, "user");
@@ -270,11 +270,119 @@ static void llm_extract_passes_source_text_into_prompt(void) {
     hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
     hu_fact_extract_result_t r;
     HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1,
-                                     "Rock climbing is my passion these days", 38, 0, &r),
+                                     "Rock climbing is my passion these days", 38, 0, &r, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(rc.last_user_msg);
     HU_ASSERT_TRUE(strstr(rc.last_user_msg, "Rock climbing is my passion") != NULL);
     stub.vtable->deinit(stub.ctx, &alloc);
+}
+
+static void llm_extract_survives_thought_channel_schema_echo(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* Real-world (measured 2026-07-11, gemma-4 thinking models): the thought
+     * channel ECHOES the requested schema — including literal '{' braces —
+     * before the real answer. A first-{..last-} extraction spans thought +
+     * answer and fails to parse. The extractor must latch onto the LAST
+     * {"facts" envelope (the answer), not the schema echo. */
+    const char *canned =
+        "<|channel>thought\n"
+        "*   Task: extract facts into {\"facts\": [{\"subject\": \"user\", "
+        "\"predicate\": \"<verb>\"}]}.\n"
+        "*   The message says the author graduates Sunday → graduating.\n"
+        "<channel|>{\"facts\":[{\"subject\":\"user\",\"predicate\":\"graduating\","
+        "\"object\":\"sunday\",\"confidence\":0.9}]}";
+    rec_ctx_t rc;
+    hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
+    hu_fact_extract_result_t r;
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "I finally graduate sunday", 25,
+                                     1700000000LL, &r, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ((long)r.fact_count, 1L);
+    HU_ASSERT_STR_EQ(r.facts[0].predicate, "graduating");
+    HU_ASSERT_STR_EQ(r.facts[0].object, "sunday");
+    stub.vtable->deinit(stub.ctx, &alloc);
+}
+
+static void llm_extract_prompt_offers_event_predicates(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* The 2026-07-11 corpus measurement: with only preference/state
+     * predicates a schema-faithful model returns {"facts":[]} on event
+     * messages ("I finally graduate sunday"). Pin that the prompt offers
+     * the event vocabulary so that failure mode cannot silently return. */
+    const char *canned = "{\"facts\":[]}";
+    rec_ctx_t rc;
+    hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
+    hu_fact_extract_result_t r;
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "I finally graduate sunday", 25,
+                                     1700000000LL, &r, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(rc.last_user_msg);
+    HU_ASSERT_NOT_NULL(strstr(rc.last_user_msg, "graduating"));
+    HU_ASSERT_NOT_NULL(strstr(rc.last_user_msg, "moving_to"));
+    HU_ASSERT_NOT_NULL(strstr(rc.last_user_msg, "asking_about"));
+    stub.vtable->deinit(stub.ctx, &alloc);
+}
+
+/* ── Status classification (2026-07-12) ────────────────────────────────
+ * Soft failures all return HU_OK + fact_count 0; status_out is what lets
+ * the shadow caller tell "clean zero" from "extractor output was garbage"
+ * so a failure RATE exists before HU_LLM_FACT_EXTRACT promotes to LIVE. */
+
+static hu_fact_extract_llm_status_t run_status_case(const char *canned) {
+    hu_allocator_t alloc = hu_system_allocator();
+    rec_ctx_t rc;
+    hu_provider_t stub = mk_stub(&rc, canned, strlen(canned), HU_OK);
+    hu_fact_extract_result_t r;
+    hu_fact_extract_llm_status_t st = (hu_fact_extract_llm_status_t)99; /* sentinel */
+    HU_ASSERT_EQ(hu_fact_extract_llm(&alloc, &stub, "m", 1, "some real message", 17, 0, &r, &st),
+                 HU_OK);
+    stub.vtable->deinit(stub.ctx, &alloc);
+    return st;
+}
+
+static void llm_extract_status_ok_with_facts(void) {
+    hu_fact_extract_llm_status_t st = run_status_case(
+        "{\"facts\":[{\"predicate\":\"likes\",\"object\":\"tea\",\"confidence\":0.8}]}");
+    HU_ASSERT_EQ((int)st, (int)HU_FACT_LLM_OK);
+}
+
+static void llm_extract_status_ok_on_clean_zero(void) {
+    /* schema-faithful empty array is a legitimate zero, NOT a failure */
+    HU_ASSERT_EQ((int)run_status_case("{\"facts\":[]}"), (int)HU_FACT_LLM_OK);
+}
+
+static void llm_extract_status_empty_response(void) {
+    HU_ASSERT_EQ((int)run_status_case(""), (int)HU_FACT_LLM_EMPTY_RESPONSE);
+}
+
+static void llm_extract_status_no_json_on_prose_only(void) {
+    /* gemma-4 thought-only replies carry no JSON body at all */
+    HU_ASSERT_EQ((int)run_status_case("I could not find any facts in that message."),
+                 (int)HU_FACT_LLM_NO_JSON);
+}
+
+static void llm_extract_status_no_json_on_truncated_body(void) {
+    /* A body with no terminating brace has no complete JSON to parse —
+     * classified no_json (this is the MAX_TOKENS-truncation signature). */
+    HU_ASSERT_EQ((int)run_status_case("{\"facts\": [{\"predicate\":\"likes\""),
+                 (int)HU_FACT_LLM_NO_JSON);
+}
+
+static void llm_extract_status_bad_json(void) {
+    /* Terminated but syntactically invalid body -> bad_json. */
+    HU_ASSERT_EQ((int)run_status_case("{\"facts\": [}]}"), (int)HU_FACT_LLM_BAD_JSON);
+}
+
+static void llm_extract_status_bad_shape(void) {
+    HU_ASSERT_EQ((int)run_status_case("{\"answer\": 42}"), (int)HU_FACT_LLM_BAD_SHAPE);
+}
+
+static void llm_extract_status_str_names_are_stable(void) {
+    HU_ASSERT_STR_EQ(hu_fact_extract_llm_status_str(HU_FACT_LLM_OK), "ok");
+    HU_ASSERT_STR_EQ(hu_fact_extract_llm_status_str(HU_FACT_LLM_EMPTY_RESPONSE), "empty_response");
+    HU_ASSERT_STR_EQ(hu_fact_extract_llm_status_str(HU_FACT_LLM_NO_JSON), "no_json");
+    HU_ASSERT_STR_EQ(hu_fact_extract_llm_status_str(HU_FACT_LLM_BAD_JSON), "bad_json");
+    HU_ASSERT_STR_EQ(hu_fact_extract_llm_status_str(HU_FACT_LLM_BAD_SHAPE), "bad_shape");
 }
 
 void run_fact_extract_llm_tests(void) {
@@ -289,4 +397,14 @@ void run_fact_extract_llm_tests(void) {
     HU_RUN_TEST(llm_extract_rejects_null_args);
     HU_RUN_TEST(llm_extract_defaults_subject_to_user);
     HU_RUN_TEST(llm_extract_passes_source_text_into_prompt);
+    HU_RUN_TEST(llm_extract_survives_thought_channel_schema_echo);
+    HU_RUN_TEST(llm_extract_prompt_offers_event_predicates);
+    HU_RUN_TEST(llm_extract_status_ok_with_facts);
+    HU_RUN_TEST(llm_extract_status_ok_on_clean_zero);
+    HU_RUN_TEST(llm_extract_status_empty_response);
+    HU_RUN_TEST(llm_extract_status_no_json_on_prose_only);
+    HU_RUN_TEST(llm_extract_status_no_json_on_truncated_body);
+    HU_RUN_TEST(llm_extract_status_bad_json);
+    HU_RUN_TEST(llm_extract_status_bad_shape);
+    HU_RUN_TEST(llm_extract_status_str_names_are_stable);
 }

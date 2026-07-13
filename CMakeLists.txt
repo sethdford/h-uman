@@ -547,6 +547,7 @@ set(HU_CORE_SOURCES
     src/core/allocator.c
     src/core/rand.c
     src/core/error.c
+    src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
     src/core/io_secure.c
@@ -708,6 +709,7 @@ set(HU_CORE_SOURCES
     src/voice/emotion_voice_map.c
     src/voice/audio_emotion.c
     src/persona/persona_fuse.c
+    src/persona/relationship_tone.c
     src/persona/humor.c
     src/persona/markdown_loader.c
     src/persona/somatic.c
@@ -737,6 +739,7 @@ set(HU_CORE_SOURCES
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
+    src/agent/prompt_trim.c
     src/agent/graph_grounding.c
     src/agent/memory_loader.c
     src/agent/channel_trust.c
@@ -1227,6 +1230,7 @@ set(HU_CORE_SOURCES
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_comfort_summary.c
+    src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
@@ -1905,6 +1909,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/embedded_registry.c
     src/data/data_prompts_group_chat_hint_txt.c
     src/data/data_prompts_safety_rules_txt.c
+    src/data/data_prompts_safety_rules_compact_txt.c
     src/data/data_prompts_default_identity_txt.c
     src/data/data_prompts_reasoning_instruction_txt.c
     src/data/data_prompts_autonomy_full_txt.c
@@ -3406,6 +3411,8 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_prompt.c
+    tests/test_prompt_trim.c
+    tests/test_gate_mode.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c
@@ -3952,6 +3959,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_eval_history.c
     tests/test_eval_shape.c
     tests/test_register.c
+    tests/test_relationship_tone.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

@@ -18,6 +18,7 @@
 #include "human/agent/preferences.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
+#include "human/agent/prompt_trim.h"
 #include "human/agent/response_guard.h"
 #include "human/agent/response_guard_dpo.h"
 #include "human/agent/response_guard_retry.h"
@@ -734,6 +735,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
     }
+    /* Relationship tone note (HU_WARMTH_TONE_VOCAB) — shared helper, same as
+     * hu_agent_turn. This streaming path is the daemon's PRIMARY inbound
+     * route; the 2026-07-11 wiring lived only in hu_agent_turn, so the gate
+     * never fired in production (shadow soak: zero warmth_tone lines). */
+    hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
 
     /* Intelligence context: learned behaviors, online learning, value learning.
      * Skip in lean_prompt mode: not needed for fast texting. */
@@ -1321,13 +1327,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
-        if (err == HU_OK && system_prompt && system_prompt_len > 16384) {
-            size_t budget = 16384;
-            size_t cut = budget;
-            while (cut > 0 && system_prompt[cut - 1] != '\n')
-                cut--;
-            if (cut < budget / 2)
-                cut = budget;
+        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
+            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
+                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
             static atomic_bool warned_stream_prompt_budget = false;
             hu_log_warn_once(&warned_stream_prompt_budget, "agent_stream", NULL,
                              "system prompt truncated from %zu to %zu bytes "

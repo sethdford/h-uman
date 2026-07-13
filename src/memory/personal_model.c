@@ -1,6 +1,7 @@
 #include "human/memory/personal_model.h"
 #include "human/core/log.h"
 #include "human/memory/anticipatory.h"
+#include "human/core/gate_mode.h"
 #include "human/memory/fact_extract_llm.h" /* LLM fact-extraction fallback (casual-text recall) */
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
@@ -65,14 +66,8 @@ void hu_personal_model_set_llm_extractor(void *alloc, void *provider, const char
 /* Runtime gate: 0=off (default), 1=shadow, 2=live. Mirrors the off|shadow|on
  * convention used by HU_SALIENCE / HU_TOM_DIRECTIVE / HU_GRAPH_GROUNDING. */
 static int llm_fact_extract_gate(void) {
-    const char *v = getenv("HU_LLM_FACT_EXTRACT");
-    if (!v || !*v)
-        return 0;
-    if (strcmp(v, "on") == 0 || strcmp(v, "live") == 0)
-        return 2;
-    if (strcmp(v, "shadow") == 0)
-        return 1;
-    return 0;
+    /* Canonical parser; ordinals match this gate's 0=off 1=shadow 2=live. */
+    return (int)hu_gate_mode_from_env("HU_LLM_FACT_EXTRACT", HU_GATE_OFF);
 }
 
 /* Minimum message length worth an LLM round-trip. Short acks ("ok", "C?",
@@ -97,11 +92,31 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
         return;
 
     hu_fact_extract_result_t llm = {0};
+    hu_fact_extract_llm_status_t llm_status = HU_FACT_LLM_OK;
     hu_error_t err = hu_fact_extract_llm(s_llm_extract_alloc, s_llm_extract_provider,
                                          s_llm_extract_model, strlen(s_llm_extract_model), message,
-                                         message_len, timestamp, &llm);
-    if (err != HU_OK || llm.fact_count == 0)
+                                         message_len, timestamp, &llm, &llm_status);
+    /* Per-attempt outcome logging — soft-fails used to be silent, so the
+     * shadow soak had a numerator (would-extract events) but no
+     * denominator. One line per attempt makes the failure rate readable
+     * from the service log before HU_LLM_FACT_EXTRACT promotes to LIVE.
+     * Volume is bounded: this fires only on regex-missed messages of
+     * >= HU_LLM_FACT_EXTRACT_MIN_LEN chars. */
+    const char *mode = (gate == 1) ? "shadow" : "live";
+    if (err != HU_OK) {
+        hu_log_info("llm_fact_extract", NULL, "%s: provider error %s (no facts merged)", mode,
+                    hu_error_string(err));
         return;
+    }
+    if (llm_status != HU_FACT_LLM_OK) {
+        hu_log_info("llm_fact_extract", NULL, "%s: soft-fail %s (no facts merged)", mode,
+                    hu_fact_extract_llm_status_str(llm_status));
+        return;
+    }
+    if (llm.fact_count == 0) {
+        hu_log_info("llm_fact_extract", NULL, "%s: clean zero (schema-faithful empty)", mode);
+        return;
+    }
 
     if (gate == 1) {
         /* SHADOW: observe, do not merge. */
@@ -110,7 +125,12 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
                     llm.fact_count);
         return;
     }
-    /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow. */
+    /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow.
+     * Logged so the live success rate stays countable post-promotion —
+     * without this line only failures and zeros were visible in LIVE
+     * (critic finding, 2026-07-12). */
+    hu_log_info("llm_fact_extract", NULL, "live: merging %zu fact(s) from a regex-missed message",
+                llm.fact_count);
     *extracted = llm;
 }
 

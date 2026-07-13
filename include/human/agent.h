@@ -859,6 +859,16 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
                                           size_t contact_id_len, const char *msg, size_t msg_len,
                                           char **system_prompt, size_t *system_prompt_len);
 
+/* Append the relationship tone note (hu_persona_relationship_tone_note) for the
+ * contact behind agent->memory_session_id to *persona_prompt, honoring
+ * HU_WARMTH_TONE_VOCAB (off|shadow|live, default off; SHADOW logs would-fire
+ * without changing the prompt). Reallocs *persona_prompt in place. Must be
+ * called by BOTH hu_agent_turn and hu_agent_turn_stream_v2 — the 2026-07-11
+ * wiring lived only in hu_agent_turn, so the gate was dead on the daemon's
+ * streaming path. No-op on NULL agent/persona/prompt/session. */
+void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
+                                      size_t *persona_prompt_len);
+
 /* Build the per-turn humanness directive context — shared references, curiosity,
  * absence, evolved opinions, emotional residue, imperfect delivery — and run the
  * salience gate over those directives. Honors HU_SALIENCE (off|shadow|live;

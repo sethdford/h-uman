@@ -36,18 +36,6 @@ static bool is_blank(const char *text, size_t len) {
     return true;
 }
 
-/* Case-insensitive substring search over a bounded buffer. */
-static bool contains_ci(const char *hay, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || hlen < nlen)
-        return false;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        if (strncasecmp(hay + i, needle, nlen) == 0)
-            return true;
-    }
-    return false;
-}
-
 /* Case-insensitive WORD-boundary match — the needle must be flanked by
  * start/end of buffer or a non-alphanumeric char. Prevents "u" matching "but",
  * "rn" matching "turn", "ya" matching "your". */
@@ -75,10 +63,44 @@ static size_t count_any_word(const char *hay, size_t hlen, const char *const *ne
     return hits;
 }
 
-static size_t count_any_sub(const char *hay, size_t hlen, const char *const *needles, size_t n) {
+/* Case-insensitive stretch-aware word match. Left edge: start-of-buffer or a
+ * non-alnum char (waived when the needle itself starts non-alnum, e.g. "<3").
+ * Right edge: a run of repeats of the needle's final character is absorbed
+ * ("heyyy", "yesss", "buddyyy"), then start/end-of-buffer or non-alnum is
+ * required (waived when the needle ends non-alnum, e.g. "dear ", "love,").
+ * Keeps the deliberate stretch-form recall of plain substring matching while
+ * rejecting embeddings with opposite intent: "they"⊅"hey", "phone"⊅"hon",
+ * "honestly"⊅"hon", "disregards"⊅"regards", "unkindly"⊅"kindly",
+ * "denoted"⊅"noted". See ~/.claude/rules/substring-classifier-pitfalls.md. */
+static bool contains_word_stretch_ci(const char *hay, size_t hlen, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || hlen < nlen)
+        return false;
+    bool left_edge_alnum = isalnum((unsigned char)needle[0]) != 0;
+    unsigned char last = (unsigned char)needle[nlen - 1];
+    bool right_edge_alnum = isalnum(last) != 0;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        if (strncasecmp(hay + i, needle, nlen) != 0)
+            continue;
+        if (left_edge_alnum && i > 0 && isalnum((unsigned char)hay[i - 1]))
+            continue;
+        size_t end = i + nlen;
+        if (right_edge_alnum) {
+            while (end < hlen && tolower((unsigned char)hay[end]) == tolower(last))
+                end++;
+            if (end < hlen && isalnum((unsigned char)hay[end]))
+                continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+static size_t count_any_word_stretch(const char *hay, size_t hlen, const char *const *needles,
+                                     size_t n) {
     size_t hits = 0;
     for (size_t i = 0; i < n; i++) {
-        if (contains_ci(hay, hlen, needles[i]))
+        if (contains_word_stretch_ci(hay, hlen, needles[i]))
             hits++;
     }
     return hits;
@@ -123,7 +145,7 @@ double hu_register_formality_estimate(const char *text, size_t len) {
     size_t casual_hits =
         count_any_word(text, len, casual_words, sizeof(casual_words) / sizeof(casual_words[0]));
     size_t formal_hits =
-        count_any_sub(text, len, formal_subs, sizeof(formal_subs) / sizeof(formal_subs[0]));
+        count_any_word_stretch(text, len, formal_subs, sizeof(formal_subs) / sizeof(formal_subs[0]));
 
     /* All-lowercase alphabetic text is a strong casual tell. */
     bool has_alpha = false, has_upper = false;
@@ -166,8 +188,9 @@ double hu_register_warmth_estimate(const char *text, size_t len) {
     if (is_blank(text, len))
         return 0.5;
 
-    /* Greetings + enthusiasm tokens that read warm even mid-word ("heyyy",
-     * "yesss") — substring matched on purpose. */
+    /* Greetings + enthusiasm tokens whose stretch-forms ("heyyy", "yesss")
+     * must still read warm — matched with the stretch-aware word matcher so
+     * "they"/"phone"/"honestly" no longer false-positive. */
     static const char *const warm_subs[] = {
         "hey",          "hello",     "miss you", "miss u",  "thinking of you",
         "can't wait",   "cant wait", "so happy", "love it", "love you",
@@ -200,10 +223,10 @@ double hu_register_warmth_estimate(const char *text, size_t len) {
     };
 
     size_t warm_hits =
-        count_any_sub(text, len, warm_subs, sizeof(warm_subs) / sizeof(warm_subs[0])) +
+        count_any_word_stretch(text, len, warm_subs, sizeof(warm_subs) / sizeof(warm_subs[0])) +
         count_any_word(text, len, warm_words, sizeof(warm_words) / sizeof(warm_words[0]));
     size_t distant_hits =
-        count_any_sub(text, len, distant_subs, sizeof(distant_subs) / sizeof(distant_subs[0]));
+        count_any_word_stretch(text, len, distant_subs, sizeof(distant_subs) / sizeof(distant_subs[0]));
 
     size_t excl = 0;
     bool has_high_byte = false; /* crude emoji / non-ASCII tell */

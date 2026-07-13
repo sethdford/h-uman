@@ -290,6 +290,8 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/proactive.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
+#include "human/agent/prompt_trim.h"
+#include "human/core/gate_mode.h"
 #include "human/agent/salience.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
@@ -347,6 +349,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/memory/tiers.h"
 #include "human/permission.h"
 #include "human/persona.h"
+#include "human/persona/relationship_tone.h"
 #include "human/provider.h"
 #include "human/security.h"
 #include "human/security/causal_armor.h"
@@ -381,6 +384,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/pwa_context.h"
 #endif
 #include <ctype.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -402,13 +406,10 @@ static hu_error_t at_append_tom_directive(hu_agent_t *agent, const char *contact
         return HU_ERR_INVALID_ARGUMENT;
     }
 
-    /* Check HU_TOM_DIRECTIVE env var: off (default), shadow, or on */
-    const char *tom_mode_env = getenv("HU_TOM_DIRECTIVE");
-    if (!tom_mode_env)
-        tom_mode_env = "off";
-
-    bool tom_enabled = (strcmp(tom_mode_env, "on") == 0);
-    bool tom_shadow = (strcmp(tom_mode_env, "shadow") == 0);
+    /* HU_TOM_DIRECTIVE: off (default) | shadow | live */
+    hu_gate_mode_t tom_mode = hu_gate_mode_from_env("HU_TOM_DIRECTIVE", HU_GATE_OFF);
+    bool tom_enabled = (tom_mode == HU_GATE_LIVE);
+    bool tom_shadow = (tom_mode == HU_GATE_SHADOW);
 
     if (!tom_enabled && !tom_shadow)
         return HU_OK; /* Mode is off, nothing to do */
@@ -929,6 +930,33 @@ static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_l
     agent->alloc->free(agent->alloc->ctx, dir, dir_len + 1);
 }
 
+/* Relationship tone note — shared by BOTH turn paths (see agent.h). The
+ * 2026-07-11 wiring was inline in hu_agent_turn only, so HU_WARMTH_TONE_VOCAB
+ * was dead on the daemon's streaming path (shadow soak: zero warmth_tone log
+ * lines despite 14 contacts carrying warmth_level). Same bug shape as the
+ * humanness directives before their hoist — hence the same shared-helper fix. */
+void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
+                                      size_t *persona_prompt_len) {
+    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len ||
+        !agent->persona || !agent->memory_session_id)
+        return;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(
+        agent->persona, agent->memory_session_id, agent->memory_session_id_len);
+    hu_gate_mode_t wt_mode = hu_gate_mode_from_env("HU_WARMTH_TONE_VOCAB", HU_GATE_OFF);
+    const char *tone_note = hu_persona_relationship_tone_note(cp, wt_mode == HU_GATE_LIVE);
+    if (wt_mode == HU_GATE_SHADOW && !tone_note && hu_persona_relationship_tone_note(cp, true))
+        hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
+    if (tone_note) {
+        /* at_append_owned_directive owns the realloc-append dance (and
+         * frees its input), so dup the static note instead of keeping a
+         * second copy of that logic here (2026-07-12 review). */
+        size_t tn_len = strlen(tone_note);
+        char *owned = hu_strndup(agent->alloc, tone_note, tn_len);
+        if (owned)
+            at_append_owned_directive(agent, owned, tn_len, persona_prompt, persona_prompt_len);
+    }
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -954,12 +982,12 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
     /* Calibrated self-uncertainty: when recent self-assessed confidence is low,
      * nudge the model to hedge rather than overclaim. */
     {
-        const char *su_mode = getenv("HU_SELF_UNCERTAINTY");
-        if (su_mode && (strcmp(su_mode, "on") == 0 || strcmp(su_mode, "shadow") == 0)) {
+        hu_gate_mode_t su_mode = hu_gate_mode_from_env("HU_SELF_UNCERTAINTY", HU_GATE_OFF);
+        if (su_mode != HU_GATE_OFF) {
             hu_self_uncertainty_t su;
             hu_self_uncertainty_assess(
                 hu_metacog_trajectory_confidence(&agent->infra.metacognition), &su);
-            if (strcmp(su_mode, "on") == 0) {
+            if (su_mode == HU_GATE_LIVE) {
                 char *sdir = NULL;
                 size_t sdir_len = 0;
                 if (hu_self_uncertainty_build_directive(agent->alloc, &su, &sdir, &sdir_len) ==
@@ -976,13 +1004,11 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
     /* Intent-aware response-type: classify the inbound message's intent and steer
      * the reply strategy. Default ON. */
     {
-        const char *intent_mode = getenv("HU_INTENT_DIRECTIVE");
-        if (!intent_mode || *intent_mode == '\0')
-            intent_mode = "on";
-        if (strcmp(intent_mode, "on") == 0 || strcmp(intent_mode, "shadow") == 0) {
+        hu_gate_mode_t intent_mode = hu_gate_mode_from_env("HU_INTENT_DIRECTIVE", HU_GATE_LIVE);
+        if (intent_mode != HU_GATE_OFF) {
             hu_intent_analysis_t ia;
             hu_intent_analyze(msg, msg_len, &ia);
-            if (strcmp(intent_mode, "on") == 0) {
+            if (intent_mode == HU_GATE_LIVE) {
                 char *idir = NULL;
                 size_t idir_len = 0;
                 if (hu_intent_build_directive(agent->alloc, &ia, &idir, &idir_len) == HU_OK)
@@ -1003,14 +1029,14 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
      * with HU_ENABLE_SELF_MODEL (the log is otherwise a stub) AND there are >=3
      * recorded turns — so it is doubly safe to leave wired. */
     {
-        const char *sm_mode = getenv("HU_SELF_MODEL");
-        if (sm_mode && (strcmp(sm_mode, "on") == 0 || strcmp(sm_mode, "shadow") == 0)) {
+        hu_gate_mode_t sm_mode = hu_gate_mode_from_env("HU_SELF_MODEL", HU_GATE_OFF);
+        if (sm_mode != HU_GATE_OFF) {
             char *smdir = NULL;
             size_t smdir_len = 0;
             if (hu_agent_self_model_build_directive(&agent->behavior_log, agent->alloc, &smdir,
                                                     &smdir_len) == HU_OK &&
                 smdir && smdir_len > 0) {
-                if (strcmp(sm_mode, "on") == 0) {
+                if (sm_mode == HU_GATE_LIVE) {
                     at_append_owned_directive(agent, smdir, smdir_len, system_prompt,
                                               system_prompt_len);
                 } else {
@@ -3062,39 +3088,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
     }
-    /* Relationship-based tone: inject warmth/vulnerability guidance from contact profile */
-    if (persona_prompt && agent->persona && agent->memory_session_id) {
-        const char *tone_note = NULL;
-        const hu_contact_profile_t *cp = hu_persona_find_contact(
-            agent->persona, agent->memory_session_id, agent->memory_session_id_len);
-        if (cp) {
-            if (cp->relationship_stage && strstr(cp->relationship_stage, "deep"))
-                tone_note = "\n\n[Relationship: deep — be genuinely present, "
-                            "anticipate needs, use shared references freely.]";
-            else if (cp->relationship_stage && strstr(cp->relationship_stage, "trusted"))
-                tone_note = "\n\n[Relationship: trusted — be candid and proactive. "
-                            "Share insights freely and be direct.]";
-            else if (cp->relationship_stage && strstr(cp->relationship_stage, "familiar"))
-                tone_note = "\n\n[Relationship: familiar — reference past conversations "
-                            "when relevant. Be warmer than default.]";
-            else if (cp->warmth_level && strstr(cp->warmth_level, "intimate"))
-                tone_note = "\n\n[Relationship: intimate — respond with genuine warmth "
-                            "and personal connection. Use inside references.]";
-        }
-        if (tone_note) {
-            size_t tn_len = strlen(tone_note);
-            size_t new_len = persona_prompt_len + tn_len;
-            char *augmented = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-            if (augmented) {
-                memcpy(augmented, persona_prompt, persona_prompt_len);
-                memcpy(augmented + persona_prompt_len, tone_note, tn_len);
-                augmented[new_len] = '\0';
-                agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
-                persona_prompt = augmented;
-                persona_prompt_len = new_len;
-            }
-        }
-    }
+    /* Relationship-based tone: inject warmth/vulnerability guidance from contact
+     * profile. Decision lives in hu_persona_relationship_tone_note (pure predicate).
+     * Warmth-vocabulary activation (HU_WARMTH_TONE_VOCAB: live/shadow/off, default
+     * off) gated on the blind-A/B HUMAN tier per feature-gate-requires-measurement.md
+     * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
+     * fires on real personas, so the warmth vocabulary is what makes this note live. */
+    hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
 
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
@@ -4398,15 +4398,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * we land well inside the safe zone. Truncate at the last newline
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
-        if (err == HU_OK && system_prompt && system_prompt_len > 16384) {
-            size_t budget = 16384;
-            /* Find the last newline within [0, budget) so we cut at a
-             * logical boundary rather than mid-token. */
-            size_t cut = budget;
-            while (cut > 0 && system_prompt[cut - 1] != '\n')
-                cut--;
-            if (cut < budget / 2)
-                cut = budget; /* no clean cut — accept the hard cap */
+        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
+            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
+                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
             static atomic_bool warned_prompt_budget = false;
             hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
                              "system prompt truncated from %zu to %zu bytes "

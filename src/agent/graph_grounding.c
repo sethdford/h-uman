@@ -1,4 +1,5 @@
 #include "human/agent/graph_grounding.h"
+#include "human/core/gate_mode.h"
 #include "human/agent/world_model_bridge.h"
 #include <stdlib.h>
 #include <string.h>
@@ -15,12 +16,14 @@ hu_graph_grounding_mode_t hu_graph_grounding_mode(void) {
      * re-enables injection, =off disables entirely. hu_graph_ground_load fails
      * open (no graph wired -> empty). See
      * docs/research/2026-05-31-graphrag-grounding-ab.md. */
-    const char *v = getenv("HU_GRAPH_GROUNDING");
-    if (!v || !*v || strcmp(v, "shadow") == 0)
-        return HU_GRAPH_GROUNDING_SHADOW;
-    if (strcmp(v, "on") == 0 || strcmp(v, "1") == 0)
+    switch (hu_gate_mode_from_env("HU_GRAPH_GROUNDING", HU_GATE_SHADOW)) {
+    case HU_GATE_LIVE:
         return HU_GRAPH_GROUNDING_ON;
-    return HU_GRAPH_GROUNDING_OFF; /* "off" or any other value */
+    case HU_GATE_SHADOW:
+        return HU_GRAPH_GROUNDING_SHADOW;
+    default:
+        return HU_GRAPH_GROUNDING_OFF; /* "off" or any other value */
+    }
 }
 
 hu_error_t hu_graph_ground_load(hu_memory_loader_t *loader, const char *contact_id,

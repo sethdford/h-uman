@@ -62,6 +62,17 @@ hu_error_t hu_data_load_embedded(hu_allocator_t *alloc, const char *relative_pat
     return HU_OK;
 }
 
+hu_error_t hu_data_borrow_embedded(const char *relative_path, const char **out, size_t *out_len) {
+    if (relative_path == NULL || out == NULL || out_len == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
+    const hu_embedded_data_result_t *entry = hu_embedded_data_lookup(relative_path);
+    if (entry == NULL)
+        return HU_ERR_NOT_FOUND;
+    *out = (const char *)entry->data;
+    *out_len = entry->len;
+    return HU_OK;
+}
+
 hu_error_t hu_data_load(hu_allocator_t *alloc, const char *relative_path,
                         char **out, size_t *out_len) {
     if (alloc == NULL || relative_path == NULL || out == NULL || out_len == NULL)

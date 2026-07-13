@@ -127,8 +127,56 @@ static void test_relationship_target_out_of_range_clamped(void) {
     HU_ASSERT_TRUE(s >= 0.0 && s <= 1.0);
 }
 
+/* ── stretch-aware word matching pins (substring-classifier-pitfalls) ──── */
+
+static void test_warmth_embedded_tokens_do_not_false_positive(void) {
+    /* "they"⊅"hey", "phone"⊅"hon", "honestly"⊅"hon" — none of these carry
+     * warm tokens, so warmth must stay at the neutral baseline. Under the
+     * old naive substring matcher each scored as warm. */
+    const char *neutral[] = {
+        "did they call back",
+        "left it on your phone",
+        "honestly it was fine",
+    };
+    for (size_t i = 0; i < sizeof(neutral) / sizeof(neutral[0]); i++) {
+        double w = hu_register_warmth_estimate(neutral[i], strlen(neutral[i]));
+        HU_ASSERT_TRUE(w <= 0.5);
+    }
+}
+
+static void test_warmth_stretch_forms_still_read_warm(void) {
+    /* The deliberate recall the old substring matcher bought — stretch
+     * greetings/enthusiasm — must survive the word-boundary fix. */
+    const char *warm[] = {"heyyy", "yesss that works", "buddyyy!"};
+    for (size_t i = 0; i < sizeof(warm) / sizeof(warm[0]); i++) {
+        double w = hu_register_warmth_estimate(warm[i], strlen(warm[i]));
+        HU_ASSERT_TRUE(w > 0.5);
+    }
+}
+
+static void test_formality_embedded_tokens_do_not_false_positive(void) {
+    /* "disregards"⊅"regards", "unkindly"⊅"kindly": casual complaints must
+     * not pick up formal marker credit from embedded formal tokens. */
+    const char *f1 = "he just disregards everything i say";
+    const char *f2 = "that was unkindly put tbh";
+    /* all-lowercase (-0.20) + zero formal hits → below neutral */
+    HU_ASSERT_TRUE(hu_register_formality_estimate(f1, strlen(f1)) < 0.5);
+    HU_ASSERT_TRUE(hu_register_formality_estimate(f2, strlen(f2)) < 0.5);
+}
+
+static void test_warmth_embedded_distant_tokens_do_not_penalize(void) {
+    /* "denoted"⊅"noted", "reverted"⊅"revert" — technical chatter must not
+     * count as distant/transactional markers. Baseline stays neutral. */
+    const char *t = "denoted it in the doc and reverted the change";
+    HU_ASSERT_TRUE(hu_register_warmth_estimate(t, strlen(t)) >= 0.5);
+}
+
 void run_register_tests(void) {
     HU_TEST_SUITE("eval register / relationship axis");
+    HU_RUN_TEST(test_warmth_embedded_tokens_do_not_false_positive);
+    HU_RUN_TEST(test_warmth_stretch_forms_still_read_warm);
+    HU_RUN_TEST(test_formality_embedded_tokens_do_not_false_positive);
+    HU_RUN_TEST(test_warmth_embedded_distant_tokens_do_not_penalize);
     HU_RUN_TEST(test_register_formality_casual_text_low);
     HU_RUN_TEST(test_register_formality_formal_text_high);
     HU_RUN_TEST(test_register_formality_null_and_empty_neutral);
