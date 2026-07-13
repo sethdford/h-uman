@@ -2530,69 +2530,69 @@ static void g5_absolute_floor_prevents_death_spiral(void) {
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 /* ── G10: deliberation-as-final-output (2026-07-11 incident) ────────────
-     * Five messages containing raw model deliberation were SENT to real
-     * contacts; all five passed the guard (log hex dumps L208947..L210340).
-     * These tests pin each wire-format leak as REJECT with
-     * detected_deliberation_leak set, and pin the surrounding clean sends
-     * (same contacts, same evening) as pass — per tests-that-pin-bugs, the
-     * clean corpus proves the detector doesn't overfire. */
+ * Five messages containing raw model deliberation were SENT to real
+ * contacts; all five passed the guard (log hex dumps L208947..L210340).
+ * These tests pin each wire-format leak as REJECT with
+ * detected_deliberation_leak set, and pin the surrounding clean sends
+ * (same contacts, same evening) as pass — per tests-that-pin-bugs, the
+ * clean corpus proves the detector doesn't overfire. */
 
-    static void g10_expect_reject(const char *raw) {
-        hu_allocator_t alloc = A();
-        char *out = NULL;
-        size_t out_len = 0;
-        hu_guard_outcome_t outcome = HU_GUARD_OK;
-        hu_guard_report_t report;
-        memset(&report, 0, sizeof(report));
-        HU_ASSERT_EQ(
-            hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
-            HU_OK);
-        HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
-        HU_ASSERT_TRUE(report.detected_deliberation_leak);
-        if (out)
-            alloc.free(alloc.ctx, out, out_len + 1);
-    }
+static void g10_expect_reject(const char *raw) {
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ((int)outcome, (int)HU_GUARD_REJECT);
+    HU_ASSERT_TRUE(report.detected_deliberation_leak);
+    if (out)
+        alloc.free(alloc.ctx, out, out_len + 1);
+}
 
-    static void g10_expect_pass(const char *raw) {
-        hu_allocator_t alloc = A();
-        char *out = NULL;
-        size_t out_len = 0;
-        hu_guard_outcome_t outcome = HU_GUARD_OK;
-        hu_guard_report_t report;
-        memset(&report, 0, sizeof(report));
-        HU_ASSERT_EQ(
-            hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
-            HU_OK);
-        HU_ASSERT_FALSE(report.detected_deliberation_leak);
-        HU_ASSERT_TRUE(outcome != HU_GUARD_REJECT);
-        if (out && outcome == HU_GUARD_REWROTE)
-            alloc.free(alloc.ctx, out, out_len + 1);
-    }
+static void g10_expect_pass(const char *raw) {
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_FALSE(report.detected_deliberation_leak);
+    HU_ASSERT_TRUE(outcome != HU_GUARD_REJECT);
+    if (out && outcome == HU_GUARD_REWROTE)
+        alloc.free(alloc.ctx, out, out_len + 1);
+}
 
-    static void g10_rejects_malformed_channel_marker_with_alternatives(void) {
-        /* L210164 — malformed marker (pipe AFTER 'channel') the harmony strip
-         * does not recognize, plus quoted draft alternatives. */
-        g10_expect_reject(
-            "\"save me some!\" or \"yum, save me a piece\"<channel|>yum, save me a piece!");
-    }
+static void g10_rejects_malformed_channel_marker_with_alternatives(void) {
+    /* L210164 — malformed marker (pipe AFTER 'channel') the harmony strip
+     * does not recognize, plus quoted draft alternatives. */
+    g10_expect_reject(
+        "\"save me some!\" or \"yum, save me a piece\"<channel|>yum, save me a piece!");
+}
 
-    static void g10_rejects_absolute_rules_quoting(void) {
-        /* L210201 — the model quoting its own persona prompt section. */
-        g10_expect_reject(
-            "Wait, looking at \"Absolute Rules\": Rule 2 says \"All lowercase unless SHOUTING\".");
-    }
+static void g10_rejects_absolute_rules_quoting(void) {
+    /* L210201 — the model quoting its own persona prompt section. */
+    g10_expect_reject(
+        "Wait, looking at \"Absolute Rules\": Rule 2 says \"All lowercase unless SHOUTING\".");
+}
 
-    static void g10_rejects_option_enumeration(void) {
-        /* L210314 — candidate-reply scratchpad enumeration. */
-        g10_expect_reject("*Option 3:* ha too cute. mine does that all the time");
-    }
+static void g10_rejects_option_enumeration(void) {
+    /* L210314 — candidate-reply scratchpad enumeration. */
+    g10_expect_reject("*Option 3:* ha too cute. mine does that all the time");
+}
 
-    static void g10_rejects_truncated_rules_reference(void) {
-        /* L210340 — rules-section reference, truncated mid-quote. */
-        g10_expect_reject("The \"Absolute Rules\" section says: \"Text like");
-    }
+static void g10_rejects_truncated_rules_reference(void) {
+    /* L210340 — rules-section reference, truncated mid-quote. */
+    g10_expect_reject("The \"Absolute Rules\" section says: \"Text like");
+}
 
-    /* 2026-07-12 14:21-14:22 — reflection-critique echo sent to a family
+/* 2026-07-12 14:21-14:22 — reflection-critique echo sent to a family
  * contact as FOUR split bubbles (chat.db wire format below). The old
  * defense was prefix-only (hu_response_is_critique_echo); the echo began
  * "i mean NEEDS_RETRY." and sailed through. Internal verdict tokens and
@@ -2605,6 +2605,25 @@ static void g10_rejects_critique_echo_variants(void) {
     g10_expect_reject("Should be something natural like \"Cool\" or \"Got it.\"");
 }
 
+/* 2026-07-13 — the SAME meta-text-echo class from a DIFFERENT subsystem
+ * (GVR verify/revise, src/agent/gvr.c). Five reached real contacts:
+ * "please revise the response to ensure it maintains a professional and
+ * formal tone", "based on what I know, Hey!", + NEEDS_RETRY x3. */
+static void g10_rejects_gvr_and_meta_instruction_echoes(void) {
+    g10_expect_reject(
+        "please revise the response to ensure it maintains a professional and formal tone");
+    g10_expect_reject("based on what I know, Hey! What's up?");
+    g10_expect_reject("You are a revision assistant. Produce a corrected response.");
+    g10_expect_reject("FAIL: the response to verify is incomplete");
+}
+
+static void g10_passes_natural_uses_of_revise_and_know(void) {
+    /* Content-bearing near-boundary phrases must survive — no meta shape. */
+    g10_expect_pass("based on what I know the market is soft right now");
+    g10_expect_pass("can you revise the offer and send it back?");
+    g10_expect_pass("let's keep it professional but warm");
+}
+
 static void g10_passes_talking_about_bots_naturally(void) {
     /* Real conversational uses near the boundary — Seth talks about AI
      * with these contacts ("my AI is bonkers"); bare bot-talk must pass. */
@@ -2613,41 +2632,41 @@ static void g10_passes_talking_about_bots_naturally(void) {
 }
 
 static void g10_rejects_style_audit_meta(void) {
-        /* L208947 — style-audit self-narration as final output. */
-        g10_expect_reject("Contractions used (\"didn");
-    }
+    /* L208947 — style-audit self-narration as final output. */
+    g10_expect_reject("Contractions used (\"didn");
+}
 
-    static void g10_passes_known_clean_corpus(void) {
-        /* Real sends from the same contacts, same evening — must not overfire.
-         * Includes 'Make sure of what? You cut off there.' which WAS a guard
-         * retry output but is content-legitimate conversational text. */
-        static const char *clean[] = {
-            "sorry, just got distracted. what's up?",
-            "Welcome back! How was your day?",
-            "Don't leave me hanging, send it!",
-            "For real, he's on a completely different level.",
-            "hey! sorry, just now seeing this.",
-            "Glad you are enjoying shopping",
-            "We do love a bed time",
-            "I like the style\xE2\x80\xA6 it's not expensive and just need to make sure it fits",
-            "1 works for me beautiful",
-            "Rock on \xF0\x9F\xA4\x98",
-            "ok",
-            "Make sure of what? You cut off there.",
-            "Get that makeup off\xE2\x80\xA6 take a shower",
-            "And enjoy hanging out with Mochi",
-            "no rush, whenever works. options are open",
-        };
-        for (size_t i = 0; i < sizeof(clean) / sizeof(clean[0]); i++)
-            g10_expect_pass(clean[i]);
-    }
+static void g10_passes_known_clean_corpus(void) {
+    /* Real sends from the same contacts, same evening — must not overfire.
+     * Includes 'Make sure of what? You cut off there.' which WAS a guard
+     * retry output but is content-legitimate conversational text. */
+    static const char *clean[] = {
+        "sorry, just got distracted. what's up?",
+        "Welcome back! How was your day?",
+        "Don't leave me hanging, send it!",
+        "For real, he's on a completely different level.",
+        "hey! sorry, just now seeing this.",
+        "Glad you are enjoying shopping",
+        "We do love a bed time",
+        "I like the style\xE2\x80\xA6 it's not expensive and just need to make sure it fits",
+        "1 works for me beautiful",
+        "Rock on \xF0\x9F\xA4\x98",
+        "ok",
+        "Make sure of what? You cut off there.",
+        "Get that makeup off\xE2\x80\xA6 take a shower",
+        "And enjoy hanging out with Mochi",
+        "no rush, whenever works. options are open",
+    };
+    for (size_t i = 0; i < sizeof(clean) / sizeof(clean[0]); i++)
+        g10_expect_pass(clean[i]);
+}
 
-    static void g10_passes_legit_option_word_without_enumeration(void) {
-        /* 'option' as a normal word — the detector requires the digit+colon
-         * enumeration form (substring-classifier-pitfalls discipline). */
-        g10_expect_pass("honestly the second option sounds better to me");
-        g10_expect_pass("we have the option to leave early if it drags");
-    }
+static void g10_passes_legit_option_word_without_enumeration(void) {
+    /* 'option' as a normal word — the detector requires the digit+colon
+     * enumeration form (substring-classifier-pitfalls discipline). */
+    g10_expect_pass("honestly the second option sounds better to me");
+    g10_expect_pass("we have the option to leave early if it drags");
+}
 
 void run_response_guard_tests(void) {
     HU_TEST_SUITE("Response Guard");
@@ -2808,7 +2827,7 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g9_retry_outcome_thrashed_when_retry_trips_g9_again);
     HU_RUN_TEST(g9_retry_outcome_starved_when_retry_failed);
 
-        /* Sprint 41 follow-up #3 — DPO daily-rotated path. */
+    /* Sprint 41 follow-up #3 — DPO daily-rotated path. */
     HU_RUN_TEST(dpo_path_for_day_emits_utc_dated_filename);
     HU_RUN_TEST(dpo_path_for_day_rolls_at_utc_midnight);
     HU_RUN_TEST(dpo_path_for_day_returns_zero_on_null_home);
@@ -2835,6 +2854,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(g10_rejects_truncated_rules_reference);
     HU_RUN_TEST(g10_rejects_style_audit_meta);
     HU_RUN_TEST(g10_rejects_critique_echo_variants);
+    HU_RUN_TEST(g10_rejects_gvr_and_meta_instruction_echoes);
+    HU_RUN_TEST(g10_passes_natural_uses_of_revise_and_know);
     HU_RUN_TEST(g10_passes_talking_about_bots_naturally);
     HU_RUN_TEST(g10_passes_known_clean_corpus);
     HU_RUN_TEST(g10_passes_legit_option_word_without_enumeration);

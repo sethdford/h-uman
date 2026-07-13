@@ -1174,7 +1174,8 @@ static bool hu_guard_has_rule_citation(const char *s, size_t len) {
  *   bit 2 = D3 rule quoting ("absolute rule" or "rule N says")
  *   bit 3 = D4 style-audit self-narration
  *   bit 4 = D5 quoted draft alternatives
- *   bit 5 = D6 reflection-critique echo (NEEDS_RETRY / draft critique) */
+ *   bit 5 = D6 reflection-critique echo (NEEDS_RETRY / draft critique)
+ *   bit 6 = D7 GVR verify/revise + meta-instruction echo */
 static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigned *which) {
     if (which)
         *which = 0;
@@ -1216,6 +1217,20 @@ static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigne
         {"as a response to \"", 18, 5},
         {"sounds like a grade", 19, 5},
         {"should be something natural like", 32, 5},
+        /* D7 — GVR (Generator-Verifier-Reviser) + generic meta-instruction
+         * echo (2026-07-13: "please revise the response to ensure it
+         * maintains a professional and formal tone" and "based on what I
+         * know, Hey!" reached real contacts). Same class as D6 but a
+         * DIFFERENT subsystem (src/agent/gvr.c) whose verify/revise system
+         * prompts get echoed as the reply. None of these phrases has a
+         * casual human-texting use. */
+        {"revise the response", 19, 6},
+        {"revision assistant", 18, 6},
+        {"verification assistant", 22, 6},
+        {"the response to verify", 22, 6},
+        {"maintains a professional and formal tone", 40, 6},
+        {"based on what i know,", 21, 6},
+        {"corrected response", 18, 6},
     };
     bool hit = false;
     for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
