@@ -70,11 +70,15 @@ if [[ "${HU_SKIP_GUARD_SENTINEL:-0}" != "1" ]]; then
         "nobody texts"               # G10 D6 — reflection-critique echo
         "That draft isn't quite right" # reflection retry rewrite (not the judge prompt)
     )
+    # Dump symbols ONCE into a variable, then match with here-strings. Piping
+    # `strings | grep -q` breaks under `set -o pipefail`: grep -q closes the
+    # pipe on first match, strings dies on SIGPIPE (exit 141), and pipefail
+    # reports the whole pipeline as failed → every sentinel reads as "missing"
+    # (a false regression alarm). The here-string has no pipe, so no SIGPIPE.
+    sym_dump="$(strings -a "$SOURCE_BIN" 2>/dev/null || true)"
     missing=()
     for sentinel in "${GUARD_SENTINELS[@]}"; do
-        if ! strings -a "$SOURCE_BIN" 2>/dev/null | grep -qF "$sentinel"; then
-            missing+=("$sentinel")
-        fi
+        grep -qF -- "$sentinel" <<<"$sym_dump" || missing+=("$sentinel")
     done
     if (( ${#missing[@]} > 0 )); then
         echo "error: refusing to install — $SOURCE_BIN is missing outbound-guard sentinels:" >&2
