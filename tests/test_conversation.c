@@ -4406,10 +4406,39 @@ static void test_should_share_word_boundary_no_false_cue(void) {
     HU_ASSERT_TRUE(proved);
 }
 
+/* ── Filler injector activation gate (HU_FILLERS off|shadow|live) ────── */
+
+/* seed=0 forces the injector's internal ~20% roll to fire, so if the gate
+ * were absent this input WOULD be mutated. With the gate defaulting OFF the
+ * call must leave the buffer byte-for-byte unchanged. */
+static void fillers_off_by_default_is_noop(void) {
+    hu_conversation_fillers_set_mode_for_test(-1); /* defer to env */
+    unsetenv("HU_FILLERS");
+    char buf[64] = "wish i could";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_apply_fillers(buf, len, sizeof(buf), 0u, "imessage", 8);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, "wish i could");
+}
+
+/* The existing filler behavior stays reachable when the gate is LIVE:
+ * seed=0 fires the roll and a filler is prepended, lengthening the text. */
+static void fillers_live_mode_still_injects(void) {
+    hu_conversation_fillers_set_mode_for_test((int)HU_GATE_LIVE);
+    char buf[64] = "wish i could";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_apply_fillers(buf, len, sizeof(buf), 0u, "imessage", 8);
+    HU_ASSERT_TRUE(out > len);
+    hu_conversation_fillers_set_mode_for_test(-1); /* reset for other tests */
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
     HU_TEST_SUITE("Conversation Intelligence");
+
+    HU_RUN_TEST(fillers_off_by_default_is_noop);
+    HU_RUN_TEST(fillers_live_mode_still_injects);
 
     HU_RUN_TEST(test_should_share_tiktok_cue_boosts_roll);
     HU_RUN_TEST(test_should_share_youtube_cue_boosts_roll);
