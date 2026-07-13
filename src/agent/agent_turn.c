@@ -3,9 +3,9 @@
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
-#include "human/agent/theory_of_mind.h"
 #include "human/agent/intent.h"
 #include "human/agent/self_uncertainty.h"
+#include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -911,15 +911,14 @@ static void at_log_humanness_gates_once(hu_observer_t *obs) {
 /* Append one owned directive string to the system prompt, then free it. Shared
  * by the self-uncertainty and intent gates to avoid duplicating the
  * realloc+memcpy+free dance (clone-ratchet). Takes ownership of `dir`. */
-static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_len,
-                                      char **sp, size_t *sp_len) {
+static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_len, char **sp,
+                                      size_t *sp_len) {
     if (!dir)
         return;
     if (dir_len > 0 && sp && *sp) {
         size_t cur = *sp_len;
         size_t new_len = cur + dir_len;
-        char *new_sp =
-            (char *)agent->alloc->realloc(agent->alloc->ctx, *sp, cur + 1, new_len + 1);
+        char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, *sp, cur + 1, new_len + 1);
         if (new_sp) {
             memcpy(new_sp + cur, dir, dir_len);
             new_sp[new_len] = '\0';
@@ -1015,8 +1014,8 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
                     at_append_owned_directive(agent, smdir, smdir_len, system_prompt,
                                               system_prompt_len);
                 } else {
-                    hu_log_info("self_model", NULL, "shadow self-observation: %.*s",
-                                (int)smdir_len, smdir);
+                    hu_log_info("self_model", NULL, "shadow self-observation: %.*s", (int)smdir_len,
+                                smdir);
                     agent->alloc->free(agent->alloc->ctx, smdir, smdir_len + 1);
                 }
             }
@@ -6046,9 +6045,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
-        /* GVR (Generator-Verifier-Reviser): verify and optionally revise the response */
-        if (agent->sota.gvr_config.enabled && resp.content && resp.content_len > 0 &&
-            resp.tool_calls_count == 0) {
+        /* GVR (Generator-Verifier-Reviser): verify and optionally revise the response.
+         * Skip when a persona is active — GVR is a factual-verification loop for
+         * task answers; on the persona/texting surface its verify/revise system
+         * prompts get echoed as the reply (2026-07-13 "please revise the response"
+         * incident). Matches the !agent->persona guard on the streaming path. */
+        if (agent->sota.gvr_config.enabled && !agent->persona && resp.content &&
+            resp.content_len > 0 && resp.tool_calls_count == 0) {
             const char *user_prompt = NULL;
             size_t user_prompt_len = 0;
             if (req.messages_count > 0) {
