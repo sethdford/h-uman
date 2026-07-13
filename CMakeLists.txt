@@ -1014,6 +1014,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/pipeline.c
     src/agent/outbound/pipeline_configs.c
     src/agent/outbound/strip.c
+    src/agent/outbound/style_governor.c
     src/agent/outbound/shape.c
     src/agent/outbound/echo.c
     src/agent/outbound/crosstalk.c
@@ -3580,6 +3581,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_outbound_pipeline.c
     # Sprint 59 Phase B — strip stage.
     tests/test_outbound_strip.c
+    tests/test_style_governor.c
     # Sprint 59 Phase B — shape stage (length + sentence structure).
     tests/test_outbound_shape.c
     # Sprint 59 Phase B — echo stage (directive-echo detection).

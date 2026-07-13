@@ -6286,9 +6286,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     reflection_retries_left--;
                     char *critique = NULL;
                     size_t critique_len = 0;
-                    hu_error_t cerr = hu_reflection_build_critique_prompt(
-                        agent->alloc, msg, msg_len, resp.content, resp.content_len, &critique,
-                        &critique_len);
+                    /* 2026-07-12 Mindy incident: the retry context used to embed
+                     * the JUDGE prompt ("Evaluate... Score it as GOOD, ACCEPTABLE,
+                     * or NEEDS_RETRY"), so the retry generation produced an
+                     * evaluation — which was then SENT. The retry instruction is
+                     * now a rewrite directive with no judge vocabulary. */
+                    hu_error_t cerr =
+                        hu_reflection_build_retry_prompt(agent->alloc, &critique, &critique_len);
                     if (cerr == HU_OK && critique) {
                         hu_error_t hist_err =
                             hu_agent_internal_append_history(agent, HU_ROLE_ASSISTANT, resp.content,

@@ -1722,6 +1722,7 @@ static void typo_never_exceeds_cap(void) {
 /* ── Text disfluency (F33) tests ───────────────────────────────────────── */
 
 static void disfluency_frequency_one_applies(void) {
+    hu_conversation_disfluency_set_mode_for_test(HU_DISFLUENCY_LIVE);
     /* frequency 1.0, no contact (casual) → at least one disfluency applied */
     char buf[128];
     const char *input = "that sounds good to me";
@@ -1729,6 +1730,34 @@ static void disfluency_frequency_one_applies(void) {
     memcpy(buf, input, len + 1);
     size_t out = hu_conversation_apply_disfluency(buf, len, sizeof(buf), 0, 1.0f, NULL, NULL, 0);
     HU_ASSERT_TRUE(out != len || memcmp(buf, input, len + 1) != 0);
+    hu_conversation_disfluency_set_mode_for_test(-1);
+}
+
+/* 2026-07-12 Jordan incident: disfluency is a send-mutating humanness
+ * feature and must be OFF by default (feature-gate-requires-measurement).
+ * With no mode set, even frequency 1.0 must leave the text untouched. */
+static void disfluency_off_by_default_is_noop(void) {
+    hu_conversation_disfluency_set_mode_for_test(-1); /* re-read env: unset -> OFF */
+    char buf[128] = "Wish I could lol, save a spot for me next time";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_apply_disfluency(buf, len, sizeof(buf), 0, 1.0f, NULL, NULL, 0);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, "Wish I could lol, save a spot for me next time");
+}
+
+/* The grammar-breaking self-correction (" wait no " inserted mid-clause,
+ * " *meant it") produced the exact garbage sent to a family contact. It
+ * must never appear across the seed space, even in LIVE mode. */
+static void disfluency_never_inserts_self_correction(void) {
+    hu_conversation_disfluency_set_mode_for_test(HU_DISFLUENCY_LIVE);
+    for (uint32_t seed = 0; seed < 2000; seed++) {
+        char buf[128] = "Wish I could lol, save a spot for me next time";
+        size_t len = strlen(buf);
+        hu_conversation_apply_disfluency(buf, len, sizeof(buf), seed, 1.0f, NULL, NULL, 0);
+        HU_ASSERT_TRUE(strstr(buf, "wait no") == NULL);
+        HU_ASSERT_TRUE(strstr(buf, "*meant it") == NULL);
+    }
+    hu_conversation_disfluency_set_mode_for_test(-1);
 }
 
 static void disfluency_frequency_zero_unchanged(void) {
@@ -4653,6 +4682,8 @@ void run_conversation_tests(void) {
 
     /* Text disfluency (F33) */
     HU_RUN_TEST(disfluency_frequency_one_applies);
+    HU_RUN_TEST(disfluency_off_by_default_is_noop);
+    HU_RUN_TEST(disfluency_never_inserts_self_correction);
     HU_RUN_TEST(disfluency_frequency_zero_unchanged);
     HU_RUN_TEST(disfluency_formal_contact_unchanged);
     HU_RUN_TEST(disfluency_formality_formal_unchanged);

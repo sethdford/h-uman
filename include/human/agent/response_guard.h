@@ -108,6 +108,19 @@ typedef struct {
      * to be honest ABOUT). See `hu_response_is_naked_discourse_opener`
      * for the exact predicate. */
     bool detected_naked_discourse_opener;
+    /* G10 (2026-07-11 incident) — model deliberation as final output.
+     * Set when the response contains internal-scratchpad signatures that
+     * reached the wire on 2026-07-11: malformed channel markers
+     * ("<channel|>" — pipe placement the harmony strip misses),
+     * candidate-reply enumeration ("Option 3:"), persona-rule quoting
+     * ("Absolute Rules", "Rule 2 says"), style-audit self-narration
+     * ("Contractions used", "all lowercase", "no markdown"), and quoted
+     * draft alternatives ("a" or "b"). Patterns calibrated against the
+     * incident corpus by scripts/leak_gate.py (5/5 recall, 0/15 false
+     * positives on real sends + 107 live Gemma generations). Applies to
+     * BOTH primary outputs and slim-retry outputs (the incident's leaks
+     * were primaries the guard never rejected). */
+    bool detected_deliberation_leak;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
@@ -261,6 +274,10 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
  * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
 bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
 bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+/* G10 detector, exported for the outbound pipeline (the proactive path
+ * never crosses hu_response_guard_check — the 2026-07-12 bare
+ * "NEEDS_RETRY" proactive send is the evidence). */
+bool hu_guard_audit_deliberation_leak(const char *s, size_t len);
 
 /* 2026-05-19 — critique-as-response echo detector.
  *

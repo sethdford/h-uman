@@ -33,6 +33,7 @@
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
 #include "human/agent/prosocial_routine.h"
+#include "human/agent/style_governor.h"
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
@@ -63,7 +64,6 @@
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
-#include "human/daemon/promise_keeper.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/intelligence_facade.h"
@@ -71,6 +71,7 @@
 #include "human/daemon/ml_facade.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
+#include "human/daemon/promise_keeper.h"
 #include "human/daemon/voice_facade.h"
 
 /* Channel helpers */
@@ -1119,7 +1120,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         size_t cid_len = strlen(cp->contact_id);
                         for (size_t ei = 0; ei < extract_result.event_count; ei++) {
                             const hu_extracted_event_t *ev = &extract_result.events[ei];
-                            if (!ev->description || ev->description_len == 0 || ev->confidence < 0.3)
+                            if (!ev->description || ev->description_len == 0 ||
+                                ev->confidence < 0.3)
                                 continue;
                             int64_t resolved = 0;
                             if (ev->temporal_ref && ev->temporal_ref_len > 0)
@@ -1616,19 +1618,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     if (agent->memory) {
                         hu_delayed_followup_t *due_arr = NULL;
                         size_t due_n = 0;
-                        if (hu_superhuman_delayed_followup_list_due(agent->memory, alloc,
-                                                                    (int64_t)now, &due_arr,
-                                                                    &due_n) == HU_OK &&
+                        if (hu_superhuman_delayed_followup_list_due(
+                                agent->memory, alloc, (int64_t)now, &due_arr, &due_n) == HU_OK &&
                             due_arr && due_n > 0) {
                             size_t pos = 0;
                             size_t listed = 0;
                             for (size_t fi = 0; fi < due_n && listed < 4; fi++) {
                                 if (strcmp(due_arr[fi].contact_id, cp->contact_id) != 0)
                                     continue;
-                                int w = snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
-                                                 "- %s (due %llds ago)\n", due_arr[fi].topic,
-                                                 (long long)((int64_t)now -
-                                                             due_arr[fi].scheduled_at));
+                                int w =
+                                    snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
+                                             "- %s (due %llds ago)\n", due_arr[fi].topic,
+                                             (long long)((int64_t)now - due_arr[fi].scheduled_at));
                                 if (w <= 0 || (size_t)w >= sizeof(due_fu_buf) - pos)
                                     break;
                                 pos += (size_t)w;
@@ -1649,9 +1650,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     memset(&unified_decision, 0, sizeof(unified_decision));
                     (void)hu_init_proposer_tick_with_provider_ex(
                         &config->initiative, daemon_autoresponder_config(),
-                        daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent, &agent->provider, alloc,
-                        &inputs, /*last_inbound_unix=*/0, (int64_t)now, &unified_last_tick,
-                        &unified_tick_id, &unified_result, &unified_decision);
+                        daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent,
+                        &agent->provider, alloc, &inputs, /*last_inbound_unix=*/0, (int64_t)now,
+                        &unified_last_tick, &unified_tick_id, &unified_result, &unified_decision);
 
                     if (unified_result == HU_INIT_RESULT_FIRED && unified_decision.draft_len > 0) {
                         response = (char *)alloc->alloc(alloc->ctx, unified_decision.draft_len + 1);
@@ -4836,8 +4837,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifdef HU_ENABLE_SQLITE
                 /* F23: Topic absence detection — record topic baselines from user message */
                 if (agent->memory && combined_len > 0)
-                    hu_daemon_record_topic_baselines_from_text(agent->memory, batch_key, key_len, combined,
-                                                     combined_len);
+                    hu_daemon_record_topic_baselines_from_text(agent->memory, batch_key, key_len,
+                                                               combined, combined_len);
                 /* F26: Temporal pattern learning — record message frequency by day/hour */
                 if (agent->memory && batch_key && key_len > 0) {
                     time_t now_t = time(NULL);
@@ -5620,8 +5621,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                              * for offline measurement (hu_salience_summarize shape). */
                             if (cp_mode == HU_CONTEXTUAL_PROACTIVE_SHADOW && cpr.count > 0) {
                                 char cp_metric[512];
-                                if (hu_contextual_proactive_shadow_summary(&cpr, batch_key, cp_metric,
-                                                                           sizeof(cp_metric)) > 0)
+                                if (hu_contextual_proactive_shadow_summary(
+                                        &cpr, batch_key, cp_metric, sizeof(cp_metric)) > 0)
                                     hu_log_info("human", agent ? agent->observer : NULL, "%s",
                                                 cp_metric);
                             }
@@ -5634,8 +5635,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         "human", agent ? agent->observer : NULL,
                                         "[contextual-proactive SHADOW] would schedule to %s via %s "
                                         "at %lld: %s",
-                                        batch_key, cp_channel,
-                                        (long long)(cpd->send_at_ms / 1000), cpd->message);
+                                        batch_key, cp_channel, (long long)(cpd->send_at_ms / 1000),
+                                        cpd->message);
                                     continue;
                                 }
                                 /* ON: dedup against the existing schedule queue so a
@@ -5656,11 +5657,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 hu_error_t cp_serr = hu_conversation_schedule_message_on(
                                     batch_key, key_len, cp_channel, cp_ch_len, cpd->message,
                                     cp_msg_len, (uint64_t)cpd->send_at_ms);
-                                hu_log_info(
-                                    "human", agent ? agent->observer : NULL,
-                                    "[contextual-proactive] %s to %s via %s at %lld: %s",
-                                    cp_serr == HU_OK ? "scheduled" : "schedule FAILED", batch_key,
-                                    cp_channel, (long long)(cpd->send_at_ms / 1000), cpd->message);
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "[contextual-proactive] %s to %s via %s at %lld: %s",
+                                            cp_serr == HU_OK ? "scheduled" : "schedule FAILED",
+                                            batch_key, cp_channel,
+                                            (long long)(cpd->send_at_ms / 1000), cpd->message);
                             }
                         }
                     }
@@ -5680,10 +5681,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->memory, alloc, batch_key, key_len, desc_buf,
                             (size_t)strlen(desc_buf), who_buf, (size_t)strlen(who_buf), deadline);
                         /* Wire commitment deadline → delayed_followup_schedule so the
-                         * commitment becomes a concrete trigger in the proactive proposer's context.
-                         * The scheduled time is the deadline itself; the proposer will list due
-                         * followups and surface them as a triggering signal (F25-2 concrete triggers).
-                         * If deadline is unset (≤ now), schedule immediately. */
+                         * commitment becomes a concrete trigger in the proactive proposer's
+                         * context. The scheduled time is the deadline itself; the proposer will
+                         * list due followups and surface them as a triggering signal (F25-2
+                         * concrete triggers). If deadline is unset (≤ now), schedule immediately.
+                         */
                         if (deadline > 0) {
                             (void)hu_superhuman_delayed_followup_schedule(
                                 agent->memory, alloc, batch_key, key_len, desc_buf,
@@ -11629,9 +11631,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Store conversation summary as long-term memory */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
-                    hu_daemon_store_conversation_summary(alloc, agent->memory, graph, agent, batch_key,
-                                               key_len, combined, combined_len, response,
-                                               response_len);
+                    hu_daemon_store_conversation_summary(alloc, agent->memory, graph, agent,
+                                                         batch_key, key_len, combined, combined_len,
+                                                         response, response_len);
                 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -12081,6 +12083,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->bth_metrics->typos_applied++;
                         }
                     }
+
+                    /* Style governor — measured-shape enforcement on the reactive
+                     * path. The outbound pipeline (proactive/burst) runs this as a
+                     * stage, but the reactive send path bypasses that pipeline
+                     * (2026-07-12 egress audit), so the shaping the pipeline stage
+                     * applies would never reach normal replies. Same gate
+                     * (HU_STYLE_GOVERNOR: off default / shadow / live) — a no-op
+                     * until promoted, and runs on the coherent reply BEFORE the
+                     * splitter chops it into bubbles. */
+                    response_len =
+                        hu_style_governor_apply_inplace(agent->alloc, response, response_len);
+
                     /* ── F40: Inline reply (quoted text fallback) ─────────────
                      * When classifier says inline reply, prepend "> {quoted}\n\n"
                      * (text-quote fallback for channels without native threading). */
@@ -12600,7 +12614,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * reply before the choreo/fragment split covers every bubble
                          * path. HU_PROMISE_KEEPER gated OFF by default; see
                          * src/daemon/daemon_promise_keeper.c. */
-                        hu_promise_keeper_mode_t pk_mode = hu_promise_keeper_mode_from_env(getenv("HU_PROMISE_KEEPER"));
+                        hu_promise_keeper_mode_t pk_mode =
+                            hu_promise_keeper_mode_from_env(getenv("HU_PROMISE_KEEPER"));
                         if (pk_mode == HU_PROMISE_KEEPER_OFF) {
                             static atomic_bool warned_disabled = false;
                             hu_log_info_once(&warned_disabled, "daemon",
@@ -14149,9 +14164,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_init_decision_t init_decision;
             memset(&init_decision, 0, sizeof(init_decision));
             (void)hu_init_proposer_tick_with_provider(
-                &config->initiative, ar_cfg_init, daemon_local_tz_offset_seconds(now_unix_init), &gov_budget, agent,
-                agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0, now_unix_init,
-                &initiative_last_tick_unix, &initiative_tick_id, &init_result, &init_decision);
+                &config->initiative, ar_cfg_init, daemon_local_tz_offset_seconds(now_unix_init),
+                &gov_budget, agent, agent ? &agent->provider : NULL, alloc, /*last_inbound_unix=*/0,
+                now_unix_init, &initiative_last_tick_unix, &initiative_tick_id, &init_result,
+                &init_decision);
 
             /* T9 M2 reflection-loop tick. Gates internally (config +
              * interval + idle), so this call is cheap when the

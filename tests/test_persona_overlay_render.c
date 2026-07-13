@@ -527,21 +527,20 @@ static void steering_coeffs_v2_humor_none_is_negative(void) {
 static void steering_coeffs_v2_all_traits_nonzero(void) {
     /* Verify that all four traits (formality, verbosity, warmth, humor) flow through v2 */
     double f = 0, v = 0, w = 0, h = 0;
-    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "playful", 1.0,
-                                  &f, &v, &w, &h);
-    HU_ASSERT(f > 0.0);  /* formal */
-    HU_ASSERT(v > 0.0);  /* detailed */
-    HU_ASSERT(w > 0.0);  /* warm */
-    HU_ASSERT(h > 0.0);  /* playful */
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "playful", 1.0, &f, &v, &w, &h);
+    HU_ASSERT(f > 0.0); /* formal */
+    HU_ASSERT(v > 0.0); /* detailed */
+    HU_ASSERT(w > 0.0); /* warm */
+    HU_ASSERT(h > 0.0); /* playful */
 }
 
 static void steering_coeffs_v2_tier_scale_damps_all(void) {
     /* All traits should scale down by tier_scale */
     double f1, v1, w1, h1, f2, v2, w2, h2;
-    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 1.0,
-                                  &f1, &v1, &w1, &h1);
-    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 0.5,
-                                  &f2, &v2, &w2, &h2);
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 1.0, &f1, &v1, &w1,
+                                  &h1);
+    hu_persona_steering_coeffs_v2("formal", "detailed", "warm", "frequent", 0.5, &f2, &v2, &w2,
+                                  &h2);
     HU_ASSERT(f1 > f2); /* lower tier_scale -> smaller magnitude */
     HU_ASSERT(v1 > v2);
     HU_ASSERT(w1 > w2);
@@ -603,11 +602,63 @@ static void compact_prompt_casual_overlay_includes_casual_register(void) {
     free(out);
 }
 
+/* 2026-07-12 measured style card (scripts/persona_style_card.py, n=1488
+ * typed msgs): starts_lowercase=4%, no-terminal-punct=79%, ?-endings=9%.
+ * The old casual rule "All lowercase unless SHOUTING" contradicted BOTH the
+ * corpus and seth.json's own "Normal capitalization" style rule — and the
+ * model's visible agonizing over that contradiction is what leaked to real
+ * contacts on 2026-07-11 ("Wait, looking at 'Absolute Rules': Rule 2 says
+ * 'All lowercase unless SHOUTING'"). The register must match measurement. */
+static void compact_prompt_casual_register_matches_measured_style(void) {
+    setup_alloc();
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.channel = "imessage";
+    ov.formality = "casual";
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "Seth";
+    p.identity = "a finance executive";
+    p.overlays = &ov;
+    p.overlays_count = 1;
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_prompt_compact(&test_alloc, &p, "imessage",
+                                                      strlen("imessage"), &out, &out_len),
+                 (int)HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* The contradictory directive must be gone... */
+    HU_ASSERT(strstr(out, "All lowercase") == NULL);
+    /* ...replaced by the measured register: normal caps, no terminal period. */
+    HU_ASSERT(strstr(out, "Normal capitalization") != NULL);
+    HU_ASSERT(strstr(out, "no period at the end") != NULL);
+    free(out);
+}
+
+static void full_prompt_output_format_rules_match_measured_style(void) {
+    setup_alloc();
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "Seth";
+    p.identity = "a finance executive";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_prompt(&test_alloc, &p, "imessage", strlen("imessage"), NULL,
+                                              0, &out, &out_len),
+                 (int)HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT(strstr(out, "All lowercase") == NULL);
+    HU_ASSERT(strstr(out, "no period at the end") != NULL);
+    free(out);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
     HU_RUN_TEST(compact_prompt_formal_overlay_includes_formal_register);
     HU_RUN_TEST(compact_prompt_casual_overlay_includes_casual_register);
+    HU_RUN_TEST(compact_prompt_casual_register_matches_measured_style);
+    HU_RUN_TEST(full_prompt_output_format_rules_match_measured_style);
     HU_RUN_TEST(render_with_null_overlay_returns_identity_copy);
     HU_RUN_TEST(render_with_empty_input_returns_empty_string);
     HU_RUN_TEST(render_with_null_allocator_returns_invalid_argument);
