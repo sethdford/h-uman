@@ -32,9 +32,9 @@ jobs:
           - tts_model: sonic-3-latest
             stt_model: ink-whisper
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
