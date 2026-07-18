@@ -66,6 +66,8 @@ static const char **s_conversation_intros = NULL;
 static size_t s_conversation_intros_len = 0;
 static const char **s_ai_disclosure_patterns = NULL;
 static size_t s_ai_disclosure_patterns_len = 0;
+static const char **s_farewell_phrases = NULL;
+static size_t s_farewell_phrases_len = 0;
 
 void hu_conversation_set_thresholds(uint32_t consecutive_limit, uint32_t participation_pct,
                                     uint32_t max_response_chars, uint32_t min_response_chars) {
@@ -475,7 +477,128 @@ void hu_conversation_data_cleanup(void) {
         s_engage_words_len = 0;
     }
 
+    if (s_farewell_phrases) {
+        free_string_array(s_farewell_phrases, s_farewell_phrases_len);
+        s_farewell_phrases = NULL;
+        s_farewell_phrases_len = 0;
+    }
+
     s_conv_alloc = NULL;
+}
+
+/* ── Phrase banks (mined user voice) ─────────────────────────────────────
+ * ~/.human/phrase_banks.json is written by scripts/mine_phrase_banks.py from
+ * the user's own sent messages. Lists present in the file override the
+ * embedded/hardcoded DEFAULT_* lists so the daemon speaks in the user's
+ * measured distributions, not generic English. Missing or corrupt files
+ * leave the defaults untouched. */
+
+/* Load one bank ("fillers", ...) from the channel object. Entries are
+ * {"text": ..., "freq": ...}; only text is consumed at runtime. Mirrors
+ * load_string_array's NULL-slot convention for unparseable entries. */
+static hu_error_t load_bank_entries(const hu_json_value_t *channel_obj, const char *key,
+                                    const char ***out_array, size_t *out_len) {
+    hu_json_value_t *field = hu_json_object_get(channel_obj, key);
+    if (!field || field->type != HU_JSON_ARRAY || field->data.array.len == 0)
+        return HU_ERR_NOT_FOUND;
+
+    size_t arr_len = field->data.array.len;
+    const char **result =
+        (const char **)s_conv_alloc->alloc(s_conv_alloc->ctx, arr_len * sizeof(const char *));
+    if (!result)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    size_t valid = 0;
+    for (size_t i = 0; i < arr_len; i++) {
+        result[i] = NULL;
+        hu_json_value_t *item = field->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
+            continue;
+        const char *text = hu_json_get_string(item, "text");
+        if (!text || !text[0])
+            continue;
+        size_t slen = strlen(text);
+        char *copy = (char *)s_conv_alloc->alloc(s_conv_alloc->ctx, slen + 1);
+        if (!copy)
+            continue;
+        memcpy(copy, text, slen + 1);
+        result[i] = copy;
+        valid++;
+    }
+
+    if (valid == 0) {
+        free_string_array(result, arr_len);
+        return HU_ERR_NOT_FOUND;
+    }
+
+    if (*out_array)
+        free_string_array(*out_array, *out_len);
+    *out_array = result;
+    *out_len = arr_len;
+    return HU_OK;
+}
+
+hu_error_t hu_conversation_phrase_banks_load(hu_allocator_t *alloc, const char *path,
+                                             const char *channel) {
+    if (!alloc || !path || !channel)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return HU_ERR_NOT_FOUND;
+    /* 1 MiB cap: a phrase-bank file is a few KB; anything larger is corrupt */
+    long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+    bool readable = size > 0 && size <= 1024L * 1024L && fseek(f, 0, SEEK_SET) == 0;
+    if (!readable) {
+        fclose(f);
+        return HU_ERR_INVALID_FORMAT;
+    }
+
+    char *data = (char *)alloc->alloc(alloc->ctx, (size_t)size + 1);
+    if (!data) {
+        fclose(f);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t nread = fread(data, 1, (size_t)size, f);
+    fclose(f);
+    if (nread != (size_t)size) {
+        alloc->free(alloc->ctx, data, (size_t)size + 1);
+        return HU_ERR_IO;
+    }
+    data[size] = '\0';
+
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, data, (size_t)size, &root);
+    alloc->free(alloc->ctx, data, (size_t)size + 1);
+    if (err != HU_OK || !root)
+        return err != HU_OK ? err : HU_ERR_PARSE;
+
+    hu_json_value_t *ch = hu_json_object_get(root, channel);
+    if (!ch || ch->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
+        return HU_ERR_NOT_FOUND;
+    }
+
+    s_conv_alloc = alloc; /* free_string_array + cleanup depend on it */
+
+    static const struct {
+        const char *key;
+        const char ***arr;
+        size_t *len;
+    } slots[] = {
+        {"fillers", &s_filler_words, &s_filler_words_len},
+        {"starters", &s_starters, &s_starters_len},
+        {"backchannels", &s_backchannel_phrases, &s_backchannel_phrases_len},
+        {"farewells", &s_farewell_phrases, &s_farewell_phrases_len},
+    };
+    size_t loaded = 0;
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        if (load_bank_entries(ch, slots[i].key, slots[i].arr, slots[i].len) == HU_OK)
+            loaded++;
+    }
+
+    hu_json_free(alloc, root);
+    return loaded > 0 ? HU_OK : HU_ERR_NOT_FOUND;
 }
 
 /* Safe pos advance: snprintf returns the would-be length even when truncated.
@@ -2643,11 +2766,28 @@ size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len, c
 
 /* ── Double-text decision (F9) ──────────────────────────────────────────── */
 
-static const char *const farewell_phrases[] = {
+static const char *const DEFAULT_FAREWELL_PHRASES[] = {
     "bye",   "goodbye",    "good night",  "goodnight",   "gn",  "gotta go",
     "ttyl",  "talk later", "see ya",      "see you",     "cya", "later",
     "night", "nite",       "heading out", "heading off", NULL,
 };
+
+/* Mined farewell bank (phrase_banks.json) wins over the hardcoded list. */
+static bool response_contains_farewell(const char *resp, size_t resp_len) {
+    if (s_farewell_phrases_len > 0) {
+        for (size_t i = 0; i < s_farewell_phrases_len; i++) {
+            const char *p = s_farewell_phrases[i];
+            if (p && hu_str_contains_ci_cstr(resp, resp_len, p))
+                return true;
+        }
+        return false;
+    }
+    for (const char *const *p = DEFAULT_FAREWELL_PHRASES; *p; p++) {
+        if (hu_str_contains_ci_cstr(resp, resp_len, *p))
+            return true;
+    }
+    return false;
+}
 
 bool hu_conversation_should_double_text(const char *last_response, size_t resp_len,
                                         const hu_channel_history_entry_t *entries, size_t count,
@@ -2658,10 +2798,8 @@ bool hu_conversation_should_double_text(const char *last_response, size_t resp_l
     if (hour_local >= 23 || hour_local < 5)
         return false;
 
-    for (const char *const *p = farewell_phrases; *p; p++) {
-        if (hu_str_contains_ci_cstr(last_response, resp_len, *p))
-            return false;
-    }
+    if (response_contains_farewell(last_response, resp_len))
+        return false;
 
     float adjusted = probability;
     bool high_energy = false;
