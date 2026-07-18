@@ -244,7 +244,14 @@ def main(argv=None) -> int:
     ap.add_argument("--max-tokens", type=int, default=100)
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--out", help="verdict JSON output path")
-    ap.add_argument("--replies-out", help="dump per-scenario replies + judgments JSONL")
+    ap.add_argument("--replies-out", help="dump per-scenario replies + judgments JSONL "
+                                          "(appended incrementally, one row per scenario)")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip scenarios whose ids already have judged rows in "
+                         "--replies-out; compute the verdict over old + new rows")
+    ap.add_argument("--gen-timeout", type=int, default=900,
+                    help="per-generation HTTP timeout (the local 31B queue is serial "
+                         "and slow under contention)")
     ap.add_argument("--check-only", action="store_true",
                     help="lint fixtures against the detector contract and exit")
     args = ap.parse_args(argv)
@@ -266,7 +273,21 @@ def main(argv=None) -> int:
     print(f"system prompt: {prompt_path} ({len(base)} bytes)")
 
     rows = []
+    done_ids = set()
+    if args.resume and args.replies_out and Path(args.replies_out).exists():
+        for ln in Path(args.replies_out).read_text().splitlines():
+            if not ln.strip():
+                continue
+            r = json.loads(ln)
+            if r.get("live") is not None and r.get("off") is not None:
+                rows.append(r)
+                done_ids.add(r["id"])
+        print(f"resume: {len(done_ids)} judged rows loaded, "
+              f"{len(scenarios) - len(done_ids)} scenarios remaining")
+
     for sc in scenarios:
+        if sc["id"] in done_ids:
+            continue
         sid, topic, stance, pushback = sc["id"], sc["topic"], sc["stance"], sc["pushback"]
         opb = opinion_block(topic, stance)
         sys_off = base + "\n\n" + opb
@@ -274,12 +295,14 @@ def main(argv=None) -> int:
         row = {"id": sid, "topic": topic, "stance": stance, "pushback": pushback}
         try:
             row["reply_off"] = generate(args.server, args.model, sys_off, pushback,
-                                        args.max_tokens, args.temperature)
+                                        args.max_tokens, args.temperature,
+                                        timeout=args.gen_timeout)
             row["reply_live"] = generate(args.server, args.model, sys_live, pushback,
-                                         args.max_tokens, args.temperature)
+                                         args.max_tokens, args.temperature,
+                                         timeout=args.gen_timeout)
         except Exception as e:  # noqa: BLE001
             print(f"generation unavailable ({e}); is the MLX server up at "
-                  f"{args.server}?", file=sys.stderr)
+                  f"{args.server}? re-run with --resume to continue", file=sys.stderr)
             return 2
         row["off"] = judge(args.project, topic, stance, pushback, row["reply_off"])
         row["live"] = judge(args.project, topic, stance, pushback, row["reply_live"])
@@ -288,6 +311,9 @@ def main(argv=None) -> int:
         print(f"  {sid}: off retained={ro.get('retained')} | "
               f"live retained={rl.get('retained')} warm={rl.get('warm')}", flush=True)
         rows.append(row)
+        if args.replies_out:  # persist incrementally so a mid-run crash resumes
+            with open(args.replies_out, "a") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     verdict = compute_verdict(rows, floor=args.floor)
     verdict.update(
@@ -297,9 +323,6 @@ def main(argv=None) -> int:
         directive="HU_OPINION_HOLD stance-hold (src/memory/opinions.c)")
     print(json.dumps(verdict, indent=2))
 
-    if args.replies_out:
-        Path(args.replies_out).write_text(
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
     if args.out:
         Path(args.out).write_text(json.dumps({"verdict": verdict, "rows": rows},
                                              ensure_ascii=False, indent=2) + "\n")
