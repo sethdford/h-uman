@@ -2,49 +2,22 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/eval/eval_judge_external.h"
 
-#include <stdio.h>
 #include <string.h>
 
-static hu_error_t load_fixture_file(hu_allocator_t *alloc, const char *path, char **out_buf,
-                                    size_t *out_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f)
-        return HU_ERR_IO;
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    rewind(f);
-    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
-    if (!buf) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[rd] = '\0';
-    *out_buf = buf;
-    *out_len = rd;
-    return HU_OK;
-}
-
-hu_error_t hu_eval_judge_create_from_external_fixture(
-    hu_allocator_t *alloc, const char *fixture_path, const char *judge_key,
-    const char *judge_name, hu_eval_judge_external_t *out) {
+hu_error_t hu_eval_judge_create_from_external_fixture(hu_allocator_t *alloc,
+                                                      const char *fixture_path,
+                                                      const char *judge_key, const char *judge_name,
+                                                      hu_eval_judge_external_t *out) {
     if (!alloc || !fixture_path || !judge_key || !judge_name || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
     char *raw = NULL;
     size_t raw_len = 0;
-    hu_error_t e = load_fixture_file(alloc, fixture_path, &raw, &raw_len);
+    hu_error_t e = hu_file_slurp(alloc, fixture_path, 0, &raw, &raw_len);
     if (e != HU_OK)
         return e;
 
