@@ -1,6 +1,7 @@
 #include "human/context/conversation.h"
 #include "human/channel_class.h"
 #include "human/core/allocator.h"
+#include "human/core/file.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -543,33 +544,20 @@ hu_error_t hu_conversation_phrase_banks_load(hu_allocator_t *alloc, const char *
     if (!alloc || !path || !channel)
         return HU_ERR_INVALID_ARGUMENT;
 
-    FILE *f = fopen(path, "rb");
-    if (!f)
-        return HU_ERR_NOT_FOUND;
     /* 1 MiB cap: a phrase-bank file is a few KB; anything larger is corrupt */
-    long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
-    bool readable = size > 0 && size <= 1024L * 1024L && fseek(f, 0, SEEK_SET) == 0;
-    if (!readable) {
-        fclose(f);
+    char *data = NULL;
+    size_t data_len = 0;
+    hu_error_t err = hu_file_slurp(alloc, path, (size_t)1024 * 1024, &data, &data_len);
+    if (err != HU_OK)
+        return err;
+    if (data_len == 0) {
+        alloc->free(alloc->ctx, data, 1);
         return HU_ERR_INVALID_FORMAT;
     }
 
-    char *data = (char *)alloc->alloc(alloc->ctx, (size_t)size + 1);
-    if (!data) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t nread = fread(data, 1, (size_t)size, f);
-    fclose(f);
-    if (nread != (size_t)size) {
-        alloc->free(alloc->ctx, data, (size_t)size + 1);
-        return HU_ERR_IO;
-    }
-    data[size] = '\0';
-
     hu_json_value_t *root = NULL;
-    hu_error_t err = hu_json_parse(alloc, data, (size_t)size, &root);
-    alloc->free(alloc->ctx, data, (size_t)size + 1);
+    err = hu_json_parse(alloc, data, data_len, &root);
+    alloc->free(alloc->ctx, data, data_len + 1);
     if (err != HU_OK || !root)
         return err != HU_OK ? err : HU_ERR_PARSE;
 
