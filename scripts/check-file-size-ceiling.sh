@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14198   # src/daemon.c, measured 2026-07-18: reply-dispatch boilerplate collapsed into hu_daemon_dispatch_imessage_reply_msg (-48). Lower as god-files are carved.
+MAX_BASELINE=14186   # src/daemon.c, measured 2026-07-18: DPO-judge tick carved to src/daemon/daemon_learning_tick.c (-12 net after US-104 outcome wiring). Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
