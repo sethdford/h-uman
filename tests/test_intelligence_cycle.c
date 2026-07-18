@@ -1,3 +1,6 @@
+// @covers-none — integration test spanning
+// src/intelligence/{cycle,skills,world_model,self_improve,online_learning}.c; name-heuristic
+// wrongly implies src/context/intelligence.c
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/agent/tree_of_thought.h"
@@ -6,6 +9,7 @@
 #include "human/intelligence/cycle.h"
 #include "human/intelligence/online_learning.h"
 #include "human/intelligence/self_improve.h"
+#include "human/intelligence/skills.h"
 #include "human/intelligence/world_model.h"
 #include "human/memory.h"
 #include "test_framework.h"
@@ -14,21 +18,20 @@
 #include <time.h>
 
 static void ensure_opinions_table(sqlite3 *db) {
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS opinions ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "topic TEXT NOT NULL,"
-        "position TEXT NOT NULL,"
-        "confidence REAL NOT NULL,"
-        "first_expressed INTEGER NOT NULL,"
-        "last_expressed INTEGER NOT NULL,"
-        "superseded_by INTEGER)";
+    const char *sql = "CREATE TABLE IF NOT EXISTS opinions ("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "topic TEXT NOT NULL,"
+                      "position TEXT NOT NULL,"
+                      "confidence REAL NOT NULL,"
+                      "first_expressed INTEGER NOT NULL,"
+                      "last_expressed INTEGER NOT NULL,"
+                      "superseded_by INTEGER)";
     sqlite3_exec(db, sql, NULL, NULL, NULL);
 }
 
 static void insert_finding(sqlite3 *db, const char *source, const char *finding,
-                           const char *relevance, const char *priority,
-                           const char *action, int64_t created_at) {
+                           const char *relevance, const char *priority, const char *action,
+                           int64_t created_at) {
     sqlite3_stmt *stmt = NULL;
     const char *sql = "INSERT INTO research_findings "
                       "(source, finding, relevance, priority, suggested_action, "
@@ -133,21 +136,14 @@ static void cycle_with_findings_and_feeds_processes_all(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "arxiv", "Transformer scaling improves accuracy",
-                   "high", "HIGH",
-                   "Investigate scaling laws further with repeated analysis",
-                   now - 60);
-    insert_finding(db, "arxiv", "Attention mechanisms reduce latency",
-                   "medium", "MEDIUM",
-                   "Optimize attention module performance improvements",
-                   now - 30);
-    insert_finding(db, "github", "New library improves inference speed",
-                   "high", "HIGH",
-                   "Benchmark inference engine against baseline performance",
-                   now - 10);
+    insert_finding(db, "arxiv", "Transformer scaling improves accuracy", "high", "HIGH",
+                   "Investigate scaling laws further with repeated analysis", now - 60);
+    insert_finding(db, "arxiv", "Attention mechanisms reduce latency", "medium", "MEDIUM",
+                   "Optimize attention module performance improvements", now - 30);
+    insert_finding(db, "github", "New library improves inference speed", "high", "HIGH",
+                   "Benchmark inference engine against baseline performance", now - 10);
 
-    insert_feed_item(db, "rss_ai_news", "article",
-                     "GPT-5 announced with breakthrough capabilities",
+    insert_feed_item(db, "rss_ai_news", "article", "GPT-5 announced with breakthrough capabilities",
                      "https://example.com/gpt5", now - 100);
     insert_feed_item(db, "twitter_ai", "post",
                      "Major advancement in reinforcement learning published today",
@@ -162,9 +158,8 @@ static void cycle_with_findings_and_feeds_processes_all(void) {
     HU_ASSERT_TRUE(r.causal_recorded >= 1);
 
     sqlite3_stmt *chk = NULL;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT COUNT(*) FROM research_findings WHERE status = 'actioned'",
-        -1, &chk, NULL);
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT COUNT(*) FROM research_findings WHERE status = 'actioned'", -1, &chk, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(chk);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
@@ -189,10 +184,8 @@ static void cycle_findings_only_no_events(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "paper", "Novel architecture outperforms baseline",
-                   "high", "HIGH",
-                   "Replicate experiment to verify claims",
-                   now - 60);
+    insert_finding(db, "paper", "Novel architecture outperforms baseline", "high", "HIGH",
+                   "Replicate experiment to verify claims", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -240,14 +233,10 @@ static void cycle_recurring_words_extract_lessons(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "src1", "Finding about scaling",
-                   "high", "HIGH",
-                   "Investigate scaling approach thoroughly",
-                   now - 120);
-    insert_finding(db, "src2", "Finding about optimization",
-                   "high", "HIGH",
-                   "Investigate scaling methods completely",
-                   now - 60);
+    insert_finding(db, "src1", "Finding about scaling", "high", "HIGH",
+                   "Investigate scaling approach thoroughly", now - 120);
+    insert_finding(db, "src2", "Finding about optimization", "high", "HIGH",
+                   "Investigate scaling methods completely", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -257,8 +246,9 @@ static void cycle_recurring_words_extract_lessons(void) {
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT lesson FROM general_lessons WHERE lesson LIKE '%Recurring topic%' OR lesson LIKE '%recurring%'",
-        -1, &stmt, NULL);
+                                "SELECT lesson FROM general_lessons WHERE lesson LIKE '%Recurring "
+                                "topic%' OR lesson LIKE '%recurring%'",
+                                -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     /* Lessons may or may not be generated depending on word frequency thresholds */
     rc = sqlite3_step(stmt);
@@ -284,10 +274,8 @@ static void cycle_high_findings_learn_values(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "paper", "Alignment techniques improve safety",
-                   "critical", "HIGH",
-                   "Prioritize safety-first development approach",
-                   now - 60);
+    insert_finding(db, "paper", "Alignment techniques improve safety", "critical", "HIGH",
+                   "Prioritize safety-first development approach", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -310,14 +298,10 @@ static void cycle_high_findings_populate_opinions(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "research", "Sparse models are more efficient",
-                   "high", "HIGH",
-                   "Adopt sparse model architectures",
-                   now - 60);
-    insert_finding(db, "benchmark", "Dense models achieve higher accuracy",
-                   "high", "HIGH",
-                   "Maintain dense model baselines",
-                   now - 30);
+    insert_finding(db, "research", "Sparse models are more efficient", "high", "HIGH",
+                   "Adopt sparse model architectures", now - 60);
+    insert_finding(db, "benchmark", "Dense models achieve higher accuracy", "high", "HIGH",
+                   "Maintain dense model baselines", now - 30);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -341,14 +325,10 @@ static void cycle_recurring_source_creates_skills(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "arxiv_ml", "New training method improves convergence",
-                   "high", "HIGH",
-                   "Monitor arxiv_ml for training improvements",
-                   now - 120);
-    insert_finding(db, "arxiv_ml", "Better regularization reduces overfitting",
-                   "medium", "MEDIUM",
-                   "Apply regularization techniques broadly",
-                   now - 60);
+    insert_finding(db, "arxiv_ml", "New training method improves convergence", "high", "HIGH",
+                   "Monitor arxiv_ml for training improvements", now - 120);
+    insert_finding(db, "arxiv_ml", "Better regularization reduces overfitting", "medium", "MEDIUM",
+                   "Apply regularization techniques broadly", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -356,9 +336,8 @@ static void cycle_recurring_source_creates_skills(void) {
     HU_ASSERT_TRUE(r.skills_updated >= 1);
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT name FROM skills WHERE name LIKE 'monitor_%'",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db, "SELECT name FROM skills WHERE name LIKE 'monitor_%'", -1,
+                                &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
@@ -382,9 +361,8 @@ static void cycle_logs_cognitive_load(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "test", "Test finding for cognitive load",
-                   "high", "HIGH", "Action needed immediately",
-                   now - 60);
+    insert_finding(db, "test", "Test finding for cognitive load", "high", "HIGH",
+                   "Action needed immediately", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -408,9 +386,8 @@ static void cycle_records_growth_milestone(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "src", "Important finding for milestones",
-                   "high", "HIGH", "Track this milestone carefully",
-                   now - 60);
+    insert_finding(db, "src", "Important finding for milestones", "high", "HIGH",
+                   "Track this milestone carefully", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -418,9 +395,9 @@ static void cycle_records_growth_milestone(void) {
     HU_ASSERT_TRUE(r.findings_actioned >= 1);
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT after_state FROM growth_milestones WHERE topic = 'research_cycle'",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT after_state FROM growth_milestones WHERE topic = 'research_cycle'", -1, &stmt,
+        NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
@@ -444,9 +421,8 @@ static void cycle_seeds_behavioral_feedback(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "src", "Finding triggers feedback",
-                   "high", "HIGH", "Process this finding urgently",
-                   now - 60);
+    insert_finding(db, "src", "Finding triggers feedback", "high", "HIGH",
+                   "Process this finding urgently", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -454,9 +430,9 @@ static void cycle_seeds_behavioral_feedback(void) {
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT signal, context FROM behavioral_feedback "
-        "WHERE behavior_type = 'research_cycle'",
-        -1, &stmt, NULL);
+                                "SELECT signal, context FROM behavioral_feedback "
+                                "WHERE behavior_type = 'research_cycle'",
+                                -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
@@ -506,14 +482,14 @@ static void cycle_low_priority_findings_skipped(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "src", "Low priority finding",
-                   "low", "LOW", "Maybe look at this later",
+    insert_finding(db, "src", "Low priority finding", "low", "LOW", "Maybe look at this later",
                    now - 60);
 
     int pre_low_count = 0;
     {
         sqlite3_stmt *s = NULL;
-        sqlite3_prepare_v2(db,
+        sqlite3_prepare_v2(
+            db,
             "SELECT COUNT(*) FROM research_findings WHERE priority = 'LOW' AND status = 'pending'",
             -1, &s, NULL);
         if (sqlite3_step(s) == SQLITE_ROW)
@@ -527,8 +503,8 @@ static void cycle_low_priority_findings_skipped(void) {
     (void)err;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT COUNT(*) FROM research_findings WHERE priority = 'LOW' AND status = 'pending'",
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT COUNT(*) FROM research_findings WHERE priority = 'LOW' AND status = 'pending'",
         -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
@@ -554,7 +530,8 @@ static void cycle_simulation_cache_returns_cached_result(void) {
 
     /* Seed a causal observation */
     int64_t now = (int64_t)time(NULL);
-    HU_ASSERT_EQ(hu_world_record_outcome(&wm, "deploy code", 11, "service restarts", 16, 0.9, now), HU_OK);
+    HU_ASSERT_EQ(hu_world_record_outcome(&wm, "deploy code", 11, "service restarts", 16, 0.9, now),
+                 HU_OK);
 
     /* First simulate — should query causal_observations and cache the result */
     hu_wm_prediction_t pred1 = {0};
@@ -629,7 +606,8 @@ static void cycle_context_changes_prediction(void) {
 
     int64_t now = (int64_t)time(NULL);
     /* Record outcomes with different contexts */
-    HU_ASSERT_EQ(hu_world_record_outcome(&wm, "send message", 12, "delivered quickly", 17, 0.9, now), HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_record_outcome(&wm, "send message", 12, "delivered quickly", 17, 0.9, now), HU_OK);
 
     /* Simulate with no context */
     hu_wm_prediction_t pred_none = {0};
@@ -695,10 +673,8 @@ static void cycle_triggers_prompt_patches(void) {
 
     int64_t now = (int64_t)time(NULL);
 
-    insert_finding(db, "research", "Prompt engineering improves responses",
-                   "high", "HIGH",
-                   "Adopt systematic prompt engineering approach",
-                   now - 60);
+    insert_finding(db, "research", "Prompt engineering improves responses", "high", "HIGH",
+                   "Adopt systematic prompt engineering approach", now - 60);
 
     hu_intelligence_cycle_result_t r = {0};
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
@@ -706,17 +682,17 @@ static void cycle_triggers_prompt_patches(void) {
     HU_ASSERT_TRUE(r.findings_actioned >= 1);
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_patches'",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT name FROM sqlite_master WHERE type='table' AND name='prompt_patches'", -1,
+        &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
     sqlite3_finalize(stmt);
 
-    rc = sqlite3_prepare_v2(db,
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_prefs'",
-        -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(
+        db, "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_prefs'", -1, &stmt,
+        NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     rc = sqlite3_step(stmt);
     HU_ASSERT_EQ(rc, SQLITE_ROW);
@@ -733,6 +709,116 @@ static void cycle_triggers_prompt_patches(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* --- Skill attempt flood guard: negatives bump aggregate only, no rows --- */
+
+static void insert_monitor_skill(sqlite3 *db, const char *name, const char *source, int64_t now,
+                                 int64_t *out_id) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char strategy[256];
+    int n = snprintf(strategy, sizeof(strategy), "Monitor %s for AI developments: track updates",
+                     source);
+    HU_ASSERT_TRUE(n > 0 && (size_t)n < sizeof(strategy));
+    hu_error_t err =
+        hu_skill_insert(&alloc, db, name, strlen(name), "research", 8, "system", 6, NULL, 0,
+                        strategy, (size_t)n, "intelligence_cycle", 18, 0, now, out_id);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
+static int count_attempts_by_signal(sqlite3 *db, const char *signal) {
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM skill_attempts WHERE outcome_signal = ?", -1,
+                           &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, signal, -1, SQLITE_STATIC);
+    int count = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+static void cycle_no_matching_findings_inserts_no_attempt_rows(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    ensure_opinions_table(db);
+
+    int64_t now = (int64_t)time(NULL);
+
+    /* Three active system skills, zero findings anywhere: every skill takes
+     * the negative branch of cycle Step 13. */
+    int64_t id_a = 0, id_b = 0, id_c = 0;
+    insert_monitor_skill(db, "monitor_src_alpha", "src_alpha", now, &id_a);
+    insert_monitor_skill(db, "monitor_src_beta", "src_beta", now, &id_b);
+    insert_monitor_skill(db, "monitor_src_gamma", "src_gamma", now, &id_c);
+
+    HU_ASSERT_EQ(count_rows(db, "skill_attempts"), 0);
+
+    hu_intelligence_cycle_result_t r = {0};
+    hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* The O(skills x cycles) flood guard: negatives must NOT append per-skill
+     * skill_attempts rows (at most one summary row per cycle is tolerated). */
+    HU_ASSERT_TRUE(count_rows(db, "skill_attempts") <= 1);
+    HU_ASSERT_EQ(count_attempts_by_signal(db, "negative"), 0);
+
+    /* But the per-skill aggregate on the skills table still records the miss. */
+    hu_skill_t reloaded = {0};
+    HU_ASSERT_EQ(hu_skill_get_by_name(&alloc, db, "monitor_src_alpha", 17, &reloaded), HU_OK);
+    HU_ASSERT_EQ(reloaded.attempts, 1);
+    HU_ASSERT_EQ(reloaded.successes, 0);
+    HU_ASSERT_EQ(hu_skill_get_by_name(&alloc, db, "monitor_src_gamma", 17, &reloaded), HU_OK);
+    HU_ASSERT_EQ(reloaded.attempts, 1);
+    HU_ASSERT_EQ(reloaded.successes, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void cycle_matching_finding_still_records_positive_attempt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    ensure_opinions_table(db);
+
+    int64_t now = (int64_t)time(NULL);
+
+    int64_t skill_id = 0;
+    insert_monitor_skill(db, "monitor_arxiv", "arxiv", now, &skill_id);
+
+    /* Actioned finding whose text contains the skill's source prefix, so
+     * Step 13 matches it and records a positive attempt. */
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO research_findings "
+                      "(source, finding, relevance, priority, suggested_action, "
+                      "status, created_at) VALUES "
+                      "('arxiv', 'arxiv paper on scaling laws', 'high', 'HIGH', "
+                      "'Review scaling laws paper', 'actioned', ?)";
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &stmt, NULL), SQLITE_OK);
+    sqlite3_bind_int64(stmt, 1, now - 60);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_DONE);
+    sqlite3_finalize(stmt);
+
+    hu_intelligence_cycle_result_t r = {0};
+    hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Matched skills still leave an evidence trail in skill_attempts. */
+    HU_ASSERT_TRUE(count_attempts_by_signal(db, "positive") >= 1);
+    HU_ASSERT_EQ(count_attempts_by_signal(db, "negative"), 0);
+
+    hu_skill_t reloaded = {0};
+    HU_ASSERT_EQ(hu_skill_get_by_name(&alloc, db, "monitor_arxiv", 13, &reloaded), HU_OK);
+    HU_ASSERT_TRUE(reloaded.attempts >= 1);
+    HU_ASSERT_TRUE(reloaded.successes >= 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* --- Tree-of-thought: depth increases exploration --- */
 
 static void tot_depth_increases_exploration(void) {
@@ -742,8 +828,8 @@ static void tot_depth_increases_exploration(void) {
     cfg1.enabled = true;
 
     hu_tot_result_t result1 = {0};
-    hu_error_t err1 = hu_tot_explore(&alloc, NULL, "test", 4, "solve this problem", 18,
-                                     &cfg1, &result1);
+    hu_error_t err1 =
+        hu_tot_explore(&alloc, NULL, "test", 4, "solve this problem", 18, &cfg1, &result1);
     HU_ASSERT_EQ(err1, HU_OK);
     HU_ASSERT_TRUE(result1.branches_explored >= 1);
     size_t explored1 = result1.branches_explored;
@@ -754,8 +840,8 @@ static void tot_depth_increases_exploration(void) {
     cfg3.enabled = true;
 
     hu_tot_result_t result3 = {0};
-    hu_error_t err3 = hu_tot_explore(&alloc, NULL, "test", 4, "solve this problem", 18,
-                                     &cfg3, &result3);
+    hu_error_t err3 =
+        hu_tot_explore(&alloc, NULL, "test", 4, "solve this problem", 18, &cfg3, &result3);
     HU_ASSERT_EQ(err3, HU_OK);
     HU_ASSERT_TRUE(result3.branches_explored >= explored1);
     hu_tot_result_free(&alloc, &result3);
@@ -779,6 +865,8 @@ void run_intelligence_cycle_tests(void) {
     HU_RUN_TEST(cycle_records_growth_milestone);
     HU_RUN_TEST(cycle_seeds_behavioral_feedback);
     HU_RUN_TEST(cycle_low_priority_findings_skipped);
+    HU_RUN_TEST(cycle_no_matching_findings_inserts_no_attempt_rows);
+    HU_RUN_TEST(cycle_matching_finding_still_records_positive_attempt);
     HU_RUN_TEST(cycle_simulation_cache_returns_cached_result);
     HU_RUN_TEST(cycle_context_changes_prediction);
     HU_RUN_TEST(cycle_record_signal_changes_weight);
