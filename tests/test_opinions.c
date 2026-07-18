@@ -155,6 +155,7 @@ static void run_opinion_challenge_tests(void) {
 #include "human/core/allocator.h"
 #include "human/humanness.h" /* hu_evolved_opinion_t + build_directive (firmness map) */
 #include "human/memory.h"
+#include "human/memory/cognitive.h" /* pins: no hu_opinion_t collision with opinions.h */
 #include "human/memory/opinions.h"
 #include "test_framework.h"
 #include <string.h>

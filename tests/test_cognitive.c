@@ -4,98 +4,6 @@
 #include "test_framework.h"
 #include <string.h>
 
-static void test_opinions_create_table_valid(void) {
-    char buf[1024];
-    size_t len = 0;
-    hu_error_t err = hu_opinions_create_table_sql(buf, sizeof(buf), &len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(len > 0);
-    HU_ASSERT_TRUE(strstr(buf, "CREATE TABLE") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "opinions") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "superseded_by") != NULL);
-}
-
-static void test_opinions_upsert_sql_valid(void) {
-    char buf[512];
-    size_t len = 0;
-    hu_error_t err = hu_opinions_upsert_sql("pizza", 5, "delicious", 9, 0.9, 1000u,
-                                            buf, sizeof(buf), &len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(len > 0);
-    HU_ASSERT_TRUE(strstr(buf, "INSERT INTO") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "pizza") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "delicious") != NULL);
-}
-
-static void test_opinions_query_current_sql_valid(void) {
-    char buf[512];
-    size_t len = 0;
-    hu_error_t err = hu_opinions_query_current_sql("pizza", 5, buf, sizeof(buf), &len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(strstr(buf, "superseded_by IS NULL") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "WHERE") != NULL);
-}
-
-static void test_opinions_supersede_sql_valid(void) {
-    char buf[256];
-    size_t len = 0;
-    hu_error_t err = hu_opinions_supersede_sql(1, 2, buf, sizeof(buf), &len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(strstr(buf, "UPDATE") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "superseded_by") != NULL);
-}
-
-static void test_opinions_is_core_value_true(void) {
-    const char *core_values[] = {"family", "honesty"};
-    bool r = hu_opinions_is_core_value("family", 6, core_values, 2);
-    HU_ASSERT_TRUE(r);
-}
-
-static void test_opinions_is_core_value_false(void) {
-    const char *core_values[] = {"family", "honesty"};
-    bool r = hu_opinions_is_core_value("pizza", 5, core_values, 2);
-    HU_ASSERT_FALSE(r);
-}
-
-static void test_opinions_build_prompt_with_data(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_opinion_t ops[2] = {{0}};
-    ops[0].topic = hu_strndup(&alloc, "pizza", 5);
-    ops[0].topic_len = 5;
-    ops[0].position = hu_strndup(&alloc, "delicious", 9);
-    ops[0].position_len = 9;
-    ops[0].confidence = 0.8;
-    ops[1].topic = hu_strndup(&alloc, "coffee", 6);
-    ops[1].topic_len = 6;
-    ops[1].position = hu_strndup(&alloc, "essential", 9);
-    ops[1].position_len = 9;
-    ops[1].confidence = 0.9;
-
-    char *out = NULL;
-    size_t out_len = 0;
-    hu_error_t err = hu_opinions_build_prompt(&alloc, ops, 2, &out, &out_len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(out);
-    HU_ASSERT_TRUE(strstr(out, "pizza") != NULL);
-    HU_ASSERT_TRUE(strstr(out, "coffee") != NULL);
-    HU_ASSERT_TRUE(strstr(out, "[YOUR OPINIONS]") != NULL);
-
-    hu_str_free(&alloc, out);
-    hu_opinion_deinit(&alloc, &ops[0]);
-    hu_opinion_deinit(&alloc, &ops[1]);
-}
-
-static void test_opinions_build_prompt_empty(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    size_t out_len = 0;
-    hu_error_t err = hu_opinions_build_prompt(&alloc, NULL, 0, &out, &out_len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(out);
-    HU_ASSERT_TRUE(strstr(out, "No recorded opinions") != NULL);
-    hu_str_free(&alloc, out);
-}
-
 static void test_chapters_create_table_valid(void) {
     char buf[1024];
     size_t len = 0;
@@ -274,15 +182,6 @@ static void test_social_graph_build_prompt_data(void) {
 
 static void test_deinit_frees_all(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_opinion_t op = {0};
-    op.topic = hu_strndup(&alloc, "t", 1);
-    op.topic_len = 1;
-    op.position = hu_strndup(&alloc, "p", 1);
-    op.position_len = 1;
-    hu_opinion_deinit(&alloc, &op);
-    HU_ASSERT_NULL(op.topic);
-    HU_ASSERT_NULL(op.position);
-
     hu_life_chapter_t ch = {0};
     ch.theme = hu_strndup(&alloc, "t", 1);
     ch.theme_len = 1;
@@ -310,14 +209,6 @@ static void test_deinit_frees_all(void) {
 
 void run_cognitive_tests(void) {
     HU_TEST_SUITE("cognitive");
-    HU_RUN_TEST(test_opinions_create_table_valid);
-    HU_RUN_TEST(test_opinions_upsert_sql_valid);
-    HU_RUN_TEST(test_opinions_query_current_sql_valid);
-    HU_RUN_TEST(test_opinions_supersede_sql_valid);
-    HU_RUN_TEST(test_opinions_is_core_value_true);
-    HU_RUN_TEST(test_opinions_is_core_value_false);
-    HU_RUN_TEST(test_opinions_build_prompt_with_data);
-    HU_RUN_TEST(test_opinions_build_prompt_empty);
     HU_RUN_TEST(test_chapters_create_table_valid);
     HU_RUN_TEST(test_chapters_insert_sql_valid);
     HU_RUN_TEST(test_chapters_query_active_valid);

@@ -7,33 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* --- F65 Opinions --- */
-typedef struct hu_opinion {
-    int64_t id;
-    char *topic;
-    size_t topic_len;
-    char *position;
-    size_t position_len;
-    double confidence;
-    uint64_t first_expressed;
-    uint64_t last_expressed;
-    int64_t superseded_by;
-} hu_opinion_t;
-
-hu_error_t hu_opinions_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_opinions_upsert_sql(const char *topic, size_t topic_len,
-                                 const char *position, size_t position_len,
-                                 double confidence, uint64_t now_ms,
-                                 char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_opinions_query_current_sql(const char *topic, size_t topic_len,
-                                        char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_opinions_supersede_sql(int64_t old_id, int64_t new_id,
-                                    char *buf, size_t cap, size_t *out_len);
-bool hu_opinions_is_core_value(const char *topic, size_t topic_len,
-                              const char *const *core_values, size_t core_count);
-hu_error_t hu_opinions_build_prompt(hu_allocator_t *alloc, const hu_opinion_t *opinions,
-                                   size_t count, char **out, size_t *out_len);
-void hu_opinion_deinit(hu_allocator_t *alloc, hu_opinion_t *op);
+/* The F65 opinion surface (a second, colliding hu_opinion_t + raw SQL-string
+ * builders) was removed 2026-07-18. The one hu_opinion_t definition and its
+ * repo-backed API live in human/memory/opinions.h; the pure challenge
+ * detector lives in human/memory/opinion_challenge.h. */
 
 /* --- F66 Life Chapters --- */
 #ifndef HU_COGNITIVE_SKIP_LIFE_CHAPTER
@@ -51,13 +28,13 @@ typedef struct hu_life_chapter {
 } hu_life_chapter_t;
 
 hu_error_t hu_chapters_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_chapters_insert_sql(const hu_life_chapter_t *ch,
-                                  char *buf, size_t cap, size_t *out_len);
+hu_error_t hu_chapters_insert_sql(const hu_life_chapter_t *ch, char *buf, size_t cap,
+                                  size_t *out_len);
 hu_error_t hu_chapters_query_active_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_chapters_close_sql(int64_t id, uint64_t ended_at,
-                                 char *buf, size_t cap, size_t *out_len);
+hu_error_t hu_chapters_close_sql(int64_t id, uint64_t ended_at, char *buf, size_t cap,
+                                 size_t *out_len);
 hu_error_t hu_chapters_build_prompt(hu_allocator_t *alloc, const hu_life_chapter_t *chapters,
-                                   size_t count, char **out, size_t *out_len);
+                                    size_t count, char **out, size_t *out_len);
 void hu_chapter_deinit(hu_allocator_t *alloc, hu_life_chapter_t *ch);
 
 #endif /* HU_COGNITIVE_SKIP_LIFE_CHAPTER */
@@ -83,17 +60,16 @@ typedef struct hu_social_link {
 } hu_social_link_t;
 
 hu_error_t hu_social_graph_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_social_graph_insert_link_sql(const hu_social_link_t *link,
-                                          char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_social_graph_query_for_contact_sql(const char *contact_id, size_t len,
-                                                char *buf, size_t cap, size_t *out_len);
-bool hu_social_graph_contacts_connected(const hu_social_link_t *links, size_t count,
-                                       const char *a, size_t a_len,
-                                       const char *b, size_t b_len);
+hu_error_t hu_social_graph_insert_link_sql(const hu_social_link_t *link, char *buf, size_t cap,
+                                           size_t *out_len);
+hu_error_t hu_social_graph_query_for_contact_sql(const char *contact_id, size_t len, char *buf,
+                                                 size_t cap, size_t *out_len);
+bool hu_social_graph_contacts_connected(const hu_social_link_t *links, size_t count, const char *a,
+                                        size_t a_len, const char *b, size_t b_len);
 const char *hu_social_rel_type_str(hu_social_rel_type_t t);
 hu_error_t hu_social_graph_build_prompt(hu_allocator_t *alloc, const hu_social_link_t *links,
-                                       size_t count, const char *contact_id, size_t cid_len,
-                                       char **out, size_t *out_len);
+                                        size_t count, const char *contact_id, size_t cid_len,
+                                        char **out, size_t *out_len);
 void hu_social_link_deinit(hu_allocator_t *alloc, hu_social_link_t *link);
 
 #endif /* HU_MEMORY_COGNITIVE_H */

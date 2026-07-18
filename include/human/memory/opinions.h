@@ -8,10 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The pure opinion-challenge detector (roadmap #14) lives in
- * human/memory/opinion_challenge.h — it has no hu_opinion_t dependency and
- * must stay includable alongside human/memory/cognitive.h, whose legacy F65
- * hu_opinion_t definition collides with the one below. */
+/* This is the ONE hu_opinion_t definition (the legacy colliding copy in
+ * human/memory/cognitive.h was removed 2026-07-18). The pure opinion-challenge
+ * detector (roadmap #14) lives in human/memory/opinion_challenge.h. */
 
 #ifdef HU_ENABLE_SQLITE
 
