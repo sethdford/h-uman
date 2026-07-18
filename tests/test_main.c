@@ -43,6 +43,7 @@ void run_prompt_budget_snapshot_tests(void);
 void run_config_gated_subsystems_tests(void);
 void run_silent_disable_compliance_tests(void);
 void run_io_secure_tests(void);
+void run_file_slurp_tests(void);
 void run_config_banner_runtime_failfast_tests(void);
 void run_slice_tests(void);
 void run_tool_registry_honesty_tests(void);
@@ -1089,6 +1090,7 @@ int main(int argc, char **argv) {
     run_config_gated_subsystems_tests();
     run_silent_disable_compliance_tests();
     run_io_secure_tests();
+    run_file_slurp_tests();
     run_config_banner_runtime_failfast_tests();
     run_slice_tests();
     run_tool_registry_honesty_tests();

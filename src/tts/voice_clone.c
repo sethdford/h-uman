@@ -5,6 +5,7 @@
 #include "human/tts/voice_clone.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/process_util.h"
 #include "human/persona.h"
@@ -356,30 +357,21 @@ hu_error_t hu_persona_set_voice_id(hu_allocator_t *alloc, const char *persona_na
         return HU_ERR_INVALID_ARGUMENT;
 
     /* Read existing persona JSON */
-    FILE *f = fopen(path, "r");
-    if (!f)
+    char *buf = NULL;
+    size_t rd = 0;
+    hu_error_t err = hu_file_slurp(alloc, path, 0, &buf, &rd);
+    if (err == HU_ERR_OUT_OF_MEMORY)
+        return HU_ERR_OUT_OF_MEMORY;
+    if (err != HU_OK)
         return HU_ERR_IO;
-
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) {
-        fclose(f);
+    if (rd == 0) {
+        alloc->free(alloc->ctx, buf, 1);
         return HU_ERR_PARSE;
     }
 
-    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
-    if (!buf) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[rd] = '\0';
-
     hu_json_value_t *root = NULL;
-    hu_error_t err = hu_json_parse(alloc, buf, rd, &root);
-    alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+    err = hu_json_parse(alloc, buf, rd, &root);
+    alloc->free(alloc->ctx, buf, rd + 1);
     if (err != HU_OK)
         return HU_ERR_PARSE;
 

@@ -551,6 +551,7 @@ set(HU_CORE_SOURCES
     src/core/arena.c
     src/core/string.c
     src/core/io_secure.c
+    src/core/file.c
     src/core/json.c
     src/core/state_file.c
     src/core/time.c
@@ -3304,6 +3305,7 @@ set(HU_TEST_SOURCES
     tests/test_prompt_budget_snapshot.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
+    tests/test_file_slurp.c
     tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
