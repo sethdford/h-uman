@@ -152,9 +152,11 @@ static void default_chain_strips_known_dirty_input(void) {
     memset(&cr, 0, sizeof(cr));
     HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, in, strlen(in), &cr),
                  HU_OK);
-    HU_ASSERT(cr.final_decision != HU_VALIDATOR_REJECT);
-    HU_ASSERT(strstr(cr.final_text, "<thinking>") == NULL);
-    HU_ASSERT(strstr(cr.final_text, "I'd be happy to") == NULL);
+    /* G10 D8 (2026-07-18): "I'd be happy to help" is assistant-service
+     * phrasing; the response_guard validator now REJECTS the message so the
+     * caller regenerates, rather than stripping the phrase and sending a
+     * mangled remainder. REJECT is the pinned contract. */
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REJECT);
     hu_chain_result_free(&alloc, &cr);
     hu_output_validator_chain_destroy(chain);
 }

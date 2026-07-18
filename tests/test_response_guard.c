@@ -1582,6 +1582,44 @@ static void guard_audit_detects_numbered_analysis_fixture(void) {
     HU_ASSERT(!hu_guard_audit_self_talk_leak("hey what's up", 13));
 }
 
+/* ── G10 D8 (2026-07-18 audit) — assistant-service phrasing ────────────────
+ * "please wait a moment while I send you the PIN" reached a real contact on
+ * 2026-07-17, AFTER the G10 deploy: D1-D7 cover deliberation/meta-text
+ * shapes but had no family for customer-service assistant phrasing. No
+ * human texts like a support desk. */
+
+static void guard_d8_rejects_assistant_service_phrasing(void) {
+    /* The real leak, verbatim. */
+    const char *leak = "please wait a moment while I send you the PIN";
+    HU_ASSERT(hu_guard_audit_self_talk_leak(leak, strlen(leak)));
+
+    static const char *const shapes[] = {
+        "Please wait a moment.",
+        "Please wait while I pull that up",
+        "As an AI, I can't do that",
+        "I'm an AI assistant",
+        "How can I assist you today?",
+        "I cannot assist with that request",
+        "I'd be happy to help with that!",
+        "Is there anything else I can help with?",
+        "I apologize for any confusion caused",
+    };
+    for (size_t i = 0; i < sizeof(shapes) / sizeof(shapes[0]); i++)
+        HU_ASSERT(hu_guard_audit_self_talk_leak(shapes[i], strlen(shapes[i])));
+}
+
+static void guard_d8_allows_human_help_offers(void) {
+    /* Human-register offers of help must NOT trip D8 — "assist" and
+     * service-desk framing are the tell, not helping itself. */
+    static const char *const human[] = {
+        "i can help you with the move tomorrow",  "happy to help if you need it",
+        "wait a moment, gotta grab the door",     "give me a sec, sending it now",
+        "anything else you need from the store?", "sorry for the confusion earlier lol",
+    };
+    for (size_t i = 0; i < sizeof(human) / sizeof(human[0]); i++)
+        HU_ASSERT(!hu_guard_audit_self_talk_leak(human[i], strlen(human[i])));
+}
+
 /* ── Sprint 38 — G8 biography + reject telemetry ─────────────────────── */
 
 static void guard_g8_rejects_biography_only_echo(void) {
@@ -2638,6 +2676,8 @@ void run_response_guard_tests(void) {
     /* Sprint 40 — cross-recipient hygiene + selection-step audit. */
     HU_RUN_TEST(agent_contact_boundary_clears_director_history);
     HU_RUN_TEST(guard_audit_detects_numbered_analysis_fixture);
+    HU_RUN_TEST(guard_d8_rejects_assistant_service_phrasing);
+    HU_RUN_TEST(guard_d8_allows_human_help_offers);
 
     /* Sprint 38 — G8 biography source + reject telemetry counters. */
     HU_RUN_TEST(guard_g8_rejects_biography_only_echo);
