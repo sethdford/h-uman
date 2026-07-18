@@ -1,9 +1,9 @@
 #include "human/security/skill_trust.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include <ctype.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,10 +56,10 @@ static bool dangerous_curl_pipe_shell(const char *s) {
             const char *r = pipe_pos + 1;
             while (*r && isspace((unsigned char)*r))
                 r++;
-            if ((hu_strcasestr(r, "sh") == r && (r[2] == '\0' || (!isalnum((unsigned char)r[2]) &&
-                                                                 r[2] != '_'))) ||
-                (hu_strcasestr(r, "bash") == r && (r[4] == '\0' || (!isalnum((unsigned char)r[4]) &&
-                                                                    r[4] != '_'))))
+            if ((hu_strcasestr(r, "sh") == r &&
+                 (r[2] == '\0' || (!isalnum((unsigned char)r[2]) && r[2] != '_'))) ||
+                (hu_strcasestr(r, "bash") == r &&
+                 (r[4] == '\0' || (!isalnum((unsigned char)r[4]) && r[4] != '_'))))
                 return true;
             pipe_pos = strchr(pipe_pos + 1, '|');
         }
@@ -71,7 +71,9 @@ static bool dangerous_dev_redirect(const char *s) {
     return hu_strcasestr(s, ">> /dev/") != NULL || hu_strcasestr(s, "> /dev/") != NULL;
 }
 
-static bool dangerous_mkfs(const char *s) { return find_word_ci(s, "mkfs") != NULL; }
+static bool dangerous_mkfs(const char *s) {
+    return find_word_ci(s, "mkfs") != NULL;
+}
 
 static bool dangerous_fork_bomb(const char *s) {
     return strcmp(s, ":(){ :|:& };:") == 0;
@@ -117,9 +119,9 @@ static bool dangerous_eval_subshell(const char *s) {
 }
 
 hu_error_t hu_skill_trust_verify_signature(const hu_skill_trust_config_t *cfg,
-                                           const char *publisher_name,
-                                           const char *manifest_json, size_t manifest_json_len,
-                                           const char *signature_hex, size_t signature_hex_len) {
+                                           const char *publisher_name, const char *manifest_json,
+                                           size_t manifest_json_len, const char *signature_hex,
+                                           size_t signature_hex_len) {
     (void)manifest_json_len;
     (void)signature_hex_len;
     if (!cfg || !publisher_name || !manifest_json || !signature_hex)
@@ -128,8 +130,9 @@ hu_error_t hu_skill_trust_verify_signature(const hu_skill_trust_config_t *cfg,
         return HU_ERR_INVALID_ARGUMENT;
 
 #if !defined(HU_IS_TEST) || !HU_IS_TEST
-    hu_log_info("skill_trust", NULL,
-                "warning: Ed25519 signature verification not yet implemented (publisher allowlist only)");
+    hu_log_info(
+        "skill_trust", NULL,
+        "warning: Ed25519 signature verification not yet implemented (publisher allowlist only)");
 #endif
 
     for (size_t i = 0; i < cfg->trusted_publishers_count; i++) {
@@ -151,9 +154,9 @@ hu_error_t hu_skill_trust_inspect_command(const char *command, size_t command_le
     buf[command_len] = '\0';
 
     hu_error_t err = HU_OK;
-    if (dangerous_rm_rf_root(buf) || dangerous_curl_pipe_shell(buf) || dangerous_dev_redirect(buf) ||
-        dangerous_mkfs(buf) || dangerous_fork_bomb(buf) || dangerous_dd_dev(buf) ||
-        dangerous_chmod_777_root(buf) || dangerous_eval_subshell(buf))
+    if (dangerous_rm_rf_root(buf) || dangerous_curl_pipe_shell(buf) ||
+        dangerous_dev_redirect(buf) || dangerous_mkfs(buf) || dangerous_fork_bomb(buf) ||
+        dangerous_dd_dev(buf) || dangerous_chmod_777_root(buf) || dangerous_eval_subshell(buf))
         err = HU_ERR_SECURITY_COMMAND_NOT_ALLOWED;
 
     free(buf);
@@ -243,44 +246,13 @@ static int build_publishers_path(char *out, size_t out_cap) {
 
 static hu_error_t read_file_contents(hu_allocator_t *alloc, const char *path, char **out_buf,
                                      size_t *out_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        if (errno == ENOENT) {
-            *out_buf = NULL;
-            *out_len = 0;
-            return HU_OK;
-        }
-        return HU_ERR_IO;
+    hu_error_t err = hu_file_slurp(alloc, path, 0, out_buf, out_len);
+    if (err == HU_ERR_NOT_FOUND) {
+        *out_buf = NULL;
+        *out_len = 0;
+        return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    size_t n = (size_t)sz;
-    char *raw = (char *)alloc->alloc(alloc->ctx, n + 1);
-    if (!raw) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    if (n > 0 && fread(raw, 1, n, f) != n) {
-        fclose(f);
-        alloc->free(alloc->ctx, raw, n + 1);
-        return HU_ERR_IO;
-    }
-    fclose(f);
-    raw[n] = '\0';
-    *out_buf = raw;
-    *out_len = n;
-    return HU_OK;
+    return err;
 }
 #endif
 

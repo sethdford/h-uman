@@ -4761,6 +4761,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                             response_time_ms);
                     }
                 }
+                /* F32: refresh the sender's style fingerprint from their inbound
+                 * messages so contact_style_overlay stays current. Sits on the
+                 * common batch path, independent of llm_decides. Raw
+                 * msgs[].content, not combined/augmented text — attachment
+                 * descriptions aren't the contact's typing, and per-message
+                 * updates keep avg_message_length honest. */
+                if (agent->memory && batch_key && key_len > 0) {
+                    for (size_t si = batch_start; si <= batch_end; si++) {
+                        size_t slen = strlen(msgs[si].content);
+                        if (slen > 0)
+                            (void)hu_style_fingerprint_update_inbound(
+                                agent->memory, alloc, batch_key, key_len, msgs[si].content, slen);
+                    }
+                }
 #endif
 
                 /* Preload channel history early so the group classifier can use it */
@@ -12913,12 +12927,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                     }
                 }
-
-                /* F32: Update style fingerprint with our sent response */
-                if (agent->memory && batch_key && key_len > 0 && response && response_len > 0 &&
-                    !llm_decides)
-                    (void)hu_style_fingerprint_update(agent->memory, alloc, batch_key, key_len,
-                                                      response, response_len);
 
 #if !defined(HU_IS_TEST) && defined(HU_ENABLE_SQLITE)
                 /* Turing score: evaluate response human-likeness post-send.
