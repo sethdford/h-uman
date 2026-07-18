@@ -605,7 +605,13 @@ hu_error_t hu_agent_from_config(
     out->autonomy_level = autonomy_level;
     out->permission_level = HU_PERM_DANGER_FULL_ACCESS;
     out->permission_base_level = HU_PERM_DANGER_FULL_ACCESS;
-    out->reflection.enabled = true;
+    /* 2026-07-13: reflection quality-loop DEFAULT OFF. Its NEEDS_RETRY retry
+     * fed the model self-critique text that got echoed to real contacts
+     * ("NEEDS_RETRY. Nobody texts GOOD..."). It's an unmeasured quality
+     * subsystem that misfires (mails garbage) more than it demonstrably
+     * helps; per feature-gate-requires-measurement it ships OFF until a
+     * measurement shows it improves outbound. Re-enable via config. */
+    out->reflection.enabled = false;
     out->reflection.use_llm = true;
     out->reflection.max_retries = 2;
     out->reflection.min_response_tokens = 0;
@@ -1009,7 +1015,14 @@ hu_error_t hu_agent_from_config(
     out->sota.mem_policy.relevance_weight = 0.4;
     out->sota.mem_policy.frequency_weight = 0.2;
 
-    out->sota.gvr_config.enabled = true;
+    /* 2026-07-13: GVR (Generator-Verifier-Reviser) DEFAULT OFF. Its
+     * verify/revise SYSTEM PROMPTS got echoed as the reply ("please revise
+     * the response to ensure it maintains a professional and formal tone"
+     * reached a real contact). GVR is a factual-verification loop meant for
+     * task answers, not casual persona texting — same class as reflection,
+     * unmeasured, misfires. OFF until measured. See also the persona-skip
+     * guard on both invocation sites (agent_stream.c + agent_turn.c). */
+    out->sota.gvr_config.enabled = false;
     out->sota.gvr_config.max_revisions = 2;
 
     out->sota.degradation_config.enabled = true;

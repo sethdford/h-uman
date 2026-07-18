@@ -33,6 +33,7 @@
 #include "human/agent/multimodal_policy.h"
 #include "human/agent/outbound_sanitize.h"
 #include "human/agent/prosocial_routine.h"
+#include "human/agent/style_governor.h"
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
@@ -11992,6 +11993,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->bth_metrics->typos_applied++;
                         }
                     }
+
+                    /* Style governor — measured-shape enforcement on the reactive
+                     * path. The outbound pipeline (proactive/burst) runs this as a
+                     * stage, but the reactive send path bypasses that pipeline
+                     * (2026-07-12 egress audit), so the shaping the pipeline stage
+                     * applies would never reach normal replies. Same gate
+                     * (HU_STYLE_GOVERNOR: off default / shadow / live) — a no-op
+                     * until promoted, and runs on the coherent reply BEFORE the
+                     * splitter chops it into bubbles. */
+                    response_len =
+                        hu_style_governor_apply_inplace(agent->alloc, response, response_len);
+
                     /* ── F40: Inline reply (quoted text fallback) ─────────────
                      * When classifier says inline reply, prepend "> {quoted}\n\n"
                      * (text-quote fallback for channels without native threading). */

@@ -97,6 +97,20 @@ static void test_persona_let_me_know_regenerates(void) {
 /* PASS-case regression                                              */
 /* ----------------------------------------------------------------- */
 
+static void test_persona_critique_echo_regenerates(void) {
+    /* 2026-07-12: proactive path sent a bare "NEEDS_RETRY" verdict token to
+     * a family contact at 10:15 — the proactive path never crosses
+     * response_guard, so the outbound persona stage must catch internal
+     * deliberation/critique itself. */
+    hu_outbound_verdict_t v = run_persona("NEEDS_RETRY");
+    HU_ASSERT_EQ(v.kind, HU_OUTBOUND_REGENERATE);
+    hu_outbound_verdict_t v2 = run_persona("i mean nEEDS_RETRY.");
+    HU_ASSERT_EQ(v2.kind, HU_OUTBOUND_REGENERATE);
+    hu_outbound_verdict_t v3 =
+        run_persona("Wait, looking at \"Absolute Rules\": Rule 2 says \"All lowercase\".");
+    HU_ASSERT_EQ(v3.kind, HU_OUTBOUND_REGENERATE);
+}
+
 static void test_persona_corpus_pass_cases_send(void) {
     const char *pass_cases[] = {
         "how'd it go with the loan?",
@@ -126,7 +140,8 @@ static void test_persona_null_content_returns_send(void) {
     hu_outbound_message_t msg = {0};
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
-    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
+    hu_outbound_verdict_t v =
+        hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 
@@ -147,6 +162,7 @@ void run_outbound_persona_tests(void) {
     HU_RUN_TEST(test_persona_corpus_17_quiet_lately_regenerates);
     HU_RUN_TEST(test_persona_as_your_assistant_regenerates);
     HU_RUN_TEST(test_persona_let_me_know_regenerates);
+    HU_RUN_TEST(test_persona_critique_echo_regenerates);
     HU_RUN_TEST(test_persona_corpus_pass_cases_send);
     HU_RUN_TEST(test_persona_empty_returns_send);
     HU_RUN_TEST(test_persona_null_content_returns_send);

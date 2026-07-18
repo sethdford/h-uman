@@ -137,7 +137,8 @@ static void test_reflection_structured_null_args(void) {
 static void test_reflection_structured_no_provider_heuristic(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_reflection_result_t r;
-    HU_ASSERT_EQ(hu_reflection_evaluate_structured(&alloc, NULL, "m", 1, "q", 1, "ok", 2, &r), HU_OK);
+    HU_ASSERT_EQ(hu_reflection_evaluate_structured(&alloc, NULL, "m", 1, "q", 1, "ok", 2, &r),
+                 HU_OK);
     HU_ASSERT_EQ(r.quality, HU_QUALITY_NEEDS_RETRY);
     HU_ASSERT_FLOAT_EQ(r.accuracy, -1.0, 0.001);
     HU_ASSERT_NULL(r.feedback);
@@ -157,6 +158,31 @@ static void test_reflection_result_free_with_feedback(void) {
     HU_ASSERT_EQ(r.feedback_len, 0);
 }
 
+/* 2026-07-12 Mindy incident: the NEEDS_RETRY retry re-used the JUDGE
+ * prompt ("Evaluate the following response. Score it as GOOD..."), so the
+ * retry generation produced an EVALUATION — and that evaluation was sent
+ * to a family contact as four message bubbles. The retry context must be
+ * a rewrite instruction that never invites scoring or critique. */
+static void test_reflection_retry_prompt_is_rewrite_instruction(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *prompt = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_reflection_build_retry_prompt(&alloc, &prompt, &len), HU_OK);
+    HU_ASSERT_NOT_NULL(prompt);
+    /* Must instruct a rewrite... */
+    HU_ASSERT_TRUE(strstr(prompt, "Rewrite") != NULL || strstr(prompt, "rewrite") != NULL);
+    /* ...and must NOT invite evaluation or carry judge vocabulary the
+     * model could echo into a sent message. */
+    HU_ASSERT_TRUE(strstr(prompt, "NEEDS_RETRY") == NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Evaluate") == NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Score") == NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Evaluation:") == NULL);
+    /* If the model ever echoes this instruction verbatim, G10 must not be
+     * the only net — but the instruction itself must at least pass the
+     * guard cleanly (it is never a sendable shape anyway). */
+    alloc.free(alloc.ctx, prompt, len + 1);
+}
+
 void run_reflection_tests(void) {
     HU_TEST_SUITE("Reflection");
     HU_RUN_TEST(test_reflection_null_response);
@@ -173,6 +199,7 @@ void run_reflection_tests(void) {
     HU_RUN_TEST(test_reflection_min_tokens_above);
     HU_RUN_TEST(test_reflection_case_insensitive_refusal);
     HU_RUN_TEST(test_reflection_critique_prompt_null);
+    HU_RUN_TEST(test_reflection_retry_prompt_is_rewrite_instruction);
     HU_RUN_TEST(test_reflection_critique_prompt_basic);
     HU_RUN_TEST(test_reflection_critique_prompt_empty_query);
     HU_RUN_TEST(test_reflection_structured_null_args);

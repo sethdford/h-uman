@@ -1,3 +1,9 @@
+---
+title: Competitive Brief - Sesame AI (Maya / CSM-1b) vs h-uman
+status: reference
+date: 2026-07-11
+---
+
 # Competitive Brief: Sesame AI (Maya / CSM-1b) vs h-uman
 
 Date: 2026-07-11. Shelf life: ~1 quarter — Sesame is shipping fast post-Series B.

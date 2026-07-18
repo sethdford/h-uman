@@ -3,9 +3,9 @@
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
-#include "human/agent/theory_of_mind.h"
 #include "human/agent/intent.h"
 #include "human/agent/self_uncertainty.h"
+#include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -291,7 +291,6 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
-#include "human/core/gate_mode.h"
 #include "human/agent/salience.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
@@ -301,6 +300,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/dual_process.h"
 #include "human/cognition/emotional.h"
 #include "human/cognition/metacognition.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/humanness.h"
 #include "human/memory/evolved_opinions.h"
@@ -384,10 +384,10 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/pwa_context.h"
 #endif
 #include <ctype.h>
-#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* Map active channel name to hu_behavior_input_t.channel_class (policy.h).
@@ -912,15 +912,14 @@ static void at_log_humanness_gates_once(hu_observer_t *obs) {
 /* Append one owned directive string to the system prompt, then free it. Shared
  * by the self-uncertainty and intent gates to avoid duplicating the
  * realloc+memcpy+free dance (clone-ratchet). Takes ownership of `dir`. */
-static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_len,
-                                      char **sp, size_t *sp_len) {
+static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_len, char **sp,
+                                      size_t *sp_len) {
     if (!dir)
         return;
     if (dir_len > 0 && sp && *sp) {
         size_t cur = *sp_len;
         size_t new_len = cur + dir_len;
-        char *new_sp =
-            (char *)agent->alloc->realloc(agent->alloc->ctx, *sp, cur + 1, new_len + 1);
+        char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, *sp, cur + 1, new_len + 1);
         if (new_sp) {
             memcpy(new_sp + cur, dir, dir_len);
             new_sp[new_len] = '\0';
@@ -938,8 +937,8 @@ static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_l
  * humanness directives before their hoist — hence the same shared-helper fix. */
 void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
                                       size_t *persona_prompt_len) {
-    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len ||
-        !agent->persona || !agent->memory_session_id)
+    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len || !agent->persona ||
+        !agent->memory_session_id)
         return;
     const hu_contact_profile_t *cp = hu_persona_find_contact(
         agent->persona, agent->memory_session_id, agent->memory_session_id_len);
@@ -1041,8 +1040,8 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
                     at_append_owned_directive(agent, smdir, smdir_len, system_prompt,
                                               system_prompt_len);
                 } else {
-                    hu_log_info("self_model", NULL, "shadow self-observation: %.*s",
-                                (int)smdir_len, smdir);
+                    hu_log_info("self_model", NULL, "shadow self-observation: %.*s", (int)smdir_len,
+                                smdir);
                     agent->alloc->free(agent->alloc->ctx, smdir, smdir_len + 1);
                 }
             }
@@ -6040,9 +6039,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
-        /* GVR (Generator-Verifier-Reviser): verify and optionally revise the response */
-        if (agent->sota.gvr_config.enabled && resp.content && resp.content_len > 0 &&
-            resp.tool_calls_count == 0) {
+        /* GVR (Generator-Verifier-Reviser): verify and optionally revise the response.
+         * Skip when a persona is active — GVR is a factual-verification loop for
+         * task answers; on the persona/texting surface its verify/revise system
+         * prompts get echoed as the reply (2026-07-13 "please revise the response"
+         * incident). Matches the !agent->persona guard on the streaming path. */
+        if (agent->sota.gvr_config.enabled && !agent->persona && resp.content &&
+            resp.content_len > 0 && resp.tool_calls_count == 0) {
             const char *user_prompt = NULL;
             size_t user_prompt_len = 0;
             if (req.messages_count > 0) {
@@ -6286,9 +6289,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     reflection_retries_left--;
                     char *critique = NULL;
                     size_t critique_len = 0;
-                    hu_error_t cerr = hu_reflection_build_critique_prompt(
-                        agent->alloc, msg, msg_len, resp.content, resp.content_len, &critique,
-                        &critique_len);
+                    /* 2026-07-12 Mindy incident: the retry context used to embed
+                     * the JUDGE prompt ("Evaluate... Score it as GOOD, ACCEPTABLE,
+                     * or NEEDS_RETRY"), so the retry generation produced an
+                     * evaluation — which was then SENT. The retry instruction is
+                     * now a rewrite directive with no judge vocabulary. */
+                    hu_error_t cerr =
+                        hu_reflection_build_retry_prompt(agent->alloc, &critique, &critique_len);
                     if (cerr == HU_OK && critique) {
                         hu_error_t hist_err =
                             hu_agent_internal_append_history(agent, HU_ROLE_ASSISTANT, resp.content,

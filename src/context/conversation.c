@@ -14,6 +14,7 @@
 #include <sqlite3.h>
 #endif
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -4155,10 +4156,35 @@ static bool is_word_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+/* Typo-injector activation gate (off | shadow | live). Default OFF: injecting
+ * character corruptions into clean output is an unmeasured send-mutator, so it
+ * must not shape real output until a measurement promotes it
+ * (~/.claude/rules/feature-gate-requires-measurement.md). */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static int s_typos_mode_override = -1; /* -1 = defer to env HU_TYPOS */
+void hu_conversation_typos_set_mode_for_test(int mode) {
+    s_typos_mode_override = mode;
+}
+#endif
+
+hu_gate_mode_t hu_conversation_typos_mode(void) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    if (s_typos_mode_override >= 0)
+        return (hu_gate_mode_t)s_typos_mode_override;
+#endif
+    return hu_gate_mode_from_env("HU_TYPOS", HU_GATE_OFF);
+}
+
 size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t seed) {
     if (!buf || len == 0)
         return len;
     if (len >= cap)
+        return len;
+
+    /* Gated OFF by default: injecting character corruptions into clean output
+     * is an unmeasured send-mutator, so only LIVE mutates. SHADOW currently
+     * emits nothing (no would-corrupt logging wired yet). */
+    if (hu_conversation_typos_mode() != HU_GATE_LIVE)
         return len;
 
     uint32_t s = seed;
@@ -5944,10 +5970,41 @@ static bool str_eq_ci(const char *a, size_t a_len, const char *b) {
     return true;
 }
 
+static atomic_int s_disfluency_mode = -1; /* -1 = unresolved */
+
+hu_disfluency_mode_t hu_conversation_disfluency_mode(void) {
+    int m = atomic_load_explicit(&s_disfluency_mode, memory_order_relaxed);
+    if (m >= 0)
+        return (hu_disfluency_mode_t)m;
+    const char *env = getenv("HU_DISFLUENCY");
+    hu_disfluency_mode_t resolved = HU_DISFLUENCY_OFF;
+    if (env && env[0]) {
+        if (strcmp(env, "live") == 0)
+            resolved = HU_DISFLUENCY_LIVE;
+        else if (strcmp(env, "shadow") == 0)
+            resolved = HU_DISFLUENCY_SHADOW;
+    }
+    atomic_store_explicit(&s_disfluency_mode, (int)resolved, memory_order_relaxed);
+    return resolved;
+}
+
+#if HU_IS_TEST
+void hu_conversation_disfluency_set_mode_for_test(int mode) {
+    atomic_store_explicit(&s_disfluency_mode, mode, memory_order_relaxed);
+}
+#endif
+
 size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint32_t seed,
                                         float frequency, const struct hu_contact_profile *contact,
                                         const char *formality, size_t formality_len) {
     if (!buf || len == 0 || cap <= len)
+        return len;
+
+    /* Send-mutating humanness feature: OFF unless explicitly promoted to
+     * LIVE via HU_DISFLUENCY (feature-gate-requires-measurement). SHADOW
+     * and OFF are both no-ops here — there is no would-do artifact worth
+     * logging per message, and never mutating the send is the safe state. */
+    if (hu_conversation_disfluency_mode() != HU_DISFLUENCY_LIVE)
         return len;
 
     /* Skip for formal contexts: coworker or formality "formal" */
@@ -5967,7 +6024,12 @@ size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint3
     if (roll >= threshold)
         return len;
 
-    /* Type selection: 40% prepend, 30% append, 20% insert actually, 10% self-correction */
+    /* Type selection: 40% prepend, 30% append, 30% insert "actually".
+     * The former 10% self-correction (" wait no " inserted mid-clause,
+     * " *meant it") was REMOVED 2026-07-12 — it produced ungrammatical
+     * output ("Wish wait no I could lol") that reads as broken, not human,
+     * and was sent to a real contact. Every remaining variant is
+     * grammatical wherever it lands. */
     uint32_t type_roll = (seed / 100u) % 100u;
     size_t add_len = 0;
     const char *add = NULL;
@@ -5995,8 +6057,8 @@ size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint3
             add = " you know";
             add_len = 9;
         }
-    } else if (type_roll < 90u) {
-        /* 20%: insert "actually " after first space/clause */
+    } else {
+        /* 30%: insert "actually " after first space/clause */
         add = "actually ";
         add_len = 9;
         for (size_t i = 0; i < len; i++) {
@@ -6007,24 +6069,6 @@ size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint3
         }
         if (insert_pos == (size_t)-1)
             insert_pos = len;
-    } else {
-        /* 10%: self-correction " wait no " or " *meant it" */
-        if (((seed / 10000u) % 2u) == 0) {
-            add = " wait no ";
-            add_len = 9;
-            for (size_t i = 0; i < len; i++) {
-                if (buf[i] == ' ' || buf[i] == ',') {
-                    insert_pos = i + 1;
-                    break;
-                }
-            }
-            if (insert_pos == (size_t)-1)
-                insert_pos = len;
-        } else {
-            append = true;
-            add = " *meant it";
-            add_len = 10;
-        }
     }
 
     if (len + add_len >= cap)

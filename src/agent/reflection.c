@@ -36,8 +36,7 @@ static hu_error_t reflection_fill_heuristic(hu_reflection_result_t *out, const c
                                             size_t user_query_len, const char *response,
                                             size_t response_len) {
     reflection_result_init_axes(out);
-    out->quality =
-        hu_reflection_evaluate(user_query, user_query_len, response, response_len, NULL);
+    out->quality = hu_reflection_evaluate(user_query, user_query_len, response, response_len, NULL);
     return HU_OK;
 }
 
@@ -83,6 +82,26 @@ hu_reflection_quality_t hu_reflection_evaluate(const char *user_query, size_t us
     }
 
     return HU_QUALITY_GOOD;
+}
+
+hu_error_t hu_reflection_build_retry_prompt(hu_allocator_t *alloc, char **out_prompt,
+                                            size_t *out_prompt_len) {
+    if (!alloc || !out_prompt)
+        return HU_ERR_INVALID_ARGUMENT;
+    static const char instruction[] =
+        "That draft isn't quite right for this conversation. Rewrite your "
+        "reply to their last message from scratch: natural, in your own "
+        "voice, matching their energy and length. Output ONLY the message "
+        "text you would send. Do not judge, explain, or compare drafts.";
+    size_t len = sizeof(instruction) - 1;
+    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, instruction, len + 1);
+    *out_prompt = buf;
+    if (out_prompt_len)
+        *out_prompt_len = len;
+    return HU_OK;
 }
 
 hu_error_t hu_reflection_build_critique_prompt(hu_allocator_t *alloc, const char *user_query,
@@ -133,7 +152,7 @@ hu_error_t hu_reflection_build_critique_prompt(hu_allocator_t *alloc, const char
 }
 
 static hu_error_t reflection_try_parse_structured_json(const char *text, size_t text_len,
-                                                         hu_reflection_result_t *out) {
+                                                       hu_reflection_result_t *out) {
     hu_allocator_t stab_alloc = hu_system_allocator();
     hu_allocator_t *stab = &stab_alloc;
 
@@ -211,8 +230,8 @@ hu_error_t hu_reflection_evaluate_structured(hu_allocator_t *alloc, hu_provider_
     size_t llm_out_len = 0;
     err = provider->vtable->chat_with_system(
         provider->ctx, alloc, sys, sizeof(sys) - 1, critique, critique_len,
-        model && model_len > 0 ? model : "gpt-4o-mini",
-        model && model_len > 0 ? model_len : 11, 0.0, &llm_out, &llm_out_len);
+        model && model_len > 0 ? model : "gpt-4o-mini", model && model_len > 0 ? model_len : 11,
+        0.0, &llm_out, &llm_out_len);
     alloc->free(alloc->ctx, critique, critique_len + 1);
 
     if (err != HU_OK || !llm_out || llm_out_len == 0) {
@@ -244,9 +263,9 @@ hu_reflection_quality_t hu_reflection_evaluate_llm(hu_allocator_t *alloc, hu_pro
         return heuristic_quality;
 
     hu_reflection_result_t tmp;
-    hu_error_t err = hu_reflection_evaluate_structured(alloc, provider, "gpt-4o-mini", 11,
-                                                       user_query, user_query_len, response,
-                                                       response_len, &tmp);
+    hu_error_t err =
+        hu_reflection_evaluate_structured(alloc, provider, "gpt-4o-mini", 11, user_query,
+                                          user_query_len, response, response_len, &tmp);
     hu_reflection_quality_t q = heuristic_quality;
     if (err == HU_OK)
         q = tmp.quality;

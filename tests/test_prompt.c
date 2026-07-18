@@ -255,6 +255,8 @@ static void test_memory_loader_with_entries(void) {
     HU_ASSERT_TRUE(strstr(ctx, "pref_theme") != NULL);
     HU_ASSERT_TRUE(strstr(ctx, "light mode") != NULL);
     HU_ASSERT_TRUE(strstr(ctx, "### Memory:") != NULL);
+    /* Contract: the returned length must match the returned buffer. */
+    HU_ASSERT_EQ(ctx_len, strlen(ctx));
 
     alloc.free(alloc.ctx, ctx, ctx_len + 1);
     mem.vtable->deinit(mem.ctx);

@@ -1678,6 +1678,7 @@ static void apply_typing_quirks_double_space_to_newline(void) {
 
 static void typo_applies_with_right_seed(void) {
     /* Seed 0 yields val=0 from first prng_next, so 0%100<15 triggers typo */
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
     char buf[64];
     const char *input = "hello there friend";
     size_t len = strlen(input);
@@ -1687,7 +1688,9 @@ static void typo_applies_with_right_seed(void) {
 }
 
 static void typo_preserves_short_words(void) {
-    /* "I am ok" - all words <= 2 chars, no eligible words */
+    /* "I am ok" - all words <= 2 chars, no eligible words (LIVE so the
+     * short-word-preservation logic is actually exercised, not the gate). */
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
     char buf[64];
     const char *input = "I am ok";
     size_t len = strlen(input);
@@ -1698,6 +1701,7 @@ static void typo_preserves_short_words(void) {
 }
 
 static void typo_deterministic(void) {
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
     char buf1[64], buf2[64];
     const char *input = "sounds good to me";
     size_t len = strlen(input);
@@ -1710,6 +1714,7 @@ static void typo_deterministic(void) {
 }
 
 static void typo_never_exceeds_cap(void) {
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
     char buf[32];
     const char *input = "hello there friend";
     size_t len = strlen(input);
@@ -1722,6 +1727,7 @@ static void typo_never_exceeds_cap(void) {
 /* ── Text disfluency (F33) tests ───────────────────────────────────────── */
 
 static void disfluency_frequency_one_applies(void) {
+    hu_conversation_disfluency_set_mode_for_test(HU_DISFLUENCY_LIVE);
     /* frequency 1.0, no contact (casual) → at least one disfluency applied */
     char buf[128];
     const char *input = "that sounds good to me";
@@ -1729,6 +1735,34 @@ static void disfluency_frequency_one_applies(void) {
     memcpy(buf, input, len + 1);
     size_t out = hu_conversation_apply_disfluency(buf, len, sizeof(buf), 0, 1.0f, NULL, NULL, 0);
     HU_ASSERT_TRUE(out != len || memcmp(buf, input, len + 1) != 0);
+    hu_conversation_disfluency_set_mode_for_test(-1);
+}
+
+/* 2026-07-12 Jordan incident: disfluency is a send-mutating humanness
+ * feature and must be OFF by default (feature-gate-requires-measurement).
+ * With no mode set, even frequency 1.0 must leave the text untouched. */
+static void disfluency_off_by_default_is_noop(void) {
+    hu_conversation_disfluency_set_mode_for_test(-1); /* re-read env: unset -> OFF */
+    char buf[128] = "Wish I could lol, save a spot for me next time";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_apply_disfluency(buf, len, sizeof(buf), 0, 1.0f, NULL, NULL, 0);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, "Wish I could lol, save a spot for me next time");
+}
+
+/* The grammar-breaking self-correction (" wait no " inserted mid-clause,
+ * " *meant it") produced the exact garbage sent to a family contact. It
+ * must never appear across the seed space, even in LIVE mode. */
+static void disfluency_never_inserts_self_correction(void) {
+    hu_conversation_disfluency_set_mode_for_test(HU_DISFLUENCY_LIVE);
+    for (uint32_t seed = 0; seed < 2000; seed++) {
+        char buf[128] = "Wish I could lol, save a spot for me next time";
+        size_t len = strlen(buf);
+        hu_conversation_apply_disfluency(buf, len, sizeof(buf), seed, 1.0f, NULL, NULL, 0);
+        HU_ASSERT_TRUE(strstr(buf, "wait no") == NULL);
+        HU_ASSERT_TRUE(strstr(buf, "*meant it") == NULL);
+    }
+    hu_conversation_disfluency_set_mode_for_test(-1);
 }
 
 static void disfluency_frequency_zero_unchanged(void) {
@@ -4432,10 +4466,39 @@ static void fillers_live_mode_still_injects(void) {
     hu_conversation_fillers_set_mode_for_test(-1); /* reset for other tests */
 }
 
+/* ── Typo injector activation gate (HU_TYPOS off|shadow|live) ─────────── */
+
+/* seed=0 forces the injector's internal 15% roll to fire, so if the gate were
+ * absent this multi-word input WOULD be corrupted. With the gate defaulting
+ * OFF the call must leave the buffer byte-for-byte unchanged. */
+static void typos_off_by_default_is_noop(void) {
+    hu_conversation_typos_set_mode_for_test(-1); /* defer to env */
+    unsetenv("HU_TYPOS");
+    char buf[64] = "hello world friend";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_apply_typos(buf, len, sizeof(buf), 0u);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, "hello world friend");
+}
+
+/* The existing typo behavior stays reachable when the gate is LIVE: seed=0
+ * fires the roll and corrupts a word, so the text differs from the original. */
+static void typos_live_mode_still_injects(void) {
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
+    char buf[64] = "hello world friend";
+    size_t out = hu_conversation_apply_typos(buf, strlen(buf), sizeof(buf), 0u);
+    (void)out;
+    HU_ASSERT_TRUE(strcmp(buf, "hello world friend") != 0);
+    hu_conversation_typos_set_mode_for_test(-1); /* reset for other tests */
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
     HU_TEST_SUITE("Conversation Intelligence");
+
+    HU_RUN_TEST(typos_off_by_default_is_noop);
+    HU_RUN_TEST(typos_live_mode_still_injects);
 
     HU_RUN_TEST(fillers_off_by_default_is_noop);
     HU_RUN_TEST(fillers_live_mode_still_injects);
@@ -4682,6 +4745,8 @@ void run_conversation_tests(void) {
 
     /* Text disfluency (F33) */
     HU_RUN_TEST(disfluency_frequency_one_applies);
+    HU_RUN_TEST(disfluency_off_by_default_is_noop);
+    HU_RUN_TEST(disfluency_never_inserts_self_correction);
     HU_RUN_TEST(disfluency_frequency_zero_unchanged);
     HU_RUN_TEST(disfluency_formal_contact_unchanged);
     HU_RUN_TEST(disfluency_formality_formal_unchanged);

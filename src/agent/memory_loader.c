@@ -1,17 +1,17 @@
 #include "human/agent/memory_loader.h"
 #include "human/agent/world_model_bridge.h" /* hu_w7_render_world_model + hu_persona_context_t */
-#include "human/memory/personal_model.h"
-#include "human/memory/trust.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
+#include "human/memory/trust.h"
 #include <string.h>
 #include <time.h>
 #ifdef HU_ENABLE_SQLITE
-#include "human/memory/retrieval/strategy_learner.h"
 #include "human/memory.h"
+#include "human/memory/retrieval/strategy_learner.h"
 #endif
 
 static hu_retrieval_mode_t adaptive_to_retrieval_mode(hu_adaptive_strategy_t strategy) {
@@ -56,8 +56,7 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
     loader->facade = facade;
 }
 
-void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader,
-                                         struct hu_personal_model *pm) {
+void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader, struct hu_personal_model *pm) {
     if (!loader)
         return;
     loader->personal_model = pm;
@@ -130,9 +129,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             char *planner_text = NULL;
             size_t planner_len = 0;
             hu_error_t pe = hu_w12_planner_recall(
-                loader->facade, loader->alloc, session_id ? session_id : "",
-                session_id_len, query ? query : "", query_len,
-                loader->max_entries, loader->max_context_chars,
+                loader->facade, loader->alloc, session_id ? session_id : "", session_id_len,
+                query ? query : "", query_len, loader->max_entries, loader->max_context_chars,
                 &planner_text, &planner_len);
 #ifdef HU_ENABLE_SQLITE
             if (loader->memory && loader->memory->ctx) {
@@ -225,9 +223,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             char *planner_text = NULL;
             size_t planner_len = 0;
             hu_error_t pe = hu_w12_planner_recall(
-                loader->facade, loader->alloc, session_id ? session_id : "",
-                session_id_len, query ? query : "", query_len,
-                loader->max_entries, loader->max_context_chars,
+                loader->facade, loader->alloc, session_id ? session_id : "", session_id_len,
+                query ? query : "", query_len, loader->max_entries, loader->max_context_chars,
                 &planner_text, &planner_len);
             if (pe == HU_OK && planner_text && planner_len > 0) {
                 *out_context = planner_text;
@@ -238,10 +235,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         }
         if (count == 0 && loader->memory && loader->memory->vtable &&
             loader->memory->vtable->recall) {
-            err = loader->memory->vtable->recall(
-                loader->memory->ctx, loader->alloc, query ? query : "", query_len,
-                loader->max_entries, session_id ? session_id : "", session_id_len, &entries,
-                &count);
+            err = loader->memory->vtable->recall(loader->memory->ctx, loader->alloc,
+                                                 query ? query : "", query_len, loader->max_entries,
+                                                 session_id ? session_id : "", session_id_len,
+                                                 &entries, &count);
             if (err != HU_OK)
                 return err;
         }
@@ -250,9 +247,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         char *planner_text = NULL;
         size_t planner_len = 0;
         hu_error_t pe = hu_w12_planner_recall(
-            loader->facade, loader->alloc, session_id ? session_id : "",
-            session_id_len, query ? query : "", query_len,
-            loader->max_entries, loader->max_context_chars,
+            loader->facade, loader->alloc, session_id ? session_id : "", session_id_len,
+            query ? query : "", query_len, loader->max_entries, loader->max_context_chars,
             &planner_text, &planner_len);
         if (pe == HU_OK && planner_text && planner_len > 0) {
             *out_context = planner_text;
@@ -262,10 +258,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         }
         /* Planner failed or empty — fall through to v1 recall. */
         if (loader->memory && loader->memory->vtable && loader->memory->vtable->recall) {
-            err = loader->memory->vtable->recall(
-                loader->memory->ctx, loader->alloc, query ? query : "", query_len,
-                loader->max_entries, session_id ? session_id : "", session_id_len, &entries,
-                &count);
+            err = loader->memory->vtable->recall(loader->memory->ctx, loader->alloc,
+                                                 query ? query : "", query_len, loader->max_entries,
+                                                 session_id ? session_id : "", session_id_len,
+                                                 &entries, &count);
             if (err != HU_OK)
                 return err;
         } else {
@@ -313,8 +309,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                     continue;
                 const hu_memory_entry_t *o = &entries[k];
                 if (o->trust_tier >= (int)HU_TRUST_FIRST_PARTY && o->key &&
-                    o->key_len == e->key_len &&
-                    memcmp(o->key, e->key, e->key_len) == 0) {
+                    o->key_len == e->key_len && memcmp(o->key, e->key, e->key_len) == 0) {
                     shadowed = true;
                     break;
                 }
@@ -375,8 +370,15 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             err = HU_ERR_OUT_OF_MEMORY;
             goto cleanup;
         }
+        /* Length MUST match the returned buffer, not buf.len. hu_strndup
+         * truncates its copy at the first embedded NUL (memchr in the first
+         * n bytes), so when recalled content contains a NUL byte the
+         * allocation is SHORTER than buf.len. Reporting buf.len made every
+         * consumer (the data-quality UTF-8 validator, then the prompt
+         * assembler) read past the allocation — a heap-buffer-overflow that
+         * crashlooped the daemon 2026-07-13. strlen == the strndup'd length. */
         if (out_context_len)
-            *out_context_len = buf.len;
+            *out_context_len = strlen(*out_context);
     }
 
 cleanup:
@@ -392,10 +394,9 @@ supplement:
         char *graph_text = NULL;
         size_t graph_len = 0;
         hu_error_t ge = hu_w7_render_world_model(
-            loader->facade, loader->alloc,
-            session_id, session_id_len, 0,
-            &graph_text, &graph_len, NULL, 0, NULL, 0, NULL, 0,
-            (hu_personal_model_t *)loader->personal_model, loader->persona_ctx);
+            loader->facade, loader->alloc, session_id, session_id_len, 0, &graph_text, &graph_len,
+            NULL, 0, NULL, 0, NULL, 0, (hu_personal_model_t *)loader->personal_model,
+            loader->persona_ctx);
         if (ge == HU_OK && graph_text && graph_len > 0) {
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)

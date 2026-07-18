@@ -890,6 +890,13 @@ bool hu_guard_audit_self_talk_leak(const char *s, size_t len) {
     return hu_guard_has_self_talk_pattern(s, len);
 }
 
+/* Forward decl — defined below with the G10 detector. */
+static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigned *which);
+
+bool hu_guard_audit_deliberation_leak(const char *s, size_t len) {
+    return hu_guard_detect_deliberation_leak(s, len, NULL);
+}
+
 bool hu_response_is_critique_echo(const char *s, size_t len) {
     /* The reflection-retry critique always begins with a verdict token
      * from reflection.c's prompt template ("NEEDS_RETRY" or lowercase).
@@ -1091,6 +1098,173 @@ static bool hu_guard_detect_semantic_leak(const char *s, size_t len, unsigned *w
         hit = true;
     }
     if (hu_guard_count_third_person_patterns(s, len) >= 2) {
+        if (which)
+            *which |= 1u << 2;
+        hit = true;
+    }
+    return hit;
+}
+
+/* ── G10 — deliberation-as-final-output (2026-07-11 incident) ──────────
+ *
+ * On 2026-07-11 five messages containing raw model deliberation reached
+ * real contacts; every one PASSED this guard (they were short primary
+ * outputs — no repetition, no canonical markup, no G1-G4 signature).
+ * Wire-format corpus: service-loop-error.log hex dumps L208947..L210340.
+ *
+ * Patterns were calibrated offline against that corpus plus 15 real
+ * clean sends and 107 live Gemma generations by scripts/leak_gate.py
+ * (5/5 recall, 0 false positives) before being ported here. A single
+ * hit is a hard reject — none of these has a legitimate human-to-human
+ * reply use case. */
+
+static bool g10_ci_match(char a, char b) {
+    if (a >= 'A' && a <= 'Z')
+        a = (char)(a + 32);
+    if (b >= 'A' && b <= 'Z')
+        b = (char)(b + 32);
+    return a == b;
+}
+
+/* D2 — candidate-reply enumeration: "option" + digits + ':'. The colon is
+ * required so conversational uses ("the second option sounds better",
+ * "go with option 3.") never trip — substring-classifier-pitfalls. */
+static bool hu_guard_has_option_enumeration(const char *s, size_t len) {
+    static const char kw[] = "option";
+    const size_t kw_len = sizeof(kw) - 1;
+    for (size_t i = 0; i + kw_len < len; i++) {
+        size_t k = 0;
+        while (k < kw_len && g10_ci_match(s[i + k], kw[k]))
+            k++;
+        if (k != kw_len)
+            continue;
+        size_t j = i + kw_len;
+        while (j < len && s[j] == ' ')
+            j++;
+        size_t digits_start = j;
+        while (j < len && s[j] >= '0' && s[j] <= '9')
+            j++;
+        if (j == digits_start)
+            continue;
+        while (j < len && s[j] == ' ')
+            j++;
+        if (j < len && s[j] == ':')
+            return true;
+    }
+    return false;
+}
+
+/* D3b — persona-rule citation: "rule" + optional '#' + digits + "says".
+ * Catches rule-quoting that doesn't use the "Absolute Rules" heading. */
+static bool hu_guard_has_rule_citation(const char *s, size_t len) {
+    static const char kw[] = "rule";
+    const size_t kw_len = sizeof(kw) - 1;
+    for (size_t i = 0; i + kw_len < len; i++) {
+        size_t k = 0;
+        while (k < kw_len && g10_ci_match(s[i + k], kw[k]))
+            k++;
+        if (k != kw_len)
+            continue;
+        size_t j = i + kw_len;
+        while (j < len && (s[j] == ' ' || s[j] == '#'))
+            j++;
+        size_t digits_start = j;
+        while (j < len && s[j] >= '0' && s[j] <= '9')
+            j++;
+        if (j == digits_start)
+            continue;
+        while (j < len && s[j] == ' ')
+            j++;
+        static const char says[] = "says";
+        if (j + sizeof(says) - 1 <= len) {
+            size_t m = 0;
+            while (m < sizeof(says) - 1 && g10_ci_match(s[j + m], says[m]))
+                m++;
+            if (m == sizeof(says) - 1)
+                return true;
+        }
+    }
+    return false;
+}
+
+/* Orchestrator — bitmask for diagnostics:
+ *   bit 0 = D1 malformed channel/thought marker
+ *   bit 1 = D2 option enumeration
+ *   bit 2 = D3 rule quoting ("absolute rule" or "rule N says")
+ *   bit 3 = D4 style-audit self-narration
+ *   bit 4 = D5 quoted draft alternatives
+ *   bit 5 = D6 reflection-critique echo (NEEDS_RETRY / draft critique)
+ *   bit 6 = D7 GVR verify/revise + meta-instruction echo */
+static bool hu_guard_detect_deliberation_leak(const char *s, size_t len, unsigned *which) {
+    if (which)
+        *which = 0;
+    if (!s || len == 0)
+        return false;
+    static const struct {
+        const char *pat;
+        size_t pat_len;
+        unsigned bit;
+    } patterns[] = {
+        /* D1 — marker fragments the canonical harmony strip misses
+         * (the 2026-07-11 leak used "<channel|>": pipe AFTER the word). */
+        {"<channel|", 9, 0},
+        {"<|channel", 9, 0},
+        {"|channel>", 9, 0},
+        {"<|thought", 9, 0},
+        {"<|analysis", 10, 0},
+        /* D3 — persona-rule section quoting. */
+        {"absolute rule", 13, 2},
+        /* D4 — style-audit self-narration (the model grading its own
+         * draft against the prompt's style constraints). */
+        {"contractions used", 17, 3},
+        {"contractions are a must", 23, 3},
+        {"all lowercase", 13, 3},
+        {"no markdown", 11, 3},
+        {"ai-speak", 8, 3},
+        /* D5 — quoted draft alternatives: `"..." or "..."`. */
+        {"\" or \"", 6, 4},
+        /* D6 — reflection-critique echo (2026-07-12 14:21 Mindy incident:
+         * "i mean NEEDS_RETRY. Nobody texts \"GOOD\" as a response to
+         * \"Okay.\" It sounds like a grade or a bot..." split into four
+         * bubbles). The prefix-only hu_response_is_critique_echo missed
+         * mid-string echoes; on the persona surface the verdict token and
+         * draft-critique prose have NO legitimate use — anywhere-match.
+         * Bare bot-talk ("that sounded like a bot lol") stays sendable:
+         * these patterns all carry the meta-critique shape, not the word. */
+        {"needs_retry", 11, 5},
+        {"nobody texts \"", 14, 5},
+        {"as a response to \"", 18, 5},
+        {"sounds like a grade", 19, 5},
+        {"should be something natural like", 32, 5},
+        /* D7 — GVR (Generator-Verifier-Reviser) + generic meta-instruction
+         * echo (2026-07-13: "please revise the response to ensure it
+         * maintains a professional and formal tone" and "based on what I
+         * know, Hey!" reached real contacts). Same class as D6 but a
+         * DIFFERENT subsystem (src/agent/gvr.c) whose verify/revise system
+         * prompts get echoed as the reply. None of these phrases has a
+         * casual human-texting use. */
+        {"revise the response", 19, 6},
+        {"revision assistant", 18, 6},
+        {"verification assistant", 22, 6},
+        {"the response to verify", 22, 6},
+        {"maintains a professional and formal tone", 40, 6},
+        {"based on what i know,", 21, 6},
+        {"corrected response", 18, 6},
+    };
+    bool hit = false;
+    for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
+        if (hu_str_contains_ci(s, len, patterns[i].pat, patterns[i].pat_len)) {
+            if (which)
+                *which |= 1u << patterns[i].bit;
+            hit = true;
+        }
+    }
+    if (hu_guard_has_option_enumeration(s, len)) {
+        if (which)
+            *which |= 1u << 1;
+        hit = true;
+    }
+    if (hu_guard_has_rule_citation(s, len)) {
         if (which)
             *which |= 1u << 2;
         hit = true;
@@ -1427,6 +1601,24 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         *out_outcome = HU_GUARD_REJECT;
         if (report)
             report->detected_semantic_leak = true;
+        hu_guard_record_reject_stats(report);
+        return HU_OK;
+    }
+
+    /* Phase 3b (2026-07-11 incident) — G10 deliberation-as-final-output.
+     * Runs in the shared core so BOTH primary outputs and slim-retry
+     * outputs (response_guard_retry.c re-checks through here) are
+     * covered: five of the six 2026-07-11 leaks were primaries this
+     * guard passed untouched. */
+    unsigned deliberation_which = 0;
+    if (hu_guard_detect_deliberation_leak(for_repetition_check, check_len, &deliberation_which)) {
+        if (cleaned)
+            alloc->free(alloc->ctx, cleaned, effective_len + 1);
+        *out_response = NULL;
+        *out_len = 0;
+        *out_outcome = HU_GUARD_REJECT;
+        if (report)
+            report->detected_deliberation_leak = true;
         hu_guard_record_reject_stats(report);
         return HU_OK;
     }

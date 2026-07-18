@@ -38,6 +38,7 @@ extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_echo;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_style_governor;
 
 /* Per-path stage lists. NULL-terminated for ease of static
  * declaration. The build_stages function below converts to the
@@ -45,32 +46,32 @@ extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation;
 static hu_outbound_pipeline_stage_t *s_reactive_stages[] = {
     &hu_outbound_pipeline_stage_strip,
     &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_style_governor,
     NULL,
 };
 
 static hu_outbound_pipeline_stage_t *s_proactive_stages[] = {
-    &hu_outbound_pipeline_stage_strip,
-    &hu_outbound_pipeline_stage_shape,
-    &hu_outbound_pipeline_stage_echo,
-    &hu_outbound_pipeline_stage_crosstalk,
-    &hu_outbound_pipeline_stage_persona,
-    &hu_outbound_pipeline_stage_moderation,
-    NULL,
+    &hu_outbound_pipeline_stage_strip,          &hu_outbound_pipeline_stage_shape,
+    &hu_outbound_pipeline_stage_echo,           &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona,        &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_style_governor, NULL,
 };
 
 static hu_outbound_pipeline_stage_t *s_f25_stages[] = {
-    &hu_outbound_pipeline_stage_strip,
-    &hu_outbound_pipeline_stage_shape,
-    &hu_outbound_pipeline_stage_echo,
-    &hu_outbound_pipeline_stage_crosstalk,
-    &hu_outbound_pipeline_stage_persona,
-    &hu_outbound_pipeline_stage_moderation,
-    NULL,
+    &hu_outbound_pipeline_stage_strip,          &hu_outbound_pipeline_stage_shape,
+    &hu_outbound_pipeline_stage_echo,           &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona,        &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_style_governor, NULL,
 };
 
 static hu_outbound_pipeline_stage_t *s_temporal_stages[] = {
-    &hu_outbound_pipeline_stage_strip,   &hu_outbound_pipeline_stage_shape,      &hu_outbound_pipeline_stage_crosstalk,
-    &hu_outbound_pipeline_stage_persona, &hu_outbound_pipeline_stage_moderation, NULL,
+    &hu_outbound_pipeline_stage_strip,
+    &hu_outbound_pipeline_stage_shape,
+    &hu_outbound_pipeline_stage_crosstalk,
+    &hu_outbound_pipeline_stage_persona,
+    &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_style_governor,
+    NULL,
 };
 
 static hu_outbound_pipeline_stage_t *s_scheduled_stages[] = {
@@ -139,7 +140,8 @@ hu_error_t hu_outbound_pipeline_configs_build_stages(hu_allocator_t *alloc, hu_o
         return HU_OK;
     }
 
-    hu_outbound_pipeline_stage_t **arr = (hu_outbound_pipeline_stage_t **)alloc->alloc(alloc->ctx, n * sizeof(*arr));
+    hu_outbound_pipeline_stage_t **arr =
+        (hu_outbound_pipeline_stage_t **)alloc->alloc(alloc->ctx, n * sizeof(*arr));
     if (!arr)
         return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < n; i++)

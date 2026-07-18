@@ -366,10 +366,24 @@ char *hu_conversation_analyze_style(hu_allocator_t *alloc,
 size_t hu_conversation_apply_typing_quirks(char *buf, size_t len, const char *const *quirks,
                                            size_t quirks_count);
 
+/* Activation gate for the typo injector (off | shadow | live), read from env
+ * HU_TYPOS via the canonical parser (core/gate_mode.h). Default OFF: injecting
+ * character corruptions into the model's clean output is an unmeasured
+ * send-mutator and must not shape real output until a measurement promotes it
+ * — see ~/.claude/rules/feature-gate-requires-measurement.md. */
+hu_gate_mode_t hu_conversation_typos_mode(void);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Force the typo gate mode in tests. Pass an hu_gate_mode_t value to override,
+ * or -1 to clear the override and defer to env HU_TYPOS. */
+void hu_conversation_typos_set_mode_for_test(int mode);
+#endif
+
 /* Apply realistic typo simulation to a response. Introduces at most 1 typo
  * per message segment. Controlled by seed for determinism in tests.
  * Never introduces typos into proper nouns (words starting with uppercase
  * that aren't the first word of a sentence).
+ * No-op unless hu_conversation_typos_mode() == HU_GATE_LIVE.
  * Returns the new length (may grow by at most 1 char for transposition).
  * buf must have capacity for len+1 chars. */
 size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t seed);
@@ -606,10 +620,31 @@ bool hu_conversation_extract_vision_description(const char *combined, size_t com
 
 /* ── Text disfluency (F33) ───────────────────────────────────────────── */
 
-/* Apply natural text imperfections: "i mean", "like", "you know", trailing "...",
- * self-correction "wait no", "actually". Casual conversations only.
- * Skip if contact has relationship_type "coworker" or formality "formal".
- * frequency: 0.0–1.0 (default 0.15). Only one disfluency per call. */
+/* Disfluency activation. Injecting hardcoded stammers into the model's
+ * clean output is an unmeasured send-mutating behavior — per
+ * feature-gate-requires-measurement it ships OFF and is promoted only on a
+ * blind-A/B verdict showing shaped output reads more like the persona.
+ * 2026-07-12: the previous default-ON path turned "Wish I could lol" into
+ * "Wish wait no I could lol" to a real contact. Env HU_DISFLUENCY =
+ * off (default) | shadow | live. */
+typedef enum hu_disfluency_mode {
+    HU_DISFLUENCY_OFF = 0,
+    HU_DISFLUENCY_SHADOW = 1,
+    HU_DISFLUENCY_LIVE = 2,
+} hu_disfluency_mode_t;
+
+hu_disfluency_mode_t hu_conversation_disfluency_mode(void);
+
+#if HU_IS_TEST
+/* Override cached mode (tests only). Pass -1 to re-read the env. */
+void hu_conversation_disfluency_set_mode_for_test(int mode);
+#endif
+
+/* Apply natural text imperfections: "i mean", "like", "you know", trailing
+ * "...", "actually". Casual conversations only. NO-OP unless
+ * hu_conversation_disfluency_mode() == LIVE. Skips coworker / formal.
+ * frequency: 0.0–1.0. Only one disfluency per call. Never inserts a
+ * grammar-breaking mid-clause self-correction. */
 size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint32_t seed,
                                         float frequency, const struct hu_contact_profile *contact,
                                         const char *formality, size_t formality_len);

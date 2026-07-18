@@ -55,6 +55,43 @@ if [[ ! -x "$SOURCE_BIN" ]]; then
     exit 1
 fi
 
+# ── Guard-sentinel: refuse to deploy a binary missing critical outbound guards
+# On 2026-07-11..13 a concurrent session built from a branch that PREDATED the
+# G10 deliberation-leak guard and installed it here, silently un-deploying the
+# guard — and NEEDS_RETRY / "please revise the response" meta-text reached real
+# contacts again. A fix that doesn't stay deployed isn't a fix. These sentinels
+# are stable string literals compiled into the guard (src/agent/response_guard.c
+# + reflection.c). If a candidate binary lacks ANY of them it is a regressed
+# build; refuse it rather than clobber a good daemon. Override for a deliberate
+# downgrade with HU_SKIP_GUARD_SENTINEL=1.
+if [[ "${HU_SKIP_GUARD_SENTINEL:-0}" != "1" ]]; then
+    GUARD_SENTINELS=(
+        "revise the response"        # G10 D7 — GVR/meta-instruction echo
+        "nobody texts"               # G10 D6 — reflection-critique echo
+        "That draft isn't quite right" # reflection retry rewrite (not the judge prompt)
+    )
+    # Dump symbols ONCE into a variable, then match with here-strings. Piping
+    # `strings | grep -q` breaks under `set -o pipefail`: grep -q closes the
+    # pipe on first match, strings dies on SIGPIPE (exit 141), and pipefail
+    # reports the whole pipeline as failed → every sentinel reads as "missing"
+    # (a false regression alarm). The here-string has no pipe, so no SIGPIPE.
+    sym_dump="$(strings -a "$SOURCE_BIN" 2>/dev/null || true)"
+    missing=()
+    for sentinel in "${GUARD_SENTINELS[@]}"; do
+        grep -qF -- "$sentinel" <<<"$sym_dump" || missing+=("$sentinel")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        echo "error: refusing to install — $SOURCE_BIN is missing outbound-guard sentinels:" >&2
+        for m in "${missing[@]}"; do echo "         - \"$m\"" >&2; done
+        echo "       This binary predates the deliberation-leak guards; installing it would" >&2
+        echo "       regress production (meta-text like NEEDS_RETRY could reach real contacts)." >&2
+        echo "       Rebuild from a branch that contains the guards (merged to main), or set" >&2
+        echo "       HU_SKIP_GUARD_SENTINEL=1 to force a deliberate downgrade." >&2
+        exit 1
+    fi
+    echo "==> guard-sentinel: all ${#GUARD_SENTINELS[@]} outbound guards present in candidate binary"
+fi
+
 # Verify the local cert exists; if not, refuse to fall back to ad-hoc because
 # that produces an even less stable TCC identity.
 if ! security find-identity -v -p codesigning 2>/dev/null | grep -qE "\"$CODESIGN_IDENT\""; then

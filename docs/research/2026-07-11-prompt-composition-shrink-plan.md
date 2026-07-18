@@ -1,3 +1,9 @@
+---
+title: Prompt Composition Map + Shrink Plan (latency lever)
+status: reference
+date: 2026-07-11
+---
+
 # Prompt Composition Map + Shrink Plan (latency lever)
 
 Date: 2026-07-11. Basis: code-trace of `src/agent/agent_turn.c` +

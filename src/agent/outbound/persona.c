@@ -47,6 +47,7 @@
  */
 
 #include "human/agent/outbound_pipeline.h"
+#include "human/agent/response_guard.h"
 #include "human/core/string.h"
 #include "human/eval/shape.h"
 
@@ -121,12 +122,23 @@ static const char *const AI_SELF_AWARE[] = {
 };
 
 /* Case-insensitive substring search. */
-static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
-                                         hu_outbound_context_t *ctx) {
+static hu_outbound_verdict_t persona_run(hu_outbound_pipeline_stage_t *self,
+                                         hu_outbound_message_t *msg, hu_outbound_context_t *ctx) {
     (void)self;
     (void)ctx;
     if (!msg || !msg->content || msg->content_len == 0)
         return hu_outbound_verdict_send();
+
+    /* Internal deliberation / critique leak (G10, shared with
+     * response_guard). The proactive path never crosses
+     * response_guard, so this stage is its only egress check — the
+     * 2026-07-12 bare "NEEDS_RETRY" proactive send to a family
+     * contact is the pinned evidence. */
+    if (hu_guard_audit_deliberation_leak(msg->content, msg->content_len)) {
+        return hu_outbound_verdict_regenerate(
+            "persona_internal_leak", "Internal notes leaked into the draft. Send ONLY the message "
+                                     "text itself — no verdicts, critiques, options, or rules.");
+    }
 
     for (size_t i = 0; PROJECT_JARGON[i]; i++) {
         if (hu_str_contains_ci_cstr(msg->content, msg->content_len, PROJECT_JARGON[i])) {

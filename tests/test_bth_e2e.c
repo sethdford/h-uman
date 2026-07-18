@@ -149,6 +149,9 @@ static void bth_emotional_graph_pipeline(void) {
 }
 
 static void bth_typo_correction_pipeline(void) {
+    /* Exercise the real typo-correction pipeline: the injector is gated OFF by
+     * default now, so drive it LIVE to generate a typo to correct. */
+    hu_conversation_typos_set_mode_for_test((int)HU_GATE_LIVE);
     const char *original = "that sounds like a great idea";
     size_t orig_len = strlen(original);
     char typo_buf[128];
