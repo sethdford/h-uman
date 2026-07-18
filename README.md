@@ -698,7 +698,7 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 
 Language: C11 + ASM (aarch64, x86_64)
 Source files: 1,093
-Lines of code: ~484K
+Lines of code: ~422K
 Test files: 828
 Tests: 6374+
 Binary: ~2468 KB (MinSizeRel + LTO, all channels)
