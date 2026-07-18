@@ -837,6 +837,7 @@ set(HU_CORE_SOURCES
     src/behavior/trust_prompt.c
     src/behavior/user_sim.c
     src/behavior/pressure_history.c
+    src/behavior/tapback_band.c
     src/behavior/user_sim_scenario.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
@@ -3778,7 +3779,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)

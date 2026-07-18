@@ -122,6 +122,7 @@
 #include "human/channels/imessage_reactions.h"
 #include "human/daemon_reaction_poll.h"
 #endif
+#include "human/behavior/tapback_band.h"
 
 /* T9: M2 reflection-loop daemon adapter. Always linked; body is
  * internally gated on HU_ENABLE_SQLITE so it stubs out cleanly in
@@ -9896,6 +9897,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Roadmap #18: stale-tapback gate. Humans tapback within their
+                 * measured latency band or not at all — a late tapback (and its
+                 * SMS `Loved "..."` text rendering) is a tell, a missing one is
+                 * invisible. Bands measured from Seth's own chat.db by
+                 * scripts/tapback_bands.py; no bands file → 15-min default cap. */
+                bool tapback_in_band = true;
+                {
+                    hu_tapback_band_t tb_band;
+                    char tb_path[512];
+                    hu_tapback_band_load(alloc,
+                                         hu_tapback_bands_default_path(tb_path, sizeof(tb_path)),
+                                         batch_key, &tb_band);
+                    tapback_in_band = hu_tapback_dispatch_within_band(
+                        (int64_t)time(NULL), msgs[batch_end].timestamp_sec, &tb_band);
+                    if (!tapback_in_band)
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "tapback stale (msg older than band cap) — "
+                                    "dropped, never sent late, no text echo");
+                }
+
                 /* Tapback-vs-text decision: gate reaction and/or LLM flow */
                 if (llm_decides) {
                     if (director_result_valid && director_result.action == DIR_SILENCE) {
@@ -9920,6 +9941,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     if (director_result_valid && director_result.action == DIR_TAPBACK &&
                         ch->channel->vtable->react) {
+                        if (!tapback_in_band)
+                            goto skip_llm_this_batch; /* stale: drop, no text fallback */
                         int64_t msg_id = msgs[batch_end].message_id;
                         if (msg_id > 0 && director_result.reaction != HU_REACTION_NONE) {
                             /* Natural delay: humans see a message, then react 1-3s later */
@@ -9968,6 +9991,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
 
                     if (tapback_decision == HU_TAPBACK_ONLY && ch->channel->vtable->react) {
+                        if (!tapback_in_band)
+                            goto skip_llm_this_batch; /* stale: silence, not text instead */
                         hu_reaction_type_t reaction = HU_REACTION_NONE;
                         const char *vision_desc = NULL;
                         size_t vision_desc_len = 0;
@@ -10009,7 +10034,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    if (tapback_decision == HU_TAPBACK_AND_TEXT && ch->channel->vtable->react) {
+                    if (tapback_decision == HU_TAPBACK_AND_TEXT && tapback_in_band &&
+                        ch->channel->vtable->react) {
                         hu_reaction_type_t reaction = HU_REACTION_NONE;
                         const char *vision_desc_txt = NULL;
                         size_t vision_desc_txt_len = 0;

@@ -243,6 +243,7 @@ void run_celebration_repo_tests(void);
 void run_behavior_prompt_tests(void);
 void run_behavior_support_strategy_tests(void);
 void run_behavior_trust_tests(void);
+void run_tapback_band_tests(void);
 void run_behavior_corpora_tests(void);
 void run_user_sim_tests(void);
 void run_tom_scenario_tests(void);
@@ -1263,6 +1264,7 @@ int main(int argc, char **argv) {
     run_behavior_prompt_tests();
     run_behavior_support_strategy_tests();
     run_behavior_trust_tests();
+    run_tapback_band_tests();
     run_behavior_corpora_tests();
     run_user_sim_tests();
     run_tom_scenario_tests();
