@@ -759,3 +759,20 @@ hu_error_t hu_style_drift_check(hu_memory_t *memory, hu_allocator_t *alloc,
 }
 
 #endif /* HU_ENABLE_SQLITE */
+
+/* Shared across SQLite and stub variants: guards here, storage (or the
+ * NOT_SUPPORTED stub) in hu_style_fingerprint_update. */
+hu_error_t hu_style_fingerprint_update_inbound(hu_memory_t *memory, hu_allocator_t *alloc,
+                                               const char *contact_id, size_t contact_id_len,
+                                               const char *message, size_t message_len) {
+    if (!memory || !contact_id || contact_id_len == 0 || !message)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* "__self__" is the drift-detection baseline row (update_self); an inbound
+     * sender key must never overwrite it. */
+    if (contact_id_len == 8 && memcmp(contact_id, "__self__", 8) == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (message_len == 0)
+        return HU_OK;
+    return hu_style_fingerprint_update(memory, alloc, contact_id, contact_id_len, message,
+                                       message_len);
+}

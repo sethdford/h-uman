@@ -1,7 +1,8 @@
 #include "human/multimodal/audio.h"
 #include "human/auth.h"
-#include "human/multimodal.h"
+#include "human/core/file.h"
 #include "human/core/string.h"
+#include "human/multimodal.h"
 #include "human/provider.h"
 #include "human/voice.h"
 #include <ctype.h>
@@ -58,9 +59,9 @@ static bool provider_name_is(const char *name, const char *want) {
 }
 #endif
 
-hu_error_t hu_multimodal_process_audio(hu_allocator_t *alloc, const char *file_path, size_t path_len,
-                                       hu_provider_t *provider, const char *model, size_t model_len,
-                                       char **out_text, size_t *out_text_len) {
+hu_error_t hu_multimodal_process_audio(hu_allocator_t *alloc, const char *file_path,
+                                       size_t path_len, hu_provider_t *provider, const char *model,
+                                       size_t model_len, char **out_text, size_t *out_text_len) {
     if (!alloc || !file_path || path_len == 0 || !provider || !out_text || !out_text_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!provider->vtable || !provider->vtable->get_name)
@@ -119,35 +120,21 @@ hu_error_t hu_multimodal_process_audio(hu_allocator_t *alloc, const char *file_p
     }
 
     if (provider_name_is(pname, "gemini")) {
-        FILE *f = fopen(path_buf, "rb");
-        if (!f) {
+        char *raw = NULL;
+        size_t raw_len = 0;
+        err = hu_file_slurp(alloc, path_buf, (size_t)HU_MULTIMODAL_MAX_AUDIO_SIZE, &raw, &raw_len);
+        if (err != HU_OK) {
             alloc->free(alloc->ctx, api_key, api_key_len + 1);
             if (model_owned)
                 alloc->free(alloc->ctx, model_owned, model_len + 1);
-            return HU_ERR_IO;
-        }
-        unsigned char *raw = (unsigned char *)alloc->alloc(alloc->ctx, file_size);
-        if (!raw) {
-            fclose(f);
-            alloc->free(alloc->ctx, api_key, api_key_len + 1);
-            if (model_owned)
-                alloc->free(alloc->ctx, model_owned, model_len + 1);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-        size_t nr = fread(raw, 1, file_size, f);
-        fclose(f);
-        if (nr != file_size) {
-            alloc->free(alloc->ctx, raw, file_size);
-            alloc->free(alloc->ctx, api_key, api_key_len + 1);
-            if (model_owned)
-                alloc->free(alloc->ctx, model_owned, model_len + 1);
-            return HU_ERR_IO;
+            return (err == HU_ERR_OUT_OF_MEMORY) ? HU_ERR_OUT_OF_MEMORY : HU_ERR_IO;
         }
 
         char *b64 = NULL;
         size_t b64_len = 0;
-        err = hu_multimodal_encode_base64(alloc, raw, file_size, &b64, &b64_len);
-        alloc->free(alloc->ctx, raw, file_size);
+        err =
+            hu_multimodal_encode_base64(alloc, (const unsigned char *)raw, raw_len, &b64, &b64_len);
+        alloc->free(alloc->ctx, raw, raw_len + 1);
         if (err != HU_OK) {
             alloc->free(alloc->ctx, api_key, api_key_len + 1);
             if (model_owned)

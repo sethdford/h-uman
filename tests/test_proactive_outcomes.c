@@ -4,6 +4,8 @@
  * Tests the proactive_sends table, outcome insertion/update, and async
  * processor integration with the contextual bandit for learning.
  */
+// @covers-none — covers hu_dpo_collector_* / hu_proactive_outcomes_process_async in
+// src/ml/dpo.c; the name heuristic wrongly maps this file to src/agent/proactive.c.
 
 #include "human/ml/dpo.h"
 #include "test_framework.h"
@@ -364,6 +366,75 @@ static void test_proactive_outcomes_prevent_double_update(void) {
 #endif /* HU_ENABLE_SQLITE */
 }
 
+/* US-104 wiring: a >24h-old unanswered send is swept to IGNORED by
+ * process_async itself and moves β — the timeout half of the outcome
+ * pipeline (the REPLY half comes from the daemon reply path). */
+static void test_proactive_stale_send_swept_to_ignored(void) {
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = test_create_db();
+    if (!db)
+        return;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t collector;
+    HU_ASSERT(hu_dpo_collector_create(&alloc, db, 10000, &collector) == HU_OK);
+    HU_ASSERT(hu_dpo_init_tables(&collector) == HU_OK);
+
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT(hu_contextual_bandit_create(&alloc, 100, &bandit) == HU_OK);
+
+    /* Two pending sends: dana's is 25h stale, erin's is fresh. */
+    HU_ASSERT(hu_dpo_collector_insert_proactive_send(db, "imessage", 8, "dana", 4, NULL, 0) ==
+              HU_OK);
+    HU_ASSERT(hu_dpo_collector_insert_proactive_send(db, "imessage", 8, "erin", 4, NULL, 0) ==
+              HU_OK);
+    HU_ASSERT(sqlite3_exec(db,
+                           "UPDATE proactive_sends SET sent_timestamp = sent_timestamp - 90000 "
+                           "WHERE contact = 'dana'",
+                           NULL, NULL, NULL) == SQLITE_OK);
+
+    uint64_t dana_handle = 0;
+    for (const char *p = "dana"; *p; p++)
+        dana_handle = dana_handle * 31 + (unsigned char)*p;
+
+    hu_contextual_bandit_arm_t before, after;
+    memset(&before, 0, sizeof(before));
+    memset(&after, 0, sizeof(after));
+    HU_ASSERT(hu_contextual_bandit_get_arm(bandit, dana_handle, &before) == HU_OK);
+    HU_ASSERT(before.beta == 1.0); /* weak prior — must move below */
+
+    HU_ASSERT(hu_proactive_outcomes_process_async(db, bandit) == HU_OK);
+
+    /* dana: swept to IGNORED (1), processed, β 1 → 2. */
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        db, "SELECT outcome_type, processed FROM proactive_sends WHERE contact = 'dana'", -1, &stmt,
+        NULL);
+    HU_ASSERT(rc == SQLITE_OK);
+    HU_ASSERT(sqlite3_step(stmt) == SQLITE_ROW);
+    HU_ASSERT(sqlite3_column_int(stmt, 0) == 1); /* HU_BANDIT_IGNORED */
+    HU_ASSERT(sqlite3_column_int(stmt, 1) == 1);
+    sqlite3_finalize(stmt);
+
+    HU_ASSERT(hu_contextual_bandit_get_arm(bandit, dana_handle, &after) == HU_OK);
+    HU_ASSERT(after.beta > before.beta);
+    HU_ASSERT(after.alpha == before.alpha);
+
+    /* erin: fresh — NOT swept, still pending. */
+    rc = sqlite3_prepare_v2(
+        db, "SELECT COUNT(*) FROM proactive_sends WHERE contact = 'erin' AND outcome_type IS NULL",
+        -1, &stmt, NULL);
+    HU_ASSERT(rc == SQLITE_OK);
+    HU_ASSERT(sqlite3_step(stmt) == SQLITE_ROW);
+    HU_ASSERT(sqlite3_column_int(stmt, 0) == 1);
+    sqlite3_finalize(stmt);
+
+    hu_contextual_bandit_destroy(bandit);
+    hu_dpo_collector_deinit(&collector);
+    sqlite3_close(db);
+#endif /* HU_ENABLE_SQLITE */
+}
+
 void run_proactive_outcomes_tests(void) {
     HU_TEST_SUITE("proactive_outcomes");
     HU_RUN_TEST(test_proactive_sends_table_created);
@@ -372,6 +443,7 @@ void run_proactive_outcomes_tests(void) {
     HU_RUN_TEST(test_proactive_outcomes_process_async_three_types);
     HU_RUN_TEST(test_proactive_outcomes_skip_unresolved);
     HU_RUN_TEST(test_proactive_outcomes_prevent_double_update);
+    HU_RUN_TEST(test_proactive_stale_send_swept_to_ignored);
 }
 
 #else

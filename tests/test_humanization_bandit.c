@@ -2,6 +2,7 @@
 #include "human/agent/humanization_bandit.h"
 #include "human/core/allocator.h"
 #include "test_framework.h"
+#include <stdio.h>
 #include <stdlib.h>
 
 /**
@@ -285,6 +286,161 @@ static void test_bandit_override_null_bandit_unchanged(void) {
     unsetenv("HU_BANDIT_HUMANIZATION");
 }
 
+/* ── persistence (2026-07-18 audit: arm posteriors died on daemon restart,
+ * so the bandit was permanently stuck re-exploring). Mirrors the
+ * tests/test_somatic.c somatic_save_load_roundtrip family. ── */
+
+static void bandit_save_load_roundtrip(void) {
+    const char *path = "/tmp/hu_test_bandit_roundtrip.json";
+    remove(path);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+
+    /* A handle above 2^53 pins the string-encoded-handle decision: stored
+     * as a JSON number it would be silently corrupted by double rounding,
+     * and the daemon would train one arm while reading another. */
+    uint64_t big_handle = 18446744073709551614ULL;
+    for (int i = 0; i < 5; i++)
+        HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, big_handle, HU_BANDIT_REPLY), HU_OK);
+    HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, 777ULL, HU_BANDIT_IGNORED), HU_OK);
+
+    HU_ASSERT_EQ(hu_humanization_bandit_save_file(bandit, path), HU_OK);
+
+    hu_contextual_bandit_t *loaded = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &loaded), HU_OK);
+    HU_ASSERT_EQ(hu_humanization_bandit_load_file(loaded, path), HU_OK);
+
+    hu_contextual_bandit_arm_t arm;
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(loaded, big_handle, &arm), HU_OK);
+    HU_ASSERT_EQ(arm.contact_handle, big_handle);
+    HU_ASSERT_TRUE(arm.alpha > 5.99 && arm.alpha < 6.01); /* 1 + 5 replies */
+    HU_ASSERT_TRUE(arm.beta > 0.99 && arm.beta < 1.01);
+    HU_ASSERT_EQ(arm.updates, 5ULL);
+
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(loaded, 777ULL, &arm), HU_OK);
+    HU_ASSERT_TRUE(arm.beta > 1.99 && arm.beta < 2.01); /* 1 + 1 ignored */
+    HU_ASSERT_EQ(arm.updates, 1ULL);
+
+    hu_contextual_bandit_destroy(bandit);
+    hu_contextual_bandit_destroy(loaded);
+    remove(path);
+}
+
+static void bandit_load_missing_file_keeps_state(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+    HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, 42ULL, HU_BANDIT_REPLY), HU_OK);
+
+    HU_ASSERT_TRUE(hu_humanization_bandit_load_file(bandit, "/tmp/hu_test_bandit_missing.json") !=
+                   HU_OK);
+
+    /* State untouched on miss. */
+    HU_ASSERT_EQ(bandit->count, (size_t)1);
+    hu_contextual_bandit_arm_t arm;
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(bandit, 42ULL, &arm), HU_OK);
+    HU_ASSERT_TRUE(arm.alpha > 1.99 && arm.alpha < 2.01);
+    hu_contextual_bandit_destroy(bandit);
+}
+
+static void bandit_load_corrupt_file_keeps_state(void) {
+    const char *path = "/tmp/hu_test_bandit_corrupt.json";
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"version\": 1, \"arms\": [{oops", f);
+    fclose(f);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+    HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, 42ULL, HU_BANDIT_REPLY), HU_OK);
+
+    HU_ASSERT_TRUE(hu_humanization_bandit_load_file(bandit, path) != HU_OK);
+
+    HU_ASSERT_EQ(bandit->count, (size_t)1);
+    hu_contextual_bandit_arm_t arm;
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(bandit, 42ULL, &arm), HU_OK);
+    HU_ASSERT_TRUE(arm.alpha > 1.99 && arm.alpha < 2.01);
+    hu_contextual_bandit_destroy(bandit);
+    remove(path);
+}
+
+static void bandit_load_clamps_out_of_range(void) {
+    /* A hand-edited or corrupted-but-parseable file must not inject values
+     * outside the arm's legal range (alpha/beta >= 1.0, updates >= 0) —
+     * the gamma sampler misbehaves at alpha/beta <= 0. */
+    const char *path = "/tmp/hu_test_bandit_clamp.json";
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"version\": 1, \"arms\": ["
+          "{\"h\": \"101\", \"alpha\": -5.0, \"beta\": 0.0, \"updates\": -3},"
+          "{\"h\": \"102\", \"alpha\": 1e300, \"beta\": 2.5, \"updates\": 7},"
+          "{\"h\": \"0\", \"alpha\": 4.0, \"beta\": 4.0, \"updates\": 2}]}",
+          f);
+    fclose(f);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+    HU_ASSERT_EQ(hu_humanization_bandit_load_file(bandit, path), HU_OK);
+
+    /* Handle "0" marks empty slots and must be skipped, not inserted. */
+    HU_ASSERT_EQ(bandit->count, (size_t)2);
+
+    hu_contextual_bandit_arm_t arm;
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(bandit, 101ULL, &arm), HU_OK);
+    HU_ASSERT_TRUE(arm.alpha > 0.99 && arm.alpha < 1.01); /* clamped up */
+    HU_ASSERT_TRUE(arm.beta > 0.99 && arm.beta < 1.01);
+    HU_ASSERT_EQ(arm.updates, 0ULL); /* negative clamped to 0 */
+
+    HU_ASSERT_EQ(hu_contextual_bandit_get_arm(bandit, 102ULL, &arm), HU_OK);
+    HU_ASSERT_TRUE(arm.alpha < 1e10); /* capped, not 1e300 */
+    HU_ASSERT_TRUE(arm.beta > 2.49 && arm.beta < 2.51);
+    HU_ASSERT_EQ(arm.updates, 7ULL);
+
+    hu_contextual_bandit_destroy(bandit);
+    remove(path);
+}
+
+/* Integration pin (non-vacuous per integration-done-contract): a LOADED
+ * posterior must change the next arm choice vs a cold start. Cold bandit →
+ * fresh Beta(1,1) arm → conservative tier unconditionally. Loaded strong
+ * success posterior Beta(60,1) → theta ≈ 0.98 → aggressive tier. If load
+ * didn't reach the decision path, both would be conservative and the
+ * strict inequality below would fail. */
+static void bandit_loaded_posterior_changes_next_choice(void) {
+    const char *path = "/tmp/hu_test_bandit_pin.json";
+    uint64_t contact = 9001ULL;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *cold = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &cold), HU_OK);
+    hu_humanization_config_t cold_cfg = hu_humanization_decide_contact_params(cold, contact);
+    HU_ASSERT_TRUE(cold_cfg.disfluency_frequency < 0.10f); /* conservative */
+
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"version\": 1, \"arms\": "
+          "[{\"h\": \"9001\", \"alpha\": 60.0, \"beta\": 1.0, \"updates\": 59}]}",
+          f);
+    fclose(f);
+
+    hu_contextual_bandit_t *warm = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &warm), HU_OK);
+    HU_ASSERT_EQ(hu_humanization_bandit_load_file(warm, path), HU_OK);
+    hu_humanization_config_t warm_cfg = hu_humanization_decide_contact_params(warm, contact);
+
+    /* Beta(60,1) samples land far above the 0.65 aggressive threshold with
+     * the fixed HU_IS_TEST seed. */
+    HU_ASSERT_TRUE(warm_cfg.disfluency_frequency > cold_cfg.disfluency_frequency);
+    HU_ASSERT_TRUE(warm_cfg.disfluency_frequency >= 0.20f);
+
+    hu_contextual_bandit_destroy(cold);
+    hu_contextual_bandit_destroy(warm);
+    remove(path);
+}
+
 void run_humanization_bandit_tests(void) {
     HU_TEST_SUITE("humanization_bandit");
     HU_RUN_TEST(test_humanization_high_theta_aggressive);
@@ -295,4 +451,9 @@ void run_humanization_bandit_tests(void) {
     HU_RUN_TEST(test_bandit_override_gate_on_applies_decision);
     HU_RUN_TEST(test_bandit_override_gate_off_unchanged);
     HU_RUN_TEST(test_bandit_override_null_bandit_unchanged);
+    HU_RUN_TEST(bandit_save_load_roundtrip);
+    HU_RUN_TEST(bandit_load_missing_file_keeps_state);
+    HU_RUN_TEST(bandit_load_corrupt_file_keeps_state);
+    HU_RUN_TEST(bandit_load_clamps_out_of_range);
+    HU_RUN_TEST(bandit_loaded_posterior_changes_next_choice);
 }

@@ -3,6 +3,7 @@
 #include "human/agent/approval_gate.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/humanization_bandit.h"
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/pattern_radar.h"
@@ -1082,6 +1083,25 @@ hu_error_t hu_agent_from_config(
         hu_init_dpo_bridge_set_collector(&out->sota.dpo_collector);
 #endif
     }
+
+    /* Per-contact humanization bandit (US-2). Never created before
+     * 2026-07-18, so daemon.c's read of sota.bandit was permanently NULL
+     * and the HU_BANDIT_HUMANIZATION gate routed to nothing. Create it and
+     * hydrate the Beta(α,β) arms from disk so learning survives restarts;
+     * a NULL path (tests / no HOME) or missing file is a cold start. */
+    {
+        hu_error_t sota_sub = hu_contextual_bandit_create(alloc, 256, &out->sota.bandit);
+        if (sota_sub != HU_OK) {
+            out->sota.bandit = NULL;
+            hu_log_warn("agent", NULL, "humanization bandit create failed: %s",
+                        hu_error_string(sota_sub));
+        } else {
+            char bandit_path[512];
+            const char *bp = hu_humanization_bandit_default_path(bandit_path, sizeof(bandit_path));
+            if (bp)
+                (void)hu_humanization_bandit_load_file(out->sota.bandit, bp);
+        }
+    }
     out->sota.sota_initialized = true;
 
     /* Sprint 46 R5.3 — load classifier via helper (refactored for
@@ -1824,6 +1844,13 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_init_dpo_bridge_set_collector(NULL);
 #endif
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
+        /* No save here: short-lived CLI agents load the daemon's file at
+         * create; a deinit-save from one would clobber newer daemon state
+         * (lost update). Saves happen at the posterior-update site only. */
+        if (agent->sota.bandit) {
+            hu_contextual_bandit_destroy(agent->sota.bandit);
+            agent->sota.bandit = NULL;
+        }
         agent->sota.sota_initialized = false;
     }
     /* Free the last rejected draft from the prior turn (used for DPO pairing

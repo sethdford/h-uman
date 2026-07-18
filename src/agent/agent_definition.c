@@ -1,11 +1,13 @@
 #include "human/agent/agent_definition.h"
+#include "human/core/file.h"
 #include "human/core/string.h"
 #include <ctype.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-static void trim_bounds(const char *start, const char *end, const char **out_lo, const char **out_hi) {
+static void trim_bounds(const char *start, const char *end, const char **out_lo,
+                        const char **out_hi) {
     while (start < end && isspace((unsigned char)*start))
         start++;
     while (end > start && isspace((unsigned char)end[-1]))
@@ -46,39 +48,12 @@ static hu_error_t append_cstr_array(hu_allocator_t *alloc, char ***arr, size_t *
 }
 
 static hu_error_t read_file_if_present(hu_allocator_t *alloc, const char *path, char **out_text) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
+    hu_error_t err = hu_file_slurp(alloc, path, 0, out_text, NULL);
+    if (err == HU_ERR_NOT_FOUND) {
         *out_text = NULL;
         return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    size_t len = (size_t)sz;
-    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1u);
-    if (!buf) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t rd = fread(buf, 1u, len, f);
-    fclose(f);
-    if (rd != len) {
-        alloc->free(alloc->ctx, buf, len + 1u);
-        return HU_ERR_IO;
-    }
-    buf[len] = '\0';
-    *out_text = buf;
-    return HU_OK;
+    return err;
 }
 
 static hu_error_t parse_soul(hu_allocator_t *alloc, const char *text, hu_agent_definition_t *out) {
@@ -172,8 +147,8 @@ static hu_error_t parse_soul(hu_allocator_t *alloc, const char *text, hu_agent_d
                 trim_bounds(t, tend, &a, &b);
                 if (a < b) {
                     char *one = dup_range(alloc, a, b);
-                    hu_error_t er = append_cstr_array(alloc, &out->soul_traits, &out->soul_traits_count,
-                                                      &traits_cap, one);
+                    hu_error_t er = append_cstr_array(alloc, &out->soul_traits,
+                                                      &out->soul_traits_count, &traits_cap, one);
                     if (er != HU_OK)
                         return er;
                 }
@@ -237,8 +212,8 @@ static hu_error_t parse_tools(hu_allocator_t *alloc, const char *text, hu_agent_
             trim_bounds(tlo, thi, &tlo, &thi);
             if (tlo < thi) {
                 char *name = dup_range(alloc, tlo, thi);
-                hu_error_t er =
-                    append_cstr_array(alloc, &out->enabled_tools, &out->enabled_tools_count, &cap, name);
+                hu_error_t er = append_cstr_array(alloc, &out->enabled_tools,
+                                                  &out->enabled_tools_count, &cap, name);
                 if (er != HU_OK)
                     return er;
             }

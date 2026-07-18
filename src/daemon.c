@@ -104,6 +104,7 @@
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
 #include "human/daemon_cron.h"
+#include "human/daemon_learning_tick.h"
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_maintenance.h"
 #include "human/daemon_proactive.h"
@@ -124,6 +125,7 @@
 #include "human/channels/imessage_reactions.h"
 #include "human/daemon_reaction_poll.h"
 #endif
+#include "human/behavior/tapback_band.h"
 
 /* T9: M2 reflection-loop daemon adapter. Always linked; body is
  * internally gated on HU_ENABLE_SQLITE so it stubs out cleanly in
@@ -695,6 +697,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 hu_contact_send_recency_record(
                                     &agent->contact_send_recency, m->contact_id,
                                     strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                                (void)hu_daemon_proactive_outcome_record_send(
+                                    agent->memory, ch_name, target_part, target_len);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "F25 emotional check-in sent to %s: %s",
                                             cp->name ? cp->name : cp->contact_id, msg_buf);
@@ -1698,6 +1702,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             hu_contact_send_recency_record(&agent->contact_send_recency,
                                                            cp->contact_id, strlen(cp->contact_id),
                                                            (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                            (void)hu_daemon_proactive_outcome_record_send(agent->memory, ch_part,
+                                                                          target_part, target_len);
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "proactive check-in sent to %s: %.*s",
                                         cp->name ? cp->name : cp->contact_id, (int)response_len,
@@ -3819,38 +3825,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* DPO consolidation — train on preference pairs every 24 hours.
-                 *
-                 * BUGFIX 2026-05-25: Same first-tick blocking issue as the ML
-                 * experiment loop above — judge_step makes 64 LLM scoring
-                 * calls (32 pairs × 2 each) for ~5 min synchronous blocking.
-                 * That prevented the iMessage channel dispatcher from running.
-                 * Defer first run by initializing last_dpo_train to current
-                 * time. Subsequent runs follow the 24-hour cadence. */
-                {
-                    static int64_t last_dpo_train = 0;
-                    int64_t dpo_interval = 24 * 3600;
-                    if (last_dpo_train == 0) {
-                        last_dpo_train = (int64_t)t;
-                        /* Skip first run; resume normal 24h cadence afterward. */
-                    } else if (agent && agent->memory && agent->sota.sota_initialized &&
-                               ((int64_t)t - last_dpo_train) >= dpo_interval) {
-                        sqlite3 *dpo_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (dpo_db) {
-                            last_dpo_train = (int64_t)t;
-                            hu_dpo_judge_result_t dpo_result = {0};
-                            hu_error_t dpo_err = hu_dpo_judge_step(
-                                &agent->sota.dpo_collector, alloc, &agent->provider,
-                                agent->model_name, agent->model_name_len, 0.1, 32, &dpo_result);
-                            if (dpo_err == HU_OK && dpo_result.pairs_evaluated > 0)
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "DPO judge step: loss=%.4f, alignment=%.2f, "
-                                            "pairs=%zu",
-                                            dpo_result.loss, dpo_result.alignment_score,
-                                            dpo_result.pairs_evaluated);
-                        }
-                    }
-                }
+                /* DPO consolidation (24h judge cadence) — carved to
+                 * src/daemon/daemon_learning_tick.c (2026-07-18). */
+                hu_daemon_dpo_judge_tick(agent, alloc, (int64_t)t);
+
+                /* US-104: feed resolved proactive outcomes (REPLY / 24h-timeout
+                 * IGNORED) into the humanization bandit; 60s cadence inside. */
+                if (agent)
+                    hu_daemon_proactive_outcome_tick(agent->memory, agent->sota.bandit, (int64_t)t);
 
                 /* RLAIF nightly cycle — judge DPO pairs, extract patterns, apply patches */
                 {
@@ -4753,6 +4735,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                combined, combined_len);
                 /* F26: Temporal pattern learning — record message frequency by day/hour */
                 if (agent->memory && batch_key && key_len > 0) {
+                    /* US-104: an inbound message from this contact resolves any
+                     * pending proactive send to them as a REPLY outcome. */
+                    const char *po_ch_name = ch->channel->vtable->name
+                                                 ? ch->channel->vtable->name(ch->channel->ctx)
+                                                 : NULL;
+                    (void)hu_daemon_proactive_outcome_mark_reply(agent->memory, po_ch_name,
+                                                                 batch_key, key_len);
                     time_t now_t = time(NULL);
                     struct tm lt_buf;
                     struct tm *lt = localtime_r(&now_t, &lt_buf);
@@ -4761,6 +4750,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (void)hu_superhuman_temporal_record(agent->memory, batch_key, key_len,
                                                             lt->tm_wday, lt->tm_hour,
                                                             response_time_ms);
+                    }
+                }
+                /* F32: refresh the sender's style fingerprint from their inbound
+                 * messages so contact_style_overlay stays current. Sits on the
+                 * common batch path, independent of llm_decides. Raw
+                 * msgs[].content, not combined/augmented text — attachment
+                 * descriptions aren't the contact's typing, and per-message
+                 * updates keep avg_message_length honest. */
+                if (agent->memory && batch_key && key_len > 0) {
+                    for (size_t si = batch_start; si <= batch_end; si++) {
+                        size_t slen = strlen(msgs[si].content);
+                        if (slen > 0)
+                            (void)hu_style_fingerprint_update_inbound(
+                                agent->memory, alloc, batch_key, key_len, msgs[si].content, slen);
                     }
                 }
 #endif
@@ -9887,6 +9890,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Roadmap #18: stale-tapback gate. Humans tapback within their
+                 * measured latency band or not at all — a late tapback (and its
+                 * SMS `Loved "..."` text rendering) is a tell, a missing one is
+                 * invisible. Bands measured from Seth's own chat.db by
+                 * scripts/tapback_bands.py; no bands file → 15-min default cap. */
+                bool tapback_in_band = true;
+                {
+                    hu_tapback_band_t tb_band;
+                    char tb_path[512];
+                    hu_tapback_band_load(alloc,
+                                         hu_tapback_bands_default_path(tb_path, sizeof(tb_path)),
+                                         batch_key, &tb_band);
+                    tapback_in_band = hu_tapback_dispatch_within_band(
+                        (int64_t)time(NULL), msgs[batch_end].timestamp_sec, &tb_band);
+                    if (!tapback_in_band)
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "tapback stale (msg older than band cap) — "
+                                    "dropped, never sent late, no text echo");
+                }
+
                 /* Tapback-vs-text decision: gate reaction and/or LLM flow */
                 if (llm_decides) {
                     if (director_result_valid && director_result.action == DIR_SILENCE) {
@@ -9911,6 +9934,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     if (director_result_valid && director_result.action == DIR_TAPBACK &&
                         ch->channel->vtable->react) {
+                        if (!tapback_in_band)
+                            goto skip_llm_this_batch; /* stale: drop, no text fallback */
                         int64_t msg_id = msgs[batch_end].message_id;
                         if (msg_id > 0 && director_result.reaction != HU_REACTION_NONE) {
                             /* Natural delay: humans see a message, then react 1-3s later */
@@ -9959,6 +9984,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
 
                     if (tapback_decision == HU_TAPBACK_ONLY && ch->channel->vtable->react) {
+                        if (!tapback_in_band)
+                            goto skip_llm_this_batch; /* stale: silence, not text instead */
                         hu_reaction_type_t reaction = HU_REACTION_NONE;
                         const char *vision_desc = NULL;
                         size_t vision_desc_len = 0;
@@ -10000,7 +10027,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    if (tapback_decision == HU_TAPBACK_AND_TEXT && ch->channel->vtable->react) {
+                    if (tapback_decision == HU_TAPBACK_AND_TEXT && tapback_in_band &&
+                        ch->channel->vtable->react) {
                         hu_reaction_type_t reaction = HU_REACTION_NONE;
                         const char *vision_desc_txt = NULL;
                         size_t vision_desc_txt_len = 0;
@@ -12570,17 +12598,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         : NULL;
                                 if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
                                     config && config->channels.imessage.action_surface_v2.enabled) {
-                                    hu_conversation_snapshot_t snap = {0};
-                                    (void)hu_daemon_dispatch_imessage_reply(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len,
-                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
-                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
-                                                                  : 0,
+                                        send_target, send_target_len, &msgs[batch_start],
                                         choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len,
-                                        (const struct hu_conversation_snapshot *)&snap,
-                                        (int64_t)msgs[batch_start].message_id);
+                                        choreo_plan.segments[seg].text_len);
                                 } else {
                                     ch->channel->vtable->send(
                                         ch->channel->ctx, send_target, send_target_len,
@@ -12685,24 +12707,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 strcmp(ch_name_f2b, "imessage") == 0 && config &&
                                                 config->channels.imessage.action_surface_v2
                                                     .enabled) {
-                                                /* Build snapshot for dispatcher */
-                                                hu_conversation_snapshot_t snap = {0};
-                                                /* For now, populate with zeros — the dispatcher
-                                                 * will still function, choosing style based on
-                                                 * defaults. Production can enhance this to query
-                                                 * chat.db if needed for richer context. */
-                                                (void)hu_daemon_dispatch_imessage_reply(
+                                                (void)hu_daemon_dispatch_imessage_reply_msg(
                                                     ch->channel, agent ? agent->persona : NULL,
                                                     agent, config, batch_key, key_len,
-                                                    msgs[batch_start].guid[0]
-                                                        ? msgs[batch_start].guid
-                                                        : NULL,
-                                                    msgs[batch_start].guid[0]
-                                                        ? strlen(msgs[batch_start].guid)
-                                                        : 0,
-                                                    dt_chunks[dt], dt_len,
-                                                    (const struct hu_conversation_snapshot *)&snap,
-                                                    (int64_t)msgs[batch_start].message_id);
+                                                    &msgs[batch_start], dt_chunks[dt], dt_len);
                                             } else {
                                                 ch->channel->vtable->send(ch->channel->ctx,
                                                                           batch_key, key_len,
@@ -12724,23 +12732,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
                                         config &&
                                         config->channels.imessage.action_surface_v2.enabled) {
-                                        /* Build snapshot for dispatcher */
-                                        hu_conversation_snapshot_t snap = {0};
-                                        /* For now, populate with zeros — the dispatcher will
-                                         * still function, choosing style based on defaults.
-                                         * Production can enhance this to query chat.db if
-                                         * needed for richer context. */
-                                        (void)hu_daemon_dispatch_imessage_reply(
+                                        (void)hu_daemon_dispatch_imessage_reply_msg(
                                             ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len,
-                                            msgs[batch_start].guid[0] ? msgs[batch_start].guid
-                                                                      : NULL,
-                                            msgs[batch_start].guid[0]
-                                                ? strlen(msgs[batch_start].guid)
-                                                : 0,
-                                            fragments[f].text, fragments[f].text_len,
-                                            (const struct hu_conversation_snapshot *)&snap,
-                                            (int64_t)msgs[batch_start].message_id);
+                                            config, batch_key, key_len, &msgs[batch_start],
+                                            fragments[f].text, fragments[f].text_len);
                                     } else {
                                         ch->channel->vtable->send(
                                             ch->channel->ctx, batch_key, key_len, fragments[f].text,
@@ -12815,16 +12810,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         : NULL;
                                 if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
                                     config->channels.imessage.action_surface_v2.enabled) {
-                                    hu_conversation_snapshot_t snap = {0};
-                                    (void)hu_daemon_dispatch_imessage_reply(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len,
-                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
-                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
-                                                                  : 0,
-                                        send_text, send_text_len,
-                                        (const struct hu_conversation_snapshot *)&snap,
-                                        (int64_t)msgs[batch_start].message_id);
+                                        send_target, send_target_len, &msgs[batch_start], send_text,
+                                        send_text_len);
                                 } else {
                                     ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                               send_target_len, send_text,
@@ -12904,12 +12893,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                     }
                 }
-
-                /* F32: Update style fingerprint with our sent response */
-                if (agent->memory && batch_key && key_len > 0 && response && response_len > 0 &&
-                    !llm_decides)
-                    (void)hu_style_fingerprint_update(agent->memory, alloc, batch_key, key_len,
-                                                      response, response_len);
 
 #if !defined(HU_IS_TEST) && defined(HU_ENABLE_SQLITE)
                 /* Turing score: evaluate response human-likeness post-send.

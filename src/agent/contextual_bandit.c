@@ -213,6 +213,22 @@ hu_error_t hu_contextual_bandit_get_arm(hu_contextual_bandit_t *bandit, uint64_t
     return HU_OK;
 }
 
+hu_error_t hu_contextual_bandit_set_arm(hu_contextual_bandit_t *bandit, uint64_t contact_handle,
+                                        double alpha, double beta, uint64_t updates) {
+    if (!bandit || contact_handle == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_error_t err;
+    hu_contextual_bandit_arm_t *arm = lookup_or_insert(bandit, contact_handle, &err);
+    if (err != HU_OK)
+        return err;
+
+    arm->alpha = alpha;
+    arm->beta = beta;
+    arm->updates = updates;
+    return HU_OK;
+}
+
 /* Serialization format (little-endian, no padding):
  * [0:4]   magic      = 0x425B4E44  ("BAN\0D" in little-endian)
  * [4:8]   version    = 1
