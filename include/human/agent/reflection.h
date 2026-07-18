@@ -25,11 +25,11 @@ typedef struct hu_reflection_result {
     char *feedback;
     size_t feedback_len;
     /* Structured rubric scores (0.0–1.0, -1.0 = not scored) */
-    double accuracy;      /* factual correctness */
-    double relevance;     /* addresses the user's question */
-    double tone;        /* appropriate tone/style */
+    double accuracy;     /* factual correctness */
+    double relevance;    /* addresses the user's question */
+    double tone;         /* appropriate tone/style */
     double completeness; /* comprehensive coverage */
-    double conciseness;   /* not verbose or padded */
+    double conciseness;  /* not verbose or padded */
 } hu_reflection_result_t;
 
 /* Run rule-based self-evaluation on a response.

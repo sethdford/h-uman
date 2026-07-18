@@ -140,7 +140,8 @@ static void test_persona_null_content_returns_send(void) {
     hu_outbound_message_t msg = {0};
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
-    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
+    hu_outbound_verdict_t v =
+        hu_outbound_pipeline_stage_persona.run(&hu_outbound_pipeline_stage_persona, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 

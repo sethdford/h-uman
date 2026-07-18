@@ -2,6 +2,7 @@
 #include "human/core/string.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -179,6 +180,53 @@ void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id) {
         return;
     d->recent_msg_ids[d->next_slot] = msg_id;
     d->next_slot = (d->next_slot + 1) % HU_FOLLOWUP_DEDUP_SIZE;
+}
+
+/* ── per-contact cooldown ledger ─────────────────────────────────────────── */
+
+void hu_followup_contact_ledger_init(hu_followup_contact_ledger_t *l) {
+    if (!l)
+        return;
+    memset(l, 0, sizeof(*l));
+}
+
+/* Find the slot holding contact_id, or SIZE if absent. */
+static size_t ledger_find(const hu_followup_contact_ledger_t *l, const char *contact_id) {
+    for (size_t i = 0; i < HU_FOLLOWUP_CONTACT_LEDGER_SIZE; i++) {
+        if (l->contact_ids[i][0] != '\0' && strcmp(l->contact_ids[i], contact_id) == 0)
+            return i;
+    }
+    return HU_FOLLOWUP_CONTACT_LEDGER_SIZE;
+}
+
+bool hu_followup_contact_recent(const hu_followup_contact_ledger_t *l, const char *contact_id,
+                                uint64_t now_ms, uint64_t cooldown_ms) {
+    if (!l || !contact_id || contact_id[0] == '\0')
+        return false;
+    size_t i = ledger_find(l, contact_id);
+    if (i == HU_FOLLOWUP_CONTACT_LEDGER_SIZE)
+        return false;
+    uint64_t at = l->scheduled_at_ms[i];
+    /* Recent iff strictly inside the cooldown window ending at at+cooldown. */
+    return now_ms < at + cooldown_ms;
+}
+
+void hu_followup_contact_record(hu_followup_contact_ledger_t *l, const char *contact_id,
+                                uint64_t now_ms) {
+    if (!l || !contact_id || contact_id[0] == '\0')
+        return;
+    size_t i = ledger_find(l, contact_id);
+    if (i == HU_FOLLOWUP_CONTACT_LEDGER_SIZE) {
+        /* Evict the oldest slot (empty slots have scheduled_at_ms 0 and win). */
+        size_t oldest = 0;
+        for (size_t s = 1; s < HU_FOLLOWUP_CONTACT_LEDGER_SIZE; s++) {
+            if (l->scheduled_at_ms[s] < l->scheduled_at_ms[oldest])
+                oldest = s;
+        }
+        i = oldest;
+        snprintf(l->contact_ids[i], HU_FOLLOWUP_CONTACT_ID_MAX, "%s", contact_id);
+    }
+    l->scheduled_at_ms[i] = now_ms;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

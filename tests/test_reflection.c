@@ -137,7 +137,8 @@ static void test_reflection_structured_null_args(void) {
 static void test_reflection_structured_no_provider_heuristic(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_reflection_result_t r;
-    HU_ASSERT_EQ(hu_reflection_evaluate_structured(&alloc, NULL, "m", 1, "q", 1, "ok", 2, &r), HU_OK);
+    HU_ASSERT_EQ(hu_reflection_evaluate_structured(&alloc, NULL, "m", 1, "q", 1, "ok", 2, &r),
+                 HU_OK);
     HU_ASSERT_EQ(r.quality, HU_QUALITY_NEEDS_RETRY);
     HU_ASSERT_FLOAT_EQ(r.accuracy, -1.0, 0.001);
     HU_ASSERT_NULL(r.feedback);

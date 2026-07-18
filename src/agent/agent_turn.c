@@ -291,7 +291,6 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
-#include "human/core/gate_mode.h"
 #include "human/agent/salience.h"
 #include "human/agent/session_persist.h"
 #include "human/agent/spawn.h"
@@ -301,6 +300,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/dual_process.h"
 #include "human/cognition/emotional.h"
 #include "human/cognition/metacognition.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/humanness.h"
 #include "human/memory/evolved_opinions.h"
@@ -384,10 +384,10 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/pwa_context.h"
 #endif
 #include <ctype.h>
-#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* Map active channel name to hu_behavior_input_t.channel_class (policy.h).
@@ -937,8 +937,8 @@ static void at_append_owned_directive(hu_agent_t *agent, char *dir, size_t dir_l
  * humanness directives before their hoist — hence the same shared-helper fix. */
 void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
                                       size_t *persona_prompt_len) {
-    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len ||
-        !agent->persona || !agent->memory_session_id)
+    if (!agent || !persona_prompt || !*persona_prompt || !persona_prompt_len || !agent->persona ||
+        !agent->memory_session_id)
         return;
     const hu_contact_profile_t *cp = hu_persona_find_contact(
         agent->persona, agent->memory_session_id, agent->memory_session_id_len);

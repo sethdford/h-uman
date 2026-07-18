@@ -128,6 +128,46 @@ bool hu_followup_dedup_seen(const hu_followup_dedup_t *d, int64_t msg_id);
 void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id);
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Per-contact follow-up cooldown ledger.
+ *
+ * The msg-id dedup ring above cannot bound follow-up FREQUENCY: each bump the
+ * daemon sends becomes a new read-but-unreplied message in chat.db, which then
+ * triggers the next bump — the bump bumps itself. On 2026-07-14 this sent the
+ * identical "hey, just bumping this" 5x in one day to one contact.
+ *
+ * The ledger caps scheduling per CONTACT: at most one follow-up per contact
+ * per HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS, regardless of msg-id churn.
+ * In-memory like the dedup ring (worst case across a daemon restart: one
+ * extra follow-up). Pinned by tests/test_follow_up.c (followup_ledger_*).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+#define HU_FOLLOWUP_CONTACT_LEDGER_SIZE 16
+#define HU_FOLLOWUP_CONTACT_ID_MAX      64
+/* 48h: humans bump a silent thread after a day or two, never twice a day. */
+#define HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS (48ULL * 3600ULL * 1000ULL)
+
+typedef struct hu_followup_contact_ledger {
+    char contact_ids[HU_FOLLOWUP_CONTACT_LEDGER_SIZE][HU_FOLLOWUP_CONTACT_ID_MAX];
+    uint64_t scheduled_at_ms[HU_FOLLOWUP_CONTACT_LEDGER_SIZE];
+    size_t next_slot;
+} hu_followup_contact_ledger_t;
+
+/* Zero the ledger. Safe to call repeatedly. */
+void hu_followup_contact_ledger_init(hu_followup_contact_ledger_t *l);
+
+/* True if a follow-up was recorded for contact_id within cooldown_ms of
+ * now_ms — i.e. scheduling another one now would over-bump. Pure; NULL/empty
+ * inputs return false (unknown contact is never "recent"). */
+bool hu_followup_contact_recent(const hu_followup_contact_ledger_t *l, const char *contact_id,
+                                uint64_t now_ms, uint64_t cooldown_ms);
+
+/* Record that a follow-up was scheduled for contact_id at now_ms. Re-recording
+ * an existing contact refreshes its slot; otherwise the oldest slot is
+ * evicted. No-op on NULL/empty inputs. */
+void hu_followup_contact_record(hu_followup_contact_ledger_t *l, const char *contact_id,
+                                uint64_t now_ms);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Send-now predicate — extracts the daemon's send decision into a pure
  * predicate per .claude/rules/security-predicate-extraction.md.
  *

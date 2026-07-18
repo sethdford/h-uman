@@ -387,8 +387,12 @@ static void test_sanitize_strips_ai_phrases(void) {
     strcpy(buf, "I'd be happy to help you with that");
     size_t len = imessage_sanitize_output(buf, strlen(buf));
     HU_ASSERT(strstr(buf, "I'd be happy to") == NULL);
-    HU_ASSERT(len < 35);
-    HU_ASSERT(len > 0);
+    /* G10 D8 (2026-07-18): assistant-service phrasing now REJECTS the whole
+     * message (suppress + regenerate upstream) instead of stripping the
+     * phrase and sending the mangled remainder "you with that". A cleared
+     * buffer is the correct deny-by-default outcome here. */
+    HU_ASSERT_EQ(len, (size_t)0);
+    HU_ASSERT_EQ(buf[0], '\0');
 }
 
 static void test_sanitize_strips_great_question(void) {

@@ -101,9 +101,9 @@
 #include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
-#include "human/daemon_maintenance.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_lifecycle.h"
+#include "human/daemon_maintenance.h"
 #include "human/daemon_proactive.h"
 #include "human/daemon_routing.h"
 /* reaction_handler.h pulled out of the RL_FULL gate: the
@@ -812,100 +812,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         }
     }
 
-    /* ── Follow-up watcher (S2.1b) ─────────────────────────────────────────
-     * For each iMessage channel and each persona contact with a warmth tier
-     * that warrants follow-ups (CLOSE / FRIEND), check chat.db for a
-     * read-but-unreplied outbound. If found and not already scheduled,
-     * compute a circadian-aware send time and enqueue a template via the
-     * existing schedule API. The next iteration's flush_scheduled_for above
-     * will pick it up at the computed time.
-     *
-     * Dedup is in-memory only (a daemon restart wipes the ring); worst case
-     * is one duplicate follow-up across a restart, acceptable for first cut.
-     * Persistence can land later if duplicates become observable.
-     *
-     * Per-contact chronotype is not yet a persona field, so we use the
-     * agent's own chronotype as a proxy (close friends often share rhythms).
-     * Future enhancement: hu_contact_profile.chronotype. */
-    {
-        static hu_followup_dedup_t followup_dedup;
-        static bool followup_dedup_inited;
-        if (!followup_dedup_inited) {
-            hu_followup_dedup_init(&followup_dedup);
-            followup_dedup_inited = true;
-        }
-
-        time_t fnow_t = time(NULL);
-        struct tm flocal_tm;
-        int ftz_off = 0;
-        if (localtime_r(&fnow_t, &flocal_tm))
-            ftz_off = (int)flocal_tm.tm_gmtoff;
-
-        for (size_t fc = 0; fc < channel_count; fc++) {
-            if (!channels[fc].channel || !channels[fc].channel->vtable ||
-                !channels[fc].channel->vtable->name)
-                continue;
-            const char *fch_name = channels[fc].channel->vtable->name(channels[fc].channel->ctx);
-            if (!fch_name || strcmp(fch_name, "imessage") != 0)
-                continue;
-
-            for (size_t ci = 0; ci < agent->persona->contacts_count; ci++) {
-                const hu_contact_profile_t *cp = &agent->persona->contacts[ci];
-                if (!cp->contact_id || !cp->warmth_level)
-                    continue;
-
-                hu_followup_warmth_t warmth = hu_followup_warmth_from_string(cp->warmth_level);
-                if (warmth == HU_FOLLOWUP_WARMTH_NONE)
-                    continue;
-
-                int64_t fmsg_id = 0;
-                uint64_t fread_at_ms = 0;
-#ifdef HU_HAS_IMESSAGE
-                hu_error_t qerr = hu_imessage_find_unreplied_read(
-                    cp->contact_id, strlen(cp->contact_id), &fmsg_id, &fread_at_ms);
-#else
-                /* Builds without HU_HAS_IMESSAGE can't query chat.db. The
-                 * loop's outer guard at line 1284 already filters to imessage
-                 * channels; we only reach this point when imessage support is
-                 * compiled in. Stub-out as NOT_SUPPORTED for the unreachable
-                 * branch so the symbol isn't required at link time. */
-                hu_error_t qerr = HU_ERR_NOT_SUPPORTED;
-                (void)cp;
-                (void)fmsg_id;
-                (void)fread_at_ms;
-#endif
-                if (qerr != HU_OK || fmsg_id == 0)
-                    continue;
-
-                if (hu_followup_dedup_seen(&followup_dedup, fmsg_id))
-                    continue;
-
-                hu_followup_input_t fin = {
-                    .read_at_ms = fread_at_ms,
-                    .warmth = warmth,
-                    .contact_chronotype = agent->persona->chronotype,
-                    .local_tz_offset_seconds = ftz_off,
-                    .seed = (uint32_t)fmsg_id ^ (uint32_t)fnow_t,
-                };
-                hu_followup_decision_t fdec = hu_followup_decide(&fin);
-                if (!fdec.should_schedule)
-                    continue;
-
-                size_t tmpl_len = strlen(fdec.template_text);
-                hu_error_t serr = hu_conversation_schedule_message_on(
-                    cp->contact_id, strlen(cp->contact_id), "imessage", 8, fdec.template_text,
-                    tmpl_len, fdec.send_at_ms);
-                if (serr == HU_OK) {
-                    hu_followup_dedup_record(&followup_dedup, fmsg_id);
-                    hu_log_info(
-                        "human", agent ? agent->observer : NULL,
-                        "scheduled follow-up: contact=%s msg_id=%lld send_at_ms=%llu warmth=%d",
-                        cp->contact_id, (long long)fmsg_id, (unsigned long long)fdec.send_at_ms,
-                        (int)warmth);
-                }
-            }
-        }
-    }
+    /* Follow-up watcher (S2.1b) — carved to src/daemon/daemon_followup_sched.c
+     * (file-size-ceiling ratchet). msg-id dedup + per-contact cooldown live
+     * there; scheduling flows through hu_conversation_schedule_message_on. */
+    hu_daemon_followup_sched_tick(agent, channels, channel_count);
 
     for (size_t i = 0; i < agent->persona->contacts_count; i++) {
         const hu_contact_profile_t *cp = &agent->persona->contacts[i];
@@ -12728,6 +12638,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         choreo_plan.segments[seg].text,
                                         choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
                                 }
+#if defined(HU_ENABLE_RL_FULL)
+                                /* Choreography route added ~2026-05-28 without
+                                 * registration — reaction_lookup went stale and zero
+                                 * imessage_tapback DPO pairs were recorded (2026-07-18
+                                 * audit). Register the first segment like f==0 above. */
+                                if (seg == 0 && ch->channel->vtable->name) {
+                                    hu_daemon_register_reply_for_reactions(
+                                        config, agent, ch->channel->vtable->name(ch->channel->ctx),
+                                        send_target, combined[0] ? combined : "",
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len, NULL, 0);
+                                }
+#endif
                             }
                             hu_choreography_plan_free(alloc, &choreo_plan);
                         }
@@ -12876,49 +12799,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     }
                                 }
 #if defined(HU_ENABLE_RL_FULL)
-                                if (config && config->reaction_collection.enabled && f == 0 &&
-                                    fragments[f].text && fragments[f].text_len > 0 &&
+                                /* One registration per reply (f==0) so a later tapback
+                                 * on it can produce a DPO pair. Centralized in
+                                 * daemon_message_router.c to cover every route. */
+                                if (f == 0 && fragments[f].text && fragments[f].text_len > 0 &&
                                     ch->channel->vtable->name) {
-                                    const char *ch_name =
-                                        ch->channel->vtable->name(ch->channel->ctx);
-                                    if (ch_name) {
-                                        char msg_ref[96];
-                                        msg_ref[0] = '\0';
-                                        if (strcmp(ch_name, "imessage") == 0) {
-                                            const char *db = NULL;
-                                            if (config->reaction_collection.chatdb_path[0])
-                                                db = config->reaction_collection.chatdb_path;
-                                            else {
-                                                const char *env = getenv("HU_CHATDB");
-                                                if (env && env[0])
-                                                    db = env;
-                                            }
-                                            if (!db) {
-                                                static char home_db[512];
-                                                const char *hm = getenv("HOME");
-                                                if (hm && hm[0]) {
-                                                    snprintf(home_db, sizeof(home_db),
-                                                             "%s/Library/Messages/chat.db", hm);
-                                                    db = home_db;
-                                                }
-                                            }
-                                            if (db && hu_imessage_lookup_latest_sent_guid(
-                                                          db, batch_key, fragments[f].text, msg_ref,
-                                                          sizeof(msg_ref)) != HU_OK) {
-                                                snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
-                                                         (long long)time(NULL));
-                                            }
-                                        } else {
-                                            snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
-                                                     (long long)time(NULL));
-                                        }
-                                        hu_reaction_handler_register_assistant_message_for_production(
-                                            ch_name, batch_key, msg_ref,
-                                            combined[0] ? combined : "", fragments[f].text,
-                                            (agent && agent->sota.last_rejected_draft)
-                                                ? agent->sota.last_rejected_draft
-                                                : "");
-                                    }
+                                    hu_daemon_register_reply_for_reactions(
+                                        config, agent, ch->channel->vtable->name(ch->channel->ctx),
+                                        batch_key, combined[0] ? combined : "", fragments[f].text,
+                                        fragments[f].text_len, NULL, 0);
                                 }
 #endif
                                 if (pv_cnt > 0) {

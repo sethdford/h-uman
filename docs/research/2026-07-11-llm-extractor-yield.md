@@ -1,3 +1,9 @@
+---
+title: LLM Fact-Extractor Yield Measurement (event schema)
+status: reference
+date: 2026-07-11
+---
+
 # LLM Fact-Extractor Yield Measurement (event schema)
 
 Date: 2026-07-11. Harness: offline, sequential, dedicated base-model server

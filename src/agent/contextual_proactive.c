@@ -90,9 +90,9 @@ static int weekday_index(const char *s, size_t len) {
 }
 
 static int month_index(const char *s, size_t len) {
-    static const char *const month_names[12] = {"january", "february", "march",     "april",
-                                                "may",     "june",     "july",      "august",
-                                                "september", "october", "november", "december"};
+    static const char *const month_names[12] = {"january",   "february", "march",    "april",
+                                                "may",       "june",     "july",     "august",
+                                                "september", "october",  "november", "december"};
     for (int m = 0; m < 12; m++) {
         if (ci_prefix(s, len, month_names[m]) && strlen(month_names[m]) <= len)
             return m;
@@ -282,6 +282,59 @@ size_t hu_contextual_proactive_normalize_topic(const char *topic, size_t len, ch
     return copy;
 }
 
+/* ── topic-quality gate ───────────────────────────────────────────────────── */
+
+/* Words that mark a topic as a clause rather than a noun phrase. Matched with
+ * word boundaries (hu_str_contains_word_ci_n) per
+ * .claude/rules/substring-classifier-pitfalls.md — "im" must not fire inside
+ * "swimming", "will" must not fire inside "goodwill". Apostrophes are word
+ * boundaries, so "I'll" is caught by "i". */
+static const char *const topic_clause_words[] = {
+    /* pronouns */
+    "i", "im", "ive", "ill", "id", "me", "you", "your", "youre", "we", "weve", "hes", "shes",
+    "theyre",
+    /* auxiliaries / copulas */
+    "is", "are", "was", "were", "will", "be", "been", "being", "am", "dont", "cant", "wont",
+    /* clause verbs seen in real extractor output */
+    "going", "gonna", "get", "got", "went", "think", "thinking", "know", "need", "want", "try",
+    "trying", "come",
+    /* interjections */
+    "okay", "ok", "yeah", "yep", "sure", "thanks", NULL};
+
+bool hu_contextual_proactive_topic_is_sendable(const char *topic, size_t len) {
+    if (!topic || len == 0 || len > 48)
+        return false;
+
+    /* Sentence punctuation ANYWHERE means the "topic" is a clause. The
+     * normalizer already strips trailing punctuation, so any survivor is
+     * internal ("It will be tomorrow. Im working"). */
+    size_t words = 0;
+    bool in_word = false;
+    for (size_t i = 0; i < len; i++) {
+        char c = topic[i];
+        if (c == '.' || c == '!' || c == '?' || c == ';' || c == ':' || c == ',' || c == '\n')
+            return false;
+        bool sp = ((unsigned char)c <= 32);
+        if (!sp && !in_word) {
+            words++;
+            in_word = true;
+        } else if (sp) {
+            in_word = false;
+        }
+    }
+
+    /* Real event topics are 1-4 words ("interview", "dentist appointment",
+     * "parent teacher conference"). Longer means the extractor grabbed prose. */
+    if (words == 0 || words > 4)
+        return false;
+
+    for (size_t w = 0; topic_clause_words[w]; w++) {
+        if (hu_str_contains_word_ci_n(topic, len, topic_clause_words[w]))
+            return false;
+    }
+    return true;
+}
+
 size_t hu_contextual_proactive_build_message(const char *topic, size_t len, char *out, size_t cap) {
     if (!out || cap == 0)
         return 0;
@@ -329,8 +382,16 @@ hu_error_t hu_contextual_proactive_decide(hu_allocator_t *alloc, const char *inb
         if (tlen == 0)
             continue;
 
-        int64_t send_at = hu_contextual_proactive_resolve_send_at(ev->temporal_ref,
-                                                                  ev->temporal_ref_len, now_ts);
+        /* Topic-quality gate (2026-07-18 audit): the extractor can hand back a
+         * whole clause as a "description"; splicing that into the template
+         * produced real sends like "how'd the It will be tomorrow. Im working
+         * go?". Only short noun-phrase topics survive — skipping a follow-up
+         * costs nothing, sending garbage costs trust. */
+        if (!hu_contextual_proactive_topic_is_sendable(cand.topic, tlen))
+            continue;
+
+        int64_t send_at =
+            hu_contextual_proactive_resolve_send_at(ev->temporal_ref, ev->temporal_ref_len, now_ts);
         if (send_at <= now_ts || send_at == 0)
             continue;
 

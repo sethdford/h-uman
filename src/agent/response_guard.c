@@ -358,6 +358,25 @@ static bool hu_guard_has_self_talk_pattern(const char *s, size_t len) {
         {" Constraints: All lowercase", 27},
         {"\nSystem prompt:", 15},
         {" System prompt:", 15},
+        /* G10 D8 (2026-07-18 audit) — assistant-service phrasing. "please
+         * wait a moment while I send you the PIN" reached a real contact on
+         * 2026-07-17, AFTER the G10 deploy: D1-D7 cover deliberation and
+         * meta-text echo but had no family for customer-service phrasing.
+         * Patterns are high-precision — "assist"/service-desk framing is
+         * the tell, never helping itself ("i can help you with the move"
+         * must SEND; see guard_d8_allows_human_help_offers). */
+        {"please wait a moment", 20},
+        {"please wait while i", 19},
+        {"as an ai", 8},
+        {"i'm an ai", 9},
+        {"i am an ai", 10},
+        {"how can i assist", 16},
+        {"i cannot assist", 15},
+        {"can't assist", 12},
+        {"i'd be happy to help", 20},
+        {"i would be happy to help", 24},
+        {"is there anything else i can", 28},
+        {"i apologize for any confusion", 29},
         /* NOTE: we do NOT hardcode the persona's name / title / age
          * here even though they appeared verbatim in the audit leaks.
          * Hardcoding PII into open-source guard code is a leak in

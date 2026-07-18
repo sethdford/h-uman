@@ -19,6 +19,7 @@
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
+#include "human/daemon/message_router.h"
 #include "human/ml/dpo.h"
 #include "test_framework.h"
 #include <sqlite3.h>
@@ -443,9 +444,77 @@ static void test_reaction_handler_handle_event_null_returns_invalid_argument(voi
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* 2026-07-18 audit pin: the daemon reply loop's choreography branch (added
+ * ~2026-05-28) sent WITHOUT registering the outbound in reaction_lookup, so
+ * tapbacks never matched and zero imessage_tapback DPO pairs were recorded
+ * for ~7 weeks despite 119 real inbound tapbacks/30d. Registration is now
+ * centralized in hu_daemon_register_reply_for_reactions (message_router);
+ * this test proves the helper's registration is FINDABLE by a subsequent
+ * reaction event end-to-end (register -> event -> DPO pair). */
+static void test_router_registration_yields_pair_on_tapback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, /*max_pairs=*/1024, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_reaction_handler_reset_for_test();
+    hu_reaction_handler_set_collector(&col);
+
+    /* NULL config: reaction_collection gate passes open, chat.db GUID lookup
+     * is skipped, and the helper mints a time-based ref it reports back. */
+    char ref[96] = {0};
+    hu_daemon_register_reply_for_reactions(NULL, NULL, "imessage", "chat_router",
+                                           "you free tonight?", "yeah give me an hour", 20, ref,
+                                           sizeof(ref));
+#if defined(HU_ENABLE_RL_FULL)
+    HU_ASSERT_TRUE(ref[0] != '\0');
+
+    hu_reaction_event_t e = {
+        .channel_id = "imessage",
+        .target_thread_id = "chat_router",
+        .target_message_ref = ref,
+        .sender_handle = "+15551230000",
+        .kind = HU_REACTION_LOVE,
+        .polarity = HU_REACTION_POSITIVE,
+        .is_removal = 0,
+    };
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
+
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT chosen, source FROM dpo_pairs LIMIT 1", -1, &stmt, NULL),
+        SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "yeah give me an hour");
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "imessage_tapback");
+    sqlite3_finalize(stmt);
+#else
+    /* Without HU_ENABLE_RL_FULL the helper is a compiled-out stub whose
+     * contract is "no registration, msg_ref_out cleared" — pin that too so
+     * a future half-stub can't silently half-register (gate symmetry per
+     * .claude/rules/test-source-gate-symmetry.md). */
+    HU_ASSERT_EQ(ref[0], '\0');
+    size_t n = 99;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+#endif
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
+    HU_RUN_TEST(test_router_registration_yields_pair_on_tapback);
     HU_RUN_TEST(test_reaction_event_with_unknown_target_drops_silently);
     HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
     HU_RUN_TEST(test_positive_tapback_with_alternative_creates_complete_pair);

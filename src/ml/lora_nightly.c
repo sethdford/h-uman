@@ -36,10 +36,15 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
     snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), "http://127.0.0.1:8741/v1");
     snprintf(cfg->gate_verdict_path, sizeof(cfg->gate_verdict_path), "%s/.human/blind_ab_gate.json",
              home);
-    /* Default base model — same as the M3 runbook example. Users on
-     * different hardware (more/less VRAM) should override via the
-     * struct or via the future daemon config block. */
-    snprintf(cfg->base_model, sizeof(cfg->base_model), "mlx-community/gemma-2-2b-it-4bit");
+    /* Default base model — MUST match the SERVING base so the trained
+     * adapter can be hot-swapped without a quantization mismatch (the
+     * 2026-07-18 audit found serving on gemma-4-31b-it-8bit while the live
+     * adapter was trained against the 4bit base; never re-validated).
+     * Users on different hardware should override via the struct or via
+     * the future daemon config block. Previous default was the stale M3
+     * runbook example (gemma-2-2b-it-4bit), which also made the nightly
+     * subprocess train a model nothing serves. */
+    snprintf(cfg->base_model, sizeof(cfg->base_model), "mlx-community/gemma-4-31b-it-8bit");
     cfg->dry_run = false;
     return true;
 }
@@ -249,7 +254,8 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
         int kn = snprintf(kto_path, sizeof(kto_path), "%s.kto.jsonl", cfg->pairs_jsonl_path);
         size_t kto_count = 0;
         if (kn > 0 && (size_t)kn < sizeof(kto_path)) {
-            hu_error_t ke = hu_lora_export_kto_signals(alloc, cfg->db_path, kto_path, 0, &kto_count);
+            hu_error_t ke =
+                hu_lora_export_kto_signals(alloc, cfg->db_path, kto_path, 0, &kto_count);
             if (ke == HU_OK && kto_count > 0) {
                 /* Hand off to the maintenance-window trainer instead of
                  * launching here (co-training a 31B with the live server
@@ -364,9 +370,9 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
     hu_lora_promotion_decision_t decision =
         hu_lora_nightly_promotion_allowed(adapter_valid, gate_verdict, allow_unmeasured);
     hu_log_info("lora-nightly", NULL, "blind-A/B gate verdict: %s",
-                (gate_verdict == HU_LORA_GATE_PASS) ? "PASS"
+                (gate_verdict == HU_LORA_GATE_PASS)   ? "PASS"
                 : (gate_verdict == HU_LORA_GATE_FAIL) ? "FAIL"
-                : "ABSENT");
+                                                      : "ABSENT");
     if (decision != HU_LORA_PROMOTE_LIVE) {
         hu_log_info(
             "lora-nightly", NULL,

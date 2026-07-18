@@ -369,6 +369,90 @@ static void followup_dedup_null_handling(void) {
     HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, -1));
 }
 
+/* ── per-contact cooldown ledger ──────────────────────────────────────────
+ * Regression pins for the 2026-07-14 incident: "hey, just bumping this" was
+ * sent 5x in ONE day to the same contact. The msg-id dedup ring cannot stop
+ * this — each bump the daemon sends becomes a NEW read-but-unreplied message,
+ * which triggers the next bump (the bump bumps itself). The ledger caps
+ * follow-up frequency per CONTACT regardless of msg-id churn. */
+
+static void followup_ledger_unknown_contact_not_recent(void) {
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    HU_ASSERT_FALSE(
+        hu_followup_contact_recent(&l, "user_a", 1000000ULL, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+}
+
+static void followup_ledger_recent_within_cooldown(void) {
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    uint64_t t0 = 1000000ULL;
+    hu_followup_contact_record(&l, "user_a", t0);
+    /* Immediately after and 47h59m later: still cooling down. */
+    HU_ASSERT_TRUE(
+        hu_followup_contact_recent(&l, "user_a", t0 + 1, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+    HU_ASSERT_TRUE(hu_followup_contact_recent(&l, "user_a",
+                                              t0 + HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS - 1,
+                                              HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+    /* A different contact is unaffected. */
+    HU_ASSERT_FALSE(
+        hu_followup_contact_recent(&l, "user_b", t0 + 1, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+}
+
+static void followup_ledger_expires_after_cooldown(void) {
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    uint64_t t0 = 1000000ULL;
+    hu_followup_contact_record(&l, "user_a", t0);
+    HU_ASSERT_FALSE(hu_followup_contact_recent(&l, "user_a",
+                                               t0 + HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS,
+                                               HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+}
+
+static void followup_ledger_rerecord_refreshes_cooldown(void) {
+    /* The incident shape: repeated schedules for the same contact. The ledger
+     * makes attempt N+1 impossible inside the cooldown, and a re-record after
+     * expiry restarts the clock. */
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    uint64_t t0 = 1000000ULL;
+    hu_followup_contact_record(&l, "user_a", t0);
+    uint64_t t1 = t0 + HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS; /* expired */
+    HU_ASSERT_FALSE(
+        hu_followup_contact_recent(&l, "user_a", t1, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+    hu_followup_contact_record(&l, "user_a", t1);
+    HU_ASSERT_TRUE(
+        hu_followup_contact_recent(&l, "user_a", t1 + 1, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+}
+
+static void followup_ledger_capacity_evicts_oldest(void) {
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    char id[32];
+    uint64_t t0 = 1000000ULL;
+    for (int i = 0; i < HU_FOLLOWUP_CONTACT_LEDGER_SIZE + 1; i++) {
+        snprintf(id, sizeof(id), "user_%d", i);
+        hu_followup_contact_record(&l, id, t0 + (uint64_t)i);
+    }
+    /* user_0 evicted; the newest survivors are still tracked. */
+    HU_ASSERT_FALSE(
+        hu_followup_contact_recent(&l, "user_0", t0 + 100, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+    snprintf(id, sizeof(id), "user_%d", HU_FOLLOWUP_CONTACT_LEDGER_SIZE);
+    HU_ASSERT_TRUE(
+        hu_followup_contact_recent(&l, id, t0 + 100, HU_FOLLOWUP_PER_CONTACT_COOLDOWN_MS));
+}
+
+static void followup_ledger_null_handling(void) {
+    hu_followup_contact_ledger_t l;
+    hu_followup_contact_ledger_init(&l);
+    hu_followup_contact_record(NULL, "user_a", 1);
+    hu_followup_contact_record(&l, NULL, 1);
+    hu_followup_contact_record(&l, "", 1);
+    HU_ASSERT_FALSE(hu_followup_contact_recent(NULL, "user_a", 2, 10));
+    HU_ASSERT_FALSE(hu_followup_contact_recent(&l, NULL, 2, 10));
+    HU_ASSERT_FALSE(hu_followup_contact_recent(&l, "user_a", 2, 10));
+}
+
 static void followup_dedup_overwrites_oldest_after_capacity(void) {
     /* After 32 records, slot 0 should hold the 33rd entry, not the first.
      * Pin: the first entry is no longer "seen" after wrap, the recent ones are. */
@@ -489,6 +573,13 @@ void run_follow_up_tests(void) {
     HU_RUN_TEST(followup_dedup_seen_on_empty_returns_false);
     HU_RUN_TEST(followup_dedup_null_handling);
     HU_RUN_TEST(followup_dedup_overwrites_oldest_after_capacity);
+
+    HU_RUN_TEST(followup_ledger_unknown_contact_not_recent);
+    HU_RUN_TEST(followup_ledger_recent_within_cooldown);
+    HU_RUN_TEST(followup_ledger_expires_after_cooldown);
+    HU_RUN_TEST(followup_ledger_rerecord_refreshes_cooldown);
+    HU_RUN_TEST(followup_ledger_capacity_evicts_oldest);
+    HU_RUN_TEST(followup_ledger_null_handling);
 
     HU_RUN_TEST(followup_warmth_lukewarm_must_not_map_to_close);
     HU_RUN_TEST(followup_warmth_unfriendly_must_not_map_to_friend);

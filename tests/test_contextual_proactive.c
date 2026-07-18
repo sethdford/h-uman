@@ -31,8 +31,7 @@ static struct tm local_of(int64_t ts) {
 static void mode_parse_defaults_off(void) {
     HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str(NULL),
                  (int)HU_CONTEXTUAL_PROACTIVE_OFF);
-    HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str(""),
-                 (int)HU_CONTEXTUAL_PROACTIVE_OFF);
+    HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str(""), (int)HU_CONTEXTUAL_PROACTIVE_OFF);
     HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("off"),
                  (int)HU_CONTEXTUAL_PROACTIVE_OFF);
     HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("garbage"),
@@ -44,8 +43,7 @@ static void mode_parse_shadow_and_on(void) {
                  (int)HU_CONTEXTUAL_PROACTIVE_SHADOW);
     HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("SHADOW"),
                  (int)HU_CONTEXTUAL_PROACTIVE_SHADOW);
-    HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("on"),
-                 (int)HU_CONTEXTUAL_PROACTIVE_ON);
+    HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("on"), (int)HU_CONTEXTUAL_PROACTIVE_ON);
     HU_ASSERT_EQ((int)hu_contextual_proactive_mode_from_str("live"),
                  (int)HU_CONTEXTUAL_PROACTIVE_ON);
 }
@@ -81,9 +79,63 @@ static void normalize_topic_strips_filler(void) {
                    0);
     HU_ASSERT_STR_EQ(buf, "surgery");
 
-    HU_ASSERT_TRUE(hu_contextual_proactive_normalize_topic("the appointment.", 16, buf,
-                                                           sizeof(buf)) > 0);
+    HU_ASSERT_TRUE(
+        hu_contextual_proactive_normalize_topic("the appointment.", 16, buf, sizeof(buf)) > 0);
     HU_ASSERT_STR_EQ(buf, "appointment");
+}
+
+/* ── topic quality: only noun-phrase-like topics are sendable ─────────────── */
+
+/* Regression pins from the 2026-07-18 iMessage quality audit: the event
+ * extractor can hand back whole clauses as "descriptions"; splicing those into
+ * "how'd the %s go?" produced real sends like "how'd the It will be tomorrow.
+ * Im working go?". An unprompted text has an asymmetric cost profile — a
+ * skipped send costs nothing, a garbage send costs trust — so the predicate
+ * biases hard toward precision. */
+static void topic_sendable_accepts_noun_phrases(void) {
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("interview", 9));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("surgery", 7));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("internet installers", 19));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("dentist appointment", 19));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("job interview", 13));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("swimming lessons", 16));
+}
+
+static void topic_sendable_rejects_sentence_fragments(void) {
+    /* The four real-world garbage topics that were sent or queued. */
+    static const char *garbage[] = {
+        "It will be tomorrow. Im working",
+        "went over to your place to measure walls.  Im thinking about doing a wall",
+        "Im meeting the v internet installers",
+        "Okay, I'll try",
+    };
+    for (size_t i = 0; i < sizeof(garbage) / sizeof(garbage[0]); i++)
+        HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(garbage[i], strlen(garbage[i])));
+
+    /* Structural rejects: sentence punctuation, clause words, length. */
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("meeting. then dinner", 20));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("you know that thing", 19));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("think we need groceries", 23));
+    HU_ASSERT_FALSE(
+        hu_contextual_proactive_topic_is_sendable("really long topic with far too many words", 41));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("", 0));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(NULL, 0));
+}
+
+/* End-to-end: decide() must drop obligations whose topic fails the predicate.
+ * This inbound is the EXACT production message that generated the mangled
+ * "how'd the It will be tomorrow. Im working go?" send on 2026-07-16. */
+static void decide_sentence_like_description_no_obligation(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_proactive_result_t res;
+    static const char inbound[] = "It will be tomorrow. Im working today. ";
+    HU_ASSERT_EQ(hu_contextual_proactive_decide(&alloc, inbound, sizeof(inbound) - 1, CP_NOW, &res),
+                 HU_OK);
+    /* Every extracted candidate is clause-like; none may survive the gate. */
+    for (size_t i = 0; i < res.count; i++)
+        HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable(res.items[i].topic,
+                                                                 strlen(res.items[i].topic)));
+    HU_ASSERT_EQ(res.count, (size_t)0);
 }
 
 /* ── temporal resolution: future, never past ──────────────────────────────── */
@@ -144,8 +196,7 @@ static void decide_dated_event_stores_contextual_obligation(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_contextual_proactive_result_t res;
     const char *msg = "my interview is on Friday";
-    hu_error_t err =
-        hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
+    hu_error_t err = hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(res.count, (size_t)1);
 
@@ -169,8 +220,7 @@ static void decide_no_temporal_no_obligation(void) {
     hu_contextual_proactive_result_t res;
     /* No temporal reference at all -> no future-dated event -> no obligation. */
     const char *msg = "i really like coffee and the weather is nice";
-    hu_error_t err =
-        hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
+    hu_error_t err = hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(res.count, (size_t)0);
 }
@@ -180,8 +230,7 @@ static void decide_past_event_no_obligation(void) {
     hu_contextual_proactive_result_t res;
     /* A detectable event but a PAST temporal ref must not schedule outreach. */
     const char *msg = "my interview was yesterday";
-    hu_error_t err =
-        hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
+    hu_error_t err = hu_contextual_proactive_decide(&alloc, msg, strlen(msg), CP_NOW, &res);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(res.count, (size_t)0);
 }
@@ -239,6 +288,9 @@ void run_contextual_proactive_tests(void) {
     HU_RUN_TEST(build_message_references_topic);
     HU_RUN_TEST(build_message_empty_topic_no_fabrication);
     HU_RUN_TEST(normalize_topic_strips_filler);
+    HU_RUN_TEST(topic_sendable_accepts_noun_phrases);
+    HU_RUN_TEST(topic_sendable_rejects_sentence_fragments);
+    HU_RUN_TEST(decide_sentence_like_description_no_obligation);
     HU_RUN_TEST(resolve_tomorrow_is_future_evening);
     HU_RUN_TEST(resolve_yesterday_and_vague_reject);
     HU_RUN_TEST(resolve_weekday_lands_on_that_weekday);

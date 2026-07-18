@@ -72,6 +72,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, struct hu_agent *a
                                        hu_service_channel_t *channels, size_t channel_count,
                                        const struct hu_config *config);
 
+/* Follow-up watcher scheduling tick (S2.1b) — schedules warmth-tiered
+ * "bump" follow-ups for read-but-unreplied iMessages. Carved out of
+ * hu_service_run_proactive_checkins; guarded by an in-memory msg-id dedup
+ * ring AND a per-contact cooldown ledger (one bump per contact per 48h).
+ * Implemented in src/daemon/daemon_followup_sched.c. */
+void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t *channels,
+                                   size_t channel_count);
+
 hu_error_t hu_daemon_install(hu_allocator_t *alloc);
 hu_error_t hu_daemon_uninstall(void);
 hu_error_t hu_daemon_logs(void);

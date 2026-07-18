@@ -585,9 +585,15 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
         out->content = decrypted;
         out->content_len = decrypted_len;
     } else {
+        /* hu_strndup truncates at any embedded NUL, so the returned buffer may
+         * be SHORTER than the stored byte count. Report the actual buffer
+         * length (never the raw column byte count) so downstream consumers that
+         * memcpy(content, content_len) cannot over-read past the allocation.
+         * Memory content is text; bytes past a NUL are corruption and dropped.
+         * Regression pinned by tests/test_prompt.c (BUG B, 2026-07-13). */
         out->content =
             content_blob ? hu_strndup(alloc, (const char *)content_blob, content_len) : NULL;
-        out->content_len = content_len;
+        out->content_len = out->content ? strlen(out->content) : 0;
     }
     out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     out->category.data.custom.name =
@@ -1333,7 +1339,9 @@ static hu_error_t impl_session_load_messages(void *ctx, hu_allocator_t *alloc,
         entries[count].role = role_p ? hu_strndup(alloc, role_p, rl) : NULL;
         entries[count].role_len = rl;
         entries[count].content = content_p ? hu_strndup(alloc, content_p, cl) : NULL;
-        entries[count].content_len = cl;
+        /* content_len must equal the actual (NUL-truncated) buffer length, not
+         * the raw column byte count — see the BUG B note in read_entry_from_row. */
+        entries[count].content_len = entries[count].content ? strlen(entries[count].content) : 0;
         count++;
     }
     sqlite3_finalize(stmt);

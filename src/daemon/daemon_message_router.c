@@ -16,20 +16,23 @@
 #define _GNU_SOURCE
 #endif
 #include "human/agent.h"
+#include "human/agent/reaction_handler.h"
 #include "human/channel.h"
+#include "human/channels/format.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
+#include "human/channels/imessage_reactions.h"
 #include "human/channels/imessage_reply.h"
 #include "human/config.h"
+#include "human/context/conversation.h"
 #include "human/core/log.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
 #include "human/persona/pacing.h"
-#include "human/channels/format.h"
-#include "human/context/conversation.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -372,3 +375,60 @@ bool hu_daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *
     return true;
 }
 #endif /* HU_ENABLE_SQLITE && !HU_IS_TEST */
+
+/* ── Reaction-lookup registration (one funnel for every reply route) ─────── */
+
+void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+                                            const char *ch_name, const char *thread,
+                                            const char *prompt, const char *response,
+                                            size_t response_len, char *msg_ref_out,
+                                            size_t msg_ref_cap) {
+    if (msg_ref_out && msg_ref_cap > 0)
+        msg_ref_out[0] = '\0';
+#if defined(HU_ENABLE_RL_FULL)
+    if (!ch_name || !thread || !response || response_len == 0)
+        return;
+    if (config && !config->reaction_collection.enabled)
+        return;
+
+    char msg_ref[96];
+    msg_ref[0] = '\0';
+    if (config && strcmp(ch_name, "imessage") == 0) {
+        const char *db = NULL;
+        if (config->reaction_collection.chatdb_path[0])
+            db = config->reaction_collection.chatdb_path;
+        else {
+            const char *env = getenv("HU_CHATDB");
+            if (env && env[0])
+                db = env;
+        }
+        if (!db) {
+            static char home_db[512];
+            const char *hm = getenv("HOME");
+            if (hm && hm[0]) {
+                snprintf(home_db, sizeof(home_db), "%s/Library/Messages/chat.db", hm);
+                db = home_db;
+            }
+        }
+        if (db && hu_imessage_lookup_latest_sent_guid(db, thread, response, msg_ref,
+                                                      sizeof(msg_ref)) != HU_OK)
+            msg_ref[0] = '\0';
+    }
+    if (msg_ref[0] == '\0')
+        snprintf(msg_ref, sizeof(msg_ref), "out-%lld", (long long)time(NULL));
+
+    hu_reaction_handler_register_assistant_message_for_production(
+        ch_name, thread, msg_ref, prompt ? prompt : "", response,
+        (agent && agent->sota.last_rejected_draft) ? agent->sota.last_rejected_draft : "");
+    if (msg_ref_out && msg_ref_cap > 0)
+        snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
+#else
+    (void)config;
+    (void)agent;
+    (void)ch_name;
+    (void)thread;
+    (void)prompt;
+    (void)response;
+    (void)response_len;
+#endif
+}

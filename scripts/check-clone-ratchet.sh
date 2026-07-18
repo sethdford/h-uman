@@ -18,7 +18,10 @@ set -euo pipefail
 # boundary sentinels (windows no longer span files, killing enumeration-
 # order dependence) and re-measured: 11587; 11552 after the
 # immersive-section table refactor (prompt.c) landed the same day.
-CLONE_BASELINE=11552
+# 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
+# the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
+# groups (verified by set-diffing merged-tree windows against origin/main).
+CLONE_BASELINE=11553
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
