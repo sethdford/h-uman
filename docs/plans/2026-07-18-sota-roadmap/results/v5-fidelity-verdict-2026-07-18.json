@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-07-18T11:31:54.597622",
+  "verdict": "PASS",
+  "exit_code": 0,
+  "n_prompts": 29,
+  "model_id": "mlx-community/gemma-4-31b-it-8bit",
+  "adapter_path": "/Users/sethford/.human/training-data/adapters/seth-lora-v5-8bit-20260718-105251",
+  "pre": {
+    "mean_score": 0.519,
+    "elapsed_sec": 352.5648591518402
+  },
+  "post": {
+    "mean_score": 0.8966,
+    "elapsed_sec": 303.5098948478699
+  },
+  "delta": {
+    "mean": 0.3776,
+    "ci_lower": 0.3259,
+    "ci_upper": 0.4397,
+    "stderr_est": 0.029
+  },
+  "gate": {
+    "statistical_pass": true,
+    "statistical_threshold": 0.5759,
+    "statistical_alpha": 0.025,
+    "practical_pass": true,
+    "practical_floor": 0.05
+  }
+}
