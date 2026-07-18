@@ -42,10 +42,10 @@
  *     surfaces HU_ERR_NOT_SUPPORTED on that path).
  */
 
-#include "test_framework.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/ml/cli_grpo.h"
+#include "test_framework.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -55,7 +55,8 @@ static const char *kGrpoFixture = "tests/fixtures/synthetic_grpo_prompts.jsonl";
 
 /* Best-effort cleanup helper — silent on ENOENT so tests stay idempotent. */
 static void unlink_quiet(const char *path) {
-    if (path) (void)unlink(path);
+    if (path)
+        (void)unlink(path);
 }
 
 static void test_cli_grpo_train_rejects_no_args(void) {
@@ -69,9 +70,9 @@ static void test_cli_grpo_train_rejects_no_args(void) {
 static void test_cli_grpo_train_rejects_n_rollouts_below_2(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--pairs",     "tests/fixtures/synthetic_grpo_prompts.jsonl",
         "--reward-fn", "synthetic",
-        "--rollouts", "1",
+        "--rollouts",  "1",
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 6, argv);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -80,8 +81,10 @@ static void test_cli_grpo_train_rejects_n_rollouts_below_2(void) {
 static void test_cli_grpo_train_rejects_no_reward_fn_no_reward_model(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl",
-        "--rollouts", "4",
+        "--pairs",
+        "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--rollouts",
+        "4",
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 4, argv);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -90,9 +93,8 @@ static void test_cli_grpo_train_rejects_no_reward_fn_no_reward_model(void) {
 static void test_cli_grpo_train_rejects_reward_fn_rm_without_model_path(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl",
-        "--reward-fn", "rm",
-        "--rollouts", "4",
+        "--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl", "--reward-fn", "rm", "--rollouts",
+        "4",
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 6, argv);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -101,10 +103,10 @@ static void test_cli_grpo_train_rejects_reward_fn_rm_without_model_path(void) {
 static void test_cli_grpo_train_rejects_backend_mlx_without_backbone(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--pairs",     "tests/fixtures/synthetic_grpo_prompts.jsonl",
         "--reward-fn", "synthetic",
-        "--rollouts", "4",
-        "--backend", "mlx",
+        "--rollouts",  "4",
+        "--backend",   "mlx",
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 8, argv);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
@@ -121,17 +123,15 @@ static void test_cli_grpo_train_synthetic_reward_smoke_huml_completes_and_writes
      * The MLX backend treats it as a directory; that's exercised by
      * tests/test_grpo_mlx.c::test_grpo_mlx_subprocess_produces_safetensors
      * under HU_HAVE_MLX_LM_GRPO=1, NOT here. */
-    const char *adapter_path = "/tmp/hu_test_cli_grpo_synthetic_adapter.bin";
+    char adapter_path[128];
+    snprintf(adapter_path, sizeof(adapter_path), "/tmp/hu_test_cli_grpo_synthetic_adapter_%ld.bin",
+             (long)getpid());
     unlink_quiet(adapter_path);
 
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", kGrpoFixture,
-        "--reward-fn", "synthetic",
-        "--rollouts", "4",
-        "--iters", "5",
-        "--backend", "huml",
-        "--adapter-out", adapter_path,
+        "--pairs", kGrpoFixture, "--reward-fn", "synthetic", "--rollouts",    "4",
+        "--iters", "5",          "--backend",   "huml",      "--adapter-out", adapter_path,
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 12, argv);
     HU_ASSERT_EQ(err, HU_OK);
@@ -154,17 +154,15 @@ static void test_cli_grpo_train_kl_beta_zero_disables_kl_penalty(void) {
      * _reference_forward) is the actual contract pin via
      * hu_grpo_huml_ref_forward_count_for_test; here we just smoke that
      * the flag flows through the CLI and the trainer still completes. */
-    const char *adapter_path = "/tmp/hu_test_cli_grpo_klbeta_zero_adapter.bin";
+    char adapter_path[128];
+    snprintf(adapter_path, sizeof(adapter_path),
+             "/tmp/hu_test_cli_grpo_klbeta_zero_adapter_%ld.bin", (long)getpid());
     unlink_quiet(adapter_path);
 
     hu_allocator_t alloc = hu_system_allocator();
     const char *argv[] = {
-        "--pairs", kGrpoFixture,
-        "--reward-fn", "synthetic",
-        "--rollouts", "4",
-        "--iters", "5",
-        "--backend", "huml",
-        "--kl-beta", "0",
+        "--pairs",       kGrpoFixture, "--reward-fn", "synthetic", "--rollouts", "4",
+        "--iters",       "5",          "--backend",   "huml",      "--kl-beta",  "0",
         "--adapter-out", adapter_path,
     };
     hu_error_t err = hu_ml_cli_grpo_train(&alloc, 14, argv);
@@ -172,7 +170,8 @@ static void test_cli_grpo_train_kl_beta_zero_disables_kl_penalty(void) {
 
     FILE *f = fopen(adapter_path, "rb");
     HU_ASSERT_NOT_NULL(f);
-    if (f) fclose(f);
+    if (f)
+        fclose(f);
     unlink_quiet(adapter_path);
 }
 
@@ -183,16 +182,32 @@ static void test_cli_grpo_train_kl_beta_zero_disables_kl_penalty(void) {
 static unsigned char *read_adapter_bytes(const char *path, size_t *out_n) {
     *out_n = 0;
     FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    if (!f)
+        return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
     long sz = ftell(f);
-    if (sz <= 0) { fclose(f); return NULL; }
-    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
+    if (sz <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
     unsigned char *buf = (unsigned char *)malloc((size_t)sz);
-    if (!buf) { fclose(f); return NULL; }
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
     size_t n = fread(buf, 1, (size_t)sz, f);
     fclose(f);
-    if (n != (size_t)sz) { free(buf); return NULL; }
+    if (n != (size_t)sz) {
+        free(buf);
+        return NULL;
+    }
     *out_n = n;
     return buf;
 }
@@ -222,8 +237,12 @@ static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
      * --adapter-out points at /tmp/... so the test doesn't write a
      * stray ./grpo-adapters into the workspace root (matches the
      * hygiene pattern of tests 6 and 7 above). */
-    const char *adapter_synth = "/tmp/hu_test_cli_grpo_rm_witness_synth.bin";
-    const char *adapter_rm    = "/tmp/hu_test_cli_grpo_rm_witness_rm.bin";
+    char adapter_synth[128];
+    char adapter_rm[128];
+    snprintf(adapter_synth, sizeof(adapter_synth), "/tmp/hu_test_cli_grpo_rm_witness_synth_%ld.bin",
+             (long)getpid());
+    snprintf(adapter_rm, sizeof(adapter_rm), "/tmp/hu_test_cli_grpo_rm_witness_rm_%ld.bin",
+             (long)getpid());
     unlink_quiet(adapter_synth);
     unlink_quiet(adapter_rm);
 
@@ -231,12 +250,12 @@ static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
 
     /* Reference run: synthetic reward, same fixture, same iters. */
     const char *argv_synth[] = {
-        "--pairs",        "tests/fixtures/synthetic_grpo_prompts.jsonl",
-        "--reward-fn",    "synthetic",
-        "--rollouts",     "4",
-        "--iters",        "3",
-        "--backend",      "huml",
-        "--adapter-out",  adapter_synth,
+        "--pairs",       "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--reward-fn",   "synthetic",
+        "--rollouts",    "4",
+        "--iters",       "3",
+        "--backend",     "huml",
+        "--adapter-out", adapter_synth,
     };
     hu_error_t err_synth = hu_ml_cli_grpo_train(&alloc, 12, argv_synth);
     HU_ASSERT_EQ(err_synth, HU_OK);
@@ -260,7 +279,7 @@ static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
      * adapters and slip past the previous exit-code-only check. */
     size_t n_synth = 0, n_rm = 0;
     unsigned char *buf_synth = read_adapter_bytes(adapter_synth, &n_synth);
-    unsigned char *buf_rm    = read_adapter_bytes(adapter_rm,    &n_rm);
+    unsigned char *buf_rm = read_adapter_bytes(adapter_rm, &n_rm);
     HU_ASSERT_NOT_NULL(buf_synth);
     HU_ASSERT_NOT_NULL(buf_rm);
     HU_ASSERT_GT(n_synth, 0);
