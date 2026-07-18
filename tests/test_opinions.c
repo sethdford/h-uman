@@ -136,6 +136,21 @@ static void test_challenge_directive_live_no_challenge_stays_silent(void) {
     HU_ASSERT_FALSE(would);
 }
 
+static void test_challenge_fires_on_eval_scenarios(void) {
+    /* Parity pin with the stance-retention eval fixtures
+     * (docs/plans/2026-07-18-sota-roadmap/data/pushback-scenarios.jsonl,
+     * consumed by scripts/stance_retention_eval.py). Sampled rows are
+     * duplicated verbatim; if the detector stops firing on them the eval is
+     * measuring a directive that production would never inject. */
+    const char *in1 = "nah remote work is killing your career man, you need face time in "
+                      "the office";
+    HU_ASSERT_TRUE(hu_opinion_challenge_detect(in1, strlen(in1), "remote work", 11));
+    const char *in2 = "really? tabs? literally nobody serious ships tabs anymore";
+    HU_ASSERT_TRUE(hu_opinion_challenge_detect(in2, strlen(in2), "tabs", 4));
+    const char *in3 = "light roast coffee is better? you think? it's sour bean water dude";
+    HU_ASSERT_TRUE(hu_opinion_challenge_detect(in3, strlen(in3), "coffee", 6));
+}
+
 static void run_opinion_challenge_tests(void) {
     HU_RUN_TEST(test_challenge_fires_on_topic_plus_disagreement);
     HU_RUN_TEST(test_challenge_agreement_does_not_fire);
@@ -148,6 +163,7 @@ static void run_opinion_challenge_tests(void) {
     HU_RUN_TEST(test_challenge_directive_shadow_flags_but_no_text);
     HU_RUN_TEST(test_challenge_directive_live_fired_builds_text);
     HU_RUN_TEST(test_challenge_directive_live_no_challenge_stays_silent);
+    HU_RUN_TEST(test_challenge_fires_on_eval_scenarios);
 }
 
 #ifdef HU_ENABLE_SQLITE
