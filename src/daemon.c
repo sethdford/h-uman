@@ -36,8 +36,10 @@
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
+#include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
+#include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
@@ -6727,6 +6729,43 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         PHASE6_APPEND(op_dir, op_dir_len);
                                     else if (op_dir)
                                         alloc->free(alloc->ctx, op_dir, op_dir_len + 1);
+
+                                    /* Roadmap #14: stances persist under pushback. When the
+                                     * inbound challenges a held opinion, direct the model to
+                                     * hold its position. Gated HU_OPINION_HOLD=off|shadow|live,
+                                     * default OFF; do not flip to default-ON without a stance-
+                                     * retention measurement (feature-gate-requires-measurement).
+                                     * Shadow logs would-fire without injecting. */
+                                    {
+                                        hu_gate_mode_t hold_mode =
+                                            hu_gate_mode_from_env("HU_OPINION_HOLD", HU_GATE_OFF);
+                                        if (hold_mode != HU_GATE_OFF && combined_len > 0) {
+                                            for (size_t oi = 0; oi < evo_count; oi++) {
+                                                char *hold_dir = NULL;
+                                                size_t hold_len = 0;
+                                                bool hold_would = false;
+                                                if (hu_opinion_challenge_directive(
+                                                        alloc, hold_mode, combined, combined_len,
+                                                        evo_opinions[oi].topic,
+                                                        evo_opinions[oi].topic_len,
+                                                        evo_opinions[oi].stance,
+                                                        evo_opinions[oi].stance_len, &hold_dir,
+                                                        &hold_len, &hold_would) != HU_OK)
+                                                    continue;
+                                                if (!hold_would)
+                                                    continue;
+                                                hu_log_info(
+                                                    "opinion_hold", agent ? agent->observer : NULL,
+                                                    "%s: inbound challenges stance [%.*s]",
+                                                    hold_mode == HU_GATE_LIVE ? "live" : "shadow",
+                                                    (int)evo_opinions[oi].topic_len,
+                                                    evo_opinions[oi].topic);
+                                                if (hold_dir && hold_len > 0)
+                                                    PHASE6_APPEND(hold_dir, hold_len);
+                                                break; /* one hold directive max per turn */
+                                            }
+                                        }
+                                    }
                                     hu_evolved_opinions_free(alloc, evo_opinions, evo_count);
                                 }
                             }
