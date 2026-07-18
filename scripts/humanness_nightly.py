@@ -33,10 +33,20 @@ sys.path.insert(0, str(HERE))
 import humanness_compose as hc  # noqa: E402
 
 
-def generate(server: str, model: str, prompt: str, max_tokens: int, temperature: float) -> str:
+def generate(server: str, model: str, prompt: str, max_tokens: int, temperature: float,
+             system_prompt: str | None = None) -> str:
+    # SOTA roadmap #19 (2026-07-18): with a system prompt this measures the
+    # PRODUCTION prompt path (hu_persona_build_prompt output via
+    # `human persona show <name> <channel>`) instead of a bare user message.
+    # The first composite run's 0.763 was a floor precisely because this was
+    # missing (finding #1 of that run).
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
     body = json.dumps({
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
     }).encode()
@@ -64,7 +74,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--replies-out", help="dump generated replies JSONL here")
     ap.add_argument("--timestamp", help="ISO timestamp to stamp the baseline row")
     ap.add_argument("--no-append", action="store_true")
+    ap.add_argument("--system-prompt-file",
+                    help="file whose contents become the system message — dump the "
+                         "production prompt via `human persona show <name> <channel>` "
+                         "to measure the real prompt path (roadmap #19)")
     args = ap.parse_args(argv)
+
+    system_prompt = None
+    if args.system_prompt_file:
+        system_prompt = Path(args.system_prompt_file).expanduser().read_text().strip()
+        if not system_prompt:
+            print("ERROR: --system-prompt-file is empty", file=sys.stderr)
+            return 2
+        print(f"  [prod-prompt] system message: {len(system_prompt)} chars "
+              f"from {args.system_prompt_file}")
 
     fixtures = [json.loads(l) for l in Path(args.fixtures).expanduser().read_text().splitlines()
                 if l.strip()]
@@ -74,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     for fx in fixtures:
         try:
             reply = generate(args.server, args.model, fx["prompt"],
-                             args.max_tokens, args.temperature)
+                             args.max_tokens, args.temperature,
+                             system_prompt=system_prompt)
         except Exception as e:  # noqa: BLE001 — one bad prompt shouldn't kill the run
             print(f"  [warn] generation failed for {fx['prompt']!r}: {e}", file=sys.stderr)
             continue

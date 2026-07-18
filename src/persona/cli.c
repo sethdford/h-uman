@@ -131,6 +131,12 @@ hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args
         if (argc < 4)
             return HU_ERR_INVALID_ARGUMENT;
         out->name = argv[3];
+        /* Optional [channel]: build the production prompt WITH that channel's
+         * overlay — the exact system prompt agent_turn sends for that channel.
+         * Added 2026-07-18 so the humanness nightly can eval the production
+         * prompt path (SOTA roadmap #19) instead of a bare user message. */
+        if (argc >= 5 && argv[4][0] != '-')
+            out->show_channel = argv[4];
     } else if (strcmp(action, "list") == 0) {
         out->action = HU_PERSONA_ACTION_LIST;
     } else if (strcmp(action, "delete") == 0) {
@@ -289,7 +295,11 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         }
         char *prompt = NULL;
         size_t prompt_len = 0;
-        err = hu_persona_build_prompt(alloc, &p, NULL, 0, NULL, 0, &prompt, &prompt_len);
+        /* With [channel], emit the production prompt for that channel (overlay
+         * applied) — the exact system prompt agent_turn.c builds. */
+        const char *ch = args->show_channel;
+        err = hu_persona_build_prompt(alloc, &p, ch, ch ? strlen(ch) : 0, NULL, 0, &prompt,
+                                      &prompt_len);
         if (err == HU_OK && prompt) {
             fprintf(stdout, "%s", prompt);
             alloc->free(alloc->ctx, prompt, prompt_len + 1);
@@ -876,8 +886,7 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
                 fprintf(stderr, "Could not resolve persona directory\n");
                 return HU_ERR_NOT_FOUND;
             }
-            int tn = snprintf(tmp_path, sizeof(tmp_path), "%s/.%s.bank.jsonl.tmp", dir,
-                              args->name);
+            int tn = snprintf(tmp_path, sizeof(tmp_path), "%s/.%s.bank.jsonl.tmp", dir, args->name);
             if (tn <= 0 || (size_t)tn >= sizeof(tmp_path)) {
                 hu_persona_deinit(alloc, &persona);
                 return HU_ERR_INVALID_ARGUMENT;
@@ -885,8 +894,7 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
             target = tmp_path;
         }
         size_t exported = 0;
-        hu_error_t eerr =
-            hu_persona_bank_export_jsonl(&persona, target, strlen(target), &exported);
+        hu_error_t eerr = hu_persona_bank_export_jsonl(&persona, target, strlen(target), &exported);
         hu_persona_deinit(alloc, &persona);
         if (eerr != HU_OK) {
             if (to_stdout)

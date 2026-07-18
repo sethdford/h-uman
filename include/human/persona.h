@@ -926,6 +926,9 @@ typedef struct hu_persona_cli_args {
     const char **merge_sources;
     size_t merge_sources_count;
     const char *import_file;    /* --from-file <path> or NULL for --from-stdin */
+    const char *show_channel;   /* optional [channel] for show — build the
+                                 * PRODUCTION prompt with that channel's
+                                 * overlay applied (what agent_turn sends). */
     const char *filler_channel; /* --channel <name> for filler subcommands */
     const char *filler_text;    /* positional "<text>" for filler add */
     int filler_index;           /* --index <n> for filler remove; -1 = not set */

@@ -64,6 +64,28 @@ static void cli_parse_show_requires_name(void) {
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
+/* SOTA roadmap #19 (2026-07-18): `show <name> [channel]` builds the
+ * PRODUCTION prompt with that channel's overlay so the humanness nightly can
+ * eval the exact system prompt agent_turn sends. */
+static void cli_parse_show_with_channel(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "show", "my-persona", "imessage"};
+    hu_error_t err = hu_persona_cli_parse(5, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_SHOW);
+    HU_ASSERT_STR_EQ(out.name, "my-persona");
+    HU_ASSERT_NOT_NULL(out.show_channel);
+    HU_ASSERT_STR_EQ(out.show_channel, "imessage");
+}
+
+static void cli_parse_show_without_channel_leaves_null(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "show", "my-persona"};
+    hu_error_t err = hu_persona_cli_parse(4, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL((void *)out.show_channel);
+}
+
 static void cli_parse_delete_ok(void) {
     hu_persona_cli_args_t out = {0};
     const char *argv[] = {"human", "persona", "delete", "old-persona"};
@@ -143,8 +165,7 @@ static void cli_parse_export_bank_ok(void) {
 
 static void cli_parse_export_bank_with_output_ok(void) {
     hu_persona_cli_args_t out = {0};
-    const char *argv[] = {"human",       "persona",         "export-bank", "ada",
-                          "--output",    "/tmp/ada.jsonl"};
+    const char *argv[] = {"human", "persona", "export-bank", "ada", "--output", "/tmp/ada.jsonl"};
     hu_error_t err = hu_persona_cli_parse(6, argv, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EXPORT_BANK);
@@ -154,8 +175,7 @@ static void cli_parse_export_bank_with_output_ok(void) {
 
 static void cli_parse_export_bank_with_short_output_ok(void) {
     hu_persona_cli_args_t out = {0};
-    const char *argv[] = {"human",       "persona",         "export-bank", "ada",
-                          "-o",          "/tmp/ada.jsonl"};
+    const char *argv[] = {"human", "persona", "export-bank", "ada", "-o", "/tmp/ada.jsonl"};
     hu_error_t err = hu_persona_cli_parse(6, argv, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EXPORT_BANK);
@@ -439,6 +459,8 @@ void run_persona_cli_tests(void) {
     HU_RUN_TEST(cli_parse_list_ok);
     HU_RUN_TEST(cli_parse_show_ok);
     HU_RUN_TEST(cli_parse_show_requires_name);
+    HU_RUN_TEST(cli_parse_show_with_channel);
+    HU_RUN_TEST(cli_parse_show_without_channel_leaves_null);
     HU_RUN_TEST(cli_parse_delete_ok);
     HU_RUN_TEST(cli_parse_validate_ok);
     HU_RUN_TEST(cli_parse_feedback_apply_ok);
