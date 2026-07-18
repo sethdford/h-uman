@@ -469,6 +469,7 @@ static void test_router_registration_yields_pair_on_tapback(void) {
     hu_daemon_register_reply_for_reactions(NULL, NULL, "imessage", "chat_router",
                                            "you free tonight?", "yeah give me an hour", 20, ref,
                                            sizeof(ref));
+#if defined(HU_ENABLE_RL_FULL)
     HU_ASSERT_TRUE(ref[0] != '\0');
 
     hu_reaction_event_t e = {
@@ -494,6 +495,16 @@ static void test_router_registration_yields_pair_on_tapback(void) {
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "yeah give me an hour");
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "imessage_tapback");
     sqlite3_finalize(stmt);
+#else
+    /* Without HU_ENABLE_RL_FULL the helper is a compiled-out stub whose
+     * contract is "no registration, msg_ref_out cleared" — pin that too so
+     * a future half-stub can't silently half-register (gate symmetry per
+     * .claude/rules/test-source-gate-symmetry.md). */
+    HU_ASSERT_EQ(ref[0], '\0');
+    size_t n = 99;
+    HU_ASSERT_EQ(hu_dpo_pair_count(&col, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+#endif
 
     hu_dpo_collector_deinit(&col);
     sqlite3_close(db);
