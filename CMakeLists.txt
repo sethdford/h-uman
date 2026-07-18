@@ -1229,6 +1229,7 @@ set(HU_CORE_SOURCES
     src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
+    src/daemon/daemon_shape.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
@@ -3359,6 +3360,7 @@ set(HU_TEST_SOURCES
     tests/test_onboard_nextstep.c
     tests/test_onboard_aloop.c
     tests/test_daemon_cron.c
+    tests/test_daemon_shape.c
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c

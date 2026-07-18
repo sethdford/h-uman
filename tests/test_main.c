@@ -852,6 +852,7 @@ void run_workflow_commands_tests(void);
 void run_repair_tests(void);
 void run_release_workflow_tests(void);
 void run_daemon_cron_tests(void);
+void run_daemon_shape_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
@@ -1840,6 +1841,7 @@ int main(int argc, char **argv) {
     run_repair_tests();
     run_release_workflow_tests();
     run_daemon_cron_tests();
+    run_daemon_shape_tests();
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
