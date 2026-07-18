@@ -8,6 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* This is the ONE hu_opinion_t definition (the legacy colliding copy in
+ * human/memory/cognitive.h was removed 2026-07-18). The pure opinion-challenge
+ * detector (roadmap #14) lives in human/memory/opinion_challenge.h. */
+
 #ifdef HU_ENABLE_SQLITE
 
 typedef struct hu_opinion {
@@ -24,24 +28,21 @@ typedef struct hu_opinion {
 
 /* Store or update opinion. If same position → update last_expressed, confidence.
    If different position → supersede old (set superseded_by = new_id), insert new. */
-hu_error_t hu_opinions_upsert(hu_allocator_t *alloc, hu_memory_t *memory,
-                             const char *topic, size_t topic_len,
-                             const char *position, size_t position_len,
-                             float confidence, int64_t now_ts);
+hu_error_t hu_opinions_upsert(hu_allocator_t *alloc, hu_memory_t *memory, const char *topic,
+                              size_t topic_len, const char *position, size_t position_len,
+                              float confidence, int64_t now_ts);
 
 /* Get current (non-superseded) opinions for topic. */
-hu_error_t hu_opinions_get(hu_allocator_t *alloc, hu_memory_t *memory,
-                          const char *topic, size_t topic_len,
-                          hu_opinion_t **out, size_t *out_count);
+hu_error_t hu_opinions_get(hu_allocator_t *alloc, hu_memory_t *memory, const char *topic,
+                           size_t topic_len, hu_opinion_t **out, size_t *out_count);
 
 /* Get superseded opinions for "I used to think X" references. */
-hu_error_t hu_opinions_get_superseded(hu_allocator_t *alloc, hu_memory_t *memory,
-                                    const char *topic, size_t topic_len,
-                                    hu_opinion_t **out, size_t *out_count);
+hu_error_t hu_opinions_get_superseded(hu_allocator_t *alloc, hu_memory_t *memory, const char *topic,
+                                      size_t topic_len, hu_opinion_t **out, size_t *out_count);
 
 /* Check if topic matches any core value (case-insensitive). */
-bool hu_opinions_is_core_value(const char *topic, size_t topic_len,
-                               const char *const *core_values, size_t count);
+bool hu_opinions_is_core_value(const char *topic, size_t topic_len, const char *const *core_values,
+                               size_t count);
 
 /* Free array of opinions. */
 void hu_opinions_free(hu_allocator_t *alloc, hu_opinion_t *ops, size_t count);

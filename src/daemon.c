@@ -36,8 +36,10 @@
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
+#include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
+#include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
@@ -6730,6 +6732,43 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         PHASE6_APPEND(op_dir, op_dir_len);
                                     else if (op_dir)
                                         alloc->free(alloc->ctx, op_dir, op_dir_len + 1);
+
+                                    /* Roadmap #14: stances persist under pushback. When the
+                                     * inbound challenges a held opinion, direct the model to
+                                     * hold its position. Gated HU_OPINION_HOLD=off|shadow|live,
+                                     * default OFF; do not flip to default-ON without a stance-
+                                     * retention measurement (feature-gate-requires-measurement).
+                                     * Shadow logs would-fire without injecting. */
+                                    {
+                                        hu_gate_mode_t hold_mode =
+                                            hu_gate_mode_from_env("HU_OPINION_HOLD", HU_GATE_OFF);
+                                        if (hold_mode != HU_GATE_OFF && combined_len > 0) {
+                                            for (size_t oi = 0; oi < evo_count; oi++) {
+                                                char *hold_dir = NULL;
+                                                size_t hold_len = 0;
+                                                bool hold_would = false;
+                                                if (hu_opinion_challenge_directive(
+                                                        alloc, hold_mode, combined, combined_len,
+                                                        evo_opinions[oi].topic,
+                                                        evo_opinions[oi].topic_len,
+                                                        evo_opinions[oi].stance,
+                                                        evo_opinions[oi].stance_len, &hold_dir,
+                                                        &hold_len, &hold_would) != HU_OK)
+                                                    continue;
+                                                if (!hold_would)
+                                                    continue;
+                                                hu_log_info(
+                                                    "opinion_hold", agent ? agent->observer : NULL,
+                                                    "%s: inbound challenges stance [%.*s]",
+                                                    hold_mode == HU_GATE_LIVE ? "live" : "shadow",
+                                                    (int)evo_opinions[oi].topic_len,
+                                                    evo_opinions[oi].topic);
+                                                if (hold_dir && hold_len > 0)
+                                                    PHASE6_APPEND(hold_dir, hold_len);
+                                                break; /* one hold directive max per turn */
+                                            }
+                                        }
+                                    }
                                     hu_evolved_opinions_free(alloc, evo_opinions, evo_count);
                                 }
                             }
@@ -7113,59 +7152,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* F65: Opinion evolution — inject current opinions for topic relevance */
-#ifdef HU_ENABLE_SQLITE
-                    if (agent->memory && batch_key && key_len > 0) {
-                        sqlite3 *op_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (op_db) {
-                            char op_sql[512];
-                            size_t op_sql_len = 0;
-                            if (hu_opinions_query_current_sql(batch_key, key_len, op_sql,
-                                                              sizeof(op_sql),
-                                                              &op_sql_len) == HU_OK) {
-                                sqlite3_stmt *op_stmt = NULL;
-                                if (sqlite3_prepare_v2(op_db, op_sql, (int)op_sql_len, &op_stmt,
-                                                       NULL) == SQLITE_OK) {
-                                    hu_opinion_t ops[8];
-                                    size_t op_count = 0;
-                                    while (sqlite3_step(op_stmt) == SQLITE_ROW && op_count < 8) {
-                                        hu_opinion_t *o = &ops[op_count];
-                                        memset(o, 0, sizeof(*o));
-                                        const char *t =
-                                            (const char *)sqlite3_column_text(op_stmt, 1);
-                                        const char *p =
-                                            (const char *)sqlite3_column_text(op_stmt, 2);
-                                        if (t) {
-                                            o->topic_len = (size_t)sqlite3_column_bytes(op_stmt, 1);
-                                            o->topic = hu_strndup(alloc, t, o->topic_len);
-                                        }
-                                        if (p) {
-                                            o->position_len =
-                                                (size_t)sqlite3_column_bytes(op_stmt, 2);
-                                            o->position = hu_strndup(alloc, p, o->position_len);
-                                        }
-                                        o->confidence = sqlite3_column_double(op_stmt, 3);
-                                        op_count++;
-                                    }
-                                    sqlite3_finalize(op_stmt);
-                                    if (op_count > 0) {
-                                        char *op_prompt = NULL;
-                                        size_t op_prompt_len = 0;
-                                        if (hu_opinions_build_prompt(alloc, ops, op_count,
-                                                                     &op_prompt,
-                                                                     &op_prompt_len) == HU_OK &&
-                                            op_prompt && op_prompt_len > 0)
-                                            PHASE6_APPEND(op_prompt, op_prompt_len);
-                                        else if (op_prompt)
-                                            alloc->free(alloc->ctx, op_prompt, op_prompt_len + 1);
-                                        for (size_t oi = 0; oi < op_count; oi++)
-                                            hu_opinion_deinit(alloc, &ops[oi]);
-                                    }
-                                }
-                            }
-                        }
-                    }
-#endif
+                    /* F65 (opinion injection from the legacy `opinions` table) was removed
+                     * 2026-07-18: the table had no production writer and the query keyed
+                     * topic=<contact key>, so the block always injected nothing. Held
+                     * opinions reach the prompt via the evolved_opinions block (10c),
+                     * which also carries the HU_OPINION_HOLD stance-hold directive. */
 
                     /* F83-F93: Feed context — inject recent relevant feed items */
 #ifdef HU_ENABLE_SQLITE
