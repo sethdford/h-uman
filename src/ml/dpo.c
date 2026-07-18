@@ -1453,11 +1453,17 @@ hu_error_t hu_dpo_collector_update_proactive_outcome(sqlite3 *db, const char *ch
     if (!db || !channel || !contact)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* ?5 twice: a NULL message_ref is a wildcard — the daemon reply path
+     * has no per-message id, and an inbound message resolves EVERY pending
+     * proactive row for this contact. (A bound NULL in a plain
+     * `message_ref = ?` never matches: SQL NULL = NULL is not true, which
+     * would make the daemon wiring a silent no-op.) */
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-                                "UPDATE proactive_sends SET outcome_type = ?, "
-                                "outcome_timestamp = ? "
-                                "WHERE channel = ? AND contact = ? AND message_ref = ? "
+                                "UPDATE proactive_sends SET outcome_type = ?1, "
+                                "outcome_timestamp = ?2 "
+                                "WHERE channel = ?3 AND contact = ?4 "
+                                "AND (?5 IS NULL OR message_ref = ?5) "
                                 "AND outcome_type IS NULL",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -1485,11 +1491,30 @@ hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque)
     hu_contextual_bandit_t *bandit = (hu_contextual_bandit_t *)bandit_opaque;
     size_t posteriors_updated = 0;
 
-    sqlite3_stmt *stmt = NULL;
+    /* Timeout sweep: a proactive send that has drawn no reply for 24h IS
+     * the IGNORED outcome — without this, unanswered sends sit at
+     * outcome NULL forever and only β-moving BLOCKED/IGNORED signals
+     * from explicit updates would ever reach the bandit. */
+    sqlite3_stmt *sweep = NULL;
     int rc = sqlite3_prepare_v2(db,
-                                "SELECT id, contact, outcome_type FROM proactive_sends "
-                                "WHERE outcome_type IS NOT NULL AND processed = 0 LIMIT 100",
-                                -1, &stmt, NULL);
+                                "UPDATE proactive_sends SET outcome_type = 1, "
+                                "outcome_timestamp = ?1 "
+                                "WHERE outcome_type IS NULL AND processed = 0 "
+                                "AND sent_timestamp <= ?1 - 86400",
+                                -1, &sweep, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(sweep, 1, (sqlite3_int64)time(NULL));
+    rc = sqlite3_step(sweep);
+    sqlite3_finalize(sweep);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+
+    sqlite3_stmt *stmt = NULL;
+    rc = sqlite3_prepare_v2(db,
+                            "SELECT id, contact, outcome_type FROM proactive_sends "
+                            "WHERE outcome_type IS NOT NULL AND processed = 0 LIMIT 100",
+                            -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
 

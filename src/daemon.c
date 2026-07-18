@@ -102,6 +102,7 @@
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
 #include "human/daemon_cron.h"
+#include "human/daemon_learning_tick.h"
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_maintenance.h"
 #include "human/daemon_proactive.h"
@@ -694,6 +695,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 hu_contact_send_recency_record(
                                     &agent->contact_send_recency, m->contact_id,
                                     strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                                (void)hu_daemon_proactive_outcome_record_send(
+                                    agent->memory, ch_name, target_part, target_len);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "F25 emotional check-in sent to %s: %s",
                                             cp->name ? cp->name : cp->contact_id, msg_buf);
@@ -1697,6 +1700,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             hu_contact_send_recency_record(&agent->contact_send_recency,
                                                            cp->contact_id, strlen(cp->contact_id),
                                                            (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                            (void)hu_daemon_proactive_outcome_record_send(agent->memory, ch_part,
+                                                                          target_part, target_len);
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "proactive check-in sent to %s: %.*s",
                                         cp->name ? cp->name : cp->contact_id, (int)response_len,
@@ -3818,38 +3823,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* DPO consolidation — train on preference pairs every 24 hours.
-                 *
-                 * BUGFIX 2026-05-25: Same first-tick blocking issue as the ML
-                 * experiment loop above — judge_step makes 64 LLM scoring
-                 * calls (32 pairs × 2 each) for ~5 min synchronous blocking.
-                 * That prevented the iMessage channel dispatcher from running.
-                 * Defer first run by initializing last_dpo_train to current
-                 * time. Subsequent runs follow the 24-hour cadence. */
-                {
-                    static int64_t last_dpo_train = 0;
-                    int64_t dpo_interval = 24 * 3600;
-                    if (last_dpo_train == 0) {
-                        last_dpo_train = (int64_t)t;
-                        /* Skip first run; resume normal 24h cadence afterward. */
-                    } else if (agent && agent->memory && agent->sota.sota_initialized &&
-                               ((int64_t)t - last_dpo_train) >= dpo_interval) {
-                        sqlite3 *dpo_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (dpo_db) {
-                            last_dpo_train = (int64_t)t;
-                            hu_dpo_judge_result_t dpo_result = {0};
-                            hu_error_t dpo_err = hu_dpo_judge_step(
-                                &agent->sota.dpo_collector, alloc, &agent->provider,
-                                agent->model_name, agent->model_name_len, 0.1, 32, &dpo_result);
-                            if (dpo_err == HU_OK && dpo_result.pairs_evaluated > 0)
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "DPO judge step: loss=%.4f, alignment=%.2f, "
-                                            "pairs=%zu",
-                                            dpo_result.loss, dpo_result.alignment_score,
-                                            dpo_result.pairs_evaluated);
-                        }
-                    }
-                }
+                /* DPO consolidation (24h judge cadence) — carved to
+                 * src/daemon/daemon_learning_tick.c (2026-07-18). */
+                hu_daemon_dpo_judge_tick(agent, alloc, (int64_t)t);
+
+                /* US-104: feed resolved proactive outcomes (REPLY / 24h-timeout
+                 * IGNORED) into the humanization bandit; 60s cadence inside. */
+                if (agent)
+                    hu_daemon_proactive_outcome_tick(agent->memory, agent->sota.bandit, (int64_t)t);
 
                 /* RLAIF nightly cycle — judge DPO pairs, extract patterns, apply patches */
                 {
@@ -4752,6 +4733,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                combined, combined_len);
                 /* F26: Temporal pattern learning — record message frequency by day/hour */
                 if (agent->memory && batch_key && key_len > 0) {
+                    /* US-104: an inbound message from this contact resolves any
+                     * pending proactive send to them as a REPLY outcome. */
+                    const char *po_ch_name = ch->channel->vtable->name
+                                                 ? ch->channel->vtable->name(ch->channel->ctx)
+                                                 : NULL;
+                    (void)hu_daemon_proactive_outcome_mark_reply(agent->memory, po_ch_name,
+                                                                 batch_key, key_len);
                     time_t now_t = time(NULL);
                     struct tm lt_buf;
                     struct tm *lt = localtime_r(&now_t, &lt_buf);

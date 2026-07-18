@@ -1352,6 +1352,11 @@ list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
 list(APPEND HU_CORE_SOURCES src/daemon/daemon_reaction_poll.c)
 
+# US-104: proactive-outcome pipeline + 24h DPO judge tick (carved from
+# daemon.c 2026-07-18). Always linked; bodies internally gated on
+# HU_ENABLE_SQLITE.
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_learning_tick.c)
+
 # T9: daemon adapter for the M2 reflection loop. Body internally
 # gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
 # the unconditional list and links cleanly in the minimal variant.
@@ -3977,6 +3982,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_reaction_paired_train_e2e.c
     tests/test_dpo_collector.c
     tests/test_proactive_outcomes.c
+    tests/test_daemon_learning_tick.c
     tests/test_e2e_learning_loop.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round

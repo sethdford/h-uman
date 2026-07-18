@@ -788,6 +788,7 @@ void run_dpo_tests(void);
 void run_reaction_paired_train_e2e_tests(void);
 void run_dpo_collector_tests(void);
 void run_proactive_outcomes_tests(void);
+void run_daemon_learning_tick_tests(void);
 void run_e2e_learning_loop_tests(void);
 void run_sota_e2e_tests(void);
 void run_sota_adversarial_tests(void);
@@ -1773,6 +1774,7 @@ int main(int argc, char **argv) {
     run_reaction_paired_train_e2e_tests();
     run_dpo_collector_tests();
     run_proactive_outcomes_tests();
+    run_daemon_learning_tick_tests();
     run_e2e_learning_loop_tests();
     run_sota_e2e_tests();
     run_sota_adversarial_tests();
