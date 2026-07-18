@@ -56,10 +56,10 @@ typedef enum hu_contextual_proactive_mode {
 #define HU_CONTEXTUAL_PROACTIVE_SEND_HOUR 19
 
 typedef struct hu_contextual_proactive_decision {
-    char topic[128];     /* normalized topic, e.g. "interview" (from the message) */
-    char message[256];   /* frozen outbound, e.g. "how'd the interview go?" */
-    int64_t send_at_ms;  /* absolute epoch millis the message should fire */
-    double confidence;   /* event-extraction confidence [0,1] */
+    char topic[128];    /* normalized topic, e.g. "interview" (from the message) */
+    char message[256];  /* frozen outbound, e.g. "how'd the interview go?" */
+    int64_t send_at_ms; /* absolute epoch millis the message should fire */
+    double confidence;  /* event-extraction confidence [0,1] */
 } hu_contextual_proactive_decision_t;
 
 typedef struct hu_contextual_proactive_result {
@@ -94,6 +94,18 @@ int64_t hu_contextual_proactive_resolve_send_at(const char *temporal_ref, size_t
  * length (0 if the topic is empty after stripping). Pure. */
 size_t hu_contextual_proactive_normalize_topic(const char *topic, size_t len, char *out,
                                                size_t cap);
+
+/* Topic-quality gate: true only when a normalized topic reads as a short
+ * noun phrase that can be spliced into "how'd the <topic> go?" without
+ * producing a non-human sentence. Rejects clause-like topics: sentence
+ * punctuation anywhere in the string, pronoun/auxiliary/verb clause words
+ * (word-boundary, case-insensitive), more than 4 words, or over-long strings.
+ * Regression context (2026-07-18 audit): the event extractor can return whole
+ * clauses as descriptions ("It will be tomorrow. Im working"); those spliced
+ * templates were sent to real contacts. An unprompted text has an asymmetric
+ * cost profile — skipping a send costs nothing, sending garbage costs trust —
+ * so this predicate biases hard toward precision. Pure; NULL-safe. */
+bool hu_contextual_proactive_topic_is_sendable(const char *topic, size_t len);
 
 /* Build the frozen outbound message from a (preferably normalized) topic:
  * "how'd the <topic> go?". Returns 0 and writes nothing if topic is empty — we
