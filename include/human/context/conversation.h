@@ -548,6 +548,16 @@ size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
 hu_error_t hu_conversation_data_init(hu_allocator_t *alloc);
 void hu_conversation_data_cleanup(void);
 
+/* Load mined per-channel phrase banks (fillers / starters / backchannels /
+ * farewells) from a JSON file written by scripts/mine_phrase_banks.py:
+ *   {"imessage": {"fillers": [{"text": "haha ", "freq": 12}, ...], ...}}
+ * Lists present in the file override the embedded/hardcoded defaults so the
+ * agent uses the user's OWN measured phrase distributions. A missing or
+ * corrupt file (or absent channel key) returns an error and leaves the
+ * defaults untouched. Free via hu_conversation_data_cleanup(). */
+hu_error_t hu_conversation_phrase_banks_load(hu_allocator_t *alloc, const char *path,
+                                             const char *channel);
+
 /* Set configurable behavior thresholds.
  * Call this after loading config to apply user-defined values.
  * Pass 0 to keep default for any threshold. */

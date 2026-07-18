@@ -1715,6 +1715,26 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
     /* Initialize conversation data (load word lists from embedded JSON) */
     hu_conversation_data_init(alloc);
 
+    /* Overlay mined phrase banks (the user's own voice) when present —
+     * written by scripts/mine_phrase_banks.py (monthly launchd job). Missing
+     * file is the normal pre-mining state; only corruption is warned. */
+    {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            char pb_path[512];
+            int n = snprintf(pb_path, sizeof(pb_path), "%s/.human/phrase_banks.json", home);
+            if (n > 0 && (size_t)n < sizeof(pb_path)) {
+                hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
+                if (pb_err == HU_OK)
+                    hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
+                else if (pb_err != HU_ERR_NOT_FOUND)
+                    hu_log_warn("human", NULL,
+                                "phrase banks unreadable (err=%d) at %s — using defaults",
+                                (int)pb_err, pb_path);
+            }
+        }
+    }
+
     err = hu_service_run(alloc, 1000, app_ctx.channel_count > 0 ? app_ctx.channels : NULL,
                          app_ctx.channel_count, app_ctx.agent, app_ctx.cfg);
 
