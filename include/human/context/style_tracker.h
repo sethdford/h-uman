@@ -7,12 +7,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Style fingerprint: per-contact texting style learned from our sent messages.
- * Used to enforce consistency (e.g. "haha" not "lol" if we used "haha" recently).
+/* Style fingerprint: per-contact texting style learned from the contact's
+ * RECEIVED messages (update_inbound, fed by the daemon's inbound batch path)
+ * so replies can mirror how each contact actually texts. The reserved
+ * "__self__" row tracks the persona's own outgoing style for drift detection
+ * (update_self).
  *
  * Thread safety: NOT THREAD SAFE. All functions that write to the database
- *   (update, update_self, drift_check) must be called from a single thread.
- *   Debug builds assert non-reentrancy on mutating functions. */
+ *   (update, update_inbound, update_self, drift_check) must be called from a
+ *   single thread. Debug builds assert non-reentrancy on mutating functions. */
 typedef struct hu_style_fingerprint {
     bool uses_lowercase;
     bool uses_periods;
@@ -22,10 +25,17 @@ typedef struct hu_style_fingerprint {
     char distinctive_words[512];
 } hu_style_fingerprint_t;
 
-/* Update fingerprint from a sent message. Merges with existing row. */
+/* Update fingerprint from a message. Merges with existing row. */
 hu_error_t hu_style_fingerprint_update(hu_memory_t *memory, hu_allocator_t *alloc,
                                        const char *contact_id, size_t contact_id_len,
                                        const char *message, size_t message_len);
+
+/* Inbound-path entry point: update the SENDER's fingerprint from a message
+ * they sent us. Rejects the reserved "__self__" contact id; an empty message
+ * is a no-op (HU_OK). */
+hu_error_t hu_style_fingerprint_update_inbound(hu_memory_t *memory, hu_allocator_t *alloc,
+                                               const char *contact_id, size_t contact_id_len,
+                                               const char *message, size_t message_len);
 
 /* Fetch fingerprint for contact. Returns HU_OK and fills out on success. */
 hu_error_t hu_style_fingerprint_get(hu_memory_t *memory, hu_allocator_t *alloc,

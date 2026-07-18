@@ -128,6 +128,105 @@ static void style_update_populates_common_phrases(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* ── Inbound-path entry point (adaptive per-contact style loop) ────── */
+
+static void style_update_inbound_populates_fingerprint(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* Pre: no row exists for this contact */
+    hu_style_fingerprint_t fp;
+    memset(&fp, 0xff, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "user_a", 6, &fp), HU_OK);
+    HU_ASSERT_FALSE(fp.uses_lowercase);
+    HU_ASSERT_EQ(fp.avg_message_length, 0);
+
+    /* Invoke the production inbound entry point (the daemon calls this for
+     * every received message on the common batch path) */
+    hu_error_t err =
+        hu_style_fingerprint_update_inbound(&mem, &alloc, "user_a", 6, "lol yeah that works", 19);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Post: fingerprint now reflects the contact's inbound message */
+    memset(&fp, 0, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "user_a", 6, &fp), HU_OK);
+    HU_ASSERT_TRUE(fp.uses_lowercase);
+    HU_ASSERT_STR_EQ(fp.laugh_style, "lol");
+    HU_ASSERT_EQ(fp.avg_message_length, 19);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void style_update_inbound_refreshes_existing_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* Pre: a stale row from an earlier message (periods, no laugh style) */
+    HU_ASSERT_EQ(
+        hu_style_fingerprint_update_inbound(&mem, &alloc, "user_b", 6, "OK. Sounds good.", 16),
+        HU_OK);
+    hu_style_fingerprint_t fp;
+    memset(&fp, 0, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "user_b", 6, &fp), HU_OK);
+    HU_ASSERT_EQ(fp.laugh_style[0], '\0');
+    HU_ASSERT_EQ(fp.avg_message_length, 16);
+
+    /* A new inbound message merges into the existing row */
+    HU_ASSERT_EQ(hu_style_fingerprint_update_inbound(&mem, &alloc, "user_b", 6,
+                                                     "haha yeah that works great", 26),
+                 HU_OK);
+    memset(&fp, 0, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "user_b", 6, &fp), HU_OK);
+    HU_ASSERT_STR_EQ(fp.laugh_style, "haha");
+    HU_ASSERT_EQ(fp.avg_message_length, (16 + 26) / 2);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void style_update_inbound_rejects_reserved_self_key(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* "__self__" is reserved for drift self-tracking; an inbound message must
+     * never overwrite it */
+    HU_ASSERT_EQ(hu_style_fingerprint_update_inbound(&mem, &alloc, "__self__", 8, "haha", 4),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    hu_style_fingerprint_t fp;
+    memset(&fp, 0, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "__self__", 8, &fp), HU_OK);
+    HU_ASSERT_EQ(fp.laugh_style[0], '\0');
+    HU_ASSERT_EQ(fp.avg_message_length, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void style_update_inbound_empty_message_is_noop(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    HU_ASSERT_EQ(hu_style_fingerprint_update_inbound(&mem, &alloc, "user_c", 6, "", 0), HU_OK);
+
+    /* No row was created */
+    hu_style_fingerprint_t fp;
+    memset(&fp, 0, sizeof(fp));
+    HU_ASSERT_EQ(hu_style_fingerprint_get(&mem, &alloc, "user_c", 6, &fp), HU_OK);
+    HU_ASSERT_EQ(fp.avg_message_length, 0);
+    HU_ASSERT_FALSE(fp.uses_lowercase);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void style_update_inbound_null_memory_returns_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(hu_style_fingerprint_update_inbound(NULL, &alloc, "user_d", 6, "hi", 2),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
 /* ── Self-tracking / drift detection tests ────────────────────────── */
 
 static void style_update_self_stores_fingerprint(void) {
@@ -282,6 +381,13 @@ void run_style_tracker_tests(void) {
     HU_RUN_TEST(style_get_nonexistent_returns_zeroed);
     HU_RUN_TEST(style_none_memory_returns_not_supported);
     HU_RUN_TEST(style_update_populates_common_phrases);
+
+    HU_TEST_SUITE("style_inbound");
+    HU_RUN_TEST(style_update_inbound_populates_fingerprint);
+    HU_RUN_TEST(style_update_inbound_refreshes_existing_row);
+    HU_RUN_TEST(style_update_inbound_rejects_reserved_self_key);
+    HU_RUN_TEST(style_update_inbound_empty_message_is_noop);
+    HU_RUN_TEST(style_update_inbound_null_memory_returns_error);
 
     HU_TEST_SUITE("style_drift");
     HU_RUN_TEST(style_update_self_stores_fingerprint);

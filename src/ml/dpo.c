@@ -4,6 +4,7 @@
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/contextual_bandit.h"
+#include "human/agent/humanization_bandit.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #endif
@@ -235,9 +236,9 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector, const char
 /* Record a single-sided feedback signal (a +/- reaction to one response) into
  * the feedback_signals table — NOT dpo_pairs. Trivially-short responses
  * (<4 bytes, e.g. "k"/"GO") are labels, not signal, and are refused. */
-hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt, size_t prompt_len,
-                                const char *response, size_t response_len, bool positive,
-                                const char *source, size_t source_len) {
+hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt,
+                                size_t prompt_len, const char *response, size_t response_len,
+                                bool positive, const char *source, size_t source_len) {
     if (!collector || !prompt || !response)
         return HU_ERR_INVALID_ARGUMENT;
     if (response_len < 4)
@@ -255,8 +256,8 @@ hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *promp
         sqlite3_bind_text(stmt, 1, prompt, (int)prompt_len, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, response, (int)response_len, SQLITE_STATIC);
         sqlite3_bind_int(stmt, 3, positive ? 1 : 0);
-        sqlite3_bind_text(stmt, 4, source ? source : "user_feedback",
-                          source ? (int)source_len : 13, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 4, source ? source : "user_feedback", source ? (int)source_len : 13,
+                          SQLITE_STATIC);
         sqlite3_bind_int64(stmt, 5, (int64_t)time(NULL));
         rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
@@ -1482,6 +1483,7 @@ hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque)
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_contextual_bandit_t *bandit = (hu_contextual_bandit_t *)bandit_opaque;
+    size_t posteriors_updated = 0;
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
@@ -1510,6 +1512,7 @@ hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque)
             sqlite3_finalize(stmt);
             return err;
         }
+        posteriors_updated++;
 
         /* Mark this row as processed. */
         sqlite3_stmt *update_stmt = NULL;
@@ -1531,6 +1534,15 @@ hu_error_t hu_proactive_outcomes_process_async(sqlite3 *db, void *bandit_opaque)
     }
 
     sqlite3_finalize(stmt);
+
+    /* Persist the arms whenever a posterior actually moved — restarts must
+     * not reset the bandit to re-exploration (2026-07-18 audit). */
+    if (posteriors_updated > 0) {
+        char bandit_path[512];
+        const char *bp = hu_humanization_bandit_default_path(bandit_path, sizeof(bandit_path));
+        if (bp)
+            (void)hu_humanization_bandit_save_file(bandit, bp);
+    }
     return HU_OK;
 }
 

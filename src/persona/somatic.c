@@ -172,18 +172,19 @@ const char *hu_somatic_battery_label(float battery) {
 /* ── Persistence (SOTA roadmap #11) ─────────────────────────────────── */
 
 #include "human/core/json.h"
+#include "human/core/state_file.h"
 #include <stdlib.h>
 
 hu_error_t hu_somatic_save_file(const hu_somatic_state_t *state, const char *path) {
     if (!state || !path || !path[0])
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Staged write + atomic rename so a crash mid-write can never leave a
+     * torn file (same-inode overwrite hazards:
+     * .claude/rules/never-cp-over-running-binary.md — different artifact,
+     * same atomic-replace principle). */
     char tmp[512];
-    int n = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    if (n <= 0 || (size_t)n >= sizeof(tmp))
-        return HU_ERR_INVALID_ARGUMENT;
-
-    FILE *f = fopen(tmp, "w");
+    FILE *f = hu_state_file_write_begin(path, tmp, sizeof(tmp));
     if (!f)
         return HU_ERR_IO;
     int w = fprintf(f,
@@ -195,18 +196,7 @@ hu_error_t hu_somatic_save_file(const hu_somatic_state_t *state, const char *pat
                     (unsigned long long)state->last_interaction_ts,
                     (unsigned long long)state->last_recharge_ts,
                     (double)state->conversation_load_accumulated);
-    if (fclose(f) != 0 || w <= 0) {
-        remove(tmp);
-        return HU_ERR_IO;
-    }
-    /* Atomic rename so a crash mid-write can never leave a torn file
-     * (same-inode overwrite hazards: .claude/rules/never-cp-over-running-binary.md
-     * — different artifact, same atomic-replace principle). */
-    if (rename(tmp, path) != 0) {
-        remove(tmp);
-        return HU_ERR_IO;
-    }
-    return HU_OK;
+    return hu_state_file_write_commit(f, w > 0, tmp, path);
 }
 
 hu_error_t hu_somatic_load_file(hu_somatic_state_t *state, const char *path) {
@@ -262,17 +252,5 @@ hu_error_t hu_somatic_load_file(hu_somatic_state_t *state, const char *path) {
 }
 
 const char *hu_somatic_default_path(char *buf, size_t cap) {
-#if defined(HU_IS_TEST) && HU_IS_TEST
-    (void)buf;
-    (void)cap;
-    return NULL; /* tests never touch the real home dir */
-#else
-    const char *home = getenv("HOME");
-    if (!home || !home[0] || !buf || cap == 0)
-        return NULL;
-    int n = snprintf(buf, cap, "%s/.human/somatic_state.json", home);
-    if (n <= 0 || (size_t)n >= cap)
-        return NULL;
-    return buf;
-#endif
+    return hu_state_file_default_path("somatic_state.json", buf, cap);
 }
