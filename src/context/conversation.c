@@ -6272,8 +6272,32 @@ size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap, uint
 
 /* ── Stylometric variance ─────────────────────────────────────────────── */
 
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static int s_vary_complexity_mode_override = -1; /* -1 = defer to env */
+void hu_conversation_vary_complexity_set_mode_for_test(int mode) {
+    s_vary_complexity_mode_override = mode;
+}
+#endif
+
+hu_gate_mode_t hu_conversation_vary_complexity_mode(void) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    if (s_vary_complexity_mode_override >= 0)
+        return (hu_gate_mode_t)s_vary_complexity_mode_override;
+#endif
+    return hu_gate_mode_from_env("HU_VARY_COMPLEXITY", HU_GATE_OFF);
+}
+
 size_t hu_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {
     if (!buf || len == 0)
+        return len;
+
+    /* Egress single-funnel Phase 2 (2026-07-18): the last ungated
+     * send-mutator. Contraction rewriting mutates model output unmeasured —
+     * same class as fillers/disfluency — so it is gated OFF by default and
+     * only a measurement promotes it to LIVE
+     * (.claude/rules/feature-gate-requires-measurement.md). SHADOW currently
+     * behaves like OFF (no would-mutate logging wired yet). */
+    if (hu_conversation_vary_complexity_mode() != HU_GATE_LIVE)
         return len;
 
     /* Apply common contractions with ~40% probability each */

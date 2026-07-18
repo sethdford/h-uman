@@ -664,6 +664,16 @@ hu_gate_mode_t hu_conversation_fillers_mode(void);
 void hu_conversation_fillers_set_mode_for_test(int mode);
 #endif
 
+/* Activation gate for vary_complexity (HU_VARY_COMPLEXITY off|shadow|live,
+ * default OFF). Egress single-funnel Phase 2: the last ungated send-mutator
+ * gets the same measure-before-live contract as fillers/disfluency/typos. */
+hu_gate_mode_t hu_conversation_vary_complexity_mode(void);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Force the vary_complexity gate in tests; -1 defers to env. */
+void hu_conversation_vary_complexity_set_mode_for_test(int mode);
+#endif
+
 /* Probabilistically inject context-appropriate fillers into a response.
  * Placement: utterance start, after first word, before complex words.
  * Channel type controls filler intensity (messaging=high, email=none).

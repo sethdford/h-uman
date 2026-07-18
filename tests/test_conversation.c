@@ -4440,6 +4440,47 @@ static void test_should_share_word_boundary_no_false_cue(void) {
     HU_ASSERT_TRUE(proved);
 }
 
+/* ── vary_complexity activation gate (HU_VARY_COMPLEXITY off|shadow|live) ──
+ * Egress single-funnel Phase 2 (2026-07-18): the LAST ungated send-mutator.
+ * Contraction rewriting is the same class as fillers/disfluency — an
+ * unmeasured mutation of model output — so it ships OFF until a blind A/B
+ * promotes it, per .claude/rules/feature-gate-requires-measurement.md. */
+
+/* seed=0 fires the ~40% contraction roll, so without the gate "I am here to
+ * stay" WOULD become "I'm here to stay". Default OFF must be byte-identical. */
+static void vary_complexity_off_by_default_is_noop(void) {
+    hu_conversation_vary_complexity_set_mode_for_test(-1); /* defer to env */
+    unsetenv("HU_VARY_COMPLEXITY");
+    char buf[64] = "I am here to stay";
+    size_t len = strlen(buf);
+    size_t out = hu_conversation_vary_complexity(buf, len, 0u);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, "I am here to stay");
+}
+
+static void vary_complexity_live_mode_still_contracts(void) {
+    /* The per-contraction roll is ~40%; sweep seeds so the pin doesn't depend
+     * on RNG internals — SOME seed must contract when the gate is LIVE. */
+    hu_conversation_vary_complexity_set_mode_for_test((int)HU_GATE_LIVE);
+    bool contracted = false;
+    for (uint32_t s = 0; s < 32 && !contracted; s++) {
+        char buf[64] = "I am here and it is fine and I will go";
+        size_t len = strlen(buf);
+        size_t out = hu_conversation_vary_complexity(buf, len, s);
+        if (out < len && strchr(buf, '\''))
+            contracted = true;
+    }
+    HU_ASSERT_TRUE(contracted);
+    /* And the SAME sweep with the gate OFF must never mutate. */
+    hu_conversation_vary_complexity_set_mode_for_test((int)HU_GATE_OFF);
+    for (uint32_t s = 0; s < 32; s++) {
+        char buf[64] = "I am here and it is fine and I will go";
+        size_t len = strlen(buf);
+        HU_ASSERT_EQ(hu_conversation_vary_complexity(buf, len, s), len);
+    }
+    hu_conversation_vary_complexity_set_mode_for_test(-1); /* reset */
+}
+
 /* ── Filler injector activation gate (HU_FILLERS off|shadow|live) ────── */
 
 /* seed=0 forces the injector's internal ~20% roll to fire, so if the gate
@@ -4502,6 +4543,8 @@ void run_conversation_tests(void) {
 
     HU_RUN_TEST(fillers_off_by_default_is_noop);
     HU_RUN_TEST(fillers_live_mode_still_injects);
+    HU_RUN_TEST(vary_complexity_off_by_default_is_noop);
+    HU_RUN_TEST(vary_complexity_live_mode_still_contracts);
 
     HU_RUN_TEST(test_should_share_tiktok_cue_boosts_roll);
     HU_RUN_TEST(test_should_share_youtube_cue_boosts_roll);
