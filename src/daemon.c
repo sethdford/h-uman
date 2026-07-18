@@ -13036,15 +13036,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (dt_n > 0 && (size_t)dt_n < sizeof(dt_user)) {
                                 char *dt_resp = NULL;
                                 size_t dt_resp_len = 0;
+                                size_t dt_fb_len = 0;
+                                const char *dt_fb = hu_daemon_fallback_model(config, &dt_fb_len);
                                 const char *dt_model =
                                     (llm_decides && g_classify_provider_ok)
                                         ? g_classify_model
-                                        : (agent->model_name ? agent->model_name
-                                                             : "gemini-3.1-flash-lite-preview");
+                                        : (agent->model_name ? agent->model_name : dt_fb);
                                 size_t dt_model_len =
                                     (llm_decides && g_classify_provider_ok)
                                         ? g_classify_model_len
-                                        : (agent->model_name ? agent->model_name_len : 31);
+                                        : (agent->model_name ? agent->model_name_len : dt_fb_len);
                                 hu_error_t dt_err = dt_vtable->chat_with_system(
                                     dt_ctx, alloc,
                                     "You are texting as this person. Keep it casual, short, "
@@ -13231,11 +13232,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifdef HU_HAS_IMESSAGE
                                 char *gif_query = NULL;
                                 size_t gif_query_len = 0;
-                                const char *gif_model = agent->model_name
-                                                            ? agent->model_name
-                                                            : "gemini-3.1-flash-lite-preview";
+                                size_t gif_fb_len = 0;
+                                const char *gif_fb = hu_daemon_fallback_model(config, &gif_fb_len);
+                                const char *gif_model =
+                                    agent->model_name ? agent->model_name : gif_fb;
                                 size_t gif_model_len =
-                                    agent->model_name ? agent->model_name_len : 31;
+                                    agent->model_name ? agent->model_name_len : gif_fb_len;
                                 if (agent->provider.vtable &&
                                     agent->provider.vtable->chat_with_system) {
                                     (void)agent->provider.vtable->chat_with_system(
@@ -13397,10 +13399,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             char *music_suggestion = NULL;
                             size_t music_suggestion_len = 0;
                             const char *insp_sys = hu_inspiration_system_prompt(medium);
-                            const char *music_model = agent->model_name
-                                                          ? agent->model_name
-                                                          : "gemini-3.1-flash-lite-preview";
-                            size_t music_model_len = agent->model_name ? agent->model_name_len : 31;
+                            size_t music_fb_len = 0;
+                            const char *music_fb = hu_daemon_fallback_model(config, &music_fb_len);
+                            const char *music_model =
+                                agent->model_name ? agent->model_name : music_fb;
+                            size_t music_model_len =
+                                agent->model_name ? agent->model_name_len : music_fb_len;
                             (void)agent->provider.vtable->chat_with_system(
                                 agent->provider.ctx, alloc, insp_sys, strlen(insp_sys),
                                 music_prompt, mp_len, music_model, music_model_len, 0.9,
@@ -13707,9 +13711,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             "funny, sweet, or illustrative. Reply SKIP if it doesn't fit.";
                         char *img_suggest = NULL;
                         size_t img_suggest_len = 0;
-                        const char *img_model =
-                            agent->model_name ? agent->model_name : "gemini-3.1-flash-lite-preview";
-                        size_t img_model_len = agent->model_name ? agent->model_name_len : 31;
+                        size_t img_fb_len = 0;
+                        const char *img_fb = hu_daemon_fallback_model(config, &img_fb_len);
+                        const char *img_model = agent->model_name ? agent->model_name : img_fb;
+                        size_t img_model_len =
+                            agent->model_name ? agent->model_name_len : img_fb_len;
                         (void)agent->provider.vtable->chat_with_system(
                             agent->provider.ctx, alloc, img_sys, sizeof(img_sys) - 1, combined,
                             combined_len, img_model, img_model_len, 0.7, &img_suggest,

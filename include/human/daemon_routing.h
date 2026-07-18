@@ -26,4 +26,16 @@ uint32_t hu_daemon_compute_photo_delay(const hu_channel_loop_msg_t *msgs, size_t
 uint32_t hu_daemon_compute_video_delay(const hu_channel_loop_msg_t *msgs, size_t batch_start,
                                        size_t batch_end, uint32_t seed);
 
+struct hu_config; /* human/config.h */
+
+/* Compiled default for daemon-side reflexive LLM calls (double-text, GIF/music/
+ * image suggestions) when neither the agent's model_name nor the model router's
+ * reflexive tier is configured. Update here on the next Gemini deprecation. */
+#define HU_DAEMON_FALLBACK_MODEL_DEFAULT "gemini-3.1-flash-lite-preview"
+
+/* Fallback model resolver: returns config->agent.mr_reflexive_model when set and
+ * non-empty, else HU_DAEMON_FALLBACK_MODEL_DEFAULT. Never returns NULL. len_out
+ * (optional) receives strlen of the returned string. */
+const char *hu_daemon_fallback_model(const struct hu_config *config, size_t *len_out);
+
 #endif /* HU_DAEMON_ROUTING_H */

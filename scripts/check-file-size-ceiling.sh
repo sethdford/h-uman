@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14274   # src/daemon.c, measured 2026-07-18: S2.1b follow-up-sched carve (-87) merged with origin/main's +13 (was 14348). Lower as god-files are carved.
+MAX_BASELINE=14217   # src/daemon.c, measured 2026-07-18: fallback-model helper chip landed at 14217 after prior carves. Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

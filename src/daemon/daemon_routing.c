@@ -7,6 +7,7 @@
  *   - Missed message acknowledgment (F10)
  */
 #include "human/daemon_routing.h"
+#include "human/config.h"
 #include "human/daemon.h"
 
 #include <stdint.h>
@@ -101,4 +102,15 @@ const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hou
     static const char *const missed[] = {"sorry just saw this", "oh man missed this",
                                          "ha my bad just saw this"};
     return missed[seed % 3];
+}
+
+/* ── Fallback model resolution ───────────────────────────────────────── */
+
+const char *hu_daemon_fallback_model(const struct hu_config *config, size_t *len_out) {
+    const char *model = HU_DAEMON_FALLBACK_MODEL_DEFAULT;
+    if (config && config->agent.mr_reflexive_model && config->agent.mr_reflexive_model[0] != '\0')
+        model = config->agent.mr_reflexive_model;
+    if (len_out)
+        *len_out = strlen(model);
+    return model;
 }
