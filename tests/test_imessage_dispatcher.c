@@ -13,10 +13,12 @@
 #include "human/core/allocator.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
+#include "human/daemon/message_router.h"
 #include "human/persona.h"
 #include "test_framework.h"
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 /* Test counters for mock vtable calls. */
 static int reply_calls = 0;
@@ -441,6 +443,89 @@ static void threaded_reply_quotes_parent_inline(void) {
 }
 #endif /* HU_HAS_IMESSAGE */
 
+/* ── Roadmap #18: stale-tapback demotion on the reply-style path ────── */
+
+/* Pure demotion truth table: stale parent collapses tapback styles to FLAT;
+ * everything else is untouched. */
+static void demote_stale_tapback_style_truth_table(void) {
+    /* No band → 15-min default cap. The audit case: 100 min stale. */
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, 100 * 60, NULL),
+                 (int)HU_REPLY_STYLE_FLAT);
+    HU_ASSERT_EQ(
+        (int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT, 100 * 60, NULL),
+        (int)HU_REPLY_STYLE_FLAT);
+    /* Fresh parent: tapback styles pass through. */
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, 30, NULL),
+                 (int)HU_REPLY_STYLE_TAPBACK);
+    /* Non-tapback styles never demoted, even when stale. */
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_THREADED, 100 * 60, NULL),
+                 (int)HU_REPLY_STYLE_THREADED);
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_FLAT, 100 * 60, NULL),
+                 (int)HU_REPLY_STYLE_FLAT);
+    /* Unknown age (0) → don't demote on missing data. */
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, 0, NULL),
+                 (int)HU_REPLY_STYLE_TAPBACK);
+    /* A measured band tightens the cap below the default. */
+    hu_tapback_band_t b = {0};
+    b.valid = true;
+    b.p90_ms = 2 * 60 * 1000;
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, 5 * 60, &b),
+                 (int)HU_REPLY_STYLE_FLAT);
+    HU_ASSERT_EQ((int)hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, 60, &b),
+                 (int)HU_REPLY_STYLE_TAPBACK);
+}
+
+/* snapshot-age helper: 0/negative/future timestamps report unknown (0). */
+static void snapshot_age_sec_handles_unknown_and_future(void) {
+    HU_ASSERT_EQ((int)hu_daemon_snapshot_age_sec(0), 0);
+    HU_ASSERT_EQ((int)hu_daemon_snapshot_age_sec(-7), 0);
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ((int)hu_daemon_snapshot_age_sec(now + 3600), 0);
+    int64_t age = hu_daemon_snapshot_age_sec(now - 100);
+    HU_ASSERT_TRUE(age >= 100 && age <= 102);
+}
+
+/* Dispatcher-level: a stale parent (audit case, 100 min) must NEVER produce a
+ * react_emoji, across the predicate's whole seed space — the tapback mass is
+ * ~20% per draw with these facts, so 50 seeds would hit it many times if the
+ * demotion gate were missing. The reply text must still be delivered. */
+static void stale_parent_never_reacts_tapback(void) {
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 100 * 60;
+
+    for (int64_t mid = 1; mid <= 50; mid++) {
+        setup_mocks();
+        mock_vtable.reply = NULL; /* keep THREADED off the table for determinism */
+        hu_error_t err = hu_daemon_dispatch_imessage_reply(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+            (const struct hu_conversation_snapshot *)&snap, mid);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_EQ(react_emoji_calls, 0); /* no late tapback, ever */
+        HU_ASSERT(send_calls >= 1);         /* the text still flows */
+    }
+}
+
+/* Control for the sweep above: with a FRESH parent the same facts DO reach
+ * react_emoji within 50 seeds — proving the stale sweep is non-vacuous (the
+ * gate, not the predicate weights, is what suppresses the reaction). */
+static void fresh_parent_still_reacts_tapback_sometimes(void) {
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 30;
+
+    bool tapback_hit = false;
+    for (int64_t mid = 1; mid <= 50 && !tapback_hit; mid++) {
+        setup_mocks();
+        mock_vtable.reply = NULL;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+            (const struct hu_conversation_snapshot *)&snap, mid);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        if (react_emoji_calls > 0)
+            tapback_hit = true;
+    }
+    HU_ASSERT(tapback_hit);
+}
+
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
     HU_RUN_TEST(invalid_args_short_circuit);
@@ -452,6 +537,10 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
+    HU_RUN_TEST(demote_stale_tapback_style_truth_table);
+    HU_RUN_TEST(snapshot_age_sec_handles_unknown_and_future);
+    HU_RUN_TEST(stale_parent_never_reacts_tapback);
+    HU_RUN_TEST(fresh_parent_still_reacts_tapback_sometimes);
 #if HU_HAS_IMESSAGE
     HU_RUN_TEST(threaded_reply_quotes_parent_inline);
     HU_RUN_TEST(desc_prefix_match_at_string_start);

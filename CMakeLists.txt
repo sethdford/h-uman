@@ -839,6 +839,7 @@ set(HU_CORE_SOURCES
     src/behavior/trust_prompt.c
     src/behavior/user_sim.c
     src/behavior/pressure_history.c
+    src/behavior/tapback_band.c
     src/behavior/user_sim_scenario.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
@@ -1350,6 +1351,11 @@ list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # CF-3: daemon reaction poll tick — always linked (daemon.c calls it
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
 list(APPEND HU_CORE_SOURCES src/daemon/daemon_reaction_poll.c)
+
+# US-104: proactive-outcome pipeline + 24h DPO judge tick (carved from
+# daemon.c 2026-07-18). Always linked; bodies internally gated on
+# HU_ENABLE_SQLITE.
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_learning_tick.c)
 
 # T9: daemon adapter for the M2 reflection loop. Body internally
 # gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
@@ -3781,7 +3787,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
@@ -3976,6 +3982,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_reaction_paired_train_e2e.c
     tests/test_dpo_collector.c
     tests/test_proactive_outcomes.c
+    tests/test_daemon_learning_tick.c
     tests/test_e2e_learning_loop.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round

@@ -18,6 +18,7 @@
 #include "human/agent.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channel.h"
+#include "human/channel_loop.h"
 #include "human/channels/format.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
@@ -101,6 +102,29 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     uint64_t rng_seed = (uint64_t)time(NULL) * 1000ULL + (uint64_t)target_len +
                         (uint64_t)inferred_message_id_for_react;
     hu_reply_style_t style = hu_imessage_choose_reply_style(&facts, rng_seed);
+
+    /* Roadmap #18: never send a late tapback on the reply-style path either.
+     * Stale parent (older than the measured band, 15-min default cap) demotes
+     * tapback styles to FLAT — the reaction is dropped, the text still flows. */
+    {
+        hu_tapback_band_t tb_band;
+        char tb_path[512], tb_key[128];
+        size_t kl = target_len < sizeof(tb_key) - 1 ? target_len : sizeof(tb_key) - 1;
+        memcpy(tb_key, target, kl);
+        tb_key[kl] = '\0';
+        hu_allocator_t tb_sys = hu_system_allocator();
+        hu_tapback_band_load(&tb_sys, hu_tapback_bands_default_path(tb_path, sizeof(tb_path)),
+                             tb_key, &tb_band);
+        hu_reply_style_t demoted =
+            hu_daemon_demote_stale_tapback_style(style, facts.seconds_since_parent, &tb_band);
+        if (demoted != style) {
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "reply-style tapback stale (parent %llds old > band cap) — demoted to "
+                        "flat, reaction dropped",
+                        (long long)facts.seconds_since_parent);
+            style = demoted;
+        }
+    }
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
@@ -431,4 +455,46 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
     (void)response;
     (void)response_len;
 #endif
+}
+
+/* ── Roadmap #18: stale-tapback demotion (reply-style path) ──────────────── */
+
+int64_t hu_daemon_snapshot_age_sec(int64_t msg_timestamp_sec) {
+    if (msg_timestamp_sec <= 0)
+        return 0;
+    int64_t now = (int64_t)time(NULL);
+    return now > msg_timestamp_sec ? now - msg_timestamp_sec : 0;
+}
+
+hu_conversation_snapshot_t hu_daemon_snapshot_for_msg(int64_t msg_timestamp_sec) {
+    hu_conversation_snapshot_t s = {0};
+    s.parent_seconds_ago = hu_daemon_snapshot_age_sec(msg_timestamp_sec);
+    return s;
+}
+
+hu_reply_style_t hu_daemon_demote_stale_tapback_style(hu_reply_style_t style,
+                                                      int64_t parent_seconds_ago,
+                                                      const hu_tapback_band_t *band) {
+    if (style != HU_REPLY_STYLE_TAPBACK && style != HU_REPLY_STYLE_TAPBACK_PLUS_FLAT)
+        return style;
+    if (parent_seconds_ago <= 0)
+        return style; /* unknown age — don't demote on missing data */
+    if (hu_tapback_age_within_band(parent_seconds_ago * 1000, band))
+        return style;
+    return HU_REPLY_STYLE_FLAT; /* reaction dropped; the text still flows */
+}
+
+hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
+                                                 const struct hu_agent *agent,
+                                                 const struct hu_config *config, const char *target,
+                                                 size_t target_len,
+                                                 const struct hu_channel_loop_msg *msg,
+                                                 const char *body, size_t body_len) {
+    const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
+    hu_conversation_snapshot_t snap = hu_daemon_snapshot_for_msg(m ? m->timestamp_sec : 0);
+    const char *guid = (m && m->guid[0]) ? m->guid : NULL;
+    return hu_daemon_dispatch_imessage_reply(
+        (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
+        target_len, guid, guid ? strlen(guid) : 0, body, body_len,
+        (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0);
 }

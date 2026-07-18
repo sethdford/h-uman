@@ -1,9 +1,14 @@
 #ifndef HU_DAEMON_MESSAGE_ROUTER_H
 #define HU_DAEMON_MESSAGE_ROUTER_H
 
+#include "human/behavior/tapback_band.h"          /* hu_tapback_band_t */
+#include "human/channels/imessage_action.h"       /* hu_reply_style_t */
+#include "human/channels/imessage_action_facts.h" /* hu_conversation_snapshot_t */
 #include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,6 +74,35 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
                                             const char *prompt, const char *response,
                                             size_t response_len, char *msg_ref_out,
                                             size_t msg_ref_cap);
+
+/* Roadmap #18 (stale-tapback gate, reply-style path): pure demotion. When the
+ * chosen reply style would send a tapback (TAPBACK / TAPBACK_PLUS_FLAT) but
+ * the parent message is older than the tapback timing band, collapse to FLAT:
+ * the reaction is dropped (never sent late), the reply text still flows (a
+ * late TEXT reply is normal human behavior; a late tapback is a tell).
+ * parent_seconds_ago <= 0 = unknown age → style unchanged. */
+hu_reply_style_t hu_daemon_demote_stale_tapback_style(hu_reply_style_t style,
+                                                      int64_t parent_seconds_ago,
+                                                      const hu_tapback_band_t *band);
+
+/* Age (seconds) of an inbound message, for snapshot.parent_seconds_ago.
+ * Returns 0 (= unknown) when msg_timestamp_sec is <= 0 or in the future. */
+int64_t hu_daemon_snapshot_age_sec(int64_t msg_timestamp_sec);
+
+/* Build a dispatcher snapshot for an inbound message: parent_seconds_ago
+ * populated from the message origin timestamp, everything else zeroed. */
+hu_conversation_snapshot_t hu_daemon_snapshot_for_msg(int64_t msg_timestamp_sec);
+
+/* Convenience form of hu_daemon_dispatch_imessage_reply (human/daemon.h) for
+ * the daemon reply loop: derives parent guid, snapshot (incl. parent age for
+ * the stale-tapback demotion), and react message id from the inbound msg. */
+struct hu_channel_loop_msg;
+hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
+                                                 const struct hu_agent *agent,
+                                                 const struct hu_config *config, const char *target,
+                                                 size_t target_len,
+                                                 const struct hu_channel_loop_msg *msg,
+                                                 const char *body, size_t body_len);
 
 #ifdef __cplusplus
 }
