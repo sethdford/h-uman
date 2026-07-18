@@ -658,6 +658,123 @@ static void test_prompt_immersive_tracks_field_stats(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* ─── Continuity context (SOTA roadmap #13 — the "goldfish" anti-tell) ─────
+ *
+ * Own-last-send + open promises, rendered as a compact capped section and
+ * injected on the reactive path. Contract: present when data exists, absent
+ * when empty, hard-capped at HU_CONTINUITY_CTX_MAX_BYTES, and trimmed FIRST
+ * under HU_PROMPT_TRIM pressure (lowest-priority tier — never displaces
+ * rules/persona). */
+
+static void test_continuity_render_both_parts(void) {
+    const char *promises[] = {"send the invoice", "call the plumber"};
+    char buf[HU_CONTINUITY_CTX_MAX_BYTES + 1];
+    static const char last[] = "on my way, be there in 10";
+    size_t n = hu_continuity_context_render(last, sizeof(last) - 1, promises, 2, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_EQ(n, strlen(buf));
+    HU_ASSERT_TRUE(strstr(buf, "Your last message to them: on my way, be there in 10") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Open promises: send the invoice; call the plumber") != NULL);
+}
+
+static void test_continuity_render_empty_returns_zero(void) {
+    char buf[64];
+    size_t n = hu_continuity_context_render(NULL, 0, NULL, 0, buf, sizeof(buf));
+    HU_ASSERT_EQ(n, 0);
+    HU_ASSERT_EQ(buf[0], '\0');
+    /* Empty-string inputs are the same as absent inputs. */
+    const char *empty_promise[] = {""};
+    n = hu_continuity_context_render("", 0, empty_promise, 1, buf, sizeof(buf));
+    HU_ASSERT_EQ(n, 0);
+}
+
+static void test_continuity_render_caps_at_max_bytes(void) {
+    /* A last-send far over the cap must be truncated, never overflow. */
+    char huge[2048];
+    memset(huge, 'x', sizeof(huge) - 1);
+    huge[sizeof(huge) - 1] = '\0';
+    const char *promises[] = {"a promise that also takes space in the section"};
+    char buf[2048];
+    size_t n = hu_continuity_context_render(huge, sizeof(huge) - 1, promises, 1, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(n <= (size_t)HU_CONTINUITY_CTX_MAX_BYTES);
+    HU_ASSERT_EQ(n, strlen(buf));
+    HU_ASSERT_TRUE(strstr(buf, "Your last message to them: ") != NULL);
+}
+
+static void test_prompt_continuity_section_present_immersive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static const char mem[] = "- MEMFACT_MARKER a small remembered detail\n";
+    hu_prompt_config_t cfg = immersive_cfg(mem, sizeof(mem) - 1, NULL);
+    static const char cont[] = "Your last message to them: CONTINUITY_SEND_MARKER\n"
+                               "Open promises: CONTINUITY_PROMISE_MARKER\n";
+    cfg.continuity_context = cont;
+    cfg.continuity_context_len = sizeof(cont) - 1;
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "CONTINUITY_SEND_MARKER") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "CONTINUITY_PROMISE_MARKER") != NULL);
+    /* Wired into the per-field byte accounting so prompt_budget snapshots
+     * and the DEAD-field trim can see it. */
+    HU_ASSERT_TRUE(stats[HU_PROMPT_FIELD_CONTINUITY_CONTEXT].bytes_contributed >= sizeof(cont) - 1);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_prompt_continuity_section_absent_when_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static const char mem[] = "- MEMFACT_MARKER a small remembered detail\n";
+    hu_prompt_config_t cfg = immersive_cfg(mem, sizeof(mem) - 1, NULL);
+    /* continuity_context deliberately unset */
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(out, "Your last message to them") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "Open promises") == NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_prompt_continuity_trimmed_first_under_pressure(void) {
+    /* Continuity is the LOWEST-priority trim tier: under budget pressure it
+     * is cut before every other span, and the persona head + guard tail
+     * always survive. Fixture: >16K memory forces ~4K of overage; the small
+     * continuity span must be consumed entirely (priority 0) while newest
+     * memory and the tail markers remain. */
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t mem_len = 0;
+    char *mem = big_memory_context(&alloc, &mem_len);
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, mem_len, &persona);
+    static const char cont[] = "Your last message to them: CONTINUITY_SEND_MARKER\n";
+    cfg.continuity_context = cont;
+    cfg.continuity_context_len = sizeof(cont) - 1;
+
+    setenv("HU_PROMPT_TRIM", "live", 1);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
+    unsetenv("HU_PROMPT_TRIM");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(out_len <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    /* Continuity (priority 0) is gone before memory is exhausted... */
+    HU_ASSERT_TRUE(strstr(out, "CONTINUITY_SEND_MARKER") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "NEWEST_FACT_MARKER") != NULL);
+    /* ...and the protected head/tail are intact. */
+    HU_ASSERT_TRUE(strstr(out, "PERSONA_HEAD_MARKER") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "TAIL_REMINDER_MARKER") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    alloc.free(alloc.ctx, mem, 20000 + 64);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
@@ -672,6 +789,12 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_immersive_safety_section_live_only_and_early);
     HU_RUN_TEST(test_prompt_immersive_trim_extends_to_world_model);
     HU_RUN_TEST(test_prompt_immersive_tracks_field_stats);
+    HU_RUN_TEST(test_continuity_render_both_parts);
+    HU_RUN_TEST(test_continuity_render_empty_returns_zero);
+    HU_RUN_TEST(test_continuity_render_caps_at_max_bytes);
+    HU_RUN_TEST(test_prompt_continuity_section_present_immersive);
+    HU_RUN_TEST(test_prompt_continuity_section_absent_when_empty);
+    HU_RUN_TEST(test_prompt_continuity_trimmed_first_under_pressure);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);

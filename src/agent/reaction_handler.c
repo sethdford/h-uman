@@ -296,6 +296,47 @@ static int reaction_lookup_find(const hu_reaction_event_t *e, char *prompt_out, 
 #endif
 }
 
+/* SOTA roadmap #13 (continuity): most recent outbound response for a
+ * (channel, thread) pair, independent of msg_ref. See reaction_handler.h. */
+int hu_reaction_lookup_last_response(const char *channel, const char *thread, char *out,
+                                     size_t out_cap) {
+    if (out && out_cap > 0)
+        out[0] = '\0';
+    if (!channel || !thread || !out || out_cap == 0)
+        return 0;
+#if HU_RXN_LOOKUP_USES_SQLITE
+    if (!rxn_db_open())
+        return 0;
+    sqlite3_stmt *st = NULL;
+    static const char sql[] =
+        "SELECT response FROM reaction_lookup WHERE channel = ? AND thread = ? "
+        "ORDER BY inserted_at DESC, rowid DESC LIMIT 1";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, thread, -1, SQLITE_STATIC);
+    int found = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *r = sqlite3_column_text(st, 0);
+        snprintf(out, out_cap, "%s", r ? (const char *)r : "");
+        found = 1;
+    }
+    sqlite3_finalize(st);
+    return found;
+#else
+    /* In-memory store appends in registration order (upserts rewrite in
+     * place), so the LAST matching entry is the most recent registration. */
+    for (size_t i = s_lookup_n; i > 0; i--) {
+        if (strcmp(s_lookup[i - 1].channel, channel) != 0 ||
+            strcmp(s_lookup[i - 1].thread, thread) != 0)
+            continue;
+        snprintf(out, out_cap, "%s", s_lookup[i - 1].response);
+        return 1;
+    }
+    return 0;
+#endif
+}
+
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     if (!e || !e->channel_id)
         return HU_ERR_INVALID_ARGUMENT;

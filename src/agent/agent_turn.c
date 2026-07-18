@@ -54,6 +54,10 @@
  * values) is a separate, larger change tracked outside Task 14. */
 void hu_reaction_handler_clear_turn(void);
 int hu_reaction_handler_was_called_this_turn(void);
+/* SOTA roadmap #13 (continuity): same forward-decl rationale as above —
+ * only scalar/char* types cross the boundary. */
+int hu_reaction_lookup_last_response(const char *channel, const char *thread, char *out,
+                                     size_t out_cap);
 #include "human/agent/channel_trust.h"
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/response_guard.h"
@@ -4276,6 +4280,56 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
+        /* SOTA roadmap #13 — continuity context: own last send (from the
+         * reaction_lookup store, populated by every reply route) + open
+         * commitments for this contact. Default ON — pure context injection
+         * capped at HU_CONTINUITY_CTX_MAX_BYTES; HU_CONTINUITY_CTX=off is
+         * the kill-switch. Lowest-priority trim tier under HU_PROMPT_TRIM. */
+        char continuity_buf[HU_CONTINUITY_CTX_MAX_BYTES + 1];
+        size_t continuity_len = 0;
+        {
+            const char *cgate = getenv("HU_CONTINUITY_CTX");
+            bool continuity_on = !(cgate && (strcmp(cgate, "off") == 0 || strcmp(cgate, "0") == 0));
+            if (continuity_on && agent->memory_session_id && agent->memory_session_id_len > 0) {
+                /* memory_session_id/active_channel are length-delimited;
+                 * copy to NUL-terminated keys for the lookup API. */
+                char thread_key[256];
+                size_t tk = agent->memory_session_id_len < sizeof(thread_key) - 1
+                                ? agent->memory_session_id_len
+                                : sizeof(thread_key) - 1;
+                memcpy(thread_key, agent->memory_session_id, tk);
+                thread_key[tk] = '\0';
+                char last_send[512];
+                last_send[0] = '\0';
+                if (agent->active_channel && agent->active_channel_len > 0 &&
+                    agent->active_channel_len < 32) {
+                    char channel_key[32];
+                    memcpy(channel_key, agent->active_channel, agent->active_channel_len);
+                    channel_key[agent->active_channel_len] = '\0';
+                    (void)hu_reaction_lookup_last_response(channel_key, thread_key, last_send,
+                                                           sizeof(last_send));
+                }
+                const char *promises[2] = {0};
+                size_t promise_count = 0;
+                hu_superhuman_commitment_t *cont_due = NULL;
+                size_t cont_due_n = 0;
+                if (agent->memory && hu_superhuman_commitment_list_due(
+                                         agent->memory, agent->alloc, (int64_t)time(NULL), 8,
+                                         &cont_due, &cont_due_n) == HU_OK) {
+                    for (size_t ci = 0; ci < cont_due_n && promise_count < 2; ci++) {
+                        if (strlen(cont_due[ci].contact_id) == tk &&
+                            memcmp(cont_due[ci].contact_id, thread_key, tk) == 0)
+                            promises[promise_count++] = cont_due[ci].description;
+                    }
+                }
+                continuity_len = hu_continuity_context_render(
+                    last_send, strlen(last_send), promises, promise_count, continuity_buf,
+                    sizeof(continuity_buf));
+                if (cont_due)
+                    hu_superhuman_commitment_free(agent->alloc, cont_due, cont_due_n);
+            }
+        }
+
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -4381,6 +4435,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .moment_context_len = moment_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            .continuity_context = continuity_len > 0 ? continuity_buf : NULL,
+            .continuity_context_len = continuity_len,
             /* B3 Phase 3 — populate trim gate fields from the operator
              * config so the builder skips DEAD fields when both the
              * subsystem is enabled AND the long-lived budget has enough
