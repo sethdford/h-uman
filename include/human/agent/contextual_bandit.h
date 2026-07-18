@@ -68,6 +68,12 @@ hu_error_t hu_contextual_bandit_load(hu_allocator_t *alloc, const char *path,
 hu_error_t hu_contextual_bandit_get_arm(hu_contextual_bandit_t *bandit, uint64_t contact_handle,
                                         hu_contextual_bandit_arm_t *out_arm);
 
+/* Overwrite (or insert) an arm's posterior directly. For the persistence
+ * layer — callers must pass already-validated values; no clamping here.
+ * Returns HU_OK or HU_ERR_OUT_OF_MEMORY (capacity exhausted). */
+hu_error_t hu_contextual_bandit_set_arm(hu_contextual_bandit_t *bandit, uint64_t contact_handle,
+                                        double alpha, double beta, uint64_t updates);
+
 /* Internal: deterministic Beta(α, β) sampler. Public for testing.
  * Uses Marsaglia-Tsang method: sample two Gamma(α,1) and Gamma(β,1)
  * via exponentials, then θ = Γ(α) / (Γ(α) + Γ(β)). */
