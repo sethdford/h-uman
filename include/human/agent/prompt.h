@@ -154,6 +154,14 @@ typedef struct hu_prompt_config {
     /* GraphRAG: per-contact community summaries for relationship context */
     const char *graph_context;
     size_t graph_context_len;
+    /* Continuity context (SOTA roadmap #13) — own-last-send + open promises
+     * for the active contact, rendered via hu_continuity_context_render.
+     * Kills the "goldfish" anti-tell (never referencing our own prior sends).
+     * NULL/empty when no outbound history or due commitments exist. Capped
+     * at HU_CONTINUITY_CTX_MAX_BYTES by the renderer; lowest-priority trim
+     * tier under HU_PROMPT_TRIM pressure. */
+    const char *continuity_context;
+    size_t continuity_context_len;
     /* Phase 2 prompt-budget trim — populated from hu_config_t.prompt_budget
      * by the caller (agent_turn.c / agent_stream.c). When trim_enabled is
      * true AND the builder is invoked with a non-NULL budget pointer that
@@ -214,6 +222,26 @@ hu_error_t hu_prompt_build_static(hu_allocator_t *alloc, const hu_prompt_config_
 hu_error_t hu_prompt_build_with_cache(hu_allocator_t *alloc, const char *static_prompt,
                                       size_t static_prompt_len, const char *memory_context,
                                       size_t memory_context_len, char **out, size_t *out_len);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Continuity context renderer (SOTA roadmap #13)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Hard byte cap for the rendered continuity section. Small on purpose:
+ * pure context injection that must never crowd out rules/persona. */
+#define HU_CONTINUITY_CTX_MAX_BYTES 400
+
+/* Render "Your last message to them: <text>\nOpen promises: <p1>; <p2>\n"
+ * into out (NUL-terminated). Pure — no allocation, no I/O.
+ *
+ * last_send may be NULL/empty (line omitted). promises entries may be
+ * NULL/empty (skipped); a promise is only appended when it fits whole.
+ * Output is capped at min(out_cap - 1, HU_CONTINUITY_CTX_MAX_BYTES); a
+ * truncated last_send is backed off to a UTF-8 boundary. Returns the
+ * rendered length, 0 when there is nothing to say (out set to ""). */
+size_t hu_continuity_context_render(const char *last_send, size_t last_send_len,
+                                    const char *const *promises, size_t promise_count, char *out,
+                                    size_t out_cap);
 
 /* Tone detection — analyze recent user messages to detect communication style.
  * Returns a static string hint suitable for tone_hint field. */

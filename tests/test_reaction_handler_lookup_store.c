@@ -347,6 +347,35 @@ static void test_negative_polarity_updates_production_outcomes_with_negative_tap
     teardown(db, &col);
 }
 
+/* SOTA roadmap #13 (continuity context): the most-recent outbound response
+ * for a (channel, thread) pair must be retrievable regardless of msg_ref —
+ * this feeds the "Your last message to them" prompt section. */
+static void test_last_response_returns_most_recent_for_thread(void) {
+    hu_reaction_handler_reset_for_test();
+
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_L", "msg_1", "Q1",
+                                                            "first reply", "");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_L", "msg_2", "Q2",
+                                                            "second reply", "");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "chat_OTHER", "msg_3", "Q3",
+                                                            "other thread reply", "");
+
+    char out[256];
+    HU_ASSERT_EQ(hu_reaction_lookup_last_response("imessage", "chat_L", out, sizeof(out)), 1);
+    HU_ASSERT_STR_EQ(out, "second reply");
+
+    /* Miss: unknown thread → 0, out untouched-as-empty. */
+    out[0] = 'x';
+    HU_ASSERT_EQ(hu_reaction_lookup_last_response("imessage", "chat_NONE", out, sizeof(out)), 0);
+    HU_ASSERT_EQ(out[0], '\0');
+
+    /* NULL-safety. */
+    HU_ASSERT_EQ(hu_reaction_lookup_last_response(NULL, "chat_L", out, sizeof(out)), 0);
+    HU_ASSERT_EQ(hu_reaction_lookup_last_response("imessage", "chat_L", NULL, 0), 0);
+
+    hu_reaction_handler_reset_for_test();
+}
+
 /* ----- opt-in SQLite-path tests -----
  *
  * These exercise the real SQLite-backed path against a temporary DB. They
@@ -384,6 +413,7 @@ void run_reaction_handler_lookup_store_tests(void) {
     HU_RUN_TEST(test_removal_event_is_dropped_silently);
     HU_RUN_TEST(test_neutral_polarity_no_dpo_row_inserted);
     HU_RUN_TEST(test_negative_polarity_updates_production_outcomes_with_negative_tapback);
+    HU_RUN_TEST(test_last_response_returns_most_recent_for_thread);
 }
 
 #else /* !HU_ENABLE_SQLITE — stub runner so the symbol always resolves */

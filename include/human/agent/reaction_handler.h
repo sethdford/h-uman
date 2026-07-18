@@ -98,6 +98,14 @@ void hu_reaction_handler_register_assistant_message_for_production(
     const char *channel, const char *thread, const char *msg_ref, const char *prompt,
     const char *response, const char *alternative);
 
+/* SOTA roadmap #13 (continuity context): most recent outbound response
+ * registered for (channel, thread), regardless of msg_ref. Returns 1 on
+ * hit (response copied into out, NUL-terminated, truncated to out_cap),
+ * 0 on miss or NULL/degenerate args (out set to "" when writable). Feeds
+ * the "Your last message to them" prompt section on the reactive path. */
+int hu_reaction_lookup_last_response(const char *channel, const char *thread, char *out,
+                                     size_t out_cap);
+
 #if HU_IS_TEST
 /* Test seam: same lookup store as production registration. */
 void hu_reaction_handler_register_assistant_message_for_test(
