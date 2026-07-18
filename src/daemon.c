@@ -12638,6 +12638,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         choreo_plan.segments[seg].text,
                                         choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
                                 }
+#if defined(HU_ENABLE_RL_FULL)
+                                /* Choreography route added ~2026-05-28 without
+                                 * registration — reaction_lookup went stale and zero
+                                 * imessage_tapback DPO pairs were recorded (2026-07-18
+                                 * audit). Register the first segment like f==0 above. */
+                                if (seg == 0 && ch->channel->vtable->name) {
+                                    hu_daemon_register_reply_for_reactions(
+                                        config, agent, ch->channel->vtable->name(ch->channel->ctx),
+                                        send_target, combined[0] ? combined : "",
+                                        choreo_plan.segments[seg].text,
+                                        choreo_plan.segments[seg].text_len, NULL, 0);
+                                }
+#endif
                             }
                             hu_choreography_plan_free(alloc, &choreo_plan);
                         }
@@ -12786,49 +12799,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     }
                                 }
 #if defined(HU_ENABLE_RL_FULL)
-                                if (config && config->reaction_collection.enabled && f == 0 &&
-                                    fragments[f].text && fragments[f].text_len > 0 &&
+                                /* One registration per reply (f==0) so a later tapback
+                                 * on it can produce a DPO pair. Centralized in
+                                 * daemon_message_router.c to cover every route. */
+                                if (f == 0 && fragments[f].text && fragments[f].text_len > 0 &&
                                     ch->channel->vtable->name) {
-                                    const char *ch_name =
-                                        ch->channel->vtable->name(ch->channel->ctx);
-                                    if (ch_name) {
-                                        char msg_ref[96];
-                                        msg_ref[0] = '\0';
-                                        if (strcmp(ch_name, "imessage") == 0) {
-                                            const char *db = NULL;
-                                            if (config->reaction_collection.chatdb_path[0])
-                                                db = config->reaction_collection.chatdb_path;
-                                            else {
-                                                const char *env = getenv("HU_CHATDB");
-                                                if (env && env[0])
-                                                    db = env;
-                                            }
-                                            if (!db) {
-                                                static char home_db[512];
-                                                const char *hm = getenv("HOME");
-                                                if (hm && hm[0]) {
-                                                    snprintf(home_db, sizeof(home_db),
-                                                             "%s/Library/Messages/chat.db", hm);
-                                                    db = home_db;
-                                                }
-                                            }
-                                            if (db && hu_imessage_lookup_latest_sent_guid(
-                                                          db, batch_key, fragments[f].text, msg_ref,
-                                                          sizeof(msg_ref)) != HU_OK) {
-                                                snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
-                                                         (long long)time(NULL));
-                                            }
-                                        } else {
-                                            snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
-                                                     (long long)time(NULL));
-                                        }
-                                        hu_reaction_handler_register_assistant_message_for_production(
-                                            ch_name, batch_key, msg_ref,
-                                            combined[0] ? combined : "", fragments[f].text,
-                                            (agent && agent->sota.last_rejected_draft)
-                                                ? agent->sota.last_rejected_draft
-                                                : "");
-                                    }
+                                    hu_daemon_register_reply_for_reactions(
+                                        config, agent, ch->channel->vtable->name(ch->channel->ctx),
+                                        batch_key, combined[0] ? combined : "", fragments[f].text,
+                                        fragments[f].text_len, NULL, 0);
                                 }
 #endif
                                 if (pv_cnt > 0) {

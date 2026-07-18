@@ -9,6 +9,9 @@
 extern "C" {
 #endif
 
+struct hu_config;
+struct hu_agent;
+
 /* Cross-channel context formatting helpers — DDD Phase 2.5 (follow-on slice),
  * extracted from daemon.c. These build the human-readable "cross-channel
  * awareness" context lines injected into proactive prompts (e.g. "Slack · 2h
@@ -45,6 +48,27 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
  * `ch` is a struct hu_channel* (void* to keep this header dependency-free). */
 bool hu_daemon_plaintext_for_split_channel(void *ch, hu_allocator_t *alloc, const char *text,
                                            size_t len, char **out, size_t *out_len);
+
+/* Register an outbound reply in the reaction lookup so a later tapback on it
+ * can produce a DPO pair (imessage_tapback source). One call per reply
+ * (first fragment / first choreography segment). Resolves the chat.db GUID
+ * for iMessage sends (falls back to a time-based ref) and writes the ref
+ * used into msg_ref_out when provided.
+ *
+ * 2026-07-18 audit: registration previously lived inline ONLY on the
+ * fragment branch of the daemon reply loop; the choreography branch (added
+ * ~2026-05-28) sent without registering, so reaction_lookup went stale and
+ * ZERO imessage_tapback pairs were ever recorded despite 119 real inbound
+ * tapbacks in 30 days. Centralizing here covers every reply route.
+ *
+ * No-op (msg_ref_out cleared) when built without HU_ENABLE_RL_FULL or when
+ * config->reaction_collection.enabled is false. `config`/`agent` may be
+ * NULL in tests; the GUID lookup is skipped when config is NULL. */
+void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+                                            const char *ch_name, const char *thread,
+                                            const char *prompt, const char *response,
+                                            size_t response_len, char *msg_ref_out,
+                                            size_t msg_ref_cap);
 
 #ifdef __cplusplus
 }

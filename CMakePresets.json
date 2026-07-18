@@ -1,223 +1,236 @@
 {
-  "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
-  "configurePresets": [
-    {
-      "name": "dev",
-      "displayName": "Development (ASan, all features)",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "HU_ENABLE_ASAN": "ON",
-        "HU_ENABLE_ALL_CHANNELS": "ON",
-        "HU_ENABLE_SQLITE": "ON",
-        "HU_ENABLE_PERSONA": "ON",
-        "HU_ENABLE_SKILLS": "ON",
-        "HU_ENABLE_FEEDS": "ON",
-        "HU_ENABLE_TUI": "ON",
-        "HU_ENABLE_UPDATE": "ON",
-        "HU_ENABLE_ML": "ON",
-        "HU_ENABLE_EMBEDDED_MODEL": "ON",
-        "HU_ENABLE_APPLE_INTELLIGENCE": "ON",
-        "HU_ENABLE_CARTESIA": "ON",
-        "HU_ENABLE_CRON": "ON",
-        "HU_ENABLE_TOOLS_ADVANCED": "ON",
-        "HU_ENABLE_LIBSODIUM": "ON"
-      }
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
     },
-    {
-      "name": "test",
-      "displayName": "Fast iteration (no ASan)",
-      "binaryDir": "${sourceDir}/build-test",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "HU_ENABLE_ALL_CHANNELS": "ON",
-        "HU_ENABLE_SQLITE": "ON",
-        "HU_ENABLE_PERSONA": "ON",
-        "HU_ENABLE_SKILLS": "ON",
-        "HU_ENABLE_UPDATE": "ON",
-        "HU_ENABLE_SYNTHETIC": "ON",
-        "HU_ENABLE_CHANNEL_TESTS": "ON"
-      }
-    },
-    {
-      "name": "release",
-      "displayName": "Release (MinSizeRel + LTO)",
-      "binaryDir": "${sourceDir}/build-release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel",
-        "HU_ENABLE_LTO": "ON",
-        "HU_ENABLE_ALL_CHANNELS": "ON",
-        "HU_ENABLE_SQLITE": "ON",
-        "HU_ENABLE_PERSONA": "ON",
-        "HU_ENABLE_SKILLS": "ON",
-        "HU_ENABLE_FEEDS": "ON",
-        "HU_ENABLE_UPDATE": "ON",
-        "HU_ENABLE_ML": "ON",
-        "HU_ENABLE_EMBEDDED_MODEL": "ON",
-        "HU_ENABLE_CARTESIA": "ON",
-        "HU_ENABLE_CRON": "ON",
-        "HU_ENABLE_TOOLS_ADVANCED": "ON"
-      }
-    },
-    {
-      "name": "fuzz",
-      "displayName": "Fuzzing (Clang required)",
-      "binaryDir": "${sourceDir}/build-fuzz",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "clang",
-        "HU_ENABLE_FUZZ": "ON",
-        "HU_ENABLE_ALL_CHANNELS": "ON",
-        "HU_ENABLE_SQLITE": "ON",
-        "HU_ENABLE_PERSONA": "ON"
-      }
-    },
-    {
-      "name": "minimal",
-      "displayName": "Minimal (CLI only, no optional deps)",
-      "binaryDir": "${sourceDir}/build-minimal",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "HU_ENABLE_CLI": "ON",
-        "HU_ENABLE_SQLITE": "OFF",
-        "HU_ENABLE_CURL": "OFF",
-        "HU_ENABLE_TLS": "OFF"
-      }
-    },
-    {
-      "name": "minimal-release",
-      "displayName": "Minimal Release (smallest binary)",
-      "binaryDir": "${sourceDir}/build-minimal-release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel",
-        "HU_ENABLE_LTO": "ON",
-        "HU_ENABLE_CLI": "ON",
-        "HU_ENABLE_SQLITE": "OFF",
-        "HU_ENABLE_CURL": "OFF",
-        "HU_ENABLE_TLS": "OFF",
-        "HU_ENABLE_PERSONA": "OFF",
-        "HU_ENABLE_SKILLS": "OFF",
-        "HU_ENABLE_ML": "OFF"
-      }
-    },
-    {
-      "name": "integration",
-      "displayName": "Integration tests binary (real curl + SQLite file)",
-      "binaryDir": "${sourceDir}/build-integration",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "HU_ENABLE_INTEGRATION_TESTS": "ON",
-        "HU_ENABLE_CURL": "ON",
-        "HU_ENABLE_SQLITE": "ON",
-        "HU_ENABLE_CLI": "ON",
-        "HU_ENABLE_IMAP": "ON"
-      }
-    },
-    {
-      "name": "dev-neural",
-      "displayName": "Dev + W10 neural memory flag (memory-v2 gate)",
-      "inherits": "dev",
-      "binaryDir": "${sourceDir}/build-dev-neural",
-      "cacheVariables": {
-        "HU_ENABLE_NEURAL_MEMORY": "ON"
-      }
-    },
-    {
-      "name": "rl_sota",
-      "displayName": "RL SOTA (Phase 1+: dev + vendored llama.cpp + Metal on Apple)",
-      "inherits": "dev",
-      "binaryDir": "${sourceDir}/build-rl-sota",
-      "cacheVariables": {
-        "HU_ENABLE_LLAMACPP": "ON",
-        "HU_ENABLE_RL_FULL": "ON"
-      }
-    },
-    {
-      "name": "release-reproducible",
-      "displayName": "Reproducible release (release + pinned SOURCE_DATE_EPOCH)",
-      "inherits": "release",
-      "binaryDir": "${sourceDir}/build-release-reproducible",
-      "environment": {
-        "SOURCE_DATE_EPOCH": "1700000000"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "dev",
-      "configurePreset": "dev",
-      "jobs": 0
-    },
-    {
-      "name": "test",
-      "configurePreset": "test",
-      "jobs": 0
-    },
-    {
-      "name": "release",
-      "configurePreset": "release",
-      "jobs": 0
-    },
-    {
-      "name": "fuzz",
-      "configurePreset": "fuzz",
-      "jobs": 0
-    },
-    {
-      "name": "minimal",
-      "configurePreset": "minimal",
-      "jobs": 0
-    },
-    {
-      "name": "minimal-release",
-      "configurePreset": "minimal-release",
-      "jobs": 0
-    },
-    {
-      "name": "integration",
-      "configurePreset": "integration",
-      "jobs": 0
-    },
-    {
-      "name": "dev-neural",
-      "configurePreset": "dev-neural",
-      "jobs": 0
-    },
-    {
-      "name": "rl_sota",
-      "configurePreset": "rl_sota",
-      "jobs": 0
-    },
-    {
-      "name": "release-reproducible",
-      "configurePreset": "release-reproducible",
-      "jobs": 0
-    }
-  ],
-  "testPresets": [
-    {
-      "name": "dev",
-      "configurePreset": "dev",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "test",
-      "configurePreset": "test",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "integration",
-      "configurePreset": "integration",
-      "output": { "outputOnFailure": true }
-    },
-    {
-      "name": "rl_sota",
-      "configurePreset": "rl_sota",
-      "output": { "outputOnFailure": true }
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "dev",
+            "displayName": "Development (ASan, all features)",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "HU_ENABLE_ASAN": "ON",
+                "HU_ENABLE_ALL_CHANNELS": "ON",
+                "HU_ENABLE_SQLITE": "ON",
+                "HU_ENABLE_PERSONA": "ON",
+                "HU_ENABLE_SKILLS": "ON",
+                "HU_ENABLE_FEEDS": "ON",
+                "HU_ENABLE_TUI": "ON",
+                "HU_ENABLE_UPDATE": "ON",
+                "HU_ENABLE_ML": "ON",
+                "HU_ENABLE_EMBEDDED_MODEL": "ON",
+                "HU_ENABLE_APPLE_INTELLIGENCE": "ON",
+                "HU_ENABLE_CARTESIA": "ON",
+                "HU_ENABLE_CRON": "ON",
+                "HU_ENABLE_TOOLS_ADVANCED": "ON",
+                "HU_ENABLE_LIBSODIUM": "ON",
+                "HU_ENABLE_RL_FULL": "ON"
+            }
+        },
+        {
+            "name": "test",
+            "displayName": "Fast iteration (no ASan)",
+            "binaryDir": "${sourceDir}/build-test",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "HU_ENABLE_ALL_CHANNELS": "ON",
+                "HU_ENABLE_SQLITE": "ON",
+                "HU_ENABLE_PERSONA": "ON",
+                "HU_ENABLE_SKILLS": "ON",
+                "HU_ENABLE_UPDATE": "ON",
+                "HU_ENABLE_SYNTHETIC": "ON",
+                "HU_ENABLE_CHANNEL_TESTS": "ON"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release (MinSizeRel + LTO)",
+            "binaryDir": "${sourceDir}/build-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
+                "HU_ENABLE_LTO": "ON",
+                "HU_ENABLE_ALL_CHANNELS": "ON",
+                "HU_ENABLE_SQLITE": "ON",
+                "HU_ENABLE_PERSONA": "ON",
+                "HU_ENABLE_SKILLS": "ON",
+                "HU_ENABLE_FEEDS": "ON",
+                "HU_ENABLE_UPDATE": "ON",
+                "HU_ENABLE_ML": "ON",
+                "HU_ENABLE_EMBEDDED_MODEL": "ON",
+                "HU_ENABLE_CARTESIA": "ON",
+                "HU_ENABLE_CRON": "ON",
+                "HU_ENABLE_TOOLS_ADVANCED": "ON"
+            }
+        },
+        {
+            "name": "fuzz",
+            "displayName": "Fuzzing (Clang required)",
+            "binaryDir": "${sourceDir}/build-fuzz",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_COMPILER": "clang",
+                "HU_ENABLE_FUZZ": "ON",
+                "HU_ENABLE_ALL_CHANNELS": "ON",
+                "HU_ENABLE_SQLITE": "ON",
+                "HU_ENABLE_PERSONA": "ON"
+            }
+        },
+        {
+            "name": "minimal",
+            "displayName": "Minimal (CLI only, no optional deps)",
+            "binaryDir": "${sourceDir}/build-minimal",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "HU_ENABLE_CLI": "ON",
+                "HU_ENABLE_SQLITE": "OFF",
+                "HU_ENABLE_CURL": "OFF",
+                "HU_ENABLE_TLS": "OFF"
+            }
+        },
+        {
+            "name": "minimal-release",
+            "displayName": "Minimal Release (smallest binary)",
+            "binaryDir": "${sourceDir}/build-minimal-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
+                "HU_ENABLE_LTO": "ON",
+                "HU_ENABLE_CLI": "ON",
+                "HU_ENABLE_SQLITE": "OFF",
+                "HU_ENABLE_CURL": "OFF",
+                "HU_ENABLE_TLS": "OFF",
+                "HU_ENABLE_PERSONA": "OFF",
+                "HU_ENABLE_SKILLS": "OFF",
+                "HU_ENABLE_ML": "OFF"
+            }
+        },
+        {
+            "name": "integration",
+            "displayName": "Integration tests binary (real curl + SQLite file)",
+            "binaryDir": "${sourceDir}/build-integration",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "HU_ENABLE_INTEGRATION_TESTS": "ON",
+                "HU_ENABLE_CURL": "ON",
+                "HU_ENABLE_SQLITE": "ON",
+                "HU_ENABLE_CLI": "ON",
+                "HU_ENABLE_IMAP": "ON"
+            }
+        },
+        {
+            "name": "dev-neural",
+            "displayName": "Dev + W10 neural memory flag (memory-v2 gate)",
+            "inherits": "dev",
+            "binaryDir": "${sourceDir}/build-dev-neural",
+            "cacheVariables": {
+                "HU_ENABLE_NEURAL_MEMORY": "ON"
+            }
+        },
+        {
+            "name": "rl_sota",
+            "displayName": "RL SOTA (Phase 1+: dev + vendored llama.cpp + Metal on Apple)",
+            "inherits": "dev",
+            "binaryDir": "${sourceDir}/build-rl-sota",
+            "cacheVariables": {
+                "HU_ENABLE_LLAMACPP": "ON",
+                "HU_ENABLE_RL_FULL": "ON"
+            }
+        },
+        {
+            "name": "release-reproducible",
+            "displayName": "Reproducible release (release + pinned SOURCE_DATE_EPOCH)",
+            "inherits": "release",
+            "binaryDir": "${sourceDir}/build-release-reproducible",
+            "environment": {
+                "SOURCE_DATE_EPOCH": "1700000000"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "jobs": 0
+        },
+        {
+            "name": "test",
+            "configurePreset": "test",
+            "jobs": 0
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "jobs": 0
+        },
+        {
+            "name": "fuzz",
+            "configurePreset": "fuzz",
+            "jobs": 0
+        },
+        {
+            "name": "minimal",
+            "configurePreset": "minimal",
+            "jobs": 0
+        },
+        {
+            "name": "minimal-release",
+            "configurePreset": "minimal-release",
+            "jobs": 0
+        },
+        {
+            "name": "integration",
+            "configurePreset": "integration",
+            "jobs": 0
+        },
+        {
+            "name": "dev-neural",
+            "configurePreset": "dev-neural",
+            "jobs": 0
+        },
+        {
+            "name": "rl_sota",
+            "configurePreset": "rl_sota",
+            "jobs": 0
+        },
+        {
+            "name": "release-reproducible",
+            "configurePreset": "release-reproducible",
+            "jobs": 0
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "test",
+            "configurePreset": "test",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "integration",
+            "configurePreset": "integration",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "rl_sota",
+            "configurePreset": "rl_sota",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
 }
