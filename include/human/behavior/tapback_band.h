@@ -34,6 +34,11 @@ typedef struct hu_tapback_band {
  * band's p90_ms when valid, else HU_TAPBACK_DEFAULT_CAP_MS. */
 bool hu_tapback_within_band(int64_t now_ms, int64_t target_msg_ms, const hu_tapback_band_t *band);
 
+/* Age-based form of the predicate, for callers that already hold the
+ * message age rather than absolute timestamps (e.g. the reply-style
+ * router's facts.seconds_since_parent). age_ms <= 0 → within band. */
+bool hu_tapback_age_within_band(int64_t age_ms, const hu_tapback_band_t *band);
+
 /* Dispatch-level wrapper for the daemon send path (second granularity).
  * msg_timestamp_sec is hu_channel_loop_msg_t.timestamp_sec; 0 means
  * "origin unknown / fresh at poll" and is within band. */

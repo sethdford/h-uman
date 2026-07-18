@@ -63,6 +63,19 @@ static void tapback_boundary_age_equals_cap_within_band(void) {
     HU_ASSERT_FALSE(hu_tapback_within_band(1000LL * MIN_MS, 1000LL * MIN_MS - 2 * MIN_MS - 1, &b));
 }
 
+static void tapback_age_form_matches_timestamp_form(void) {
+    /* age-based form: same cap semantics as the timestamp form. */
+    hu_tapback_band_t b = band_with_p90(2 * MIN_MS);
+    HU_ASSERT_TRUE(hu_tapback_age_within_band(90 * 1000, &b));
+    HU_ASSERT_FALSE(hu_tapback_age_within_band(3 * MIN_MS, &b));
+    /* no band → 15-min default cap */
+    HU_ASSERT_TRUE(hu_tapback_age_within_band(10 * MIN_MS, NULL));
+    HU_ASSERT_FALSE(hu_tapback_age_within_band(100 * MIN_MS, NULL));
+    /* unknown / negative age → within band */
+    HU_ASSERT_TRUE(hu_tapback_age_within_band(0, NULL));
+    HU_ASSERT_TRUE(hu_tapback_age_within_band(-30, NULL));
+}
+
 /* ── dispatch wrapper (the symbol the daemon send path calls) ───────── */
 
 static void tapback_dispatch_stale_msg_drops(void) {
@@ -164,6 +177,7 @@ void run_tapback_band_tests(void) {
     HU_RUN_TEST(tapback_unknown_origin_within_band);
     HU_RUN_TEST(tapback_negative_age_within_band);
     HU_RUN_TEST(tapback_boundary_age_equals_cap_within_band);
+    HU_RUN_TEST(tapback_age_form_matches_timestamp_form);
     HU_RUN_TEST(tapback_dispatch_stale_msg_drops);
     HU_RUN_TEST(tapback_dispatch_fresh_msg_sends);
     HU_RUN_TEST(tapback_dispatch_unknown_ts_sends);

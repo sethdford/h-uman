@@ -19,13 +19,16 @@ static int64_t band_cap_ms(const hu_tapback_band_t *band) {
     return HU_TAPBACK_DEFAULT_CAP_MS;
 }
 
+bool hu_tapback_age_within_band(int64_t age_ms, const hu_tapback_band_t *band) {
+    if (age_ms <= 0)
+        return true; /* unknown age / clock skew — never drop on missing data */
+    return age_ms <= band_cap_ms(band);
+}
+
 bool hu_tapback_within_band(int64_t now_ms, int64_t target_msg_ms, const hu_tapback_band_t *band) {
     if (target_msg_ms <= 0)
         return true; /* origin unknown — never drop on missing data */
-    int64_t age_ms = now_ms - target_msg_ms;
-    if (age_ms < 0)
-        return true; /* clock skew — not stale */
-    return age_ms <= band_cap_ms(band);
+    return hu_tapback_age_within_band(now_ms - target_msg_ms, band);
 }
 
 bool hu_tapback_dispatch_within_band(int64_t now_sec, int64_t msg_timestamp_sec,

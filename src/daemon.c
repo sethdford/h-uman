@@ -12605,17 +12605,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         : NULL;
                                 if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
                                     config && config->channels.imessage.action_surface_v2.enabled) {
-                                    hu_conversation_snapshot_t snap = {0};
-                                    (void)hu_daemon_dispatch_imessage_reply(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len,
-                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
-                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
-                                                                  : 0,
+                                        send_target, send_target_len, &msgs[batch_start],
                                         choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len,
-                                        (const struct hu_conversation_snapshot *)&snap,
-                                        (int64_t)msgs[batch_start].message_id);
+                                        choreo_plan.segments[seg].text_len);
                                 } else {
                                     ch->channel->vtable->send(
                                         ch->channel->ctx, send_target, send_target_len,
@@ -12720,24 +12714,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 strcmp(ch_name_f2b, "imessage") == 0 && config &&
                                                 config->channels.imessage.action_surface_v2
                                                     .enabled) {
-                                                /* Build snapshot for dispatcher */
-                                                hu_conversation_snapshot_t snap = {0};
-                                                /* For now, populate with zeros — the dispatcher
-                                                 * will still function, choosing style based on
-                                                 * defaults. Production can enhance this to query
-                                                 * chat.db if needed for richer context. */
-                                                (void)hu_daemon_dispatch_imessage_reply(
+                                                (void)hu_daemon_dispatch_imessage_reply_msg(
                                                     ch->channel, agent ? agent->persona : NULL,
                                                     agent, config, batch_key, key_len,
-                                                    msgs[batch_start].guid[0]
-                                                        ? msgs[batch_start].guid
-                                                        : NULL,
-                                                    msgs[batch_start].guid[0]
-                                                        ? strlen(msgs[batch_start].guid)
-                                                        : 0,
-                                                    dt_chunks[dt], dt_len,
-                                                    (const struct hu_conversation_snapshot *)&snap,
-                                                    (int64_t)msgs[batch_start].message_id);
+                                                    &msgs[batch_start], dt_chunks[dt], dt_len);
                                             } else {
                                                 ch->channel->vtable->send(ch->channel->ctx,
                                                                           batch_key, key_len,
@@ -12759,23 +12739,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
                                         config &&
                                         config->channels.imessage.action_surface_v2.enabled) {
-                                        /* Build snapshot for dispatcher */
-                                        hu_conversation_snapshot_t snap = {0};
-                                        /* For now, populate with zeros — the dispatcher will
-                                         * still function, choosing style based on defaults.
-                                         * Production can enhance this to query chat.db if
-                                         * needed for richer context. */
-                                        (void)hu_daemon_dispatch_imessage_reply(
+                                        (void)hu_daemon_dispatch_imessage_reply_msg(
                                             ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len,
-                                            msgs[batch_start].guid[0] ? msgs[batch_start].guid
-                                                                      : NULL,
-                                            msgs[batch_start].guid[0]
-                                                ? strlen(msgs[batch_start].guid)
-                                                : 0,
-                                            fragments[f].text, fragments[f].text_len,
-                                            (const struct hu_conversation_snapshot *)&snap,
-                                            (int64_t)msgs[batch_start].message_id);
+                                            config, batch_key, key_len, &msgs[batch_start],
+                                            fragments[f].text, fragments[f].text_len);
                                     } else {
                                         ch->channel->vtable->send(
                                             ch->channel->ctx, batch_key, key_len, fragments[f].text,
@@ -12850,16 +12817,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         : NULL;
                                 if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
                                     config->channels.imessage.action_surface_v2.enabled) {
-                                    hu_conversation_snapshot_t snap = {0};
-                                    (void)hu_daemon_dispatch_imessage_reply(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len,
-                                        msgs[batch_start].guid[0] ? msgs[batch_start].guid : NULL,
-                                        msgs[batch_start].guid[0] ? strlen(msgs[batch_start].guid)
-                                                                  : 0,
-                                        send_text, send_text_len,
-                                        (const struct hu_conversation_snapshot *)&snap,
-                                        (int64_t)msgs[batch_start].message_id);
+                                        send_target, send_target_len, &msgs[batch_start], send_text,
+                                        send_text_len);
                                 } else {
                                     ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                               send_target_len, send_text,
