@@ -259,6 +259,76 @@ static void test_memory_loader_with_entries(void) {
     alloc.free(alloc.ctx, ctx, ctx_len + 1);
     mem.vtable->deinit(mem.ctx);
 }
+
+/* Regression pin for BUG B (2026-07-13, distinct from the loader strlen fix in
+ * commit 85f4d892). A stored memory whose content contains an embedded NUL byte
+ * must NOT trigger a heap-buffer-overflow during context assembly.
+ *
+ * Root cause: the sqlite recall path copied content with hu_strndup (which
+ * truncates at the first NUL, so the returned buffer is shorter than the stored
+ * byte count) but reported the FULL column byte length as content_len. During
+ * context assembly, memory_loader.c calls hu_json_buf_append_raw(content,
+ * content_len) → memcpy reads content_len bytes → over-read past the truncated
+ * buffer. Under ASan the pre-fix code aborts before hu_memory_loader_load
+ * returns. Post-fix, content_len equals the actual returned buffer length. */
+static void test_memory_loader_embedded_nul_no_overflow(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+
+    /* Array literal so the embedded NUL is preserved; content_len spans it. */
+    static const char content[] = "seth loves \0 hidden tail after nul";
+    size_t content_len = sizeof(content) - 1; /* 34 — includes bytes past the NUL */
+
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    hu_error_t err = mem.vtable->store(mem.ctx, "nul_key", 7, content, content_len, &cat, NULL, 0);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    hu_memory_loader_t loader;
+    err = hu_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    /* Query "seth" (before the NUL) recalls the entry; assembly must not over-read. */
+    err = hu_memory_loader_load(&loader, "seth", 4, "", 0, &ctx, &ctx_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    if (ctx)
+        alloc.free(alloc.ctx, ctx, ctx_len + 1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Direct contract check: a stored+recalled entry's content_len must equal the
+ * actual byte length of the returned content buffer. When content has an
+ * embedded NUL, hu_strndup truncates the buffer, so content_len must track the
+ * truncated length — never the original stored byte count. */
+static void test_sqlite_recall_content_len_matches_buffer(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+
+    static const char content[] = "prefix\0suffix-past-nul";
+    size_t content_len = sizeof(content) - 1; /* 22 — spans the NUL */
+
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    hu_error_t err = mem.vtable->store(mem.ctx, "nul_key2", 8, content, content_len, &cat, NULL, 0);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    hu_memory_entry_t *entries = NULL;
+    size_t count = 0;
+    err = mem.vtable->recall(mem.ctx, &alloc, "prefix", 6, 10, "", 0, &entries, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(count >= 1);
+
+    /* The invariant: reported length equals the actual NUL-terminated buffer. */
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].content)
+            HU_ASSERT_EQ(entries[i].content_len, strlen(entries[i].content));
+        hu_memory_entry_free_fields(&alloc, &entries[i]);
+    }
+
+    alloc.free(alloc.ctx, entries, count * sizeof(hu_memory_entry_t));
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 /* Calibrated-uncertainty Task 3: the [conf=0.X] confidence-tagging addendum
@@ -608,5 +678,7 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_memory_loader_empty_backend);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_memory_loader_with_entries);
+    HU_RUN_TEST(test_memory_loader_embedded_nul_no_overflow);
+    HU_RUN_TEST(test_sqlite_recall_content_len_matches_buffer);
 #endif
 }

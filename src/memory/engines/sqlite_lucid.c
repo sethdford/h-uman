@@ -478,7 +478,11 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
     out->key = key_p ? hu_strndup(alloc, key_p, key_len) : NULL;
     out->key_len = key_len;
     out->content = content_p ? hu_strndup(alloc, content_p, content_len) : NULL;
-    out->content_len = content_len;
+    /* content_len must track the actual (NUL-truncated) buffer, not the raw
+     * column byte count — otherwise content with an embedded NUL yields a
+     * buffer shorter than content_len and downstream memcpy over-reads.
+     * See BUG B in src/memory/engines/sqlite.c read_entry_from_row. */
+    out->content_len = out->content ? strlen(out->content) : 0;
     out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     out->category.data.custom.name =
         category_p
