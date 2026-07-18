@@ -100,6 +100,83 @@ static void somatic_build_context_emits_labels(void) {
     alloc.free(alloc.ctx, ctx, len + 1);
 }
 
+/* ── persistence (SOTA roadmap #11, presence plan) ─────────────────────────
+ * The somatic state previously died with the process — every daemon restart
+ * reset energy/social-battery to full, erasing "the day so far". Save/load
+ * make the interior continuous across restarts; recovery-while-away already
+ * falls out of hu_somatic_update(now_ts) on the next turn. */
+
+static void somatic_save_load_roundtrip(void) {
+    const char *path = "/tmp/hu_test_somatic_roundtrip.json";
+    remove(path);
+    hu_somatic_state_t s;
+    hu_somatic_init(&s);
+    s.energy = 0.42f;
+    s.social_battery = 0.17f;
+    s.focus = 0.9f;
+    s.arousal = 0.33f;
+    s.physical = HU_PHYSICAL_TIRED;
+    s.last_interaction_ts = 1784000000ULL;
+    s.last_recharge_ts = 1783990000ULL;
+    s.conversation_load_accumulated = 3.5f;
+    HU_ASSERT_EQ(hu_somatic_save_file(&s, path), HU_OK);
+
+    hu_somatic_state_t r;
+    hu_somatic_init(&r); /* defaults differ from s — load must overwrite */
+    HU_ASSERT_EQ(hu_somatic_load_file(&r, path), HU_OK);
+    HU_ASSERT_TRUE(r.energy > 0.41f && r.energy < 0.43f);
+    HU_ASSERT_TRUE(r.social_battery > 0.16f && r.social_battery < 0.18f);
+    HU_ASSERT_TRUE(r.focus > 0.89f && r.focus < 0.91f);
+    HU_ASSERT_EQ((int)r.physical, (int)HU_PHYSICAL_TIRED);
+    HU_ASSERT_EQ(r.last_interaction_ts, 1784000000ULL);
+    HU_ASSERT_EQ(r.last_recharge_ts, 1783990000ULL);
+    HU_ASSERT_TRUE(r.conversation_load_accumulated > 3.4f &&
+                   r.conversation_load_accumulated < 3.6f);
+    remove(path);
+}
+
+static void somatic_load_missing_file_keeps_state(void) {
+    hu_somatic_state_t s;
+    hu_somatic_init(&s);
+    s.energy = 0.55f;
+    HU_ASSERT_TRUE(hu_somatic_load_file(&s, "/tmp/hu_test_somatic_missing.json") != HU_OK);
+    /* State untouched on miss. */
+    HU_ASSERT_TRUE(s.energy > 0.54f && s.energy < 0.56f);
+}
+
+static void somatic_load_corrupt_file_keeps_state(void) {
+    const char *path = "/tmp/hu_test_somatic_corrupt.json";
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{not valid json!!", f);
+    fclose(f);
+    hu_somatic_state_t s;
+    hu_somatic_init(&s);
+    s.energy = 0.66f;
+    HU_ASSERT_TRUE(hu_somatic_load_file(&s, path) != HU_OK);
+    HU_ASSERT_TRUE(s.energy > 0.65f && s.energy < 0.67f);
+    remove(path);
+}
+
+static void somatic_load_clamps_out_of_range(void) {
+    /* A hand-edited or corrupted-but-parseable file must not inject
+     * out-of-range values into behavior gates. */
+    const char *path = "/tmp/hu_test_somatic_clamp.json";
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"energy\": 9.5, \"social_battery\": -2.0, \"focus\": 0.5, \"arousal\": 0.5,"
+          "\"physical\": 0, \"last_interaction_ts\": 1, \"last_recharge_ts\": 1,"
+          "\"conversation_load_accumulated\": 0}",
+          f);
+    fclose(f);
+    hu_somatic_state_t s;
+    hu_somatic_init(&s);
+    HU_ASSERT_EQ(hu_somatic_load_file(&s, path), HU_OK);
+    HU_ASSERT_TRUE(s.energy <= 1.0f);
+    HU_ASSERT_TRUE(s.social_battery >= 0.0f);
+    remove(path);
+}
+
 void run_somatic_tests(void);
 void run_somatic_tests(void) {
     HU_TEST_SUITE("somatic");
@@ -110,4 +187,8 @@ void run_somatic_tests(void) {
     HU_RUN_TEST(somatic_update_clamps_arousal);
     HU_RUN_TEST(somatic_update_forces_tired_when_depleted);
     HU_RUN_TEST(somatic_build_context_emits_labels);
+    HU_RUN_TEST(somatic_save_load_roundtrip);
+    HU_RUN_TEST(somatic_load_missing_file_keeps_state);
+    HU_RUN_TEST(somatic_load_corrupt_file_keeps_state);
+    HU_RUN_TEST(somatic_load_clamps_out_of_range);
 }

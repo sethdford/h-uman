@@ -3276,6 +3276,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     {
         if (!agent->frontiers.initialized) {
             hu_somatic_init(&agent->frontiers.somatic);
+            /* SOTA roadmap #11: restore the interior across restarts — a
+             * fresh process resumes yesterday's energy/social-battery instead
+             * of waking up reset. Recovery-while-away falls out of the
+             * hu_somatic_update(now) below. NULL path (tests / no HOME)
+             * means persistence is disabled; a missing file is a cold start. */
+            {
+                char somatic_path[512];
+                const char *sp = hu_somatic_default_path(somatic_path, sizeof(somatic_path));
+                if (sp)
+                    (void)hu_somatic_load_file(&agent->frontiers.somatic, sp);
+            }
             hu_novelty_tracker_init(&agent->frontiers.novelty);
             hu_attachment_init(&agent->frontiers.attachment);
             hu_rupture_init(&agent->frontiers.rupture);
@@ -3418,6 +3429,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_somatic_update(&agent->frontiers.somatic, (uint64_t)time(NULL),
                           agent->infra.emotional_cognition.state.intensity, topic_switches,
                           f1_physical);
+        /* Persist per turn (atomic ~200B write) so a crash or restart never
+         * loses more than the current turn's delta. */
+        {
+            char somatic_path[512];
+            const char *sp = hu_somatic_default_path(somatic_path, sizeof(somatic_path));
+            if (sp)
+                (void)hu_somatic_save_file(&agent->frontiers.somatic, sp);
+        }
         hu_somatic_build_context(agent->alloc, &agent->frontiers.somatic, &somatic_ctx,
                                  &somatic_ctx_len);
 
