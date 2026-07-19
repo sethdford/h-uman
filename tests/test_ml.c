@@ -160,7 +160,8 @@ static void test_bpe_save_load(void) {
     size_t orig_vocab = hu_bpe_tokenizer_vocab_size(tok);
 
     /* Save */
-    const char *path = "/tmp/test_bpe_vocab.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/test_bpe_vocab.bin_%ld", (long)getpid());
     hu_error_t err = hu_bpe_tokenizer_save(tok, path);
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -273,7 +274,8 @@ static void test_dataloader_basic(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
     /* Create temp dir with two .bin shard files */
-    const char *dir = "/tmp/test_ml_dataloader";
+    char dir[128];
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_dataloader_%ld", (long)getpid());
     mkdir_p(dir);
 
     /* Each shard has 200 tokens — enough for a few batches with batch_size=2, seq_len=16 */
@@ -365,8 +367,11 @@ static void test_prepare_tokenize_file(void) {
     hu_bpe_tokenizer_t *tok = NULL;
     hu_bpe_tokenizer_create(&alloc, &tok);
 
-    const char *txt_path = "/tmp/test_ml_input.txt";
-    const char *bin_path = "/tmp/test_ml_output.bin";
+    char txt_path[128];
+
+    snprintf(txt_path, sizeof(txt_path), "/tmp/test_ml_input.txt_%ld", (long)getpid());
+    char bin_path[128];
+    snprintf(bin_path, sizeof(bin_path), "/tmp/test_ml_output.bin_%ld", (long)getpid());
 
     write_text_file(txt_path, "Hello world test data for tokenizer");
 
@@ -586,7 +591,9 @@ static void test_lr_schedule(void) {
 static void test_train_pipeline(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
-    const char *dir = "/tmp/test_ml_train";
+    char dir[128];
+
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_train_%ld", (long)getpid());
     mkdir_p(dir);
 
     int32_t tokens[200];
@@ -1105,7 +1112,8 @@ static void test_muon_adamw_add_param_zero(void) {
 
 static void test_dataloader_reset(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *dir = "/tmp/test_ml_dl_reset";
+    char dir[128];
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_dl_reset_%ld", (long)getpid());
     mkdir_p(dir);
 
     int32_t tokens[200];
@@ -1191,7 +1199,9 @@ static void test_bpe_trained_token_byte_length(void) {
 static void test_evaluator_happy_path(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
-    const char *dir = "/tmp/test_ml_eval_happy";
+    char dir[128];
+
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_eval_happy_%ld", (long)getpid());
     mkdir_p(dir);
     int32_t tokens[200];
     for (int i = 0; i < 200; i++)
@@ -1284,7 +1294,9 @@ static void track_status_callback(const hu_experiment_result_t *result, void *us
 static void test_experiment_loop_keep_discard(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
-    const char *dir = "/tmp/test_ml_keepdisc";
+    char dir[128];
+
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_keepdisc_%ld", (long)getpid());
     mkdir_p(dir);
     int32_t tokens[400];
     for (int i = 0; i < 400; i++)
@@ -1390,7 +1402,9 @@ static void test_experiment_callback(const hu_experiment_result_t *result, void 
 static void test_experiment_loop_runs(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
-    const char *dir = "/tmp/test_ml_experiment";
+    char dir[128];
+
+    snprintf(dir, sizeof(dir), "/tmp/test_ml_experiment_%ld", (long)getpid());
     mkdir_p(dir);
 
     int32_t tokens[400];
@@ -1476,7 +1490,8 @@ static void test_ml_cli_status(void) {
  * (minified + reordered keys). */
 static void test_ml_cli_status_scheduler_file_e2e(void) {
 #ifndef _WIN32
-    const char *td = "/tmp/hu_ml_sched_status_e2e";
+    char td[128];
+    snprintf(td, sizeof(td), "/tmp/hu_ml_sched_status_e2e_%ld", (long)getpid());
     char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
 
     mkdir_p(td);
@@ -1739,7 +1754,9 @@ static void test_checkpoint_roundtrip(void) {
         .embedding_lr = 0.01f, .unembedding_lr = 0.01f, .matrix_lr = 0.01f, .scalar_lr = 0.001f};
     HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
 
-    const char *ckpt_path = "/tmp/test_ml_checkpoint.bin";
+    char ckpt_path[128];
+
+    snprintf(ckpt_path, sizeof(ckpt_path), "/tmp/test_ml_checkpoint.bin_%ld", (long)getpid());
 
     /* Save checkpoint */
     HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, ckpt_path, &model, &opt), HU_OK);
@@ -1797,7 +1814,8 @@ static void test_checkpoint_null_args(void) {
 
 static void test_experiment_store_roundtrip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *db_path = "/tmp/test_ml_store.db";
+    char db_path[128];
+    snprintf(db_path, sizeof(db_path), "/tmp/test_ml_store.db_%ld", (long)getpid());
     remove(db_path);
 
     hu_experiment_store_t *store = NULL;
@@ -2181,7 +2199,8 @@ static void test_checkpoint_invalid_file(void) {
                  HU_ERR_IO);
 
     /* Create a file with wrong magic */
-    const char *bad_path = "/tmp/hu_bad_ckpt.bin";
+    char bad_path[128];
+    snprintf(bad_path, sizeof(bad_path), "/tmp/hu_bad_ckpt.bin_%ld", (long)getpid());
     FILE *f = fopen(bad_path, "wb");
     HU_ASSERT(f != NULL);
     uint32_t bad_magic = 0xDEADBEEF;
@@ -2817,7 +2836,8 @@ static void test_rope_theta_zero_default(void) {
 
 static void test_dataloader_empty_shard(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *dir = "/tmp/hu_dl_empty";
+    char dir[128];
+    snprintf(dir, sizeof(dir), "/tmp/hu_dl_empty_%ld", (long)getpid());
     mkdir_p(dir);
 
     /* Create empty shard file */
@@ -3726,7 +3746,9 @@ static void test_evaluator_edge_args(void) {
     hu_model_t model = {0};
     HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
 
-    const char *dir = "/tmp/test_eval_edge";
+    char dir[128];
+
+    snprintf(dir, sizeof(dir), "/tmp/test_eval_edge_%ld", (long)getpid());
     mkdir_p(dir);
     int32_t tokens[32];
     for (int i = 0; i < 32; i++)
@@ -3758,8 +3780,11 @@ static void test_prepare_tokenize_dir(void) {
     hu_bpe_tokenizer_t *tok = NULL;
     hu_bpe_tokenizer_create(&alloc, &tok);
 
-    const char *in_dir = "/tmp/test_ml_tokdir_in";
-    const char *out_dir = "/tmp/test_ml_tokdir_out";
+    char in_dir[128];
+
+    snprintf(in_dir, sizeof(in_dir), "/tmp/test_ml_tokdir_in_%ld", (long)getpid());
+    char out_dir[128];
+    snprintf(out_dir, sizeof(out_dir), "/tmp/test_ml_tokdir_out_%ld", (long)getpid());
     mkdir_p(in_dir);
     mkdir_p(out_dir);
 
@@ -3837,7 +3862,8 @@ static void test_checkpoint_optimizer_state(void) {
     opt.vtable->step(opt.ctx, params, &gt, 1);
 
     /* Save model + optimizer */
-    const char *ckpt = "/tmp/test_opt_state.bin";
+    char ckpt[128];
+    snprintf(ckpt, sizeof(ckpt), "/tmp/test_opt_state.bin_%ld", (long)getpid());
     HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, ckpt, &model, &opt), HU_OK);
 
     /* Corrupt model params */
@@ -4008,7 +4034,8 @@ static void test_checkpoint_v1_compat(void) {
     opt.vtable->step(opt.ctx, params, &gt, 1);
 
     /* Manually write a v1 checkpoint (model params only, no optimizer state) */
-    const char *ckpt = "/tmp/test_v1_compat.bin";
+    char ckpt[128];
+    snprintf(ckpt, sizeof(ckpt), "/tmp/test_v1_compat.bin_%ld", (long)getpid());
     FILE *f = fopen(ckpt, "wb");
     HU_ASSERT_NOT_NULL(f);
     uint32_t magic = 0x48554D4C;
@@ -4188,7 +4215,9 @@ static void test_checkpoint_resume_training(void) {
     for (int s = 0; s < 2; s++)
         optB.vtable->step(optB.ctx, paramsB, &gt, 1);
 
-    const char *ckpt = "/tmp/test_resume_ckpt.bin";
+    char ckpt[128];
+
+    snprintf(ckpt, sizeof(ckpt), "/tmp/test_resume_ckpt.bin_%ld", (long)getpid());
     HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, ckpt, &modelB, &optB), HU_OK);
 
     /* Create fresh model+optimizer, load checkpoint */
@@ -4349,7 +4378,8 @@ static void test_checkpoint_optimizer_mismatch(void) {
     HU_ASSERT_EQ(hu_gpt_register_params(&model, &opt), HU_OK);
 
     /* Save valid v2 checkpoint */
-    const char *ckpt = "/tmp/test_opt_mismatch.bin";
+    char ckpt[128];
+    snprintf(ckpt, sizeof(ckpt), "/tmp/test_opt_mismatch.bin_%ld", (long)getpid());
     HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, ckpt, &model, &opt), HU_OK);
 
     /* Create a model with different dimensions → different param structure */
@@ -4727,15 +4757,18 @@ static void test_m3_frontier_adapter_bad_file(void) {
         hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
         HU_ERR_IO);
     HU_ASSERT_NULL(a);
-    write_text_file("/tmp/hu_m3_bad_magic.txt", "not-a-stub");
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a),
+    char bad_magic[128];
+    snprintf(bad_magic, sizeof(bad_magic), "/tmp/hu_m3_bad_magic_%ld.txt", (long)getpid());
+    write_text_file(bad_magic, "not-a-stub");
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, bad_magic, strlen(bad_magic), &a),
                  HU_ERR_IO);
     HU_ASSERT_NULL(a);
 }
 
 static void test_m3_frontier_adapter_fixture_roundtrip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_fixture_adapter.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_fixture_adapter.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -4779,7 +4812,8 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_fixture_agent_attach.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_fixture_agent_attach.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -4907,7 +4941,8 @@ static void test_m3_on_provider_success_noop_when_unattached(void) {
 
 static void test_m3_probe_count_starts_at_zero(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_probe_zero_start.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_probe_zero_start.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -4929,7 +4964,8 @@ static void test_m3_probe_count_starts_at_zero(void) {
 
 static void test_m3_probe_infer_increments_counter(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_probe_increments.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_probe_increments.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -4990,7 +5026,8 @@ static void test_m3_agent_on_provider_success_advances_probe_count(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_agent_provider_success.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_agent_provider_success.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -5042,7 +5079,8 @@ static void test_m3_probe_count_advances_once_per_chat_single_call(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_probe_single.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_probe_single.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -5082,7 +5120,8 @@ static void test_m3_probe_count_advances_once_per_chat_multiple_calls(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_probe_multi.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_probe_multi.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -5125,7 +5164,8 @@ static void test_m3_probe_outcome_metadata_captured(void) {
 #ifdef HU_ENABLE_ML
     hu_allocator_t alloc = hu_system_allocator();
     hu_m3_frontier_adapter_t *adapter = NULL;
-    const char *path = "/tmp/hu_m3_outcome_metadata.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_outcome_metadata.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -5199,7 +5239,8 @@ static void test_m3_record_chat_outcome_populates_token_estimates(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_record_outcome_tokens.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_record_outcome_tokens.bin_%ld", (long)getpid());
     /* Inline fixture creation (matches the probe-count test above):
      * open_fixture_adapter() is defined further down in this file and
      * isn't forward-visible from here. The blob is 8-byte magic + LE
@@ -5273,7 +5314,8 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
     memset(&agent, 0, sizeof(agent));
     hu_allocator_t alloc = hu_system_allocator();
     agent.alloc = &alloc;
-    const char *path = "/tmp/hu_m3_record_outcome_usage.bin";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_record_outcome_usage.bin_%ld", (long)getpid());
     FILE *fp = fopen(path, "wb");
     HU_ASSERT_NOT_NULL(fp);
     unsigned char blob[12];
@@ -5407,7 +5449,8 @@ static void test_m3_id_map_null_or_empty_inputs_return_zero(void) {
 
 static void test_m3_id_map_persists_ids_across_reload(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_id_map_reload_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_id_map_reload_test.json_%ld", (long)getpid());
     (void)unlink(path);
 
     hu_m3_id_map_t *map = NULL;
@@ -5447,7 +5490,8 @@ static void test_m3_id_map_persists_ids_across_reload(void) {
  *      guarantee. */
 static void test_m3_rewrite_pair_record_writes_valid_jsonl(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_rewrite_pair_test.jsonl";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_rewrite_pair_test.jsonl_%ld", (long)getpid());
     (void)unlink(path);
 
     hu_error_t err = hu_m3_rewrite_pair_record(&alloc, path, "what's the time?", 16,
@@ -5490,7 +5534,8 @@ static void test_m3_rewrite_pair_record_rejects_null_or_empty(void) {
 static void test_m3_rewrite_pair_record_appends_multiple_lines(void) {
     /* Two pairs from the same prompt → two JSONL lines, both readable. */
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_rewrite_pair_append.jsonl";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_rewrite_pair_append.jsonl_%ld", (long)getpid());
     (void)unlink(path);
 
     for (int i = 0; i < 3; i++) {
@@ -5522,7 +5567,8 @@ static void test_m3_rewrite_pair_record_appends_multiple_lines(void) {
  */
 static void test_m3_contact_routes_empty_file_lookup_returns_null(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_routes_empty_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_routes_empty_test.json_%ld", (long)getpid());
     (void)unlink(path);
     hu_m3_contact_routes_t *routes = NULL;
     HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
@@ -5534,7 +5580,8 @@ static void test_m3_contact_routes_empty_file_lookup_returns_null(void) {
 
 static void test_m3_contact_routes_specific_route_resolves(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_routes_specific_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_routes_specific_test.json_%ld", (long)getpid());
     (void)unlink(path);
     /* Write a minimal routes JSON matching Python's writer shape. */
     FILE *fp = fopen(path, "w");
@@ -5558,7 +5605,8 @@ static void test_m3_contact_routes_specific_route_resolves(void) {
 
 static void test_m3_contact_routes_default_fallback(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_routes_default_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_routes_default_test.json_%ld", (long)getpid());
     (void)unlink(path);
     FILE *fp = fopen(path, "w");
     HU_ASSERT_NOT_NULL(fp);
@@ -5580,7 +5628,8 @@ static void test_m3_contact_routes_default_fallback(void) {
 
 static void test_m3_contact_routes_reload_picks_up_changes(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_routes_reload_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_routes_reload_test.json_%ld", (long)getpid());
     (void)unlink(path);
     FILE *fp = fopen(path, "w");
     HU_ASSERT_NOT_NULL(fp);
@@ -5619,7 +5668,8 @@ static void test_m3_contact_routes_malformed_json_is_non_fatal(void) {
      * inference" stance. A malformed file → empty routes, lookup
      * returns NULL, chat path continues with base model. */
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_routes_malformed_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_routes_malformed_test.json_%ld", (long)getpid());
     (void)unlink(path);
     FILE *fp = fopen(path, "w");
     HU_ASSERT_NOT_NULL(fp);
@@ -5641,7 +5691,8 @@ static void test_m3_id_map_save_is_noop_when_clean(void) {
      * record-outcome path calls save() opportunistically; if save()
      * wrote on every call, we'd have a write per outcome. */
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_m3_id_map_clean_save_test.json";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_m3_id_map_clean_save_test.json_%ld", (long)getpid());
     (void)unlink(path);
 
     hu_m3_id_map_t *map = NULL;
@@ -5667,8 +5718,13 @@ static void test_m3_id_map_save_is_noop_when_clean(void) {
  *     in test (runtime) so a struct grow won't silently slip past CI.
  * ───────────────────────────────────────────────────────────────── */
 
-/* Tiny helper: open a fixture adapter at /tmp. */
-static hu_m3_frontier_adapter_t *open_fixture_adapter(hu_allocator_t *alloc, const char *path) {
+/* Tiny helper: open a fixture adapter at /tmp. The caller-supplied base
+ * path is suffixed with the pid so two human_tests processes running
+ * concurrently (parallel worktree builds) never truncate each other's
+ * fixture files mid-read. */
+static hu_m3_frontier_adapter_t *open_fixture_adapter(hu_allocator_t *alloc, const char *base) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s_%ld", base, (long)getpid());
     FILE *fp = fopen(path, "wb");
     if (!fp)
         return NULL;
@@ -5918,8 +5974,11 @@ static void test_m3_snapshot_outcomes_max_count_caps_output(void) {
  * before an agent attaches its adapter at boot.
  * ───────────────────────────────────────────────────────────────── */
 
-static hu_m3_frontier_adapter_t *open_outcomes_fixture(hu_allocator_t *alloc, const char *path,
+static hu_m3_frontier_adapter_t *open_outcomes_fixture(hu_allocator_t *alloc, const char *base,
                                                        size_t n_outcomes, uint8_t turn_kind) {
+    /* pid-suffixed for the same concurrent-run reason as open_fixture_adapter. */
+    char path[256];
+    snprintf(path, sizeof(path), "%s_%ld", base, (long)getpid());
     FILE *fp = fopen(path, "wb");
     if (!fp)
         return NULL;
