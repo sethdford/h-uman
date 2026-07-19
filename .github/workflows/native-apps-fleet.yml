@@ -36,7 +36,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Swift PM tests (shared protocol + UI kit)
         run: cd apps/shared/HumanKit && swift test
 
@@ -67,10 +67,10 @@ jobs:
           # devices fail fast and are suppressed cleanly. Restore iPad coverage
           # when the iOS 26 tab-overflow UITests are fixed.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache Xcode DerivedData
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/Library/Developer/Xcode/DerivedData
           key: ${{ runner.os }}-xcode-dd-${{ hashFiles('apps/ios/**/*.swift', 'apps/ios/project.yml', 'apps/shared/HumanKit/**/*.swift') }}
@@ -78,7 +78,7 @@ jobs:
             ${{ runner.os }}-xcode-dd-
 
       - name: Cache Homebrew downloads (XcodeGen)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-brew-${{ hashFiles('.github/workflows/native-apps-fleet.yml', '.github/actions/ios-uitest/**') }}
@@ -119,7 +119,7 @@ jobs:
       matrix:
         api-level: [29, 30, 33, 34]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The Android emulator needs /dev/kvm for CPU acceleration. Without it the
       # AVD never boots ("adb: device 'emulator-5554' not found" until timeout).
@@ -138,7 +138,7 @@ jobs:
           java-version: "17"
 
       - name: Cache Gradle
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -177,7 +177,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: "Debug + release build (award-tier: ships clean on both configs)"
         run: cd apps/macos && swift build && swift build -c release
 
@@ -193,10 +193,10 @@ jobs:
     env:
       HAS_SIGNING_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache Homebrew downloads (XcodeGen)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-brew-macos-archive-${{ hashFiles('.github/workflows/native-apps-fleet.yml') }}
