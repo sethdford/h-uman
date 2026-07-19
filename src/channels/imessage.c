@@ -2,6 +2,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_caps.h" /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
@@ -1118,6 +1119,124 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
     return found;
 }
 
+/* ── Native-capability probe cache (T0.4) ───────────────────────────────
+ * One `imsg status` per process. Everything advanced gates on this; when the
+ * bridge is absent (SIP on) every native verb declines and the caller degrades
+ * honestly — never UI puppetry, never a green bubble. */
+static const hu_imessage_caps_t *imsg_caps_cached(hu_imessage_ctx_t *c) {
+    static hu_imessage_caps_t caps;
+    static bool probed = false;
+    if (!c || !c->alloc)
+        return NULL;
+    if (!probed) {
+        probed = true;
+        (void)hu_imessage_caps_probe(c->alloc, &caps);
+        char desc[160];
+        hu_imessage_caps_describe(&caps, desc, sizeof(desc));
+        hu_log_info("imessage", NULL, "%s", desc);
+    }
+    return &caps;
+}
+
+/* Resolve a chat.db message ROWID to its GUID (the bridge verbs address
+ * messages by GUID, not rowid). Returns false when unavailable. */
+#if defined(HU_ENABLE_SQLITE)
+/* Open the user's chat.db read-only. Single place that builds the path, so the
+ * boilerplate is not repeated per query helper. Returns NULL on any failure. */
+static sqlite3 *imsg_open_user_chatdb(void) {
+    const char *home_env = getenv("HOME");
+    if (!home_env)
+        return NULL;
+    char db_p[512];
+    int dp = snprintf(db_p, sizeof(db_p), "%s/Library/Messages/chat.db", home_env);
+    if (dp <= 0 || (size_t)dp >= sizeof(db_p))
+        return NULL;
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_p, &db) != SQLITE_OK)
+        return NULL;
+    return db;
+}
+#endif
+
+static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t message_id, char *out,
+                                            size_t out_cap) {
+    if (!c || !out || out_cap == 0 || message_id <= 0)
+        return false;
+    out[0] = '\0';
+#if defined(HU_ENABLE_SQLITE)
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return false;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT guid FROM message WHERE ROWID = ? LIMIT 1", -1, &st, NULL) ==
+        SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, message_id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *g = (const char *)sqlite3_column_text(st, 0);
+            if (g)
+                snprintf(out, out_cap, "%s", g);
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+#endif
+    return out[0] != '\0';
+}
+
+#if defined(HU_ENABLE_SQLITE)
+/* Run a one-column service query bound to `handle`, mapping the result through
+ * the service parser. UNKNOWN on any failure (⇒ blue verdict HOLDs). */
+static hu_imessage_service_t imsg_query_service(sqlite3 *db, const char *sql, const char *handle,
+                                                size_t handle_len) {
+    hu_imessage_service_t svc = HU_IMSG_SERVICE_UNKNOWN;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+        return svc;
+    sqlite3_bind_text(st, 1, handle, (int)handle_len, SQLITE_STATIC);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *s = (const char *)sqlite3_column_text(st, 0);
+        if (s)
+            svc = hu_imessage_service_from_string(s, strlen(s));
+    }
+    sqlite3_finalize(st);
+    return svc;
+}
+#endif
+
+/* Blue guard evidence (T0.1): the service of the most recent message with this
+ * handle (freshest routing evidence) and the handle row's own service. Both
+ * default to UNKNOWN when chat.db is unavailable, which makes the verdict HOLD. */
+static void imsg_lookup_services_for_handle(const char *handle, size_t handle_len,
+                                            hu_imessage_service_t *recent_out,
+                                            hu_imessage_service_t *handle_out) {
+    if (recent_out)
+        *recent_out = HU_IMSG_SERVICE_UNKNOWN;
+    if (handle_out)
+        *handle_out = HU_IMSG_SERVICE_UNKNOWN;
+    if (!handle || handle_len == 0)
+        return;
+#if defined(HU_ENABLE_SQLITE)
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return;
+    /* Freshest routing evidence: what service did the last message use?
+     * Authoritative fallback: prefer an iMessage handle row when one exists. */
+    if (recent_out)
+        *recent_out = imsg_query_service(db,
+                                         "SELECT m.service FROM message m "
+                                         "JOIN handle h ON m.handle_id = h.ROWID "
+                                         "WHERE h.id = ? AND m.service IS NOT NULL "
+                                         "ORDER BY m.date DESC LIMIT 1",
+                                         handle, handle_len);
+    if (handle_out)
+        *handle_out = imsg_query_service(db,
+                                         "SELECT service FROM handle WHERE id = ? "
+                                         "ORDER BY (service = 'iMessage') DESC LIMIT 1",
+                                         handle, handle_len);
+    sqlite3_close(db);
+#endif
+}
+
 /* ── imsg react helper (shared by both tapback-enabled and tapback-disabled paths) ── */
 
 static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction_type_t reaction) {
@@ -1155,6 +1274,28 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
 #endif
     if (!chat_rowid_str[0])
         return false;
+
+    /* T0.2 (docs/plans/2026-07-19-native-imessage): prefer the IMCore-bridge
+     * tapback when the bridge is live — that is a REAL reaction
+     * (associatedMessageType), not an AppleScript approximation. `imsg react`
+     * remains the SIP-on path. Both take the same kind vocabulary. */
+    if (hu_imessage_caps_allows(imsg_caps_cached(c), HU_IMSG_VERB_REACT)) {
+        char msg_guid[128] = {0};
+        if (imsg_lookup_guid_for_message_id(c, message_id, msg_guid, sizeof(msg_guid))) {
+            const char *tb_argv[] = {"imsg",         "tapback",    "--chat",
+                                     chat_rowid_str, "--message",  msg_guid,
+                                     "--kind",       tapback_name, NULL};
+            hu_run_result_t tbr = {0};
+            hu_error_t tbe = hu_process_run_with_timeout(c->alloc, tb_argv, NULL, 65536, 15, &tbr);
+            bool tbok = (tbe == HU_OK && tbr.success && tbr.exit_code == 0);
+            hu_run_result_free(c->alloc, &tbr);
+            if (tbok) {
+                hu_log_info("imessage", NULL, "tapback sent via IMCore bridge (native)");
+                return true;
+            }
+            hu_log_info("imessage", NULL, "bridge tapback failed; falling back to imsg react");
+        }
+    }
 
     const char *react_argv[] = {"imsg",       "react",      "--chat-id", chat_rowid_str,
                                 "--reaction", tapback_name, NULL};
@@ -1704,6 +1845,25 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         return HU_ERR_INVALID_ARGUMENT;
     if (message_len > 0 && !message)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* T0.1 BLUE GUARD (docs/plans/2026-07-19-native-imessage).
+     * Never emit a green bubble. chat.db is the SIP-free source of truth for
+     * which service a handle actually routes over; RCS counts as green. When
+     * the evidence says not-iMessage (or says nothing at all), HOLD — staying
+     * silent beats texting as SMS from a persona that only ever texts blue.
+     * Override for deliberate SMS use: HU_IMESSAGE_ALLOW_GREEN=1. */
+    if (!getenv("HU_IMESSAGE_ALLOW_GREEN")) {
+        hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
+        hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
+        imsg_lookup_services_for_handle(tgt, tgt_len, &recent, &handle_svc);
+        if (hu_imessage_blue_verdict(recent, handle_svc) == HU_BLUE_HOLD) {
+            hu_log_warn("imessage", NULL,
+                        "blue_guard: HELD send to %.*s — not iMessage-reachable "
+                        "(recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
+                        (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)recent, (int)handle_svc);
+            return HU_ERR_NOT_SUPPORTED;
+        }
+    }
 
     /* Persona overlay rendering: applied BEFORE iMessage's markdown strip
      * and AI-phrase sanitization. The overlay is a semantic transform

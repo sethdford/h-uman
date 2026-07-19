@@ -419,6 +419,9 @@ endif()
 # Tier 2 Task 11 (RL SOTA): tapback inbound poll (hu_imessage_poll_reactions,
 # hu_imessage_lookup_latest_sent_guid). SQL behind internal Apple guard.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+# T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
+# advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
 # personal-model ingestion (hu_reaction_ingest_personal_model,
@@ -3835,6 +3838,7 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
 # unconditionally and stay green on every build variant.
