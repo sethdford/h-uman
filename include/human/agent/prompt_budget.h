@@ -164,4 +164,13 @@ hu_error_t hu_prompt_budget_load_snapshot(hu_allocator_t *alloc,
 /* Free resources allocated by _load_snapshot. Safe on zero-init struct. */
 void hu_prompt_budget_snapshot_load_free(hu_prompt_budget_snapshot_load_t *load);
 
+/* Seed an EMPTY budget from the persisted snapshot so long-run field
+ * stats survive daemon restarts (without this, every deploy zeroed the
+ * accumulators and the live trim policy re-learned from scratch).
+ * Fields are matched by NAME, so snapshots from older binaries restore
+ * into the right slots. No-op (HU_OK) once the budget has observed a
+ * real turn — live data always wins. Returns HU_ERR_NOT_FOUND when no
+ * snapshot exists (normal first boot). */
+hu_error_t hu_prompt_budget_restore_snapshot(hu_prompt_budget_t *b);
+
 #endif /* HU_AGENT_PROMPT_BUDGET_H */

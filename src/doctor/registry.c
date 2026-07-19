@@ -289,8 +289,13 @@ static hu_doctor_check_result_t run_install_check(hu_doctor_check_t *self, void 
     (void)self;
     hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
     size_t start_off = uctx->count;
+    /* Thread cfg from the adapter ctx (same as config_semantics below).
+     * Passing NULL here made the channel sub-check report "channel: NONE"
+     * unconditionally — a permanent false-positive ERROR in `human doctor`
+     * on fully-configured installs. */
+    const hu_config_t *cfg = (const hu_config_t *)uctx->cfg;
     hu_error_t err =
-        hu_doctor_check_install(uctx->alloc, NULL, &uctx->items, &uctx->count, &uctx->cap);
+        hu_doctor_check_install(uctx->alloc, cfg, &uctx->items, &uctx->count, &uctx->cap);
     ADAPTER_RETURN((err == HU_OK) ? HU_DOCTOR_PASS : HU_DOCTOR_FAIL);
 }
 

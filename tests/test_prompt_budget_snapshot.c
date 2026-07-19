@@ -188,6 +188,101 @@ static void test_prompt_budget_load_returns_parse_when_malformed(void) {
     hu_prompt_budget_snapshot_set_path_for_test(NULL);
 }
 
+/* Restore repopulates an empty budget from the snapshot so field stats
+ * survive daemon restarts (they previously reset to zero on every deploy,
+ * starving the live trim policy of its long-run means). */
+static void test_prompt_budget_restore_populates_empty_budget(void) {
+    char path[256];
+    make_tmp_path(path, sizeof(path), "restore.json");
+    hu_prompt_budget_snapshot_set_path_for_test(path);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_budget_t *src = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &src), HU_OK);
+
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    for (int turn = 0; turn < 2; turn++) {
+        memset(stats, 0, sizeof(stats));
+        stats[0].name = hu_prompt_field_name((hu_prompt_field_t)0);
+        stats[0].bytes_contributed = 300;
+        stats[1].name = hu_prompt_field_name((hu_prompt_field_t)1);
+        stats[1].bytes_contributed = 40;
+        hu_prompt_budget_observe(src, stats, HU_PROMPT_FIELD_COUNT);
+    }
+    HU_ASSERT_EQ(hu_prompt_budget_save_snapshot(src), HU_OK);
+    hu_prompt_budget_free(src);
+
+    /* Fresh budget (a restarted daemon) restores the persisted stats. */
+    hu_prompt_budget_t *dst = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &dst), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(dst), (size_t)0);
+    HU_ASSERT_EQ(hu_prompt_budget_restore_snapshot(dst), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(dst), (size_t)2);
+
+    /* Round-trip the restored budget: save + load must reproduce the
+     * original per-field stats (mean 300 / samples 2 for field 0). */
+    HU_ASSERT_EQ(hu_prompt_budget_save_snapshot(dst), HU_OK);
+    hu_prompt_budget_snapshot_load_t load;
+    HU_ASSERT_EQ(hu_prompt_budget_load_snapshot(&alloc, &load), HU_OK);
+    HU_ASSERT_EQ(load.observation_count, (uint64_t)2);
+    HU_ASSERT_EQ(load.fields[0].mean_bytes, (uint64_t)300);
+    HU_ASSERT_EQ(load.fields[0].samples, (uint64_t)2);
+    HU_ASSERT_EQ(load.fields[0].non_empty_count, (uint64_t)2);
+    HU_ASSERT_EQ(load.fields[1].mean_bytes, (uint64_t)40);
+    hu_prompt_budget_snapshot_load_free(&load);
+
+    hu_prompt_budget_free(dst);
+    (void)unlink(path);
+    hu_prompt_budget_snapshot_set_path_for_test(NULL);
+}
+
+static void test_prompt_budget_restore_missing_file_returns_not_found(void) {
+    char path[256];
+    make_tmp_path(path, sizeof(path), "no_such_restore.json");
+    hu_prompt_budget_snapshot_set_path_for_test(path);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_budget_t *b = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &b), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_budget_restore_snapshot(b), HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(b), (size_t)0);
+
+    hu_prompt_budget_free(b);
+    hu_prompt_budget_snapshot_set_path_for_test(NULL);
+}
+
+/* Live observations always win: restore is a no-op once the budget has
+ * observed a turn, so a late restore can never clobber fresh data. */
+static void test_prompt_budget_restore_noop_when_budget_has_observations(void) {
+    char path[256];
+    make_tmp_path(path, sizeof(path), "noclobber.json");
+    hu_prompt_budget_snapshot_set_path_for_test(path);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_budget_t *src = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &src), HU_OK);
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    stats[0].bytes_contributed = 999;
+    for (int i = 0; i < 5; i++)
+        hu_prompt_budget_observe(src, stats, HU_PROMPT_FIELD_COUNT);
+    HU_ASSERT_EQ(hu_prompt_budget_save_snapshot(src), HU_OK);
+    hu_prompt_budget_free(src);
+
+    hu_prompt_budget_t *live = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &live), HU_OK);
+    memset(stats, 0, sizeof(stats));
+    stats[0].bytes_contributed = 10;
+    hu_prompt_budget_observe(live, stats, HU_PROMPT_FIELD_COUNT);
+
+    HU_ASSERT_EQ(hu_prompt_budget_restore_snapshot(live), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(live), (size_t)1); /* not 5 */
+
+    hu_prompt_budget_free(live);
+    (void)unlink(path);
+    hu_prompt_budget_snapshot_set_path_for_test(NULL);
+}
+
 void run_prompt_budget_snapshot_tests(void) {
     HU_TEST_SUITE("prompt-budget-snapshot");
     HU_RUN_TEST(test_prompt_budget_snapshot_save_writes_parseable_file);
@@ -195,4 +290,7 @@ void run_prompt_budget_snapshot_tests(void) {
     HU_RUN_TEST(test_prompt_budget_save_preserves_prior_state_when_tmp_blocked);
     HU_RUN_TEST(test_prompt_budget_load_returns_not_found_when_missing);
     HU_RUN_TEST(test_prompt_budget_load_returns_parse_when_malformed);
+    HU_RUN_TEST(test_prompt_budget_restore_populates_empty_budget);
+    HU_RUN_TEST(test_prompt_budget_restore_missing_file_returns_not_found);
+    HU_RUN_TEST(test_prompt_budget_restore_noop_when_budget_has_observations);
 }
