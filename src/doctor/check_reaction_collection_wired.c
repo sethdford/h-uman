@@ -14,6 +14,10 @@
 #include "human/config.h"
 #include "human/doctor/check.h"
 
+#ifdef HU_ENABLE_SQLITE
+#include "human/agent/reaction_handler.h" /* hu_reaction_handler_lookup_db_probe */
+#endif
+
 #include <stdio.h>
 #include <string.h>
 
@@ -30,13 +34,17 @@
 static char s_reason_buf[512];
 static char s_detail_json_buf[512];
 
-/* Pure verdict logic — takes both facts explicitly so the public vtable
- * runner and the test seam share one code path. Buffers are caller-
+/* Pure verdict logic — takes all three facts explicitly so the public
+ * vtable runner and the test seam share one code path. Buffers are caller-
  * provided so the test seam can hand in its own (avoiding race on the
- * static buffers when tests run interleaved with the production check). */
+ * static buffers when tests run interleaved with the production check).
+ *
+ * store_probe: 1 = lookup store opened+migrated, 0 = open FAILED (the
+ * bricked-db state PR #321 fixed), -1 = not probed (no SQLite store in
+ * this build, or an earlier fact already decided the verdict). */
 static hu_doctor_check_result_t derive(const struct hu_config *cfg, bool built_with_rl_full,
-                                       char *reason_buf, size_t reason_cap, char *detail_buf,
-                                       size_t detail_cap) {
+                                       int store_probe, char *reason_buf, size_t reason_cap,
+                                       char *detail_buf, size_t detail_cap) {
     if (!cfg) {
         return (hu_doctor_check_result_t){
             HU_DOCTOR_NA, "no config provided to doctor — reaction_collection_wired check skipped",
@@ -44,10 +52,12 @@ static hu_doctor_check_result_t derive(const struct hu_config *cfg, bool built_w
     }
 
     bool cfg_enabled = cfg->reaction_collection.enabled;
+    const char *store_str = store_probe == 1 ? "ok" : (store_probe == 0 ? "fail" : "unprobed");
 
     snprintf(detail_buf, detail_cap,
-             "{\"reaction_collection_enabled\":%s,\"built_with_rl_full\":%s}",
-             cfg_enabled ? "true" : "false", built_with_rl_full ? "true" : "false");
+             "{\"reaction_collection_enabled\":%s,\"built_with_rl_full\":%s,"
+             "\"lookup_store\":\"%s\"}",
+             cfg_enabled ? "true" : "false", built_with_rl_full ? "true" : "false", store_str);
 
     if (!cfg_enabled) {
         return (hu_doctor_check_result_t){
@@ -66,9 +76,26 @@ static hu_doctor_check_result_t derive(const struct hu_config *cfg, bool built_w
         return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, reason_buf, detail_buf};
     }
 
+    if (store_probe == 0) {
+        /* Config + compile flag agree, but the store itself cannot open —
+         * the exact 2026-05-31 → 2026-07-19 silent failure: registration
+         * and tapback lookup both no-op while everything LOOKS wired. */
+        snprintf(reason_buf, reason_cap,
+                 "reaction_collection is enabled and compiled in, but the lookup store "
+                 "~/.human/reaction_lookup.db cannot be opened/migrated — outbound "
+                 "registration and tapback lookups are silently no-oping, so no "
+                 "imessage_tapback DPO pairs will be recorded. Inspect it with: "
+                 "sqlite3 ~/.human/reaction_lookup.db 'PRAGMA integrity_check' — "
+                 "if corrupt, move the file aside and restart the daemon (the store "
+                 "is recreated on next open; only 60-day lookup history is lost).");
+        return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, reason_buf, detail_buf};
+    }
+
     snprintf(reason_buf, reason_cap,
              "reaction_collection.enabled=true AND binary built with HU_ENABLE_RL_FULL "
-             "— DPO recorder is wired and will fire on outbound + tapback pairs.");
+             "AND lookup store %s — DPO recorder is wired and will fire on outbound + "
+             "tapback pairs.",
+             store_probe == 1 ? "opens cleanly" : "not probed (no SQLite in this build)");
     return (hu_doctor_check_result_t){HU_DOCTOR_PASS, reason_buf, detail_buf};
 }
 
@@ -77,7 +104,17 @@ static hu_doctor_check_result_t check_run(hu_doctor_check_t *self, void *ctx) {
     const hu_doctor_check_reaction_collection_wired_ctx_t *pctx =
         (const hu_doctor_check_reaction_collection_wired_ctx_t *)ctx;
     const struct hu_config *cfg = pctx ? pctx->cfg : NULL;
-    return derive(cfg, HU_BUILT_WITH_RL_FULL != 0, s_reason_buf, sizeof(s_reason_buf),
+
+    /* Probe the real store ONLY when the two static facts would otherwise
+     * PASS — probing earlier would create ~/.human/reaction_lookup.db as a
+     * side effect even when the operator opted the subsystem out. */
+    int store_probe = -1;
+#ifdef HU_ENABLE_SQLITE
+    if (cfg && cfg->reaction_collection.enabled && HU_BUILT_WITH_RL_FULL)
+        store_probe = hu_reaction_handler_lookup_db_probe();
+#endif
+
+    return derive(cfg, HU_BUILT_WITH_RL_FULL != 0, store_probe, s_reason_buf, sizeof(s_reason_buf),
                   s_detail_json_buf, sizeof(s_detail_json_buf));
 }
 
@@ -86,10 +123,11 @@ static hu_doctor_check_result_t check_run(hu_doctor_check_t *self, void *ctx) {
  * overwritten. */
 hu_doctor_check_result_t
 hu_doctor_check_reaction_collection_wired_run_for_test(const struct hu_config *cfg,
-                                                       bool built_with_rl_full) {
+                                                       bool built_with_rl_full, int store_probe) {
     static char t_reason[512];
     static char t_detail[512];
-    return derive(cfg, built_with_rl_full, t_reason, sizeof(t_reason), t_detail, sizeof(t_detail));
+    return derive(cfg, built_with_rl_full, store_probe, t_reason, sizeof(t_reason), t_detail,
+                  sizeof(t_detail));
 }
 
 hu_doctor_check_t hu_doctor_check_reaction_collection_wired = {

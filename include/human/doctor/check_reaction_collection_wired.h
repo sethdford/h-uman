@@ -25,8 +25,15 @@
  *          (operator opted out; nothing to check)
  *   FAIL — cfg.enabled == true AND binary built WITHOUT HU_ENABLE_RL_FULL
  *          (silent-failure state — message names the exact fix command)
+ *   FAIL — cfg.enabled == true AND built WITH HU_ENABLE_RL_FULL but the
+ *          lookup store ~/.human/reaction_lookup.db cannot open+migrate
+ *          (the 2026-05-31 → 2026-07-19 bricked-store state PR #321
+ *          fixed — invisible to the two static facts above, so the
+ *          check now probes the store via
+ *          hu_reaction_handler_lookup_db_probe)
  *   PASS — cfg.enabled == true AND binary built WITH HU_ENABLE_RL_FULL
- *          (subsystem will produce DPO pairs when reactions arrive)
+ *          AND the store probe succeeds (or there is no SQLite store to
+ *          probe in this build — the in-memory ring cannot brick)
  *
  * ctx contract: same shape as check_prompt_budget — a borrowed
  * `const struct hu_config *`. NULL cfg → NA "no config".
@@ -46,13 +53,19 @@ typedef struct hu_doctor_check_reaction_collection_wired_ctx {
 /* Public vtable — registered by registry.c::register_defaults. */
 extern hu_doctor_check_t hu_doctor_check_reaction_collection_wired;
 
-/* Test seam: invoke the check logic with an EXPLICIT `built_with_rl_full`
- * value so tests can cover both production-shape and silent-fail-shape
- * verdicts in a single binary (the production runner reads the value
- * from a compile-time #ifdef of THIS .c file, which can't be changed
- * per-test). Production code MUST call the vtable above, not this. */
+/* Test seam: invoke the check logic with EXPLICIT `built_with_rl_full`
+ * and `store_probe` values so tests can cover production-shape,
+ * silent-fail-shape, AND bricked-store verdicts in a single binary (the
+ * production runner reads the flag from a compile-time #ifdef of THIS
+ * .c file and the probe from the real ~/.human store, neither of which
+ * a test can change per-call). Production code MUST call the vtable
+ * above, not this.
+ *
+ * store_probe: 1 = store opened+migrated, 0 = open FAILED (the PR #321
+ * bricked-db state), -1 = not probed (no SQLite store in this build,
+ * or the check bailed before the probe was relevant). */
 hu_doctor_check_result_t
 hu_doctor_check_reaction_collection_wired_run_for_test(const struct hu_config *cfg,
-                                                       bool built_with_rl_full);
+                                                       bool built_with_rl_full, int store_probe);
 
 #endif /* HU_DOCTOR_CHECK_REACTION_COLLECTION_WIRED_H */
