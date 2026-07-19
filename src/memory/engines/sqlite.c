@@ -6,12 +6,14 @@
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/platform.h"
+#include <fcntl.h>
 #include <math.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
@@ -35,6 +37,9 @@ typedef struct hu_sqlite_memory {
      * without re-writing the database. */
     hu_keystore_t *keystore;
     bool encrypt_at_rest;
+    /* On-disk path (empty for :memory:) — deinit clears the unclean-shutdown
+     * open-sentinel here so the next boot can skip the full quick_check. */
+    char db_path[1100];
 } hu_sqlite_memory_t;
 
 static const char *const schema_parts[] = {
@@ -1267,6 +1272,10 @@ static void impl_deinit(void *ctx) {
         hu_graph_index_deinit(&self->graph_index);
     if (self->db)
         sqlite3_close(self->db);
+    /* Clean close — clear the unclean-shutdown mark so the next open can skip
+     * the full quick_check scan. */
+    if (self->db_path[0])
+        hu_sqlite_open_sentinel_remove(self->db_path);
     self->alloc->free(self->alloc->ctx, self, sizeof(hu_sqlite_memory_t));
 }
 
@@ -1442,6 +1451,74 @@ bool hu_sqlite_quarantine_corrupt_file(const char *db_path) {
     return true;
 }
 
+/* Unclean-shutdown sentinel: <db_path>.open-sentinel exists while the DB is
+ * open on disk and is removed on clean close. Presence at open time therefore
+ * means the previous process died mid-flight — the only case worth paying the
+ * full-page quick_check scan for (minutes of pread on a multi-GB DB). */
+static bool open_sentinel_path(const char *db_path, char *buf, size_t buf_len) {
+    if (!db_path || !db_path[0] || strcmp(db_path, ":memory:") == 0)
+        return false;
+    int n = snprintf(buf, buf_len, "%s.open-sentinel", db_path);
+    return n > 0 && (size_t)n < buf_len;
+}
+
+bool hu_sqlite_open_sentinel_present(const char *db_path) {
+    char p[1100];
+    if (!open_sentinel_path(db_path, p, sizeof(p)))
+        return false;
+    return access(p, F_OK) == 0;
+}
+
+bool hu_sqlite_open_sentinel_write(const char *db_path) {
+    char p[1100];
+    if (!open_sentinel_path(db_path, p, sizeof(p)))
+        return false;
+    int fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return false;
+    close(fd);
+    return true;
+}
+
+void hu_sqlite_open_sentinel_remove(const char *db_path) {
+    char p[1100];
+    if (open_sentinel_path(db_path, p, sizeof(p)))
+        (void)remove(p);
+}
+
+/* Quarantine the corrupt file at db_path and reopen a fresh DB there. On
+ * success *db is the new live handle (busy timeout applied); on failure *db is
+ * NULL and the refusal has been logged. */
+static bool quarantine_and_reopen(const char *db_path, sqlite3 **db) {
+    if (*db)
+        sqlite3_close(*db);
+    *db = NULL;
+    if (!hu_sqlite_quarantine_corrupt_file(db_path) || sqlite3_open(db_path, db) != SQLITE_OK) {
+        hu_log_error("memory.sqlite", NULL, "could not recover corrupt DB '%s'; refusing to open",
+                     db_path);
+        if (*db)
+            sqlite3_close(*db);
+        *db = NULL;
+        return false;
+    }
+    sqlite3_busy_timeout(*db, HU_SQLITE_BUSY_TIMEOUT_MS);
+    return true;
+}
+
+/* Run the base DDL. False on any failure (freeing the error string) — on a
+ * fresh handle that is the structural-corruption signal create() heals on. */
+static bool init_schema_parts(sqlite3 *db) {
+    for (const char *const *part = schema_parts; *part; part++) {
+        char *err = NULL;
+        if (sqlite3_exec(db, *part, NULL, NULL, &err) != SQLITE_OK) {
+            if (err)
+                sqlite3_free(err);
+            return false;
+        }
+    }
+    return true;
+}
+
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     sqlite3 *db = NULL;
     int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
@@ -1452,37 +1529,48 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     }
     sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
 
+    bool on_disk = db_path && db_path[0] && strcmp(db_path, ":memory:") != 0;
+    bool healed = false;
+
     /* Self-heal: a corrupt on-disk DB must not be read as silent garbage.
      * quick_check the file; if it fails, quarantine it (preserved for manual
      * recovery) and reopen fresh. Losing memory LOUDLY beats serving garbage
-     * silently. :memory: / NULL have nothing on disk to corrupt or quarantine. */
-    if (db_path && db_path[0] && strcmp(db_path, ":memory:") != 0 &&
-        !hu_sqlite_quick_check_ok(db)) {
+     * silently. :memory: / NULL have nothing on disk to corrupt or quarantine.
+     *
+     * The full scan walks every btree page — minutes of pread at 100% CPU on a
+     * multi-GB DB — so it only runs when the previous process left the
+     * open-sentinel behind (unclean shutdown). On the clean-shutdown fast path,
+     * gross corruption is still healed cheaply by the schema-init fallback
+     * below. */
+    if (on_disk && hu_sqlite_open_sentinel_present(db_path) && !hu_sqlite_quick_check_ok(db)) {
         hu_log_error("memory.sqlite", NULL,
                      "memory DB failed PRAGMA quick_check — quarantining '%s' and "
                      "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
                      db_path);
-        sqlite3_close(db);
-        db = NULL;
-        if (!hu_sqlite_quarantine_corrupt_file(db_path) ||
-            sqlite3_open(db_path, &db) != SQLITE_OK) {
-            hu_log_error("memory.sqlite", NULL,
-                         "could not recover corrupt DB '%s'; refusing to open", db_path);
-            if (db)
-                sqlite3_close(db);
+        if (!quarantine_and_reopen(db_path, &db))
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
-        }
-        sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
+        healed = true;
     }
 
     sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
 
-    for (const char *const *part = schema_parts; *part; part++) {
-        char *err = NULL;
-        rc = sqlite3_exec(db, *part, NULL, NULL, &err);
-        if (rc != SQLITE_OK) {
-            if (err)
-                sqlite3_free(err);
+    if (!init_schema_parts(db)) {
+        /* Cheap corruption net for the clean-shutdown fast path: a DB with a
+         * bad header or broken master btree fails schema init without any
+         * full-page scan. Quarantine and retry once on a fresh file. */
+        if (!on_disk || healed) {
+            sqlite3_close(db);
+            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+        }
+        hu_log_error("memory.sqlite", NULL,
+                     "memory DB failed schema init — quarantining '%s' and "
+                     "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
+                     db_path);
+        if (!quarantine_and_reopen(db_path, &db))
+            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+        healed = true;
+        sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
+        if (!init_schema_parts(db)) {
             sqlite3_close(db);
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
@@ -1583,6 +1671,19 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     if (self->graph_initialized)
         self->graph_hierarchy_ready =
             (hu_graph_hierarchy_init(&self->graph_hierarchy, alloc) == HU_OK);
+    /* Mark the DB open-on-disk; deinit clears the mark on clean close. A crash
+     * between the two leaves the sentinel behind, telling the next boot to pay
+     * the full quick_check. A too-long path (write fails) degrades to always
+     * skipping the scan — same posture as the pre-sentinel clean path. */
+    self->db_path[0] = '\0';
+    if (on_disk && hu_sqlite_open_sentinel_write(db_path)) {
+        snprintf(self->db_path, sizeof(self->db_path), "%s", db_path);
+    } else if (on_disk) {
+        hu_log_warn("memory.sqlite", NULL,
+                    "could not write open-sentinel for '%s'; startup integrity "
+                    "scans will be skipped until it is writable",
+                    db_path);
+    }
     return (hu_memory_t){
         .ctx = self,
         .vtable = &sqlite_vtable,
