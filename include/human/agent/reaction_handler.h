@@ -106,6 +106,17 @@ void hu_reaction_handler_register_assistant_message_for_production(
 int hu_reaction_lookup_last_response(const char *channel, const char *thread, char *out,
                                      size_t out_cap);
 
+#ifdef HU_ENABLE_SQLITE
+/* Doctor probe: attempt the production open+migrate of the lookup store
+ * (~/.human/reaction_lookup.db) via the SAME cached-handle path the
+ * recorder and tapback lookup use — do NOT create a second connection
+ * lifecycle around this. Returns 1 when the store is usable, 0 when
+ * open/migrate failed (the 2026-05-31 → 2026-07-19 bricked-store state
+ * PR #321 fixed, invisible to doctor until this probe). Under HU_IS_TEST
+ * the active backend is the in-memory ring and the probe reports 1. */
+int hu_reaction_handler_lookup_db_probe(void);
+#endif
+
 #if HU_IS_TEST
 /* Test seam: same lookup store as production registration. */
 void hu_reaction_handler_register_assistant_message_for_test(

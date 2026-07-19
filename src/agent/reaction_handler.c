@@ -289,6 +289,23 @@ static int rxn_db_lookup(const char *channel, const char *thread, const char *ms
 
 #endif /* HU_RXN_LOOKUP_USES_SQLITE */
 
+#ifdef HU_ENABLE_SQLITE
+/* Doctor probe (PR #321 follow-up): report whether the production lookup
+ * store is actually usable. Reuses rxn_db_open()'s cached handle — the
+ * exact path registration and tapback lookup take — so a probe success
+ * IS a recorder-path success, and no second connection lifecycle exists.
+ * Under HU_IS_TEST the active backend is the in-memory ring, which
+ * cannot fail to open; the probe reports healthy so doctor checks in
+ * test binaries don't touch the real ~/.human tree. */
+int hu_reaction_handler_lookup_db_probe(void) {
+#if HU_RXN_LOOKUP_USES_SQLITE
+    return rxn_db_open();
+#else
+    return 1;
+#endif
+}
+#endif /* HU_ENABLE_SQLITE */
+
 /* ===== Unified lookup adapter =====
  *
  * Returns 1 on hit (prompt_out / response_out / alternative_out filled), 0 on miss.
