@@ -18,6 +18,11 @@ src_h_files=$(find src -name '*.h' 2>/dev/null | wc -l | tr -d ' ')
 include_h_files=$(find include -name '*.h' 2>/dev/null | wc -l | tr -d ' ')
 total_source_header=$((src_c_files + src_h_files + include_h_files))
 
+# SRC_LOC measures src/ only (no include/) — MUST match update-stats.sh
+# C_LINES_RAW, the writer that stamps "~NNNK lines of C" into the docs. When the
+# two scopes diverged (writer src/+include/ = 484K vs checker src/ = 421K) the
+# drift gate rejected the writer's own output. Same writer≠checker convergence
+# contract as CHANNEL_ENUM in update-stats.sh.
 src_loc=$(find src -name '*.[ch]' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
 test_loc=$(find tests -name '*.c' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
 

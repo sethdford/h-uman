@@ -136,7 +136,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~430K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~422K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
 | `tests/`                          | 760+ test files, 13,779+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
