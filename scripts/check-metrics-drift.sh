@@ -25,7 +25,9 @@ BINARY_PATH="${2:-}"
 
 eval "$(bash scripts/repo-metrics.sh)"
 
-# Lines of C in src/, rounded to the nearest K, to match the docs' "~NNNK lines" phrasing.
+# Lines of C in src/ (no include/), rounded to the nearest K, to match the docs'
+# "~NNNK lines of C" phrasing — same scope as update-stats.sh C_LINES_RAW, the
+# writer that stamps those claims.
 SRC_LOC_K=$(( (SRC_LOC + 500) / 1000 ))
 
 check_metric() {
@@ -98,7 +100,7 @@ for doc in "${KEY_DOCS[@]}"; do
   check_metric "$doc" "channels"   "$CHANNEL_ENUM" '[0-9]+ (messaging )?channels' 15
   check_metric "$doc" "tools"      87              '[0-9]+ tool impl' 15
   check_metric "$doc" "fuzz"       "$FUZZ_HARNESSES" '[0-9]+ libFuzzer' 15
-  # Lines of C (src/), in K. Pattern is the specific "NNNK lines of C" phrasing so
+  # Lines of C (src/ only), in K. Pattern is the specific "NNNK lines of C" phrasing so
   # it can't collide with the "NNNK lines of tests" figure on the same line. The
   # canonical claim in CLAUDE.md + AGENTS.md uses this exact wording. Tolerance 10%
   # rides normal growth between doc refreshes but catches a stale snapshot.

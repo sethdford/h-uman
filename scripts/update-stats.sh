@@ -297,9 +297,13 @@ if [ -f CLAUDE.md ]; then
             CLAUDE.md && rm -f CLAUDE.md.bak
     fi
 
-    # Source file count
+    # Lines-of-C claim in the paths table. (The old pattern
+    # '~[0-9]+ files, ~[0-9]+K lines' stopped matching when the row's phrasing
+    # changed to "~1,050 `.c` files, ~NNNK lines of C", so CLAUDE.md silently
+    # rotted while other docs got refreshed. Patch just the LOC figure, which is
+    # what the drift gate checks.)
     sed -i.bak -E \
-        "s/~[0-9]+ files, ~[0-9]+K lines/~${SRC_COUNT} files, ~${C_LINES_K}K lines/" \
+        "s/~[0-9]+K lines of C/~${C_LINES_K}K lines of C/g" \
         CLAUDE.md && rm -f CLAUDE.md.bak
 fi
 
