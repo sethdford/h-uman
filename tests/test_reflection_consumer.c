@@ -28,17 +28,16 @@
  * lets us test queries against handcrafted state including retired
  * and surfaced patterns that the upsert path can't produce. */
 static void insert_test_pattern(sqlite3 *db, const char *id, const char *type, const char *subject,
-                               const char *observation, double confidence,
-                               const char *channels_json, int surfaced, int retired,
-                               uint64_t last_observed_ms) {
+                                const char *observation, double confidence,
+                                const char *channels_json, int surfaced, int retired,
+                                uint64_t last_observed_ms) {
     sqlite3_stmt *st = NULL;
-    const char *sql =
-        "INSERT INTO reflection_patterns "
-        "(id, type, subject, observation, confidence, evidence_json, channels_json, "
-        " first_seen_run_id, last_seen_run_id, observation_count, "
-        " created_at_ms, last_observed_at_ms, expires_at_ms, "
-        " surfaced_to_user, retired, retired_at_ms) "
-        "VALUES (?, ?, ?, ?, ?, '[\"t1\"]', ?, 'r1', 'r1', 1, ?, ?, ?, ?, ?, NULL)";
+    const char *sql = "INSERT INTO reflection_patterns "
+                      "(id, type, subject, observation, confidence, evidence_json, channels_json, "
+                      " first_seen_run_id, last_seen_run_id, observation_count, "
+                      " created_at_ms, last_observed_at_ms, expires_at_ms, "
+                      " surfaced_to_user, retired, retired_at_ms) "
+                      "VALUES (?, ?, ?, ?, ?, '[\"t1\"]', ?, 'r1', 'r1', 1, ?, ?, ?, ?, ?, NULL)";
     HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &st, NULL), SQLITE_OK);
     sqlite3_bind_text(st, 1, id, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, type, -1, SQLITE_STATIC);
@@ -112,8 +111,8 @@ static void test_consumer_query_channel_filter_includes_cross_channel(void) {
     HU_ASSERT_EQ(hu_reflection_storage_insert_run(db, "r1", "p", 1000, 10), HU_OK);
 
     uint64_t recent = now_ms_minus(60 * 60 * 1000);
-    insert_test_pattern(db, "p_imsg", "preference", "Seth", "imessage-only", 0.9,
-                        "[\"imessage\"]", 0, 0, recent);
+    insert_test_pattern(db, "p_imsg", "preference", "Seth", "imessage-only", 0.9, "[\"imessage\"]",
+                        0, 0, recent);
     insert_test_pattern(db, "p_telegram", "preference", "Seth", "telegram-only", 0.9,
                         "[\"telegram\"]", 0, 0, recent);
     insert_test_pattern(db, "p_cross", "behavioral_shift", "Seth", "cross-channel", 0.9,
@@ -198,6 +197,53 @@ static void test_consumer_query_unsurfaced_filters_by_min_confidence(void) {
     sqlite3_close(db);
 }
 
+/* Regression (2026-07-19): readers run before the reflection loop's
+ * writer has ever migrated the schema (init_proposer queries
+ * unconditionally on SQLite-backed agents; the daemon-tick migrate is
+ * gated behind the reflection loop being enabled). The consumer
+ * queries must ensure the schema themselves instead of erroring with
+ * "no such table: reflection_patterns" every proposer tick. */
+static int reflection_patterns_table_exists(sqlite3 *db) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                                    "AND name='reflection_patterns'",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    int exists = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return exists;
+}
+
+static void test_consumer_query_unsurfaced_on_fresh_db_ensures_schema(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    /* Deliberately NO hu_reflection_storage_migrate — writer never ran. */
+    HU_ASSERT_EQ(reflection_patterns_table_exists(db), 0);
+
+    hu_reflection_pattern_t *out = NULL;
+    int n = -1;
+    HU_ASSERT_EQ(hu_reflection_query_unsurfaced(db, 0.6, &out, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+    HU_ASSERT_EQ(out, NULL);
+    HU_ASSERT_EQ(reflection_patterns_table_exists(db), 1);
+    sqlite3_close(db);
+}
+
+static void test_consumer_query_for_system_prompt_on_fresh_db_ensures_schema(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ(reflection_patterns_table_exists(db), 0);
+
+    hu_reflection_pattern_t *out = NULL;
+    int n = -1;
+    HU_ASSERT_EQ(hu_reflection_query_for_system_prompt(db, "imessage", 10, &out, &n), HU_OK);
+    HU_ASSERT_EQ(n, 0);
+    HU_ASSERT_EQ(out, NULL);
+    HU_ASSERT_EQ(reflection_patterns_table_exists(db), 1);
+    sqlite3_close(db);
+}
+
 /* AC-T6.5: mark_surfaced is idempotent. */
 static void test_consumer_mark_surfaced_is_idempotent(void) {
     sqlite3 *db = NULL;
@@ -238,9 +284,8 @@ static void test_consumer_retire_is_idempotent_and_sets_timestamp(void) {
     hu_reflection_retire(db, "p_bad"); /* idempotent — second call ok */
 
     sqlite3_stmt *st = NULL;
-    sqlite3_prepare_v2(db,
-                       "SELECT retired, retired_at_ms FROM reflection_patterns WHERE id = ?", -1,
-                       &st, NULL);
+    sqlite3_prepare_v2(db, "SELECT retired, retired_at_ms FROM reflection_patterns WHERE id = ?",
+                       -1, &st, NULL);
     sqlite3_bind_text(st, 1, "p_bad", -1, SQLITE_STATIC);
     HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
     HU_ASSERT_EQ(sqlite3_column_int(st, 0), 1);
@@ -265,6 +310,8 @@ void run_reflection_consumer_tests(void) {
     HU_RUN_TEST(test_consumer_query_channel_filter_includes_cross_channel);
     HU_RUN_TEST(test_consumer_query_caps_at_max);
     HU_RUN_TEST(test_consumer_query_unsurfaced_filters_by_min_confidence);
+    HU_RUN_TEST(test_consumer_query_unsurfaced_on_fresh_db_ensures_schema);
+    HU_RUN_TEST(test_consumer_query_for_system_prompt_on_fresh_db_ensures_schema);
     HU_RUN_TEST(test_consumer_mark_surfaced_is_idempotent);
     HU_RUN_TEST(test_consumer_retire_is_idempotent_and_sets_timestamp);
 }
