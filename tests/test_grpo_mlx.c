@@ -25,11 +25,11 @@
  *        — gating is compile-time, not runtime, so dummy binaries
  *        don't ship the heavy path).
  */
-#include "test_framework.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include "human/ml/grpo.h"
 #include "human/ml/rl_trainer.h"
-#include "human/core/error.h"
-#include "human/core/allocator.h"
+#include "test_framework.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,12 +42,10 @@
  * target_include_directories(${HU_ROOT}/src/ml) entry in
  * CMakeLists.txt — same mechanism as Phase 3 RM and Phase 4 GRPO-loss
  * tests. */
-hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
-                                             const hu_preference_pair_t *pairs,
-                                             size_t n_pairs);
-hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc,
-                                        const hu_rl_trainer_config_t *config,
-                                        hu_rl_trainer_t *out);
+hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path, const hu_preference_pair_t *pairs,
+                                            size_t n_pairs);
+hu_error_t hu_grpo_mlx_create_for_test(hu_allocator_t *alloc, const hu_rl_trainer_config_t *config,
+                                       hu_rl_trainer_t *out);
 
 /* --- 1. Factory: probe short-circuit (M7) --------------------------- */
 static void test_grpo_mlx_factory_unavailable_when_python_probe_fails(void) {
@@ -87,7 +85,8 @@ static void test_grpo_mlx_jsonl_write_uses_secure_perms(void) {
      * symlink-attack on the user-controlled out_path AND limits
      * exposure to other local users.  Unconditional test — the
      * hardening must be in effect regardless of HU_HAVE_MLX_LM_GRPO. */
-    const char *path = "/tmp/hu_grpo_mlx_perms_test.jsonl";
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/hu_grpo_mlx_perms_test_%ld.jsonl", (long)getpid());
     /* Remove any stale file from a prior aborted test run. */
     unlink(path);
 
@@ -139,7 +138,8 @@ static void test_grpo_mlx_dummy_adapter_in_test_mode(void) {
      * 0-byte sentinel adapter_model.safetensors and exits 0 — no
      * real MLX, no Gemma download, no network. */
     hu_allocator_t alloc = hu_system_allocator();
-    const char *out_dir = "/tmp/hu_grpo_mlx_dummy_test";
+    char out_dir[128];
+    snprintf(out_dir, sizeof(out_dir), "/tmp/hu_grpo_mlx_dummy_test_%ld", (long)getpid());
     hu_rl_trainer_config_t cfg = {
         .backend = HU_DPO_BACKEND_MLX,
         .max_iters = 1,
@@ -175,7 +175,8 @@ static void test_grpo_mlx_dummy_adapter_in_test_mode(void) {
      * doesn't crash. The dedicated subprocess test below asserts the
      * real-output contract. */
     fprintf(stderr, "[grpo_mlx] step returned %d under HU_HAVE_MLX_LM_GRPO=1\n", (int)serr);
-    (void)serr; (void)m;
+    (void)serr;
+    (void)m;
 #else
     /* Dummy-adapter path — Python wrapper writes 0-byte sentinel. */
     HU_ASSERT_EQ(serr, HU_OK);
@@ -192,13 +193,16 @@ static void test_grpo_mlx_dummy_adapter_in_test_mode(void) {
     /* Clean up the sentinel + the temp dir (best-effort; ignore
      * failure if the dir contains other files). */
     unlink(sentinel);
+    rmdir(out_dir);
 #endif
 }
 
 /* --- 4. Real subprocess (gated on HU_HAVE_MLX_LM_GRPO — L1) ---------- */
 static void test_grpo_mlx_subprocess_produces_safetensors(void) {
 #if !defined(HU_HAVE_MLX_LM_GRPO) || HU_HAVE_MLX_LM_GRPO == 0
-    fprintf(stderr, "[skip] HU_HAVE_MLX_LM_GRPO not defined; GRPO MLX subprocess test deferred to local run\n");
+    fprintf(
+        stderr,
+        "[skip] HU_HAVE_MLX_LM_GRPO not defined; GRPO MLX subprocess test deferred to local run\n");
     return;
 #elif !defined(__APPLE__)
     fprintf(stderr, "[skip] non-Apple: GRPO MLX subprocess unavailable\n");
@@ -208,6 +212,8 @@ static void test_grpo_mlx_subprocess_produces_safetensors(void) {
      * runs the REAL mlx-lm-lora GRPO subprocess (a few iters on a tiny
      * fixture). Budget ~10s. */
     hu_allocator_t alloc = hu_system_allocator();
+    char out_dir[128];
+    snprintf(out_dir, sizeof(out_dir), "/tmp/hu_grpo_mlx_subprocess_test_%ld", (long)getpid());
     hu_rl_trainer_config_t cfg = {
         .backend = HU_DPO_BACKEND_MLX,
         .max_iters = 5,
@@ -215,7 +221,7 @@ static void test_grpo_mlx_subprocess_produces_safetensors(void) {
         .clip_eps = 0.2,
         .kl_beta = 0.04,
         .model_id = "mlx-community/gemma-3-4b-it-bf16",
-        .adapter_out_dir = "/tmp/hu_grpo_mlx_subprocess_test",
+        .adapter_out_dir = out_dir,
     };
     hu_rl_trainer_t trainer = {0};
     /* Use the production factory — under HU_HAVE_MLX_LM_GRPO=1 we

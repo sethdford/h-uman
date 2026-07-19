@@ -40,15 +40,15 @@
  * round-3 critic L1 (NOT HU_SKIP_IF) so dummy CI builds don't ship
  * the heavy path.
  */
-#include "test_framework.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/ml/dpo.h"            /* hu_preference_pair_t */
+#include "human/ml/dpo.h" /* hu_preference_pair_t */
 #include "human/ml/grpo.h"
-#include "human/ml/ml.h"             /* hu_gpt_config_t */
+#include "human/ml/ml.h" /* hu_gpt_config_t */
 #include "human/ml/model.h"
 #include "human/ml/policy_logprobs.h"
 #include "human/ml/rl_trainer.h"
+#include "test_framework.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -68,20 +68,28 @@
 /* Parses one line of {"prompt": "..."} into the prompt buffer.  Returns
  * 1 on success, 0 if the line is empty / blank, -1 on parse failure. */
 static int parse_prompt_line(const char *line, hu_preference_pair_t *out) {
-    if (!line || !out) return -1;
+    if (!line || !out)
+        return -1;
     const char *p = line;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-    if (*p == '\0') return 0;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+        p++;
+    if (*p == '\0')
+        return 0;
     const char *key = strstr(p, "\"prompt\"");
-    if (!key) return -1;
+    if (!key)
+        return -1;
     const char *colon = strchr(key, ':');
-    if (!colon) return -1;
+    if (!colon)
+        return -1;
     const char *q1 = strchr(colon, '"');
-    if (!q1) return -1;
+    if (!q1)
+        return -1;
     const char *q2 = strchr(q1 + 1, '"');
-    if (!q2) return -1;
+    if (!q2)
+        return -1;
     size_t plen = (size_t)(q2 - (q1 + 1));
-    if (plen == 0 || plen >= sizeof(out->prompt)) return -1;
+    if (plen == 0 || plen >= sizeof(out->prompt))
+        return -1;
     memset(out, 0, sizeof(*out));
     memcpy(out->prompt, q1 + 1, plen);
     out->prompt[plen] = '\0';
@@ -102,7 +110,8 @@ static void load_grpo_e2e_prompts(hu_preference_pair_t *out, size_t expected) {
             fclose(f);
             HU_FAIL("fixture parse failed at row %zu", loaded);
         }
-        if (rc == 1) loaded++;
+        if (rc == 1)
+            loaded++;
     }
     fclose(f);
     HU_ASSERT_EQ(loaded, expected);
@@ -112,17 +121,20 @@ static void load_grpo_e2e_prompts(hu_preference_pair_t *out, size_t expected) {
  * int32 buffer.  Mirrors src/ml/grpo.c::parse_id_string so log-prob
  * measurements on the shadow GPT see EXACTLY the same token IDs the
  * trainer's internal parser sees. */
-static hu_error_t e2e_parse_id_string(hu_allocator_t *alloc, const char *s,
-                                       int32_t **out, size_t *out_n, size_t *out_cap) {
-    if (!s || !out || !out_n || !out_cap) return HU_ERR_INVALID_ARGUMENT;
+static hu_error_t e2e_parse_id_string(hu_allocator_t *alloc, const char *s, int32_t **out,
+                                      size_t *out_n, size_t *out_cap) {
+    if (!s || !out || !out_n || !out_cap)
+        return HU_ERR_INVALID_ARGUMENT;
     size_t cap = 16, n = 0;
     int32_t *buf = (int32_t *)alloc->alloc(alloc->ctx, cap * sizeof(int32_t));
-    if (!buf) return HU_ERR_OUT_OF_MEMORY;
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
     const char *p = s;
     while (*p) {
         char *endp = NULL;
         long v = strtol(p, &endp, 10);
-        if (endp == p) break;
+        if (endp == p)
+            break;
         if (n == cap) {
             size_t old_cap = cap;
             cap *= 2;
@@ -137,7 +149,8 @@ static hu_error_t e2e_parse_id_string(hu_allocator_t *alloc, const char *s,
         }
         buf[n++] = (int32_t)v;
         p = endp;
-        while (*p == ' ' || *p == '\t') p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
     }
     *out = buf;
     *out_n = n;
@@ -149,10 +162,8 @@ static hu_error_t e2e_parse_id_string(hu_allocator_t *alloc, const char *s,
  * on each prompt.  Per prompt + per token-id: hu_policy_logprobs(model,
  * prompt_ids, prompt_len, &tk, 1) → log π(tk | prompt).  Then we average
  * over (n_prompts × 5) measurements. */
-static double mean_good_token_logprob(hu_allocator_t *alloc,
-                                       hu_model_t *model,
-                                       const hu_preference_pair_t *prompts,
-                                       size_t n_prompts) {
+static double mean_good_token_logprob(hu_allocator_t *alloc, hu_model_t *model,
+                                      const hu_preference_pair_t *prompts, size_t n_prompts) {
     double sum = 0.0;
     size_t count = 0;
     for (size_t i = 0; i < n_prompts; i++) {
@@ -161,7 +172,8 @@ static double mean_good_token_logprob(hu_allocator_t *alloc,
         if (e2e_parse_id_string(alloc, prompts[i].prompt, &prompt_ids, &pl, &pcap) != HU_OK)
             continue;
         if (pl == 0) {
-            if (prompt_ids) alloc->free(alloc->ctx, prompt_ids, pcap * sizeof(int32_t));
+            if (prompt_ids)
+                alloc->free(alloc->ctx, prompt_ids, pcap * sizeof(int32_t));
             continue;
         }
         for (int32_t tk = 1; tk <= 5; tk++) {
@@ -233,21 +245,21 @@ static void test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease(v
     load_grpo_e2e_prompts(prompts, GRPO_E2E_PROMPT_COUNT);
 
     hu_rl_trainer_metrics_t initial = {0}, final = {0};
-    HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts,
-                                       GRPO_E2E_PROMPT_COUNT, &initial), HU_OK);
+    HU_ASSERT_EQ(
+        trainer.vtable->step(trainer.ctx, &alloc, prompts, GRPO_E2E_PROMPT_COUNT, &initial), HU_OK);
     for (int it = 1; it < 50; it++) {
         hu_rl_trainer_metrics_t m = {0};
-        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts,
-                                           GRPO_E2E_PROMPT_COUNT, &m), HU_OK);
-        if (it == 49) final = m;
+        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts, GRPO_E2E_PROMPT_COUNT, &m),
+                     HU_OK);
+        if (it == 49)
+            final = m;
     }
 
     HU_ASSERT_TRUE(isfinite(initial.final_loss));
     HU_ASSERT_TRUE(isfinite(final.final_loss));
     if (!(final.final_loss > initial.final_loss + 0.005)) {
-        fprintf(stderr, "  initial_loss=%.6f final_loss=%.6f delta=%.6f\n",
-                initial.final_loss, final.final_loss,
-                final.final_loss - initial.final_loss);
+        fprintf(stderr, "  initial_loss=%.6f final_loss=%.6f delta=%.6f\n", initial.final_loss,
+                final.final_loss, final.final_loss - initial.final_loss);
         HU_FAIL("final_loss - initial_loss not > 0.005 (advantage signal did NOT propagate)");
     }
 
@@ -259,8 +271,10 @@ static void test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease(v
      * print the wall-time for CI dashboards to track regression. */
     const clock_t t1 = clock();
     const double secs = (double)(t1 - t0) / (double)CLOCKS_PER_SEC;
-    fprintf(stderr, "  wall-time=%.3f sec (R7 target: 5.0 sec for 5-prompt; "
-                    "this config: 20-prompt)\n", secs);
+    fprintf(stderr,
+            "  wall-time=%.3f sec (R7 target: 5.0 sec for 5-prompt; "
+            "this config: 20-prompt)\n",
+            secs);
 
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }
@@ -311,8 +325,8 @@ static void test_grpo_huml_synthetic_reward_e2e_chosen_token_logprob_increases(v
     HU_ASSERT_EQ(hu_rl_trainer_create_grpo(&alloc, &cfg, &trainer), HU_OK);
     for (int it = 0; it < 50; it++) {
         hu_rl_trainer_metrics_t m = {0};
-        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts,
-                                           GRPO_E2E_PROMPT_COUNT, &m), HU_OK);
+        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts, GRPO_E2E_PROMPT_COUNT, &m),
+                     HU_OK);
     }
 
     /* Dump trainer's lm_head to a unique temp path (avoids cross-test
@@ -349,8 +363,8 @@ static void test_grpo_huml_synthetic_reward_e2e_chosen_token_logprob_increases(v
     shadow.vtable->deinit(shadow.ctx, &alloc);
 
     if (!(iter50_mean > iter0_mean)) {
-        fprintf(stderr, "  iter0_mean_lp=%.6f iter50_mean_lp=%.6f delta=%.6f\n",
-                iter0_mean, iter50_mean, iter50_mean - iter0_mean);
+        fprintf(stderr, "  iter0_mean_lp=%.6f iter50_mean_lp=%.6f delta=%.6f\n", iter0_mean,
+                iter50_mean, iter50_mean - iter0_mean);
         HU_FAIL("mean log-prob of good tokens did not increase after 50 GRPO iters");
     }
 }
@@ -370,7 +384,7 @@ static void test_grpo_huml_kl_penalty_keeps_policy_close_to_reference(void) {
         .learning_rate = 1e-2,
         .n_rollouts = 4,
         .clip_eps = 0.2,
-        .kl_beta = 0.04,  /* explicit default — keeps the policy near π_ref */
+        .kl_beta = 0.04, /* explicit default — keeps the policy near π_ref */
     };
     hu_rl_trainer_t trainer = {0};
     HU_ASSERT_EQ(hu_rl_trainer_create_grpo(&alloc, &cfg, &trainer), HU_OK);
@@ -381,14 +395,13 @@ static void test_grpo_huml_kl_penalty_keeps_policy_close_to_reference(void) {
     hu_rl_trainer_metrics_t m = {0};
     for (int it = 0; it < 50; it++) {
         memset(&m, 0, sizeof(m));
-        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts,
-                                           GRPO_E2E_PROMPT_COUNT, &m), HU_OK);
+        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, prompts, GRPO_E2E_PROMPT_COUNT, &m),
+                     HU_OK);
     }
 
     HU_ASSERT_TRUE(isfinite(m.rejected_logprob_delta));
     if (!(m.rejected_logprob_delta < 2.0)) {
-        fprintf(stderr, "  mean_kl=%.6f (R5 budget: 2.0 nats)\n",
-                m.rejected_logprob_delta);
+        fprintf(stderr, "  mean_kl=%.6f (R5 budget: 2.0 nats)\n", m.rejected_logprob_delta);
         HU_FAIL("KL brake did NOT hold — policy drifted too far from reference");
     }
 
@@ -408,6 +421,8 @@ static void test_grpo_mlx_subprocess_produces_safetensors_under_test_mode(void) 
      * Without the gate, this function is compile-time excluded (round-3
      * critic L1 — NOT HU_SKIP_IF). */
     hu_allocator_t alloc = hu_system_allocator();
+    char out_dir[128];
+    snprintf(out_dir, sizeof(out_dir), "/tmp/hu_grpo_e2e_mlx_under_test_mode_%ld", (long)getpid());
     hu_rl_trainer_config_t cfg = {
         .backend = HU_DPO_BACKEND_MLX,
         .max_iters = 1,
@@ -415,7 +430,7 @@ static void test_grpo_mlx_subprocess_produces_safetensors_under_test_mode(void) 
         .clip_eps = 0.2,
         .kl_beta = 0.04,
         .model_id = "mlx-community/gemma-3-4b-it-bf16",
-        .adapter_out_dir = "/tmp/hu_grpo_e2e_mlx_under_test_mode",
+        .adapter_out_dir = out_dir,
     };
     hu_rl_trainer_t trainer = {0};
     hu_error_t err = hu_grpo_mlx_create(&alloc, &cfg, &trainer);
