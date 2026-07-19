@@ -30,7 +30,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (13,780+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (13,801+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -111,7 +111,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 13,780+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 13,801+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -136,9 +136,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~430K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~422K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 13,780+ tests                                       |
+| `tests/`                          | 760+ test files, 13,801+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

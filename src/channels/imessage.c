@@ -1158,9 +1158,11 @@ static sqlite3 *imsg_open_user_chatdb(void) {
 }
 #endif
 
-static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t message_id, char *out,
-                                            size_t out_cap) {
-    if (!c || !out || out_cap == 0 || message_id <= 0)
+/* Run a single-TEXT-column chat.db query bound to one int64 parameter and copy
+ * the result into `out`. Shared by every rowid→GUID lookup below so the
+ * open/prepare/bind/step/finalize/close boilerplate exists once. */
+static bool imsg_query_text_by_int64(const char *sql, int64_t param, char *out, size_t out_cap) {
+    if (!sql || !out || out_cap == 0)
         return false;
     out[0] = '\0';
 #if defined(HU_ENABLE_SQLITE)
@@ -1168,9 +1170,8 @@ static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t messag
     if (!db)
         return false;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, "SELECT guid FROM message WHERE ROWID = ? LIMIT 1", -1, &st, NULL) ==
-        SQLITE_OK) {
-        sqlite3_bind_int64(st, 1, message_id);
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, param);
         if (sqlite3_step(st) == SQLITE_ROW) {
             const char *g = (const char *)sqlite3_column_text(st, 0);
             if (g)
@@ -1179,8 +1180,33 @@ static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t messag
         sqlite3_finalize(st);
     }
     sqlite3_close(db);
+#else
+    (void)param;
 #endif
     return out[0] != '\0';
+}
+
+/* Resolve a chat.db message ROWID to its GUID (the bridge verbs address
+ * messages by GUID, not rowid). Returns false when unavailable. */
+static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t message_id, char *out,
+                                            size_t out_cap) {
+    if (!c || message_id <= 0)
+        return false;
+    return imsg_query_text_by_int64("SELECT guid FROM message WHERE ROWID = ? LIMIT 1", message_id,
+                                    out, out_cap);
+}
+
+/* Resolve the CHAT guid owning a message ROWID. `imsg tapback|send-rich|edit|
+ * unsend` address the chat by GUID (`--chat`), unlike `imsg react` which takes
+ * a chat rowid (`--chat-id`). Returns false when unavailable. */
+static bool imsg_lookup_chat_guid_for_message_id(hu_imessage_ctx_t *c, int64_t message_id,
+                                                 char *out, size_t out_cap) {
+    if (!c || message_id <= 0)
+        return false;
+    return imsg_query_text_by_int64("SELECT c.guid FROM chat c "
+                                    "JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID "
+                                    "WHERE cmj.message_id = ? LIMIT 1",
+                                    message_id, out, out_cap);
 }
 
 #if defined(HU_ENABLE_SQLITE)
@@ -1281,10 +1307,11 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
      * remains the SIP-on path. Both take the same kind vocabulary. */
     if (hu_imessage_caps_allows(imsg_caps_cached(c), HU_IMSG_VERB_REACT)) {
         char msg_guid[128] = {0};
-        if (imsg_lookup_guid_for_message_id(c, message_id, msg_guid, sizeof(msg_guid))) {
-            const char *tb_argv[] = {"imsg",         "tapback",    "--chat",
-                                     chat_rowid_str, "--message",  msg_guid,
-                                     "--kind",       tapback_name, NULL};
+        char chat_guid[128] = {0};
+        if (imsg_lookup_guid_for_message_id(c, message_id, msg_guid, sizeof(msg_guid)) &&
+            imsg_lookup_chat_guid_for_message_id(c, message_id, chat_guid, sizeof(chat_guid))) {
+            const char *tb_argv[] = {"imsg",   "tapback", "--chat",     chat_guid, "--message",
+                                     msg_guid, "--kind",  tapback_name, NULL};
             hu_run_result_t tbr = {0};
             hu_error_t tbe = hu_process_run_with_timeout(c->alloc, tb_argv, NULL, 65536, 15, &tbr);
             bool tbok = (tbe == HU_OK && tbr.success && tbr.exit_code == 0);
