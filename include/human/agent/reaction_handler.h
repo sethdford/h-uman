@@ -112,6 +112,13 @@ void hu_reaction_handler_register_assistant_message_for_test(
     const char *channel, const char *thread, const char *msg_ref, const char *prompt,
     const char *response, const char *alternative);
 void hu_reaction_handler_reset_for_test(void);
+#ifdef HU_ENABLE_SQLITE
+/* Test seam: run the production SQLite open+migrate at an arbitrary path.
+ * Returns 1 when the store opened (fresh create, reopen of an already-
+ * migrated store, or legacy pre-`alternative` migration); 0 on failure.
+ * Pins the idempotent-migration contract that production rxn_db_open uses. */
+int hu_reaction_handler_lookup_db_open_for_test(const char *path);
+#endif
 #endif
 
 #ifdef __cplusplus
