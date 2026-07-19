@@ -1,7 +1,7 @@
 {
   "name": "human-control-ui",
   "version": "0.5.0",
-  "description": "h-uman Control — not quite human. Real-time AI assistant dashboard.",
+  "description": "h-uman Control \u2014 not quite human. Real-time AI assistant dashboard.",
   "author": "h-uman Contributors",
   "private": true,
   "type": "module",
@@ -33,28 +33,29 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run lint:tokens && npm run test"
   },
   "dependencies": {
-    "@codemirror/commands": "^6.10.3",
+    "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-markdown": "^6.5.0",
-    "@codemirror/language": "^6.12.3",
+    "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.6.0",
-    "@codemirror/view": "^6.43.0",
+    "@codemirror/view": "^6.43.6",
     "chart.js": "^4.5.1",
     "dompurify": "^3.4.12",
     "katex": "^0.17.0",
     "lit": "^3.3.3",
-    "marked": "^18.0.4",
-    "shiki": "^4.1.0"
+    "marked": "^18.0.6",
+    "shiki": "^4.3.1"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.11.3",
-    "@playwright/test": "^1.60.0",
-    "@vitest/coverage-v8": "^4.1.7",
-    "eslint": "^10.4.1",
-    "happy-dom": "^20.9.0",
-    "prettier": "^3.8.3",
-    "typescript-eslint": "^8.60.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
+    "@types/dompurify": "^3.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
+    "happy-dom": "^20.10.6",
+    "prettier": "^3.9.5",
+    "typescript-eslint": "^8.64.0",
     "vite": "~8.0.16",
     "vitest": "^4.0.18"
   }
