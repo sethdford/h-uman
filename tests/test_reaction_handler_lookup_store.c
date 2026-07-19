@@ -26,7 +26,10 @@
 #include "human/core/allocator.h"
 #include "human/ml/dpo.h"
 #include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ----- helpers ----- */
 
@@ -401,6 +404,71 @@ static void test_last_response_returns_most_recent_for_thread(void) {
  * plus the production code path's clang compile + lint guarantees. */
 #endif
 
+/* ----- SQLite open+migrate contract (via the open_for_test seam) -----
+ *
+ * The one SQLite-path behavior that IS unit-testable without a daemon: the
+ * open+migrate sequence at an arbitrary path. Pins the bug where the
+ * `ADD COLUMN alternative` migration error was treated as fatal, so every
+ * open after the column existed (including every fresh create, whose CREATE
+ * TABLE already includes the column) failed — silently disabling both
+ * registration and lookup, hence zero imessage_tapback DPO pairs in
+ * production from 2026-05-31 until diagnosis. */
+
+static void rxn_test_db_path(char *out, size_t cap) {
+    const char *tmp = getenv("TMPDIR");
+    snprintf(out, cap, "%s/hu_rxn_lookup_store_migration_%d.db", tmp && *tmp ? tmp : "/tmp",
+             (int)getpid());
+}
+
+static void test_lookup_db_open_succeeds_on_fresh_create_and_reopen(void) {
+    char path[512];
+    rxn_test_db_path(path, sizeof(path));
+    (void)unlink(path);
+
+    HU_ASSERT_EQ(hu_reaction_handler_lookup_db_open_for_test(path), 1);
+    /* Second open hits the already-has-`alternative` schema; the migration
+     * ALTER fails with duplicate-column, which must be benign. */
+    HU_ASSERT_EQ(hu_reaction_handler_lookup_db_open_for_test(path), 1);
+
+    (void)unlink(path);
+}
+
+static void test_lookup_db_open_migrates_legacy_store_without_alternative(void) {
+    char path[512];
+    rxn_test_db_path(path, sizeof(path));
+    (void)unlink(path);
+
+    /* Legacy store shape: created before the alternative column existed. */
+    sqlite3 *legacy = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &legacy), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(legacy,
+                              "CREATE TABLE reaction_lookup ("
+                              "channel TEXT NOT NULL,"
+                              "thread TEXT NOT NULL,"
+                              "msg_ref TEXT NOT NULL,"
+                              "prompt TEXT NOT NULL,"
+                              "response TEXT NOT NULL,"
+                              "inserted_at INTEGER NOT NULL,"
+                              "PRIMARY KEY (channel, thread, msg_ref))",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_close(legacy), SQLITE_OK);
+
+    HU_ASSERT_EQ(hu_reaction_handler_lookup_db_open_for_test(path), 1);
+
+    /* The migration must have added the alternative column. */
+    sqlite3 *check = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &check), SQLITE_OK);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(check, "SELECT alternative FROM reaction_lookup LIMIT 1", -1, &st, NULL),
+        SQLITE_OK);
+    sqlite3_finalize(st);
+    sqlite3_close(check);
+
+    (void)unlink(path);
+}
+
 void run_reaction_handler_lookup_store_tests(void) {
     HU_TEST_SUITE("reaction_handler_lookup_store");
     HU_RUN_TEST(test_register_then_handle_event_records_dpo_pair);
@@ -414,6 +482,8 @@ void run_reaction_handler_lookup_store_tests(void) {
     HU_RUN_TEST(test_neutral_polarity_no_dpo_row_inserted);
     HU_RUN_TEST(test_negative_polarity_updates_production_outcomes_with_negative_tapback);
     HU_RUN_TEST(test_last_response_returns_most_recent_for_thread);
+    HU_RUN_TEST(test_lookup_db_open_succeeds_on_fresh_create_and_reopen);
+    HU_RUN_TEST(test_lookup_db_open_migrates_legacy_store_without_alternative);
 }
 
 #else /* !HU_ENABLE_SQLITE — stub runner so the symbol always resolves */
