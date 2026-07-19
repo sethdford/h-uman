@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
 # Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human-skills/STUBS.md, CLAUDE.md
-# Usage: ./scripts/update-stats.sh [--apply]
+# Usage: ./scripts/update-stats.sh [--apply] [--binary-size <KB>]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
+#   --binary-size <KB>: trust this size instead of measuring a local binary.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
 APPLY=false
-[ "${1:-}" = "--apply" ] && APPLY=true
+BINARY_KB_OVERRIDE=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --apply) APPLY=true ;;
+        --binary-size)
+            BINARY_KB_OVERRIDE="${2:-}"
+            case "$BINARY_KB_OVERRIDE" in
+                ''|*[!0-9]*) echo "error: --binary-size requires a numeric KB value" >&2; exit 2 ;;
+            esac
+            shift ;;
+        *) echo "error: unknown argument '$1' (usage: update-stats.sh [--apply] [--binary-size <KB>])" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 # Count source + header files
 SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
@@ -59,15 +73,38 @@ else
     echo "WARN: no test binary found in build*/ — leaving test-count claims untouched" >&2
 fi
 
-# Get binary size (prefer MinSizeRel builds, then release, then debug)
+# Get binary size — ONLY from a verifiable release build. The docs phrasings
+# claim "MinSizeRel+LTO"; a dev/ASan Debug binary is ~10x larger, and writing
+# its size into that claim is how the docs drifted to ~23209 KB twice
+# (commits 6b0f8926, 2edbdd74). When no release binary exists, keep the
+# committed value untouched (BINARY_KB stays "unknown" and every patch site
+# below skips). CI/release callers with no build dir can pass --binary-size.
+is_release_build_dir() {
+    cache="$1/CMakeCache.txt"
+    [ -f "$cache" ] || return 1
+    grep -q '^CMAKE_BUILD_TYPE:[^=]*=MinSizeRel$' "$cache" || return 1
+    ! grep -q '^HU_ENABLE_ASAN:[^=]*=ON$' "$cache"
+}
+
 BINARY_KB="unknown"
-for bin in build-size/human build2/human build-release/human build/human; do
-    if [ -f "$bin" ]; then
-        BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
-        BINARY_KB=$((BINARY_BYTES / 1024))
-        break
+if [ -n "$BINARY_KB_OVERRIDE" ]; then
+    BINARY_KB="$BINARY_KB_OVERRIDE"
+else
+    SKIPPED_BIN=""
+    for bin in build-size/human build2/human build-release/human build/human; do
+        if [ -f "$bin" ]; then
+            if is_release_build_dir "$(dirname "$bin")"; then
+                BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
+                BINARY_KB=$((BINARY_BYTES / 1024))
+                break
+            fi
+            [ -n "$SKIPPED_BIN" ] || SKIPPED_BIN="$bin"
+        fi
+    done
+    if [ "$BINARY_KB" = "unknown" ] && [ -n "$SKIPPED_BIN" ]; then
+        echo "Binary size: skipping — ${SKIPPED_BIN} is not a MinSizeRel release build (Debug/ASan); keeping committed value. Use --binary-size <KB> to override."
     fi
-done
+fi
 
 echo "=== Human Stats ==="
 echo "Source + header files: ${SRC_COUNT}"
@@ -75,7 +112,11 @@ echo "Lines of C:           ~${C_LINES_K}K (${C_LINES_RAW})"
 echo "Test files:           ${TEST_FILES}"
 echo "Lines of tests:       ~${TEST_LINES_K}K (${TEST_LINES_RAW})"
 echo "Tests:                ${TEST_COUNT_FMT}"
-echo "Binary size:          ~${BINARY_KB} KB"
+if [ "$BINARY_KB" != "unknown" ]; then
+    echo "Binary size:          ~${BINARY_KB} KB"
+else
+    echo "Binary size:          unknown (keeping committed value)"
+fi
 echo "Channels (enum):      ${CHANNEL_ENUM}"
 echo "Channel .c files:     ${CHANNEL_COUNT}"
 echo "Tools:                ${TOOL_COUNT}"
@@ -248,11 +289,19 @@ fi
 echo "Patching human/STUBS.md..."
 
 if [ -f human/STUBS.md ]; then
-    # Test count in header blurb (also carries BINARY_KB — skip unless both known)
-    if [ "$TEST_COUNT" != "unknown" ] && [ "$BINARY_KB" != "unknown" ]; then
-        sed -i.bak -E \
-            "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
-            human/STUBS.md && rm -f human/STUBS.md.bak
+    # Test count in header blurb (backreference keeps the committed KB value
+    # when no release binary was measured; skipped entirely when the test
+    # count itself is unknown — never write "unknown" into docs)
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        if [ "$BINARY_KB" != "unknown" ]; then
+            sed -i.bak -E \
+                "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
+                human/STUBS.md && rm -f human/STUBS.md.bak
+        else
+            sed -i.bak -E \
+                "s/[0-9,]+ tests, ~([0-9]+) KB binary/${TEST_COUNT_FMT} tests, ~\1 KB binary/" \
+                human/STUBS.md && rm -f human/STUBS.md.bak
+        fi
     fi
 
     # Tests passing table row
