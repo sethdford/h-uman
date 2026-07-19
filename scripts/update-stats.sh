@@ -14,11 +14,10 @@ APPLY=false
 # Count source + header files
 SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
 
-# Count lines of C (round to nearest K).
-# Scope is src/ + include/ — MUST match scripts/repo-metrics.sh SRC_LOC, which the
-# docs metrics-drift gate (scripts/check-metrics-drift.sh) checks against. Same
-# convergence contract as CHANNEL_ENUM below.
-C_LINES_RAW=$(find src include \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+# Count lines of C (round to nearest K)
+# MUST match scripts/repo-metrics.sh SRC_LOC (src/ only, no include/) — that is
+# what the metrics-drift gate checks "[0-9]+K lines of C" claims against.
+C_LINES_RAW=$(find src \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
 C_LINES_K=$(( (C_LINES_RAW + 500) / 1000 ))
 
 # Count test files
@@ -49,11 +48,15 @@ for test_bin in build/human_tests build2/human_tests build-check/human_tests bui
     fi
 done
 
+# Treat an empty extraction (binary ran but no Results: line) as unknown too
+[ -n "$TEST_COUNT" ] || TEST_COUNT="unknown"
+
 # Format test count with comma
 if [ "$TEST_COUNT" != "unknown" ]; then
     TEST_COUNT_FMT=$(printf "%'d" "$TEST_COUNT" 2>/dev/null || echo "$TEST_COUNT")
 else
     TEST_COUNT_FMT="unknown"
+    echo "WARN: no test binary found in build*/ — leaving test-count claims untouched" >&2
 fi
 
 # Get binary size (prefer MinSizeRel builds, then release, then debug)
@@ -87,14 +90,18 @@ echo ""
 echo "Patching AGENTS.md..."
 
 # "Current scale" line (test count, channels, lines, etc.)
-sed -i.bak -E \
-    "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_ENUM} channels**/" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_ENUM} channels**/" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 # "tests/" repo-map line (test files + test count)
-sed -i.bak -E \
-    "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/                 ${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests|" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/                 ${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests|" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 # "tools/" repo-map line (tool count)
 sed -i.bak -E \
@@ -114,31 +121,41 @@ if [ "$BINARY_KB" != "unknown" ]; then
 fi
 
 # "All N+ tests" rule-of-thumb line
-sed -i.bak -E \
-    "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 echo "Patching README.md..."
 
 # Test count — all "NNNN tests" / "NNNN+ tests" references
-sed -i.bak -E \
-    "s/[0-9,]+\+? tests/${TEST_COUNT_FMT}+ tests/g" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/[0-9,]+\+? tests/${TEST_COUNT_FMT}+ tests/g" \
+        README.md && rm -f README.md.bak
+fi
 
 # "Tests:" stat line
-sed -i.bak -E \
-    "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
+        README.md && rm -f README.md.bak
+fi
 
 # "tests/" stat line
-sed -i.bak -E \
-    "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/ ${TEST_FILES} test files, ${TEST_COUNT_FMT} tests|" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/ ${TEST_FILES} test files, ${TEST_COUNT_FMT} tests|" \
+        README.md && rm -f README.md.bak
+fi
 
 # "# run all tests" comment with count
-sed -i.bak -E \
-    "s/# [0-9,]+ tests$/# ${TEST_COUNT_FMT} tests/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/# [0-9,]+ tests$/# ${TEST_COUNT_FMT} tests/" \
+        README.md && rm -f README.md.bak
+fi
 
 # Binary size — all ~NNN KB references
 if [ "$BINARY_KB" != "unknown" ]; then
@@ -170,16 +187,20 @@ sed -i.bak -E \
     "s/^Test files: [0-9]+$/Test files: ${TEST_FILES}/" \
     README.md && rm -f README.md.bak
 
-sed -i.bak -E \
-    "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
+        README.md && rm -f README.md.bak
+fi
 
 echo "Patching CONTRIBUTING.md..."
 
 # "All N+ tests must pass" line
-sed -i.bak -E \
-    "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
-    CONTRIBUTING.md && rm -f CONTRIBUTING.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
+        CONTRIBUTING.md && rm -f CONTRIBUTING.md.bak
+fi
 
 echo "Patching PROJECT_STATUS.md..."
 
@@ -190,9 +211,11 @@ if [ -f PROJECT_STATUS.md ]; then
         PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
 
     # Tests passing
-    sed -i.bak -E \
-        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
-        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    fi
 
     # Binary size
     if [ "$BINARY_KB" != "unknown" ]; then
@@ -225,15 +248,19 @@ fi
 echo "Patching human/STUBS.md..."
 
 if [ -f human/STUBS.md ]; then
-    # Test count in header blurb
-    sed -i.bak -E \
-        "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
-        human/STUBS.md && rm -f human/STUBS.md.bak
+    # Test count in header blurb (also carries BINARY_KB — skip unless both known)
+    if [ "$TEST_COUNT" != "unknown" ] && [ "$BINARY_KB" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
+            human/STUBS.md && rm -f human/STUBS.md.bak
+    fi
 
     # Tests passing table row
-    sed -i.bak -E \
-        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
-        human/STUBS.md && rm -f human/STUBS.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+            human/STUBS.md && rm -f human/STUBS.md.bak
+    fi
 
     # Test files
     sed -i.bak -E \
@@ -257,14 +284,18 @@ if [ -f CLAUDE.md ]; then
     fi
 
     # Test count references
-    sed -i.bak -E \
-        "s/[0-9,]+\+ tests/${TEST_COUNT_FMT}+ tests/g" \
-        CLAUDE.md && rm -f CLAUDE.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/[0-9,]+\+ tests/${TEST_COUNT_FMT}+ tests/g" \
+            CLAUDE.md && rm -f CLAUDE.md.bak
+    fi
 
     # Test files in paths table
-    sed -i.bak -E \
-        "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
-        CLAUDE.md && rm -f CLAUDE.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
+            CLAUDE.md && rm -f CLAUDE.md.bak
+    fi
 
     # Lines-of-C claim in the paths table. (The old pattern
     # '~[0-9]+ files, ~[0-9]+K lines' stopped matching when the row's phrasing

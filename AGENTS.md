@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **1992 source + header files, ~484K lines of C, ~279K lines of tests, 13,735 tests, 31 channels**.
+Current scale: **1991 source + header files, ~422K lines of C, ~278K lines of tests, 13,735 tests, 31 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
