@@ -18,7 +18,12 @@ src_h_files=$(find src -name '*.h' 2>/dev/null | wc -l | tr -d ' ')
 include_h_files=$(find include -name '*.h' 2>/dev/null | wc -l | tr -d ' ')
 total_source_header=$((src_c_files + src_h_files + include_h_files))
 
-src_loc=$(find src -name '*.[ch]' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
+# SRC_LOC measures src/ + include/ — MUST match update-stats.sh C_LINES_RAW,
+# the writer that stamps "~NNNK lines of C" into the docs. The docs' "lines of C"
+# claim has always included public headers; measuring src/ only here made the
+# drift gate reject the writer's own output (484K claimed vs 421K measured).
+# Same writer≠checker convergence contract as CHANNEL_ENUM in update-stats.sh.
+src_loc=$(find src include -name '*.[ch]' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
 test_loc=$(find tests -name '*.c' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
 
 channel_c_files=$(find src/channels -maxdepth 1 -name '*.c' 2>/dev/null | wc -l | tr -d ' ')
@@ -38,7 +43,7 @@ if [ "$MODE" = "--human" ]; then
   echo "Test cases:            $test_cases"
   echo "Source .c files:       $src_c_files"
   echo "Source+header files:   $total_source_header"
-  echo "Lines of C (src/):     $src_loc"
+  echo "Lines of C (src+inc):  $src_loc"
   echo "Lines of test code:    $test_loc"
   echo "Channel .c files:      $channel_c_files"
   echo "Channels (enum):       $channel_enum"

@@ -14,7 +14,10 @@ APPLY=false
 # Count source + header files
 SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
 
-# Count lines of C (round to nearest K)
+# Count lines of C (round to nearest K).
+# Scope is src/ + include/ — MUST match scripts/repo-metrics.sh SRC_LOC, which the
+# docs metrics-drift gate (scripts/check-metrics-drift.sh) checks against. Same
+# convergence contract as CHANNEL_ENUM below.
 C_LINES_RAW=$(find src include \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
 C_LINES_K=$(( (C_LINES_RAW + 500) / 1000 ))
 
@@ -263,9 +266,13 @@ if [ -f CLAUDE.md ]; then
         "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
         CLAUDE.md && rm -f CLAUDE.md.bak
 
-    # Source file count
+    # Lines-of-C claim in the paths table. (The old pattern
+    # '~[0-9]+ files, ~[0-9]+K lines' stopped matching when the row's phrasing
+    # changed to "~1,050 `.c` files, ~NNNK lines of C", so CLAUDE.md silently
+    # rotted while other docs got refreshed. Patch just the LOC figure, which is
+    # what the drift gate checks.)
     sed -i.bak -E \
-        "s/~[0-9]+ files, ~[0-9]+K lines/~${SRC_COUNT} files, ~${C_LINES_K}K lines/" \
+        "s/~[0-9]+K lines of C/~${C_LINES_K}K lines of C/g" \
         CLAUDE.md && rm -f CLAUDE.md.bak
 fi
 
