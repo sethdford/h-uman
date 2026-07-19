@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14194   # src/daemon.c, merged tree 2026-07-18: learning-tick carve + reply-dispatch wrapper dedup + origin PRs. Lower as god-files are carved.
+MAX_BASELINE=14191   # src/daemon.c, merged tree 2026-07-18: fallback-model helper retire (-3 on top of learning-tick carve). Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

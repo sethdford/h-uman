@@ -585,12 +585,17 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
         }
     }
 
-    /* Step 9: Create skills from recurring findings topics */
+    /* Step 9: Create skills from recurring findings topics.
+     * Scoped to findings actioned THIS cycle (Step 1 stamps acted_at=now_ts):
+     * research_findings rows keep status='actioned' forever, so an unscoped
+     * scan re-records a "cycle run" positive for every historical source on
+     * every cycle — 5,362 sources x ~280 cycles/day of contentless rows. */
     {
         const char *sql = "SELECT source, suggested_action FROM research_findings "
-                          "WHERE status = 'actioned' GROUP BY source";
+                          "WHERE status = 'actioned' AND acted_at >= ? GROUP BY source";
         sqlite3_stmt *stmt = NULL;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, now_ts);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char *source = (const char *)sqlite3_column_text(stmt, 0);
                 const char *action = (const char *)sqlite3_column_text(stmt, 1);

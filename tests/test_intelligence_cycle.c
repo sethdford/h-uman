@@ -819,6 +819,95 @@ static void cycle_matching_finding_still_records_positive_attempt(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* --- Step 9 flood guard: historical actioned findings don't re-record --- */
+
+static void insert_actioned_finding(sqlite3 *db, const char *source, const char *finding,
+                                    const char *action, int64_t created_at, int64_t acted_at) {
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO research_findings "
+                      "(source, finding, relevance, priority, suggested_action, "
+                      "status, created_at, acted_at) VALUES (?, ?, 'high', 'HIGH', ?, "
+                      "'actioned', ?, ?)";
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &stmt, NULL), SQLITE_OK);
+    sqlite3_bind_text(stmt, 1, source, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, finding, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, action, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 4, created_at);
+    sqlite3_bind_int64(stmt, 5, acted_at);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_DONE);
+    sqlite3_finalize(stmt);
+}
+
+static void cycle_previously_actioned_findings_do_not_rerecord_positive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    ensure_opinions_table(db);
+
+    int64_t now = (int64_t)time(NULL);
+
+    /* Skill for a source whose only finding was actioned an hour ago (a prior
+     * cycle). Finding text deliberately does NOT contain the source string, so
+     * cycle Step 13 cannot match it — isolating Step 9 behavior. */
+    int64_t skill_id = 0;
+    insert_monitor_skill(db, "monitor_oldsource", "oldsource", now - 7200, &skill_id);
+    insert_actioned_finding(db, "oldsource", "stale historic result", "Review the archived report",
+                            now - 7200, now - 3600);
+
+    hu_intelligence_cycle_result_t r = {0};
+    hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Step 9 must not re-record a positive for a finding actioned by a PRIOR
+     * cycle — that is O(historical_sources x cycles) unbounded growth. */
+    HU_ASSERT_EQ(count_attempts_by_signal(db, "positive"), 0);
+    HU_ASSERT_EQ(count_rows(db, "skill_attempts"), 0);
+
+    /* The skill saw no fresh findings this cycle: Step 13's aggregate-only
+     * negative applies (attempts 1, successes 0) — not Step 9's success. */
+    hu_skill_t reloaded = {0};
+    HU_ASSERT_EQ(hu_skill_get_by_name(&alloc, db, "monitor_oldsource", 17, &reloaded), HU_OK);
+    HU_ASSERT_EQ(reloaded.attempts, 1);
+    HU_ASSERT_EQ(reloaded.successes, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void cycle_freshly_actioned_finding_records_step9_positive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    ensure_opinions_table(db);
+
+    int64_t now = (int64_t)time(NULL);
+
+    /* Skill for a source with a PENDING finding: this cycle actions it
+     * (Step 1 stamps acted_at), so Step 9 must still record the positive.
+     * Finding text avoids the source string to keep Step 13 out of it. */
+    int64_t skill_id = 0;
+    insert_monitor_skill(db, "monitor_freshsource", "freshsource", now - 7200, &skill_id);
+    insert_finding(db, "freshsource", "brand new observation worth acting on", "high", "HIGH",
+                   "Investigate the new observation", now - 60);
+
+    hu_intelligence_cycle_result_t r = {0};
+    hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &r);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(r.findings_actioned >= 1);
+
+    HU_ASSERT_TRUE(count_attempts_by_signal(db, "positive") >= 1);
+    HU_ASSERT_EQ(count_attempts_by_signal(db, "negative"), 0);
+
+    hu_skill_t reloaded = {0};
+    HU_ASSERT_EQ(hu_skill_get_by_name(&alloc, db, "monitor_freshsource", 19, &reloaded), HU_OK);
+    HU_ASSERT_TRUE(reloaded.successes >= 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* --- Tree-of-thought: depth increases exploration --- */
 
 static void tot_depth_increases_exploration(void) {
@@ -867,6 +956,8 @@ void run_intelligence_cycle_tests(void) {
     HU_RUN_TEST(cycle_low_priority_findings_skipped);
     HU_RUN_TEST(cycle_no_matching_findings_inserts_no_attempt_rows);
     HU_RUN_TEST(cycle_matching_finding_still_records_positive_attempt);
+    HU_RUN_TEST(cycle_previously_actioned_findings_do_not_rerecord_positive);
+    HU_RUN_TEST(cycle_freshly_actioned_finding_records_step9_positive);
     HU_RUN_TEST(cycle_simulation_cache_returns_cached_result);
     HU_RUN_TEST(cycle_context_changes_prediction);
     HU_RUN_TEST(cycle_record_signal_changes_weight);
