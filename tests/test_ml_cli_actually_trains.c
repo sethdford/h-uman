@@ -52,10 +52,11 @@ typedef struct pipeline {
 } pipeline_t;
 
 static void build_pipeline(hu_allocator_t *alloc, const char *dirname, pipeline_t *p) {
-    /* pid-suffixed: fixed /tmp paths collide when two human_tests processes
-     * run concurrently (parallel worktree builds). The dataloader re-opens
-     * shard files on every epoch wrap, so a concurrent run's truncate or
-     * remove lands mid-read and surfaces as a spurious HU_ERR_IO. */
+    /* PID-unique fixture dir: a fixed /tmp path collides when two suite runs
+     * overlap (concurrent worktree builds / CI). The other process's "wb"
+     * truncate or cleanup remove() lands mid-read in this process's
+     * dataloader (which re-opens shards on every epoch wrap) → HU_ERR_IO →
+     * intermittent "training failed: 8" CRASH with val_bpb=0. */
     snprintf(p->dir, sizeof(p->dir), "/tmp/%s_%ld", dirname, (long)getpid());
     mkdir_p_local(p->dir);
 
@@ -117,7 +118,12 @@ static void test_ml_cli_train_with_zero_vocab_does_nothing(void) {
 
     hu_training_config_t train_cfg = {0};
     train_cfg.device_batch_size = 2;
-    train_cfg.time_budget_secs = 1;
+    /* time_budget_secs=0 disables the wall-clock budget; max_steps bounds the
+     * run instead. A nonzero budget makes both the stopping point AND the LR
+     * schedule (progress = elapsed/budget in hu_ml_train) load-dependent,
+     * which made this suite flaky under machine load. */
+    train_cfg.time_budget_secs = 0;
+    train_cfg.max_steps = 8;
     train_cfg.eval_tokens = 32;
 
     hu_ml_train_result_t result_buggy = {0};
@@ -143,7 +149,11 @@ static void test_ml_cli_train_with_real_vocab_actually_trains(void) {
 
     hu_training_config_t train_cfg = {0};
     train_cfg.device_batch_size = 2;
-    train_cfg.time_budget_secs = 1;
+    /* Deterministic step bound, no wall-clock budget — see the comment in
+     * test_ml_cli_train_with_zero_vocab_does_nothing. The dataloader wraps
+     * across epochs, so max_steps (not data exhaustion) must end the loop. */
+    train_cfg.time_budget_secs = 0;
+    train_cfg.max_steps = 8;
     train_cfg.eval_tokens = 32;
 
     /* int32_t per spec — token_bytes[t] = #bytes that token t encodes.
@@ -179,10 +189,13 @@ static void test_ml_cli_train_with_real_vocab_actually_trains(void) {
 static double g_experiment_callback_bpb = -1.0;
 static hu_experiment_status_t g_experiment_callback_status = HU_EXPERIMENT_CRASH;
 
+static char g_experiment_callback_desc[256];
+
 static void capture_experiment_result(const hu_experiment_result_t *r, void *user_data) {
     (void)user_data;
     g_experiment_callback_bpb = r->val_bpb;
     g_experiment_callback_status = r->status;
+    snprintf(g_experiment_callback_desc, sizeof(g_experiment_callback_desc), "%s", r->description);
 }
 
 static void test_experiment_loop_passes_token_bytes(void) {
@@ -210,7 +223,13 @@ static void test_experiment_loop_passes_token_bytes(void) {
     loop_cfg.base_config.gpt.head_dim = 32;
     loop_cfg.base_config.training.device_batch_size = 2;
     loop_cfg.base_config.training.max_steps = 8;
-    loop_cfg.base_config.training.time_budget_secs = 10;
+    /* time_budget_secs=0 — max_steps is the only bound. With a nonzero
+     * budget, LR-schedule progress in hu_ml_train is elapsed/budget, so under
+     * machine load the effective LR ramps from ~0 (warmup) to full scale and
+     * this tiny model can diverge → val_bpb NaN/0 → intermittent failure of
+     * the g_experiment_callback_bpb assert below (~1-in-5 loaded full-suite
+     * runs, 2026-07-18). Step-driven progress is deterministic. */
+    loop_cfg.base_config.training.time_budget_secs = 0;
     loop_cfg.base_config.training.eval_tokens = 32;
 
     g_experiment_callback_bpb = -1.0;
@@ -218,6 +237,15 @@ static void test_experiment_loop_passes_token_bytes(void) {
 
     hu_error_t err = hu_experiment_loop(&alloc, &loop_cfg, capture_experiment_result, NULL);
     HU_ASSERT_EQ(err, HU_OK);
+
+    /* On failure, print the captured result so an intermittent failure in CI
+     * is triageable from the log alone (bpb=0+CRASH ⇒ infra/IO error vs
+     * bpb=NaN ⇒ divergence). The 2026-07-18 flake was only diagnosable
+     * because of this value: "training failed: 8" = HU_ERR_IO from a /tmp
+     * fixture collision, not a training regression. */
+    if (!(g_experiment_callback_bpb > 0.0))
+        fprintf(stderr, "DEBUG flake: bpb=%.9f status=%d desc=%s\n", g_experiment_callback_bpb,
+                (int)g_experiment_callback_status, g_experiment_callback_desc);
 
     /* The fix shape: callback fired with a real, finite, positive BPB.
      * Pre-fix: val_bpb stays 0.0 because hu_ml_train hard-fails on the
