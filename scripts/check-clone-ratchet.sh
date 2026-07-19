@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11542   # locked 2026-07-18: merged tree (reply-dispatch wrapper dedup x outcome-pipeline x S2.1b carve) measured 11542
+CLONE_BASELINE=11539   # locked 2026-07-19: reflection consumer PATTERN_QUERY_PREFIX dedup measured 11539
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
