@@ -184,6 +184,32 @@ static void hydrate_pattern_from_row(sqlite3_stmt *st, hu_reflection_pattern_t *
     p->retired_at_ms = (uint64_t)sqlite3_column_int64(st, 12);
 }
 
+/* Shared SELECT prefix for both pattern queries below. The column
+ * order is the contract hydrate_pattern_from_row decodes; both filters
+ * (not retired, not yet surfaced) apply to every reader — a single
+ * definition so the two query strings cannot drift apart. */
+#define PATTERN_QUERY_PREFIX                                                            \
+    "SELECT id, type, subject, observation, confidence, evidence_json, channels_json, " \
+    "       created_at_ms, last_observed_at_ms, expires_at_ms, "                        \
+    "       surfaced_to_user, retired, retired_at_ms "                                  \
+    "FROM reflection_patterns "                                                         \
+    "WHERE retired = 0 "                                                                \
+    "  AND surfaced_to_user = 0 "
+
+/* Shared reader prologue: zero the out-params, then make sure the
+ * schema exists. Readers can run before the reflection loop's writer
+ * has ever migrated this db (the daemon-tick migrate only fires when
+ * the reflection loop is enabled, while callers like init_proposer and
+ * the system-prompt path query unconditionally). Migrate is idempotent
+ * CREATE IF NOT EXISTS; no static guard here because tests exercise
+ * multiple dbs in one process. */
+static hu_error_t reader_prologue(struct sqlite3 *db, hu_reflection_pattern_t **out_patterns,
+                                  int *out_count) {
+    *out_patterns = NULL;
+    *out_count = 0;
+    return hu_reflection_storage_migrate(db);
+}
+
 /* ── query_for_system_prompt ───────────────────────────────────── */
 
 hu_error_t hu_reflection_query_for_system_prompt(struct sqlite3 *db, const char *channel,
@@ -192,8 +218,9 @@ hu_error_t hu_reflection_query_for_system_prompt(struct sqlite3 *db, const char 
                                                  int *out_count) {
     if (!db || !channel || !out_patterns || !out_count || max_patterns <= 0)
         return HU_ERR_INVALID_ARGUMENT;
-    *out_patterns = NULL;
-    *out_count = 0;
+    hu_error_t merr = reader_prologue(db, out_patterns, out_count);
+    if (merr != HU_OK)
+        return merr;
 
     /* Channel match: pattern's channels_json contains `channel`, OR
      * the pattern is cross-channel (≥2 channels) — those count for
@@ -202,13 +229,7 @@ hu_error_t hu_reflection_query_for_system_prompt(struct sqlite3 *db, const char 
      * Ordering: confidence weighted by recency decay (1 / (1 + age_days)).
      * Single-channel high-confidence recent → highest. Cross-channel
      * stale low-confidence → lowest. */
-    static const char *const k_sql =
-        "SELECT id, type, subject, observation, confidence, evidence_json, channels_json, "
-        "       created_at_ms, last_observed_at_ms, expires_at_ms, "
-        "       surfaced_to_user, retired, retired_at_ms "
-        "FROM reflection_patterns "
-        "WHERE retired = 0 "
-        "  AND surfaced_to_user = 0 "
+    static const char *const k_sql = PATTERN_QUERY_PREFIX
         "  AND confidence > 0.7 "
         "  AND last_observed_at_ms > ? "
         "  AND (EXISTS(SELECT 1 FROM json_each(channels_json) WHERE value = ?) "
@@ -260,8 +281,9 @@ hu_error_t hu_reflection_query_unsurfaced(struct sqlite3 *db, double min_confide
                                           hu_reflection_pattern_t **out_patterns, int *out_count) {
     if (!db || !out_patterns || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
-    *out_patterns = NULL;
-    *out_count = 0;
+    hu_error_t merr = reader_prologue(db, out_patterns, out_count);
+    if (merr != HU_OK)
+        return merr;
 
     /* Wider time window than the system-prompt query — init_proposer can
      * surface a pattern from up to 30 days ago. Caller passes
@@ -270,16 +292,10 @@ hu_error_t hu_reflection_query_unsurfaced(struct sqlite3 *db, double min_confide
      * load-bearing context injection). Caps at 32 rows per the spec's
      * `out_patterns` array. */
     static const char *const k_sql =
-        "SELECT id, type, subject, observation, confidence, evidence_json, channels_json, "
-        "       created_at_ms, last_observed_at_ms, expires_at_ms, "
-        "       surfaced_to_user, retired, retired_at_ms "
-        "FROM reflection_patterns "
-        "WHERE retired = 0 "
-        "  AND surfaced_to_user = 0 "
-        "  AND confidence >= ? "
-        "  AND last_observed_at_ms > ? "
-        "ORDER BY confidence DESC, last_observed_at_ms DESC "
-        "LIMIT 32";
+        PATTERN_QUERY_PREFIX "  AND confidence >= ? "
+                             "  AND last_observed_at_ms > ? "
+                             "ORDER BY confidence DESC, last_observed_at_ms DESC "
+                             "LIMIT 32";
 
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, k_sql, -1, &st, NULL) != SQLITE_OK) {

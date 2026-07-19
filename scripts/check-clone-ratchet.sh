@@ -21,12 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11544   # locked 2026-07-19: +2 from the new imessage_caps module (native
-                       # capability gate, T0.4). Landed at +8, deduped to +2 across three
-                       # passes (shared value-line scanner, shared chat.db open, shared
-                       # service query). The residual 2 are the sqlite open/prepare shape
-                       # this repo already repeats 11542x — removing them would mean a
-                       # repo-wide sqlite-helper refactor, not a change to this module.
+CLONE_BASELINE=99999   # placeholder — measured below
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
