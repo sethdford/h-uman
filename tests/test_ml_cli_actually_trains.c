@@ -7,7 +7,6 @@
  *
  * See spec §1.5.2 issues #1, #2 and the May 11 2026 audit baseline. */
 
-#include "test_framework.h"
 #include "human/core/allocator.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/experiment.h"
@@ -15,6 +14,7 @@
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/train.h"
+#include "test_framework.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -52,7 +52,11 @@ typedef struct pipeline {
 } pipeline_t;
 
 static void build_pipeline(hu_allocator_t *alloc, const char *dirname, pipeline_t *p) {
-    snprintf(p->dir, sizeof(p->dir), "/tmp/%s", dirname);
+    /* pid-suffixed: fixed /tmp paths collide when two human_tests processes
+     * run concurrently (parallel worktree builds). The dataloader re-opens
+     * shard files on every epoch wrap, so a concurrent run's truncate or
+     * remove lands mid-read and surfaces as a spurious HU_ERR_IO. */
+    snprintf(p->dir, sizeof(p->dir), "/tmp/%s_%ld", dirname, (long)getpid());
     mkdir_p_local(p->dir);
 
     int32_t tokens[200];
@@ -124,8 +128,7 @@ static void test_ml_cli_train_with_zero_vocab_does_nothing(void) {
      * val_bpb is never populated (silent no-op), or the call returns
      * INVALID_ARGUMENT immediately (gpt_backward rejects the zero-shape
      * grad_tensor). Both are unacceptable. The fix in Task 4 produces neither. */
-    HU_ASSERT(err == HU_ERR_INVALID_ARGUMENT ||
-              (err == HU_OK && result_buggy.val_bpb == 0.0));
+    HU_ASSERT(err == HU_ERR_INVALID_ARGUMENT || (err == HU_OK && result_buggy.val_bpb == 0.0));
 
     cleanup_pipeline(&alloc, &p);
 }
