@@ -1136,6 +1136,14 @@ hu_error_t hu_agent_from_config(
                         hu_error_string(pb_err));
             out->prompt_budget = NULL;
         }
+#if !defined(HU_IS_TEST)
+        /* Seed from the persisted snapshot so the trim policy keeps its
+         * long-run field means across restarts. Missing file (first boot)
+         * is normal; tests restore explicitly via the path override. */
+        else {
+            (void)hu_prompt_budget_restore_snapshot(out->prompt_budget);
+        }
+#endif
     }
 
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
