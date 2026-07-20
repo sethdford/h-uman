@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11539   # locked 2026-07-19 on the MERGED tree: origin's reflection
+CLONE_BASELINE=11542   # locked 2026-07-19 on the MERGED tree: origin's reflection
                        # PATTERN_QUERY_PREFIX dedup (11539) + the new imessage_caps
                        # module (native capability gate, T0.4). That module landed at
                        # +8 and was deduped to +2 across three passes (shared value-line
