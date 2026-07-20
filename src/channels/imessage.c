@@ -4123,6 +4123,82 @@ bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
     return ok;
 }
 
+/* Is `parent_guid` the newest message in its conversation? Tier 1 (Cmd-R =
+ * "Reply to Last Message") threads to whatever is newest in the open chat, so
+ * it is only correct when the parent IS that newest message. Scope by the
+ * parent's OWN chat (via chat_message_join) so this works for both DMs and
+ * groups; `target` is not needed for the query. True iff no message in the same
+ * chat has a higher ROWID. Best-effort: false on any failure (NULL/empty guid,
+ * db unreadable, guid not found) — we prefer the specific-message path over a
+ * possibly-wrong Cmd-R thread. */
+bool hu_imessage_ax_parent_is_last_message(const char *target, size_t target_len,
+                                           const char *parent_guid, size_t parent_guid_len) {
+    (void)target;
+    (void)target_len;
+    if (!parent_guid || parent_guid_len == 0)
+        return false;
+#ifdef HU_ENABLE_SQLITE
+    const char *home = getenv("HOME");
+    if (!home)
+        return false;
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return false;
+
+    char guid_buf[128];
+    size_t glen = parent_guid_len < sizeof(guid_buf) - 1 ? parent_guid_len : sizeof(guid_buf) - 1;
+    memcpy(guid_buf, parent_guid, glen);
+    guid_buf[glen] = '\0';
+
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return false;
+
+    /* Resolve the parent's ROWID and the chat it belongs to. */
+    int64_t parent_rowid = -1;
+    int64_t chat_id = -1;
+    sqlite3_stmt *st = NULL;
+    const char *q1 = "SELECT m.ROWID, cmj.chat_id FROM message m "
+                     "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+                     "WHERE m.guid = ?1 LIMIT 1";
+    if (sqlite3_prepare_v2(db, q1, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, guid_buf, (int)glen, NULL);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            parent_rowid = sqlite3_column_int64(st, 0);
+            chat_id = sqlite3_column_int64(st, 1);
+        }
+        sqlite3_finalize(st);
+    }
+
+    bool is_last = false;
+    if (parent_rowid >= 0 && chat_id >= 0) {
+        /* Any newer message in the same chat? If none, the parent is last. */
+        sqlite3_stmt *st2 = NULL;
+        const char *q2 = "SELECT 1 FROM chat_message_join cmj "
+                         "JOIN message m ON m.ROWID = cmj.message_id "
+                         "WHERE cmj.chat_id = ?1 AND m.ROWID > ?2 LIMIT 1";
+        if (sqlite3_prepare_v2(db, q2, -1, &st2, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(st2, 1, chat_id);
+            sqlite3_bind_int64(st2, 2, parent_rowid);
+            is_last = (sqlite3_step(st2) != SQLITE_ROW); /* no newer row → parent is last */
+            sqlite3_finalize(st2);
+        }
+    }
+    sqlite3_close(db);
+    return is_last;
+#else
+    return false;
+#endif
+}
+#endif /* HU_IMESSAGE_TAPBACK_ENABLED */
+
+/* chat.db read-backs — pure SQLite, NOT Accessibility. Deliberately OUTSIDE
+ * the AX gate above: while trapped inside it these were compiled out of every
+ * shipping build (HU_IMESSAGE_TAPBACK_ENABLED=OFF), so hu_imessage_reply_
+ * verify_threaded always returned false and genuinely threaded bridge replies
+ * were recorded as flat commits (live 2026-07-20). */
+#if defined(__APPLE__) && !HU_IS_TEST
 /* Post-send chat.db threading check. The AX value-inject + Return path can
  * silently commit a FLAT message (reply_to_guid set but thread_originator_guid
  * NULL) because IMCore is entitlement-locked on macOS 26+. The only honest way
@@ -4218,76 +4294,7 @@ int64_t hu_imessage_ax_reply_newest_rowid(void) {
     return 0;
 #endif
 }
-
-/* Is `parent_guid` the newest message in its conversation? Tier 1 (Cmd-R =
- * "Reply to Last Message") threads to whatever is newest in the open chat, so
- * it is only correct when the parent IS that newest message. Scope by the
- * parent's OWN chat (via chat_message_join) so this works for both DMs and
- * groups; `target` is not needed for the query. True iff no message in the same
- * chat has a higher ROWID. Best-effort: false on any failure (NULL/empty guid,
- * db unreadable, guid not found) — we prefer the specific-message path over a
- * possibly-wrong Cmd-R thread. */
-bool hu_imessage_ax_parent_is_last_message(const char *target, size_t target_len,
-                                           const char *parent_guid, size_t parent_guid_len) {
-    (void)target;
-    (void)target_len;
-    if (!parent_guid || parent_guid_len == 0)
-        return false;
-#ifdef HU_ENABLE_SQLITE
-    const char *home = getenv("HOME");
-    if (!home)
-        return false;
-    char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
-    if (n < 0 || (size_t)n >= sizeof(db_path))
-        return false;
-
-    char guid_buf[128];
-    size_t glen = parent_guid_len < sizeof(guid_buf) - 1 ? parent_guid_len : sizeof(guid_buf) - 1;
-    memcpy(guid_buf, parent_guid, glen);
-    guid_buf[glen] = '\0';
-
-    sqlite3 *db = NULL;
-    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
-        return false;
-
-    /* Resolve the parent's ROWID and the chat it belongs to. */
-    int64_t parent_rowid = -1;
-    int64_t chat_id = -1;
-    sqlite3_stmt *st = NULL;
-    const char *q1 = "SELECT m.ROWID, cmj.chat_id FROM message m "
-                     "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
-                     "WHERE m.guid = ?1 LIMIT 1";
-    if (sqlite3_prepare_v2(db, q1, -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_text(st, 1, guid_buf, (int)glen, NULL);
-        if (sqlite3_step(st) == SQLITE_ROW) {
-            parent_rowid = sqlite3_column_int64(st, 0);
-            chat_id = sqlite3_column_int64(st, 1);
-        }
-        sqlite3_finalize(st);
-    }
-
-    bool is_last = false;
-    if (parent_rowid >= 0 && chat_id >= 0) {
-        /* Any newer message in the same chat? If none, the parent is last. */
-        sqlite3_stmt *st2 = NULL;
-        const char *q2 = "SELECT 1 FROM chat_message_join cmj "
-                         "JOIN message m ON m.ROWID = cmj.message_id "
-                         "WHERE cmj.chat_id = ?1 AND m.ROWID > ?2 LIMIT 1";
-        if (sqlite3_prepare_v2(db, q2, -1, &st2, NULL) == SQLITE_OK) {
-            sqlite3_bind_int64(st2, 1, chat_id);
-            sqlite3_bind_int64(st2, 2, parent_rowid);
-            is_last = (sqlite3_step(st2) != SQLITE_ROW); /* no newer row → parent is last */
-            sqlite3_finalize(st2);
-        }
-    }
-    sqlite3_close(db);
-    return is_last;
-#else
-    return false;
 #endif
-}
-#endif /* HU_IMESSAGE_TAPBACK_ENABLED */
 
 /* ── IMCore private framework bridge ────────────────────────────────── */
 static bool imcore_init(hu_imessage_ctx_t *c) {

@@ -143,6 +143,16 @@ int hu_imessage_test_reply_warn_count(void);
  *   Tier 1: Cmd-R on the focused parent row → inline composer → type → send.
  *   Tier 2: AXShowMenu → click "Reply" → inline composer → type → send.
  * Each returns true on success; false to fall through to the next tier. */
+/* chat.db read-backs — pure SQLite, NOT Accessibility. Declared outside the
+ * AX gate: they were previously trapped inside it, so with
+ * HU_IMESSAGE_TAPBACK_ENABLED=OFF (every shipping build) the verifier was
+ * compiled out and every threaded reply was recorded as a flat commit. */
+#if defined(__APPLE__) && !HU_IS_TEST
+bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
+                                          int64_t since_rowid);
+int64_t hu_imessage_ax_reply_newest_rowid(void);
+#endif
+
 #if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
 bool hu_imessage_ax_reply_tier1_cmd_r(const char *target, size_t target_len,
                                       const char *parent_guid, size_t parent_guid_len,
@@ -150,14 +160,6 @@ bool hu_imessage_ax_reply_tier1_cmd_r(const char *target, size_t target_len,
 bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
                                           const char *parent_guid, size_t parent_guid_len,
                                           const char *body, size_t body_len);
-/* Post-send chat.db threading check (production impl). Looks up the first
- * outbound row to `target` with ROWID > since_rowid and returns whether its
- * thread_originator_guid is populated. Best-effort; false on any failure. */
-bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
-                                          int64_t since_rowid);
-/* Production impl of hu_imessage_reply_newest_rowid — SELECT MAX(ROWID) FROM
- * message. Returns the boundary, or 0 on any failure. */
-int64_t hu_imessage_ax_reply_newest_rowid(void);
 /* Production impl of hu_imessage_reply_parent_is_last — chat.db query: is
  * `parent_guid` the newest message in its conversation? True iff no message in
  * the same chat has a higher ROWID. Best-effort: false on any lookup failure
