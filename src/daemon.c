@@ -206,45 +206,8 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 hu_identity_graph_t g_identity_graph;
 bool g_identity_graph_loaded = false;
 
-/* BUG #2: crash-resume outbound reply dedup. Per-contact "highest inbound rowid
- * replied-to" watermark, persisted to ~/.human/reply_dedup.json. Loaded lazily
- * on first use, recorded+saved after each successful reactive send, and checked
- * before processing a batch so a daemon crash between send and poll-watermark
- * persistence doesn't re-reply on restart. */
-static hu_reply_dedup_t g_reply_dedup;
-static bool g_reply_dedup_loaded;
-
-static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
-    int n = snprintf(buf, cap, "%s/.human/reply_dedup.json", home);
-    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
-}
-
-static void daemon_reply_dedup_ensure_loaded(void) {
-    if (g_reply_dedup_loaded)
-        return;
-    g_reply_dedup_loaded = true; /* set first: absent file is fine, don't retry every batch */
-    char path[512];
-    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
-    if (plen)
-        (void)hu_reply_dedup_load(&g_reply_dedup, path, plen);
-}
-
-/* Record that we replied to `rowid` for `chat_id` and persist immediately, so a
- * crash before the next poll-watermark save can't cause a duplicate on restart.
- * Persist is best-effort (a failed save just means at-least-once on that edge). */
-static void daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int64_t rowid) {
-    if (!chat_id || rowid <= 0)
-        return;
-    daemon_reply_dedup_ensure_loaded();
-    hu_reply_dedup_record(&g_reply_dedup, chat_id, chat_id_len, rowid);
-    char path[512];
-    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
-    if (plen)
-        (void)hu_reply_dedup_save(&g_reply_dedup, path, plen);
-}
+/* BUG #2 crash-resume outbound reply dedup:
+ * MOVED TO: src/daemon/reply_dedup.c (process-wide store + mark/check glue) */
 
 /* Sprint B.3 D1 — daemon-loaded autoresponder config.
  *
@@ -4710,9 +4673,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * dropping any newer messages appended to the batch on a
                  * crash-then-restart-with-new-tail replay. */
                 if (msgs[batch_end].message_id > 0) {
-                    daemon_reply_dedup_ensure_loaded();
-                    if (hu_daemon_already_replied(&g_reply_dedup, batch_key, key_len,
-                                                  (int64_t)msgs[batch_end].message_id)) {
+                    if (hu_daemon_reply_dedup_already_replied(
+                            batch_key, key_len, (int64_t)msgs[batch_end].message_id)) {
                         hu_log_info(
                             "human", agent ? agent->observer : NULL,
                             "reply-dedup: already replied to %.*s rowid=%lld — skip (crash replay)",
@@ -11554,8 +11516,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * we just replied to) so the monotonic watermark reflects the
                      * whole batch — matching reply_dedup.h's "highest inbound
                      * rowid replied to" contract and the dedup check above. */
-                    daemon_reply_dedup_mark(batch_key, key_len,
-                                            (int64_t)msgs[batch_end].message_id);
+                    hu_daemon_reply_dedup_mark(batch_key, key_len,
+                                               (int64_t)msgs[batch_end].message_id);
                 }
 
                 /* Store conversation summary as long-term memory */
