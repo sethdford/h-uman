@@ -1236,7 +1236,8 @@ static sqlite3 *imsg_open_user_chatdb(void) {
 /* Run a single-TEXT-column chat.db query bound to one int64 parameter and copy
  * the result into `out`. Shared by every rowid→GUID lookup below so the
  * open/prepare/bind/step/finalize/close boilerplate exists once. */
-static bool imsg_query_text_by_int64(const char *sql, int64_t param, char *out, size_t out_cap) {
+static bool imsg_query_text1(const char *sql, int64_t i64_param, const char *txt_param,
+                             size_t txt_len, char *out, size_t out_cap) {
     if (!sql || !out || out_cap == 0)
         return false;
     out[0] = '\0';
@@ -1246,7 +1247,10 @@ static bool imsg_query_text_by_int64(const char *sql, int64_t param, char *out, 
         return false;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_int64(st, 1, param);
+        if (txt_param)
+            sqlite3_bind_text(st, 1, txt_param, (int)txt_len, SQLITE_STATIC);
+        else
+            sqlite3_bind_int64(st, 1, i64_param);
         if (sqlite3_step(st) == SQLITE_ROW) {
             const char *g = (const char *)sqlite3_column_text(st, 0);
             if (g)
@@ -1256,7 +1260,9 @@ static bool imsg_query_text_by_int64(const char *sql, int64_t param, char *out, 
     }
     sqlite3_close(db);
 #else
-    (void)param;
+    (void)i64_param;
+    (void)txt_param;
+    (void)txt_len;
 #endif
     return out[0] != '\0';
 }
@@ -1267,8 +1273,8 @@ static bool imsg_lookup_guid_for_message_id(hu_imessage_ctx_t *c, int64_t messag
                                             size_t out_cap) {
     if (!c || message_id <= 0)
         return false;
-    return imsg_query_text_by_int64("SELECT guid FROM message WHERE ROWID = ? LIMIT 1", message_id,
-                                    out, out_cap);
+    return imsg_query_text1("SELECT guid FROM message WHERE ROWID = ? LIMIT 1", message_id, NULL, 0,
+                            out, out_cap);
 }
 
 /* Resolve the CHAT guid owning a message ROWID. `imsg tapback|send-rich|edit|
@@ -1278,10 +1284,10 @@ static bool imsg_lookup_chat_guid_for_message_id(hu_imessage_ctx_t *c, int64_t m
                                                  char *out, size_t out_cap) {
     if (!c || message_id <= 0)
         return false;
-    return imsg_query_text_by_int64("SELECT c.guid FROM chat c "
-                                    "JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID "
-                                    "WHERE cmj.message_id = ? LIMIT 1",
-                                    message_id, out, out_cap);
+    return imsg_query_text1("SELECT c.guid FROM chat c "
+                            "JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID "
+                            "WHERE cmj.message_id = ? LIMIT 1",
+                            message_id, NULL, 0, out, out_cap);
 }
 
 #if defined(HU_ENABLE_SQLITE)
@@ -1338,6 +1344,21 @@ static void imsg_lookup_services_for_handle(const char *handle, size_t handle_le
 #endif
 }
 
+/* Resolve a handle (phone/email) to the chat GUID owning its most recent
+ * message — the bridge verbs address chats by GUID. Declared in
+ * human/channels/imessage_schema.h; defined here so it shares the single
+ * chat.db query helper above (clone-ratchet discipline). */
+bool hu_imessage_reply_chat_guid_for_handle(const char *handle, size_t handle_len, char *out,
+                                            size_t out_cap) {
+    if (!handle || handle_len == 0)
+        return false;
+    return imsg_query_text1("SELECT c.guid FROM chat c "
+                            "JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID "
+                            "JOIN message m ON m.ROWID = cmj.message_id "
+                            "WHERE c.chat_identifier = ? ORDER BY m.date DESC LIMIT 1",
+                            0, handle, handle_len, out, out_cap);
+}
+
 /* ── imsg react helper (shared by both tapback-enabled and tapback-disabled paths) ── */
 
 static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction_type_t reaction) {
@@ -1387,10 +1408,7 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
             imsg_lookup_chat_guid_for_message_id(c, message_id, chat_guid, sizeof(chat_guid))) {
             const char *tb_argv[] = {"imsg",   "tapback", "--chat",     chat_guid, "--message",
                                      msg_guid, "--kind",  tapback_name, NULL};
-            hu_run_result_t tbr = {0};
-            hu_error_t tbe = hu_process_run_with_timeout(c->alloc, tb_argv, NULL, 65536, 15, &tbr);
-            bool tbok = (tbe == HU_OK && tbr.success && tbr.exit_code == 0);
-            hu_run_result_free(c->alloc, &tbr);
+            bool tbok = hu_imsg_run_ok(c->alloc, tb_argv, 15);
             if (tbok) {
                 hu_log_info("imessage", NULL, "tapback sent via IMCore bridge (native)");
                 return true;
@@ -1958,11 +1976,22 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
         hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
         imsg_lookup_services_for_handle(tgt, tgt_len, &recent, &handle_svc);
-        if (hu_imessage_blue_verdict(recent, handle_svc) == HU_BLUE_HOLD) {
-            hu_log_warn("imessage", NULL,
-                        "blue_guard: HELD send to %.*s — not iMessage-reachable "
-                        "(recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
-                        (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)recent, (int)handle_svc);
+        /* T0.1b: chat.db only says how this handle routed in the PAST. When the
+         * IMCore bridge is live, ask Apple the current question directly and
+         * let that answer win; an unavailable/failed lookup returns
+         * INDETERMINATE and falls back to the chat.db inference above. */
+        hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
+        const hu_imessage_caps_t *caps = imsg_caps_cached(c);
+        if (caps && caps->advanced)
+            live = hu_imessage_whois_probe_cached(c->alloc, tgt, tgt_len);
+        const bool whois_negative_binds = getenv("HU_IMESSAGE_WHOIS_STRICT") != NULL;
+        if (hu_imessage_blue_verdict_live(live, recent, handle_svc, whois_negative_binds) ==
+            HU_BLUE_HOLD) {
+            hu_log_warn(
+                "imessage", NULL,
+                "blue_guard: HELD send to %.*s — not iMessage-reachable "
+                "(whois=%d recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
+                (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)live, (int)recent, (int)handle_svc);
             return HU_ERR_NOT_SUPPORTED;
         }
     }

@@ -900,6 +900,7 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         size_t body_len;
         bool apply_safety;
     } fields[] = {
+        {"situation", inputs->situation_context, inputs->situation_context_len, false},
         {"memory", inputs->memory_context, inputs->memory_context_len, true},
         {"weather", inputs->weather_context, inputs->weather_context_len, false},
         {"calendar", inputs->calendar_context, inputs->calendar_context_len, false},

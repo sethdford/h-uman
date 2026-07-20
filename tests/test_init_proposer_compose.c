@@ -26,6 +26,7 @@ static void compose_empty_inputs_emits_header_and_question(void) {
     /* Final question line. */
     HU_ASSERT(strstr(buf, "Should h-uman send Seth a message right now?") != NULL);
     /* NO content labels — all fields empty. */
+    HU_ASSERT_NULL(strstr(buf, "--- situation ---"));
     HU_ASSERT_NULL(strstr(buf, "--- memory ---"));
     HU_ASSERT_NULL(strstr(buf, "--- weather ---"));
     HU_ASSERT_NULL(strstr(buf, "--- calendar ---"));
@@ -135,6 +136,48 @@ static void compose_safe_memory_passes_through_when_predicate_accepts(void) {
     char buf[1024] = {0};
     (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
     HU_ASSERT(strstr(buf, "--- memory ---\nalice's birthday is friday") != NULL);
+}
+
+/* ── 5b. Situation frame (2026-07-19 decline-starvation fix) ────────── */
+
+static void compose_situation_renders_before_memory(void) {
+    /* The daemon's composed proactive directive (silence duration, event
+     * triggers) is the model's reason-to-send; it must render, and render
+     * BEFORE memory so triggers frame the recalled fragments. */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.situation_context = "It's been 3 days since you talked to alice";
+    inputs.situation_context_len = strlen(inputs.situation_context);
+    inputs.memory_context = "alice's birthday is friday";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    char *situation_pos = strstr(buf, "--- situation ---\nIt's been 3 days since you talked");
+    char *memory_pos = strstr(buf, "--- memory ---");
+    HU_ASSERT_NOT_NULL(situation_pos);
+    HU_ASSERT_NOT_NULL(memory_pos);
+    HU_ASSERT(situation_pos < memory_pos);
+}
+
+static void compose_situation_not_gated_by_safety_predicate(void) {
+    /* content_is_safe gates recalled memory only. The situation frame is
+     * daemon-authored template text — a rejecting predicate must drop
+     * memory yet leave the situation rendered, or a strict predicate
+     * would re-starve the proposer back to empty briefings. */
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.situation_context = "quiet for 5 days";
+    inputs.situation_context_len = strlen(inputs.situation_context);
+    inputs.memory_context = "I am lonely tonight";
+    inputs.memory_context_len = strlen(inputs.memory_context);
+    inputs.content_is_safe = always_unsafe;
+
+    char buf[1024] = {0};
+    (void)hu_init_proposer_build_propose_user_message_ex(&inputs, 0, 0, buf, sizeof(buf));
+    HU_ASSERT(strstr(buf, "--- situation ---\nquiet for 5 days") != NULL);
+    HU_ASSERT_NULL(strstr(buf, "--- memory ---"));
+    HU_ASSERT_NULL(strstr(buf, "I am lonely tonight"));
 }
 
 /* ── 6. NULL safety + zero-cap ──────────────────────────────────────── */
@@ -368,6 +411,8 @@ void run_init_proposer_compose_tests(void) {
     HU_RUN_TEST(compose_partial_fields_renders_only_present_labels);
     HU_RUN_TEST(compose_unsafe_memory_filtered_when_predicate_rejects);
     HU_RUN_TEST(compose_safe_memory_passes_through_when_predicate_accepts);
+    HU_RUN_TEST(compose_situation_renders_before_memory);
+    HU_RUN_TEST(compose_situation_not_gated_by_safety_predicate);
     HU_RUN_TEST(compose_returns_zero_for_null_or_zero_cap);
     HU_RUN_TEST(compose_truncates_safely_on_small_buffer);
     HU_RUN_TEST(compose_identity_block_renders_before_content);
