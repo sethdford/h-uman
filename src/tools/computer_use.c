@@ -1,13 +1,14 @@
 /* computer_use — macOS screen control via CoreGraphics (screenshot, click, type, scroll, keys). */
 #include "human/tools/computer_use.h"
-#include "human/tools/visual_grounding.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
 #include "human/tool.h"
 #include "human/tools/validation.h"
+#include "human/tools/visual_grounding.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,21 +20,25 @@
 #if defined(__APPLE__) && !defined(HU_IS_TEST)
 #include "human/core/process_util.h"
 #include <CoreGraphics/CoreGraphics.h>
-#include <ImageIO/ImageIO.h>
 #include <dlfcn.h>
+#include <ImageIO/ImageIO.h>
 #include <unistd.h>
 #endif
 
-#define HU_CU_NAME        "computer_use"
-#define HU_CU_TEXT_MAX    4096
-#define HU_CU_COMBO_MAX   128
+#define HU_CU_NAME      "computer_use"
+#define HU_CU_TEXT_MAX  4096
+#define HU_CU_COMBO_MAX 128
 
-#define HU_CU_PARAMS                                                                               \
-    "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"screenshot\"," \
-    "\"click\",\"type\",\"scroll\",\"key\"]},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"}," \
-    "\"target\":{\"type\":\"string\",\"description\":\"Natural language description of UI element " \
-    "to interact with (uses vision to locate)\"}," \
-    "\"text\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"delta\":{\"type\":\"number\"}," \
+#define HU_CU_PARAMS                                                                          \
+    "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":["         \
+    "\"screenshot\","                                                                         \
+    "\"click\",\"type\",\"scroll\",\"key\"]},\"x\":{\"type\":\"number\"},\"y\":{\"type\":"    \
+    "\"number\"},"                                                                            \
+    "\"target\":{\"type\":\"string\",\"description\":\"Natural language description of UI "   \
+    "element "                                                                                \
+    "to interact with (uses vision to locate)\"},"                                            \
+    "\"text\":{\"type\":\"string\"},\"direction\":{\"type\":\"string\"},\"delta\":{\"type\":" \
+    "\"number\"},"                                                                            \
     "\"combo\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"}},\"required\":[\"action\"]}"
 
 typedef struct hu_computer_use_ctx {
@@ -51,8 +56,7 @@ static bool cu_autonomy_allows(hu_computer_use_ctx_t *c) {
 }
 #endif
 
-__attribute__((unused))
-static char *cu_dup_json(hu_allocator_t *alloc, const char *s, size_t len) {
+__attribute__((unused)) static char *cu_dup_json(hu_allocator_t *alloc, const char *s, size_t len) {
     char *p = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!p)
         return NULL;
@@ -113,10 +117,12 @@ static CGImageRef cu_try_cg_window_capture(void) {
     }
     if (!impl)
         return NULL;
-    return impl(CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGNullWindowID, kCGWindowImageDefault);
+    return impl(CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGNullWindowID,
+                kCGWindowImageDefault);
 }
 
-static bool cu_screencapture_to_path(hu_allocator_t *alloc, hu_computer_use_ctx_t *c, const char *path) {
+static bool cu_screencapture_to_path(hu_allocator_t *alloc, hu_computer_use_ctx_t *c,
+                                     const char *path) {
     const char *argv[6];
     argv[0] = "screencapture";
     argv[1] = "-x";
@@ -231,7 +237,8 @@ static bool cu_parse_combo(const char *combo, CGEventFlags *out_flags, CGKeyCode
         cu_trim_inplace(t);
         if (!t[0])
             continue;
-        if (strcasecmp(t, "cmd") == 0 || strcasecmp(t, "command") == 0 || strcasecmp(t, "meta") == 0) {
+        if (strcasecmp(t, "cmd") == 0 || strcasecmp(t, "command") == 0 ||
+            strcasecmp(t, "meta") == 0) {
             flags |= kCGEventFlagMaskCommand;
             continue;
         }
@@ -273,8 +280,8 @@ static void cu_post_key_combo(CGKeyCode kc, CGEventFlags flags) {
     }
 }
 
-static hu_error_t cu_mac_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx_t *c, const char *path,
-                                    hu_tool_result_t *out) {
+static hu_error_t cu_mac_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx_t *c,
+                                    const char *path, hu_tool_result_t *out) {
     CGImageRef img = cu_try_cg_window_capture();
 
     CFMutableDataRef data = CFDataCreateMutable(kCFAllocatorDefault, 0);
@@ -460,7 +467,8 @@ static hu_error_t cu_mac_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx_t
 static hu_error_t cu_mac_click(hu_allocator_t *alloc, double x, double y, hu_tool_result_t *out) {
     cu_clamp_pointer_coords(&x, &y);
     CGPoint point = CGPointMake((CGFloat)x, (CGFloat)y);
-    CGEventRef down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGMouseButtonLeft);
+    CGEventRef down =
+        CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGMouseButtonLeft);
     CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, kCGMouseButtonLeft);
     if (down)
         CGEventPost(kCGHIDEventTap, down);
@@ -484,10 +492,10 @@ static hu_error_t cu_mac_click(hu_allocator_t *alloc, double x, double y, hu_too
 #if defined(__linux__) && !defined(HU_IS_TEST) && defined(HU_HAS_X11) && HU_HAS_X11
 
 #include "human/core/process_util.h"
-#include <X11/Xlib.h>
-#include <X11/extensions/XTest.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <X11/extensions/XTest.h>
+#include <X11/Xlib.h>
 
 static bool cu_linux_png_nonempty(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -525,42 +533,29 @@ static bool cu_linux_try_screenshot_cmd(hu_allocator_t *alloc, hu_security_polic
     return ok3 && cu_linux_png_nonempty(path);
 }
 
-static hu_error_t cu_linux_read_png_file(hu_allocator_t *alloc, const char *path, unsigned char **out,
-                                         size_t *out_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f)
+/* Reads the whole PNG into a buffer; caller frees with *out_len + 1 (the
+ * hu_file_slurp NUL terminator). Missing/empty/oversize files all map to
+ * HU_ERR_IO to preserve the original single-error contract. */
+static hu_error_t cu_linux_read_png_file(hu_allocator_t *alloc, const char *path,
+                                         unsigned char **out, size_t *out_len) {
+    char *data = NULL;
+    size_t len = 0;
+    hu_error_t err = hu_file_slurp(alloc, path, (size_t)(16u * 1024u * 1024u), &data, &len);
+    if (err == HU_ERR_OUT_OF_MEMORY)
+        return err;
+    if (err != HU_OK)
         return HU_ERR_IO;
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    long sz = ftell(f);
-    if (sz <= 0 || sz > (long)(16u * 1024u * 1024u)) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
+    if (len == 0) { /* slurp accepts empty files; a 0-byte PNG is a failed capture */
+        alloc->free(alloc->ctx, data, 1);
         return HU_ERR_IO;
     }
-    unsigned char *buf = (unsigned char *)alloc->alloc(alloc->ctx, (size_t)sz);
-    if (!buf) {
-        fclose(f);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
-        fclose(f);
-        alloc->free(alloc->ctx, buf, (size_t)sz);
-        return HU_ERR_IO;
-    }
-    fclose(f);
-    *out = buf;
-    *out_len = (size_t)sz;
+    *out = (unsigned char *)data;
+    *out_len = len;
     return HU_OK;
 }
 
-static hu_error_t cu_linux_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx_t *c, const char *path,
-                                      hu_tool_result_t *out) {
+static hu_error_t cu_linux_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx_t *c,
+                                      const char *path, hu_tool_result_t *out) {
     if (path && path[0]) {
         if (!cu_path_json_safe(path)) {
             *out = hu_tool_result_fail("path contains invalid characters", 31);
@@ -603,7 +598,7 @@ static hu_error_t cu_linux_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx
         (void)unlink(tmpl);
     if (rr != HU_OK || !raw) {
         if (raw)
-            alloc->free(alloc->ctx, raw, raw_len);
+            alloc->free(alloc->ctx, raw, raw_len + 1);
         *out = hu_tool_result_fail("screenshot read failed", 22);
         return HU_OK;
     }
@@ -611,7 +606,7 @@ static hu_error_t cu_linux_screenshot(hu_allocator_t *alloc, hu_computer_use_ctx
     char *b64 = NULL;
     size_t b64_len = 0;
     hu_error_t enc = hu_multimodal_encode_base64(alloc, raw, raw_len, &b64, &b64_len);
-    alloc->free(alloc->ctx, raw, raw_len);
+    alloc->free(alloc->ctx, raw, raw_len + 1);
     if (enc != HU_OK || !b64) {
         if (b64)
             alloc->free(alloc->ctx, b64, b64_len + 1);
@@ -695,8 +690,8 @@ static hu_error_t cu_linux_click(hu_allocator_t *alloc, double x, double y, hu_t
     return HU_OK;
 }
 
-static hu_error_t cu_linux_type(hu_allocator_t *alloc, hu_security_policy_t *policy, const char *text,
-                                hu_tool_result_t *out) {
+static hu_error_t cu_linux_type(hu_allocator_t *alloc, hu_security_policy_t *policy,
+                                const char *text, hu_tool_result_t *out) {
     const char *const argv[] = {"xdotool", "type", "--clearmodifiers", "--", text, NULL};
     hu_run_result_t run = {0};
     hu_error_t e = hu_process_run_with_policy(alloc, argv, NULL, 4096, policy, &run);
@@ -748,8 +743,8 @@ static hu_error_t cu_linux_scroll(hu_allocator_t *alloc, double x, double y, int
 
 #endif /* linux && X11 */
 
-static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
-                                       hu_tool_result_t *out) {
+static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc,
+                                       const hu_json_value_t *args, hu_tool_result_t *out) {
     hu_computer_use_ctx_t *c = (hu_computer_use_ctx_t *)ctx;
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -766,8 +761,9 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         return HU_OK;
     }
     if (strcmp(action, "screenshot") == 0) {
-        const char *mock =
-            "{\"format\":\"png\",\"base64\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==\"}";
+        const char *mock = "{\"format\":\"png\",\"base64\":"
+                           "\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEh"
+                           "QGAhKmMIQAAAABJRU5ErkJggg==\"}";
         size_t mlen = strlen(mock);
         char *copy = cu_dup_json(alloc, mock, mlen);
         if (!copy) {
@@ -788,8 +784,8 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         }
         if (tlen > 0) {
             double gx = 0, gy = 0;
-            hu_error_t ge = hu_visual_ground_action(alloc, NULL, NULL, 0, "mock.png", 9, target, tlen,
-                                                    &gx, &gy, NULL, NULL);
+            hu_error_t ge = hu_visual_ground_action(alloc, NULL, NULL, 0, "mock.png", 9, target,
+                                                    tlen, &gx, &gy, NULL, NULL);
             if (ge == HU_OK && gx >= 0.0 && gy >= 0.0) {
                 x = gx;
                 y = gy;
@@ -801,8 +797,9 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         }
         char *copy = NULL;
         if (tlen > 0) {
-            copy = hu_sprintf(alloc, "{\"success\":true,\"via_visual_grounding\":true,\"x\":%.0f,"
-                                     "\"y\":%.0f}",
+            copy = hu_sprintf(alloc,
+                              "{\"success\":true,\"via_visual_grounding\":true,\"x\":%.0f,"
+                              "\"y\":%.0f}",
                               x, y);
         } else {
             copy = cu_dup_json(alloc, "{\"success\":true}", 16);
@@ -814,7 +811,8 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         *out = hu_tool_result_ok_owned(copy, strlen(copy));
         return HU_OK;
     }
-    if (strcmp(action, "type") == 0 || strcmp(action, "scroll") == 0 || strcmp(action, "key") == 0) {
+    if (strcmp(action, "type") == 0 || strcmp(action, "scroll") == 0 ||
+        strcmp(action, "key") == 0) {
         char *copy = cu_dup_json(alloc, "{\"success\":true}", 16);
         if (!copy) {
             *out = hu_tool_result_fail("out of memory", 13);
@@ -860,9 +858,10 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         if (tlen > 0) {
             if (!c->ground_provider) {
                 if (x == 0.0 && y == 0.0) {
-                    *out = hu_tool_result_fail("visual grounding requires provider binding or explicit "
-                                               "coordinates",
-                                               58);
+                    *out = hu_tool_result_fail(
+                        "visual grounding requires provider binding or explicit "
+                        "coordinates",
+                        58);
                     return HU_OK;
                 }
             } else {
@@ -909,7 +908,7 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
             return HU_OK;
         }
         CFStringRef str = CFStringCreateWithBytes(kCFAllocatorDefault, (const UInt8 *)text,
-                                                    (CFIndex)tlen, kCFStringEncodingUTF8, false);
+                                                  (CFIndex)tlen, kCFStringEncodingUTF8, false);
         if (!str) {
             *out = hu_tool_result_fail("text encode failed", 18);
             return HU_OK;
@@ -1030,9 +1029,10 @@ static hu_error_t computer_use_execute(void *ctx, hu_allocator_t *alloc, const h
         if (tlen > 0) {
             if (!c->ground_provider) {
                 if (x == 0.0 && y == 0.0) {
-                    *out = hu_tool_result_fail("visual grounding requires provider binding or explicit "
-                                               "coordinates",
-                                               58);
+                    *out = hu_tool_result_fail(
+                        "visual grounding requires provider binding or explicit "
+                        "coordinates",
+                        58);
                     return HU_OK;
                 }
             } else {
@@ -1156,7 +1156,8 @@ static const char *computer_use_name(void *ctx) {
 }
 static const char *computer_use_description(void *ctx) {
     (void)ctx;
-    return "Control the desktop: macOS (CoreGraphics) or Linux with X11 — screenshot (PNG base64 or "
+    return "Control the desktop: macOS (CoreGraphics) or Linux with X11 — screenshot (PNG base64 "
+           "or "
            "file), click, type, scroll, key combos (key macOS-only).";
 }
 static const char *computer_use_parameters_json(void *ctx) {
@@ -1178,7 +1179,8 @@ static const hu_tool_vtable_t computer_use_vtable = {
     .deinit = computer_use_deinit,
 };
 
-hu_error_t hu_computer_use_create(hu_allocator_t *alloc, hu_security_policy_t *policy, hu_tool_t *out) {
+hu_error_t hu_computer_use_create(hu_allocator_t *alloc, hu_security_policy_t *policy,
+                                  hu_tool_t *out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
     hu_computer_use_ctx_t *ctx =
