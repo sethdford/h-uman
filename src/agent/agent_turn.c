@@ -778,7 +778,18 @@ static void *dag_parallel_worker(void *arg) {
 
     dag_tool = hu_agent_internal_find_tool(w->agent, node->tool_name,
                                            node->tool_name ? strlen(node->tool_name) : 0);
+
+    /* Serialize the security gate (hooks/policy are not thread-safe). */
+    hu_tool_result_t dag_result = {0};
+    hu_tool_gate_t gate = HU_TOOL_GATE_DENY;
+    if (dag_tool && dag_tool->vtable && node->tool_name) {
+        const char *gate_args = use_args ? use_args : "";
+        gate =
+            hu_agent_internal_pre_execute_checks(w->agent, node->tool_name, strlen(node->tool_name),
+                                                 gate_args, strlen(gate_args), &dag_result);
+    }
     pthread_mutex_unlock(&g_dag_parallel_prep_mutex);
+
     if (!dag_tool || !dag_tool->vtable) {
         node->status = HU_DAG_FAILED;
         if (resolved_args)
@@ -786,7 +797,19 @@ static void *dag_parallel_worker(void *arg) {
         return NULL;
     }
 
-    hu_tool_result_t dag_result = hu_tool_result_fail("invalid", 7);
+    if (gate != HU_TOOL_GATE_ALLOW) {
+        node->status = HU_DAG_FAILED;
+        pthread_mutex_lock(&g_dag_parallel_prep_mutex);
+        hu_agent_internal_post_hook_fire(w->agent, node->tool_name, strlen(node->tool_name),
+                                         use_args ? use_args : "", use_args ? strlen(use_args) : 0,
+                                         &dag_result);
+        pthread_mutex_unlock(&g_dag_parallel_prep_mutex);
+        hu_tool_result_free(w->agent->alloc, &dag_result);
+        if (resolved_args)
+            w->agent->alloc->free(w->agent->alloc->ctx, resolved_args, resolved_len + 1);
+        return NULL;
+    }
+
     hu_json_value_t *dag_args = NULL;
     if (use_args) {
         hu_error_t jerr = hu_json_parse(w->agent->alloc, use_args, strlen(use_args), &dag_args);
@@ -797,9 +820,18 @@ static void *dag_parallel_worker(void *arg) {
         if (node->tool_name)
             hu_agent_turn_state_track_tool(w->agent, node->tool_name, strlen(node->tool_name));
         dag_tool->vtable->execute(dag_tool->ctx, w->agent->alloc, dag_args, &dag_result);
+    } else if (!dag_args) {
+        dag_result = hu_tool_result_fail("invalid", 7);
     }
     if (dag_args)
         hu_json_free(w->agent->alloc, dag_args);
+
+    pthread_mutex_lock(&g_dag_parallel_prep_mutex);
+    hu_agent_internal_post_hook_fire(
+        w->agent, node->tool_name, node->tool_name ? strlen(node->tool_name) : 0,
+        use_args ? use_args : "", use_args ? strlen(use_args) : 0, &dag_result);
+    pthread_mutex_unlock(&g_dag_parallel_prep_mutex);
+
     if (resolved_args)
         w->agent->alloc->free(w->agent->alloc->ctx, resolved_args, resolved_len + 1);
 
@@ -6242,6 +6274,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                            agent->tools_count, agent->policy, agent->observer);
                 if (hxe == HU_OK) {
                     agent_turn_hula_exec_bind_spawn(agent, &hx, &hula_spawn_tpl);
+                    hu_hula_exec_set_security_agent(&hx, agent);
                     if (agent->infra.idempotency_registry) {
                         hu_hula_exec_set_idempotency_registry(&hx,
                                                               agent->infra.idempotency_registry);
@@ -8762,8 +8795,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                 ? resolved_len
                                                 : (node->args_json ? strlen(node->args_json) : 0);
 
-                                        hu_tool_result_t dag_result =
-                                            hu_tool_result_fail("invalid", 7);
+                                        hu_tool_result_t dag_result = {0};
+                                        const char *gate_args = args_str ? args_str : "";
+                                        size_t gate_args_len = args_str ? args_len : 0;
+                                        hu_tool_gate_t gate = hu_agent_internal_pre_execute_checks(
+                                            agent, node->tool_name,
+                                            node->tool_name ? strlen(node->tool_name) : 0,
+                                            gate_args, gate_args_len, &dag_result);
+                                        if (gate != HU_TOOL_GATE_ALLOW) {
+                                            node->status = HU_DAG_FAILED;
+                                            hu_agent_internal_post_hook_fire(
+                                                agent, node->tool_name,
+                                                node->tool_name ? strlen(node->tool_name) : 0,
+                                                gate_args, gate_args_len, &dag_result);
+                                            hu_tool_result_free(agent->alloc, &dag_result);
+                                            if (resolved_args)
+                                                hu_str_free(agent->alloc, resolved_args);
+                                            continue;
+                                        }
+
                                         hu_json_value_t *dag_args = NULL;
                                         if (args_str && args_len > 0) {
                                             hu_error_t jerr = hu_json_parse(agent->alloc, args_str,
@@ -8780,11 +8830,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                     strlen(node->tool_name));
                                             dag_tool->vtable->execute(dag_tool->ctx, agent->alloc,
                                                                       dag_args, &dag_result);
+                                        } else if (!dag_args) {
+                                            dag_result = hu_tool_result_fail("invalid", 7);
                                         }
                                         if (dag_args)
                                             hu_json_free(agent->alloc, dag_args);
                                         if (resolved_args)
                                             hu_str_free(agent->alloc, resolved_args);
+                                        hu_agent_internal_post_hook_fire(
+                                            agent, node->tool_name,
+                                            node->tool_name ? strlen(node->tool_name) : 0,
+                                            gate_args, gate_args_len, &dag_result);
                                         if (dag_result.success) {
                                             node->status = HU_DAG_DONE;
                                             dag_executed = true;
@@ -9108,6 +9164,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 if (herr == HU_OK) {
                                     agent_turn_hula_exec_bind_spawn(agent, &hula_exec,
                                                                     &hula_spawn_tpl);
+                                    hu_hula_exec_set_security_agent(&hula_exec, agent);
                                     herr = hu_hula_exec_run(&hula_exec);
                                     if (herr == HU_OK) {
                                         size_t trl = 0;
@@ -9283,9 +9340,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             }
                         }
 
-                        /* SECURITY FIX: Pre-check permissions and pre-hooks BEFORE dispatching.
-                         * Build a whitelist of tools allowed to execute. Tools denied by
-                         * permissions or pre-hooks will get failure results instead. */
+                        /* SECURITY: Full pre-execute envelope BEFORE dispatching.
+                         * Build a whitelist of tools allowed to execute. */
                         dispatch_allowed = (bool *)agent->alloc->alloc(
                             agent->alloc->ctx, dispatch_count * sizeof(bool));
                         if (dispatch_allowed) {
@@ -9300,33 +9356,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     memcpy(dn_buf, dcall->name, dn);
                                 dn_buf[dn] = '\0';
 
-                                /* 1. Permission tier check FIRST */
-                                {
-                                    hu_permission_level_t dreq =
-                                        hu_permission_get_tool_level(dn_buf);
-                                    if (!hu_permission_check(agent->permission_level, dreq)) {
-                                        dispatch_allowed[dci] = false;
-                                        hu_permission_reset_escalation(agent);
-                                        continue;
-                                    }
-                                }
-
-                                /* 2. Pre-hook pipeline SECOND (centralized via
-                                 *    hu_agent_internal_pre_hook_check). On DENY we mark the
-                                 *    dispatcher slot disallowed and free the scratch result; the
-                                 *    real result slot is populated by the post-dispatch loop. */
-                                {
-                                    const char *dargs_str =
-                                        dcall->arguments ? dcall->arguments : "";
-                                    hu_tool_result_t pre_scratch = {0};
-                                    bool dproceed = hu_agent_internal_pre_hook_check(
-                                        agent, dn_buf, dn, dargs_str, strlen(dargs_str),
-                                        &pre_scratch);
-                                    if (!dproceed) {
-                                        dispatch_allowed[dci] = false;
-                                        hu_tool_result_free(agent->alloc, &pre_scratch);
-                                        continue;
-                                    }
+                                const char *dargs_str = dcall->arguments ? dcall->arguments : "";
+                                hu_tool_result_t pre_scratch = {0};
+                                hu_tool_gate_t dgate = hu_agent_internal_pre_execute_checks(
+                                    agent, dn_buf, dn, dargs_str, strlen(dargs_str), &pre_scratch);
+                                if (dgate != HU_TOOL_GATE_ALLOW) {
+                                    dispatch_allowed[dci] = false;
+                                    hu_tool_result_free(agent->alloc, &pre_scratch);
+                                    continue;
                                 }
 
                                 dispatch_allowed_count++;
@@ -9391,103 +9428,41 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             tn_buf[tn] = '\0';
                             const char *args_str = call->arguments ? call->arguments : "";
 
-                            /* SECURITY FIX: Permission and pre-hook checks are done PRE-dispatch.
-                             */
+                            /* SECURITY: slots denied by the pre-dispatch envelope never
+                             * executed — populate the deny/approval result here. */
+                            bool slot_allowed = true;
                             if (dispatch_allowed && ttl_hit_count == 0 && tc < tc_count) {
-                                if (!dispatch_allowed[tc]) {
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail("denied by security policy", 25);
-                                    goto dispatch_tool_done;
-                                }
+                                slot_allowed = dispatch_allowed[tc];
                             } else if (dispatch_allowed && ttl_hit_count > 0) {
-                                bool found_allowed = false;
+                                slot_allowed = false;
                                 if (filtered_map) {
                                     for (size_t mi = 0; mi < uncached_count; mi++) {
                                         if (filtered_map[mi] == tc) {
-                                            if (dispatch_allowed[mi])
-                                                found_allowed = true;
+                                            slot_allowed = dispatch_allowed[mi];
                                             break;
                                         }
                                     }
-                                } else {
-                                    if (tc < dispatch_count && dispatch_allowed[tc])
-                                        found_allowed = true;
-                                }
-                                if (!found_allowed) {
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail("denied by security policy", 25);
-                                    goto dispatch_tool_done;
+                                } else if (tc < dispatch_count) {
+                                    slot_allowed = dispatch_allowed[tc];
                                 }
                             }
-
-                            {
-                                hu_permission_level_t required =
-                                    hu_permission_get_tool_level(tn_buf);
-                                if (!hu_permission_check(agent->permission_level, required)) {
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail("denied by security policy", 25);
-                                    goto dispatch_tool_done;
-                                }
-                            }
-
-                            /* Pre-hook pipeline (centralized via hu_agent_internal_pre_hook_check).
-                             * Note: *result already holds the dispatcher's output. We can't
-                             * pass it directly because the helper would overwrite on DENY and
-                             * leak the prior payload. Use a scratch result; if denied, free the
-                             * prior *result and move the scratch into place. */
-                            {
-                                hu_tool_result_t pre_scratch = {0};
-                                bool proceed = hu_agent_internal_pre_hook_check(
-                                    agent, tn_buf, tn, args_str, strlen(args_str), &pre_scratch);
-                                if (!proceed) {
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = pre_scratch;
-                                    goto dispatch_tool_done;
-                                }
-                                /* Proceeded: helper did NOT touch pre_scratch (no registry or
-                                 * ALLOW), so nothing to free. */
-                            }
-
-                            /* ESCALATE enforcement: check approval matrix */
-                            if (agent->sota.escalate_protocol.rule_count > 0) {
-                                hu_escalate_level_t esc_level = hu_escalate_evaluate(
-                                    &agent->sota.escalate_protocol, tn_buf, tn);
-                                if (esc_level == HU_ESCALATE_DENY) {
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail("blocked by ESCALATE policy", 26);
-                                    if (agent->audit_logger)
-                                        hu_escalate_log_decision(agent->audit_logger, tn_buf,
-                                                                 esc_level, false);
-                                } else if (esc_level == HU_ESCALATE_APPROVE) {
-                                    result->needs_approval = true;
-                                    if (agent->audit_logger)
-                                        hu_escalate_log_decision(agent->audit_logger, tn_buf,
-                                                                 esc_level, false);
-                                }
-                            }
-
-                            /* Policy evaluation (dispatcher path) */
-                            hu_policy_action_t pa = hu_agent_internal_evaluate_tool_policy(
-                                agent, tn_buf[0] ? tn_buf : "unknown", args_str);
-                            if (pa == HU_POLICY_DENY) {
-                                if (agent->audit_logger) {
-                                    hu_audit_event_t aev;
-                                    hu_audit_event_init(&aev, HU_AUDIT_POLICY_VIOLATION);
-                                    hu_audit_event_with_identity(
-                                        &aev, agent->agent_id,
-                                        agent->model_name ? agent->model_name : "unknown", NULL);
-                                    hu_audit_event_with_action(&aev, tn_buf[0] ? tn_buf : "unknown",
-                                                               "denied", false, false);
-                                    hu_audit_logger_log(agent->audit_logger, &aev);
-                                }
+                            if (!slot_allowed) {
+                                hu_tool_result_t gate_out = {0};
+                                hu_tool_gate_t g = hu_agent_internal_pre_execute_checks(
+                                    agent, tn_buf, tn, args_str, strlen(args_str), &gate_out);
                                 hu_tool_result_free(agent->alloc, result);
-                                *result = hu_tool_result_fail("denied by policy", 16);
-                            } else if (pa == HU_POLICY_REQUIRE_APPROVAL) {
-                                result->needs_approval = true;
+                                *result = gate_out;
+                                /* NEED_APPROVAL falls through to approval_cb handling below;
+                                 * hard DENY short-circuits after post-hook. */
+                                if (g != HU_TOOL_GATE_NEED_APPROVAL && !result->needs_approval) {
+                                    hu_agent_internal_post_hook_fire(agent, tn_buf, tn, args_str,
+                                                                     strlen(args_str), result);
+                                    goto dispatch_tool_done;
+                                }
                             }
 
                             /* CausalArmor: check causal attribution for high-risk tools */
-                            if (pa != HU_POLICY_DENY && result->success &&
+                            if (result->success &&
                                 hu_tool_risk_level(tn_buf[0] ? tn_buf : "unknown") >=
                                     HU_RISK_HIGH) {
                                 hu_causal_armor_config_t ca_cfg;
@@ -9522,7 +9497,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             }
 
                             /* Interaction-history safety scorer (post-CausalArmor) */
-                            if (pa != HU_POLICY_DENY && result->success &&
+                            if (result->success &&
                                 hu_tool_risk_level(tn_buf[0] ? tn_buf : "unknown") >=
                                     HU_RISK_MEDIUM) {
                                 hu_tool_history_entry_t thist[16];
@@ -9905,74 +9880,38 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 continue;
                             }
 
-                            /* Permission tier check (sequential path) */
-                            {
-                                hu_permission_level_t seq_req =
-                                    hu_permission_get_tool_level(pol_tn);
-                                if (!hu_permission_check(agent->permission_level, seq_req)) {
-                                    hu_tool_result_t perm_fail =
-                                        hu_tool_result_fail("insufficient permission", 23);
-                                    const char *pf_content = perm_fail.error_msg;
-                                    size_t pf_len = perm_fail.error_msg_len;
-                                    hu_agent_internal_append_history(
-                                        agent, HU_ROLE_TOOL, pf_content, pf_len, call->name,
-                                        call->name_len, call->id, call->id_len);
-                                    hu_permission_reset_escalation(agent);
-                                    continue;
-                                }
-                            }
-
-                            /* Pre-hook pipeline (sequential path, centralized via
-                             * hu_agent_internal_pre_hook_check). On DENY: append the deny
-                             * message to history AND fire the post-hook so auditors observe
-                             * the blocked attempt, then skip to next tool call. */
-                            {
-                                const char *pre_hook_args = call->arguments ? call->arguments : "";
-                                hu_tool_result_t pre_scratch = {0};
-                                bool seq_proceed = hu_agent_internal_pre_hook_check(
-                                    agent, pol_tn, pol_tn_len, pre_hook_args, strlen(pre_hook_args),
-                                    &pre_scratch);
-                                if (!seq_proceed) {
-                                    const char *dm = pre_scratch.error_msg ? pre_scratch.error_msg
-                                                                           : "denied by hook";
-                                    size_t dl =
-                                        pre_scratch.error_msg ? pre_scratch.error_msg_len : 14;
-                                    hu_agent_internal_append_history(agent, HU_ROLE_TOOL, dm, dl,
-                                                                     call->name, call->name_len,
-                                                                     call->id, call->id_len);
-                                    /* Post-hook fires even on deny per AC-3 contract. */
-                                    hu_agent_internal_post_hook_fire(
-                                        agent, pol_tn, pol_tn_len, pre_hook_args,
-                                        strlen(pre_hook_args), &pre_scratch);
-                                    hu_tool_result_free(agent->alloc, &pre_scratch);
-                                    continue;
-                                }
-                            }
-
-                            hu_policy_action_t pa = hu_agent_internal_evaluate_tool_policy(
-                                agent, pol_tn, call->arguments ? call->arguments : "");
+                            /* Full pre-execute envelope (sequential path). */
+                            const char *pre_hook_args = call->arguments ? call->arguments : "";
+                            hu_tool_result_t result = {0};
+                            hu_tool_gate_t seq_gate = hu_agent_internal_pre_execute_checks(
+                                agent, pol_tn, pol_tn_len, pre_hook_args, strlen(pre_hook_args),
+                                &result);
                             bool force_approval =
                                 (agent->autonomy_level == HU_AUTONOMY_SUPERVISED) ||
                                 (agent->autonomy_level == HU_AUTONOMY_ASSISTED &&
                                  hu_tool_risk_level(pol_tn) >= HU_RISK_MEDIUM);
 
-                            hu_tool_result_t result = hu_tool_result_fail("invalid arguments", 16);
-                            if (pa == HU_POLICY_DENY) {
-                                if (agent->audit_logger) {
-                                    hu_audit_event_t aev;
-                                    hu_audit_event_init(&aev, HU_AUDIT_POLICY_VIOLATION);
-                                    hu_audit_event_with_identity(
-                                        &aev, agent->agent_id,
-                                        agent->model_name ? agent->model_name : "unknown", NULL);
-                                    hu_audit_event_with_action(&aev, pol_tn, "denied", false,
-                                                               false);
-                                    hu_audit_logger_log(agent->audit_logger, &aev);
+                            if (seq_gate == HU_TOOL_GATE_DENY) {
+                                const char *dm =
+                                    result.error_msg ? result.error_msg : "denied by security";
+                                size_t dl = result.error_msg ? result.error_msg_len : 18;
+                                hu_agent_internal_append_history(agent, HU_ROLE_TOOL, dm, dl,
+                                                                 call->name, call->name_len,
+                                                                 call->id, call->id_len);
+                                hu_agent_internal_post_hook_fire(agent, pol_tn, pol_tn_len,
+                                                                 pre_hook_args,
+                                                                 strlen(pre_hook_args), &result);
+                                hu_tool_result_free(agent->alloc, &result);
+                                continue;
+                            }
+
+                            if (seq_gate == HU_TOOL_GATE_NEED_APPROVAL || force_approval) {
+                                if (seq_gate != HU_TOOL_GATE_NEED_APPROVAL) {
+                                    result = hu_tool_result_fail("pending approval", 16);
+                                    result.needs_approval = true;
                                 }
-                                result = hu_tool_result_fail("denied by policy", 16);
-                            } else if (pa == HU_POLICY_REQUIRE_APPROVAL || force_approval) {
-                                result = hu_tool_result_fail("pending approval", 16);
-                                result.needs_approval = true;
                             } else {
+                                result = hu_tool_result_fail("invalid arguments", 16);
                                 hu_json_value_t *args = NULL;
                                 if (call->arguments_len > 0) {
                                     hu_error_t pe = hu_json_parse(agent->alloc, call->arguments,
@@ -9989,7 +9928,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             }
 
                             /* CausalArmor on sequential path (mirrors parallel path) */
-                            if (pa != HU_POLICY_DENY && result.success &&
+                            if (result.success &&
                                 hu_tool_risk_level(pol_tn[0] ? pol_tn : "unknown") >=
                                     HU_RISK_HIGH) {
                                 hu_causal_armor_config_t ca_cfg;
@@ -10025,7 +9964,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             }
 
                             /* History scorer on sequential path (mirrors parallel path) */
-                            if (pa != HU_POLICY_DENY && result.success &&
+                            if (result.success &&
                                 hu_tool_risk_level(pol_tn[0] ? pol_tn : "unknown") >=
                                     HU_RISK_MEDIUM) {
                                 hu_tool_history_entry_t thist[16];

@@ -1436,8 +1436,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
      * hu_agent_turn. This is the daemon's PRIMARY inbound path — without this
      * call the gates never fired on real streaming turns (2026-05-31 audit). */
     hu_agent_append_humanness_directives(agent, agent->memory_session_id,
-                                         agent->memory_session_id_len, msg, msg_len,
-                                         &system_prompt, &system_prompt_len);
+                                         agent->memory_session_id_len, msg, msg_len, &system_prompt,
+                                         &system_prompt_len);
 
     /* ── Observer: turn start (matches batch path in agent_turn.c) ─────── */
     hu_agent_internal_generate_trace_id(agent->trace_id);
@@ -1592,9 +1592,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 const char *humor_cfg = NULL;
                 if (agent->persona && agent->persona->humor.frequency)
                     humor_cfg = agent->persona->humor.frequency;
-                hu_persona_steering_coeffs_v2(steer_ov->formality, steer_ov->avg_length,
-                                              warmth_cfg, humor_cfg, 1.0,
-                                              &sf, &sv, &sw, &sh);
+                hu_persona_steering_coeffs_v2(steer_ov->formality, steer_ov->avg_length, warmth_cfg,
+                                              humor_cfg, 1.0, &sf, &sv, &sw, &sh);
                 if (sf != 0.0 || sv != 0.0 || sw != 0.0 || sh != 0.0) {
                     req.steering_present = true;
                     req.steer_formality = sf;
@@ -2034,11 +2033,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
 
-            /* Pre-hook pipeline (centralized via hu_agent_internal_pre_hook_check):
-             * returns false on DENY with *result already populated. */
-            if (!hu_agent_internal_pre_hook_check(agent, tn_buf, tn, args_str, strlen(args_str),
-                                                  &result)) {
-                goto stream_tool_done;
+            /* Full pre-execute envelope (permission → hook → escalate → policy).
+             * DENY / NEED_APPROVAL short-circuit execute; post-hook still fires. */
+            {
+                hu_tool_gate_t gate = hu_agent_internal_pre_execute_checks(
+                    agent, tn_buf, tn, args_str, strlen(args_str), &result);
+                if (gate != HU_TOOL_GATE_ALLOW)
+                    goto stream_tool_done;
             }
 
             if (!tool) {

@@ -171,6 +171,7 @@ typedef struct hu_hula_slot {
 } hu_hula_slot_t;
 
 struct hu_agent_registry;
+struct hu_agent;
 
 /* Execution state for a running program */
 typedef struct hu_hula_exec {
@@ -202,6 +203,8 @@ typedef struct hu_hula_exec {
     uint32_t budget_tool_calls_used;
     struct hu_agent_registry *delegate_registry; /* optional; for delegate_agent_id */
     struct hu_idempotency_registry *idempotency_registry; /* optional; for crash-proof replay */
+    /* Optional agent for Wave A security envelope on CALL (borrowed). */
+    struct hu_agent *security_agent;
 } hu_hula_exec_t;
 
 /* Validation diagnostics */
@@ -269,6 +272,10 @@ void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_re
 /* Optional: idempotency registry for crash-proof tool execution (workflow replay). */
 void hu_hula_exec_set_idempotency_registry(hu_hula_exec_t *exec,
                                            struct hu_idempotency_registry *registry);
+
+/* Optional: borrow an agent so CALL nodes run the full pre-execute security
+ * envelope (permission → hook → escalate → policy) before tool execute. */
+void hu_hula_exec_set_security_agent(hu_hula_exec_t *exec, struct hu_agent *agent);
 
 /* Optional: stop execution; in-flight nodes complete as cancelled. */
 void hu_hula_exec_cancel(hu_hula_exec_t *exec, const char *reason, size_t reason_len);
