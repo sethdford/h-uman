@@ -9,9 +9,51 @@
 /* Section labels in `imsg status` output (steipete/imsg 0.11.x). Matched as
  * line prefixes, so a wording change downstream fails CLOSED (no capability)
  * rather than silently mis-reporting one. */
-#define CAPS_LABEL_BASIC    "Basic features"
-#define CAPS_LABEL_ADVANCED "Advanced features"
-#define CAPS_LABEL_SIP      "System Integrity Protection"
+#define CAPS_LABEL_BASIC     "Basic features"
+#define CAPS_LABEL_ADVANCED  "Advanced features"
+#define CAPS_LABEL_SIP       "System Integrity Protection"
+#define CAPS_LABEL_SELECTORS "selectors:"
+
+/* imsg marks selector availability with U+2713 CHECK MARK / U+2717 BALLOT X. */
+#define CAPS_MARK_OK "\xE2\x9C\x93"
+
+/* True when the report contains a "<name>: ✓" selector line. Absent or
+ * ✗-marked ⇒ false (fail closed — never call a selector that isn't there). */
+/* Advance *p to the next line and hand back its whitespace-trimmed extent.
+ * Returns false at end of buffer. Every scanner below shares this one loop —
+ * three copies of the memchr/trim/advance idiom is exactly what the clone
+ * ratchet is there to prevent. */
+static bool caps_next_line(const char **p, const char *end, const char **out_s, size_t *out_len) {
+    if (!p || !*p || *p >= end)
+        return false;
+    const char *nl = memchr(*p, '\n', (size_t)(end - *p));
+    size_t line_len = nl ? (size_t)(nl - *p) : (size_t)(end - *p);
+    const char *s = *p;
+    while (line_len > 0 && (*s == ' ' || *s == '\t')) {
+        s++;
+        line_len--;
+    }
+    while (line_len > 0 && (s[line_len - 1] == ' ' || s[line_len - 1] == '\r'))
+        line_len--;
+    *out_s = s;
+    *out_len = line_len;
+    *p = nl ? nl + 1 : end;
+    return true;
+}
+
+static bool caps_selector_ok(const char *buf, const char *end, const char *name) {
+    size_t name_len = strlen(name);
+    const char *p = buf;
+    const char *s = NULL;
+    size_t n = 0;
+    while (caps_next_line(&p, end, &s, &n)) {
+        /* Require "<name>:" exactly, so editMessage does not match
+         * editMessageItem (the substring trap, again). */
+        if (n > name_len && strncasecmp(s, name, name_len) == 0 && s[name_len] == ':')
+            return memmem(s, n, CAPS_MARK_OK, sizeof(CAPS_MARK_OK) - 1) != NULL;
+    }
+    return false;
+}
 
 /* Scan forward from `from` for the first non-blank line and report whether it
  * states availability. CRITICAL: "Not available" contains "available" as a
@@ -23,24 +65,10 @@
  * trimming logic exists exactly once. */
 static bool caps_first_value_line(const char *from, const char *end, const char **out_s,
                                   size_t *out_len) {
-    for (const char *p = from; p && p < end;) {
-        const char *nl = memchr(p, '\n', (size_t)(end - p));
-        size_t line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
-        const char *s = p;
-        while (line_len > 0 && (*s == ' ' || *s == '\t')) {
-            s++;
-            line_len--;
-        }
-        while (line_len > 0 && (s[line_len - 1] == ' ' || s[line_len - 1] == '\r'))
-            line_len--;
-        if (line_len > 0) {
-            *out_s = s;
-            *out_len = line_len;
+    const char *p = from;
+    while (caps_next_line(&p, end, out_s, out_len)) {
+        if (*out_len > 0)
             return true;
-        }
-        if (!nl)
-            break;
-        p = nl + 1;
     }
     return false;
 }
@@ -66,19 +94,12 @@ static bool caps_line_says(const char *from, const char *end, const char *negati
  * just past that line, or NULL. */
 static const char *caps_find_section(const char *buf, const char *end, const char *label) {
     size_t label_len = strlen(label);
-    for (const char *p = buf; p && p < end;) {
-        const char *nl = memchr(p, '\n', (size_t)(end - p));
-        size_t line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
-        const char *s = p;
-        while (line_len > 0 && (*s == ' ' || *s == '\t')) {
-            s++;
-            line_len--;
-        }
-        if (line_len >= label_len && strncasecmp(s, label, label_len) == 0)
-            return nl ? nl + 1 : end;
-        if (!nl)
-            break;
-        p = nl + 1;
+    const char *p = buf;
+    const char *s = NULL;
+    size_t n = 0;
+    while (caps_next_line(&p, end, &s, &n)) {
+        if (n >= label_len && strncasecmp(s, label, label_len) == 0)
+            return p; /* just past the label line */
     }
     return NULL;
 }
@@ -106,6 +127,16 @@ hu_error_t hu_imessage_caps_parse(const char *status_out, size_t len, hu_imessag
     caps->basic = basic ? caps_value_is_available(basic, end) : false;
     caps->advanced = adv ? caps_value_is_available(adv, end) : false;
     caps->sip_enabled = sip ? caps_value_is_enabled(sip, end) : false;
+
+    /* Per-selector availability, e.g. "    editMessage: ✗". Absent section →
+     * selectors_reported stays false and the selector-gated verbs fall back
+     * to `advanced` (we cannot know better). */
+    if (caps_find_section(status_out, end, CAPS_LABEL_SELECTORS)) {
+        caps->selectors_reported = true;
+        caps->sel_edit = caps_selector_ok(status_out, end, "editMessage") ||
+                         caps_selector_ok(status_out, end, "editMessageItem");
+        caps->sel_retract = caps_selector_ok(status_out, end, "retractMessagePart");
+    }
     return HU_OK;
 }
 
@@ -119,10 +150,14 @@ bool hu_imessage_caps_allows(const hu_imessage_caps_t *caps, hu_imessage_verb_t 
     case HU_IMSG_VERB_REPLY_THREADED:
     case HU_IMSG_VERB_TYPING:
     case HU_IMSG_VERB_READ_RECEIPT:
-    case HU_IMSG_VERB_EDIT:
-    case HU_IMSG_VERB_UNSEND:
     case HU_IMSG_VERB_EFFECT:
         return caps->advanced;
+    /* Selector-gated: a live bridge does not guarantee the selector exists.
+     * On macOS 26 editMessage is absent while retractMessagePart is present. */
+    case HU_IMSG_VERB_EDIT:
+        return caps->advanced && (caps->selectors_reported ? caps->sel_edit : true);
+    case HU_IMSG_VERB_UNSEND:
+        return caps->advanced && (caps->selectors_reported ? caps->sel_retract : true);
     default:
         return false; /* unknown verb fails closed */
     }
@@ -170,6 +205,29 @@ hu_blue_verdict_t hu_imessage_blue_verdict(hu_imessage_service_t recent_msg_serv
     if (handle_service != HU_IMSG_SERVICE_UNKNOWN)
         return hu_imessage_service_is_blue(handle_service) ? HU_BLUE_ALLOW : HU_BLUE_HOLD;
     return HU_BLUE_HOLD; /* no evidence ⇒ never risk a green bubble */
+}
+
+bool hu_imsg_run_ok(hu_allocator_t *alloc, const char *const *argv, int timeout_s) {
+    if (!alloc || !argv)
+        return false;
+    hu_run_result_t rr = {0};
+    hu_error_t e = hu_process_run_with_timeout(alloc, argv, NULL, 65536, timeout_s, &rr);
+    bool ok = (e == HU_OK && rr.success && rr.exit_code == 0);
+    hu_run_result_free(alloc, &rr);
+    return ok;
+}
+
+const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc) {
+    static hu_imessage_caps_t caps;
+    static bool probed = false;
+    if (!probed && alloc) {
+        probed = true;
+        (void)hu_imessage_caps_probe(alloc, &caps);
+        char desc[224];
+        hu_imessage_caps_describe(&caps, desc, sizeof(desc));
+        hu_log_info("imessage", NULL, "%s", desc);
+    }
+    return &caps;
 }
 
 hu_error_t hu_imessage_caps_probe(hu_allocator_t *alloc, hu_imessage_caps_t *caps) {

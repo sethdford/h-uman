@@ -132,6 +132,56 @@ static void caps_describe_is_operator_readable(void) {
     HU_ASSERT_STR_CONTAINS(buf, "sip=on");
 }
 
+/* Verbatim `imsg status` from this Tahoe 26.5.1 box with SIP off, library
+ * validation disabled, and the bridge injected. NOTE the selector reality:
+ * editMessage is ✗ on macOS 26 even though the bridge is fully live — the
+ * documented edit selectors do not exist here. Unsend (retractMessagePart)
+ * IS available. A verb gate that keys only off "bridge live" would silently
+ * emit failing edit calls. */
+static const char *STATUS_BRIDGE_V2_TAHOE = "Basic features (send, receive, history):\n"
+                                            "  Available\n"
+                                            "\n"
+                                            "System Integrity Protection (SIP):\n"
+                                            "  disabled\n"
+                                            "\n"
+                                            "Advanced features (typing, read receipts):\n"
+                                            "  Available - IMCore bridge connected\n"
+                                            "  bridge version: v2 (v2 inbox active)\n"
+                                            "  selectors:\n"
+                                            "    editMessage: \xE2\x9C\x97\n"
+                                            "    editMessageItem: \xE2\x9C\x97\n"
+                                            "    pollPayloadMessage: \xE2\x9C\x93\n"
+                                            "    retractMessagePart: \xE2\x9C\x93\n"
+                                            "    sendMessageReason: \xE2\x9C\x97\n";
+
+static void caps_selectors_deny_edit_but_allow_unsend_on_tahoe(void) {
+    hu_imessage_caps_t caps;
+    HU_ASSERT_EQ(
+        hu_imessage_caps_parse(STATUS_BRIDGE_V2_TAHOE, strlen(STATUS_BRIDGE_V2_TAHOE), &caps),
+        HU_OK);
+    HU_ASSERT_TRUE(caps.advanced);
+    HU_ASSERT_TRUE(caps.selectors_reported);
+    /* The whole point: bridge live, yet edit must be DENIED. */
+    HU_ASSERT_FALSE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_EDIT));
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_UNSEND));
+    /* Verbs not selector-gated still ride on `advanced`. */
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_REPLY_THREADED));
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_TYPING));
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_REACT));
+}
+
+static void caps_no_selector_section_falls_back_to_bridge_state(void) {
+    /* Older imsg (or a future one that stops printing selectors): we cannot
+     * know per-selector state, so edit/unsend follow the bridge flag rather
+     * than being permanently disabled. */
+    hu_imessage_caps_t caps;
+    (void)hu_imessage_caps_parse(STATUS_BRIDGE_LIVE, strlen(STATUS_BRIDGE_LIVE), &caps);
+    HU_ASSERT_TRUE(caps.advanced);
+    HU_ASSERT_FALSE(caps.selectors_reported);
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_EDIT));
+    HU_ASSERT_TRUE(hu_imessage_caps_allows(&caps, HU_IMSG_VERB_UNSEND));
+}
+
 /* ── T0.1 blue guard: never emit a green bubble ────────────────────────── */
 
 static void blue_service_parse_from_chatdb_values(void) {
@@ -192,4 +242,6 @@ void run_imessage_caps_tests(void) {
     HU_RUN_TEST(caps_gate_advanced_verbs_allowed_with_bridge);
     HU_RUN_TEST(caps_gate_null_caps_denies_everything);
     HU_RUN_TEST(caps_describe_is_operator_readable);
+    HU_RUN_TEST(caps_selectors_deny_edit_but_allow_unsend_on_tahoe);
+    HU_RUN_TEST(caps_no_selector_section_falls_back_to_bridge_state);
 }
