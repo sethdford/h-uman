@@ -1,17 +1,17 @@
-# SOTA Wave B — Measurement (outline)
+# SOTA Wave B — Measurement
 
-> Companion to Wave A. Do not start until Wave A exit criteria are green.
+> Status: **implemented** on `feat/sota-waves-a-b-c` (2026-07-19).
 
 **Goal:** Replace architecture claims with published numbers and fail-closed gates.
 
 ## Exit criteria
 
-1. LongMemEval score published under `docs/evaluation/` with method notes.
-2. LoCoMo P@1 improved vs ≈0.058 baseline **or** explicit documented floor with method.
-3. Contact/session isolation regression tests for vector/hybrid retrieval.
-4. Blind A/B human n≥30 **or** CI fails closed when gate file says ABSENT and humanness feature is LIVE (see `docs/superpowers/specs/2026-05-31-blind-ab-measurement-gate-design.md`).
+1. [x] LongMemEval method notes: `docs/evaluation/longmemeval-method.md` (+ baseline.json scores).
+2. [x] LoCoMo floor documented: `docs/evaluation/locomo-method.md` (P@1 = 0.057717; improve later with same method).
+3. [x] Contact/session isolation: `hu_retrieval_options_t` namespace + `tests/test_retrieval_contact_isolation.c`.
+4. [x] Blind A/B fail-closed: `scripts/check_capability_gates.py` rejects LIVE when human ABSENT / n&lt;30. Human n≥30 sheet still **ABSENT** (manual outer loop).
 
-## Non-goals
+## Non-goals (unchanged)
 
 - Full retrieval redesign unless isolation tests require it.
-- Claiming memory SOTA in `docs/SOTA_BENCHMARK.md` before numbers exist.
+- Claiming memory SOTA in `docs/SOTA_BENCHMARK.md` before numbers improve.
