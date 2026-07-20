@@ -4,6 +4,7 @@
  * OUR promises were never captured. These tests pin the mode gate, the
  * who='me' store, the deadline→delayed_followup wiring, and the ledger
  * stats that make kept/broken auditable. */
+#include "human/core/allocator.h"
 #include "human/daemon/promise_keeper.h"
 #include "test_framework.h"
 
@@ -18,6 +19,15 @@ static void promise_keeper_mode_from_env_truth_table(void) {
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("on"), (int)HU_PROMISE_KEEPER_LIVE);
     /* Exact-match only: "ON"/"On" are not silently live. */
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("ON"), (int)HU_PROMISE_KEEPER_OFF);
+}
+
+static void courtesy_data_init_loads_embedded_json(void) {
+    /* The courtesy vocabulary is DATA (daemon/courtesy_phrases.json), not
+     * code: HU_OK here proves the embedded JSON exists, parses, and yields
+     * non-empty lists — the compiled-in arrays are only a fail-safe. */
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(hu_promise_keeper_data_init(&alloc), HU_OK);
+    HU_ASSERT_EQ(hu_promise_keeper_data_init(NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
 static void courtesy_predicate_rejects_bare_invitations(void) {
@@ -284,6 +294,7 @@ static void promise_keeper_live_rejects_courtesy_invitation(void) {
 void run_daemon_promise_keeper_tests(void) {
     HU_TEST_SUITE("DaemonPromiseKeeper");
     HU_RUN_TEST(promise_keeper_mode_from_env_truth_table);
+    HU_RUN_TEST(courtesy_data_init_loads_embedded_json);
     HU_RUN_TEST(courtesy_predicate_rejects_bare_invitations);
     HU_RUN_TEST(courtesy_predicate_accepts_genuine_commitments);
     HU_RUN_TEST(courtesy_predicate_word_boundary_and_escape_hatches);

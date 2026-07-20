@@ -33,11 +33,20 @@ typedef enum hu_promise_keeper_mode {
 /* Pure mode parse ("on" -> LIVE, "shadow" -> SHADOW, anything else / NULL -> OFF). */
 hu_promise_keeper_mode_t hu_promise_keeper_mode_from_env(const char *env_value);
 
+/* Load the courtesy vocabulary from daemon/courtesy_phrases.json (embedded,
+ * user-overridable at ~/.human/data/daemon/courtesy_phrases.json — edit the
+ * JSON to tune the filter, no recompile). Returns HU_OK when the data file
+ * loaded and parsed; on any failure the predicate keeps minimal compiled-in
+ * defaults. Idempotent; the predicate also calls it lazily. */
+hu_error_t hu_promise_keeper_data_init(hu_allocator_t *alloc);
+
 /* Pure predicate: true iff the detected commitment description is a bare
- * courtesy invitation — it starts with the word-bounded phrase "let me know",
- * no deadline parsed from the reply (deadline_ts <= 0), and no first-person
- * deliverable marker (i'll / i will / gonna) after the prefix. Shadow evidence
- * 2026-07-19: 5 of 8 distinct captured promises were this shape. */
+ * courtesy invitation — it starts with a word-bounded invitation prefix
+ * ("let me know", per data), no deadline parsed from the reply
+ * (deadline_ts <= 0), and no first-person deliverable marker (i'll / i will /
+ * gonna, per data) after the prefix. Vocabulary comes from
+ * daemon/courtesy_phrases.json via hu_promise_keeper_data_init. Shadow
+ * evidence 2026-07-19: 5 of 8 distinct captured promises were this shape. */
 bool hu_promise_keeper_is_courtesy_invitation(const char *desc, size_t desc_len,
                                               int64_t deadline_ts);
 
