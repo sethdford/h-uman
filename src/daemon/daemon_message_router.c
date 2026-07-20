@@ -139,51 +139,20 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     hu_reply_style_t actual_style = style;
     switch (style) {
     case HU_REPLY_STYLE_THREADED: {
-        /* Native inline threading is unreachable via automation: there is no
-         * public API, and the private IMCore path needs SIP-off + dylib
-         * injection (broken on macOS 26 by XPC entitlement gating). When we
-         * intend to reference the parent, QUOTE it inline in the body — a
-         * working, honest substitute for a native thread. The quoted body is
-         * used for BOTH the (best-effort) reply attempt and the flat fallback,
-         * so the quote is present whether the AX reply flat-commits or we fall
-         * straight through. Falls back to the plain body if the parent text
-         * can't be looked up or no allocator is available — never a regression.
-         *
-         * BUT only quote when a human actually would. An `↩ "quote"` block on a
-         * reply to the message just received is the single most bot-like tell on
-         * the reply path; humans quote only when context is ambiguous. The
-         * should_quote_on_fallback predicate gates the quote on the same signals
-         * thread_logodds uses (parent not newest / stale / multiple pending Qs).
-         * Fresh-last-single context → no quote, send the natural plain body. */
+        /* NATIVE THREADING (2026-07-20). The old comment here claimed native
+         * inline threading was "unreachable via automation" and substituted an
+         * inline `↩ "quote"` prefix. That is no longer true and the substitute
+         * was itself the most bot-like tell on the reply path: with SIP off and
+         * the IMCore bridge live, `imsg send-rich --reply-to <guid>` sets
+         * databaseReplyToGUID and the reply genuinely nests (verified live:
+         * thread_originator_guid == parent guid). We now send the plain body
+         * and let the reply layer thread it for real — no fake quote, ever.
+         * If the bridge is down the reply layer falls through to a flat send,
+         * which is an honest plain message rather than a fabricated quote. */
         const char *send_body = body;
         size_t send_len = body_len;
-        char *quoted = NULL;
+        char *quoted = NULL; /* retained: freed unconditionally below */
         size_t quoted_cap = 0;
-#if defined(HU_HAS_IMESSAGE)
-        /* The parent-text lookup lives in imessage.c, which is compiled only on
-         * platforms where the iMessage channel exists (HU_HAS_IMESSAGE). Off
-         * that platform there is no iMessage channel to reply to, so the quote
-         * is simply skipped and the plain body is sent. */
-        bool want_quote = hu_imessage_reply_should_quote_on_fallback(&facts);
-        if (want_quote && agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
-            char ptext[256];
-            size_t plen = 0;
-            if (hu_imessage_lookup_message_by_guid(agent->alloc, parent_msg_guid, parent_guid_len,
-                                                   ptext, sizeof(ptext), &plen) == HU_OK &&
-                plen > 0) {
-                quoted_cap = body_len + 128; /* snippet (≤~66B) + body + framing */
-                quoted = (char *)agent->alloc->alloc(agent->alloc->ctx, quoted_cap);
-                if (quoted) {
-                    size_t qn = hu_imessage_reply_format_quoted(ptext, plen, body, body_len, quoted,
-                                                                quoted_cap);
-                    if (qn > 0) {
-                        send_body = quoted;
-                        send_len = qn;
-                    }
-                }
-            }
-        }
-#endif /* HU_HAS_IMESSAGE */
         bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
         if (threaded_attempted) {
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,

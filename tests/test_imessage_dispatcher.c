@@ -412,7 +412,12 @@ static void desc_prefix_no_match_absent(void) {
  * platforms with the iMessage channel. The dispatcher's quote block is gated
  * the same way, so off-platform there is nothing to assert. */
 #if HU_HAS_IMESSAGE
-static void threaded_reply_quotes_parent_inline(void) {
+/* 2026-07-20: inverted. This test used to PIN the fake inline `↩ "quote"`
+ * substitute, which existed only because native threading was believed
+ * unreachable. With the IMCore bridge live the reply genuinely nests
+ * (thread_originator_guid == parent), so the quote is pure bot-tell and is
+ * gone. The contract is now: the body sent is the body given, verbatim. */
+static void threaded_reply_sends_plain_body_never_quotes(void) {
     hu_allocator_t sys = hu_system_allocator();
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -436,7 +441,9 @@ static void threaded_reply_quotes_parent_inline(void) {
         HU_ASSERT_EQ((int)err, (int)HU_OK);
         if (reply_calls > 0) {
             hit = true;
-            HU_ASSERT_STR_EQ(last_reply_body, "↩ \"dinner tonight?\"\nhi");
+            /* Plain body, verbatim — no fabricated quote prefix. */
+            HU_ASSERT_STR_EQ(last_reply_body, "hi");
+            HU_ASSERT_TRUE(strstr(last_reply_body, "\xE2\x86\xA9") == NULL);
         }
     }
     HU_ASSERT(hit);
@@ -542,7 +549,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(stale_parent_never_reacts_tapback);
     HU_RUN_TEST(fresh_parent_still_reacts_tapback_sometimes);
 #if HU_HAS_IMESSAGE
-    HU_RUN_TEST(threaded_reply_quotes_parent_inline);
+    HU_RUN_TEST(threaded_reply_sends_plain_body_never_quotes);
     HU_RUN_TEST(desc_prefix_match_at_string_start);
     HU_RUN_TEST(desc_prefix_match_after_separator);
     HU_RUN_TEST(desc_prefix_no_match_mid_token);
