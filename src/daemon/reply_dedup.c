@@ -197,3 +197,47 @@ hu_error_t hu_reply_dedup_load(hu_reply_dedup_t *r, const char *path, size_t pat
     fclose(f);
     return HU_OK;
 }
+
+/* ── Daemon process-wide store glue (moved from daemon.c, 2026-07-19) ──
+ * Per-contact "highest inbound rowid replied-to" watermark, persisted to
+ * ~/.human/reply_dedup.json. Loaded lazily on first use, recorded+saved
+ * after each successful reactive send, and checked before processing a
+ * batch so a daemon crash between send and poll-watermark persistence
+ * doesn't re-reply on restart. */
+
+static hu_reply_dedup_t g_reply_dedup;
+static bool g_reply_dedup_loaded;
+
+static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return 0;
+    int n = snprintf(buf, cap, "%s/.human/reply_dedup.json", home);
+    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+}
+
+static void daemon_reply_dedup_ensure_loaded(void) {
+    if (g_reply_dedup_loaded)
+        return;
+    g_reply_dedup_loaded = true; /* set first: absent file is fine, don't retry every batch */
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_load(&g_reply_dedup, path, plen);
+}
+
+bool hu_daemon_reply_dedup_already_replied(const char *chat_id, size_t chat_id_len, int64_t rowid) {
+    daemon_reply_dedup_ensure_loaded();
+    return hu_daemon_already_replied(&g_reply_dedup, chat_id, chat_id_len, rowid);
+}
+
+void hu_daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int64_t rowid) {
+    if (!chat_id || rowid <= 0)
+        return;
+    daemon_reply_dedup_ensure_loaded();
+    hu_reply_dedup_record(&g_reply_dedup, chat_id, chat_id_len, rowid);
+    char path[512];
+    size_t plen = daemon_reply_dedup_path(path, sizeof(path));
+    if (plen)
+        (void)hu_reply_dedup_save(&g_reply_dedup, path, plen);
+}
