@@ -1901,11 +1901,22 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
         hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
         imsg_lookup_services_for_handle(tgt, tgt_len, &recent, &handle_svc);
-        if (hu_imessage_blue_verdict(recent, handle_svc) == HU_BLUE_HOLD) {
-            hu_log_warn("imessage", NULL,
-                        "blue_guard: HELD send to %.*s — not iMessage-reachable "
-                        "(recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
-                        (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)recent, (int)handle_svc);
+        /* T0.1b: chat.db only says how this handle routed in the PAST. When the
+         * IMCore bridge is live, ask Apple the current question directly and
+         * let that answer win; an unavailable/failed lookup returns
+         * INDETERMINATE and falls back to the chat.db inference above. */
+        hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
+        const hu_imessage_caps_t *caps = imsg_caps_cached(c);
+        if (caps && caps->advanced)
+            live = hu_imessage_whois_probe_cached(c->alloc, tgt, tgt_len);
+        const bool whois_negative_binds = getenv("HU_IMESSAGE_WHOIS_STRICT") != NULL;
+        if (hu_imessage_blue_verdict_live(live, recent, handle_svc, whois_negative_binds) ==
+            HU_BLUE_HOLD) {
+            hu_log_warn(
+                "imessage", NULL,
+                "blue_guard: HELD send to %.*s — not iMessage-reachable "
+                "(whois=%d recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
+                (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)live, (int)recent, (int)handle_svc);
             return HU_ERR_NOT_SUPPORTED;
         }
     }
