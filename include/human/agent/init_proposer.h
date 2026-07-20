@@ -321,6 +321,16 @@ typedef struct hu_proactive_compose_inputs {
     const char *channel_name;
     size_t channel_name_len;
 
+    /* Situation frame: the daemon's composed proactive directive for this
+     * contact this tick — silence duration, event/calendar triggers, joke
+     * callbacks. Daemon-authored template text (NOT recalled memory), so it
+     * does not route through content_is_safe. Before this field existed the
+     * daemon built that material and used it only as a recall key; the
+     * proposer saw an empty briefing and declined every tick with
+     * "no context or triggers provided" (2026-07-19 decline observability). */
+    const char *situation_context;
+    size_t situation_context_len;
+
     /* Pre-built context fragments. The caller (daemon_proactive) is
      * responsible for running output-safety filters on memory_context
      * BEFORE populating; init_proposer trusts the bytes as-is. */
