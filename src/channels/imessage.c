@@ -4480,6 +4480,24 @@ const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8) {
  *                  int64_t message_id, const char *emoji_utf8,
  *                  size_t emoji_utf8_len);
  */
+
+hu_reaction_type_t hu_imessage_reaction_for_emoji(const char *emoji_utf8) {
+    if (!emoji_utf8 || !emoji_utf8[0])
+        return HU_REACTION_THUMBS_UP;
+    const char *label = classic_label_for_emoji(emoji_utf8);
+    if (strcmp(label, "Loved") == 0)
+        return HU_REACTION_HEART;
+    if (strcmp(label, "Disliked") == 0)
+        return HU_REACTION_THUMBS_DOWN;
+    if (strcmp(label, "Laughed") == 0)
+        return HU_REACTION_HAHA;
+    if (strcmp(label, "Emphasized") == 0)
+        return HU_REACTION_EMPHASIS;
+    if (strcmp(label, "Questioned") == 0)
+        return HU_REACTION_QUESTION;
+    return HU_REACTION_THUMBS_UP; /* "Liked" + universal-positive default */
+}
+
 hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
                                                  int64_t message_id, const char *emoji_utf8,
                                                  size_t emoji_utf8_len) {
@@ -4494,15 +4512,25 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
         return HU_OK;
     }
 
-    /* Tier 2: classic-tapback fallback via CLASSIC_MAP. */
-    const char *label = classic_label_for_emoji(emoji_utf8);
-    (void)label;
-    /* In production with live macOS AX, the classic-tapback path would call
-     * ax_react_tapback(target, target_len, message_id, label) here.
-     * For D2, the fallback path is stubbed (test contract is the gate).
-     * When test stub g_test_react_emoji_subpicker is set, only the
-     * sub-picker tier is exercised. Production without AX returns
-     * NOT_SUPPORTED and the dispatcher (F2) falls back to FLAT text. */
+    /* Tier 2: NATIVE tapback via the IMCore bridge (2026-07-20 fix).
+     * This was previously a stub returning NOT_SUPPORTED, so the dispatcher
+     * always fell through to a FLAT TEXT send — shipping the reaction emoji
+     * as an actual message, which reads as obviously fake. imsg_try_react
+     * routes through `imsg tapback` when the bridge is live (a real
+     * associatedMessageType reaction) and `imsg react` otherwise. */
+#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST
+    {
+        hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
+        if (c && message_id > 0 &&
+            imsg_try_react(c, message_id, hu_imessage_reaction_for_emoji(emoji_utf8)))
+            return HU_OK;
+    }
+#else
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message_id;
+#endif
     return HU_ERR_NOT_SUPPORTED;
 }
 
