@@ -16,7 +16,7 @@
 # Exempt from the count:
 #   - a file including its OWN header (slack.c -> slack.h)
 #   - shared infra headers: format, dispatch, contact_signature,
-#     channel_embed, behavior_class, reaction_event, meta_common
+#     channel_embed, behavior_class, reaction_event, meta_common, imessage_caps
 set -euo pipefail
 
 # Measured 2026-05-29 at the start of Phase 0 (all imessage-family + reuse).
@@ -34,7 +34,7 @@ count_cross() {
       | sed -E 's#.*human/channels/([a-z_]+)\.h.*#\1#' \
       | while IFS= read -r inc; do
           case "$inc" in
-            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common) ;;
+            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps) ;;
             *) echo x ;;
           esac
         done | wc -l | tr -d ' ')
@@ -52,7 +52,7 @@ list_cross() {
       | sed -E 's#.*human/channels/([a-z_]+)\.h.*#\1#' \
       | while IFS= read -r inc; do
           case "$inc" in
-            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common) ;;
+            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps) ;;
             *) echo "  $f -> $inc.h" ;;
           esac
         done

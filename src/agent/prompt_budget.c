@@ -487,6 +487,46 @@ hu_error_t hu_prompt_budget_load_snapshot(hu_allocator_t *alloc,
     return HU_OK;
 }
 
+/* Map a snapshot field name back to its enum slot. Name-based (not
+ * positional) so a snapshot written by an older binary with a different
+ * field order or set still restores into the right accumulators. */
+static int pb_field_index_by_name(const char *name) {
+    if (!name)
+        return -1;
+    for (size_t i = 0; i < HU_PROMPT_FIELD_COUNT; i++) {
+        if (s_field_names[i] && strcmp(s_field_names[i], name) == 0)
+            return (int)i;
+    }
+    return -1;
+}
+
+hu_error_t hu_prompt_budget_restore_snapshot(hu_prompt_budget_t *b) {
+    if (!b || !b->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Live observations always win — restore only seeds an empty budget,
+     * so a late call can never clobber data from real turns. */
+    if (b->observation_count > 0)
+        return HU_OK;
+
+    hu_prompt_budget_snapshot_load_t load;
+    hu_error_t err = hu_prompt_budget_load_snapshot(b->alloc, &load);
+    if (err != HU_OK)
+        return err;
+
+    for (size_t i = 0; i < load.field_count; i++) {
+        const hu_prompt_budget_field_stat_ext_t *fs = &load.fields[i];
+        int idx = pb_field_index_by_name(fs->name);
+        if (idx < 0)
+            continue; /* unknown field from another version: skip */
+        b->fields[idx].observation_count = fs->samples;
+        b->fields[idx].total_bytes = fs->mean_bytes * fs->samples;
+        b->fields[idx].non_empty_count = fs->non_empty_count;
+    }
+    b->observation_count = (size_t)load.observation_count;
+    hu_prompt_budget_snapshot_load_free(&load);
+    return HU_OK;
+}
+
 void hu_prompt_budget_snapshot_load_free(hu_prompt_budget_snapshot_load_t *load) {
     if (!load)
         return;

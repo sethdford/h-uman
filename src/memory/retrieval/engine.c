@@ -99,6 +99,11 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
+    {
+        hu_error_t nerr = hu_retrieval_check_namespace(opts);
+        if (nerr != HU_OK)
+            return nerr;
+    }
     if (!embedder || !embedder->vtable || !vector_store || !vector_store->vtable)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -169,7 +174,7 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
     out->entries = entries;
     out->count = n;
     out->scores = scores;
-    return HU_OK;
+    return hu_retrieval_filter_by_namespace(alloc, out, opts);
 }
 
 static void impl_deinit(void *ctx, hu_allocator_t *alloc) {

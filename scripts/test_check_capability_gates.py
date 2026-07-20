@@ -23,8 +23,19 @@ def test_live_with_green_gate_passes():
     with tempfile.TemporaryDirectory() as d:
         rp, gp = _write(d,
             {"capabilities": [{"id": "x", "env": "X", "state": "LIVE", "required_gate": "pass"}]},
-            {"effective_verdict": "PASS"})
+            {"effective_verdict": "PASS",
+             "human": {"verdict": "PASS", "n": 30}})
         assert c.check(rp, gp) == 0
+
+
+def test_live_with_human_absent_fails():
+    """Wave B: LIVE + human ABSENT must fail closed even if effective looks green."""
+    with tempfile.TemporaryDirectory() as d:
+        rp, gp = _write(d,
+            {"capabilities": [{"id": "x", "env": "X", "state": "LIVE", "required_gate": "pass"}]},
+            {"effective_verdict": "PASS",
+             "human": {"verdict": "ABSENT", "n": 0}})
+        assert c.check(rp, gp) != 0
 
 
 def test_non_live_with_red_gate_passes():

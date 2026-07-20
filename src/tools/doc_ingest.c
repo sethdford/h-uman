@@ -4,7 +4,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/core/file_util.h"
+#include "human/core/file.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/process_util.h"
@@ -152,23 +152,24 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
 
     char *buf = NULL;
     size_t rd = 0;
-    hu_error_t rerr = hu_file_read_all(alloc, open_path, (size_t)READ_CAP, &buf, &rd);
-    if (rerr == HU_ERR_NOT_FOUND) {
+    hu_error_t ferr = hu_file_slurp(alloc, open_path, (size_t)READ_CAP, &buf, &rd);
+    if (ferr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (rerr == HU_ERR_INVALID_FORMAT) {
+    if (ferr == HU_ERR_LIMIT_REACHED) {
         *out = hu_tool_result_fail("file too large or invalid", 25);
         return HU_OK;
     }
-    if (rerr == HU_ERR_OUT_OF_MEMORY) {
+    if (ferr == HU_ERR_OUT_OF_MEMORY) {
         *out = hu_tool_result_fail("out of memory", 12);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    if (rerr != HU_OK) {
-        *out = hu_tool_result_fail("seek failed", 11);
+    if (ferr != HU_OK) {
+        *out = hu_tool_result_fail("read failed", 11);
         return HU_OK;
     }
+    size_t buf_cap = rd + 1;
 
     size_t olen = strlen(open_path);
     bool is_pdf = olen > 4 && strcmp(open_path + olen - 4, ".pdf") == 0;
@@ -182,7 +183,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
         hu_run_result_t res = {0};
         hu_error_t er = hu_process_run_with_policy(alloc, argv_buf, NULL, 1048576, NULL, &res);
         if (er == HU_OK && res.success && res.stdout_len > 0) {
-            alloc->free(alloc->ctx, buf, rd + 1);
+            alloc->free(alloc->ctx, buf, buf_cap);
             buf = (char *)alloc->alloc(alloc->ctx, res.stdout_len + 1);
             if (!buf) {
                 hu_run_result_free(alloc, &res);
@@ -192,6 +193,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
             memcpy(buf, res.stdout_buf, res.stdout_len);
             buf[res.stdout_len] = '\0';
             rd = res.stdout_len;
+            buf_cap = rd + 1;
             hu_run_result_free(alloc, &res);
         }
 #endif
@@ -208,7 +210,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
         size_t jb_cap = take * 2 + 512;
         char *jb = (char *)alloc->alloc(alloc->ctx, jb_cap);
         if (!jb) {
-            alloc->free(alloc->ctx, buf, rd + 1);
+            alloc->free(alloc->ctx, buf, buf_cap);
             *out = hu_tool_result_fail("out of memory", 12);
             return HU_ERR_OUT_OF_MEMORY;
         }
@@ -236,7 +238,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
 
         if (bff_store_json(alloc, base, auth, tenant, jb, j) != 0) {
             alloc->free(alloc->ctx, jb, jb_cap);
-            alloc->free(alloc->ctx, buf, rd + 1);
+            alloc->free(alloc->ctx, buf, buf_cap);
             *out = hu_tool_result_fail("bff store failed", 16);
             return HU_OK;
         }
@@ -247,7 +249,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
             break;
         off += (size_t)chunk_sz - (size_t)overlap;
     }
-    alloc->free(alloc->ctx, buf, rd + 1);
+    alloc->free(alloc->ctx, buf, buf_cap);
     char *summary = hu_sprintf(alloc, "{\"ok\":true,\"chunks_stored\":%d}", stored);
     *out = hu_tool_result_ok_owned(summary, summary ? strlen(summary) : 0);
     return HU_OK;

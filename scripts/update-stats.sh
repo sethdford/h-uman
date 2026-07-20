@@ -1,21 +1,37 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
 # Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human-skills/STUBS.md, CLAUDE.md
-# Usage: ./scripts/update-stats.sh [--apply]
+# Usage: ./scripts/update-stats.sh [--apply] [--binary-size <KB>]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
+#   --binary-size <KB>: trust this size instead of measuring a local binary.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
 APPLY=false
-[ "${1:-}" = "--apply" ] && APPLY=true
+BINARY_KB_OVERRIDE=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --apply) APPLY=true ;;
+        --binary-size)
+            BINARY_KB_OVERRIDE="${2:-}"
+            case "$BINARY_KB_OVERRIDE" in
+                ''|*[!0-9]*) echo "error: --binary-size requires a numeric KB value" >&2; exit 2 ;;
+            esac
+            shift ;;
+        *) echo "error: unknown argument '$1' (usage: update-stats.sh [--apply] [--binary-size <KB>])" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 # Count source + header files
 SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
 
 # Count lines of C (round to nearest K)
-C_LINES_RAW=$(find src include \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+# MUST match scripts/repo-metrics.sh SRC_LOC (src/ only, no include/) — that is
+# what the metrics-drift gate checks "[0-9]+K lines of C" claims against.
+C_LINES_RAW=$(find src \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
 C_LINES_K=$(( (C_LINES_RAW + 500) / 1000 ))
 
 # Count test files
@@ -46,22 +62,49 @@ for test_bin in build/human_tests build2/human_tests build-check/human_tests bui
     fi
 done
 
+# Treat an empty extraction (binary ran but no Results: line) as unknown too
+[ -n "$TEST_COUNT" ] || TEST_COUNT="unknown"
+
 # Format test count with comma
 if [ "$TEST_COUNT" != "unknown" ]; then
     TEST_COUNT_FMT=$(printf "%'d" "$TEST_COUNT" 2>/dev/null || echo "$TEST_COUNT")
 else
     TEST_COUNT_FMT="unknown"
+    echo "WARN: no test binary found in build*/ — leaving test-count claims untouched" >&2
 fi
 
-# Get binary size (prefer MinSizeRel builds, then release, then debug)
+# Get binary size — ONLY from a verifiable release build. The docs phrasings
+# claim "MinSizeRel+LTO"; a dev/ASan Debug binary is ~10x larger, and writing
+# its size into that claim is how the docs drifted to ~23209 KB twice
+# (commits 6b0f8926, 2edbdd74). When no release binary exists, keep the
+# committed value untouched (BINARY_KB stays "unknown" and every patch site
+# below skips). CI/release callers with no build dir can pass --binary-size.
+is_release_build_dir() {
+    cache="$1/CMakeCache.txt"
+    [ -f "$cache" ] || return 1
+    grep -q '^CMAKE_BUILD_TYPE:[^=]*=MinSizeRel$' "$cache" || return 1
+    ! grep -q '^HU_ENABLE_ASAN:[^=]*=ON$' "$cache"
+}
+
 BINARY_KB="unknown"
-for bin in build-size/human build2/human build-release/human build/human; do
-    if [ -f "$bin" ]; then
-        BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
-        BINARY_KB=$((BINARY_BYTES / 1024))
-        break
+if [ -n "$BINARY_KB_OVERRIDE" ]; then
+    BINARY_KB="$BINARY_KB_OVERRIDE"
+else
+    SKIPPED_BIN=""
+    for bin in build-size/human build2/human build-release/human build/human; do
+        if [ -f "$bin" ]; then
+            if is_release_build_dir "$(dirname "$bin")"; then
+                BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
+                BINARY_KB=$((BINARY_BYTES / 1024))
+                break
+            fi
+            [ -n "$SKIPPED_BIN" ] || SKIPPED_BIN="$bin"
+        fi
+    done
+    if [ "$BINARY_KB" = "unknown" ] && [ -n "$SKIPPED_BIN" ]; then
+        echo "Binary size: skipping — ${SKIPPED_BIN} is not a MinSizeRel release build (Debug/ASan); keeping committed value. Use --binary-size <KB> to override."
     fi
-done
+fi
 
 echo "=== Human Stats ==="
 echo "Source + header files: ${SRC_COUNT}"
@@ -69,7 +112,11 @@ echo "Lines of C:           ~${C_LINES_K}K (${C_LINES_RAW})"
 echo "Test files:           ${TEST_FILES}"
 echo "Lines of tests:       ~${TEST_LINES_K}K (${TEST_LINES_RAW})"
 echo "Tests:                ${TEST_COUNT_FMT}"
-echo "Binary size:          ~${BINARY_KB} KB"
+if [ "$BINARY_KB" != "unknown" ]; then
+    echo "Binary size:          ~${BINARY_KB} KB"
+else
+    echo "Binary size:          unknown (keeping committed value)"
+fi
 echo "Channels (enum):      ${CHANNEL_ENUM}"
 echo "Channel .c files:     ${CHANNEL_COUNT}"
 echo "Tools:                ${TOOL_COUNT}"
@@ -84,14 +131,18 @@ echo ""
 echo "Patching AGENTS.md..."
 
 # "Current scale" line (test count, channels, lines, etc.)
-sed -i.bak -E \
-    "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_ENUM} channels**/" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/Current scale: \*\*[^*]+\*\*/Current scale: **${SRC_COUNT} source + header files, ~${C_LINES_K}K lines of C, ~${TEST_LINES_K}K lines of tests, ${TEST_COUNT_FMT} tests, ${CHANNEL_ENUM} channels**/" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 # "tests/" repo-map line (test files + test count)
-sed -i.bak -E \
-    "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/                 ${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests|" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/                 ${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests|" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 # "tools/" repo-map line (tool count)
 sed -i.bak -E \
@@ -111,31 +162,41 @@ if [ "$BINARY_KB" != "unknown" ]; then
 fi
 
 # "All N+ tests" rule-of-thumb line
-sed -i.bak -E \
-    "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
-    AGENTS.md && rm -f AGENTS.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
+        AGENTS.md && rm -f AGENTS.md.bak
+fi
 
 echo "Patching README.md..."
 
 # Test count — all "NNNN tests" / "NNNN+ tests" references
-sed -i.bak -E \
-    "s/[0-9,]+\+? tests/${TEST_COUNT_FMT}+ tests/g" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/[0-9,]+\+? tests/${TEST_COUNT_FMT}+ tests/g" \
+        README.md && rm -f README.md.bak
+fi
 
 # "Tests:" stat line
-sed -i.bak -E \
-    "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
+        README.md && rm -f README.md.bak
+fi
 
 # "tests/" stat line
-sed -i.bak -E \
-    "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/ ${TEST_FILES} test files, ${TEST_COUNT_FMT} tests|" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s|tests/[[:space:]]+[0-9]+ test files, [0-9,]+\+? tests|tests/ ${TEST_FILES} test files, ${TEST_COUNT_FMT} tests|" \
+        README.md && rm -f README.md.bak
+fi
 
 # "# run all tests" comment with count
-sed -i.bak -E \
-    "s/# [0-9,]+ tests$/# ${TEST_COUNT_FMT} tests/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/# [0-9,]+ tests$/# ${TEST_COUNT_FMT} tests/" \
+        README.md && rm -f README.md.bak
+fi
 
 # Binary size — all ~NNN KB references
 if [ "$BINARY_KB" != "unknown" ]; then
@@ -167,16 +228,20 @@ sed -i.bak -E \
     "s/^Test files: [0-9]+$/Test files: ${TEST_FILES}/" \
     README.md && rm -f README.md.bak
 
-sed -i.bak -E \
-    "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
-    README.md && rm -f README.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
+        README.md && rm -f README.md.bak
+fi
 
 echo "Patching CONTRIBUTING.md..."
 
 # "All N+ tests must pass" line
-sed -i.bak -E \
-    "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
-    CONTRIBUTING.md && rm -f CONTRIBUTING.md.bak
+if [ "$TEST_COUNT" != "unknown" ]; then
+    sed -i.bak -E \
+        "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
+        CONTRIBUTING.md && rm -f CONTRIBUTING.md.bak
+fi
 
 echo "Patching PROJECT_STATUS.md..."
 
@@ -187,9 +252,11 @@ if [ -f PROJECT_STATUS.md ]; then
         PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
 
     # Tests passing
-    sed -i.bak -E \
-        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
-        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    fi
 
     # Binary size
     if [ "$BINARY_KB" != "unknown" ]; then
@@ -222,15 +289,27 @@ fi
 echo "Patching human/STUBS.md..."
 
 if [ -f human/STUBS.md ]; then
-    # Test count in header blurb
-    sed -i.bak -E \
-        "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
-        human/STUBS.md && rm -f human/STUBS.md.bak
+    # Test count in header blurb (backreference keeps the committed KB value
+    # when no release binary was measured; skipped entirely when the test
+    # count itself is unknown — never write "unknown" into docs)
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        if [ "$BINARY_KB" != "unknown" ]; then
+            sed -i.bak -E \
+                "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
+                human/STUBS.md && rm -f human/STUBS.md.bak
+        else
+            sed -i.bak -E \
+                "s/[0-9,]+ tests, ~([0-9]+) KB binary/${TEST_COUNT_FMT} tests, ~\1 KB binary/" \
+                human/STUBS.md && rm -f human/STUBS.md.bak
+        fi
+    fi
 
     # Tests passing table row
-    sed -i.bak -E \
-        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
-        human/STUBS.md && rm -f human/STUBS.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+            human/STUBS.md && rm -f human/STUBS.md.bak
+    fi
 
     # Test files
     sed -i.bak -E \
@@ -254,18 +333,26 @@ if [ -f CLAUDE.md ]; then
     fi
 
     # Test count references
-    sed -i.bak -E \
-        "s/[0-9,]+\+ tests/${TEST_COUNT_FMT}+ tests/g" \
-        CLAUDE.md && rm -f CLAUDE.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/[0-9,]+\+ tests/${TEST_COUNT_FMT}+ tests/g" \
+            CLAUDE.md && rm -f CLAUDE.md.bak
+    fi
 
     # Test files in paths table
-    sed -i.bak -E \
-        "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
-        CLAUDE.md && rm -f CLAUDE.md.bak
+    if [ "$TEST_COUNT" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
+            CLAUDE.md && rm -f CLAUDE.md.bak
+    fi
 
-    # Source file count
+    # Lines-of-C claim in the paths table. (The old pattern
+    # '~[0-9]+ files, ~[0-9]+K lines' stopped matching when the row's phrasing
+    # changed to "~1,050 `.c` files, ~NNNK lines of C", so CLAUDE.md silently
+    # rotted while other docs got refreshed. Patch just the LOC figure, which is
+    # what the drift gate checks.)
     sed -i.bak -E \
-        "s/~[0-9]+ files, ~[0-9]+K lines/~${SRC_COUNT} files, ~${C_LINES_K}K lines/" \
+        "s/~[0-9]+K lines of C/~${C_LINES_K}K lines of C/g" \
         CLAUDE.md && rm -f CLAUDE.md.bak
 fi
 

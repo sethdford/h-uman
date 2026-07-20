@@ -11,6 +11,11 @@
  * runner reads HU_ENABLE_RL_FULL from a compile-time #ifdef which the
  * test binary cannot change per-call). */
 
+// @covers-none — check-test-references' filename heuristic maps this to
+// src/doctor/doctor.c; the file actually covers
+// src/doctor/check_reaction_collection_wired.c via the exported
+// hu_doctor_check_reaction_collection_wired vtable + _run_for_test seam.
+
 #include "test_framework.h"
 
 #include "human/config.h"
@@ -23,7 +28,8 @@ static void test_null_cfg_returns_na(void) {
     /* No config at all → NA. Operator gets a clear "skipped" reason
      * rather than a confusing FAIL when running doctor against a path
      * that didn't load a config file. */
-    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(NULL, true);
+    hu_doctor_check_result_t r =
+        hu_doctor_check_reaction_collection_wired_run_for_test(NULL, true, /*store_probe=*/1);
     HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_NA);
     HU_ASSERT_NOT_NULL(r.reason);
     HU_ASSERT_TRUE(strstr(r.reason, "no config") != NULL);
@@ -36,7 +42,8 @@ static void test_cfg_enabled_false_returns_na(void) {
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.reaction_collection.enabled = false;
-    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(&cfg, true);
+    hu_doctor_check_result_t r =
+        hu_doctor_check_reaction_collection_wired_run_for_test(&cfg, true, /*store_probe=*/1);
     HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_NA);
     HU_ASSERT_NOT_NULL(r.reason);
     HU_ASSERT_TRUE(strstr(r.reason, "enabled=false") != NULL);
@@ -51,8 +58,8 @@ static void test_cfg_enabled_but_not_built_with_rl_full_returns_fail(void) {
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.reaction_collection.enabled = true;
-    hu_doctor_check_result_t r =
-        hu_doctor_check_reaction_collection_wired_run_for_test(&cfg, /*built_with_rl_full=*/false);
+    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(
+        &cfg, /*built_with_rl_full=*/false, /*store_probe=*/1);
     HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
     HU_ASSERT_NOT_NULL(r.reason);
     /* Reason MUST name the exact rebuild command — operator should NOT
@@ -72,14 +79,53 @@ static void test_cfg_enabled_and_built_with_rl_full_returns_pass(void) {
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.reaction_collection.enabled = true;
-    hu_doctor_check_result_t r =
-        hu_doctor_check_reaction_collection_wired_run_for_test(&cfg, /*built_with_rl_full=*/true);
+    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(
+        &cfg, /*built_with_rl_full=*/true, /*store_probe=*/1);
     HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_PASS);
     HU_ASSERT_NOT_NULL(r.reason);
     HU_ASSERT_TRUE(strstr(r.reason, "wired") != NULL ||
                    strstr(r.reason, "AND binary built with HU_ENABLE_RL_FULL") != NULL);
     HU_ASSERT_NOT_NULL(r.detail_json);
     HU_ASSERT_TRUE(strstr(r.detail_json, "\"built_with_rl_full\":true") != NULL);
+    /* The healthy verdict now also carries the empirical store fact. */
+    HU_ASSERT_TRUE(strstr(r.detail_json, "\"lookup_store\":\"ok\"") != NULL);
+}
+
+static void test_cfg_enabled_rl_full_but_store_unopenable_returns_fail(void) {
+    /* THE 2026-05-31 → 2026-07-19 silent-failure case (PR #321): config
+     * enabled, RL_FULL binary, but every rxn_db_open() of
+     * ~/.human/reaction_lookup.db failed (fatal duplicate-column
+     * migration) — registration AND tapback lookup silently no-op'd
+     * while this check reported PASS because it never touched the
+     * store. A failed probe MUST now be a FAIL, not ok. */
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reaction_collection.enabled = true;
+    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(
+        &cfg, /*built_with_rl_full=*/true, /*store_probe=*/0);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_FAIL);
+    HU_ASSERT_NOT_NULL(r.reason);
+    /* Reason MUST name the store path and give the operator a concrete
+     * next step — not just "store broken". */
+    HU_ASSERT_TRUE(strstr(r.reason, "reaction_lookup.db") != NULL);
+    HU_ASSERT_TRUE(strstr(r.reason, "integrity_check") != NULL);
+    HU_ASSERT_NOT_NULL(r.detail_json);
+    HU_ASSERT_TRUE(strstr(r.detail_json, "\"lookup_store\":\"fail\"") != NULL);
+}
+
+static void test_store_probe_unavailable_still_passes_with_unprobed_detail(void) {
+    /* Binary built without SQLite → the lookup store is the in-memory
+     * ring, which cannot brick. The check must not FAIL just because
+     * there is no SQLite store to probe — but the detail_json should
+     * say the store fact was not empirically checked. */
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reaction_collection.enabled = true;
+    hu_doctor_check_result_t r = hu_doctor_check_reaction_collection_wired_run_for_test(
+        &cfg, /*built_with_rl_full=*/true, /*store_probe=*/-1);
+    HU_ASSERT_EQ((int)r.verdict, (int)HU_DOCTOR_PASS);
+    HU_ASSERT_NOT_NULL(r.detail_json);
+    HU_ASSERT_TRUE(strstr(r.detail_json, "\"lookup_store\":\"unprobed\"") != NULL);
 }
 
 static void test_vtable_metadata_is_stable(void) {
@@ -102,5 +148,7 @@ void run_doctor_reaction_collection_wired_tests(void) {
     HU_RUN_TEST(test_cfg_enabled_false_returns_na);
     HU_RUN_TEST(test_cfg_enabled_but_not_built_with_rl_full_returns_fail);
     HU_RUN_TEST(test_cfg_enabled_and_built_with_rl_full_returns_pass);
+    HU_RUN_TEST(test_cfg_enabled_rl_full_but_store_unopenable_returns_fail);
+    HU_RUN_TEST(test_store_probe_unavailable_still_passes_with_unprobed_detail);
     HU_RUN_TEST(test_vtable_metadata_is_stable);
 }

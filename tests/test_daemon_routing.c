@@ -1,6 +1,7 @@
+#include "human/channel_loop.h"
+#include "human/config.h"
 #include "human/daemon.h"
 #include "human/daemon_routing.h"
-#include "human/channel_loop.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -189,6 +190,49 @@ static void test_video_delay_batch_mixed_content(void) {
     HU_ASSERT(delay >= 2000 && delay <= 10000);
 }
 
+/* ── hu_daemon_fallback_model ────────────────────────────────────────── */
+
+static void test_fallback_model_null_config_returns_default(void) {
+    size_t len = 0;
+    const char *m = hu_daemon_fallback_model(NULL, &len);
+    HU_ASSERT_STR_EQ(m, HU_DAEMON_FALLBACK_MODEL_DEFAULT);
+    HU_ASSERT_EQ(len, strlen(HU_DAEMON_FALLBACK_MODEL_DEFAULT));
+}
+
+static void test_fallback_model_unset_config_returns_default(void) {
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    size_t len = 0;
+    const char *m = hu_daemon_fallback_model(&cfg, &len);
+    HU_ASSERT_STR_EQ(m, HU_DAEMON_FALLBACK_MODEL_DEFAULT);
+    HU_ASSERT_EQ(len, strlen(HU_DAEMON_FALLBACK_MODEL_DEFAULT));
+}
+
+static void test_fallback_model_empty_config_value_returns_default(void) {
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.agent.mr_reflexive_model = (char *)"";
+    size_t len = 0;
+    const char *m = hu_daemon_fallback_model(&cfg, &len);
+    HU_ASSERT_STR_EQ(m, HU_DAEMON_FALLBACK_MODEL_DEFAULT);
+    HU_ASSERT_EQ(len, strlen(HU_DAEMON_FALLBACK_MODEL_DEFAULT));
+}
+
+static void test_fallback_model_configured_returns_config_value(void) {
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.agent.mr_reflexive_model = (char *)"reflexive-tier-model";
+    size_t len = 0;
+    const char *m = hu_daemon_fallback_model(&cfg, &len);
+    HU_ASSERT_STR_EQ(m, "reflexive-tier-model");
+    HU_ASSERT_EQ(len, strlen("reflexive-tier-model"));
+}
+
+static void test_fallback_model_null_len_out_is_safe(void) {
+    const char *m = hu_daemon_fallback_model(NULL, NULL);
+    HU_ASSERT_STR_EQ(m, HU_DAEMON_FALLBACK_MODEL_DEFAULT);
+}
+
 void run_daemon_routing_tests(void) {
     HU_TEST_SUITE("daemon_routing");
 
@@ -223,4 +267,11 @@ void run_daemon_routing_tests(void) {
     HU_RUN_TEST(test_tapback_worthy_with_group_context);
     HU_RUN_TEST(test_photo_delay_reply_msg_with_attachment);
     HU_RUN_TEST(test_video_delay_batch_mixed_content);
+
+    /* fallback model */
+    HU_RUN_TEST(test_fallback_model_null_config_returns_default);
+    HU_RUN_TEST(test_fallback_model_unset_config_returns_default);
+    HU_RUN_TEST(test_fallback_model_empty_config_value_returns_default);
+    HU_RUN_TEST(test_fallback_model_configured_returns_config_value);
+    HU_RUN_TEST(test_fallback_model_null_len_out_is_safe);
 }

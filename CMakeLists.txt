@@ -419,6 +419,9 @@ endif()
 # Tier 2 Task 11 (RL SOTA): tapback inbound poll (hu_imessage_poll_reactions,
 # hu_imessage_lookup_latest_sent_guid). SQL behind internal Apple guard.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+# T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
+# advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
 # personal-model ingestion (hu_reaction_ingest_personal_model,
@@ -551,8 +554,9 @@ set(HU_CORE_SOURCES
     src/core/arena.c
     src/core/string.c
     src/core/io_secure.c
-    src/core/file_util.c
+    src/core/file.c
     src/core/json.c
+    src/core/state_file.c
     src/core/time.c
     # Phase 3 of docs/plans/2026-05-18-imessage-sota.md: pure-C bplist00
     # parser. Used by imessage_ingest.c extractors for audio transcripts
@@ -1090,6 +1094,7 @@ set(HU_CORE_SOURCES
     src/memory/lifecycle/rollout.c
     src/memory/lifecycle/migrate.c
     src/memory/retrieval/keyword.c
+    src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
     src/memory/retrieval/reranker.c
     src/memory/retrieval/hybrid.c
@@ -1350,6 +1355,11 @@ list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
 # CF-3: daemon reaction poll tick — always linked (daemon.c calls it
 # unconditionally); must not sit behind HU_ENABLE_RL_FULL.
 list(APPEND HU_CORE_SOURCES src/daemon/daemon_reaction_poll.c)
+
+# US-104: proactive-outcome pipeline + 24h DPO judge tick (carved from
+# daemon.c 2026-07-18). Always linked; bodies internally gated on
+# HU_ENABLE_SQLITE.
+list(APPEND HU_CORE_SOURCES src/daemon/daemon_learning_tick.c)
 
 # T9: daemon adapter for the M2 reflection loop. Body internally
 # gated on HU_ENABLE_SQLITE (stub no-op otherwise), so it stays in
@@ -3299,7 +3309,7 @@ set(HU_TEST_SOURCES
     tests/test_prompt_budget_snapshot.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
-    tests/test_file_util.c
+    tests/test_file_slurp.c
     tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
@@ -3416,6 +3426,7 @@ set(HU_TEST_SOURCES
     tests/test_mlx_local_voice.c
     tests/test_autonomy.c
     tests/test_retrieval.c
+    tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
     tests/test_gate_mode.c
@@ -3829,6 +3840,7 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
 # unconditionally and stay green on every build variant.
@@ -3976,6 +3988,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_reaction_paired_train_e2e.c
     tests/test_dpo_collector.c
     tests/test_proactive_outcomes.c
+    tests/test_daemon_learning_tick.c
     tests/test_e2e_learning_loop.c
     # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
     # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round

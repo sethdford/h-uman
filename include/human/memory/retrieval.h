@@ -25,6 +25,15 @@ typedef struct hu_retrieval_options {
     double min_score;
     bool use_reranking;
     double temporal_decay_factor; /* 0.0 = no decay, 1.0 = strong decay */
+    /* Wave B namespace (borrowed). When require_contact_namespace is true,
+     * contact_id must be non-empty or retrieve returns HU_ERR_INVALID_ARGUMENT.
+     * When contact_id is set, results are filtered to keys prefixed
+     * contact:<id>: — unscoped rows are excluded (fail-closed isolation). */
+    const char *contact_id;
+    size_t contact_id_len;
+    const char *session_id;
+    size_t session_id_len;
+    bool require_contact_namespace;
 } hu_retrieval_options_t;
 
 typedef struct hu_retrieval_result {
@@ -79,13 +88,20 @@ hu_error_t hu_keyword_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, cons
                                hu_retrieval_result_t *out);
 
 hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_embedder_t *embedder,
-                              hu_vector_store_t *vector_store, hu_graph_t *graph,
-                              const char *query, size_t query_len,
-                              const hu_retrieval_options_t *opts, hu_retrieval_result_t *out);
+                              hu_vector_store_t *vector_store, hu_graph_t *graph, const char *query,
+                              size_t query_len, const hu_retrieval_options_t *opts,
+                              hu_retrieval_result_t *out);
 
 /* Temporal decay: apply to base_score; entries without timestamp unchanged */
 double hu_temporal_decay_score(double base_score, double decay_factor, const char *timestamp,
                                size_t timestamp_len);
+
+/* Namespace helpers (Wave B contact/session isolation). */
+hu_error_t hu_retrieval_check_namespace(const hu_retrieval_options_t *opts);
+bool hu_retrieval_entry_in_contact_scope(const hu_memory_entry_t *e, const char *contact_id,
+                                         size_t contact_id_len);
+hu_error_t hu_retrieval_filter_by_namespace(hu_allocator_t *alloc, hu_retrieval_result_t *r,
+                                            const hu_retrieval_options_t *opts);
 
 /* MMR reranking: diversifies results. Modifies entries/scores in place. */
 hu_error_t hu_mmr_rerank(hu_allocator_t *alloc, const char *query, size_t query_len,

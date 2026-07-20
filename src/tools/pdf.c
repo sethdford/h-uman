@@ -1,6 +1,6 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/core/file_util.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
@@ -59,12 +59,12 @@ static hu_error_t pdf_execute(void *ctx, hu_allocator_t *alloc, const hu_json_va
     int max_pages = (int)hu_json_get_number(args, "max_pages", 0);
     char *data = NULL;
     size_t flen = 0;
-    hu_error_t rerr = hu_file_read_all(alloc, path, (size_t)HU_PDF_MAX_SIZE, &data, &flen);
+    hu_error_t rerr = hu_file_slurp(alloc, path, (size_t)HU_PDF_MAX_SIZE, &data, &flen);
     if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (rerr == HU_ERR_INVALID_FORMAT) {
+    if (rerr == HU_ERR_LIMIT_REACHED) {
         *out = hu_tool_result_fail("file too large (>20MB)", 21);
         return HU_OK;
     }

@@ -1,4 +1,5 @@
 #include "human/agent/hula.h"
+#include "agent_internal.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/planner.h"
 #include "human/agent/dag.h"
@@ -879,6 +880,12 @@ void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_re
     exec->delegate_registry = registry;
 }
 
+void hu_hula_exec_set_security_agent(hu_hula_exec_t *exec, struct hu_agent *agent) {
+    if (!exec)
+        return;
+    exec->security_agent = agent;
+}
+
 void hu_hula_exec_set_idempotency_registry(hu_hula_exec_t *exec,
                                            struct hu_idempotency_registry *registry) {
     if (!exec)
@@ -1180,6 +1187,27 @@ static hu_error_t exec_call(hu_hula_exec_t *exec, hu_hula_node_t *n) {
     }
 
     if (!use_cached_result) {
+        /* Wave A: optional agent security envelope before execute. */
+        if (exec->security_agent && n->tool_name) {
+            const char *gate_args = n->args_json ? n->args_json : "{}";
+            hu_tool_result_t gate_out = {0};
+            hu_tool_gate_t gate = hu_agent_internal_pre_execute_checks(
+                (hu_agent_t *)exec->security_agent, n->tool_name, strlen(n->tool_name), gate_args,
+                strlen(gate_args), &gate_out);
+            if (gate != HU_TOOL_GATE_ALLOW) {
+                const char *em = gate_out.error_msg ? gate_out.error_msg : "denied by security";
+                size_t el = gate_out.error_msg ? gate_out.error_msg_len : 18;
+                set_result(exec, n, HU_HULA_FAILED, NULL, 0, em, el);
+                hu_agent_internal_post_hook_fire((hu_agent_t *)exec->security_agent, n->tool_name,
+                                                 strlen(n->tool_name), gate_args, strlen(gate_args),
+                                                 &gate_out);
+                hu_tool_result_free(&exec->alloc, &gate_out);
+                hu_json_free(&exec->alloc, args);
+                return HU_OK;
+            }
+            hu_tool_result_free(&exec->alloc, &gate_out);
+        }
+
         if (exec->observer) {
             hu_observer_event_t ev = {0};
             ev.tag = HU_OBSERVER_EVENT_TOOL_CALL_START;
@@ -1192,6 +1220,13 @@ static hu_error_t exec_call(hu_hula_exec_t *exec, hu_hula_node_t *n) {
             exec->budget_tool_calls_used++;
 
         err = tool->vtable->execute(tool->ctx, &exec->alloc, args, &tr);
+
+        if (exec->security_agent && n->tool_name) {
+            const char *gate_args = n->args_json ? n->args_json : "{}";
+            hu_agent_internal_post_hook_fire((hu_agent_t *)exec->security_agent, n->tool_name,
+                                             strlen(n->tool_name), gate_args, strlen(gate_args),
+                                             &tr);
+        }
 
         /* Record result in idempotency registry for future replay */
         if (exec->idempotency_registry && err == HU_OK) {

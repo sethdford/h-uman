@@ -133,4 +133,9 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
  * back to (operator must inspect quarantine manually). */
 hu_error_t hu_ml_cli_adapter_rollback(hu_allocator_t *alloc, int argc, const char **argv);
 
+/* Wave C — `human ml train-from-reactions`
+ * Export preference pairs from memory.db (reaction / DPO collector) to JSONL,
+ * then run KTO (default) or DPO training on that export. */
+hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const char **argv);
+
 #endif

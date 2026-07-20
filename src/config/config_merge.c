@@ -2,11 +2,11 @@
 #include "human/config.h"
 #include "human/core/arena.h"
 #include "human/core/error.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/api_key.h"
-#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -544,41 +544,22 @@ static void sync_autonomy_string_from_level(hu_config_t *cfg, hu_allocator_t *a)
 }
 
 static hu_error_t load_json_file(hu_config_t *cfg, const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f)
-        return (errno == ENOENT) ? HU_ERR_CONFIG_NOT_FOUND : HU_ERR_IO;
-    hu_allocator_t *a = &cfg->allocator;
-    hu_error_t err = HU_OK;
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return HU_ERR_IO;
-    }
-    if (sz >= 65536) {
-        fclose(f);
-        hu_log_warn("config", NULL, "config file too large (%ld bytes, max 65535): %s", sz, path);
+    char *buf = NULL;
+    size_t len = 0;
+    /* Buffer comes from the config arena; reclaimed with the arena, no
+     * individual free (hu_config_parse_json may reference it in place). */
+    hu_error_t err = hu_file_slurp(&cfg->allocator, path, 65535, &buf, &len);
+    if (err == HU_ERR_NOT_FOUND)
+        return HU_ERR_CONFIG_NOT_FOUND;
+    if (err == HU_ERR_LIMIT_REACHED) {
+        hu_log_warn("config", NULL, "config file too large (max 65535 bytes): %s", path);
         return HU_ERR_LIMIT_REACHED;
     }
-    if (sz > 0) {
-        char *buf = (char *)a->alloc(a->ctx, (size_t)sz + 1);
-        if (buf) {
-            size_t read_len = fread(buf, 1, (size_t)sz, f);
-            buf[read_len] = '\0';
-            err = hu_config_parse_json(cfg, buf, read_len);
-        } else {
-            err = HU_ERR_OUT_OF_MEMORY;
-        }
-    }
-    fclose(f);
-    return err;
+    if (err != HU_OK)
+        return err;
+    if (len > 0)
+        return hu_config_parse_json(cfg, buf, len);
+    return HU_OK;
 }
 
 static void sync_flat_fields(hu_config_t *cfg) {
@@ -702,22 +683,13 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         bool strict = (strict_env != NULL && strict_env[0] != '\0' && strict_env[0] != '0');
         hu_json_value_t *validation_root = NULL;
         if (out->config_path) {
-            FILE *vf = fopen(out->config_path, "rb");
-            if (vf) {
-                fseek(vf, 0, SEEK_END);
-                long vsz = ftell(vf);
-                fseek(vf, 0, SEEK_SET);
-                if (vsz > 0 && vsz < 65536) {
-                    char *vbuf = (char *)a.alloc(a.ctx, (size_t)vsz + 1);
-                    if (vbuf) {
-                        size_t vread = fread(vbuf, 1, (size_t)vsz, vf);
-                        vbuf[vread] = '\0';
-                        hu_error_t verr = hu_json_parse(&a, vbuf, vread, &validation_root);
-                        if (verr != HU_OK)
-                            validation_root = NULL;
-                    }
-                }
-                fclose(vf);
+            char *vbuf = NULL;
+            size_t vread = 0;
+            /* Arena-backed like load_json_file: no individual free. */
+            if (hu_file_slurp(&a, out->config_path, 65535, &vbuf, &vread) == HU_OK && vread > 0) {
+                hu_error_t verr = hu_json_parse(&a, vbuf, vread, &validation_root);
+                if (verr != HU_OK)
+                    validation_root = NULL;
             }
         }
         hu_error_t verr = hu_config_validate_strict(out, validation_root, strict);

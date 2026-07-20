@@ -42,7 +42,16 @@
  * helpers let an engine open path detect corruption and recover loudly:
  * quick_check the freshly-opened handle; if it fails, quarantine the file
  * (preserved for manual recovery) and reopen fresh. Implemented in
- * src/memory/engines/sqlite.c (same TU + HU_ENABLE_SQLITE gate as the engine). */
+ * src/memory/engines/sqlite.c (same TU + HU_ENABLE_SQLITE gate as the engine).
+ *
+ * Cost gating: PRAGMA quick_check walks every btree page — minutes of pread at
+ * 100% CPU on a multi-GB DB — so the engine only runs the full scan when the
+ * previous process did NOT close the DB cleanly. That is tracked by an
+ * unclean-shutdown sentinel (<db_path>.open-sentinel): written right after a
+ * successful open, removed on clean close (deinit). Presence at the next open
+ * ⇒ prior unclean shutdown ⇒ full quick_check (+ quarantine on failure). On
+ * the clean-shutdown fast path, gross corruption (bad header / broken master
+ * btree) is still healed cheaply when schema init fails. */
 #include <stdbool.h>
 struct sqlite3;
 
@@ -58,5 +67,13 @@ bool hu_sqlite_quick_check_ok(struct sqlite3 *db);
  * if the main file was renamed. No-op returning false for NULL / empty /
  * ":memory:" (nothing on disk to quarantine). */
 bool hu_sqlite_quarantine_corrupt_file(const char *db_path);
+
+/* Unclean-shutdown sentinel (<db_path>.open-sentinel). present: does the
+ * sentinel exist? write: create it (returns false when there is nothing on
+ * disk to guard — NULL / empty / ":memory:" — or on I/O failure). remove:
+ * best-effort delete on clean close. */
+bool hu_sqlite_open_sentinel_present(const char *db_path);
+bool hu_sqlite_open_sentinel_write(const char *db_path);
+void hu_sqlite_open_sentinel_remove(const char *db_path);
 
 #endif /* HU_MEMORY_SQL_COMMON_H */

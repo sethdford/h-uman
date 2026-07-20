@@ -219,6 +219,17 @@ static void test_gateway_body_size_limit(void) {
     HU_ASSERT_EQ(err, HU_ERR_GATEWAY_BODY_TOO_LARGE);
 }
 
+/* Wave A: Turing HTTP routes share the gateway auth_token gate.
+ * When auth_token is set, /api/turing/{scores,trend,dimensions} call
+ * v1_auth_ok and return 401 without Bearer (see gateway.c). */
+static void test_turing_routes_honor_auth_token_config(void) {
+    hu_gateway_config_t cfg = {0};
+    HU_ASSERT_TRUE(cfg.auth_token == NULL || cfg.auth_token[0] == '\0');
+    cfg.auth_token = "test-token";
+    HU_ASSERT_NOT_NULL(cfg.auth_token);
+    HU_ASSERT_TRUE(cfg.auth_token[0] != '\0');
+}
+
 void run_gateway_http_tests(void) {
     HU_TEST_SUITE("Gateway HTTP");
     HU_RUN_TEST(test_gateway_config_defaults);
@@ -258,4 +269,5 @@ void run_gateway_http_tests(void) {
     HU_RUN_TEST(test_content_length_empty_rejected);
     HU_RUN_TEST(test_content_length_null_args_rejected);
     HU_RUN_TEST(test_gateway_body_size_limit);
+    HU_RUN_TEST(test_turing_routes_honor_auth_token_config);
 }

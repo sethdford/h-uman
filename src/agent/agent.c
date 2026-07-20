@@ -3,6 +3,7 @@
 #include "human/agent/approval_gate.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/humanization_bandit.h"
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/pattern_radar.h"
@@ -1082,6 +1083,25 @@ hu_error_t hu_agent_from_config(
         hu_init_dpo_bridge_set_collector(&out->sota.dpo_collector);
 #endif
     }
+
+    /* Per-contact humanization bandit (US-2). Never created before
+     * 2026-07-18, so daemon.c's read of sota.bandit was permanently NULL
+     * and the HU_BANDIT_HUMANIZATION gate routed to nothing. Create it and
+     * hydrate the Beta(α,β) arms from disk so learning survives restarts;
+     * a NULL path (tests / no HOME) or missing file is a cold start. */
+    {
+        hu_error_t sota_sub = hu_contextual_bandit_create(alloc, 256, &out->sota.bandit);
+        if (sota_sub != HU_OK) {
+            out->sota.bandit = NULL;
+            hu_log_warn("agent", NULL, "humanization bandit create failed: %s",
+                        hu_error_string(sota_sub));
+        } else {
+            char bandit_path[512];
+            const char *bp = hu_humanization_bandit_default_path(bandit_path, sizeof(bandit_path));
+            if (bp)
+                (void)hu_humanization_bandit_load_file(out->sota.bandit, bp);
+        }
+    }
     out->sota.sota_initialized = true;
 
     /* Sprint 46 R5.3 — load classifier via helper (refactored for
@@ -1116,6 +1136,14 @@ hu_error_t hu_agent_from_config(
                         hu_error_string(pb_err));
             out->prompt_budget = NULL;
         }
+#if !defined(HU_IS_TEST)
+        /* Seed from the persisted snapshot so the trim policy keeps its
+         * long-run field means across restarts. Missing file (first boot)
+         * is normal; tests restore explicitly via the path override. */
+        else {
+            (void)hu_prompt_budget_restore_snapshot(out->prompt_budget);
+        }
+#endif
     }
 
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
@@ -1824,6 +1852,13 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_init_dpo_bridge_set_collector(NULL);
 #endif
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
+        /* No save here: short-lived CLI agents load the daemon's file at
+         * create; a deinit-save from one would clobber newer daemon state
+         * (lost update). Saves happen at the posterior-update site only. */
+        if (agent->sota.bandit) {
+            hu_contextual_bandit_destroy(agent->sota.bandit);
+            agent->sota.bandit = NULL;
+        }
         agent->sota.sota_initialized = false;
     }
     /* Free the last rejected draft from the prior turn (used for DPO pairing
@@ -2287,6 +2322,82 @@ hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size
     return NULL;
 }
 
+hu_tool_gate_t hu_agent_internal_pre_execute_checks(hu_agent_t *agent, const char *tool_name,
+                                                    size_t tool_name_len, const char *args_json,
+                                                    size_t args_json_len, hu_tool_result_t *out) {
+    if (!agent || !out)
+        return HU_TOOL_GATE_DENY;
+    if (!tool_name || tool_name_len == 0) {
+        *out = hu_tool_result_fail("denied by security policy", 25);
+        return HU_TOOL_GATE_DENY;
+    }
+
+    char tn_buf[128];
+    size_t tn = tool_name_len < sizeof(tn_buf) - 1 ? tool_name_len : sizeof(tn_buf) - 1;
+    memcpy(tn_buf, tool_name, tn);
+    tn_buf[tn] = '\0';
+
+    const char *args = args_json ? args_json : "";
+    size_t args_len = args_json ? args_json_len : 0;
+
+    /* 1. Permission tier */
+    {
+        hu_permission_level_t required = hu_permission_get_tool_level(tn_buf);
+        if (!hu_permission_check(agent->permission_level, required)) {
+            *out = hu_tool_result_fail("denied by security policy", 25);
+            hu_permission_reset_escalation(agent);
+            return HU_TOOL_GATE_DENY;
+        }
+    }
+
+    /* 2. Pre-hook pipeline */
+    if (!hu_agent_internal_pre_hook_check(agent, tn_buf, tn, args, args_len, out))
+        return HU_TOOL_GATE_DENY;
+
+    /* 3. ESCALATE protocol */
+    if (agent->sota.escalate_protocol.rule_count > 0) {
+        hu_escalate_level_t esc_level =
+            hu_escalate_evaluate(&agent->sota.escalate_protocol, tn_buf, tn);
+        if (esc_level == HU_ESCALATE_DENY) {
+            *out = hu_tool_result_fail("blocked by ESCALATE policy", 26);
+            if (agent->audit_logger)
+                hu_escalate_log_decision(agent->audit_logger, tn_buf, esc_level, false);
+            return HU_TOOL_GATE_DENY;
+        }
+        if (esc_level == HU_ESCALATE_APPROVE) {
+            *out = hu_tool_result_fail("pending approval", 16);
+            out->needs_approval = true;
+            if (agent->audit_logger)
+                hu_escalate_log_decision(agent->audit_logger, tn_buf, esc_level, false);
+            return HU_TOOL_GATE_NEED_APPROVAL;
+        }
+    }
+
+    /* 4. Policy engine + arg inspection */
+    {
+        hu_policy_action_t pa = hu_agent_internal_evaluate_tool_policy(agent, tn_buf, args);
+        if (pa == HU_POLICY_DENY) {
+            if (agent->audit_logger) {
+                hu_audit_event_t aev;
+                hu_audit_event_init(&aev, HU_AUDIT_POLICY_VIOLATION);
+                hu_audit_event_with_identity(
+                    &aev, agent->agent_id, agent->model_name ? agent->model_name : "unknown", NULL);
+                hu_audit_event_with_action(&aev, tn_buf, "denied", false, false);
+                hu_audit_logger_log(agent->audit_logger, &aev);
+            }
+            *out = hu_tool_result_fail("denied by policy", 16);
+            return HU_TOOL_GATE_DENY;
+        }
+        if (pa == HU_POLICY_REQUIRE_APPROVAL) {
+            *out = hu_tool_result_fail("pending approval", 16);
+            out->needs_approval = true;
+            return HU_TOOL_GATE_NEED_APPROVAL;
+        }
+    }
+
+    return HU_TOOL_GATE_ALLOW;
+}
+
 bool hu_agent_internal_pre_hook_check(hu_agent_t *agent, const char *tool_name,
                                       size_t tool_name_len, const char *args_json,
                                       size_t args_json_len, hu_tool_result_t *out) {
@@ -2349,18 +2460,12 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
     if (!agent || !tool || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Pre-tool hook. A DENY decision short-circuits the dispatch: the tool's
-     * execute() is NOT called and *out is populated with a failure result.
-     * Per the audit-followup contract, the post-hook STILL fires below so
-     * auditors observe every tool dispatch regardless of outcome. */
-    bool proceed = hu_agent_internal_pre_hook_check(agent, tool_name, tool_name_len, args_json,
-                                                    args_json_len, out);
+    /* Full pre-execute envelope (permission → hook → escalate → policy).
+     * DENY / NEED_APPROVAL short-circuit execute(); post-hook still fires. */
+    hu_tool_gate_t gate = hu_agent_internal_pre_execute_checks(agent, tool_name, tool_name_len,
+                                                               args_json, args_json_len, out);
 
-    /* Execute. The tool is responsible for populating *out; we treat a missing
-     * execute pointer as an empty-success no-op to match the historical
-     * behavior of the inline dispatch sites being replaced. Skipped if the
-     * pre-hook denied — that's the security gate the helper exists for. */
-    if (proceed) {
+    if (gate == HU_TOOL_GATE_ALLOW) {
         if (tool->vtable && tool->vtable->execute) {
             hu_agent_turn_state_track_tool(agent, tool_name, tool_name_len);
             tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
@@ -2369,8 +2474,6 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
         }
     }
 
-    /* Post-tool hook. Fires unconditionally whenever a registry is configured,
-     * including when the pre-hook denied the call: auditors get full visibility. */
     hu_agent_internal_post_hook_fire(agent, tool_name, tool_name_len, args_json, args_json_len,
                                      out);
 

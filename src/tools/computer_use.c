@@ -2,7 +2,7 @@
 #include "human/tools/computer_use.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/core/file_util.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/multimodal.h"
@@ -534,17 +534,21 @@ static bool cu_linux_try_screenshot_cmd(hu_allocator_t *alloc, hu_security_polic
 }
 
 /* Reads the whole PNG into a buffer; caller frees with *out_len + 1 (the
- * hu_file_read_all NUL terminator). Missing/empty/oversize files all map
- * to HU_ERR_IO to preserve the original single-error contract. */
+ * hu_file_slurp NUL terminator). Missing/empty/oversize files all map to
+ * HU_ERR_IO to preserve the original single-error contract. */
 static hu_error_t cu_linux_read_png_file(hu_allocator_t *alloc, const char *path,
                                          unsigned char **out, size_t *out_len) {
     char *data = NULL;
     size_t len = 0;
-    hu_error_t err = hu_file_read_all(alloc, path, (size_t)(16u * 1024u * 1024u), &data, &len);
+    hu_error_t err = hu_file_slurp(alloc, path, (size_t)(16u * 1024u * 1024u), &data, &len);
     if (err == HU_ERR_OUT_OF_MEMORY)
         return err;
     if (err != HU_OK)
         return HU_ERR_IO;
+    if (len == 0) { /* slurp accepts empty files; a 0-byte PNG is a failed capture */
+        alloc->free(alloc->ctx, data, 1);
+        return HU_ERR_IO;
+    }
     *out = (unsigned char *)data;
     *out_len = len;
     return HU_OK;

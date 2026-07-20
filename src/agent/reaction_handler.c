@@ -25,10 +25,13 @@
 #include <string.h>
 #include <time.h>
 
-#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
-#define HU_RXN_LOOKUP_USES_SQLITE 1
+#if defined(HU_ENABLE_SQLITE)
 #include <sqlite3.h>
 #include <sys/stat.h>
+#endif
+
+#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
+#define HU_RXN_LOOKUP_USES_SQLITE 1
 #else
 #define HU_RXN_LOOKUP_USES_SQLITE 0
 #endif
@@ -119,12 +122,7 @@ int hu_reaction_handler_was_called_this_turn(void) {
  * Retention: every register call probes a counter and runs a 60-day
  * cleanup DELETE every 1000th invocation. Keeps the DB bounded without
  * a daemon-side scheduler tick. */
-#if HU_RXN_LOOKUP_USES_SQLITE
-
-static sqlite3 *s_db = NULL;
-static unsigned long s_register_count = 0;
-static const unsigned long RXN_CLEANUP_EVERY_N = 1000;
-static const long RXN_RETENTION_SECONDS = 60L * 86400L; /* 60 days */
+#if defined(HU_ENABLE_SQLITE)
 
 /* Ensure parent directory exists for ~/.human/reaction_lookup.db. mkdir(0700)
  * matches the rest of the ~/.human/ tree posture. Best-effort; failures get
@@ -141,25 +139,22 @@ static void rxn_ensure_parent_dir(const char *path) {
     (void)mkdir(buf, 0700);
 }
 
-static int rxn_db_open(void) {
-    if (s_db)
-        return 1;
+/* Open + migrate the lookup store at `path`. Shared by the production open
+ * (fixed ~/.human path, cached handle) and the HU_IS_TEST seam (arbitrary
+ * path) so the migration contract is unit-testable. Returns 1 with *out_db
+ * set on success, 0 with *out_db NULL on failure. */
+static int rxn_db_open_at(const char *path, sqlite3 **out_db) {
+    *out_db = NULL;
+    rxn_ensure_parent_dir(path);
 
-    static char path_buf[1024];
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        home = "/tmp";
-    snprintf(path_buf, sizeof(path_buf), "%s/.human/reaction_lookup.db", home);
-    rxn_ensure_parent_dir(path_buf);
-
-    if (sqlite3_open(path_buf, &s_db) != SQLITE_OK) {
-        if (s_db)
-            sqlite3_close(s_db);
-        s_db = NULL;
+    sqlite3 *db = NULL;
+    if (sqlite3_open(path, &db) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
         return 0;
     }
-    sqlite3_exec(s_db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
-    sqlite3_exec(s_db, "PRAGMA synchronous=NORMAL", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA synchronous=NORMAL", NULL, NULL, NULL);
 
     static const char *ddl[] = {
         "CREATE TABLE IF NOT EXISTS reaction_lookup ("
@@ -173,18 +168,46 @@ static int rxn_db_open(void) {
         "PRIMARY KEY (channel, thread, msg_ref))",
         "CREATE INDEX IF NOT EXISTS idx_reaction_lookup_inserted "
         "ON reaction_lookup(inserted_at DESC)",
-        /* Forward-compatible migration: add alternative column if missing */
-        "ALTER TABLE reaction_lookup ADD COLUMN alternative TEXT",
         NULL,
     };
     for (size_t i = 0; ddl[i]; i++) {
-        if (sqlite3_exec(s_db, ddl[i], NULL, NULL, NULL) != SQLITE_OK) {
-            sqlite3_close(s_db);
-            s_db = NULL;
+        if (sqlite3_exec(db, ddl[i], NULL, NULL, NULL) != SQLITE_OK) {
+            sqlite3_close(db);
             return 0;
         }
     }
+
+    /* Legacy migration, best-effort: the duplicate-column error on a store
+     * that already has `alternative` (including every fresh create above) is
+     * the benign already-migrated case — same contract as graph.c MIGRATION.
+     * Treating it as fatal bricked every open after the column first landed,
+     * silently killing registration AND lookup (zero imessage_tapback DPO
+     * pairs, 2026-05-31 → 2026-07-19). */
+    sqlite3_exec(db, "ALTER TABLE reaction_lookup ADD COLUMN alternative TEXT", NULL, NULL, NULL);
+
+    *out_db = db;
     return 1;
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
+#if HU_RXN_LOOKUP_USES_SQLITE
+
+static sqlite3 *s_db = NULL;
+static unsigned long s_register_count = 0;
+static const unsigned long RXN_CLEANUP_EVERY_N = 1000;
+static const long RXN_RETENTION_SECONDS = 60L * 86400L; /* 60 days */
+
+static int rxn_db_open(void) {
+    if (s_db)
+        return 1;
+
+    static char path_buf[1024];
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+        home = "/tmp";
+    snprintf(path_buf, sizeof(path_buf), "%s/.human/reaction_lookup.db", home);
+    return rxn_db_open_at(path_buf, &s_db);
 }
 
 /* 60-day retention sweep. Idempotent; safe to call repeatedly. */
@@ -265,6 +288,23 @@ static int rxn_db_lookup(const char *channel, const char *thread, const char *ms
 }
 
 #endif /* HU_RXN_LOOKUP_USES_SQLITE */
+
+#ifdef HU_ENABLE_SQLITE
+/* Doctor probe (PR #321 follow-up): report whether the production lookup
+ * store is actually usable. Reuses rxn_db_open()'s cached handle — the
+ * exact path registration and tapback lookup take — so a probe success
+ * IS a recorder-path success, and no second connection lifecycle exists.
+ * Under HU_IS_TEST the active backend is the in-memory ring, which
+ * cannot fail to open; the probe reports healthy so doctor checks in
+ * test binaries don't touch the real ~/.human tree. */
+int hu_reaction_handler_lookup_db_probe(void) {
+#if HU_RXN_LOOKUP_USES_SQLITE
+    return rxn_db_open();
+#else
+    return 1;
+#endif
+}
+#endif /* HU_ENABLE_SQLITE */
 
 /* ===== Unified lookup adapter =====
  *
@@ -544,4 +584,14 @@ void hu_reaction_handler_reset_for_test(void) {
     s_identity_graph = NULL;
     s_reflection_db = NULL;
 }
+
+#ifdef HU_ENABLE_SQLITE
+int hu_reaction_handler_lookup_db_open_for_test(const char *path) {
+    sqlite3 *db = NULL;
+    int ok = rxn_db_open_at(path, &db);
+    if (db)
+        sqlite3_close(db);
+    return ok;
+}
+#endif
 #endif

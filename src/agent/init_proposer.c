@@ -213,15 +213,15 @@ hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64
      * the model in who it is + who it's addressing is the cheapest real
      * signal and unblocks a non-trivial decision. */
     if (agent->persona && agent->persona->name && agent->persona->name_len > 0) {
-        const char *ident = agent->persona->identity ? agent->persona->identity
+        const char *ident = agent->persona->identity      ? agent->persona->identity
                             : agent->persona->core_anchor ? agent->persona->core_anchor
                                                           : "";
         int pn = snprintf(out->persona_buf, sizeof(out->persona_buf), "%.*s%s%s",
                           (int)agent->persona->name_len, agent->persona->name,
                           ident[0] ? " — " : "", ident);
         if (pn > 0) {
-            size_t plen = (size_t)pn < sizeof(out->persona_buf) ? (size_t)pn
-                                                                : sizeof(out->persona_buf) - 1;
+            size_t plen =
+                (size_t)pn < sizeof(out->persona_buf) ? (size_t)pn : sizeof(out->persona_buf) - 1;
             out->content[HU_INIT_FIELD_PERSONA] = out->persona_buf;
             out->bytes[HU_INIT_FIELD_PERSONA] = plen;
         }
@@ -753,6 +753,16 @@ hu_error_t hu_init_proposer_tick_with_provider(
         return HU_OK;
     }
 
+    /* Log what the model will actually see. A 100%-decline verdict stream
+     * is unattributable without this: "empty context, correctly silent"
+     * and "rich context, over-conservative prompt" look identical in the
+     * verdict log alone. */
+    {
+        char ctx_summary[512];
+        if (hu_init_proposer_format_context_summary(&bundle, ctx_summary, sizeof(ctx_summary)) > 0)
+            hu_log_info("init_proposer", NULL, "context bundle: %s", ctx_summary);
+    }
+
     /* Build prompt (T3 pure). */
     static char sys_prompt[1536];
     static char user_msg[16384];
@@ -818,9 +828,10 @@ hu_error_t hu_init_proposer_tick_with_provider(
     hu_init_proposer_result_t verdict = hu_init_proposer_evaluate_decision(&decision, threshold);
 
     hu_log_info("init_proposer", NULL,
-                "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d",
+                "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d "
+                "reason=%.*s",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict);
+                (int)verdict, (int)decision.skip_reason_len, decision.skip_reason);
 
     if (out_result)
         *out_result = verdict;
@@ -1127,10 +1138,11 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
 
     hu_log_info("init_proposer", NULL,
                 "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
-                "draft_len=%zu result=%d",
+                "draft_len=%zu result=%d user_msg_bytes=%zu reason=%.*s",
                 (int)inputs->channel_name_len, inputs->channel_name ? inputs->channel_name : "",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict);
+                (int)verdict, strlen(user_msg), (int)decision.skip_reason_len,
+                decision.skip_reason);
 
     if (out_result)
         *out_result = verdict;

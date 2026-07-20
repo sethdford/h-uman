@@ -3,7 +3,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/core/file_util.h"
+#include "human/core/file.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -194,12 +194,12 @@ static hu_error_t meeting_execute(void *ctx, hu_allocator_t *alloc, const hu_jso
 
     char *raw = NULL;
     size_t rd = 0;
-    hu_error_t rerr = hu_file_read_all(alloc, open_path, (size_t)AUDIO_CAP, &raw, &rd);
+    hu_error_t rerr = hu_file_slurp(alloc, open_path, (size_t)AUDIO_CAP, &raw, &rd);
     if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (rerr == HU_ERR_INVALID_FORMAT) {
+    if (rerr == HU_ERR_LIMIT_REACHED) {
         *out = hu_tool_result_fail("audio too large (max 8MB for sync API)", 38);
         return HU_OK;
     }

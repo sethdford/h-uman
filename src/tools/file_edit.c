@@ -9,7 +9,7 @@
 #include "human/tools/file_edit.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/core/file_util.h"
+#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/security.h"
@@ -187,7 +187,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     char *contents = NULL;
     size_t content_len = 0;
     hu_error_t rerr =
-        hu_file_read_all(alloc, resolved, (size_t)HU_FILE_EDIT_MAX_SIZE, &contents, &content_len);
+        hu_file_slurp(alloc, resolved, (size_t)HU_FILE_EDIT_MAX_SIZE, &contents, &content_len);
     if (rerr != HU_OK) {
 #ifndef _WIN32
         free(resolved);
@@ -202,7 +202,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
                 *out = hu_tool_result_fail("Failed to open file", 19);
             return HU_OK;
         }
-        if (rerr == HU_ERR_INVALID_FORMAT) {
+        if (rerr == HU_ERR_LIMIT_REACHED) {
             *out = hu_tool_result_fail("File too large or unreadable", 28);
             return HU_OK;
         }

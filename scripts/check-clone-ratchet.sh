@@ -21,7 +21,14 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11543   # locked 2026-07-19: hu_file_read_all dedup of the fopen/fseek/ftell preamble (was 11550; count includes the helper's own windows once tracked)
+CLONE_BASELINE=11541   # locked 2026-07-19 on the MERGED tree: origin's reflection
+                       # PATTERN_QUERY_PREFIX dedup (11539) + the new imessage_caps
+                       # module (native capability gate, T0.4). That module landed at
+                       # +8 and was deduped to +2 across three passes (shared value-line
+                       # scanner, shared chat.db open, shared service query); the
+                       # residual 2 are the sqlite open/prepare shape this repo already
+                       # repeats thousands of times — removing them means a repo-wide
+                       # sqlite-helper refactor, not a change to this module.
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"

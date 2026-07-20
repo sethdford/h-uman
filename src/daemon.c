@@ -36,8 +36,10 @@
 #include "human/behavior/belief_update.h"
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
+#include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
+#include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
@@ -102,6 +104,7 @@
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
 #include "human/daemon_cron.h"
+#include "human/daemon_learning_tick.h"
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_maintenance.h"
 #include "human/daemon_proactive.h"
@@ -694,6 +697,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 hu_contact_send_recency_record(
                                     &agent->contact_send_recency, m->contact_id,
                                     strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                                (void)hu_daemon_proactive_outcome_record_send(
+                                    agent->memory, ch_name, target_part, target_len);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "F25 emotional check-in sent to %s: %s",
                                             cp->name ? cp->name : cp->contact_id, msg_buf);
@@ -1697,6 +1702,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             hu_contact_send_recency_record(&agent->contact_send_recency,
                                                            cp->contact_id, strlen(cp->contact_id),
                                                            (int64_t)now, HU_SEND_PATH_PROACTIVE);
+                            (void)hu_daemon_proactive_outcome_record_send(agent->memory, ch_part,
+                                                                          target_part, target_len);
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "proactive check-in sent to %s: %.*s",
                                         cp->name ? cp->name : cp->contact_id, (int)response_len,
@@ -3818,38 +3825,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* DPO consolidation — train on preference pairs every 24 hours.
-                 *
-                 * BUGFIX 2026-05-25: Same first-tick blocking issue as the ML
-                 * experiment loop above — judge_step makes 64 LLM scoring
-                 * calls (32 pairs × 2 each) for ~5 min synchronous blocking.
-                 * That prevented the iMessage channel dispatcher from running.
-                 * Defer first run by initializing last_dpo_train to current
-                 * time. Subsequent runs follow the 24-hour cadence. */
-                {
-                    static int64_t last_dpo_train = 0;
-                    int64_t dpo_interval = 24 * 3600;
-                    if (last_dpo_train == 0) {
-                        last_dpo_train = (int64_t)t;
-                        /* Skip first run; resume normal 24h cadence afterward. */
-                    } else if (agent && agent->memory && agent->sota.sota_initialized &&
-                               ((int64_t)t - last_dpo_train) >= dpo_interval) {
-                        sqlite3 *dpo_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (dpo_db) {
-                            last_dpo_train = (int64_t)t;
-                            hu_dpo_judge_result_t dpo_result = {0};
-                            hu_error_t dpo_err = hu_dpo_judge_step(
-                                &agent->sota.dpo_collector, alloc, &agent->provider,
-                                agent->model_name, agent->model_name_len, 0.1, 32, &dpo_result);
-                            if (dpo_err == HU_OK && dpo_result.pairs_evaluated > 0)
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "DPO judge step: loss=%.4f, alignment=%.2f, "
-                                            "pairs=%zu",
-                                            dpo_result.loss, dpo_result.alignment_score,
-                                            dpo_result.pairs_evaluated);
-                        }
-                    }
-                }
+                /* DPO consolidation (24h judge cadence) — carved to
+                 * src/daemon/daemon_learning_tick.c (2026-07-18). */
+                hu_daemon_dpo_judge_tick(agent, alloc, (int64_t)t);
+
+                /* US-104: feed resolved proactive outcomes (REPLY / 24h-timeout
+                 * IGNORED) into the humanization bandit; 60s cadence inside. */
+                if (agent)
+                    hu_daemon_proactive_outcome_tick(agent->memory, agent->sota.bandit, (int64_t)t);
 
                 /* RLAIF nightly cycle — judge DPO pairs, extract patterns, apply patches */
                 {
@@ -4752,6 +4735,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                combined, combined_len);
                 /* F26: Temporal pattern learning — record message frequency by day/hour */
                 if (agent->memory && batch_key && key_len > 0) {
+                    /* US-104: an inbound message from this contact resolves any
+                     * pending proactive send to them as a REPLY outcome. */
+                    const char *po_ch_name = ch->channel->vtable->name
+                                                 ? ch->channel->vtable->name(ch->channel->ctx)
+                                                 : NULL;
+                    (void)hu_daemon_proactive_outcome_mark_reply(agent->memory, po_ch_name,
+                                                                 batch_key, key_len);
                     time_t now_t = time(NULL);
                     struct tm lt_buf;
                     struct tm *lt = localtime_r(&now_t, &lt_buf);
@@ -4760,6 +4750,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (void)hu_superhuman_temporal_record(agent->memory, batch_key, key_len,
                                                             lt->tm_wday, lt->tm_hour,
                                                             response_time_ms);
+                    }
+                }
+                /* F32: refresh the sender's style fingerprint from their inbound
+                 * messages so contact_style_overlay stays current. Sits on the
+                 * common batch path, independent of llm_decides. Raw
+                 * msgs[].content, not combined/augmented text — attachment
+                 * descriptions aren't the contact's typing, and per-message
+                 * updates keep avg_message_length honest. */
+                if (agent->memory && batch_key && key_len > 0) {
+                    for (size_t si = batch_start; si <= batch_end; si++) {
+                        size_t slen = strlen(msgs[si].content);
+                        if (slen > 0)
+                            (void)hu_style_fingerprint_update_inbound(
+                                agent->memory, alloc, batch_key, key_len, msgs[si].content, slen);
                     }
                 }
 #endif
@@ -6728,6 +6732,43 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         PHASE6_APPEND(op_dir, op_dir_len);
                                     else if (op_dir)
                                         alloc->free(alloc->ctx, op_dir, op_dir_len + 1);
+
+                                    /* Roadmap #14: stances persist under pushback. When the
+                                     * inbound challenges a held opinion, direct the model to
+                                     * hold its position. Gated HU_OPINION_HOLD=off|shadow|live,
+                                     * default OFF; do not flip to default-ON without a stance-
+                                     * retention measurement (feature-gate-requires-measurement).
+                                     * Shadow logs would-fire without injecting. */
+                                    {
+                                        hu_gate_mode_t hold_mode =
+                                            hu_gate_mode_from_env("HU_OPINION_HOLD", HU_GATE_OFF);
+                                        if (hold_mode != HU_GATE_OFF && combined_len > 0) {
+                                            for (size_t oi = 0; oi < evo_count; oi++) {
+                                                char *hold_dir = NULL;
+                                                size_t hold_len = 0;
+                                                bool hold_would = false;
+                                                if (hu_opinion_challenge_directive(
+                                                        alloc, hold_mode, combined, combined_len,
+                                                        evo_opinions[oi].topic,
+                                                        evo_opinions[oi].topic_len,
+                                                        evo_opinions[oi].stance,
+                                                        evo_opinions[oi].stance_len, &hold_dir,
+                                                        &hold_len, &hold_would) != HU_OK)
+                                                    continue;
+                                                if (!hold_would)
+                                                    continue;
+                                                hu_log_info(
+                                                    "opinion_hold", agent ? agent->observer : NULL,
+                                                    "%s: inbound challenges stance [%.*s]",
+                                                    hold_mode == HU_GATE_LIVE ? "live" : "shadow",
+                                                    (int)evo_opinions[oi].topic_len,
+                                                    evo_opinions[oi].topic);
+                                                if (hold_dir && hold_len > 0)
+                                                    PHASE6_APPEND(hold_dir, hold_len);
+                                                break; /* one hold directive max per turn */
+                                            }
+                                        }
+                                    }
                                     hu_evolved_opinions_free(alloc, evo_opinions, evo_count);
                                 }
                             }
@@ -7111,59 +7152,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* F65: Opinion evolution — inject current opinions for topic relevance */
-#ifdef HU_ENABLE_SQLITE
-                    if (agent->memory && batch_key && key_len > 0) {
-                        sqlite3 *op_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (op_db) {
-                            char op_sql[512];
-                            size_t op_sql_len = 0;
-                            if (hu_opinions_query_current_sql(batch_key, key_len, op_sql,
-                                                              sizeof(op_sql),
-                                                              &op_sql_len) == HU_OK) {
-                                sqlite3_stmt *op_stmt = NULL;
-                                if (sqlite3_prepare_v2(op_db, op_sql, (int)op_sql_len, &op_stmt,
-                                                       NULL) == SQLITE_OK) {
-                                    hu_opinion_t ops[8];
-                                    size_t op_count = 0;
-                                    while (sqlite3_step(op_stmt) == SQLITE_ROW && op_count < 8) {
-                                        hu_opinion_t *o = &ops[op_count];
-                                        memset(o, 0, sizeof(*o));
-                                        const char *t =
-                                            (const char *)sqlite3_column_text(op_stmt, 1);
-                                        const char *p =
-                                            (const char *)sqlite3_column_text(op_stmt, 2);
-                                        if (t) {
-                                            o->topic_len = (size_t)sqlite3_column_bytes(op_stmt, 1);
-                                            o->topic = hu_strndup(alloc, t, o->topic_len);
-                                        }
-                                        if (p) {
-                                            o->position_len =
-                                                (size_t)sqlite3_column_bytes(op_stmt, 2);
-                                            o->position = hu_strndup(alloc, p, o->position_len);
-                                        }
-                                        o->confidence = sqlite3_column_double(op_stmt, 3);
-                                        op_count++;
-                                    }
-                                    sqlite3_finalize(op_stmt);
-                                    if (op_count > 0) {
-                                        char *op_prompt = NULL;
-                                        size_t op_prompt_len = 0;
-                                        if (hu_opinions_build_prompt(alloc, ops, op_count,
-                                                                     &op_prompt,
-                                                                     &op_prompt_len) == HU_OK &&
-                                            op_prompt && op_prompt_len > 0)
-                                            PHASE6_APPEND(op_prompt, op_prompt_len);
-                                        else if (op_prompt)
-                                            alloc->free(alloc->ctx, op_prompt, op_prompt_len + 1);
-                                        for (size_t oi = 0; oi < op_count; oi++)
-                                            hu_opinion_deinit(alloc, &ops[oi]);
-                                    }
-                                }
-                            }
-                        }
-                    }
-#endif
+                    /* F65 (opinion injection from the legacy `opinions` table) was removed
+                     * 2026-07-18: the table had no production writer and the query keyed
+                     * topic=<contact key>, so the block always injected nothing. Held
+                     * opinions reach the prompt via the evolved_opinions block (10c),
+                     * which also carries the HU_OPINION_HOLD stance-hold directive. */
 
                     /* F83-F93: Feed context — inject recent relevant feed items */
 #ifdef HU_ENABLE_SQLITE
@@ -12901,12 +12894,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* F32: Update style fingerprint with our sent response */
-                if (agent->memory && batch_key && key_len > 0 && response && response_len > 0 &&
-                    !llm_decides)
-                    (void)hu_style_fingerprint_update(agent->memory, alloc, batch_key, key_len,
-                                                      response, response_len);
-
 #if !defined(HU_IS_TEST) && defined(HU_ENABLE_SQLITE)
                 /* Turing score: evaluate response human-likeness post-send.
                  * Skip in llm_decides mode — heuristic scoring adds latency. */
@@ -13023,15 +13010,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (dt_n > 0 && (size_t)dt_n < sizeof(dt_user)) {
                                 char *dt_resp = NULL;
                                 size_t dt_resp_len = 0;
+                                size_t dt_fb_len = 0;
+                                const char *dt_fb = hu_daemon_fallback_model(config, &dt_fb_len);
                                 const char *dt_model =
                                     (llm_decides && g_classify_provider_ok)
                                         ? g_classify_model
-                                        : (agent->model_name ? agent->model_name
-                                                             : "gemini-3.1-flash-lite-preview");
+                                        : (agent->model_name ? agent->model_name : dt_fb);
                                 size_t dt_model_len =
                                     (llm_decides && g_classify_provider_ok)
                                         ? g_classify_model_len
-                                        : (agent->model_name ? agent->model_name_len : 31);
+                                        : (agent->model_name ? agent->model_name_len : dt_fb_len);
                                 hu_error_t dt_err = dt_vtable->chat_with_system(
                                     dt_ctx, alloc,
                                     "You are texting as this person. Keep it casual, short, "
@@ -13218,11 +13206,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifdef HU_HAS_IMESSAGE
                                 char *gif_query = NULL;
                                 size_t gif_query_len = 0;
-                                const char *gif_model = agent->model_name
-                                                            ? agent->model_name
-                                                            : "gemini-3.1-flash-lite-preview";
+                                size_t gif_fb_len = 0;
+                                const char *gif_fb = hu_daemon_fallback_model(config, &gif_fb_len);
+                                const char *gif_model =
+                                    agent->model_name ? agent->model_name : gif_fb;
                                 size_t gif_model_len =
-                                    agent->model_name ? agent->model_name_len : 31;
+                                    agent->model_name ? agent->model_name_len : gif_fb_len;
                                 if (agent->provider.vtable &&
                                     agent->provider.vtable->chat_with_system) {
                                     (void)agent->provider.vtable->chat_with_system(
@@ -13384,10 +13373,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             char *music_suggestion = NULL;
                             size_t music_suggestion_len = 0;
                             const char *insp_sys = hu_inspiration_system_prompt(medium);
-                            const char *music_model = agent->model_name
-                                                          ? agent->model_name
-                                                          : "gemini-3.1-flash-lite-preview";
-                            size_t music_model_len = agent->model_name ? agent->model_name_len : 31;
+                            size_t music_fb_len = 0;
+                            const char *music_fb = hu_daemon_fallback_model(config, &music_fb_len);
+                            const char *music_model =
+                                agent->model_name ? agent->model_name : music_fb;
+                            size_t music_model_len =
+                                agent->model_name ? agent->model_name_len : music_fb_len;
                             (void)agent->provider.vtable->chat_with_system(
                                 agent->provider.ctx, alloc, insp_sys, strlen(insp_sys),
                                 music_prompt, mp_len, music_model, music_model_len, 0.9,
@@ -13694,9 +13685,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             "funny, sweet, or illustrative. Reply SKIP if it doesn't fit.";
                         char *img_suggest = NULL;
                         size_t img_suggest_len = 0;
-                        const char *img_model =
-                            agent->model_name ? agent->model_name : "gemini-3.1-flash-lite-preview";
-                        size_t img_model_len = agent->model_name ? agent->model_name_len : 31;
+                        size_t img_fb_len = 0;
+                        const char *img_fb = hu_daemon_fallback_model(config, &img_fb_len);
+                        const char *img_model = agent->model_name ? agent->model_name : img_fb;
+                        size_t img_model_len =
+                            agent->model_name ? agent->model_name_len : img_fb_len;
                         (void)agent->provider.vtable->chat_with_system(
                             agent->provider.ctx, alloc, img_sys, sizeof(img_sys) - 1, combined,
                             combined_len, img_model, img_model_len, 0.7, &img_suggest,

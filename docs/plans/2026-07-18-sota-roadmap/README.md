@@ -150,6 +150,17 @@ Every area below carries: **Now** (evidence) → **SOTA** (target) → **Plan**
   paths the same way tapback was audited); add per-source freshness to
   `human doctor`.
 - **Gate**: ≥25 fresh pairs/week across ≥3 sources, sustained a month.
+- **Retired**: `generated_v2` (217 synthetic pairs, all inserted in a single
+  batch at 2026-05-10 23:16:01 — a one-off backfill, never a recurring
+  pipeline; the producer script never lived in the repo and no cron/launchd
+  invokes it). The 2026-05-19 corpus-inversion audit
+  (`docs/plans/2026-05-19-dpo-corpus-inverted.md`) measured it as the
+  lowest-signal source: 87/220 pairs (40%) inverted, mean margin +0.073.
+  Retired 2026-07-18 in favor of the revived real-signal sources above
+  (tapback, outbound_edit, implicit_feedback) — synthetic pairs risk the
+  corpus-inversion class and add no volume the real sources don't now cover.
+  Existing rows stay in `dpo_pairs` (the inversion read-path filter already
+  screens them); do not backfill more.
 
 ### 8. Judge quality (RLAIF/DPO direction)
 - **Now**: judge direction was inverted once (fixed, alignment 0.00→0.53);

@@ -4533,6 +4533,131 @@ static void typos_live_mode_still_injects(void) {
     hu_conversation_typos_set_mode_for_test(-1); /* reset for other tests */
 }
 
+/* ── Phrase banks: mined user-voice lists override DEFAULT_* arrays ───── */
+
+static void write_phrase_banks_file(const char *path, const char *json) {
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs(json, f);
+    fclose(f);
+}
+
+/* Missing file must fail and leave the hardcoded defaults in effect. */
+static void phrase_banks_missing_file_leaves_defaults(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(
+        &alloc, "/tmp/hu_test_phrase_banks_does_not_exist.json", "imessage");
+    HU_ASSERT_TRUE(err != HU_OK);
+
+    char buf[64];
+    size_t len = hu_conversation_pick_backchannel(0u, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_EQ(strcmp(buf, "yeah"), 0); /* DEFAULT_BACKCHANNEL_PHRASES[0] */
+}
+
+/* Corrupt JSON must fail and leave the defaults in effect. */
+static void phrase_banks_corrupt_file_leaves_defaults(void) {
+    const char *path = "/tmp/hu_test_phrase_banks_corrupt.json";
+    write_phrase_banks_file(path, "{ this is not valid json !!");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
+    HU_ASSERT_TRUE(err != HU_OK);
+
+    char buf[64];
+    size_t len = hu_conversation_pick_backchannel(0u, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_EQ(strcmp(buf, "yeah"), 0);
+    (void)unlink(path);
+}
+
+/* A file without the requested channel key must fail and keep defaults. */
+static void phrase_banks_missing_channel_leaves_defaults(void) {
+    const char *path = "/tmp/hu_test_phrase_banks_wrong_channel.json";
+    write_phrase_banks_file(path,
+                            "{\"slack\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
+    HU_ASSERT_TRUE(err != HU_OK);
+
+    char buf[64];
+    size_t len = hu_conversation_pick_backchannel(0u, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_EQ(strcmp(buf, "yeah"), 0);
+    (void)unlink(path);
+}
+
+/* Loaded bank wins over DEFAULT_BACKCHANNEL_PHRASES: with a single-entry
+ * bank, every seed must return the mined phrase, which is not a default. */
+static void phrase_banks_backchannel_uses_bank_not_default(void) {
+    const char *path = "/tmp/hu_test_phrase_banks_bc.json";
+    write_phrase_banks_file(path,
+                            "{\"imessage\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
+    HU_ASSERT_EQ(err, HU_OK);
+
+    for (uint32_t seed = 0; seed < 4; seed++) {
+        char buf[64];
+        size_t len = hu_conversation_pick_backchannel(seed, buf, sizeof(buf));
+        HU_ASSERT_TRUE(len > 0);
+        HU_ASSERT_EQ(strcmp(buf, "frfr"), 0);
+    }
+
+    hu_conversation_data_cleanup();
+    (void)unlink(path);
+}
+
+/* Loaded filler bank wins over DEFAULT_FILLERS in the injector (LIVE mode). */
+static void phrase_banks_fillers_used_by_injector(void) {
+    const char *path = "/tmp/hu_test_phrase_banks_fillers.json";
+    write_phrase_banks_file(path, "{\"imessage\":{\"fillers\":[{\"text\":\"zzz \",\"freq\":12}]}}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
+    HU_ASSERT_EQ(err, HU_OK);
+
+    hu_conversation_fillers_set_mode_for_test((int)HU_GATE_LIVE);
+    size_t injected = 0;
+    for (uint32_t seed = 0; seed < 50; seed++) {
+        char buf[128] = "ok that works";
+        size_t base = strlen(buf);
+        size_t out = hu_conversation_apply_fillers(buf, base, sizeof(buf), seed, "imessage", 8);
+        if (out > base) {
+            injected++;
+            HU_ASSERT_EQ(strncmp(buf, "zzz ", 4), 0); /* bank, not DEFAULT_FILLERS */
+        }
+    }
+    HU_ASSERT_TRUE(injected > 0); /* ~20% of 50 seeds must fire */
+    hu_conversation_fillers_set_mode_for_test(-1);
+
+    hu_conversation_data_cleanup();
+    (void)unlink(path);
+}
+
+/* Mined farewells suppress double-texting; the hardcoded list alone would
+ * let "peace out" through (it is not in DEFAULT_FAREWELL_PHRASES). */
+static void phrase_banks_farewells_suppress_double_text(void) {
+    /* Pre-bank: "peace out" is not a default farewell, so with probability
+     * 1.0 the double-text roll always fires. */
+    bool before = hu_conversation_should_double_text("peace out", 9, NULL, 0, 12, 7u, 1.0f);
+    HU_ASSERT_TRUE(before);
+
+    const char *path = "/tmp/hu_test_phrase_banks_farewell.json";
+    write_phrase_banks_file(path,
+                            "{\"imessage\":{\"farewells\":[{\"text\":\"peace out\",\"freq\":7}]}}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
+    HU_ASSERT_EQ(err, HU_OK);
+
+    bool after = hu_conversation_should_double_text("peace out", 9, NULL, 0, 12, 7u, 1.0f);
+    HU_ASSERT_FALSE(after);
+
+    /* Cleanup restores the default farewell behavior. */
+    hu_conversation_data_cleanup();
+    bool restored = hu_conversation_should_double_text("peace out", 9, NULL, 0, 12, 7u, 1.0f);
+    HU_ASSERT_TRUE(restored);
+    (void)unlink(path);
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
@@ -5138,4 +5263,12 @@ void run_conversation_tests(void) {
     /* sched_slot accessor */
     HU_RUN_TEST(sched_slot_returns_null_for_invalid_index);
     HU_RUN_TEST(sched_slot_returns_valid_after_schedule);
+
+    /* Phrase banks (mined user voice overrides DEFAULT_* fallbacks) */
+    HU_RUN_TEST(phrase_banks_missing_file_leaves_defaults);
+    HU_RUN_TEST(phrase_banks_corrupt_file_leaves_defaults);
+    HU_RUN_TEST(phrase_banks_missing_channel_leaves_defaults);
+    HU_RUN_TEST(phrase_banks_backchannel_uses_bank_not_default);
+    HU_RUN_TEST(phrase_banks_fillers_used_by_injector);
+    HU_RUN_TEST(phrase_banks_farewells_suppress_double_text);
 }

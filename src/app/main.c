@@ -248,6 +248,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
             "  pair-init-singles       Convert single-sided init_proposer rows to pairs\n"
             "  dpo-judge               Score preference pairs with an LLM judge (legacy)\n"
             "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+            "  train-from-reactions    Export reaction/DPO pairs then train (KTO/DPO)\n"
             "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
             "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
             "  mine-corrections        Mine DPO pairs from chat.db correction triples\n"
@@ -283,6 +284,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_dpo_judge(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "kto-train") == 0)
         return hu_ml_cli_kto_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "train-from-reactions") == 0)
+        return hu_ml_cli_train_from_reactions(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "grpo-train") == 0)
         return hu_ml_cli_grpo_train(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "rm-train") == 0)
@@ -1274,15 +1277,27 @@ static hu_error_t cmd_onboard(hu_allocator_t *alloc, int argc, char **argv) {
     const char *cli_provider = NULL;
     const char *cli_api_key = NULL;
     bool apple_shortcut = false;
+    bool prefer_local = false;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--apple") == 0) {
             apple_shortcut = true;
+        } else if (strcmp(argv[i], "--local") == 0) {
+            /* Wave C: skip the picker and lock the default to on-device. */
+            prefer_local = true;
         } else if (strcmp(argv[i], "--provider") == 0 && i + 1 < argc) {
             cli_provider = argv[++i];
         } else if (strcmp(argv[i], "--api-key") == 0 && i + 1 < argc) {
             cli_api_key = argv[++i];
         }
+    }
+
+    if (prefer_local && !cli_provider && !apple_shortcut) {
+#if defined(__APPLE__)
+        cli_provider = "mlx_local";
+#else
+        cli_provider = "ollama";
+#endif
     }
 
     return hu_onboard_run_with_args(alloc, cli_provider, cli_api_key, apple_shortcut);
@@ -1714,6 +1729,26 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 
     /* Initialize conversation data (load word lists from embedded JSON) */
     hu_conversation_data_init(alloc);
+
+    /* Overlay mined phrase banks (the user's own voice) when present —
+     * written by scripts/mine_phrase_banks.py (monthly launchd job). Missing
+     * file is the normal pre-mining state; only corruption is warned. */
+    {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            char pb_path[512];
+            int n = snprintf(pb_path, sizeof(pb_path), "%s/.human/phrase_banks.json", home);
+            if (n > 0 && (size_t)n < sizeof(pb_path)) {
+                hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
+                if (pb_err == HU_OK)
+                    hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
+                else if (pb_err != HU_ERR_NOT_FOUND)
+                    hu_log_warn("human", NULL,
+                                "phrase banks unreadable (err=%d) at %s — using defaults",
+                                (int)pb_err, pb_path);
+            }
+        }
+    }
 
     err = hu_service_run(alloc, 1000, app_ctx.channel_count > 0 ? app_ctx.channels : NULL,
                          app_ctx.channel_count, app_ctx.agent, app_ctx.cfg);

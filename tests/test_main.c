@@ -43,7 +43,7 @@ void run_prompt_budget_snapshot_tests(void);
 void run_config_gated_subsystems_tests(void);
 void run_silent_disable_compliance_tests(void);
 void run_io_secure_tests(void);
-void run_file_util_tests(void);
+void run_file_slurp_tests(void);
 void run_config_banner_runtime_failfast_tests(void);
 void run_slice_tests(void);
 void run_tool_registry_honesty_tests(void);
@@ -91,6 +91,7 @@ void run_channel_embeds_tests(void);
 void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
 void run_imessage_reactions_tests(void);
+void run_imessage_caps_tests(void);
 /* Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis primitives
  * that render iMessage events into canonical English for personal-model ingest. */
 void run_imessage_ingest_tests(void);
@@ -187,6 +188,7 @@ void run_voice_streaming_e2e_tests(void);
 void run_mlx_local_voice_tests(void);
 void run_autonomy_tests(void);
 void run_retrieval_tests(void);
+void run_retrieval_contact_isolation_tests(void);
 void run_vector_tests(void);
 void run_vector_full_tests(void);
 void run_infrastructure_tests(void);
@@ -788,6 +790,7 @@ void run_dpo_tests(void);
 void run_reaction_paired_train_e2e_tests(void);
 void run_dpo_collector_tests(void);
 void run_proactive_outcomes_tests(void);
+void run_daemon_learning_tick_tests(void);
 void run_e2e_learning_loop_tests(void);
 void run_sota_e2e_tests(void);
 void run_sota_adversarial_tests(void);
@@ -1089,7 +1092,7 @@ int main(int argc, char **argv) {
     run_config_gated_subsystems_tests();
     run_silent_disable_compliance_tests();
     run_io_secure_tests();
-    run_file_util_tests();
+    run_file_slurp_tests();
     run_config_banner_runtime_failfast_tests();
     run_slice_tests();
     run_tool_registry_honesty_tests();
@@ -1135,6 +1138,7 @@ int main(int argc, char **argv) {
     run_channel_embeds_tests();
     run_reaction_event_tests();
     run_imessage_reactions_tests();
+    run_imessage_caps_tests();
     run_imessage_ingest_tests();
     run_imessage_personal_model_e2e_tests();
     run_bplist_tests();
@@ -1206,6 +1210,7 @@ int main(int argc, char **argv) {
     run_mlx_local_voice_tests();
     run_autonomy_tests();
     run_retrieval_tests();
+    run_retrieval_contact_isolation_tests();
     run_multigraph_tests();
     run_memory_graph_tests();
     run_vector_tests();
@@ -1773,6 +1778,7 @@ int main(int argc, char **argv) {
     run_reaction_paired_train_e2e_tests();
     run_dpo_collector_tests();
     run_proactive_outcomes_tests();
+    run_daemon_learning_tick_tests();
     run_e2e_learning_loop_tests();
     run_sota_e2e_tests();
     run_sota_adversarial_tests();
