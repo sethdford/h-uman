@@ -8,7 +8,8 @@
  * Gated on HU_PROMISE_KEEPER (off|shadow|on, default OFF): stored promises
  * feed the proposer's due_followups context and can change future sends, so
  * promotion to "on" is gated on the scoped proactivity trial observation
- * per feature-gate-requires-measurement. */
+ * per feature-gate-requires-measurement: the filtered SHADOW stream must
+ * show >=80% genuine-commitment precision over a week before flipping live. */
 #ifndef HUMAN_DAEMON_PROMISE_KEEPER_H
 #define HUMAN_DAEMON_PROMISE_KEEPER_H
 
@@ -17,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +32,14 @@ typedef enum hu_promise_keeper_mode {
 
 /* Pure mode parse ("on" -> LIVE, "shadow" -> SHADOW, anything else / NULL -> OFF). */
 hu_promise_keeper_mode_t hu_promise_keeper_mode_from_env(const char *env_value);
+
+/* Pure predicate: true iff the detected commitment description is a bare
+ * courtesy invitation — it starts with the word-bounded phrase "let me know",
+ * no deadline parsed from the reply (deadline_ts <= 0), and no first-person
+ * deliverable marker (i'll / i will / gonna) after the prefix. Shadow evidence
+ * 2026-07-19: 5 of 8 distinct captured promises were this shape. */
+bool hu_promise_keeper_is_courtesy_invitation(const char *desc, size_t desc_len,
+                                              int64_t deadline_ts);
 
 /* Scan one outbound reply. SHADOW logs what it would store; LIVE stores the
  * commitment and (when a deadline parses) schedules the follow-up. OFF is a
