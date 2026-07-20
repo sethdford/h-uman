@@ -1,5 +1,6 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file_util.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/tool.h"
@@ -49,32 +50,30 @@ static hu_error_t image_execute(void *ctx, hu_allocator_t *alloc, const hu_json_
     *out = hu_tool_result_ok_owned(msg, len);
     return HU_OK;
 #else
-    FILE *f = fopen(path, "rb");
-    if (!f) {
+    char *data = NULL;
+    size_t flen = 0;
+    hu_error_t rerr = hu_file_read_all(alloc, path, (size_t)HU_IMAGE_MAX_SIZE, &data, &flen);
+    if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("seek failed", 11);
-        return HU_OK;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("ftell failed", 12);
-        return HU_OK;
-    }
-    if ((unsigned long)sz > HU_IMAGE_MAX_SIZE) {
-        fclose(f);
+    if (rerr == HU_ERR_INVALID_FORMAT) {
         *out = hu_tool_result_fail("file too large (>5MB)", 20);
         return HU_OK;
     }
-    rewind(f);
+    if (rerr == HU_ERR_OUT_OF_MEMORY) {
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    if (rerr != HU_OK) {
+        *out = hu_tool_result_fail("seek failed", 11);
+        return HU_OK;
+    }
+    long sz = (long)flen;
     unsigned char header[16];
-    size_t nread = fread(header, 1, sizeof(header), f);
-    fclose(f);
-    f = NULL;
+    size_t nread = flen < sizeof(header) ? flen : sizeof(header);
+    memcpy(header, data, nread);
+    alloc->free(alloc->ctx, data, flen + 1);
 
     const char *fmt = "unknown";
     if (nread >= 4 && header[0] == 0x89 && header[1] == 'P' && header[2] == 'N' && header[3] == 'G')

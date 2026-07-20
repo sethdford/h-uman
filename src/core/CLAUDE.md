@@ -8,6 +8,7 @@ Foundational libraries used across the entire codebase. These are the lowest-lev
 allocator.c          Custom allocator (hu_allocator_t) — wraps malloc/free with tracking
 arena.c              Arena allocator — bulk allocation with single-free semantics
 error.c              Error codes (hu_error_t) and hu_error_string() formatting
+file_util.c          Whole-file read helper (hu_file_read_all) — replaces the fopen/fseek/ftell clone
 json.c               JSON parser and builder (zero-dependency, streaming)
 string.c             String utilities (hu_string_t, split, join, trim, format)
 http.c               HTTP client abstraction (wraps libcurl when available)

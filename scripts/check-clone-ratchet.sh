@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11550   # locked 2026-07-18: dispatch_imessage_reply_msg wrapper dedup (was 11552)
+CLONE_BASELINE=11543   # locked 2026-07-19: hu_file_read_all dedup of the fopen/fseek/ftell preamble (was 11550; count includes the helper's own windows once tracked)
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"

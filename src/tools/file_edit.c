@@ -9,6 +9,7 @@
 #include "human/tools/file_edit.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file_util.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/security.h"
@@ -183,64 +184,32 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
         alloc->free(alloc->ctx, ws_resolved, strlen(ws_resolved) + 1);
 
     /* Read file */
-    FILE *f = fopen(resolved, "rb");
-    if (!f) {
+    char *contents = NULL;
+    size_t content_len = 0;
+    hu_error_t rerr =
+        hu_file_read_all(alloc, resolved, (size_t)HU_FILE_EDIT_MAX_SIZE, &contents, &content_len);
+    if (rerr != HU_OK) {
 #ifndef _WIN32
         free(resolved);
 #else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
 #endif
-        char *err_msg = hu_sprintf(alloc, "Failed to open file: %s", strerror(errno));
-        if (err_msg)
-            *out = hu_tool_result_fail_owned(err_msg, strlen(err_msg));
-        else
-            *out = hu_tool_result_fail("Failed to open file", 19);
-        return HU_OK;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-#ifndef _WIN32
-        free(resolved);
-#else
-        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
-        *out = hu_tool_result_fail("Failed to seek file", 18);
-        return HU_OK;
-    }
-    long sz = ftell(f);
-    if (sz < 0 || (size_t)sz > HU_FILE_EDIT_MAX_SIZE) {
-        fclose(f);
-#ifndef _WIN32
-        free(resolved);
-#else
-        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
-        *out = hu_tool_result_fail("File too large or unreadable", 28);
-        return HU_OK;
-    }
-    rewind(f);
-    size_t content_len = (size_t)sz;
-    char *contents = (char *)alloc->alloc(alloc->ctx, content_len + 1);
-    if (!contents) {
-        fclose(f);
-#ifndef _WIN32
-        free(resolved);
-#else
-        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
-        *out = hu_tool_result_fail("out of memory", 12);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t read_n = fread(contents, 1, content_len, f);
-    fclose(f);
-    contents[read_n] = '\0';
-    if (read_n != content_len) {
-        alloc->free(alloc->ctx, contents, content_len + 1);
-#ifndef _WIN32
-        free(resolved);
-#else
-        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
+        if (rerr == HU_ERR_NOT_FOUND) {
+            char *err_msg = hu_sprintf(alloc, "Failed to open file: %s", strerror(errno));
+            if (err_msg)
+                *out = hu_tool_result_fail_owned(err_msg, strlen(err_msg));
+            else
+                *out = hu_tool_result_fail("Failed to open file", 19);
+            return HU_OK;
+        }
+        if (rerr == HU_ERR_INVALID_FORMAT) {
+            *out = hu_tool_result_fail("File too large or unreadable", 28);
+            return HU_OK;
+        }
+        if (rerr == HU_ERR_OUT_OF_MEMORY) {
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
         *out = hu_tool_result_fail("Failed to read file", 18);
         return HU_OK;
     }

@@ -1,5 +1,6 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file_util.h"
 #include "human/core/json.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
@@ -56,34 +57,32 @@ static hu_error_t pdf_execute(void *ctx, hu_allocator_t *alloc, const hu_json_va
     return HU_OK;
 #else
     int max_pages = (int)hu_json_get_number(args, "max_pages", 0);
-    FILE *f = fopen(path, "rb");
-    if (!f) {
+    char *data = NULL;
+    size_t flen = 0;
+    hu_error_t rerr = hu_file_read_all(alloc, path, (size_t)HU_PDF_MAX_SIZE, &data, &flen);
+    if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("seek failed", 11);
-        return HU_OK;
-    }
-    long sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("ftell failed", 12);
-        return HU_OK;
-    }
-    if ((unsigned long)sz > HU_PDF_MAX_SIZE) {
-        fclose(f);
+    if (rerr == HU_ERR_INVALID_FORMAT) {
         *out = hu_tool_result_fail("file too large (>20MB)", 21);
         return HU_OK;
     }
-    rewind(f);
+    if (rerr == HU_ERR_OUT_OF_MEMORY) {
+        *out = hu_tool_result_fail("out of memory", 13);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    if (rerr != HU_OK) {
+        *out = hu_tool_result_fail("seek failed", 11);
+        return HU_OK;
+    }
+    long sz = (long)flen;
     unsigned char hdr[5];
-    size_t nr = fread(hdr, 1, 5, f);
-    fclose(f);
-    f = NULL;
-
-    if (nr < 5 || memcmp(hdr, "%PDF-", 5) != 0) {
+    int is_pdf = flen >= 5 && memcmp(data, "%PDF-", 5) == 0;
+    if (is_pdf)
+        memcpy(hdr, data, 5);
+    alloc->free(alloc->ctx, data, flen + 1);
+    if (!is_pdf) {
         *out = hu_tool_result_fail("not a PDF file", 14);
         return HU_OK;
     }

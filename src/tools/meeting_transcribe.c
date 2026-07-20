@@ -3,6 +3,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file_util.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -15,26 +16,26 @@
 #include <string.h>
 
 #define HU_MEETING_NAME "meeting_transcribe"
-#define HU_MEETING_DESC                                                                      \
-    "Transcribe audio (sync, max ~8MB). Uses Speech-to-Text v2 with model chirp_2 when "    \
+#define HU_MEETING_DESC                                                                       \
+    "Transcribe audio (sync, max ~8MB). Uses Speech-to-Text v2 with model chirp_2 when "      \
     "gcp_project is set (arg or GOOGLE_CLOUD_PROJECT/GCP_PROJECT env) and speech_api is not " \
-    "v1; otherwise v1. v2 URL: .../locations/{speech_location}/recognizers/_:recognize. "   \
+    "v1; otherwise v1. v2 URL: .../locations/{speech_location}/recognizers/_:recognize. "     \
     "OAuth access_token. Env: BFF_*, optional SPEECH_LOCATION."
-#define HU_MEETING_PARAMS                                                                       \
+#define HU_MEETING_PARAMS                                                                         \
     "{\"type\":\"object\",\"properties\":{\"audio_path\":{\"type\":\"string\"},\"access_token\":" \
-    "{\"type\":\"string\",\"description\":\"GCP OAuth2 access token\"},\"client_id\":{\"type\":"   \
+    "{\"type\":\"string\",\"description\":\"GCP OAuth2 access token\"},\"client_id\":{\"type\":"  \
     "\"string\"},\"gcp_project\":{\"type\":\"string\",\"description\":\"GCP project id for "      \
     "Speech v2\"},\"speech_location\":{\"type\":\"string\",\"default\":\"us\"},\"speech_api\":"   \
     "{\"type\":\"string\",\"description\":\"v2 (default when project set) or v1\"},"              \
     "\"encoding\":{\"type\":\"string\",\"description\":\"LINEAR16, FLAC, MP3, OGG_OPUS, "         \
     "WEBM_OPUS (default LINEAR16)\"},\"sample_rate_hertz\":{\"type\":\"number\","                 \
-    "\"default\":16000},\"language_code\":{\"type\":\"string\",\"default\":\"en-US\"},"          \
-    "\"model\":{\"type\":\"string\",\"description\":\"v2 default chirp_2; v1 default "           \
-    "latest_long\"},\"session_id\":{\"type\":\"string\"}},\"required\":[\"audio_path\","         \
+    "\"default\":16000},\"language_code\":{\"type\":\"string\",\"default\":\"en-US\"},"           \
+    "\"model\":{\"type\":\"string\",\"description\":\"v2 default chirp_2; v1 default "            \
+    "latest_long\"},\"session_id\":{\"type\":\"string\"}},\"required\":[\"audio_path\","          \
     "\"access_token\",\"client_id\"]}"
 
 #define SPEECH_V1_URL "https://speech.googleapis.com/v1/speech:recognize"
-#define AUDIO_CAP  (8 * 1024 * 1024)
+#define AUDIO_CAP     (8 * 1024 * 1024)
 
 typedef struct {
     const char *workspace_dir;
@@ -165,10 +166,9 @@ static hu_error_t meeting_execute(void *ctx, hu_allocator_t *alloc, const hu_jso
     }
     char resolved[4096];
     const char *open_path = path;
-    bool is_abs =
-        (path[0] == '/') ||
-        (strlen(path) >= 2 && path[1] == ':' &&
-         ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')));
+    bool is_abs = (path[0] == '/') ||
+                  (strlen(path) >= 2 && path[1] == ':' &&
+                   ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')));
     if (c->workspace_dir && c->workspace_dir_len > 0 && !is_abs) {
         size_t n = c->workspace_dir_len;
         if (n >= sizeof(resolved) - 1) {
@@ -192,49 +192,44 @@ static hu_error_t meeting_execute(void *ctx, hu_allocator_t *alloc, const hu_jso
         return HU_OK;
     }
 
-    FILE *f = fopen(open_path, "rb");
-    if (!f) {
+    char *raw = NULL;
+    size_t rd = 0;
+    hu_error_t rerr = hu_file_read_all(alloc, open_path, (size_t)AUDIO_CAP, &raw, &rd);
+    if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("seek failed", 11);
-        return HU_OK;
-    }
-    long sz = ftell(f);
-    if (sz < 0 || (size_t)sz > AUDIO_CAP) {
-        fclose(f);
+    if (rerr == HU_ERR_INVALID_FORMAT) {
         *out = hu_tool_result_fail("audio too large (max 8MB for sync API)", 38);
         return HU_OK;
     }
-    rewind(f);
-    unsigned char *raw = (unsigned char *)alloc->alloc(alloc->ctx, (size_t)sz);
-    if (!raw) {
-        fclose(f);
+    if (rerr == HU_ERR_OUT_OF_MEMORY) {
         *out = hu_tool_result_fail("out of memory", 12);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    size_t rd = fread(raw, 1, (size_t)sz, f);
-    fclose(f);
+    if (rerr != HU_OK) {
+        *out = hu_tool_result_fail("seek failed", 11);
+        return HU_OK;
+    }
 
     char *b64 = NULL;
     size_t b64_len = 0;
     if (hu_multimodal_encode_base64(alloc, raw, rd, &b64, &b64_len) != HU_OK) {
-        alloc->free(alloc->ctx, raw, (size_t)sz);
+        alloc->free(alloc->ctx, raw, rd + 1);
         *out = hu_tool_result_fail("base64 encode failed", 20);
         return HU_OK;
     }
-    alloc->free(alloc->ctx, raw, (size_t)sz);
+    alloc->free(alloc->ctx, raw, rd + 1);
 
     char gauth[256];
     snprintf(gauth, sizeof(gauth), "Bearer %s", tok);
 
     char speech_url[384];
     if (use_v2) {
-        snprintf(speech_url, sizeof(speech_url),
-                 "https://speech.googleapis.com/v2/projects/%s/locations/%s/recognizers/_:recognize",
-                 gcp_proj, sloc);
+        snprintf(
+            speech_url, sizeof(speech_url),
+            "https://speech.googleapis.com/v2/projects/%s/locations/%s/recognizers/_:recognize",
+            gcp_proj, sloc);
     } else {
         strncpy(speech_url, SPEECH_V1_URL, sizeof(speech_url) - 1);
         speech_url[sizeof(speech_url) - 1] = '\0';
@@ -309,9 +304,9 @@ static hu_error_t meeting_execute(void *ctx, hu_allocator_t *alloc, const hu_jso
     const char *bff_auth = bff_bearer();
     if (!eb || !bff_auth) {
         size_t tlen_early = strlen(transcript);
-        char *wrap =
-            hu_sprintf(alloc, "{\"transcript_chars\":%zu,\"bff_store\":false,\"note\":\"set BFF_*\"}",
-                       tlen_early);
+        char *wrap = hu_sprintf(
+            alloc, "{\"transcript_chars\":%zu,\"bff_store\":false,\"note\":\"set BFF_*\"}",
+            tlen_early);
         alloc->free(alloc->ctx, transcript, tlen_early + 1);
         *out = hu_tool_result_ok_owned(wrap, wrap ? strlen(wrap) : 0);
         return HU_OK;
@@ -355,9 +350,9 @@ static hu_error_t meeting_execute(void *ctx, hu_allocator_t *alloc, const hu_jso
     const char *tenant = getenv("BFF_TENANT_ID");
     int ok = bff_store(alloc, base, bff_auth, tenant, jb, j);
     alloc->free(alloc->ctx, jb, jb_cap);
-    char *fin = hu_sprintf(alloc,
-                           "{\"transcript_chars\":%zu,\"transcript_stored\":%s,\"bff_ok\":%s}", tlen,
-                           ok == 0 ? "true" : "false", ok == 0 ? "true" : "false");
+    char *fin =
+        hu_sprintf(alloc, "{\"transcript_chars\":%zu,\"transcript_stored\":%s,\"bff_ok\":%s}", tlen,
+                   ok == 0 ? "true" : "false", ok == 0 ? "true" : "false");
     *out = hu_tool_result_ok_owned(fin, fin ? strlen(fin) : 0);
     return HU_OK;
 #endif

@@ -4,10 +4,11 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file_util.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
-#include "human/core/string.h"
 #include "human/core/process_util.h"
+#include "human/core/string.h"
 #include "human/tool.h"
 #include "human/tools/validation.h"
 #include <stdio.h>
@@ -15,14 +16,14 @@
 #include <string.h>
 
 #define HU_DOC_INGEST_NAME "doc_ingest"
-#define HU_DOC_INGEST_DESC                                                                 \
-    "Ingest a workspace file into cloud memory (BFF). Chunks text and POSTs to "         \
-    "/v1/memory/store. PDFs use pdftotext when available. Requires BFF_BASE_URL and "     \
+#define HU_DOC_INGEST_DESC                                                            \
+    "Ingest a workspace file into cloud memory (BFF). Chunks text and POSTs to "      \
+    "/v1/memory/store. PDFs use pdftotext when available. Requires BFF_BASE_URL and " \
     "BFF_AUTH_TOKEN; optional BFF_TENANT_ID."
-#define HU_DOC_INGEST_PARAMS                                                                   \
+#define HU_DOC_INGEST_PARAMS                                                                  \
     "{\"type\":\"object\",\"properties\":{\"file_path\":{\"type\":\"string\"},\"client_id\":" \
     "{\"type\":\"string\"},\"source_type\":{\"type\":\"string\"},\"chunk_size\":{\"type\":"   \
-    "\"number\",\"default\":1800},\"overlap\":{\"type\":\"number\",\"default\":200},"          \
+    "\"number\",\"default\":1800},\"overlap\":{\"type\":\"number\",\"default\":200},"         \
     "\"session_id\":{\"type\":\"string\"}},\"required\":[\"file_path\",\"client_id\"]}"
 
 #define CHUNK_DEFAULT   1800
@@ -124,9 +125,8 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
     char resolved[4096];
     const char *open_path = fp;
     bool is_abs =
-        (fp[0] == '/') ||
-        (strlen(fp) >= 2 && fp[1] == ':' &&
-         ((fp[0] >= 'A' && fp[0] <= 'Z') || (fp[0] >= 'a' && fp[0] <= 'z')));
+        (fp[0] == '/') || (strlen(fp) >= 2 && fp[1] == ':' &&
+                           ((fp[0] >= 'A' && fp[0] <= 'Z') || (fp[0] >= 'a' && fp[0] <= 'z')));
     if (c->workspace_dir && c->workspace_dir_len > 0 && !is_abs) {
         size_t n = c->workspace_dir_len;
         if (n >= sizeof(resolved) - 1) {
@@ -150,32 +150,25 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
         return HU_OK;
     }
 
-    FILE *f = fopen(open_path, "rb");
-    if (!f) {
+    char *buf = NULL;
+    size_t rd = 0;
+    hu_error_t rerr = hu_file_read_all(alloc, open_path, (size_t)READ_CAP, &buf, &rd);
+    if (rerr == HU_ERR_NOT_FOUND) {
         *out = hu_tool_result_fail("file not found", 14);
         return HU_OK;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        *out = hu_tool_result_fail("seek failed", 11);
-        return HU_OK;
-    }
-    long sz = ftell(f);
-    if (sz < 0 || (size_t)sz > READ_CAP) {
-        fclose(f);
+    if (rerr == HU_ERR_INVALID_FORMAT) {
         *out = hu_tool_result_fail("file too large or invalid", 25);
         return HU_OK;
     }
-    rewind(f);
-    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
-    if (!buf) {
-        fclose(f);
+    if (rerr == HU_ERR_OUT_OF_MEMORY) {
         *out = hu_tool_result_fail("out of memory", 12);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    size_t rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[rd] = '\0';
+    if (rerr != HU_OK) {
+        *out = hu_tool_result_fail("seek failed", 11);
+        return HU_OK;
+    }
 
     size_t olen = strlen(open_path);
     bool is_pdf = olen > 4 && strcmp(open_path + olen - 4, ".pdf") == 0;
@@ -189,7 +182,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
         hu_run_result_t res = {0};
         hu_error_t er = hu_process_run_with_policy(alloc, argv_buf, NULL, 1048576, NULL, &res);
         if (er == HU_OK && res.success && res.stdout_len > 0) {
-            alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+            alloc->free(alloc->ctx, buf, rd + 1);
             buf = (char *)alloc->alloc(alloc->ctx, res.stdout_len + 1);
             if (!buf) {
                 hu_run_result_free(alloc, &res);
@@ -215,7 +208,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
         size_t jb_cap = take * 2 + 512;
         char *jb = (char *)alloc->alloc(alloc->ctx, jb_cap);
         if (!jb) {
-            alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+            alloc->free(alloc->ctx, buf, rd + 1);
             *out = hu_tool_result_fail("out of memory", 12);
             return HU_ERR_OUT_OF_MEMORY;
         }
@@ -243,7 +236,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
 
         if (bff_store_json(alloc, base, auth, tenant, jb, j) != 0) {
             alloc->free(alloc->ctx, jb, jb_cap);
-            alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+            alloc->free(alloc->ctx, buf, rd + 1);
             *out = hu_tool_result_fail("bff store failed", 16);
             return HU_OK;
         }
@@ -254,7 +247,7 @@ static hu_error_t doc_ingest_execute(void *ctx, hu_allocator_t *alloc, const hu_
             break;
         off += (size_t)chunk_sz - (size_t)overlap;
     }
-    alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+    alloc->free(alloc->ctx, buf, rd + 1);
     char *summary = hu_sprintf(alloc, "{\"ok\":true,\"chunks_stored\":%d}", stored);
     *out = hu_tool_result_ok_owned(summary, summary ? strlen(summary) : 0);
     return HU_OK;
