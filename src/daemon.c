@@ -1482,6 +1482,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     inputs.channel_name_len = strlen(ch_part);
                     inputs.memory_context = unified_mem_ctx;
                     inputs.memory_context_len = unified_mem_ctx_len;
+                    /* The composed proactive directive (silence duration, event
+                     * context, joke callbacks) IS the trigger material — without
+                     * it the proposer sees an empty briefing and declines every
+                     * tick (result=9, "no context or triggers provided"). */
+                    inputs.situation_context = prompt;
+                    inputs.situation_context_len = prompt_len;
                     inputs.content_is_safe = hu_daemon_callback_content_is_safe;
 
                     /* Producer for the due_followups field: surface THIS

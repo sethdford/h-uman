@@ -213,15 +213,15 @@ hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64
      * the model in who it is + who it's addressing is the cheapest real
      * signal and unblocks a non-trivial decision. */
     if (agent->persona && agent->persona->name && agent->persona->name_len > 0) {
-        const char *ident = agent->persona->identity ? agent->persona->identity
+        const char *ident = agent->persona->identity      ? agent->persona->identity
                             : agent->persona->core_anchor ? agent->persona->core_anchor
                                                           : "";
         int pn = snprintf(out->persona_buf, sizeof(out->persona_buf), "%.*s%s%s",
                           (int)agent->persona->name_len, agent->persona->name,
                           ident[0] ? " — " : "", ident);
         if (pn > 0) {
-            size_t plen = (size_t)pn < sizeof(out->persona_buf) ? (size_t)pn
-                                                                : sizeof(out->persona_buf) - 1;
+            size_t plen =
+                (size_t)pn < sizeof(out->persona_buf) ? (size_t)pn : sizeof(out->persona_buf) - 1;
             out->content[HU_INIT_FIELD_PERSONA] = out->persona_buf;
             out->bytes[HU_INIT_FIELD_PERSONA] = plen;
         }
@@ -889,6 +889,7 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         size_t body_len;
         bool apply_safety;
     } fields[] = {
+        {"situation", inputs->situation_context, inputs->situation_context_len, false},
         {"memory", inputs->memory_context, inputs->memory_context_len, true},
         {"weather", inputs->weather_context, inputs->weather_context_len, false},
         {"calendar", inputs->calendar_context, inputs->calendar_context_len, false},
