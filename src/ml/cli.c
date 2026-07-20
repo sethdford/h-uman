@@ -17,6 +17,7 @@
 #include "human/memory/personal_model.h"
 #include "human/ml/checkpoint.h"
 #include "human/ml/cli_dpo.h"
+#include "human/ml/cli_kto.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/dpo.h"
 #include "human/ml/dpo_miner.h"
@@ -3244,6 +3245,146 @@ static hu_error_t rl_train_delegate_to_dpo(hu_allocator_t *alloc, int argc, cons
     hu_error_t err = hu_ml_cli_dpo_train(alloc, dpo_argc, dpo_argv);
     alloc->free(alloc->ctx, dpo_argv, (size_t)argc * sizeof(*dpo_argv));
     return err;
+}
+
+hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const char **argv) {
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *db_path = NULL;
+    const char *export_path = NULL;
+    const char *mode = "kto"; /* kto | dpo */
+    const char *adapter_out = NULL;
+    int max_iters = 100;
+
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml train-from-reactions [options]\n"
+                   "  --db <path>            SQLite memory/dpo db (default: ~/.human/memory.db)\n"
+                   "  --export <path>        JSONL export path (default: "
+                   "~/.human/dpo/reactions.jsonl)\n"
+                   "  --mode {kto,dpo}       Trainer (default: kto)\n"
+                   "  --iters <N>            Training iterations (default: 100)\n"
+                   "  --adapter-out <dir>    Optional adapter output directory\n"
+                   "\n"
+                   "Exports collected preference pairs, then trains. Reaction taps and\n"
+                   "edit-based pairs land in dpo_pairs via the live collector.\n");
+            return HU_OK;
+        }
+        const char *v;
+        if ((v = get_opt(argv, argc, i, "--db"))) {
+            db_path = v;
+            i++;
+        } else if ((v = get_opt(argv, argc, i, "--export"))) {
+            export_path = v;
+            i++;
+        } else if ((v = get_opt(argv, argc, i, "--mode"))) {
+            mode = v;
+            i++;
+        } else if ((v = get_opt(argv, argc, i, "--iters"))) {
+            if (parse_int_arg(v, &max_iters) != 0)
+                return HU_ERR_INVALID_ARGUMENT;
+            i++;
+        } else if ((v = get_opt(argv, argc, i, "--adapter-out"))) {
+            adapter_out = v;
+            i++;
+        }
+    }
+
+#ifndef HU_ENABLE_SQLITE
+    (void)db_path;
+    (void)export_path;
+    (void)mode;
+    (void)adapter_out;
+    (void)max_iters;
+    fprintf(stderr, "train-from-reactions: SQLite required\n");
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    char home_db[512];
+    char home_export[512];
+    if (!db_path) {
+        const char *env = getenv("HU_MEMORY_DB_PATH");
+        if (env && env[0]) {
+            db_path = env;
+        } else {
+            const char *home = getenv("HOME");
+            if (!home)
+                home = ".";
+            snprintf(home_db, sizeof(home_db), "%s/.human/memory.db", home);
+            db_path = home_db;
+        }
+    }
+    if (!export_path) {
+        const char *home = getenv("HOME");
+        if (!home)
+            home = ".";
+        snprintf(home_export, sizeof(home_export), "%s/.human/dpo/reactions.jsonl", home);
+        export_path = home_export;
+        (void)hu_dpo_miner_ensure_parent_dir(export_path);
+    }
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "train-from-reactions: cannot open %s\n", db_path);
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    hu_dpo_collector_t collector;
+    hu_error_t err = hu_dpo_collector_create(alloc, db, 100000, &collector);
+    if (err != HU_OK) {
+        sqlite3_close(db);
+        fprintf(stderr, "train-from-reactions: collector create failed: %s\n",
+                hu_error_string(err));
+        return err;
+    }
+
+    size_t exported = 0;
+    err = hu_dpo_export_jsonl(&collector, export_path, strlen(export_path), &exported);
+    hu_dpo_collector_deinit(&collector);
+    sqlite3_close(db);
+    if (err != HU_OK) {
+        fprintf(stderr, "train-from-reactions: export failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    fprintf(stderr, "train-from-reactions: exported %zu pairs → %s\n", exported, export_path);
+    if (exported == 0) {
+        fprintf(stderr, "train-from-reactions: no pairs to train (collect reactions first)\n");
+        return HU_OK;
+    }
+
+    char iters_buf[32];
+    snprintf(iters_buf, sizeof(iters_buf), "%d", max_iters);
+
+    if (strcmp(mode, "dpo") == 0) {
+        const char *dpo_argv[16];
+        int dpo_argc = 0;
+        dpo_argv[dpo_argc++] = "dpo-train";
+        dpo_argv[dpo_argc++] = "--pairs";
+        dpo_argv[dpo_argc++] = export_path;
+        dpo_argv[dpo_argc++] = "--iters";
+        dpo_argv[dpo_argc++] = iters_buf;
+        if (adapter_out) {
+            dpo_argv[dpo_argc++] = "--adapter-out";
+            dpo_argv[dpo_argc++] = adapter_out;
+        }
+        return hu_ml_cli_dpo_train(alloc, dpo_argc, dpo_argv);
+    }
+
+    const char *kto_argv[16];
+    int kto_argc = 0;
+    kto_argv[kto_argc++] = "kto-train";
+    kto_argv[kto_argc++] = "--pairs";
+    kto_argv[kto_argc++] = export_path;
+    kto_argv[kto_argc++] = "--iters";
+    kto_argv[kto_argc++] = iters_buf;
+    if (adapter_out) {
+        kto_argv[kto_argc++] = "--adapter-out";
+        kto_argv[kto_argc++] = adapter_out;
+    }
+    return hu_ml_cli_kto_train(alloc, kto_argc, kto_argv);
+#endif
 }
 
 hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv) {

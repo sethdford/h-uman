@@ -206,8 +206,28 @@ hu_policy_action_t hu_agent_internal_evaluate_tool_policy(hu_agent_t *agent, con
                                                           const char *args_json);
 hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size_t name_len);
 
-/* Canonical tool dispatch: pre/post hook pipeline + execute.
- * Returns HU_OK for normal completion (including hook-denied dispatch).
+/* Canonical pre-execute security envelope (Wave A / SOTA program).
+ *
+ * Order: permission → pre-hook → ESCALATE → policy/arg-inspect.
+ *
+ * DENY: *out is a fail result (caller owns; free via hu_tool_result_free).
+ * NEED_APPROVAL: *out is a fail result with needs_approval=true; do not execute.
+ * ALLOW: *out untouched — caller may execute.
+ *
+ * Always pair with hu_agent_internal_post_hook_fire after the attempt
+ * (allow, deny, or need-approval) so auditors observe every gate decision. */
+typedef enum {
+    HU_TOOL_GATE_ALLOW = 0,
+    HU_TOOL_GATE_DENY = 1,
+    HU_TOOL_GATE_NEED_APPROVAL = 2,
+} hu_tool_gate_t;
+
+hu_tool_gate_t hu_agent_internal_pre_execute_checks(hu_agent_t *agent, const char *tool_name,
+                                                    size_t tool_name_len, const char *args_json,
+                                                    size_t args_json_len, hu_tool_result_t *out);
+
+/* Canonical tool dispatch: full pre-execute gate + execute + post-hook.
+ * Returns HU_OK for normal completion (including gate-denied dispatch).
  * Caller frees *out via hu_tool_result_free. */
 hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
                                                  const char *tool_name, size_t tool_name_len,
@@ -218,6 +238,9 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
 /* Split pre/post hook helpers — for call sites that cannot use
  * hu_agent_internal_dispatch_with_hooks because they own execution
  * differently (streaming tools, parallel dispatcher, approval-retry).
+ *
+ * Prefer hu_agent_internal_pre_execute_checks for new call sites; these
+ * hook-only helpers remain for incremental migration.
  *
  * They MUST be called as a pair: pre returns true if the caller should
  * proceed to execute the tool; false means the pre-hook denied and *out

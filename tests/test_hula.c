@@ -4,11 +4,13 @@
 #include "human/agent/hula_emergence.h"
 #include "human/agent/hula_lite.h"
 #include "human/agent/spawn.h"
+#include "human/agent.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/hula_sdk.h"
+#include "human/permission.h"
 #include "human/provider.h"
 #include "human/security.h"
 #include "test_framework.h"
@@ -971,6 +973,37 @@ static void hula_policy_locked_blocks_call(void) {
     hu_hula_program_deinit(&prog);
 }
 
+/* Wave A: security_agent permission gate denies shell under READ_ONLY. */
+static void hula_security_agent_denies_shell_under_read_only(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"name\":\"sec\",\"root\":{\"op\":\"call\",\"id\":\"c1\","
+                       "\"tool\":\"shell\",\"args\":{}}}";
+    hu_hula_program_t prog;
+    HU_ASSERT_EQ(hu_hula_parse_json(&alloc, json, strlen(json), &prog), HU_OK);
+
+    hu_tool_t tools[3];
+    make_tools(tools);
+    tools[2] = (hu_tool_t){.ctx = NULL, .vtable = &shell_stub_vtable};
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.permission_level = HU_PERM_READ_ONLY;
+
+    hu_hula_exec_t exec;
+    HU_ASSERT_EQ(hu_hula_exec_init_full(&exec, alloc, &prog, tools, 3, NULL, NULL), HU_OK);
+    hu_hula_exec_set_security_agent(&exec, &agent);
+    HU_ASSERT_EQ(hu_hula_exec_run(&exec), HU_OK);
+
+    const hu_hula_result_t *r = hu_hula_exec_result(&exec, "c1");
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_EQ(r->status, HU_HULA_FAILED);
+    HU_ASSERT_STR_CONTAINS(r->error, "denied");
+
+    hu_hula_exec_deinit(&exec);
+    hu_hula_program_deinit(&prog);
+}
+
 static void hula_policy_high_risk_blocked(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"name\":\"risky\",\"root\":{\"op\":\"call\",\"id\":\"c1\","
@@ -1919,6 +1952,7 @@ void run_hula_tests(void) {
     HU_RUN_TEST(hula_from_dag_parallel_roots);
 
     HU_RUN_TEST(hula_policy_locked_blocks_call);
+    HU_RUN_TEST(hula_security_agent_denies_shell_under_read_only);
     HU_RUN_TEST(hula_policy_high_risk_blocked);
 
     HU_RUN_TEST(hula_trace_records_execution);

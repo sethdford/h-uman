@@ -75,12 +75,18 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
 }
 
 hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_embedder_t *embedder,
-                              hu_vector_store_t *vector_store, hu_graph_t *graph,
-                              const char *query, size_t query_len,
-                              const hu_retrieval_options_t *opts, hu_retrieval_result_t *out) {
+                              hu_vector_store_t *vector_store, hu_graph_t *graph, const char *query,
+                              size_t query_len, const hu_retrieval_options_t *opts,
+                              hu_retrieval_result_t *out) {
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
+
+    {
+        hu_error_t nerr = hu_retrieval_check_namespace(opts);
+        if (nerr != HU_OK)
+            return nerr;
+    }
 
     if (!alloc || !query || query_len == 0)
         return HU_OK;
@@ -96,14 +102,16 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     if (err != HU_OK)
         return err;
 
-    /* Graph retrieval: add as extra source when graph is set */
+    /* Graph retrieval: add as extra source when graph is set.
+     * Skip when a contact namespace is active — graph context is not
+     * contact-keyed and would reintroduce cross-contact leakage. */
 #ifdef HU_ENABLE_SQLITE
     hu_retrieval_result_t graph_result = {0};
-    if (graph) {
+    if (graph && !(opts && opts->contact_id && opts->contact_id_len > 0)) {
         char *graph_ctx = NULL;
         size_t graph_ctx_len = 0;
         if (hu_graph_build_context(graph, alloc, "", 0, query, query_len, 2, 2048, &graph_ctx,
-                                  &graph_ctx_len) == HU_OK &&
+                                   &graph_ctx_len) == HU_OK &&
             graph_ctx && graph_ctx_len > 0) {
             graph_result.entries =
                 (hu_memory_entry_t *)alloc->alloc(alloc->ctx, sizeof(hu_memory_entry_t));
@@ -155,7 +163,7 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
                 out->entries = merged;
                 out->count = total;
                 out->scores = scores;
-                return HU_OK;
+                return hu_retrieval_filter_by_namespace(alloc, out, opts);
             }
             if (merged)
                 alloc->free(alloc->ctx, merged, total * sizeof(hu_memory_entry_t));
@@ -164,7 +172,7 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         }
 #endif
         *out = keyword_result;
-        return HU_OK;
+        return hu_retrieval_filter_by_namespace(alloc, out, opts);
     }
 
     hu_retrieval_result_t semantic_result = {0};
@@ -191,9 +199,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         return HU_OK;
     }
 
-    size_t max_merged = (kw_count + sem_count + gr_count) > limit
-                            ? (kw_count + sem_count + gr_count)
-                            : limit;
+    size_t max_merged =
+        (kw_count + sem_count + gr_count) > limit ? (kw_count + sem_count + gr_count) : limit;
     if (max_merged > 128)
         max_merged = 128;
 
@@ -269,5 +276,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     err = search_results_to_entries(alloc, query, merged, merged_count, limit, out);
     hu_rerank_free_results(merged, merged_count);
     alloc->free(alloc->ctx, merged, max_merged * sizeof(hu_search_result_t));
-    return err;
+    if (err != HU_OK)
+        return err;
+    /* Keyword/semantic legs already namespace-filtered; re-apply for safety. */
+    return hu_retrieval_filter_by_namespace(alloc, out, opts);
 }

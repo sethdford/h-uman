@@ -1064,6 +1064,10 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
 #ifdef HU_ENABLE_SQLITE
     /* API endpoint: Turing scores (latest per-contact) */
     if (path_is(path, "/api/turing/scores") && method && strcmp(method, "GET") == 0) {
+        if (!v1_auth_ok(&gw->config, auth_header)) {
+            (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
+            return;
+        }
         hu_app_context_t *ctx = (hu_app_context_t *)gw->config.app_ctx;
         if (!ctx || !ctx->agent || !ctx->agent->memory) {
             (void)send_json(fd, 503, "{\"error\":\"service unavailable\"}");
@@ -1119,6 +1123,10 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
 
     /* API endpoint: Turing trend (score history over time) */
     if (path_is(path, "/api/turing/trend") && method && strcmp(method, "GET") == 0) {
+        if (!v1_auth_ok(&gw->config, auth_header)) {
+            (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
+            return;
+        }
         hu_app_context_t *ctx = (hu_app_context_t *)gw->config.app_ctx;
         if (!ctx || !ctx->agent || !ctx->agent->memory) {
             (void)send_json(fd, 503, "{\"error\":\"service unavailable\"}");
@@ -1164,6 +1172,10 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
 
     /* API endpoint: Turing weakest dimensions (averages) */
     if (path_is(path, "/api/turing/dimensions") && method && strcmp(method, "GET") == 0) {
+        if (!v1_auth_ok(&gw->config, auth_header)) {
+            (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
+            return;
+        }
         hu_app_context_t *ctx = (hu_app_context_t *)gw->config.app_ctx;
         if (!ctx || !ctx->agent || !ctx->agent->memory) {
             (void)send_json(fd, 503, "{\"error\":\"service unavailable\"}");
