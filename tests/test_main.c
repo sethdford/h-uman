@@ -92,6 +92,7 @@ void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
 void run_imessage_reactions_tests(void);
 void run_imessage_caps_tests(void);
+void run_imessage_bb_event_tests(void);
 /* Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis primitives
  * that render iMessage events into canonical English for personal-model ingest. */
 void run_imessage_ingest_tests(void);
@@ -1139,6 +1140,7 @@ int main(int argc, char **argv) {
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_imessage_caps_tests();
+    run_imessage_bb_event_tests();
     run_imessage_ingest_tests();
     run_imessage_personal_model_e2e_tests();
     run_bplist_tests();
