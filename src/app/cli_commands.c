@@ -30,6 +30,7 @@
 #include "human/memory.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
+#include "human/memory/personal_model.h"
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
 typedef struct hu_memory_facade hu_memory_facade_t;
@@ -393,7 +394,7 @@ hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv) {
 
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit>\n");
+        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
@@ -582,6 +583,68 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                 hu_audit_event_with_result(&ev, true, 0, 0, NULL);
                 (void)hu_audit_logger_log(logger, &ev);
                 hu_audit_logger_destroy(logger, alloc);
+            }
+        }
+    } else if (strcmp(sub, "wiki") == 0) {
+        /* Wave C thin LLM-wiki surface: personal-model facts/topics as markdown. */
+        const char *contact = NULL;
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--contact") == 0 && i + 1 < argc)
+                contact = argv[++i];
+        }
+        char pm_path[1024];
+        snprintf(pm_path, sizeof(pm_path), "%s/personal_model.bin", ws);
+        hu_personal_model_t model;
+        memset(&model, 0, sizeof(model));
+        if (contact && contact[0])
+            err = hu_personal_model_load_for_contact(&model, contact, pm_path);
+        else
+            err = hu_personal_model_load(&model, pm_path);
+        if (err == HU_ERR_NOT_FOUND) {
+            printf("# Personal wiki\n\n_No personal model at %s yet._\n", pm_path);
+            err = HU_OK;
+            goto done;
+        }
+        if (err != HU_OK) {
+            fprintf(stderr, "wiki: load failed: %s\n", hu_error_string(err));
+            goto done;
+        }
+        printf("# Personal wiki\n\n");
+        if (contact)
+            printf("_Contact scope: %s_\n\n", contact);
+        printf("## Index\n\n");
+        printf("- Facts: %zu\n", model.fact_count);
+        printf("- Topics: %zu\n", model.topic_count);
+        printf("- Goals: %zu\n", model.goal_count);
+        printf("- Interactions: %u\n\n", model.interaction_count);
+        printf("## Facts\n\n");
+        if (model.fact_count == 0) {
+            printf("_None yet._\n\n");
+        } else {
+            for (size_t i = 0; i < model.fact_count; i++) {
+                const hu_heuristic_fact_t *f = &model.facts[i];
+                printf("- %s %s %s\n", f->subject[0] ? f->subject : "?",
+                       f->predicate[0] ? f->predicate : "?", f->object[0] ? f->object : "?");
+            }
+            printf("\n");
+        }
+        printf("## Topics\n\n");
+        if (model.topic_count == 0) {
+            printf("_None yet._\n\n");
+        } else {
+            for (size_t i = 0; i < model.topic_count; i++) {
+                printf("- %s (interest=%.2f, mentions=%u)\n", model.topics[i].name,
+                       (double)model.topics[i].interest_score, model.topics[i].mention_count);
+            }
+            printf("\n");
+        }
+        printf("## Goals\n\n");
+        if (model.goal_count == 0) {
+            printf("_None yet._\n");
+        } else {
+            for (size_t i = 0; i < model.goal_count; i++) {
+                printf("- %s%s\n", model.goals[i].description,
+                       model.goals[i].active ? "" : " _(inactive)_");
             }
         }
     } else if (strcmp(sub, "audit") == 0) {

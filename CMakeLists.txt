@@ -1094,6 +1094,7 @@ set(HU_CORE_SOURCES
     src/memory/lifecycle/rollout.c
     src/memory/lifecycle/migrate.c
     src/memory/retrieval/keyword.c
+    src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
     src/memory/retrieval/reranker.c
     src/memory/retrieval/hybrid.c
@@ -3425,6 +3426,7 @@ set(HU_TEST_SOURCES
     tests/test_mlx_local_voice.c
     tests/test_autonomy.c
     tests/test_retrieval.c
+    tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
     tests/test_gate_mode.c

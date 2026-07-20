@@ -91,6 +91,12 @@ hu_error_t hu_keyword_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, cons
     out->count = 0;
     out->scores = NULL;
 
+    {
+        hu_error_t nerr = hu_retrieval_check_namespace(opts);
+        if (nerr != HU_OK)
+            return nerr;
+    }
+
     if (!backend || !backend->ctx || !backend->vtable || !query || query_len == 0)
         return HU_OK;
 
@@ -206,5 +212,5 @@ hu_error_t hu_keyword_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, cons
     out->entries = result_entries;
     out->count = pass_count;
     out->scores = result_scores;
-    return HU_OK;
+    return hu_retrieval_filter_by_namespace(alloc, out, opts);
 }

@@ -25,15 +25,31 @@ def check(registry_path=DEFAULT_REGISTRY, gate_path=DEFAULT_GATE):
     if not live:
         print("Capability gate check: no LIVE capabilities require the gate — OK")
         return 0
+    gate = None
     try:
         gate = json.load(open(gate_path))
         effective = gate.get("effective_verdict")
     except (OSError, ValueError):
         effective = None  # fail closed
+    human = gate.get("human") if isinstance(gate, dict) else None
+    human_verdict = (human or {}).get("verdict")
+    human_n = (human or {}).get("n") or 0
+    # Wave B: human ABSENT (or n < 30 without PASS) must never unlock LIVE.
+    if human_verdict == "ABSENT" or (
+        isinstance(human_n, int) and human_n < 30 and human_verdict != "PASS"
+    ):
+        for cap in live:
+            print(
+                f"FAIL: capability '{cap['id']}' is LIVE but human blind_ab "
+                f"verdict={human_verdict!r} n={human_n} (need human PASS with n≥30)"
+            )
+        return 1
     if effective != "PASS":
         for cap in live:
-            print(f"FAIL: capability '{cap['id']}' is LIVE but blind_ab gate "
-                  f"effective_verdict={effective!r} (need PASS)")
+            print(
+                f"FAIL: capability '{cap['id']}' is LIVE but blind_ab gate "
+                f"effective_verdict={effective!r} (need PASS)"
+            )
         return 1
     print(f"Capability gate check: {len(live)} LIVE capabilities, gate PASS — OK")
     return 0

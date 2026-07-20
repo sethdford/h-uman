@@ -117,13 +117,13 @@ Under `HU_IS_TEST`, or when the `CI` environment variable is set (e.g. GitHub Ac
 
 Test-mode scores reflect the system's deterministic mock behavior. Production scores against real providers will vary by model. Run `human eval baseline eval_suites/` with API keys configured to measure live scores.
 
-### External memory / humanness (Wave B targets)
+### External memory / humanness (Wave B)
 
-| Bar | Current | Gate |
-|-----|---------|------|
-| LoCoMo P@1 | ≈ 0.058 in `docs/evaluation/baseline.json` | Publish method + improve vs baseline |
-| LongMemEval | Not yet published as program gate | Reproduce + document |
-| Blind A/B human | Verdict **ABSENT** (n=0) | n≥30 or fail-closed CI when feature LIVE |
+| Bar | Current | Gate / method |
+|-----|---------|---------------|
+| LoCoMo P@1 | **0.057717** (`locomo` suite) | Method: [`docs/evaluation/locomo-method.md`](evaluation/locomo-method.md). Floor until improved with same method. |
+| LongMemEval | Category scores locked in `baseline.json` | Method: [`docs/evaluation/longmemeval-method.md`](evaluation/longmemeval-method.md). Abstention n=0. |
+| Blind A/B human | Verdict **ABSENT** (n=0) | `docs/evaluation/blind_ab_gate.json`; CI `check_capability_gates.py` blocks LIVE until `effective_verdict=PASS`. |
 
 ---
 
