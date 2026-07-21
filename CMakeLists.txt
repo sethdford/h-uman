@@ -1936,6 +1936,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/data_conversation_contractions_json.c
     src/data/data_conversation_conversation_intros_json.c
     src/data/data_conversation_crisis_keywords_json.c
+    src/data/data_conversation_commitment_keywords_json.c
     src/data/data_conversation_emotional_words_json.c
     src/data/data_conversation_engage_words_json.c
     src/data/data_conversation_filler_words_json.c
@@ -1948,6 +1949,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/data_personas_default_json.c
     src/data/data_security_command_lists_json.c
     src/data/data_agent_commitment_patterns_json.c
+    src/data/data_daemon_courtesy_phrases_json.c
     src/data/data_agent_conversation_plan_words_json.c
     src/data/data_agent_input_guard_patterns_json.c
     src/data/data_agent_multistep_indicators_json.c
