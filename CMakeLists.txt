@@ -1936,6 +1936,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/data_conversation_contractions_json.c
     src/data/data_conversation_conversation_intros_json.c
     src/data/data_conversation_crisis_keywords_json.c
+    src/data/data_conversation_commitment_keywords_json.c
     src/data/data_conversation_emotional_words_json.c
     src/data/data_conversation_engage_words_json.c
     src/data/data_conversation_filler_words_json.c

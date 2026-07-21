@@ -6,6 +6,8 @@ extern const unsigned char data_agent_commitment_patterns_json[];
 extern const size_t data_agent_commitment_patterns_json_len;
 extern const unsigned char data_daemon_courtesy_phrases_json[];
 extern const size_t data_daemon_courtesy_phrases_json_len;
+extern const unsigned char data_conversation_commitment_keywords_json[];
+extern const size_t data_conversation_commitment_keywords_json_len;
 extern const unsigned char data_agent_conversation_plan_words_json[];
 extern const size_t data_agent_conversation_plan_words_json_len;
 extern const unsigned char data_agent_input_guard_patterns_json[];
@@ -144,6 +146,8 @@ static const hu_embedded_data_entry_t hu_embedded_data_registry[] = {
      &data_conversation_conversation_intros_json_len},
     {"conversation/crisis_keywords.json", data_conversation_crisis_keywords_json,
      &data_conversation_crisis_keywords_json_len},
+    {"conversation/commitment_keywords.json", data_conversation_commitment_keywords_json,
+     &data_conversation_commitment_keywords_json_len},
     {"conversation/emotional_words.json", data_conversation_emotional_words_json,
      &data_conversation_emotional_words_json_len},
     {"conversation/engage_words.json", data_conversation_engage_words_json,
