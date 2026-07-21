@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
-    "@astrojs/starlight": "^0.39.2",
+    "@astrojs/starlight": "^0.41.3",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@tailwindcss/vite": "^4.3.0",
     "astro": "^6.4.8",
@@ -30,9 +30,9 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.8",
-    "prettier": "^3.9.5",
+    "prettier": "^3.9.6",
     "prettier-plugin-astro": "^0.14.1",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vitest": "^4.1.10"
   },
   "overrides": {
