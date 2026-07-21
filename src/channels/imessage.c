@@ -4516,6 +4516,31 @@ hu_reaction_type_t hu_imessage_reaction_for_emoji(const char *emoji_utf8) {
     return HU_REACTION_THUMBS_UP; /* "Liked" + universal-positive default */
 }
 
+hu_error_t hu_imessage_mark_read(void *ctx, const char *target, size_t target_len) {
+    if (!target || target_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
+    if (!c || !c->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!hu_imessage_caps_allows(imsg_caps_cached(c), HU_IMSG_VERB_READ_RECEIPT))
+        return HU_ERR_NOT_SUPPORTED;
+    char tgt[256];
+    size_t n = target_len < sizeof(tgt) - 1 ? target_len : sizeof(tgt) - 1;
+    memcpy(tgt, target, n);
+    tgt[n] = '\0';
+    const char *argv[] = {"imsg", "read", "--to", tgt, NULL};
+    if (hu_imsg_run_ok(c->alloc, argv, 15)) {
+        hu_log_info("imessage", NULL, "read receipt sent (native)");
+        return HU_OK;
+    }
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    (void)ctx;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
 hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
                                                  int64_t message_id, const char *emoji_utf8,
                                                  size_t emoji_utf8_len) {

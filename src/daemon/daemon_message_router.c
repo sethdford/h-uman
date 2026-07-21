@@ -254,6 +254,15 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
         break;
     }
 
+    /* Native read receipt (2026-07-21). Replying without marking the thread
+     * read leaves every inbound message permanently "unread" on the sender's
+     * side while answers keep arriving — an obvious tell. A human who replies
+     * has read it. Best-effort and caps-gated: a down bridge is a silent
+     * no-op and never affects the send outcome above. */
+    if (err == HU_OK && ch && ch->ctx && target && target_len > 0) {
+        (void)hu_imessage_mark_read(ch->ctx, target, target_len);
+    }
+
     /* Pacing — finish (sleep if elapsed < persona.min_reply_delay_ms * 1.2). */
     if (persona) {
         hu_persona_pace_reply_finish(persona, pace_start);
