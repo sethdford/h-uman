@@ -419,8 +419,23 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
     if (msg_ref[0] == '\0')
         snprintf(msg_ref, sizeof(msg_ref), "out-%lld", (long long)time(NULL));
 
+    /* Register under the SAME normalized thread key the tapback poller will
+     * emit. reaction_lookup is an exact-match join; before both sides
+     * normalized, registration stored "+1555" while the poller looked up
+     * "any;-;+1555" and nothing ever matched — zero imessage_tapback DPO
+     * pairs. Scoped to iMessage on purpose: the ';'-stripping rule describes
+     * chat.guid, and applying it to a channel that legitimately uses ';' in
+     * its thread ids would corrupt that channel's key. */
+    char thread_key[256];
+    snprintf(thread_key, sizeof(thread_key), "%s", thread);
+    if (strcmp(ch_name, "imessage") == 0) {
+        char norm[256];
+        if (hu_imessage_normalize_thread_key(thread, norm, sizeof(norm)) == HU_OK && norm[0])
+            snprintf(thread_key, sizeof(thread_key), "%s", norm);
+    }
+
     hu_reaction_handler_register_assistant_message_for_production(
-        ch_name, thread, msg_ref, prompt ? prompt : "", response,
+        ch_name, thread_key, msg_ref, prompt ? prompt : "", response,
         (agent && agent->sota.last_rejected_draft) ? agent->sota.last_rejected_draft : "");
     if (msg_ref_out && msg_ref_cap > 0)
         snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
