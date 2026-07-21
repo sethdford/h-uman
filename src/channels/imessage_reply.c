@@ -140,7 +140,11 @@ bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, in
     if (g_test_verify) {
         return g_test_verify(target, target_len, since_rowid);
     }
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+/* chat.db read-back — NOT an AX operation. This was gated on
+ * HU_IMESSAGE_TAPBACK_ENABLED (OFF in every shipping build), so it returned
+ * false unconditionally and even a genuinely threaded bridge reply was
+ * recorded as "flat commit" (live 2026-07-20). */
+#if defined(__APPLE__) && !HU_IS_TEST
     return hu_imessage_ax_reply_verify_threaded(target, target_len, since_rowid);
 #else
     (void)target;
@@ -155,7 +159,7 @@ bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, in
  * verification best-effort — it matches any outbound row rather than over-
  * claiming). */
 int64_t hu_imessage_reply_newest_rowid(void) {
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+#if defined(__APPLE__) && !HU_IS_TEST
     return hu_imessage_ax_reply_newest_rowid();
 #else
     return 0;
