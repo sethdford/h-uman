@@ -41,6 +41,12 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
  * Returns NULL for HU_REACTION_NONE or unknown. */
 const char *hu_imessage_reaction_to_tapback_name(hu_reaction_type_t reaction);
 
+/* Map an emoji to the native tapback kind it corresponds to. Never returns
+ * HU_REACTION_NONE — an unmapped emoji falls back to THUMBS_UP, because a
+ * NONE would re-open the plain-text fallback that shipped emoji as MESSAGES
+ * (live 2026-07-20: "tapback emoji sent"=0 vs "flat fallback"=29). */
+hu_reaction_type_t hu_imessage_reaction_for_emoji(const char *emoji_utf8);
+
 /** Build tapback context string for recent reactions on our messages from this contact.
  * Returns allocated string like "[REACTIONS on your recent messages: 2 hearts, 1 like]" or NULL.
  * Caller owns. Stub returns NULL on non-macOS or when SQLite unavailable. */
