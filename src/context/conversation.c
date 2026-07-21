@@ -39,6 +39,8 @@ static uint32_t g_min_response_chars = 15;
 /* Configurable keyword/phrase lists — when NULL/0, DEFAULT_* fallbacks are used */
 static const char **s_crisis_keywords = NULL;
 static size_t s_crisis_keywords_len = 0;
+static const char **s_commitment_keywords = NULL;
+static size_t s_commitment_keywords_len = 0;
 static const char **s_personal_sharing_phrases = NULL;
 static size_t s_personal_sharing_phrases_len = 0;
 static const char **s_starters = NULL;
@@ -335,6 +337,25 @@ hu_error_t hu_conversation_data_init(hu_allocator_t *alloc) {
         }
     }
 
+    /* Load commitment keywords (detect_commitment vocabulary) */
+    {
+        char *json_data = NULL;
+        size_t json_len = 0;
+        hu_error_t err =
+            hu_data_load(alloc, "conversation/commitment_keywords.json", &json_data, &json_len);
+        if (err == HU_OK) {
+            hu_json_value_t *root = NULL;
+            err = hu_json_parse(alloc, json_data, json_len, &root);
+            if (err == HU_OK && root) {
+                load_string_array(root, "keywords", &s_commitment_keywords,
+                                  &s_commitment_keywords_len);
+                hu_json_free(alloc, root);
+            }
+            if (json_data)
+                alloc->free(alloc->ctx, json_data, json_len);
+        }
+    }
+
     /* Load personal sharing phrases */
     {
         char *json_data = NULL;
@@ -464,6 +485,12 @@ void hu_conversation_data_cleanup(void) {
         free_string_array(s_crisis_keywords, s_crisis_keywords_len);
         s_crisis_keywords = NULL;
         s_crisis_keywords_len = 0;
+    }
+
+    if (s_commitment_keywords) {
+        free_string_array(s_commitment_keywords, s_commitment_keywords_len);
+        s_commitment_keywords = NULL;
+        s_commitment_keywords_len = 0;
     }
 
     if (s_personal_sharing_phrases) {
@@ -1714,13 +1741,24 @@ bool hu_conversation_detect_commitment(const char *msg, size_t msg_len, char *de
     description_out[0] = '\0';
     who_out[0] = '\0';
 
-    static const char *KEYWORDS[] = {"i'll",      "i will",     "i'm going to", "gonna",
-                                     "promise",   "let me",     "i'll call",    "i'll text",
-                                     "i'll send", "i'll check", "we should",    NULL};
+    /* Vocabulary is data: conversation/commitment_keywords.json (embedded,
+     * ~/.human/data override); this array is the fail-safe for load failure. */
+    static const char *const DEFAULT_COMMITMENT_KEYWORDS[] = {
+        "i'll",      "i will",    "i'm going to", "gonna",      "promise",  "let me",
+        "i'll call", "i'll text", "i'll send",    "i'll check", "we should"};
+    static const size_t DEFAULT_COMMITMENT_KEYWORDS_LEN =
+        sizeof(DEFAULT_COMMITMENT_KEYWORDS) / sizeof(DEFAULT_COMMITMENT_KEYWORDS[0]);
+    const char **keywords = s_commitment_keywords_len > 0
+                                ? (const char **)s_commitment_keywords
+                                : (const char **)DEFAULT_COMMITMENT_KEYWORDS;
+    size_t keywords_len =
+        s_commitment_keywords_len > 0 ? s_commitment_keywords_len : DEFAULT_COMMITMENT_KEYWORDS_LEN;
+
     bool found = false;
     size_t best_start = msg_len;
     size_t best_len = 0;
-    for (const char **kw = KEYWORDS; *kw; kw++) {
+    for (size_t k = 0; k < keywords_len; k++) {
+        const char *const *kw = &keywords[k];
         size_t nlen = strlen(*kw);
         if (nlen > msg_len)
             continue;

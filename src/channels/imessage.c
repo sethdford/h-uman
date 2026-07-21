@@ -2,7 +2,8 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
-#include "human/channels/imessage_caps.h" /* native capability gate (T0.4) */
+#include "human/channels/imessage_bb_event.h" /* IMCore bridge event stream */
+#include "human/channels/imessage_caps.h"     /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
@@ -236,6 +237,13 @@ typedef struct hu_imessage_ctx {
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;
+    /* IMCore bridge event stream (`imsg watch --bb-events`). Default OFF; see
+     * docs/plans/2026-07-19-native-imessage/bb-events-schema.md. */
+    hu_imessage_bb_mode_t bb_mode;
+    bool bb_mode_resolved;
+    hu_imessage_bb_stream_t bb_stream;         /* line framing across read()s */
+    hu_imessage_bb_kind_t bb_last_typing_kind; /* last typing state observed */
+    double bb_last_typing_ts;
     bool imsg_target_validated;
     void *imcore_handle;
     bool imcore_tried;
@@ -967,6 +975,59 @@ static bool imsg_cli_available(hu_imessage_ctx_t *c) {
 }
 /* ── imsg watch subprocess (event-driven poll trigger) ─────────────── */
 
+static const hu_imessage_caps_t *imsg_caps_cached(hu_imessage_ctx_t *c);
+
+/* Resolve the bridge-event activation mode ONCE per channel.
+ *
+ * Two independent gates, both of which must pass:
+ *   1. HU_IMESSAGE_BB_EVENTS=off|shadow|live   (default OFF)
+ *   2. hu_imessage_caps_allows(caps, TYPING)   (bridge actually live)
+ *
+ * Gate 2 is the honest proxy for "is the IMCore bridge up": the bb-event
+ * stream is produced by the same injected dylib that provides typing, so if
+ * TYPING is not authorized the stream cannot carry anything either. Asking for
+ * --bb-events without the bridge is harmless but pointless, and pretending we
+ * are observing typing when we are not would be worse. */
+static hu_imessage_bb_mode_t imsg_bb_mode(hu_imessage_ctx_t *c) {
+    if (!c)
+        return HU_IMSG_BB_MODE_OFF;
+    if (c->bb_mode_resolved)
+        return c->bb_mode;
+    c->bb_mode_resolved = true;
+    c->bb_mode = hu_imessage_bb_mode_from_env(getenv("HU_IMESSAGE_BB_EVENTS"));
+    if (c->bb_mode != HU_IMSG_BB_MODE_OFF &&
+        !hu_imessage_caps_allows(imsg_caps_cached(c), HU_IMSG_VERB_TYPING)) {
+        hu_log_info("imessage", NULL,
+                    "bb-events requested but IMCore bridge is not live; staying OFF");
+        c->bb_mode = HU_IMSG_BB_MODE_OFF;
+    }
+    return c->bb_mode;
+}
+
+/* Invoked by the shared stream splitter once per recognised bridge event. */
+static void imsg_bb_on_event(const hu_imessage_bb_event_t *evp, void *user) {
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)user;
+    hu_imessage_bb_event_t ev = *evp;
+    if (!c)
+        return;
+
+    if (ev.kind == HU_IMSG_BB_TYPING_START || ev.kind == HU_IMSG_BB_TYPING_STOP) {
+        c->bb_last_typing_kind = ev.kind;
+        c->bb_last_typing_ts = ev.timestamp;
+    }
+
+    /* SHADOW: log what we observed AND what we WOULD do, changing nothing.
+     * Per .claude/rules/feature-gate-requires-measurement.md the would-do
+     * decision has to be exercised here, or the measurement is vacuous. */
+    double hold_s = 0.0;
+    bool would_hold = hu_imessage_bb_should_hold_send(c->bb_last_typing_kind, c->bb_last_typing_ts,
+                                                      (double)time(NULL), &hold_s);
+    hu_log_info("imessage", NULL,
+                "bb-event: kind=%d chat=%s handle=%s ts=%.3f would_hold_send=%d hold_s=%.1f",
+                (int)ev.kind, ev.chat_guid[0] ? ev.chat_guid : "-", ev.handle[0] ? ev.handle : "-",
+                ev.timestamp, (int)would_hold, hold_s);
+}
+
 static void imsg_watch_start(hu_imessage_ctx_t *c) {
     if (!c || c->imsg_watch_running || !c->use_imsg_cli || !imsg_cli_available(c))
         return;
@@ -983,6 +1044,10 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
     char rowid_str[32];
     snprintf(rowid_str, sizeof(rowid_str), "%lld", (long long)c->last_rowid);
 
+    /* Resolved BEFORE fork: the child must not run the caps probe (it would
+     * spawn `imsg status` from a forked context). */
+    hu_imessage_bb_mode_t bb_mode = imsg_bb_mode(c);
+
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]);
@@ -998,6 +1063,9 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
+        if (bb_mode != HU_IMSG_BB_MODE_OFF)
+            execlp("imsg", "imsg", "watch", "--json", "--since-rowid", rowid_str, "--bb-events",
+                   NULL);
         execlp("imsg", "imsg", "watch", "--json", "--since-rowid", rowid_str, NULL);
         _exit(127);
     }
@@ -1034,6 +1102,13 @@ __attribute__((unused)) static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
         ssize_t n = read(c->imsg_watch_fd, drain, sizeof(drain));
         if (n > 0) {
             got_data = true;
+            /* SHADOW is observation-only: bridge-event lines are parsed and
+             * logged but STILL count as got_data, so the poll cadence is
+             * byte-for-byte what it was before. Suppressing the wakeup is a
+             * LIVE-mode behavior change and is deliberately not done here. */
+            if (c->bb_mode != HU_IMSG_BB_MODE_OFF)
+                hu_imessage_bb_stream_consume(&c->bb_stream, c->alloc, drain, (size_t)n,
+                                              imsg_bb_on_event, c);
             continue;
         }
         if (n == 0) {
