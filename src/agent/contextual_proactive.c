@@ -298,6 +298,11 @@ static const char *const topic_clause_words[] = {
     /* clause verbs seen in real extractor output */
     "going", "gonna", "get", "got", "went", "think", "thinking", "know", "need", "want", "try",
     "trying", "come",
+    /* question words + discourse markers (2026-07-21 leak wave: "What's" splits
+     * at the apostrophe into "what"+"s", which passed the original list and
+     * scheduled "how'd the What's go?"; "So" and "How ya feeling" likewise). */
+    "what", "whats", "how", "when", "where", "why", "who", "whos", "so", "well", "oh", "hey", "ya",
+    "it", "its", "this", "that", "feeling",
     /* interjections */
     "okay", "ok", "yeah", "yep", "sure", "thanks", NULL};
 
