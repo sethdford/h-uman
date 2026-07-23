@@ -398,14 +398,23 @@ typedef struct hu_imessage_action_surface_v2_config {
  * ~/.claude/rules/feature-gate-requires-measurement.md). When unavailable or
  * OFF, the dispatcher falls back to the hardened Tier-1 reply path. */
 typedef struct hu_imessage_private_api_config {
-    bool enabled;                     /* master gate, default false */
-    hu_imessage_private_mode_t mode;  /* OFF (default) / SHADOW / LIVE */
+    bool enabled;                    /* master gate, default false */
+    hu_imessage_private_mode_t mode; /* OFF (default) / SHADOW / LIVE */
 } hu_imessage_private_api_config_t;
 
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
     size_t allow_from_count;
+    /* Handles the assistant must NEVER message, in either direction. Checked
+     * before allow_from, and unlike a non-allowlisted handle an excluded one is
+     * dropped SILENTLY — no courtesy reply. This is the "please leave this
+     * person alone" switch: a real human asked not to be texted by the AI, so
+     * an automated "you're not allowlisted" bounce would itself be the harm.
+     * Matching is digit-suffix normalized and deliberately over-matches
+     * (see hu_imessage_handle_excluded). */
+    char **exclude_from;
+    size_t exclude_from_count;
     int poll_interval_sec;
     int user_response_window_sec; /* DEPRECATED: use daemon.user_response_window_sec */
     char *response_mode;          /* DEPRECATED: use daemon.response_mode */

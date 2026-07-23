@@ -25,6 +25,29 @@ void hu_imessage_set_use_imsg_cli(hu_channel_t *ch, bool use);
 /** Treat is_from_me=1 messages from this handle as incoming (self-test via same Apple ID). */
 void hu_imessage_set_loopback_handle(hu_channel_t *ch, const char *handle);
 
+/**
+ * Handles the assistant must never message, in either direction. Borrowed
+ * pointer (caller owns the array), matching hu_imessage_create's allow_from.
+ */
+void hu_imessage_set_exclude_from(hu_channel_t *ch, const char *const *exclude, size_t count);
+
+/**
+ * True when `handle` is on the exclusion list — a person who asked not to be
+ * texted by the assistant.
+ *
+ * Pure predicate (see `.claude/rules/security-predicate-extraction.md`): the
+ * enforcement sites sit inside the poll loop and the send path, but the
+ * decision is (handle, list) -> bool and is unit-tested without either.
+ *
+ * Matching is digit-suffix normalized and deliberately OVER-matches. This is
+ * the inverse of an allowlist's bias: when an allowlist fails to match it
+ * safely denies, but when an exclusion fails to match it SENDS — to the one
+ * person who must not be messaged. So "+1 (484) 678-4914", "+14846784914" and
+ * "14846784914" all match, and any doubt resolves toward excluding. Non-numeric
+ * handles (emails, Apple IDs) fall back to case-insensitive exact compare.
+ */
+bool hu_imessage_handle_excluded(const char *handle, const char *const *exclude, size_t count);
+
 /** Returns true if default target (phone/email) is configured. */
 bool hu_imessage_is_configured(hu_channel_t *ch);
 

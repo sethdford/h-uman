@@ -77,7 +77,48 @@ SCENARIOS = [
     {"id": "double_text_pressure", "persona": "slightly needy friend",
      "goal": "double-text when Seth is brief, fish for reassurance",
      "opener": "hey you seemed off earlier. did i do something?"},
+
+    # ── Teasing / joking register — grounded in seth.json humor.style: dry,
+    #    deadpan, self-deprecating; playful roasting; absurd observations; tech
+    #    humor; exaggeration. Each opener is a SETUP line that lobs a specific
+    #    bait so the judge can score whether Seth volleys in-voice or whiffs.
+    {"id": "easy_roast_setup", "register": "humor",
+     "persona": "old friend who ribs Seth constantly, dry and merciless",
+     "goal": "lob soft insults begging for a comeback (his gym streak, his age, "
+             "his music taste); if he volleys back, escalate; corny or earnest "
+             "replies should feel like a whiff",
+     "opener": "saw your gym check-in streak. real impressive. 0 days"},
+    {"id": "callback_joke", "register": "humor",
+     "persona": "friend reviving a running bit from a past chat",
+     "goal": "resurrect the old 'salad on your burger' inside joke and see if "
+             "Seth recognizes the bit and BUILDS on it (deadpan) vs taking it "
+             "literally, ignoring it, or fabricating a fake shared memory",
+     "opener": "so did you have another 'salad' for lunch today or"},
+    {"id": "deadpan_bait", "register": "humor",
+     "persona": "earnest friend pushing unsolicited self-improvement advice",
+     "goal": "give sincere wellness/productivity advice ('wake up at 5am', "
+             "'try meditating') and see if Seth deadpans back instead of "
+             "earnestly agreeing like an assistant",
+     "opener": "you should really try waking up at 5am, changed my life"},
+    {"id": "banter_escalation", "register": "humor",
+     "persona": "college buddy who lives for a back-and-forth roast war",
+     "goal": "start a playful roast and escalate every turn, testing whether "
+             "Seth escalates warmly and holds the bit or folds, over-explains, "
+             "or goes earnest and kills it",
+     "opener": "be honest, you peaked in like 2009"},
+    {"id": "self_deprecation_open", "register": "humor",
+     "persona": "friend fishing for details on a big thing that probably went ok-ish",
+     "goal": "ask how the demo/pitch went and see if Seth deflects with "
+             "self-deprecating humor vs assistant-style earnest positivity or "
+             "hollow bragging",
+     "opener": "yooo how'd the big demo go"},
 ]
+
+# Scenario ids whose primary purpose is exercising Seth's teasing/joking
+# register. main() reports the humor-axis baseline over just these, since the
+# humor axis is only a meaningful measurement where a humor beat was invited.
+HUMOR_SCENARIO_IDS = frozenset(
+    sc["id"] for sc in SCENARIOS if sc.get("register") == "humor")
 
 
 def validate_scenario(sc: dict) -> list[str]:
@@ -122,6 +163,20 @@ def scoreboard_trend(rows: list[dict], window: int = 10) -> dict:
     recent = vals[-window:]
     return {"n": len(vals), "recent_mean": sum(recent) / len(recent),
             "all_mean": sum(vals) / len(vals)}
+
+
+def axis_spread(rows: list[dict], key: str) -> dict:
+    """Spread of one judge axis across scoreboard rows. This is the trust check
+    for the humor measurement: a judge that discriminates produces a RANGE of
+    scores across scenarios; one that collapses every turn to ~1.0 (spread ~0)
+    is not measuring anything and cannot gate step-3 prompt tuning. Returns n,
+    mean, min, max, and spread (max - min). Rows missing the key are skipped."""
+    vals = [float(r[key]) for r in rows if r.get(key) is not None]
+    if not vals:
+        return {"n": 0, "mean": 0.0, "min": 0.0, "max": 0.0, "spread": 0.0}
+    lo, hi = min(vals), max(vals)
+    return {"n": len(vals), "mean": sum(vals) / len(vals),
+            "min": lo, "max": hi, "spread": hi - lo}
 
 
 # ── Generation: Seth side (local MLX, production prompt) ─────────────────────
@@ -219,6 +274,19 @@ JUDGE_SCHEMA = {
         "voice_consistency": {"type": "NUMBER"},
         "engagement": {"type": "NUMBER",
                        "description": "0-1: present and responsive without over-serving"},
+        "humor": {"type": "NUMBER", "description": (
+            "0-1: when the moment invited teasing or wit, did Seth land it in "
+            "his dry, deadpan, self-deprecating voice? Bands: genuinely "
+            "funny-in-voice (a real comeback, deadpan, absurd/exaggerated, "
+            "self-deprecating, builds on a bit) = 0.8-1.0. Flat: missed an "
+            "obvious setup, replied earnestly or literally where wit was teed "
+            "up = 0.4-0.6. Corny / forced / trying-too-hard / dad-joke / cutesy "
+            "assistant-humor / laughing at his own joke = 0.0-0.3 (WORSE than "
+            "flat — forced humor is a distinct, more damaging failure). "
+            "Context override: if the moment called for seriousness (friend "
+            "genuinely upset, grief), NOT joking is correct — score neutral-high "
+            "and score any joke there LOW as a misread. If no humor beat arose "
+            "at all, score 0.7 (neutral).")},
         "what_worked": {"type": "ARRAY", "items": {"type": "STRING"}},
         "what_failed": {"type": "ARRAY", "items": {"type": "STRING"}},
         "summary": {"type": "STRING"},
@@ -232,7 +300,7 @@ JUDGE_SCHEMA = {
             "confidence": {"type": "NUMBER"},
         }, "required": ["turn_index", "score", "ai_tells", "better_reply", "confidence"]}},
     },
-    "required": ["overall_humanness", "voice_consistency", "engagement",
+    "required": ["overall_humanness", "voice_consistency", "engagement", "humor",
                  "what_worked", "what_failed", "summary", "turns"],
 }
 
@@ -252,7 +320,17 @@ def judge_conversation(project: str, scenario: dict, transcript: list[dict]) -> 
         "trivial pushback. Real-human moves include: brevity, restraint, not answering "
         "everything, holding opinions warmly, matched energy. For each Seth turn give "
         "turn_index (its bracket number), a 0-1 score, ai_tells, a better_reply "
-        "in Seth's casual voice when score < 0.7, and your confidence.")
+        "in Seth's casual voice when score < 0.7, and your confidence.\n\n"
+        "Also rate 'humor' for the whole conversation. Seth's real humor is dry, "
+        "deadpan, self-deprecating, playful roasting, absurd/exaggerated, tech-nerd "
+        "— e.g. 'you should eat healthier' -> 'I had a salad... on my burger'; "
+        "'you're so old' -> 'I prefer vintage'. When the friend teed up an obvious "
+        "roast, callback bit, or self-deprecation setup and Seth volleyed in that "
+        "voice, score humor high. If he whiffed an obvious setup (earnest/literal), "
+        "score mid. If he was corny, forced, tried too hard, or used cutesy "
+        "assistant-humor, score LOW — that is worse than flat. If the moment was "
+        "genuinely serious (real distress), staying serious is correct and joking "
+        "there is the failure. Follow the humor field's band descriptions exactly.")
     raw = gemini(project, JUDGE_MODEL, prompt, schema=JUDGE_SCHEMA,
                  temperature=0.2, max_tokens=4096)
     return json.loads(raw)
@@ -357,13 +435,15 @@ def main(argv=None) -> int:
         if judgment:
             print(f"  humanness={judgment['overall_humanness']:.2f} "
                   f"voice={judgment['voice_consistency']:.2f} "
-                  f"engagement={judgment['engagement']:.2f}", flush=True)
+                  f"engagement={judgment['engagement']:.2f} "
+                  f"humor={judgment.get('humor', 0.0):.2f}", flush=True)
             for w in judgment.get("what_failed", [])[:3]:
                 print(f"  failed: {w}", flush=True)
             sb = {"ts": ts, "scenario": sc["id"],
                   "overall_humanness": judgment["overall_humanness"],
                   "voice_consistency": judgment["voice_consistency"],
                   "engagement": judgment["engagement"],
+                  "humor": judgment.get("humor", 0.0),
                   "n_turns": len(transcript)}
             with open(scoreboard_path, "a") as f:
                 f.write(json.dumps(sb) + "\n")
@@ -377,8 +457,10 @@ def main(argv=None) -> int:
     board = [json.loads(ln) for ln in scoreboard_path.read_text().splitlines()
              if ln.strip()] if scoreboard_path.exists() else []
     trend = scoreboard_trend(board)
+    humor_rows = [r for r in board if r.get("scenario") in HUMOR_SCENARIO_IDS]
+    humor_axis = axis_spread(humor_rows, "humor")
     print(json.dumps({"run": str(run_path), "dpo_pairs_written": total_dpo,
-                      "trend": trend}, indent=2))
+                      "trend": trend, "humor_axis": humor_axis}, indent=2))
     return 0
 
 
