@@ -122,6 +122,27 @@ static void topic_sendable_rejects_sentence_fragments(void) {
     HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(NULL, 0));
 }
 
+/* Second wave of real leaked topics (service-loop log, 2026-07-15..21): the
+ * 07-18 clause-word gate misses bare question words and discourse markers —
+ * "What's" splits at the apostrophe into "what"+"s", neither of which was in
+ * the list, producing the scheduled send "how'd the What's go?". */
+static void topic_sendable_rejects_question_words_and_discourse_markers(void) {
+    static const char *leaked[] = {
+        "What\xe2\x80\x99s", /* curly apostrophe, as iMessage delivers it */
+        "What's",            /* ASCII apostrophe variant */
+        "So",
+        "How ya feeling",
+        "it\xe2\x80\x99s a lot better",
+    };
+    for (size_t i = 0; i < sizeof(leaked) / sizeof(leaked[0]); i++)
+        HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(leaked[i], strlen(leaked[i])));
+
+    /* Legit noun-phrase topics containing none of the new stop words must
+     * keep passing — the additions must not regress recall. */
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("happy hour", 10));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("press release", 13));
+}
+
 /* End-to-end: decide() must drop obligations whose topic fails the predicate.
  * This inbound is the EXACT production message that generated the mangled
  * "how'd the It will be tomorrow. Im working go?" send on 2026-07-16. */
@@ -290,6 +311,7 @@ void run_contextual_proactive_tests(void) {
     HU_RUN_TEST(normalize_topic_strips_filler);
     HU_RUN_TEST(topic_sendable_accepts_noun_phrases);
     HU_RUN_TEST(topic_sendable_rejects_sentence_fragments);
+    HU_RUN_TEST(topic_sendable_rejects_question_words_and_discourse_markers);
     HU_RUN_TEST(decide_sentence_like_description_no_obligation);
     HU_RUN_TEST(resolve_tomorrow_is_future_evening);
     HU_RUN_TEST(resolve_yesterday_and_vague_reject);

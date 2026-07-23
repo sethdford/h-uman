@@ -4,6 +4,7 @@
  * ~/.claude/rules/substring-classifier-pitfalls.md) and the verb gating
  * contract: nothing advanced is ever attempted without a proven bridge. */
 
+#include "human/channels/imessage.h"
 #include "human/channels/imessage_caps.h"
 #include "test_framework.h"
 #include <string.h>
@@ -451,4 +452,38 @@ void run_imessage_caps_tests(void) {
     HU_RUN_TEST(caps_describe_is_operator_readable);
     HU_RUN_TEST(caps_selectors_deny_edit_but_allow_unsend_on_tahoe);
     HU_RUN_TEST(caps_no_selector_section_falls_back_to_bridge_state);
+}
+
+/* ── Emoji → native tapback kind (production bug 2026-07-20) ──────────────
+ * The daemon's TAPBACK reply style called react_emoji, whose Tier-2 fallback
+ * was a STUB returning NOT_SUPPORTED. Live log: "tapback emoji sent"=0 vs
+ * "tapback unavailable, flat fallback"=29 — so every intended reaction was
+ * sent as a PLAIN TEXT MESSAGE containing an emoji, which reads as fake.
+ * With the IMCore bridge live, emoji must map to a real tapback kind. */
+
+static void emoji_maps_to_native_reaction_kind(void) {
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("❤️"), (int)HU_REACTION_HEART);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🙏"), (int)HU_REACTION_HEART);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("👍"), (int)HU_REACTION_THUMBS_UP);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("👎"), (int)HU_REACTION_THUMBS_DOWN);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("😂"), (int)HU_REACTION_HAHA);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🤣"), (int)HU_REACTION_HAHA);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🔥"), (int)HU_REACTION_EMPHASIS);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🤔"), (int)HU_REACTION_QUESTION);
+    /* Skin-tone variants must not fall through to the default. */
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("👍🏽"), (int)HU_REACTION_THUMBS_UP);
+}
+
+static void emoji_unknown_defaults_to_thumbs_up_never_none(void) {
+    /* Must never return NONE: a NONE would re-open the text-fallback path
+     * that produced the fake emoji messages. */
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🦖"), (int)HU_REACTION_THUMBS_UP);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji(""), (int)HU_REACTION_THUMBS_UP);
+    HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji(NULL), (int)HU_REACTION_THUMBS_UP);
+}
+
+void run_imessage_emoji_reaction_tests(void) {
+    HU_TEST_SUITE("imessage_emoji_reaction");
+    HU_RUN_TEST(emoji_maps_to_native_reaction_kind);
+    HU_RUN_TEST(emoji_unknown_defaults_to_thumbs_up_never_none);
 }
