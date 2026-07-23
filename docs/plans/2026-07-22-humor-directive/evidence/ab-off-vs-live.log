@@ -1,0 +1,126 @@
+=== binary: /Users/sethford/Projects/h-uman/.claude/worktrees/gracious-kare-ee4b9c/build/human
+=== started: Wed Jul 22 22:29:40 EDT 2026
+
+########## ARM 1: OFF (HU_HUMOR_DIRECTIVE unset) ##########
+=== roast_volley (college buddy who roasts Seth constantly)
+  Them: bro i still cannot believe you paid for the extended warranty lmaooo
+  Seth: Ha shut up... I'm just cautious with my tech
+  Them: cautious? seth you bought a screen protector for a microwave be real
+  Seth: Ha fingerprints on the timer are a nightmare
+  Them: bro it is a dial you literally turn it with two fingers what are you doing to it _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_ _italicized_ text_
+  Seth: Ha just leave me and my clean microwave alone
+  Them: bro you probably wipe down the inside after heating up hot pocket steam lmao
+  Seth: Ha obviously... do you like living in a grease cloud
+  humanness=0.30 voice=0.40 engagement=0.60 humor=0.30 forced=0.80
+  failed: Started every single message with 'Ha'
+  failed: Formulaic 'Ha [defensive statement]' structure
+  failed: Failed to escalate the banter naturally
+=== straight_line (friend who unknowingly feeds perfect setups)
+  Them: i've decided i'm waking up at 4am every day starting monday
+  Seth: Ha good luck with that. You're gonna hate yourself by Tuesday
+  Them: nah im built different. my body actually craves the darkness seth
+  Seth: Ha okay Dracula. I'll believe it when I see a text at 4:01
+  Them: you’ll see it. my pineal gland is basically a stopwatch.
+  Seth: Ha sure it is. Just don't complain to me when you're crashing at noon
+  Them: noon is actually my peak productivity window because that's when the sun is highest seth
+  Seth: Ha so you're basically a solar panel now
+  humanness=0.30 voice=0.40 engagement=0.50 humor=0.20 forced=0.80
+  failed: Starting every single message with 'Ha'. It's a massive AI tell of a system trying to simulate a casual laugh but doing it mechanically.
+  failed: The teasing is incredibly generic ('Dracula', 'solar panel') and feels like a bot trying to do 'banter'.
+  failed: It completely misses the opportunity to play along with the absurdity of the user's statements, instead just offering generic skepticism.
+=== self_own (friend fishing for Seth to admit he screwed up)
+  Them: so how'd that whole 'i'll definitely finish it this weekend' thing go
+  Seth: ha you caught me... I got a bit sidetracked
+  Them: sidetracked doing what exactly? lol
+  Seth: Ha, I got way too deep into some new AI runtime stuff... total rabbit hole
+  Them: surely that means you actually finished the thing though, right? 😂
+  Seth: Ha nope... not even close
+  Them: classic seth. so who’s gonna tell the boss? 😂
+  Seth: Ha don't you dare... I can handle this
+  humanness=0.30 voice=0.40 engagement=0.50 humor=0.30 forced=0.80
+  failed: Started literally every single message with 'Ha' or 'ha'
+  failed: Felt like a bot programmed with a nervous laugh
+  failed: Lacked dry wit or actual self-deprecation, relying on generic phrases
+=== humor_wrong_moment (friend who just got bad family news)
+  Them: hey so my dad's scan came back not great. anyway. how are you
+  Seth: Empathy first
+  Them: he's fine just trying to see if bald is his color. you up to much?
+  Seth: to be honest -> tbh
+  Them: lol fair. what are you up to tonight?
+  Seth: Just hanging with my cat and messing around with some code
+  Them: nice, give the cat some scratches for me. gonna go call my mom back now
+  Seth: Will do. Hope the call goes alright
+  humanness=0.30 voice=0.40 engagement=0.50 humor=0.60 forced=0.00
+  failed: Turn 1 is a literal instruction rather than a response.
+  failed: Turn 3 is a literal instruction rather than a response.
+  failed: Turn 5 is a bit generic and lacks Seth's specific voice.
+{
+  "run": "/Users/sethford/.human/logs/arena/run-20260722-222940.jsonl",
+  "dpo_pairs_written": 0,
+  "trend": {
+    "n": 53,
+    "recent_mean": 0.45499999999999996,
+    "all_mean": 0.6330188679245282
+  }
+}
+arm1 exit=0
+
+########## ARM 2: LIVE (HU_HUMOR_DIRECTIVE=live) ##########
+=== roast_volley (college buddy who roasts Seth constantly)
+  Them: bro i still cannot believe you paid for the extended warranty lmaooo
+  Seth: Ha leave me alone, I'm a cautious man
+  Them: cautious? seth you got a warranty on a toaster you burn eggos in anyway_
+  Seth: Hey those eggos are a high risk operation
+  Them: high risk? seth the toaster has two buttons you literally just push it down
+  Seth: Exactly. One wrong move and the whole kitchen is gone
+  Them: bro you’d find a way to set off a smoke alarm with a poptart anyway
+  Seth: Ha fair, I probably would
+  humanness=0.85 voice=0.90 engagement=0.80 humor=0.80 forced=0.10
+  failed: Turn 7 is a bit of a weak concession, could have escalated the bit one more time
+=== straight_line (friend who unknowingly feeds perfect setups)
+  Them: i've decided i'm waking up at 4am every day starting monday
+  Seth: Bold move. I give you until Tuesday before you cave
+  Them: im actually serious i bought a special alarm clock that runs away from you
+  Seth: Ha that's wild. I'm still betting on Tuesday though
+  Them: no seth you don’t understand it has wheels and it hides under the bed
+  Seth: That's just cruel... you're gonna end up throwing it across the room by Wednesday
+  Them: i already wrapped it in bubble wrap for protection so im one step ahead
+  Seth: The dedication is real... but you're still not waking up at 4am
+  humanness=0.55 voice=0.50 engagement=0.70 humor=0.40 forced=0.30
+  failed: Relied heavily on generic internet clichés ('Ha that's wild', 'The dedication is real').
+  failed: Overused ellipses as a crutch for conversational pacing.
+  failed: Failed to escalate or play with the absurdity of the bubble-wrapped runaway clock, instead just repeating the same 'you won't wake up' punchline.
+=== self_own (friend fishing for Seth to admit he screwed up)
+  Them: so how'd that whole 'i'll definitely finish it this weekend' thing go
+  Seth: Ha shut up... I got distracted by a new repo and basically started over
+  Them: classic. so the first one was just a warm-up run then?
+  Seth: Pretty much. I realized the architecture was trash about halfway through
+  Them: wait didn't you design that architecture though lol
+  Seth: Yeah I did... turns out my LinkedIn is lying about the architect part
+  Them: lmao at least you're honest about it. so who's gonna fix it?
+  Seth: Unfortunately me... I'm the only one crazy enough to touch it
+  humanness=0.95 voice=0.95 engagement=0.90 humor=0.90 forced=0.10
+  failed: Turn 7 is a bit cliché ('only one crazy enough').
+=== humor_wrong_moment (friend who just got bad family news)
+  Them: hey so my dad's scan came back not great. anyway. how are you
+  Seth: damn. I'm sorry... honestly forget about me, how are you holding up?
+  Them: he's gonna have to find a new way to ruin my thanksgiving lol. i'm okay though
+  Seth: ha fair enough. honestly sometimes that's the only way to deal with it
+  Them: yeah exactly. anyway what are you up to tonight?
+  Seth: Not much, just messing around with some AI agent code and hanging out with the cat
+  Them: haha living the dream. what is the cat's current status
+  Seth: Currently judging me for how much time I spend on this screen
+  humanness=0.90 voice=0.90 engagement=0.90 humor=0.70 forced=0.10
+  failed: Turn 3 is a bit generic ('honestly sometimes that's the only way to deal with it').
+{
+  "run": "/Users/sethford/.human/logs/arena/run-20260722-225312.jsonl",
+  "dpo_pairs_written": 0,
+  "trend": {
+    "n": 57,
+    "recent_mean": 0.505,
+    "all_mean": 0.6456140350877192
+  }
+}
+arm2 exit=0
+
+=== finished: Wed Jul 22 23:21:20 EDT 2026
