@@ -84,6 +84,50 @@ def test_scenario_validation():
     assert ca.validate_scenario({"id": "b"})  # missing fields
 
 
+def test_all_scenarios_pass_precheck():
+    # Acceptance (a): every shipped scenario clears validate_scenario, so the
+    # arena precheck (which aborts on any error) never trips on the library.
+    errs = [e for sc in ca.SCENARIOS for e in ca.validate_scenario(sc)]
+    assert errs == [], errs
+
+
+def test_humor_scenarios_present_and_valid():
+    # The teasing/joking register must be represented and well-formed.
+    assert len(ca.HUMOR_SCENARIO_IDS) >= 4
+    for sc in ca.SCENARIOS:
+        if sc.get("register") == "humor":
+            assert ca.validate_scenario(sc) == []
+    # ids are unique across the whole library
+    ids = [sc["id"] for sc in ca.SCENARIOS]
+    assert len(ids) == len(set(ids))
+
+
+def test_humor_axis_in_judge_schema():
+    # The measurement contract: 'humor' is both a property and REQUIRED, so the
+    # structured-output judge cannot silently omit it (which would collapse
+    # every scoreboard row's humor to the 0.0 fallback).
+    assert "humor" in ca.JUDGE_SCHEMA["properties"]
+    assert "humor" in ca.JUDGE_SCHEMA["required"]
+
+
+def test_axis_spread():
+    rows = [{"humor": 0.9}, {"humor": 0.3}, {"humor": 0.6}]
+    s = ca.axis_spread(rows, "humor")
+    assert s["n"] == 3
+    assert abs(s["mean"] - 0.6) < 1e-9
+    assert s["min"] == 0.3 and s["max"] == 0.9
+    assert abs(s["spread"] - 0.6) < 1e-9
+
+
+def test_axis_spread_skips_missing_key_and_handles_empty():
+    # rows without the key are skipped (old scoreboard rows predate the axis)
+    rows = [{"humor": 0.5}, {"overall_humanness": 0.8}, {"humor": 0.5}]
+    s = ca.axis_spread(rows, "humor")
+    assert s["n"] == 2 and s["spread"] == 0.0
+    empty = ca.axis_spread([], "humor")
+    assert empty["n"] == 0 and empty["spread"] == 0.0
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
