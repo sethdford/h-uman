@@ -544,6 +544,20 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
 
+/* Render the teasing/humor directive from persona->humor into `out`.
+ *
+ * Pure text builder, extracted from hu_persona_build_prompt so the wording can
+ * be pinned by tests without building a full prompt (see
+ * .claude/rules/security-predicate-extraction.md — same discipline, applied to
+ * a prompt fragment whose exact wording is the thing under measurement).
+ *
+ * Writes nothing and returns HU_OK with *out_len == 0 when the persona
+ * declares no humor style. The emitted text ALWAYS carries an explicit
+ * do-not-force clause: forced humor is the failure mode the HU_HUMOR_DIRECTIVE
+ * gate exists to catch, so "lean in" must never ship without "don't reach". */
+hu_error_t hu_persona_build_humor_directive(const hu_persona_t *persona, char *out, size_t cap,
+                                            size_t *out_len);
+
 /* 2026-05-18: compact variant for throughput-sensitive callers (eval
  * framework, short-form chat). Produces ~2-3 KB instead of 16 KB by
  * including only: identity (truncated 600 chars), the requested channel

@@ -15,6 +15,7 @@
 #include "test_framework.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -652,9 +653,164 @@ static void full_prompt_output_format_rules_match_measured_style(void) {
     free(out);
 }
 
+/* ── HU_HUMOR_DIRECTIVE gate (quirk effort step 3) ────────────────────────
+ *
+ * The gate is exercised through hu_persona_build_prompt — the real call site —
+ * not only through the pure builder, so these fail if the directive is written
+ * but never wired (integration-done-contract.md).
+ *
+ * The load-bearing assertion is not "LIVE emits something"; it is that the
+ * emitted text ALWAYS carries the do-not-force clause. A humor directive that
+ * says only "lean in" is the forced-humor regression this whole gate exists to
+ * prevent, and it would otherwise pass every other check here. */
+
+static void humor_persona(hu_persona_t *p) {
+    memset(p, 0, sizeof(*p));
+    p->name = "Seth";
+    p->identity = "a tech entrepreneur";
+    snprintf(p->humor.style[0], sizeof(p->humor.style[0]), "dry and deadpan");
+    snprintf(p->humor.style[1], sizeof(p->humor.style[1]), "self-deprecating");
+    p->humor.style_count = 2;
+    snprintf(p->humor.never_during[0], sizeof(p->humor.never_during[0]), "someone is grieving");
+    p->humor.never_during_count = 1;
+}
+
+static char *humor_prompt_with_gate(const char *gate_value) {
+    setup_alloc();
+    if (gate_value)
+        setenv("HU_HUMOR_DIRECTIVE", gate_value, 1);
+    else
+        unsetenv("HU_HUMOR_DIRECTIVE");
+    hu_persona_t p;
+    humor_persona(&p);
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_build_prompt(&test_alloc, &p, "imessage", strlen("imessage"), NULL,
+                                             0, &out, &out_len);
+    unsetenv("HU_HUMOR_DIRECTIVE");
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    return out;
+}
+
+static void humor_directive_absent_when_gate_unset(void) {
+    char *out = humor_prompt_with_gate(NULL); /* default MUST be OFF */
+    HU_ASSERT(strstr(out, "Teasing and humor") == NULL);
+    free(out);
+}
+
+static void humor_directive_absent_when_gate_off(void) {
+    char *out = humor_prompt_with_gate("off");
+    HU_ASSERT(strstr(out, "Teasing and humor") == NULL);
+    free(out);
+}
+
+static void humor_directive_absent_in_shadow(void) {
+    /* SHADOW runs the builder and logs, but the emitted prompt is unchanged. */
+    char *out = humor_prompt_with_gate("shadow");
+    HU_ASSERT(strstr(out, "Teasing and humor") == NULL);
+    free(out);
+}
+
+static void humor_directive_present_when_live(void) {
+    char *out = humor_prompt_with_gate("live");
+    HU_ASSERT(strstr(out, "Teasing and humor") != NULL);
+    HU_ASSERT(strstr(out, "dry and deadpan") != NULL);
+    free(out);
+}
+
+static void humor_directive_live_still_forbids_forcing(void) {
+    /* The anti-regression assertion: "lean in" never ships without "don't reach". */
+    char *out = humor_prompt_with_gate("live");
+    HU_ASSERT(strstr(out, "Do NOT force it") != NULL);
+    HU_ASSERT(strstr(out, "no humor at all is a correct reply") != NULL);
+    HU_ASSERT(strstr(out, "do not joke past someone's bad news") != NULL);
+    free(out);
+}
+
+static void humor_directive_unknown_gate_value_fails_closed(void) {
+    char *out = humor_prompt_with_gate("yes-please"); /* unknown -> OFF */
+    HU_ASSERT(strstr(out, "Teasing and humor") == NULL);
+    free(out);
+}
+
+static void humor_directive_builder_carries_never_during(void) {
+    hu_persona_t p;
+    humor_persona(&p);
+    char buf[768];
+    size_t n = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(&p, buf, sizeof(buf), &n), (int)HU_OK);
+    HU_ASSERT(n > 0);
+    HU_ASSERT(strstr(buf, "someone is grieving") != NULL);
+    HU_ASSERT(strstr(buf, "Do NOT force it") != NULL);
+}
+
+static void humor_directive_builder_empty_without_style(void) {
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "Seth";
+    char buf[768];
+    size_t n = 12345;
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(&p, buf, sizeof(buf), &n), (int)HU_OK);
+    HU_ASSERT_EQ((int)n, 0);
+    HU_ASSERT_EQ((int)buf[0], 0);
+}
+
+static void humor_directive_trims_loader_truncated_style(void) {
+    /* humor.style is char[8][32]; the loader clips longer JSON values mid-word.
+     * The prompt must not carry the fragment ("...playful roasting fr"). */
+    hu_persona_t p;
+    humor_persona(&p);
+    snprintf(p.humor.style[0], sizeof(p.humor.style[0]), "Sarcasm and playful roasting fr");
+    p.humor.style_count = 1;
+    HU_ASSERT_EQ((int)strlen(p.humor.style[0]), (int)sizeof(p.humor.style[0]) - 1); /* is clipped */
+    char buf[768];
+    size_t n = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(&p, buf, sizeof(buf), &n), (int)HU_OK);
+    HU_ASSERT(strstr(buf, "Sarcasm and playful roasting") != NULL);
+    HU_ASSERT(strstr(buf, "roasting fr") == NULL); /* dangling fragment dropped */
+}
+
+static void humor_directive_splices_never_during_as_one_sentence(void) {
+    /* never_during entries are fragments starting with a capital ("When someone
+     * ..."); naive splicing produced "never when When someone ...". */
+    hu_persona_t p;
+    humor_persona(&p);
+    snprintf(p.humor.never_during[0], sizeof(p.humor.never_during[0]), "When someone is grieving");
+    p.humor.never_during_count = 1;
+    char buf[768];
+    size_t n = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(&p, buf, sizeof(buf), &n), (int)HU_OK);
+    HU_ASSERT(strstr(buf, "never when someone is grieving") != NULL);
+    HU_ASSERT(strstr(buf, "when When") == NULL);
+}
+
+static void humor_directive_builder_rejects_null_and_tiny_buffer(void) {
+    hu_persona_t p;
+    humor_persona(&p);
+    char buf[16];
+    size_t n = 0;
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(NULL, buf, sizeof(buf), &n),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+    /* truncation must be reported, not silently emitted half-written */
+    HU_ASSERT_EQ((int)hu_persona_build_humor_directive(&p, buf, sizeof(buf), &n),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
+    HU_RUN_TEST(humor_directive_absent_when_gate_unset);
+    HU_RUN_TEST(humor_directive_absent_when_gate_off);
+    HU_RUN_TEST(humor_directive_absent_in_shadow);
+    HU_RUN_TEST(humor_directive_present_when_live);
+    HU_RUN_TEST(humor_directive_live_still_forbids_forcing);
+    HU_RUN_TEST(humor_directive_unknown_gate_value_fails_closed);
+    HU_RUN_TEST(humor_directive_builder_carries_never_during);
+    HU_RUN_TEST(humor_directive_builder_empty_without_style);
+    HU_RUN_TEST(humor_directive_trims_loader_truncated_style);
+    HU_RUN_TEST(humor_directive_splices_never_during_as_one_sentence);
+    HU_RUN_TEST(humor_directive_builder_rejects_null_and_tiny_buffer);
     HU_RUN_TEST(compact_prompt_formal_overlay_includes_formal_register);
     HU_RUN_TEST(compact_prompt_casual_overlay_includes_casual_register);
     HU_RUN_TEST(compact_prompt_casual_register_matches_measured_style);

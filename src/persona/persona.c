@@ -1,5 +1,6 @@
 #include "human/persona.h"
 #include "human/agent/validators/builtin.h"
+#include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -3176,6 +3177,78 @@ static hu_error_t append_prompt(hu_allocator_t *alloc, char **buf, size_t *len, 
     return HU_OK;
 }
 
+hu_error_t hu_persona_build_humor_directive(const hu_persona_t *persona, char *out, size_t cap,
+                                            size_t *out_len) {
+    if (!persona || !out || !cap || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_len = 0;
+    out[0] = '\0';
+    if (persona->humor.style_count == 0)
+        return HU_OK;
+
+    size_t pos = 0;
+    pos = hu_buf_appendf(out, cap, pos, "\n--- Teasing and humor ---\nYour humor is ");
+    for (size_t i = 0; i < persona->humor.style_count && i < 3; i++) {
+        /* humor.style is char[8][32]: any entry that fills the field was clipped
+         * by the loader and ends mid-word ("Sarcasm and playful roasting fr").
+         * Emitting the fragment puts literal garbage in the prompt, so trim back
+         * to the last whole word. */
+        const char *s = persona->humor.style[i];
+        size_t slen = strlen(s);
+        if (slen == sizeof(persona->humor.style[i]) - 1) {
+            while (slen > 0 && s[slen - 1] != ' ')
+                slen--;
+            while (slen > 0 && s[slen - 1] == ' ')
+                slen--;
+        }
+        if (slen == 0)
+            continue;
+        pos = hu_buf_appendf(out, cap, pos, "%s%.*s", i ? "; " : "", (int)slen, s);
+    }
+
+    /* "Lean in" half — what the moment-fits case looks like concretely. Vague
+     * encouragement ("be funny") is what produces comedian voice. */
+    pos = hu_buf_appendf(
+        out, cap, pos,
+        ".\nWith people you are close to, take the opening when there is one: a dry aside, "
+        "a tease that shows you know them, self-deprecation instead of getting defensive, "
+        "playing along with a bit rather than answering it straight. Keep it short and throw "
+        "it away. Never explain the joke.\n");
+
+    /* "Do not force" half — REQUIRED, never emitted without the clause above.
+     * Restraint is stated as the correct outcome, not as a fallback, because a
+     * directive that only rewards attempting humor produces exactly the
+     * try-hard the gate is measuring for. */
+    pos = hu_buf_appendf(
+        out, cap, pos,
+        "Do NOT force it. If nothing opened, say the plain thing — no humor at all is a "
+        "correct reply and beats a joke you had to reach for. Do not open every message "
+        "with a quip, and do not joke past someone's bad news");
+    if (persona->humor.never_during_count > 0) {
+        /* never_during entries are authored as sentence fragments ("When someone
+         * is genuinely upset"), so splicing one after "never" yields "never when
+         * When someone...". Lowercase the leading char to make one sentence. */
+        const char *nd = persona->humor.never_during[0];
+        if (nd[0] != '\0') {
+            char lead = (char)((nd[0] >= 'A' && nd[0] <= 'Z') ? nd[0] - 'A' + 'a' : nd[0]);
+            pos = hu_buf_appendf(out, cap, pos, ", and never %c%s", lead, nd + 1);
+        }
+    }
+    pos = hu_buf_appendf(out, cap, pos, ".\n");
+
+    /* hu_buf_appendf clamps to cap-1 on truncation (src/core/string.c:223), so
+     * cap-1 — not cap — is the overflow signal. Fail CLOSED and emit nothing: a
+     * truncated directive would keep the "lean in" half and lose the "do not
+     * force" half, which is the exact regression this directive guards against. */
+    if (pos >= cap - 1) {
+        out[0] = '\0';
+        *out_len = 0;
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    *out_len = pos;
+    return HU_OK;
+}
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len) {
@@ -4721,6 +4794,41 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                     err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
                     if (err != HU_OK)
                         goto fail;
+                }
+            }
+        }
+    }
+
+    /* Teasing/humor directive — OFF by default, per feature-gate-requires-measurement.md.
+     *
+     * Activation gated on the arena HUMOR-axis A/B recorded in
+     * docs/plans/2026-07-22-humor-directive/: do not flip this to default-ON
+     * without a measurement showing the humor axis improves while
+     * voice_consistency and overall_humanness do not regress. "Humor up, voice
+     * down" is the forced-humor signature and is a veto, not a trade.
+     *
+     * OFF    -> nothing emitted, zero behaviour change.
+     * SHADOW -> directive is built and its size logged; prompt is UNCHANGED.
+     * LIVE   -> directive is appended ahead of the few-shot examples, so the
+     *           instruction precedes the demonstrations. */
+    {
+        hu_gate_mode_t humor_gate = hu_gate_mode_from_env("HU_HUMOR_DIRECTIVE", HU_GATE_OFF);
+        if (humor_gate != HU_GATE_OFF) {
+            char hum_dir[768];
+            size_t hum_len = 0;
+            if (hu_persona_build_humor_directive(persona, hum_dir, sizeof(hum_dir), &hum_len) ==
+                    HU_OK &&
+                hum_len > 0) {
+                if (humor_gate == HU_GATE_LIVE) {
+                    err = append_prompt(alloc, &buf, &len, &cap, hum_dir, hum_len);
+                    if (err != HU_OK)
+                        goto fail;
+                } else {
+                    static atomic_bool humor_shadow_logged = false;
+                    hu_log_info_once(&humor_shadow_logged, "persona", NULL,
+                                     "humor directive SHADOW: would add %zu bytes to the "
+                                     "persona prompt (set HU_HUMOR_DIRECTIVE=live to emit)",
+                                     hum_len);
                 }
             }
         }
