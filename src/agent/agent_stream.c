@@ -716,11 +716,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 persona_prompt_len = lpo;
             }
         } else {
-            const char *ch = agent->active_channel;
-            size_t ch_len = agent->active_channel_len;
+            /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
+             * hu_agent_turn (single-path wiring was dead in prod for
+             * HU_WARMTH_TONE_VOCAB; this streaming path is the daemon's
+             * PRIMARY inbound route). */
             hu_error_t perr =
-                hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, NULL, 0,
-                                        &persona_prompt, &persona_prompt_len);
+                hu_agent_build_persona_head(agent, NULL, 0, &persona_prompt, &persona_prompt_len);
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
