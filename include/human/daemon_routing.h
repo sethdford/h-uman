@@ -31,7 +31,7 @@ struct hu_config; /* human/config.h */
 /* Compiled default for daemon-side reflexive LLM calls (double-text, GIF/music/
  * image suggestions) when neither the agent's model_name nor the model router's
  * reflexive tier is configured. Update here on the next Gemini deprecation. */
-#define HU_DAEMON_FALLBACK_MODEL_DEFAULT "gemini-3.1-flash-lite-preview"
+#define HU_DAEMON_FALLBACK_MODEL_DEFAULT "gemini-3.1-flash-lite"
 
 /* Fallback model resolver: returns config->agent.mr_reflexive_model when set and
  * non-empty, else HU_DAEMON_FALLBACK_MODEL_DEFAULT. Never returns NULL. len_out

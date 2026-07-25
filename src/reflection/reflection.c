@@ -121,7 +121,7 @@ static void format_run_id(uint64_t now_ms, char *out, size_t cap) {
 static const char *effective_provider_name(const hu_reflection_loop_config_t *cfg) {
     if (cfg && cfg->provider[0])
         return cfg->provider;
-    return "gemini-3.5-flash";
+    return "gemini-3.1-pro-preview";
 }
 
 hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool force,

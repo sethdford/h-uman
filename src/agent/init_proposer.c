@@ -108,7 +108,7 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
                      cfg->tick_interval_sec > 0 ? cfg->tick_interval_sec : 1800,
                      cfg->confidence_threshold > 0.0 ? cfg->confidence_threshold : 0.85,
                      (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model
-                                                                   : "gemini-3.5-flash");
+                                                                   : "gemini-3.1-pro-preview");
 
     /* Interval gate (cheap — runs every outer loop). */
     int interval = cfg->tick_interval_sec > 0 ? cfg->tick_interval_sec : 1800;
@@ -783,8 +783,8 @@ hu_error_t hu_init_proposer_tick_with_provider(
     /* Production: structured chat() with max_tokens + thinking_budget=0
      * + response_format=json. See init_proposer_call_llm helper for the
      * full rationale on each request field. */
-    const char *model =
-        (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
+    const char *model = (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model
+                                                                      : "gemini-3.1-pro-preview";
     char *response = NULL;
     size_t response_len = 0;
     hu_error_t lerr = init_proposer_call_llm(alloc, provider, sys_prompt, user_msg, model,
@@ -1016,8 +1016,8 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
         memset(out_decision, 0, sizeof(*out_decision));
     return HU_OK;
 #else
-    const char *model =
-        (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model : "gemini-3.5-flash";
+    const char *model = (cfg->propose_model && cfg->propose_model[0]) ? cfg->propose_model
+                                                                      : "gemini-3.1-pro-preview";
     char *response = NULL;
     size_t response_len = 0;
     hu_error_t lerr = init_proposer_call_llm(alloc, provider, sys_prompt, user_msg, model,

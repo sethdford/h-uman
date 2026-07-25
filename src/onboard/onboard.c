@@ -571,7 +571,7 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
             if (strcmp(provider, "anthropic") == 0)
                 default_model = "claude-sonnet-4-20250514";
             else if (strcmp(provider, "gemini") == 0)
-                default_model = "gemini-3.1-flash-lite-preview";
+                default_model = "gemini-3.1-flash-lite";
             else if (strcmp(provider, "ollama") == 0)
                 default_model = "llama3";
             else if (strcmp(provider, "mlx_local") == 0 || strcmp(provider, "mlx-local") == 0)
