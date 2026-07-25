@@ -14,7 +14,7 @@ Usage:
     python3 score.py sheet_alice.csv sheet_bob.csv --key answer_key.json
     python3 score.py --selftest        # verify the math on synthetic data
 """
-import argparse, csv, json, math, sys
+import argparse, csv, json, math, os, sys
 
 
 def wilson(k, n, z=1.96):
@@ -233,6 +233,16 @@ def main():
     agg = score_rows(rows, key)
     axes = score_axes(rows)
 
+    # A sheet with ZERO scored items must never produce a verdict: detection
+    # 0.000 on n=0 satisfies every PASS criterion vacuously, and this script
+    # unconditionally writes the LoRA promotion gate below. On 2026-07-25 an
+    # unjudged sheet (judge outage) scored "PASS n=0" and clobbered
+    # ~/.human/blind_ab_gate.json — a promotion green-light from no evidence.
+    if agg["n"] == 0:
+        print("RESULT_blind_ab=INVALID (0 items scored — no choices matched the "
+              "key; refusing to emit any verdict or gate file)", file=sys.stderr)
+        sys.exit(3)
+
     # Backward-compatible output: keep legacy keys, add axes object
     agg["axes"] = axes
 
@@ -241,7 +251,6 @@ def main():
         with open(a.json_out, 'w') as f:
             json.dump(agg, f, indent=2)
     if a.emit_gate:
-        import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         import blind_ab_gate as _gate
         _gate.write_human_half(a.emit_gate, {
