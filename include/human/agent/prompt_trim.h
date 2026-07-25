@@ -60,8 +60,27 @@ typedef struct hu_prompt_trim_span {
  * remove from spans[i].offset. Returns the total planned cut. Returns 0
  * (all cuts zero) when len <= budget or on NULL/degenerate input. */
 size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
-                           const hu_prompt_trim_span_t *spans, size_t span_count,
-                           size_t *cuts_out);
+                           const hu_prompt_trim_span_t *spans, size_t span_count, size_t *cuts_out);
+
+/* Floor-aware variant: floors[i] is the minimum byte count of spans[i]
+ * that must SURVIVE trimming (0 or floors==NULL = no floor, identical to
+ * hu_prompt_trim_plan). Motivation (2026-07-25 Dermot audit): the live
+ * trim deleted ALL 4.7 KB of recalled memory and all continuity context
+ * on an over-budget turn — the model replied knowing nothing it knew.
+ * Floors turn "sacrifice whole sections in priority order" into
+ * "sacrifice down to a protected core". The newline extension of a
+ * partial cut never crosses a floor: a cut capped by the floor may end
+ * mid-line, which the surviving-content boundary tolerates (the section
+ * head is a fresh line either way). */
+size_t hu_prompt_trim_plan_floors(const char *buf, size_t len, size_t budget,
+                                  const hu_prompt_trim_span_t *spans, size_t span_count,
+                                  const size_t *floors, size_t *cuts_out);
+
+/* Default floors for the two highest-value trimmable sections. Continuity
+ * is ≤400 B by construction (its builder cap), so a 400 B floor means it
+ * is simply never cut; memory keeps its most-relevant 2 KB head. */
+#define HU_TRIM_FLOOR_MEMORY_BYTES     2048
+#define HU_TRIM_FLOOR_CONTINUITY_BYTES 400
 
 /* Applies a plan from hu_prompt_trim_plan: removes [offset, offset+cut)
  * for every span with a non-zero cut, compacts the buffer, and returns
