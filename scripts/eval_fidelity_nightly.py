@@ -12,19 +12,29 @@ and gates on both statistical (one-sided t-test α=0.025) and practical
 Verdict logged to stdout and JSON, suitable for launchd scheduling.
 
 Usage:
+  # Preferred: no --adapter-path — the SERVING adapter is resolved dynamically
+  # (live mlx-server process, else config.json personalization.lora_adapter_path)
   python3 scripts/eval_fidelity_nightly.py \\
-    --adapter-path ~/.human/training-data/adapters/seth-lora-v4-repair \\
     --model-id mlx-community/gemma-4-31b-it-4bit \\
     --output-json ~/.human/logs/eval-fidelity-nightly.json
 
+  # Explicit override (pin a specific adapter under test)
+  python3 scripts/eval_fidelity_nightly.py \\
+    --adapter-path ~/.human/training-data/adapters/seth-lora-v5-8bit-20260718-105251
+
 Exit codes:
-  0 = PASS or SKIP (gate executed, verdict logged)
+  0 = PASS (gate executed, adapter measurably better)
   1 = FAIL (adapter measurably worse, or gate missing components)
   2 = DEFERRED (mlx_lm or model unavailable)
+  3 = SKIP (no adapter / no prompts / no measurable delta) — deliberately
+      non-zero and paired with a greppable FIDELITY_SKIP stdout marker so a
+      silent skip can never masquerade as a healthy nightly again (a stale
+      hardcoded adapter path skipped silently for 13 nights in 2026-07).
 """
 
 import argparse
 import json
+import shlex
 import statistics
 import subprocess
 import sys
@@ -46,11 +56,85 @@ import adapter_registry
 DEFAULT_FIXTURE = Path(__file__).parent.parent / "docs/plans/2026-05-26-sprint-56-gemma-as-seth/data/heldout-prompts.jsonl"
 DEFAULT_LOG_DIR = Path.home() / ".human" / "logs"
 DEFAULT_MODEL = "mlx-community/gemma-4-31b-it-4bit"
+DEFAULT_CONFIG_PATH = Path.home() / ".human" / "config.json"
+
+# Exit codes (see module docstring)
+EXIT_PASS = 0
+EXIT_FAIL = 1
+EXIT_DEFERRED = 2
+EXIT_SKIP = 3
 
 # SOTA gate thresholds (per design US-9, AC-9.5 and AC-9.6)
 ALPHA_ONESIDED = 0.025  # one-sided t-test significance level
 CONFIDENCE = 1 - 2 * ALPHA_ONESIDED  # 0.95 for two-sided, 0.975 for one-sided
 PRACTICAL_DELTA_FLOOR = 0.05  # 5% absolute minimum improvement
+
+
+def resolve_serving_adapter(
+    ps_output: str | None = None,
+    config_path: Path = DEFAULT_CONFIG_PATH,
+) -> tuple[Path | None, str]:
+    """Resolve the adapter that is ACTUALLY serving, not a hardcoded name.
+
+    Priority (each candidate must exist on disk to win):
+      1. The live mlx-server process's --adapter-path argument — ground truth
+         for what is serving right now.
+      2. config.json personalization.lora_adapter_path — what will serve
+         after the next restart.
+
+    Args:
+        ps_output: process listing to scan (injectable for tests);
+                   None = run `ps ax -o command` here
+        config_path: path to ~/.human/config.json (injectable for tests)
+
+    Returns:
+        (adapter_path, source_description); (None, reason) when unresolvable.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    for line in ps_output.splitlines():
+        if "mlx-server" not in line or "--adapter-path" not in line:
+            continue
+        try:
+            tokens = shlex.split(line)
+            candidate = Path(tokens[tokens.index("--adapter-path") + 1])
+        except (ValueError, IndexError):
+            continue
+        if candidate.exists():
+            return (candidate, "live mlx-server process --adapter-path")
+
+    try:
+        config = json.loads(Path(config_path).read_text())
+        raw = config.get("personalization", {}).get("lora_adapter_path")
+        if raw:
+            candidate = Path(raw).expanduser()
+            if candidate.exists():
+                return (candidate, "config.json personalization.lora_adapter_path")
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return (None, "no live mlx-server and no usable personalization.lora_adapter_path")
+
+
+def emit_skip(reason: str, output_json: Path | None) -> int:
+    """Log a SKIP loudly (greppable FIDELITY_SKIP marker), write verdict, exit 3."""
+    verdict = {
+        "timestamp": datetime.now().isoformat(),
+        "verdict": "SKIP",
+        "reason": reason,
+        "exit_code": EXIT_SKIP,
+    }
+    print(f"[SKIP] FIDELITY_SKIP {reason}", flush=True)
+    if output_json:
+        output_json.write_text(json.dumps(verdict, indent=2))
+    return EXIT_SKIP
 
 
 def generate(model_id: str, prompt: str, adapter_path: str | None = None, max_tokens: int = 80) -> str:
@@ -134,8 +218,22 @@ def main():
     ap.add_argument(
         "--adapter-path",
         type=Path,
-        required=True,
-        help="Path to LoRA adapter (e.g., ~/.human/training-data/adapters/seth-lora-v4-repair)",
+        default=None,
+        help="Explicit LoRA adapter override. Default: resolve the SERVING "
+             "adapter dynamically (live mlx-server process, then config.json "
+             "personalization.lora_adapter_path).",
+    )
+    ap.add_argument(
+        "--resolve-only",
+        action="store_true",
+        help="Print the resolved serving adapter path and exit (0 resolved, 3 not)",
+    )
+    ap.add_argument(
+        "--min-prompts",
+        type=int,
+        default=20,
+        help="Minimum held-out prompts required (default 20; lower only for "
+             "manual small-n smoke runs — results below 20 are not gate-grade)",
     )
     ap.add_argument(
         "--model-id",
@@ -166,50 +264,50 @@ def main():
     )
     args = ap.parse_args()
 
-    # Ensure log dir exists
+    # Ensure log dir exists before anything that might emit a verdict JSON
     args.log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve the adapter under test: explicit override wins, else the one
+    # actually serving. A hardcoded adapter name went stale in 2026-07 and
+    # skipped silently for 13 nights — dynamic resolution is the default.
+    if args.adapter_path is None:
+        resolved, source = resolve_serving_adapter()
+        if args.resolve_only:
+            # stdout is a path-or-empty contract for shell callers; noise → stderr
+            if resolved is None:
+                print(f"[SKIP] FIDELITY_SKIP no serving adapter resolvable ({source})",
+                      file=sys.stderr)
+                return EXIT_SKIP
+            print(resolved)
+            return EXIT_PASS
+        if resolved is None:
+            return emit_skip(f"no serving adapter resolvable ({source})", args.output_json)
+        print(f"[INFO] Resolved serving adapter via {source}: {resolved}", flush=True)
+        args.adapter_path = resolved
+    elif args.resolve_only:
+        print(args.adapter_path)
+        return EXIT_PASS
 
     # Load held-out prompts
     print(f"[INFO] Loading held-out prompts from {args.held_out_fixture}", flush=True)
     prompts = load_held_out_prompts_from_jsonl(str(args.held_out_fixture))
 
     if not prompts:
-        verdict = {
-            "timestamp": datetime.now().isoformat(),
-            "verdict": "SKIP",
-            "reason": f"Held-out prompts unavailable or empty: {args.held_out_fixture}",
-            "exit_code": 0,
-        }
-        print(f"[SKIP] {verdict['reason']}")
-        if args.output_json:
-            args.output_json.write_text(json.dumps(verdict, indent=2))
-        return 0
+        return emit_skip(
+            f"Held-out prompts unavailable or empty: {args.held_out_fixture}",
+            args.output_json,
+        )
 
-    print(f"[INFO] Loaded {len(prompts)} held-out prompts (min 20 required)", flush=True)
-    if len(prompts) < 20:
-        verdict = {
-            "timestamp": datetime.now().isoformat(),
-            "verdict": "SKIP",
-            "reason": f"Insufficient held-out prompts: {len(prompts)} < 20",
-            "exit_code": 0,
-        }
-        print(f"[SKIP] {verdict['reason']}")
-        if args.output_json:
-            args.output_json.write_text(json.dumps(verdict, indent=2))
-        return 0
+    print(f"[INFO] Loaded {len(prompts)} held-out prompts (min {args.min_prompts} required)", flush=True)
+    if len(prompts) < args.min_prompts:
+        return emit_skip(
+            f"Insufficient held-out prompts: {len(prompts)} < {args.min_prompts}",
+            args.output_json,
+        )
 
-    # Verify adapter exists
+    # Verify adapter exists (explicit --adapter-path may point anywhere)
     if not args.adapter_path.exists():
-        verdict = {
-            "timestamp": datetime.now().isoformat(),
-            "verdict": "SKIP",
-            "reason": f"Adapter not found: {args.adapter_path}",
-            "exit_code": 0,
-        }
-        print(f"[SKIP] {verdict['reason']}")
-        if args.output_json:
-            args.output_json.write_text(json.dumps(verdict, indent=2))
-        return 0
+        return emit_skip(f"Adapter not found: {args.adapter_path}", args.output_json)
 
     # PRE pass (base model only)
     print(f"\n=== PRE PASS (base model) ===", flush=True)
@@ -301,13 +399,15 @@ def main():
 
     if stat_pass and prac_pass:
         final_verdict = "PASS"
-        exit_code = 0
+        exit_code = EXIT_PASS
     elif not prac_pass:
+        # No measurable improvement over base — a real measurement, but not a
+        # promotable one. Exit 3 (not 0) so a SKIP streak is visible to callers.
         final_verdict = "SKIP"
-        exit_code = 0
+        exit_code = EXIT_SKIP
     else:
         final_verdict = "FAIL"
-        exit_code = 1
+        exit_code = EXIT_FAIL
 
     # Detailed verdict JSON
     verdict = {
@@ -341,6 +441,9 @@ def main():
     }
 
     print(f"\n=== FINAL VERDICT: {final_verdict} ===", flush=True)
+    if final_verdict == "SKIP":
+        print(f"[SKIP] FIDELITY_SKIP no measurable improvement "
+              f"(delta_mean={delta_mean:.4f} < floor={PRACTICAL_DELTA_FLOOR})", flush=True)
 
     # Output verdict JSON
     if args.output_json:
@@ -352,13 +455,16 @@ def main():
     log_file.write_text(json.dumps(verdict, indent=2))
     print(f"[INFO] Log written to {log_file}", flush=True)
 
-    # Record evaluation result to adapter registry
+    # Record evaluation result to adapter registry. A SKIP records score=None:
+    # 13 nightly SKIPs once landed as {"score": 1.0, "verdict": "SKIP"} and
+    # read as perfect evals in the registry history. Full scores stay in the
+    # verdict JSON above; the registry score is only meaningful for PASS/FAIL.
     try:
         adapter_name = Path(args.adapter_path).name
         adapter_registry.record_eval(
             adapter_id=adapter_name,
             eval_name="fidelity-nightly",
-            score=post_mean,
+            score=post_mean if final_verdict != "SKIP" else None,
             verdict=final_verdict,
             timestamp=datetime.now().isoformat()
         )
