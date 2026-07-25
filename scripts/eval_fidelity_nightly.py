@@ -476,6 +476,14 @@ def main():
              "kill deadline, which must also cover a cold model load.",
     )
     ap.add_argument(
+        "--no-registry",
+        action="store_true",
+        help="Run the full eval but do NOT record the verdict in the adapter "
+             "registry. Use for smoke/manual runs (e.g. --min-prompts 5): "
+             "small-n verdicts recorded as real registry entries are "
+             "indistinguishable from gate-grade nightlies in promotion history.",
+    )
+    ap.add_argument(
         "--subprocess-gen",
         action="store_true",
         help="Legacy generation path: spawn `python3 -m mlx_lm generate` per "
@@ -770,6 +778,10 @@ def main():
     # 13 nightly SKIPs once landed as {"score": 1.0, "verdict": "SKIP"} and
     # read as perfect evals in the registry history. Full scores stay in the
     # verdict JSON above; the registry score is only meaningful for PASS/FAIL.
+    if args.no_registry:
+        print("[INFO] --no-registry: verdict NOT recorded in adapter registry",
+              flush=True)
+        return exit_code
     try:
         adapter_name = Path(args.adapter_path).name
         adapter_registry.record_eval(

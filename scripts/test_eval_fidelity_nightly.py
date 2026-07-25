@@ -344,6 +344,20 @@ def test_adapter_missing_skip_is_loud_and_unrecorded(capsys=None):
     print(f"✓ adapter-missing skip: exit=3, FIDELITY_SKIP marker present, registry untouched")
 
 
+def test_no_registry_flag_skips_registry_write():
+    """--no-registry must complete a full eval without touching the adapter
+    registry — smoke/manual small-n runs were recording real entries (e.g. the
+    2026-07-25 n=5 PASS at 0.91) indistinguishable from gate-grade nightlies."""
+    rc, record_eval = _run_main_with_argv(
+        ["--adapter-path", "__ADAPTER__", "--no-registry"]
+    )
+    # identical pre/post → SKIP (exit 3): the eval RAN, only the registry write is off
+    assert rc == 3, f"eval must still run to a verdict, got rc={rc}"
+    assert not record_eval.called, \
+        "--no-registry must not write adapter-registry entries"
+    print(f"✓ --no-registry: full eval ran (rc={rc}), registry untouched")
+
+
 def test_resolve_serving_model_from_process():
     """The serving --model must be resolvable from the live mlx-server process."""
     ps_output = (
@@ -815,6 +829,7 @@ def main():
         test_resolve_serving_adapter_none_when_unresolvable,
         test_skip_records_null_score_and_exits_3,
         test_adapter_missing_skip_is_loud_and_unrecorded,
+        test_no_registry_flag_skips_registry_write,
         test_resolve_serving_model_from_process,
         test_sentinel_responses_defer_not_score,
         test_partial_sentinels_dropped_from_deltas,
