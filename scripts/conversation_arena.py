@@ -79,11 +79,17 @@ SCENARIOS = [
      "opener": "hey you seemed off earlier. did i do something?"},
 
     # ── Humor probes (humor_probe=True) ──────────────────────────────────────
-    # These exist to measure the HUMOR axis specifically: three that create a
-    # real opening for teasing, and one that BAITS humor at a moment where
-    # joking is wrong. The last one is the point — an axis that only rewards
-    # more jokes would rate a try-hard daemon highly. humor_wrong_moment is
-    # how forced humor gets caught.
+    # These exist to measure the HUMOR axis specifically: four that create a
+    # real, DISTINCT opening for teasing (a roast to volley, an absurd straight
+    # line begging a deadpan, a self-own to deflect, a running-bit callback to
+    # build on), and one that BAITS humor at a moment where joking is wrong.
+    # humor_wrong_moment is the point — an axis that only rewards more jokes
+    # would rate a try-hard daemon highly; it is how forced humor gets caught.
+    # Each probe targets a different in-voice move so the humor axis samples a
+    # RANGE (see axis_spread): a judge that collapses them to one score cannot
+    # gate anything. (Folded 2026-07-25 from the parallel 3cb5970d arena — the
+    # near-duplicate roast/self-deprecation/deadpan probes there mapped onto
+    # these four; callback_joke was the one genuinely new intent kept.)
     {"id": "roast_volley", "persona": "college buddy who roasts Seth constantly",
      "goal": "roast Seth about something dumb he did, keep volleying — see if he "
              "teases back or goes flat/defensive",
@@ -98,12 +104,24 @@ SCENARIOS = [
              "or gets defensive",
      "opener": "so how'd that whole 'i'll definitely finish it this weekend' thing go",
      "humor_probe": True},
+    {"id": "callback_joke", "persona": "friend reviving a running bit from a past chat",
+     "goal": "resurrect the old 'salad on your burger' inside joke and see if Seth "
+             "recognizes the bit and BUILDS on it (deadpan) vs taking it literally, "
+             "ignoring it, or fabricating a fake shared memory",
+     "opener": "so did you have another 'salad' for lunch today or",
+     "humor_probe": True},
     {"id": "humor_wrong_moment", "persona": "friend who just got bad family news",
      "goal": "share the bad news plainly, then make ONE weak deflecting joke yourself "
              "— see if Seth piles on jokes or reads the room",
      "opener": "hey so my dad's scan came back not great. anyway. how are you",
      "humor_probe": True},
 ]
+
+# Scenario ids whose primary purpose is exercising Seth's teasing/joking
+# register. main() reports the humor-axis spread over just these rows — the
+# humor axis is only a meaningful measurement where a humor beat was invited.
+HUMOR_PROBE_IDS = frozenset(
+    sc["id"] for sc in SCENARIOS if sc.get("humor_probe"))
 
 
 def validate_scenario(sc: dict) -> list[str]:
@@ -205,6 +223,53 @@ def compare_arms(rows: list[dict], off_tag: str, live_tag: str,
             "humanness_delta": humanness_delta, "forced_delta": forced_delta,
             "promote": not reasons,
             "reasons": reasons or ["all promotion criteria met"]}
+
+
+# Below this humor-axis spread, the judge is not discriminating between the
+# probe scenarios — it is stamping a near-constant score, which cannot gate a
+# prompt change. Soft: a warning, not an abort (a run may legitimately have too
+# few probe rows). Folded 2026-07-25 from the parallel 3cb5970d arena.
+HUMOR_SPREAD_MIN = 0.15
+
+
+def axis_spread(rows: list[dict], key: str) -> dict:
+    """Spread of one judge axis across scoreboard rows. This is the measurement's
+    own trust check: a judge that discriminates produces a RANGE of scores across
+    scenarios; one that collapses every turn to ~1.0 (spread ~0) is not measuring
+    anything and cannot gate prompt tuning. Returns n, mean, min, max, and spread
+    (max - min). Rows missing the key are skipped (old rows predate the axis)."""
+    vals = [float(r[key]) for r in rows if r.get(key) is not None]
+    if not vals:
+        return {"n": 0, "mean": 0.0, "min": 0.0, "max": 0.0, "spread": 0.0}
+    lo, hi = min(vals), max(vals)
+    return {"n": len(vals), "mean": sum(vals) / len(vals),
+            "min": lo, "max": hi, "spread": hi - lo}
+
+
+def humor_axis_warning(axis: dict, min_spread: float = HUMOR_SPREAD_MIN) -> str | None:
+    """Soft gate on the humor measurement's trust check. Returns a warning string
+    when the judge failed to discriminate (spread collapsed) across enough rows to
+    matter, else None. A collapsed spread means the humor number is a rubber stamp
+    and must not be trusted to gate a prompt change. Applies ONLY to the 'humor'
+    axis — humor_forced can legitimately sit near 0 (no forced humor), so a small
+    humor_forced spread is not a rubber-stamp signal and is not gated here."""
+    if axis.get("n", 0) < 2:
+        return None  # too few probe rows to judge discrimination
+    if axis.get("spread", 0.0) < min_spread:
+        return (f"humor axis spread {axis['spread']:.3f} < {min_spread} across "
+                f"{axis['n']} rows — judge may not be discriminating (rubber "
+                f"stamp); do not trust the humor number to gate prompt changes")
+    return None
+
+
+def humor_probe_pool(scenarios: list[dict], n: int) -> tuple[list[dict], list[str]]:
+    """Deterministic humor-probe selection for --humor-only, plus the ids it had
+    to drop. An A/B needs both arms to run the SAME probes, so the order is fixed
+    (not sampled). Truncating below the full set can silently exclude the
+    anti-forced-humor guard (humor_wrong_moment) and rig the measurement — the
+    caller MUST surface `dropped` rather than cap coverage in silence."""
+    probes = [sc for sc in scenarios if sc.get("humor_probe")]
+    return probes[:n], [sc["id"] for sc in probes[n:]]
 
 
 # ── Generation: Seth side (local MLX, production prompt) ─────────────────────
@@ -352,6 +417,13 @@ bad news), then Seth NOT joking is correct behavior and 'humor' should score
 he whiffed it or answered like an assistant. Never reward joking through
 someone else's bad news.
 
+NEVER-DURING override — if Seth actually DOES joke through genuine distress (a
+friend's bad news, grief, real upset), that is a misread, not a landing. The two
+humor axes must AGREE on it: score 'humor' LOW (a joke that shouldn't have been
+made did not "land") AND 'humor_forced' HIGH (joking past a serious beat is the
+definition of try-hard). This is the one case where restraint's neutral-high
+floor does not apply — because he did not restrain.
+
 'humor_forced' (0-1, HIGHER IS WORSE) = how try-hard he was.
   0.0-0.2: never strained; humor appeared only where it fit.
   0.3-0.6: a joke or two that didn't need to be there; slightly performing.
@@ -453,7 +525,15 @@ def main(argv=None) -> int:
     elif args.humor_only:
         # Deterministic order, not a sample: an A/B needs both arms to run the
         # SAME scenarios, or the delta measures scenario luck, not the change.
-        pool = [sc for sc in SCENARIOS if sc.get("humor_probe")][:args.conversations]
+        pool, dropped = humor_probe_pool(SCENARIOS, args.conversations)
+        if dropped:
+            # No silent caps: a truncated probe set can exclude the
+            # anti-forced-humor guard and rig the A/B — surface what was dropped.
+            full = len(pool) + len(dropped)
+            print(f"WARN: --humor-only ran {len(pool)} of {full} probes; dropped "
+                  f"{dropped}. Pass --conversations {full} to run the full probe "
+                  f"set (the A/B needs every probe, incl. humor_wrong_moment).",
+                  file=sys.stderr)
     else:
         pool = random.sample(SCENARIOS, k=min(args.conversations, len(SCENARIOS)))
 
@@ -517,8 +597,21 @@ def main(argv=None) -> int:
     board = [json.loads(ln) for ln in scoreboard_path.read_text().splitlines()
              if ln.strip()] if scoreboard_path.exists() else []
     trend = scoreboard_trend(board)
+
+    # Humor-axis trust check: report the spread over the humor-probe rows so a
+    # judge that stopped discriminating is visible, not silent. Soft-gate a
+    # collapsed 'humor' spread to stderr (a rubber-stamp judge cannot gate step-3
+    # prompt tuning). humor_forced spread is reported as a plain diagnostic — it
+    # can legitimately be near-zero, so it is not gated.
+    humor_rows = [r for r in board if r.get("scenario") in HUMOR_PROBE_IDS]
+    humor_axis = axis_spread(humor_rows, "humor")
+    humor_forced_axis = axis_spread(humor_rows, "humor_forced")
+    warn = humor_axis_warning(humor_axis)
+    if warn:
+        print(f"WARN: {warn}", file=sys.stderr)
     print(json.dumps({"run": str(run_path), "dpo_pairs_written": total_dpo,
-                      "trend": trend}, indent=2))
+                      "trend": trend, "humor_axis": humor_axis,
+                      "humor_forced_axis": humor_forced_axis}, indent=2))
     return 0
 
 

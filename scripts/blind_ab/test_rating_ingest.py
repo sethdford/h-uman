@@ -445,5 +445,103 @@ class TestState(unittest.TestCase):
         self.assertEqual(loaded["ingested_rowids"], [1, 2, 3])
 
 
+class TestRunScore(unittest.TestCase):
+    """run_score must invoke score.py with --key and treat a FAIL verdict
+    (exit 1) as a successful scoring run — only exit >=2 is an invocation
+    failure. Pins the 2026-07-25 bug where the key was passed positionally
+    (score.py exit 2 'need sheets + --key') yet ingest marked complete."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self._orig_key = ingest.ANSWER_KEY
+        ingest.ANSWER_KEY = os.path.join(self.temp_dir, "answer_key.json")
+        with open(ingest.ANSWER_KEY, "w") as f:
+            json.dump({"t001": "A"}, f)
+
+    def tearDown(self):
+        ingest.ANSWER_KEY = self._orig_key
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _patch_subprocess(self, returncode):
+        calls = []
+
+        class _Result:
+            def __init__(self):
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = ""
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            return _Result()
+
+        self._orig_run = ingest.subprocess.run
+        ingest.subprocess.run = fake_run
+        self.addCleanup(lambda: setattr(ingest.subprocess, "run", self._orig_run))
+        return calls
+
+    def test_invocation_uses_key_flag_and_emits_gate(self):
+        calls = self._patch_subprocess(0)
+        self.assertTrue(ingest.run_score())
+        argv = calls[0]
+        self.assertIn("--key", argv)
+        self.assertEqual(argv[argv.index("--key") + 1], ingest.ANSWER_KEY)
+        self.assertIn("--emit-gate", argv)
+
+    def test_fail_verdict_exit1_is_a_successful_run(self):
+        self._patch_subprocess(1)  # score.py exits 1 when verdict != PASS
+        self.assertTrue(ingest.run_score())
+
+    def test_usage_error_exit2_is_failure(self):
+        self._patch_subprocess(2)  # argparse/usage error — nothing was scored
+        self.assertFalse(ingest.run_score())
+
+
+class TestCompletionRequiresScore(unittest.TestCase):
+    """A fully-rated sheet must NOT be marked complete when run_score fails —
+    otherwise the gate verdict is silently never emitted and no retry happens."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.sheet_path = os.path.join(self.temp_dir, "rating_sheet.csv")
+        with open(self.sheet_path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["id", "context", "option_A", "option_B",
+                                              "choice", "confidence"])
+            w.writeheader()
+            w.writerow({"id": "t001", "context": "hi", "option_A": "hello",
+                        "option_B": "hey", "choice": "A", "confidence": "4"})
+        self.state_path = os.path.join(self.temp_dir, "drip_state.json")
+        with open(self.state_path, "w") as f:
+            json.dump({"target": "sethford@me.com", "pending_row": None,
+                       "question_unix": 0, "sent": 1, "answered": 1,
+                       "complete": False, "asks": 1}, f)
+        self._orig = (ingest.SHEET, ingest.STATE)
+        ingest.SHEET, ingest.STATE = self.sheet_path, self.state_path
+
+    def tearDown(self):
+        ingest.SHEET, ingest.STATE = self._orig
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _state(self):
+        with open(self.state_path) as f:
+            return json.load(f)
+
+    def test_score_failure_leaves_complete_false(self):
+        self._orig_rs = ingest.run_score
+        ingest.run_score = lambda: False
+        self.addCleanup(lambda: setattr(ingest, "run_score", self._orig_rs))
+        ingest.ingest()
+        self.assertFalse(self._state().get("complete"))
+
+    def test_score_success_sets_complete(self):
+        self._orig_rs = ingest.run_score
+        ingest.run_score = lambda: True
+        self.addCleanup(lambda: setattr(ingest, "run_score", self._orig_rs))
+        ingest.ingest()
+        self.assertTrue(self._state().get("complete"))
+
+
 if __name__ == "__main__":
     unittest.main()

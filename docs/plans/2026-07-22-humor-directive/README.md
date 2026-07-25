@@ -51,20 +51,39 @@ A single `humor` score is gameable: instruct the model to joke more and a naive
 judge rates the try-hard higher. `humor_forced` is the independent counter-signal
 — the same reasoning as `.claude/rules/classifier-score-plus-flag-gate.md`.
 
-Four `humor_probe` scenarios ship with it:
+Five `humor_probe` scenarios ship with it — each a DISTINCT in-voice move, so
+the humor axis samples a range rather than one repeated beat:
 
 - `roast_volley` — friend roasts Seth; does he volley or go flat/defensive?
 - `straight_line` — earnest absurd setups begging for a deadpan reply
 - `self_own` — invites self-deprecation; does he get defensive instead?
+- `callback_joke` — revives a running "salad on your burger" bit; does he
+  recognize and BUILD on it, or take it literally / fabricate a fake memory?
+  (folded 2026-07-25 from the parallel 3cb5970d arena — the one probe intent
+  not already covered by the roast/deadpan/self-own probes)
 - `humor_wrong_moment` — **the important one**: bad family news, then a weak
   deflecting joke from the contact. Does Seth pile on jokes or read the room?
 
 Without `humor_wrong_moment` the axis only ever rewards more jokes, and the
-promotion decision would be rigged.
+promotion decision would be rigged. Because the probe set is now larger than the
+old `--conversations 4` default, `--humor-only` **warns to stderr and names any
+probe it drops** when `--conversations` is below the probe count — a truncated
+run that silently excluded `humor_wrong_moment` would be exactly the rigged
+measurement this guard exists to prevent.
+
+**The measurement's own trust check (`axis_spread`).** A judge that discriminates
+produces a *range* of humor scores across these probes; one that collapses every
+probe to a near-constant score is a rubber stamp that cannot gate anything. Every
+multi-scenario run reports `humor_axis` (n / mean / min / max / spread) in its
+final JSON, and soft-gates to stderr when the humor spread falls below `0.15`
+across ≥2 probe rows. `humor_forced` spread is reported too, but not gated — it
+can legitimately sit near zero when nothing was try-hard.
 
 **Restraint scores neutral-high (0.6–0.8), never low.** Not joking when nothing
 opened — or when someone is sharing bad news — is correct behaviour, not a miss.
-Operator-confirmed 2026-07-22.
+The one exception is the NEVER-DURING override: if Seth actually jokes *through*
+genuine distress, both axes agree it is a misread — `humor` LOW and
+`humor_forced` HIGH. Operator-confirmed 2026-07-22.
 
 ### Step 3 — the directive (`src/persona/persona.c`)
 
@@ -246,12 +265,31 @@ out = pathlib.Path('~/.human/personas/seth-baseline.json').expanduser()
 d = json.loads(bak.read_text()); d['name'] = 'seth-baseline'
 out.write_text(json.dumps(d, ensure_ascii=False, indent=1) + '\n')
 PY
-python3 scripts/conversation_arena.py --humor-only --conversations 4 --turns 8 \
+python3 scripts/conversation_arena.py --humor-only --conversations 5 --turns 8 \
     --no-dpo --persona seth-baseline --human-bin build/human --tag humor-baseline
 ```
 
+`--conversations 5` runs the full probe set (5 as of 2026-07-25). A lower count
+still works but `--humor-only` will WARN and name the dropped probe(s); keep it at
+the probe count so `humor_wrong_moment` is always measured. The final JSON now also
+reports `humor_axis`/`humor_forced_axis` (n/mean/min/max/spread) — the humor spread
+is the judge-trust check; a spread below 0.15 across the probes means the judge
+stopped discriminating and the run cannot gate a change.
+
 (The temporary `seth-baseline.json` was removed after the run so no stray persona
 is loadable; recreate it with the snippet above.)
+
+To sanity-check the arena tooling itself (no persona swap, just confirm the humor
+axis still discriminates > 0 spread):
+
+```bash
+python3 scripts/conversation_arena.py --humor-only --conversations 5 --turns 8 \
+    --no-dpo --tag humor-refold-check
+```
+
+Note the local MLX server on `:8741` is a SERIAL queue — pause the service-loop
+(`launchctl kickstart -k` to resume) before a real arena run, or the daemon's own
+turns convoy behind it.
 
 ## Decision
 

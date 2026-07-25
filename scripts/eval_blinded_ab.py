@@ -65,6 +65,10 @@ USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
 USE_GATE = "--gate" in sys.argv
 GATE_DRY_RUN = "--gate-dry-run" in sys.argv
+# Advisory Binoculars AI-tell metric appended to the results JSON after the
+# run (docs/research/2026-07-25-binoculars-discriminator.md). Measurement-side
+# only: never feeds the gate, never changes the exit code. ~12 min GPU.
+USE_BINOCULARS = "--binoculars" in sys.argv
 MAX_TRIALS = 50
 # Gemini judge runs concurrently in a thread pool while MLX generation (serial,
 # model_lock-bound) continues — see the main loop. Default kept modest to stay
@@ -293,6 +297,91 @@ def load_ground_truth():
     return pairs
 
 
+BINOCULARS_SCRIPT = os.path.join(
+    os.path.dirname(__file__), "blind_ab", "binoculars_score.py")
+
+
+def _run_binoculars(results_path):
+    """Compute the Binoculars AI-tell summary for the just-written results file
+    and merge it under the "binoculars" key.
+
+    Direction/thresholds calibrated 2026-07-25 on the 07-24 corpus against the
+    seth-lora-v5 adapter (docs/research/2026-07-25-binoculars-discriminator.md).
+    The 5%-FPR threshold is adapter-version-specific — override with
+    HU_BINOCULARS_THR_FPR5 after an adapter promotion + recalibration.
+
+    Never raises, never touches the gate file: on any failure the summary is
+    {"error": ...} and the eval's outcome is unchanged.
+    """
+    started = time.time()
+    thr_fpr5 = float(os.environ.get("HU_BINOCULARS_THR_FPR5", "0.9643"))
+    try:
+        py = os.environ.get("HU_BINOCULARS_PYTHON",
+                            os.path.expanduser("~/.human/venv/bin/python"))
+        if not os.path.exists(py):
+            py = sys.executable
+        binoc_out = results_path + ".binoculars.tmp.json"
+        subprocess.run(
+            [py, BINOCULARS_SCRIPT, "--pairs", results_path,
+             "--windows", "5", "--out", binoc_out, "--quiet"],
+            check=True, timeout=2400,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(binoc_out) as f:
+            binoc = json.load(f)
+        os.unlink(binoc_out)
+
+        rows = binoc.get("results", [])
+        real = [r["score_dirA"] for r in rows if r.get("label") == "real"]
+        ai = [r["score_dirA"] for r in rows if r.get("label") == "ai"]
+        dira = ((binoc.get("analysis") or {}).get("scores") or {}).get(
+            "dirA (obs=base)") or {}
+        summary = {
+            "direction": "dirA (obs=base, performer=adapted)",
+            "adapter": binoc.get("adapter"),
+            "n_real": len(real), "n_ai": len(ai),
+            "auc_per_message": dira.get("auc_oriented"),
+            "auc_windowed_k5": (dira.get("windowed") or {}).get("k=5"),
+            "mean_real": round(sum(real) / len(real), 4) if real else None,
+            "mean_ai": round(sum(ai) / len(ai), 4) if ai else None,
+            "fpr5_threshold": thr_fpr5,
+            "ai_frac_below_fpr5_thr":
+                round(sum(1 for s in ai if s < thr_fpr5) / len(ai), 4)
+                if ai else None,
+            "elapsed_s": round(time.time() - started, 1),
+            # Per-trial AI scores so binoculars_to_dpo.py can mine from this
+            # file alone — no second 12-minute scoring pass.
+            "ai_by_trial": {
+                str(r["trial"]): {"score": round(r["score_dirA"], 5),
+                                  "n_tokens": r["n_tokens"]}
+                for r in rows
+                if r.get("label") == "ai" and r.get("trial") is not None},
+        }
+    except Exception as e:  # advisory metric — swallow everything
+        summary = {"error": f"{type(e).__name__}: {e}",
+                   "elapsed_s": round(time.time() - started, 1)}
+
+    try:
+        with open(results_path) as f:
+            doc = json.load(f)
+        doc["binoculars"] = summary
+        with open(results_path, "w") as f:
+            json.dump(doc, f, indent=2)
+    except Exception as e:
+        print(f"  BINOCULARS: could not merge summary: {e}")
+        return summary
+
+    if "error" in summary:
+        print(f"\n  BINOCULARS: FAILED ({summary['error']}) — advisory only, run unaffected")
+    else:
+        print(f"\n  BINOCULARS (advisory AI-tell, {summary['elapsed_s']:.0f}s):")
+        print(f"    per-message AUC:  {summary['auc_per_message']}")
+        print(f"    windowed k=5 AUC: {summary['auc_windowed_k5']}  "
+              "(0.5 = statistically indistinguishable, the goal)")
+        print(f"    mean score real={summary['mean_real']} ai={summary['mean_ai']}")
+        print(f"    AI below {thr_fpr5} (5%-FPR flag): {summary['ai_frac_below_fpr5_thr']}")
+    return summary
+
+
 def main():
     # Short-circuit for --gate --gate-dry-run (no creds, no data needed)
     if USE_GATE and GATE_DRY_RUN:
@@ -471,6 +560,12 @@ def main():
             "trials": results,
         }, f, indent=2)
     print(f"\n  Full results saved to {RESULTS_PATH}")
+
+    # Advisory Binoculars metric: needs the results file on disk, and only a
+    # run that counts as a real measurement (same >=50%-valid bar the gate
+    # harness-fail check uses) is worth 12 min of GPU.
+    if USE_BINOCULARS and total > 0 and (not pairs or total >= len(pairs) / 2):
+        _run_binoculars(RESULTS_PATH)
 
     if USE_GATE:
         fool_rate = ai_detected_correctly / total * 100 if total else 0.0

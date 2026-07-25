@@ -45,6 +45,10 @@ ANSWER_KEY = os.path.join(SHEET_DIR, "answer_key.json")
 STATE = os.path.join(SHEET_DIR, "drip_state.json")
 CHAT_DB = os.path.join(HOME, "Library", "Messages", "chat.db")
 SCORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.py")
+# Repo-side gate JSON (human half) — same target the nightly's stage 3 refreshes.
+REPO_GATE = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..",
+    "docs", "evaluation", "blind_ab_gate.json"))
 
 DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat (notes-to-self)
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
@@ -267,10 +271,13 @@ def send_question(target, text, dry_run=False):
 
 
 def run_score():
-    r = subprocess.run([sys.executable, SCORE_PY, SHEET, ANSWER_KEY],
+    r = subprocess.run([sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
+                        "--emit-gate", REPO_GATE],
                        capture_output=True, text=True, timeout=60)
     print(r.stdout[-500:] if r.stdout else r.stderr[-300:])
-    return r.returncode == 0
+    # score.py exit semantics: 0 = PASS verdict, 1 = ran but verdict != PASS
+    # (still a successful scoring run), >=2 = usage error/crash.
+    return r.returncode in (0, 1)
 
 
 def tick(dry_run=False, now=None):
@@ -296,8 +303,14 @@ def tick(dry_run=False, now=None):
     if next_unanswered(rows, st.get("skipped")) is None:
         if not st.get("complete"):
             print(f"sheet complete ({total}/{total}) — running score.py -> gate verdict")
-            run_score()
-            st["complete"] = True
+            if run_score():
+                st["complete"] = True
+            else:
+                # Leave complete=False so the next tick retries scoring; a
+                # silently-unscored complete sheet blocks the human tier.
+                print("score.py FAILED — sheet is fully rated but the gate "
+                      "verdict was NOT emitted; will retry next tick",
+                      file=sys.stderr)
         save_state(st)
         return
 

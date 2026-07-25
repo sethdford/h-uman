@@ -179,3 +179,88 @@ def test_next_unanswered_respects_skipped():
     ]
     assert rd.next_unanswered(rows, skipped=["r1"])["id"] == "r2"
     assert rd.next_unanswered(rows, skipped=["r1", "r2"]) is None
+
+
+# ── run_score invocation + completion gating (pinned 2026-07-25) ────────
+# Bug: the answer key was passed positionally (score.py exit 2 "need
+# sheets + --key") and tick() marked complete anyway — a fully-rated
+# sheet silently never produced a gate verdict.
+
+class _FakeResult:
+    def __init__(self, rc):
+        self.returncode = rc
+        self.stdout = ""
+        self.stderr = ""
+
+
+def _patched_run(rc, calls):
+    def fake(argv, **kwargs):
+        calls.append(list(argv))
+        return _FakeResult(rc)
+    return fake
+
+
+def test_run_score_passes_key_and_emit_gate():
+    import subprocess as sp
+    calls, orig = [], sp.run
+    sp.run = _patched_run(0, calls)
+    try:
+        assert rd.run_score() is True
+    finally:
+        sp.run = orig
+    argv = calls[0]
+    assert "--key" in argv
+    assert argv[argv.index("--key") + 1] == rd.ANSWER_KEY
+    assert "--emit-gate" in argv
+
+
+def test_run_score_fail_verdict_exit1_is_success():
+    import subprocess as sp
+    orig = sp.run
+    sp.run = _patched_run(1, [])  # score.py exit 1 = ran, verdict != PASS
+    try:
+        assert rd.run_score() is True
+    finally:
+        sp.run = orig
+
+
+def test_run_score_usage_error_exit2_is_failure():
+    import subprocess as sp
+    orig = sp.run
+    sp.run = _patched_run(2, [])  # argparse error — nothing scored
+    try:
+        assert rd.run_score() is False
+    finally:
+        sp.run = orig
+
+
+def test_tick_completion_requires_score_success():
+    import json as _json
+    import tempfile as _tf
+    tmpdir = _tf.mkdtemp()
+    sheet = os.path.join(tmpdir, "rating_sheet.csv")
+    with open(sheet, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["id", "context", "option_A", "option_B",
+                                          "choice", "confidence"])
+        w.writeheader()
+        w.writerow({"id": "r1", "context": "c", "option_A": "a", "option_B": "b",
+                    "choice": "A", "confidence": "4"})
+    state = os.path.join(tmpdir, "drip_state.json")
+    with open(state, "w") as f:
+        _json.dump({"target": "t@me.com", "pending_row": None, "question_unix": 0,
+                    "sent": 1, "answered": 1, "complete": False, "asks": 1}, f)
+    orig = (rd.SHEET, rd.STATE, rd.SHEET_DIR, rd.run_score)
+    rd.SHEET, rd.STATE, rd.SHEET_DIR = sheet, state, tmpdir
+    try:
+        rd.run_score = lambda: False
+        rd.tick()
+        with open(state) as f:
+            assert not _json.load(f).get("complete")
+        rd.run_score = lambda: True
+        rd.tick()
+        with open(state) as f:
+            assert _json.load(f).get("complete") is True
+    finally:
+        rd.SHEET, rd.STATE, rd.SHEET_DIR, rd.run_score = orig
+        import shutil as _sh
+        _sh.rmtree(tmpdir, ignore_errors=True)
