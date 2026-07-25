@@ -33,6 +33,12 @@ import sys
 import unicodedata
 from collections import Counter
 
+# Shared typedstream decoder — the single source of truth for attributedBody.
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab")
+)
+from imessage_text import decode_attributed_body
+
 APPLE_EPOCH_SQL = "m.date/1000000000 + strftime('%s','2001-01-01')"
 
 TAPBACK_PREFIXES = ("Loved “", "Liked “", "Disliked “", "Laughed at “",
@@ -40,26 +46,25 @@ TAPBACK_PREFIXES = ("Loved “", "Liked “", "Disliked “", "Laughed at “",
 
 
 def extract_text_from_attributed_body(blob):
-    """Decode text from an NSAttributedString blob. Copied verbatim from
-    scripts/extract_imessage_pairs.py (that module has no import guard —
-    importing it would execute its extraction run)."""
-    idx = blob.find(b"NSString")
-    if idx < 0:
-        return None
-    start = blob.find(b"+", idx)
-    if start < 0:
-        return None
-    start += 1
-    end = blob.find(b"\x86", start)
-    if end < 0:
-        end = start + 2000
-    raw = blob[start:end]
-    try:
-        text = raw.decode("utf-8", errors="ignore").strip()
-    except Exception:
-        return None
-    text = re.sub(r"^[\x00-\x1f]+", "", text)
-    return text if len(text) > 1 else None
+    """Decode text from an ``attributedBody`` typedstream blob.
+
+    Delegates to the shared decoder in scripts/blind_ab/imessage_text.py.
+
+    This function previously held a verbatim copy of the decoder from
+    scripts/extract_imessage_pairs.py, justified by the claim that that module
+    "has no import guard". The claim was false — it does guard on
+    ``__name__ == "__main__"`` — but the copy was made anyway, and it carried a
+    length-prefix bug that corrupted the style-card corpus two ways: the
+    message's own length byte was prepended whenever it was printable (byte
+    lengths 32-126), and any message containing UTF-8 byte 0x86 (e.g.
+    "\\U0001f606", or the "↩" that opens every reply-quote) was truncated and
+    dropped. Since the style card measures punctuation, capitalisation and
+    length distributions, both defects skewed the persona prompt directly.
+
+    See scripts/test_extract_imessage_pairs.py for the format description and
+    the real-chat.db regression fixtures.
+    """
+    return decode_attributed_body(blob)
 
 
 def fetch_messages(db_path, days):
