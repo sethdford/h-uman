@@ -30,7 +30,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (13,861+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (13,905+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -73,6 +73,7 @@ Vtable-driven and modular. Extend by implementing vtable structs + factory regis
 - Security: deny-by-default, HTTPS-only for outbound, never log secrets.
 - KISS/YAGNI: no speculative abstractions or config flags without a caller.
 - One concern per change. Don't mix feature + refactor + infra.
+- **Session isolation**: do file-editing work in your own worktree (`EnterWorktree`), not the shared main checkout — concurrent sessions collide there (HEAD moves mid-operation, pushes race, you can publish another session's in-flight commits). Merge to `main` in one short window at the end. Read-only sessions don't need one. See `.claude/rules/session-worktree-isolation.md`.
 - **AI Model Versions**: Never reference or use Gemini 2.0 or 2.5 models — they are deprecated. Always use Gemini 3.0+. Before writing any code that references a model version, do a web search AND probe the live Vertex AI endpoint (HTTP 200 from `:generateContent`) to verify availability. **Canonical lineup as of 2026-05-24 (empirically verified live on `johnb-2025/global`):**
   - **`gemini-3.5-flash`** — GA, launched 2026-05-19. **New default** for conversational/coding. Near-Pro quality at Flash speed/cost ($1.50/$9.00 per Mtok). Beats `gemini-3.1-pro-preview` on coding at ~25% lower cost.
   - **`gemini-3.1-pro-preview`** — Preview, launched 2026-02-19. Use for deep reasoning, analytical/deep tiers. $2/$12 per Mtok.
@@ -111,7 +112,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 13,861+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 13,905+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -136,9 +137,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~423K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~438K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 13,861+ tests                                       |
+| `tests/`                          | 760+ test files, 13,905+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

@@ -2,6 +2,13 @@
 # pre-commit: auto-format C files, format check, design token lint.
 # Activate: git config core.hooksPath .githooks
 
+# Session isolation: warn if this commit is landing on main in the SHARED
+# checkout while other Claude sessions have live worktrees (advisory; set
+# HU_WORKTREE_STRICT=1 to make it blocking).
+if [ -x "scripts/check-session-worktree.sh" ]; then
+    bash scripts/check-session-worktree.sh || exit 1
+fi
+
 CLANG_FMT="clang-format"
 if ! command -v "$CLANG_FMT" >/dev/null 2>&1; then
     for p in /opt/homebrew/opt/llvm/bin/clang-format /usr/local/opt/llvm/bin/clang-format; do
