@@ -119,17 +119,21 @@ export class ScFormGroup extends LitElement {
         @submit=${this._onSubmit}
         aria-labelledby=${this.title ? this._titleId : nothing}
       >
-        ${this.title || this.description || this._dirty
-          ? html`
-              <div class="header">
-                ${this.title
-                  ? html`<h3 id=${this._titleId} class="title">${this.title}</h3>`
-                  : null}
-                ${this.description ? html`<p class="description">${this.description}</p>` : null}
-                ${this._dirty ? html`<span class="dirty-indicator">Unsaved changes</span>` : null}
-              </div>
-            `
-          : null}
+        ${
+          this.title || this.description || this._dirty
+            ? html`
+                <div class="header">
+                  ${
+                    this.title
+                      ? html`<h3 id=${this._titleId} class="title">${this.title}</h3>`
+                      : null
+                  }
+                  ${this.description ? html`<p class="description">${this.description}</p>` : null}
+                  ${this._dirty ? html`<span class="dirty-indicator">Unsaved changes</span>` : null}
+                </div>
+              `
+            : null
+        }
         <div class="content">
           <slot></slot>
         </div>

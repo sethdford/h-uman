@@ -213,9 +213,11 @@ export class ScSlider extends LitElement {
     return html`
       <div class="wrapper">
         <div class="header">
-          ${this.label
-            ? html`<label class="label" for=${this._sliderId}>${this.label}</label>`
-            : html`<span class="label" id=${`${this._sliderId}-label`}>${ariaLabel}</span>`}
+          ${
+            this.label
+              ? html`<label class="label" for=${this._sliderId}>${this.label}</label>`
+              : html`<span class="label" id=${`${this._sliderId}-label`}>${ariaLabel}</span>`
+          }
           ${this.showValue ? html`<span class="value">${this.value}</span>` : null}
         </div>
         <div

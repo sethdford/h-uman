@@ -100,8 +100,9 @@ export class HuActivityHeatmap extends LitElement {
                 (val) => html`
                   <div
                     class="cell"
-                    style="width:${this.cellSize}px;height:${this
-                      .cellSize}px;background:${this._getColor(val, max)}"
+                    style="width:${this.cellSize}px;height:${
+                      this.cellSize
+                    }px;background:${this._getColor(val, max)}"
                     title="${val} actions"
                   ></div>
                 `,

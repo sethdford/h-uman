@@ -707,83 +707,93 @@ export class ScChatBubble extends LitElement {
       <div
         class=${classes}
         role="article"
-        aria-label=${this.ariaMessageOrdinal && this.ariaMessageTotal
-          ? `Message ${this.ariaMessageOrdinal} of ${this.ariaMessageTotal}, from ${isUser ? "user" : "assistant"}`
-          : isUser
-            ? "Your message"
-            : "Assistant message"}
+        aria-label=${
+          this.ariaMessageOrdinal && this.ariaMessageTotal
+            ? `Message ${this.ariaMessageOrdinal} of ${this.ariaMessageTotal}, from ${isUser ? "user" : "assistant"}`
+            : isUser
+              ? "Your message"
+              : "Assistant message"
+        }
         aria-busy=${this.streaming}
         tabindex="0"
       >
         <div class="content">
-          ${this._headings.length > 0
-            ? html`
-                <button
-                  class="outline-toggle"
-                  type="button"
-                  @click=${() => (this._outlineOpen = !this._outlineOpen)}
-                  aria-label="Toggle section outline"
-                >
-                  ${icons["list-bullets"] ?? icons.list ?? nothing}
-                  ${this._outlineOpen ? "Hide" : "Outline"} (${this._headings.length})
-                </button>
-                ${this._outlineOpen
-                  ? html`
-                      <ul class="outline-list" role="navigation" aria-label="Section outline">
-                        ${this._headings.map(
-                          (h) => html`
-                            <li>
-                              <button
-                                class="outline-item"
-                                data-level=${h.level}
-                                @click=${() => this._scrollToHeading(h.text)}
-                              >
-                                ${h.text}
-                              </button>
-                            </li>
-                          `,
-                        )}
-                      </ul>
-                    `
-                  : nothing}
-              `
-            : nothing}
-          ${this.replyTo
-            ? html`
-                <div
-                  class="reply-quote"
-                  role="button"
-                  tabindex="0"
-                  @click=${() =>
-                    this.dispatchEvent(
-                      new CustomEvent("scroll-to-message", {
-                        bubbles: true,
-                        composed: true,
-                        detail: { id: this.replyTo!.id },
-                      }),
-                    )}
-                  @keydown=${(e: KeyboardEvent) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
+          ${
+            this._headings.length > 0
+              ? html`
+                  <button
+                    class="outline-toggle"
+                    type="button"
+                    @click=${() => (this._outlineOpen = !this._outlineOpen)}
+                    aria-label="Toggle section outline"
+                  >
+                    ${icons["list-bullets"] ?? icons.list ?? nothing}
+                    ${this._outlineOpen ? "Hide" : "Outline"} (${this._headings.length})
+                  </button>
+                  ${
+                    this._outlineOpen
+                      ? html`
+                          <ul class="outline-list" role="navigation" aria-label="Section outline">
+                            ${this._headings.map(
+                              (h) => html`
+                                <li>
+                                  <button
+                                    class="outline-item"
+                                    data-level=${h.level}
+                                    @click=${() => this._scrollToHeading(h.text)}
+                                  >
+                                    ${h.text}
+                                  </button>
+                                </li>
+                              `,
+                            )}
+                          </ul>
+                        `
+                      : nothing
+                  }
+                `
+              : nothing
+          }
+          ${
+            this.replyTo
+              ? html`
+                  <div
+                    class="reply-quote"
+                    role="button"
+                    tabindex="0"
+                    @click=${() =>
                       this.dispatchEvent(
                         new CustomEvent("scroll-to-message", {
                           bubbles: true,
                           composed: true,
                           detail: { id: this.replyTo!.id },
                         }),
-                      );
-                    }
-                  }}
-                >
-                  <span class="reply-role">${this.replyTo.role}</span>
-                  <span class="reply-preview"
-                    >${this.replyTo.content.length > 80
-                      ? this.replyTo.content.slice(0, 80) + "\u2026"
-                      : this.replyTo.content}</span
+                      )}
+                    @keydown=${(e: KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        this.dispatchEvent(
+                          new CustomEvent("scroll-to-message", {
+                            bubbles: true,
+                            composed: true,
+                            detail: { id: this.replyTo!.id },
+                          }),
+                        );
+                      }
+                    }}
                   >
-                </div>
-              `
-            : nothing}
+                    <span class="reply-role">${this.replyTo.role}</span>
+                    <span class="reply-preview"
+                      >${
+                        this.replyTo.content.length > 80
+                          ? this.replyTo.content.slice(0, 80) + "\u2026"
+                          : this.replyTo.content
+                      }</span
+                    >
+                  </div>
+                `
+              : nothing
+          }
           ${renderMarkdown(
             this.streaming && this.role === "assistant" ? this._visibleContent : this.content,
             {
@@ -795,12 +805,14 @@ export class ScChatBubble extends LitElement {
               streaming: this.streaming,
             },
           )}
-          ${showCursor
-            ? html`<span
-                class="cursor ${this.completing ? "completing" : ""}"
-                aria-hidden="true"
-              ></span>`
-            : nothing}
+          ${
+            showCursor
+              ? html`<span
+                  class="cursor ${this.completing ? "completing" : ""}"
+                  aria-hidden="true"
+                ></span>`
+              : nothing
+          }
         </div>
         <div class="footer">
           <slot name="status"></slot>

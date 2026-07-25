@@ -574,9 +574,11 @@ export class ScTuringView extends GatewayAwareLitElement {
           description="Human Fidelity Score across conversations"
         >
           <hu-connection-pulse status=${this.connectionStatus}></hu-connection-pulse>
-          ${this.lastLoadedAt
-            ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`
-            : nothing}
+          ${
+            this.lastLoadedAt
+              ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`
+              : nothing
+          }
           <hu-tooltip text="Reload Turing data" position="bottom">
             <hu-button variant="secondary" @click=${() => this.load()}>Refresh</hu-button>
           </hu-tooltip>
@@ -698,12 +700,14 @@ export class ScTuringView extends GatewayAwareLitElement {
     return html`
       <div class="section-label">Contact: ${c.contact_id ?? "—"}</div>
       <hu-card glass surface="high">
-        ${c.hint
-          ? html`<div class="contact-hint">
-              ${icons.lightbulb}
-              <span>${c.hint}</span>
-            </div>`
-          : nothing}
+        ${
+          c.hint
+            ? html`<div class="contact-hint">
+                ${icons.lightbulb}
+                <span>${c.hint}</span>
+              </div>`
+            : nothing
+        }
         <div class="contact-dims">
           ${entries.map(
             ([key, score]) => html`

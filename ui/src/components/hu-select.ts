@@ -144,9 +144,9 @@ export class ScSelect extends LitElement {
     const errorId = this.error ? `${this._selectId}-error` : undefined;
     return html`
       <div class="wrapper">
-        ${this.label
-          ? html`<label class="label" for=${this._selectId}>${this.label}</label>`
-          : null}
+        ${
+          this.label ? html`<label class="label" for=${this._selectId}>${this.label}</label>` : null
+        }
         <div class="select-wrap">
           <select
             id=${this._selectId}
@@ -158,22 +158,24 @@ export class ScSelect extends LitElement {
             aria-label=${this.label || this.placeholder || "Select"}
             @change=${this._onChange}
           >
-            ${this.placeholder
-              ? html`<option value="" disabled>${this.placeholder}</option>`
-              : null}
+            ${
+              this.placeholder ? html`<option value="" disabled>${this.placeholder}</option>` : null
+            }
             ${this.options.map((opt) => html`<option value=${opt.value}>${opt.label}</option>`)}
           </select>
           <span class="chevron" aria-hidden="true">${icons["caret-down"]}</span>
         </div>
-        ${this.error
-          ? html`<span
-              class="error-msg"
-              id=${`${this._selectId}-error`}
-              role="alert"
-              aria-live="polite"
-              >${this.error}</span
-            >`
-          : null}
+        ${
+          this.error
+            ? html`<span
+                class="error-msg"
+                id=${`${this._selectId}-error`}
+                role="alert"
+                aria-live="polite"
+                >${this.error}</span
+              >`
+            : null
+        }
       </div>
     `;
   }

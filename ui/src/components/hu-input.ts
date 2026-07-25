@@ -161,11 +161,13 @@ export class ScInput extends LitElement {
             @change=${this._onChange}
           />
         </div>
-        ${this.error
-          ? html`<span class="error-msg" id=${errorId} role="alert" aria-live="polite"
-              >${this.error}</span
-            >`
-          : null}
+        ${
+          this.error
+            ? html`<span class="error-msg" id=${errorId} role="alert" aria-live="polite"
+                >${this.error}</span
+              >`
+            : null
+        }
       </div>
     `;
   }

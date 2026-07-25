@@ -391,9 +391,11 @@ export class ScLinkPreview extends LitElement {
         aria-label=${this.title || this._getDomain()}
       >
         <div class="card-inner">
-          ${this.image
-            ? html`<img class="thumb" src=${this.image} alt="" loading="lazy" />`
-            : nothing}
+          ${
+            this.image
+              ? html`<img class="thumb" src=${this.image} alt="" loading="lazy" />`
+              : nothing
+          }
           <div class="text">
             ${this.title ? html`<span class="title">${this.title}</span>` : nothing}
             ${this.description ? html`<span class="desc">${this.description}</span>` : nothing}

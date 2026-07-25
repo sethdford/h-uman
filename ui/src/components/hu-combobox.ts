@@ -321,40 +321,44 @@ export class ScCombobox extends LitElement {
             @blur=${this._onBlur}
             @keydown=${this._onKeyDown}
           />
-          ${this._open && filtered.length > 0
-            ? html`
-                <div
-                  id=${this._listboxId}
-                  class="dropdown"
-                  role="listbox"
-                  @mousedown=${(e: MouseEvent) => e.preventDefault()}
-                >
-                  ${filtered.map(
-                    (opt, i) => html`
-                      <div
-                        id=${`${this._listboxId}-opt-${i}`}
-                        class="option"
-                        role="option"
-                        aria-selected=${i === this._activeIndex}
-                        @click=${() => this._selectOption(opt)}
-                      >
-                        ${this._highlightLabel(opt.label)}
-                      </div>
-                    `,
-                  )}
-                </div>
-              `
-            : null}
+          ${
+            this._open && filtered.length > 0
+              ? html`
+                  <div
+                    id=${this._listboxId}
+                    class="dropdown"
+                    role="listbox"
+                    @mousedown=${(e: MouseEvent) => e.preventDefault()}
+                  >
+                    ${filtered.map(
+                      (opt, i) => html`
+                        <div
+                          id=${`${this._listboxId}-opt-${i}`}
+                          class="option"
+                          role="option"
+                          aria-selected=${i === this._activeIndex}
+                          @click=${() => this._selectOption(opt)}
+                        >
+                          ${this._highlightLabel(opt.label)}
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `
+              : null
+          }
         </div>
-        ${this.error
-          ? html`<span
-              class="error-msg"
-              id=${`${this._inputId}-error`}
-              role="alert"
-              aria-live="polite"
-              >${this.error}</span
-            >`
-          : null}
+        ${
+          this.error
+            ? html`<span
+                class="error-msg"
+                id=${`${this._inputId}-error`}
+                role="alert"
+                aria-live="polite"
+                >${this.error}</span
+              >`
+            : null
+        }
       </div>
     `;
   }

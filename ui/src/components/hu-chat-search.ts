@@ -290,18 +290,20 @@ export class ScChatSearch extends LitElement {
             @input=${this._handleInput}
             @keydown=${this._handleKeyDown}
           />
-          ${hasQuery
-            ? html`
-                <button
-                  class="clear-btn"
-                  type="button"
-                  aria-label="Clear search"
-                  @click=${this._handleClear}
-                >
-                  ${icons.x}
-                </button>
-              `
-            : nothing}
+          ${
+            hasQuery
+              ? html`
+                  <button
+                    class="clear-btn"
+                    type="button"
+                    aria-label="Clear search"
+                    @click=${this._handleClear}
+                  >
+                    ${icons.x}
+                  </button>
+                `
+              : nothing
+          }
         </div>
         <button
           class="nav-btn"

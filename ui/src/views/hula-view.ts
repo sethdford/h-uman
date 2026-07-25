@@ -304,44 +304,52 @@ export class ScHulaView extends GatewayAwareLitElement {
         </hu-section-header>
       </hu-page-hero>
 
-      ${this.listError
-        ? html`<div class="error-banner" role="alert">${this.listError}</div>`
-        : nothing}
-      ${this.loading
-        ? html`<hu-skeleton style="height:6rem;border-radius:var(--hu-radius)"></hu-skeleton>`
-        : nothing}
-      ${!this.loading && this.analytics
-        ? html`
-            <div class="stats">
-              <hu-stat-card
-                label="Trace files"
-                .value=${this.analytics.file_count ?? 0}
-              ></hu-stat-card>
-              <hu-stat-card
-                label="Successful runs"
-                .value=${this.analytics.success_count ?? 0}
-              ></hu-stat-card>
-              <hu-stat-card
-                label="Failed runs"
-                .value=${this.analytics.fail_count ?? 0}
-              ></hu-stat-card>
-              <hu-stat-card
-                label="Trace steps (total)"
-                .value=${this.analytics.total_trace_steps ?? 0}
-              ></hu-stat-card>
-            </div>
-          `
-        : nothing}
+      ${
+        this.listError
+          ? html`<div class="error-banner" role="alert">${this.listError}</div>`
+          : nothing
+      }
+      ${
+        this.loading
+          ? html`<hu-skeleton style="height:6rem;border-radius:var(--hu-radius)"></hu-skeleton>`
+          : nothing
+      }
+      ${
+        !this.loading && this.analytics
+          ? html`
+              <div class="stats">
+                <hu-stat-card
+                  label="Trace files"
+                  .value=${this.analytics.file_count ?? 0}
+                ></hu-stat-card>
+                <hu-stat-card
+                  label="Successful runs"
+                  .value=${this.analytics.success_count ?? 0}
+                ></hu-stat-card>
+                <hu-stat-card
+                  label="Failed runs"
+                  .value=${this.analytics.fail_count ?? 0}
+                ></hu-stat-card>
+                <hu-stat-card
+                  label="Trace steps (total)"
+                  .value=${this.analytics.total_trace_steps ?? 0}
+                ></hu-stat-card>
+              </div>
+            `
+          : nothing
+      }
 
       <div class="layout">
         <hu-card>
           <hu-section-header heading="Saved traces"></hu-section-header>
-          ${!this.loading && !this.traces.length
-            ? html`<hu-empty-state
-                heading="No traces yet"
-                description="Run a HuLa program with HU_HULA_TRACE_DIR set (or use the default ~/.human/hula_traces on POSIX). The gateway lists traces on POSIX builds only."
-              ></hu-empty-state>`
-            : nothing}
+          ${
+            !this.loading && !this.traces.length
+              ? html`<hu-empty-state
+                  heading="No traces yet"
+                  description="Run a HuLa program with HU_HULA_TRACE_DIR set (or use the default ~/.human/hula_traces on POSIX). The gateway lists traces on POSIX builds only."
+                ></hu-empty-state>`
+              : nothing
+          }
           <div class="trace-list hu-stagger-motion9" role="list">
             ${this.traces.map(
               (t) => html`
@@ -354,21 +362,25 @@ export class ScHulaView extends GatewayAwareLitElement {
                 >
                   <span class="trace-id">${t.id ?? "?"}</span>
                   <span class="trace-meta"
-                    >${t.size != null ? `${t.size} B` : ""}${t.mtime != null
-                      ? ` · ${new Date((t.mtime as number) * 1000).toLocaleString()}`
-                      : ""}</span
+                    >${t.size != null ? `${t.size} B` : ""}${
+                      t.mtime != null
+                        ? ` · ${new Date((t.mtime as number) * 1000).toLocaleString()}`
+                        : ""
+                    }</span
                   >
                 </button>
               `,
             )}
           </div>
-          ${this.directory
-            ? html`<p
-                style="font-size:var(--hu-text-xs);color:var(--hu-text-muted);margin-top:var(--hu-space-md);"
-              >
-                ${this.directory}
-              </p>`
-            : nothing}
+          ${
+            this.directory
+              ? html`<p
+                  style="font-size:var(--hu-text-xs);color:var(--hu-text-muted);margin-top:var(--hu-space-md);"
+                >
+                  ${this.directory}
+                </p>`
+              : nothing
+          }
         </hu-card>
 
         <hu-card>
@@ -401,36 +413,44 @@ export class ScHulaView extends GatewayAwareLitElement {
               >
             </div>
           </div>
-          ${this.detailError
-            ? html`<div class="detail-error" role="alert">${this.detailError}</div>`
-            : nothing}
-          ${this.detailLoading
-            ? html`<hu-skeleton style="height:12rem;border-radius:var(--hu-radius)"></hu-skeleton>`
-            : this.detail?.record
-              ? html`
-                  <p style="font-size:var(--hu-text-sm);margin-bottom:var(--hu-space-md);">
-                    <strong>${this.detail.record.program_name ?? "program"}</strong>
-                    · ${this.detail.record.success ? "success" : "failed"}
-                  </p>
-                  ${this.detail.trace_truncated
-                    ? html`<p class="trace-window-note" role="status">
-                        Showing ${this.detail.trace_returned_count ?? "—"} of
-                        ${this.detail.trace_total_steps ?? "—"} steps (offset
-                        ${this.detail.trace_offset ?? 0}; limit ${this.detail.trace_limit ?? "—"}).
-                        Re-fetch with RPC params to page.
-                      </p>`
-                    : nothing}
-                  <hu-hula-tree .steps=${this.detail.record.trace ?? []}></hu-hula-tree>
-                `
-              : this.selected?.id
-                ? html`<hu-empty-state
-                    heading="Could not load trace"
-                    description="The list entry is selected but no record was returned. Try another file or refresh."
-                  ></hu-empty-state>`
-                : html`<hu-empty-state
-                    heading="Select a trace"
-                    description="Choose a file on the left to inspect its execution tree."
-                  ></hu-empty-state>`}
+          ${
+            this.detailError
+              ? html`<div class="detail-error" role="alert">${this.detailError}</div>`
+              : nothing
+          }
+          ${
+            this.detailLoading
+              ? html`<hu-skeleton
+                  style="height:12rem;border-radius:var(--hu-radius)"
+                ></hu-skeleton>`
+              : this.detail?.record
+                ? html`
+                    <p style="font-size:var(--hu-text-sm);margin-bottom:var(--hu-space-md);">
+                      <strong>${this.detail.record.program_name ?? "program"}</strong>
+                      · ${this.detail.record.success ? "success" : "failed"}
+                    </p>
+                    ${
+                      this.detail.trace_truncated
+                        ? html`<p class="trace-window-note" role="status">
+                            Showing ${this.detail.trace_returned_count ?? "—"} of
+                            ${this.detail.trace_total_steps ?? "—"} steps (offset
+                            ${this.detail.trace_offset ?? 0}; limit
+                            ${this.detail.trace_limit ?? "—"}). Re-fetch with RPC params to page.
+                          </p>`
+                        : nothing
+                    }
+                    <hu-hula-tree .steps=${this.detail.record.trace ?? []}></hu-hula-tree>
+                  `
+                : this.selected?.id
+                  ? html`<hu-empty-state
+                      heading="Could not load trace"
+                      description="The list entry is selected but no record was returned. Try another file or refresh."
+                    ></hu-empty-state>`
+                  : html`<hu-empty-state
+                      heading="Select a trace"
+                      description="Choose a file on the left to inspect its execution tree."
+                    ></hu-empty-state>`
+          }
         </hu-card>
       </div>
     `;

@@ -73,68 +73,76 @@ export class ScSkillRegistry extends LitElement {
             @hu-input=${this._onSearch}
           ></hu-input>
         </div>
-        ${this.tags.length > 0
-          ? html`<div class="tag-chips" role="radiogroup" aria-label="Filter by tag">
-              <button
-                class="tag-chip"
-                role="radio"
-                aria-checked=${!this.activeTag}
-                @click=${() => (this.activeTag = "")}
-              >
-                All
-              </button>
-              ${this.tags.map(
-                (tag) =>
-                  html`<button
-                    class="tag-chip"
-                    role="radio"
-                    aria-checked=${this.activeTag === tag}
-                    @click=${() => (this.activeTag = this.activeTag === tag ? "" : tag)}
-                  >
-                    ${tag}
-                  </button>`,
-              )}
-            </div>`
-          : nothing}
-        ${this.loading
-          ? html`<div class="skills-grid hu-stagger">
-              <hu-skeleton variant="card" height="140px"></hu-skeleton>
-              <hu-skeleton variant="card" height="140px"></hu-skeleton>
-              <hu-skeleton variant="card" height="140px"></hu-skeleton>
-            </div>`
-          : this._filteredResults.length === 0
-            ? html`<hu-empty-state
-                .icon=${icons.compass}
-                heading=${this.query
-                  ? `No results for "${this.query}"`
-                  : this.activeTag
-                    ? "No registry skills with this tag"
-                    : "No results"}
-                description=${this.activeTag
-                  ? "Try a different tag or search query."
-                  : "Try a different search query."}
-              ></hu-empty-state>`
-            : html`<div class="skills-grid hu-scroll-reveal-stagger">
-                ${this._filteredResults.map(
-                  (e) => html`
-                    <hu-skill-card
-                      variant="registry"
-                      .skill=${e}
-                      .installed=${installedSet.has(e.name)}
-                      .actionLoading=${this.actionLoading}
-                      @install=${(ev: CustomEvent<{ skill: RegistrySkill }>) => {
-                        this.dispatchEvent(
-                          new CustomEvent("install", {
-                            detail: ev.detail,
-                            bubbles: true,
-                            composed: true,
-                          }),
-                        );
-                      }}
-                    ></hu-skill-card>
-                  `,
+        ${
+          this.tags.length > 0
+            ? html`<div class="tag-chips" role="radiogroup" aria-label="Filter by tag">
+                <button
+                  class="tag-chip"
+                  role="radio"
+                  aria-checked=${!this.activeTag}
+                  @click=${() => (this.activeTag = "")}
+                >
+                  All
+                </button>
+                ${this.tags.map(
+                  (tag) =>
+                    html`<button
+                      class="tag-chip"
+                      role="radio"
+                      aria-checked=${this.activeTag === tag}
+                      @click=${() => (this.activeTag = this.activeTag === tag ? "" : tag)}
+                    >
+                      ${tag}
+                    </button>`,
                 )}
-              </div>`}
+              </div>`
+            : nothing
+        }
+        ${
+          this.loading
+            ? html`<div class="skills-grid hu-stagger">
+                <hu-skeleton variant="card" height="140px"></hu-skeleton>
+                <hu-skeleton variant="card" height="140px"></hu-skeleton>
+                <hu-skeleton variant="card" height="140px"></hu-skeleton>
+              </div>`
+            : this._filteredResults.length === 0
+              ? html`<hu-empty-state
+                  .icon=${icons.compass}
+                  heading=${
+                    this.query
+                      ? `No results for "${this.query}"`
+                      : this.activeTag
+                        ? "No registry skills with this tag"
+                        : "No results"
+                  }
+                  description=${
+                    this.activeTag
+                      ? "Try a different tag or search query."
+                      : "Try a different search query."
+                  }
+                ></hu-empty-state>`
+              : html`<div class="skills-grid hu-scroll-reveal-stagger">
+                  ${this._filteredResults.map(
+                    (e) => html`
+                      <hu-skill-card
+                        variant="registry"
+                        .skill=${e}
+                        .installed=${installedSet.has(e.name)}
+                        .actionLoading=${this.actionLoading}
+                        @install=${(ev: CustomEvent<{ skill: RegistrySkill }>) => {
+                          this.dispatchEvent(
+                            new CustomEvent("install", {
+                              detail: ev.detail,
+                              bubbles: true,
+                              composed: true,
+                            }),
+                          );
+                        }}
+                      ></hu-skill-card>
+                    `,
+                  )}
+                </div>`
+        }
       </div>
     `;
   }

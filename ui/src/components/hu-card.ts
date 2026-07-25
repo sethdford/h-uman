@@ -550,14 +550,16 @@ export class ScCard extends LitElement {
         @pointermove=${onTiltMove}
         @pointerleave=${onTiltLeave}
       >
-        ${this.tilt
-          ? html`
-              <div class="tilt-inner">
-                <div class="tilt-light" aria-hidden="true"></div>
-                <slot></slot>
-              </div>
-            `
-          : html`<slot></slot>`}
+        ${
+          this.tilt
+            ? html`
+                <div class="tilt-inner">
+                  <div class="tilt-light" aria-hidden="true"></div>
+                  <slot></slot>
+                </div>
+              `
+            : html`<slot></slot>`
+        }
       </div>
     `;
   }

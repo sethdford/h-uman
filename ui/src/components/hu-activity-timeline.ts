@@ -74,10 +74,7 @@ export class ScActivityTimeline extends LitElement {
         time: formatRelative(ts),
         message,
         status: (ev.level === "error" ? "error" : ev.level === "success" ? "success" : "info") as
-          | "success"
-          | "error"
-          | "info"
-          | "pending",
+          "success" | "error" | "info" | "pending",
         detail: ev.detail,
       };
     });
@@ -86,13 +83,15 @@ export class ScActivityTimeline extends LitElement {
   override render() {
     return html`
       <div class="section-label">Live Activity</div>
-      ${this.events.length > 0
-        ? html`
-            <div class="activity-sparkline">
-              <hu-chart type="line" .data=${this._sparklineData} height=${48}></hu-chart>
-            </div>
-          `
-        : nothing}
+      ${
+        this.events.length > 0
+          ? html`
+              <div class="activity-sparkline">
+                <hu-chart type="line" .data=${this._sparklineData} height=${48}></hu-chart>
+              </div>
+            `
+          : nothing
+      }
       <hu-timeline .items=${this._timelineItems} .max=${this.maxItems}></hu-timeline>
     `;
   }

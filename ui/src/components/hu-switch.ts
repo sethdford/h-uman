@@ -140,9 +140,11 @@ export class ScSwitch extends LitElement {
       >
         <span class="thumb" aria-hidden="true"></span>
       </div>
-      ${this.label
-        ? html`<span id="switch-label-${this._switchId}" class="label">${this.label}</span>`
-        : null}
+      ${
+        this.label
+          ? html`<span id="switch-label-${this._switchId}" class="label">${this.label}</span>`
+          : null
+      }
     `;
   }
 }

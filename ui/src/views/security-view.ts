@@ -479,43 +479,49 @@ export class ScSecurityView extends GatewayAwareLitElement {
               @hu-change=${this._onNetProxyToggle}
             ></hu-switch>
           </div>
-          ${proxy?.enabled
-            ? html`
-                <div class="policy-row">
-                  <span class="policy-label">Status</span>
-                  <span class="policy-value enabled">active</span>
-                </div>
-                <div class="policy-row">
-                  <span class="policy-label">Deny all</span>
-                  <span class="policy-value ${proxy.deny_all ? "warning" : "disabled"}">
-                    ${proxy.deny_all ? "yes" : "no"}
-                  </span>
-                </div>
-                ${proxy.proxy_addr
-                  ? html`
-                      <div class="policy-row">
-                        <span class="policy-label">Proxy</span>
-                        <span class="policy-value">${proxy.proxy_addr}</span>
-                      </div>
-                    `
-                  : nothing}
-                ${proxy.allowed_domains && proxy.allowed_domains.length > 0
-                  ? html`
-                      <div class="policy-label domains-label">Allowed domains</div>
-                      <div class="domain-list">
-                        ${proxy.allowed_domains.map(
-                          (d) => html`<span class="domain-tag">${d}</span>`,
-                        )}
-                      </div>
-                    `
-                  : nothing}
-              `
-            : html`
-                <div class="policy-row">
-                  <span class="policy-label">Status</span>
-                  <span class="policy-value disabled">not configured</span>
-                </div>
-              `}
+          ${
+            proxy?.enabled
+              ? html`
+                  <div class="policy-row">
+                    <span class="policy-label">Status</span>
+                    <span class="policy-value enabled">active</span>
+                  </div>
+                  <div class="policy-row">
+                    <span class="policy-label">Deny all</span>
+                    <span class="policy-value ${proxy.deny_all ? "warning" : "disabled"}">
+                      ${proxy.deny_all ? "yes" : "no"}
+                    </span>
+                  </div>
+                  ${
+                    proxy.proxy_addr
+                      ? html`
+                          <div class="policy-row">
+                            <span class="policy-label">Proxy</span>
+                            <span class="policy-value">${proxy.proxy_addr}</span>
+                          </div>
+                        `
+                      : nothing
+                  }
+                  ${
+                    proxy.allowed_domains && proxy.allowed_domains.length > 0
+                      ? html`
+                          <div class="policy-label domains-label">Allowed domains</div>
+                          <div class="domain-list">
+                            ${proxy.allowed_domains.map(
+                              (d) => html`<span class="domain-tag">${d}</span>`,
+                            )}
+                          </div>
+                        `
+                      : nothing
+                  }
+                `
+              : html`
+                  <div class="policy-row">
+                    <span class="policy-label">Status</span>
+                    <span class="policy-value disabled">not configured</span>
+                  </div>
+                `
+          }
         </div>
       </hu-card>
     `;
@@ -537,14 +543,16 @@ export class ScSecurityView extends GatewayAwareLitElement {
             <span class="policy-label">Status</span>
             <span class="policy-value enabled">Paired</span>
           </div>
-          ${info?.device_name || pairedDate
-            ? html`
-                <div class="pairing-info">
-                  ${info?.device_name ? html`<div>Device: ${info.device_name}</div>` : nothing}
-                  ${pairedDate ? html`<div>Paired: ${pairedDate}</div>` : nothing}
-                </div>
-              `
-            : nothing}
+          ${
+            info?.device_name || pairedDate
+              ? html`
+                  <div class="pairing-info">
+                    ${info?.device_name ? html`<div>Device: ${info.device_name}</div>` : nothing}
+                    ${pairedDate ? html`<div>Paired: ${pairedDate}</div>` : nothing}
+                  </div>
+                `
+              : nothing
+          }
           <div class="control-row">
             <hu-button
               variant="secondary"
@@ -611,9 +619,11 @@ export class ScSecurityView extends GatewayAwareLitElement {
               <span class="check-icon ${this.autonomyLevel < 2 ? "pass" : "warn"}">
                 ${this.autonomyLevel < 2 ? icons.check : icons.warning}
               </span>
-              ${this.autonomyLevel < 2
-                ? "User approval required before tool execution"
-                : "Tool execution without user approval (autonomy = 2)"}
+              ${
+                this.autonomyLevel < 2
+                  ? "User approval required before tool execution"
+                  : "Tool execution without user approval (autonomy = 2)"
+              }
             </div>
           </div>
         </div>
@@ -635,11 +645,9 @@ export class ScSecurityView extends GatewayAwareLitElement {
               <div class="card-inner">
                 <div class="card-title">${e.tool}</div>
                 <hu-badge
-                  variant=${e.verdict === "allow"
-                    ? "success"
-                    : e.verdict === "deny"
-                      ? "error"
-                      : "info"}
+                  variant=${
+                    e.verdict === "allow" ? "success" : e.verdict === "deny" ? "error" : "info"
+                  }
                   >${e.verdict}</hu-badge
                 >
                 <p
@@ -692,11 +700,9 @@ export class ScSecurityView extends GatewayAwareLitElement {
         <hu-stat-card
           .value=${this.securityScore}
           label="Security Score"
-          accent=${this.securityScore >= 75
-            ? "primary"
-            : this.securityScore >= 50
-              ? "secondary"
-              : "error"}
+          accent=${
+            this.securityScore >= 75 ? "primary" : this.securityScore >= 50 ? "secondary" : "error"
+          }
           style="--hu-stagger-delay: 0ms"
         ></hu-stat-card>
         <hu-stat-card

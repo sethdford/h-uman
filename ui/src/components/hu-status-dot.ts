@@ -110,9 +110,9 @@ export class ScStatusDot extends LitElement {
       this.status === "connected" || this.status === "operational" || this.status === "online";
     return html`
       <span
-        class="dot size-${this.size} status-${this.status} ${breathing
-          ? "hu-status-breathing"
-          : ""}"
+        class="dot size-${this.size} status-${this.status} ${
+          breathing ? "hu-status-breathing" : ""
+        }"
         role="status"
         aria-label="Status: ${this.status}"
       ></span>

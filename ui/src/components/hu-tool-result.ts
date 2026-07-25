@@ -584,13 +584,15 @@ export class ScToolResult extends LitElement {
             <span class="subtitle">${this._statusSubtitle()}</span>
           </div>
         </div>
-        ${this.status === "running"
-          ? html`
-              <div class="header-progress" aria-hidden="true">
-                <div class="header-progress-bar"></div>
-              </div>
-            `
-          : nothing}
+        ${
+          this.status === "running"
+            ? html`
+                <div class="header-progress" aria-hidden="true">
+                  <div class="header-progress-bar"></div>
+                </div>
+              `
+            : nothing
+        }
       </div>
     `;
   }
@@ -636,9 +638,9 @@ export class ScToolResult extends LitElement {
       <div class="section">
         <button
           type="button"
-          class="section-toggle ${err
-            ? "section-toggle--output-error"
-            : "section-toggle--output-success"}"
+          class="section-toggle ${
+            err ? "section-toggle--output-error" : "section-toggle--output-success"
+          }"
           aria-expanded=${expanded}
           aria-controls=${bodyId}
           id=${toggleId}
@@ -679,15 +681,16 @@ export class ScToolResult extends LitElement {
 
     return html`
       <div
-        class="container ${statusClass} ${this._enterActive ? "container--enter" : ""} ${this
-          ._flashActive
-          ? "status-flash"
-          : ""}"
+        class="container ${statusClass} ${this._enterActive ? "container--enter" : ""} ${
+          this._flashActive ? "status-flash" : ""
+        }"
       >
         ${this._renderHeader()}
-        ${this._hasInputSection
-          ? html`${this._renderInputSection()}${showOutput ? this._renderOutputSection() : nothing}`
-          : this._renderLegacyBody()}
+        ${
+          this._hasInputSection
+            ? html`${this._renderInputSection()}${showOutput ? this._renderOutputSection() : nothing}`
+            : this._renderLegacyBody()
+        }
       </div>
     `;
   }

@@ -1202,105 +1202,120 @@ export class ScMessageThread extends LitElement {
                     .ariaMessageTotal=${messageTotal}
                     @contextmenu=${(ev: MouseEvent) => this._onContextMenu(ev, item)}
                   >
-                    ${item.role === "user" && item.status
-                      ? html`<hu-delivery-status
-                          slot="status"
-                          .status=${item.status}
-                        ></hu-delivery-status>`
-                      : nothing}
-                    ${item.ts != null
-                      ? html`<span slot="meta">${formatTime(item.ts)}</span>`
-                      : nothing}
+                    ${
+                      item.role === "user" && item.status
+                        ? html`<hu-delivery-status
+                            slot="status"
+                            .status=${item.status}
+                          ></hu-delivery-status>`
+                        : nothing
+                    }
+                    ${
+                      item.ts != null
+                        ? html`<span slot="meta">${formatTime(item.ts)}</span>`
+                        : nothing
+                    }
                   </hu-chat-bubble>
-                  ${item.reactions?.length
-                    ? html`
-                        <div class="reaction-pills">
-                          ${item.reactions.map(
-                            (r: { value: string; count: number; mine: boolean }, ri: number) => {
-                              const iconKey = VALUE_TO_ICON[r.value];
-                              const icon = iconKey ? icons[iconKey] : null;
-                              return html`
-                                <button
-                                  class="reaction-pill ${r.mine ? "mine" : ""}"
-                                  data-stagger="${Math.min(ri, 3)}"
-                                  @click=${() => this._toggleReaction(idx, r.value)}
-                                  aria-label="${r.value} ${r.count}"
-                                >
-                                  ${icon
-                                    ? html`<span class="reaction-icon">${icon}</span>`
-                                    : html`<span class="reaction-fallback">${r.value}</span>`}
-                                  <span class="reaction-count">${r.count}</span>
-                                </button>
-                              `;
-                            },
-                          )}
-                        </div>
-                      `
-                    : nothing}
-                  ${item.branchCount != null && item.branchCount > 1
-                    ? html`
-                        <div class="branch-nav">
-                          <button
-                            class="branch-btn"
-                            @click=${() => this._navigateBranch(idx, -1)}
-                            aria-label="Previous branch"
-                          >
-                            ${icons["caret-left"] ?? icons.chevron}
-                          </button>
-                          <span class="branch-label"
-                            >${(item.branchIndex ?? 0) + 1} / ${item.branchCount}</span
-                          >
-                          <button
-                            class="branch-btn"
-                            @click=${() => this._navigateBranch(idx, 1)}
-                            aria-label="Next branch"
-                          >
-                            ${icons["caret-right"] ?? icons["chevron-right"]}
-                          </button>
-                        </div>
-                      `
-                    : nothing}
-                  ${item.role === "assistant" &&
-                  item.id &&
-                  this.artifacts.some((a) => a.messageId === item.id)
-                    ? html`
-                        <div class="artifact-cards">
-                          ${this.artifacts
-                            .filter((a) => a.messageId === item.id)
-                            .map(
-                              (a) => html`
-                                <button
-                                  type="button"
-                                  class="artifact-card"
-                                  @click=${() =>
-                                    this.dispatchEvent(
-                                      new CustomEvent("open-artifact", {
-                                        detail: { id: a.id },
-                                        bubbles: true,
-                                        composed: true,
-                                      }),
-                                    )}
-                                  aria-label=${`Open artifact: ${a.title}`}
-                                >
-                                  <span class="artifact-icon"
-                                    >${icons[ARTIFACT_TYPE_ICON[a.type]] ??
-                                    icons["file-text"]}</span
+                  ${
+                    item.reactions?.length
+                      ? html`
+                          <div class="reaction-pills">
+                            ${item.reactions.map(
+                              (r: { value: string; count: number; mine: boolean }, ri: number) => {
+                                const iconKey = VALUE_TO_ICON[r.value];
+                                const icon = iconKey ? icons[iconKey] : null;
+                                return html`
+                                  <button
+                                    class="reaction-pill ${r.mine ? "mine" : ""}"
+                                    data-stagger="${Math.min(ri, 3)}"
+                                    @click=${() => this._toggleReaction(idx, r.value)}
+                                    aria-label="${r.value} ${r.count}"
                                   >
-                                  <span class="artifact-title">${a.title}</span>
-                                </button>
-                              `,
+                                    ${
+                                      icon
+                                        ? html`<span class="reaction-icon">${icon}</span>`
+                                        : html`<span class="reaction-fallback">${r.value}</span>`
+                                    }
+                                    <span class="reaction-count">${r.count}</span>
+                                  </button>
+                                `;
+                              },
                             )}
-                        </div>
-                      `
-                    : nothing}
+                          </div>
+                        `
+                      : nothing
+                  }
+                  ${
+                    item.branchCount != null && item.branchCount > 1
+                      ? html`
+                          <div class="branch-nav">
+                            <button
+                              class="branch-btn"
+                              @click=${() => this._navigateBranch(idx, -1)}
+                              aria-label="Previous branch"
+                            >
+                              ${icons["caret-left"] ?? icons.chevron}
+                            </button>
+                            <span class="branch-label"
+                              >${(item.branchIndex ?? 0) + 1} / ${item.branchCount}</span
+                            >
+                            <button
+                              class="branch-btn"
+                              @click=${() => this._navigateBranch(idx, 1)}
+                              aria-label="Next branch"
+                            >
+                              ${icons["caret-right"] ?? icons["chevron-right"]}
+                            </button>
+                          </div>
+                        `
+                      : nothing
+                  }
+                  ${
+                    item.role === "assistant" &&
+                    item.id &&
+                    this.artifacts.some((a) => a.messageId === item.id)
+                      ? html`
+                          <div class="artifact-cards">
+                            ${this.artifacts
+                              .filter((a) => a.messageId === item.id)
+                              .map(
+                                (a) => html`
+                                  <button
+                                    type="button"
+                                    class="artifact-card"
+                                    @click=${() =>
+                                      this.dispatchEvent(
+                                        new CustomEvent("open-artifact", {
+                                          detail: { id: a.id },
+                                          bubbles: true,
+                                          composed: true,
+                                        }),
+                                      )}
+                                    aria-label=${`Open artifact: ${a.title}`}
+                                  >
+                                    <span class="artifact-icon"
+                                      >${
+                                        icons[ARTIFACT_TYPE_ICON[a.type]] ?? icons["file-text"]
+                                      }</span
+                                    >
+                                    <span class="artifact-title">${a.title}</span>
+                                  </button>
+                                `,
+                              )}
+                          </div>
+                        `
+                      : nothing
+                  }
                 </div>
               </div>
             </div>
           `;
         })}
-        ${role === "assistant"
-          ? html`<span slot="avatar">${icons["chat-circle"]}</span>`
-          : html`<span slot="avatar">${icons.user}</span>`}
+        ${
+          role === "assistant"
+            ? html`<span slot="avatar">${icons["chat-circle"]}</span>`
+            : html`<span slot="avatar">${icons.user}</span>`
+        }
         <span slot="timestamp">${formatTime(lastTs)}</span>
       </hu-message-group>
     `;
@@ -1341,134 +1356,154 @@ export class ScMessageThread extends LitElement {
         @keydown=${this._onKeydown}
         @click=${this._onThreadClick}
       >
-        ${this.historyLoading
-          ? html`
-              <div class="history-skeleton">
-                <hu-skeleton variant="card" height="60px"></hu-skeleton>
-                <hu-skeleton variant="card" height="60px"></hu-skeleton>
-                <hu-skeleton variant="card" height="60px"></hu-skeleton>
-              </div>
-            `
-          : isEmpty
+        ${
+          this.historyLoading
             ? html`
-                <div class="hero">
-                  <div>
-                    <div class="hero-greeting">${getTimeGreeting()}</div>
-                    <div class="hero-sub">What would you like to work on?</div>
-                  </div>
-                  <div class="hero-suggestions">
-                    ${HERO_SUGGESTIONS.map(
-                      (s) => html`
-                        <button
-                          class="hero-chip"
-                          type="button"
-                          @click=${() => this._onHeroChipClick(s.label)}
-                        >
-                          ${icons[s.icon] ?? nothing}
-                          <span>${s.label}</span>
-                        </button>
-                      `,
-                    )}
-                  </div>
+                <div class="history-skeleton">
+                  <hu-skeleton variant="card" height="60px"></hu-skeleton>
+                  <hu-skeleton variant="card" height="60px"></hu-skeleton>
+                  <hu-skeleton variant="card" height="60px"></hu-skeleton>
                 </div>
               `
-            : html`
-                ${this.hasEarlierMessages
-                  ? html`
-                      <div class="pull-to-load" aria-hidden="true"></div>
-                      <div class="load-earlier">
-                        ${this.loadingEarlier
-                          ? html`<hu-skeleton variant="card" height="40px"></hu-skeleton>`
-                          : html`<button
-                              class="load-earlier-btn"
-                              @click=${this._onLoadEarlier}
-                              aria-label="Load earlier messages"
-                            >
-                              Load earlier messages
-                            </button>`}
-                      </div>
-                    `
-                  : nothing}
-                ${blocks.map((block) => {
-                  if (block.type === "time-divider")
-                    return html`<div class="time-divider">
-                      <span>${formatTimestampForDivider(block.ts)}</span>
-                    </div>`;
-                  if (block.type === "message-group") return this._renderMessageGroup(block);
-                  if (block.type === "tool_call")
-                    return html`<hu-tool-result
-                      .tool=${block.item.name}
-                      .status=${block.item.status === "completed"
-                        ? block.item.result?.startsWith("Error")
-                          ? "error"
-                          : "success"
-                        : "running"}
-                      .input=${block.item.input ?? ""}
-                      .content=${block.item.result ?? ""}
-                    ></hu-tool-result>`;
-                  if (block.type === "thinking")
-                    return html`<hu-reasoning-block
-                      .content=${block.item.content}
-                      .streaming=${block.item.streaming}
-                      .duration=${block.item.duration ?? ""}
-                    ></hu-reasoning-block>`;
-                  if (block.type === "memory")
-                    return html`<hu-memory-event
-                      .action=${block.item.action}
-                      .key=${block.item.key}
-                      .value=${block.item.value ?? ""}
-                    ></hu-memory-event>`;
-                  if (block.type === "web_search")
-                    return html`<hu-web-search-result
-                      .query=${block.item.query}
-                      .sites=${block.item.sites}
-                      .sources=${block.item.sources ?? []}
-                    ></hu-web-search-result>`;
-                  return nothing;
-                })}
-                ${!this.isWaiting &&
-                this._findLastAssistantIdx() >= 0 &&
-                this.suggestions.length > 0
-                  ? html`
-                      <div class="suggestions">
-                        ${this.suggestions.map(
-                          (s, i) => html`
-                            <button
-                              class="suggestion-chip"
-                              data-stagger="${Math.min(i, 2)}"
-                              type="button"
-                              @click=${() => this._onSuggestionClick(s)}
-                            >
-                              ${s}
-                            </button>
-                          `,
-                        )}
-                      </div>
-                    `
-                  : nothing}
-                ${this.isWaiting
-                  ? html`<hu-typing-indicator .elapsed=${this.streamElapsed}></hu-typing-indicator>`
-                  : nothing}
-              `}
+            : isEmpty
+              ? html`
+                  <div class="hero">
+                    <div>
+                      <div class="hero-greeting">${getTimeGreeting()}</div>
+                      <div class="hero-sub">What would you like to work on?</div>
+                    </div>
+                    <div class="hero-suggestions">
+                      ${HERO_SUGGESTIONS.map(
+                        (s) => html`
+                          <button
+                            class="hero-chip"
+                            type="button"
+                            @click=${() => this._onHeroChipClick(s.label)}
+                          >
+                            ${icons[s.icon] ?? nothing}
+                            <span>${s.label}</span>
+                          </button>
+                        `,
+                      )}
+                    </div>
+                  </div>
+                `
+              : html`
+                  ${
+                    this.hasEarlierMessages
+                      ? html`
+                          <div class="pull-to-load" aria-hidden="true"></div>
+                          <div class="load-earlier">
+                            ${
+                              this.loadingEarlier
+                                ? html`<hu-skeleton variant="card" height="40px"></hu-skeleton>`
+                                : html`<button
+                                    class="load-earlier-btn"
+                                    @click=${this._onLoadEarlier}
+                                    aria-label="Load earlier messages"
+                                  >
+                                    Load earlier messages
+                                  </button>`
+                            }
+                          </div>
+                        `
+                      : nothing
+                  }
+                  ${blocks.map((block) => {
+                    if (block.type === "time-divider")
+                      return html`<div class="time-divider">
+                        <span>${formatTimestampForDivider(block.ts)}</span>
+                      </div>`;
+                    if (block.type === "message-group") return this._renderMessageGroup(block);
+                    if (block.type === "tool_call")
+                      return html`<hu-tool-result
+                        .tool=${block.item.name}
+                        .status=${
+                          block.item.status === "completed"
+                            ? block.item.result?.startsWith("Error")
+                              ? "error"
+                              : "success"
+                            : "running"
+                        }
+                        .input=${block.item.input ?? ""}
+                        .content=${block.item.result ?? ""}
+                      ></hu-tool-result>`;
+                    if (block.type === "thinking")
+                      return html`<hu-reasoning-block
+                        .content=${block.item.content}
+                        .streaming=${block.item.streaming}
+                        .duration=${block.item.duration ?? ""}
+                      ></hu-reasoning-block>`;
+                    if (block.type === "memory")
+                      return html`<hu-memory-event
+                        .action=${block.item.action}
+                        .key=${block.item.key}
+                        .value=${block.item.value ?? ""}
+                      ></hu-memory-event>`;
+                    if (block.type === "web_search")
+                      return html`<hu-web-search-result
+                        .query=${block.item.query}
+                        .sites=${block.item.sites}
+                        .sources=${block.item.sources ?? []}
+                      ></hu-web-search-result>`;
+                    return nothing;
+                  })}
+                  ${
+                    !this.isWaiting &&
+                    this._findLastAssistantIdx() >= 0 &&
+                    this.suggestions.length > 0
+                      ? html`
+                          <div class="suggestions">
+                            ${this.suggestions.map(
+                              (s, i) => html`
+                                <button
+                                  class="suggestion-chip"
+                                  data-stagger="${Math.min(i, 2)}"
+                                  type="button"
+                                  @click=${() => this._onSuggestionClick(s)}
+                                >
+                                  ${s}
+                                </button>
+                              `,
+                            )}
+                          </div>
+                        `
+                      : nothing
+                  }
+                  ${
+                    this.isWaiting
+                      ? html`<hu-typing-indicator
+                          .elapsed=${this.streamElapsed}
+                        ></hu-typing-indicator>`
+                      : nothing
+                  }
+                `
+        }
       </div>
-      ${this.showScrollPill
-        ? html`
-            <button
-              class="scroll-bottom-pill"
-              @click=${() => {
-                this.scrollToBottom();
-                this._unseenCount = 0;
-              }}
-              aria-label=${this._unseenCount > 0
-                ? `${this._unseenCount} new message${this._unseenCount > 1 ? "s" : ""}`
-                : "Scroll to latest message"}
-            >
-              ${this._unseenCount > 0
-                ? html`${this._unseenCount} new message${this._unseenCount > 1 ? "s" : ""} ↓`
-                : html`<span class="pill-icon">${icons["arrow-down"]}</span> New messages`}
-            </button>
-          `
-        : nothing}
+      ${
+        this.showScrollPill
+          ? html`
+              <button
+                class="scroll-bottom-pill"
+                @click=${() => {
+                  this.scrollToBottom();
+                  this._unseenCount = 0;
+                }}
+                aria-label=${
+                  this._unseenCount > 0
+                    ? `${this._unseenCount} new message${this._unseenCount > 1 ? "s" : ""}`
+                    : "Scroll to latest message"
+                }
+              >
+                ${
+                  this._unseenCount > 0
+                    ? html`${this._unseenCount} new message${this._unseenCount > 1 ? "s" : ""} ↓`
+                    : html`<span class="pill-icon">${icons["arrow-down"]}</span> New messages`
+                }
+              </button>
+            `
+          : nothing
+      }
       <hu-image-viewer
         .src=${this._imageViewerSrc}
         .open=${this._imageViewerOpen}

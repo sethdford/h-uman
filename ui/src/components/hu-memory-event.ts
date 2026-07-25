@@ -121,11 +121,13 @@ export class ScMemoryEvent extends LitElement {
               <span class="action">${actionLabel}</span>
               <span class="key">${this.key}</span>
             </span>
-            ${this.value
-              ? html`<span class="caret ${this._expanded ? "open" : ""}"
-                  >${icons["caret-right"]}</span
-                >`
-              : nothing}
+            ${
+              this.value
+                ? html`<span class="caret ${this._expanded ? "open" : ""}"
+                    >${icons["caret-right"]}</span
+                  >`
+                : nothing
+            }
           </div>
           ${this._expanded && this.value ? html`<div class="detail">${this.value}</div>` : nothing}
         </div>

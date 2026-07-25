@@ -659,79 +659,83 @@ export class ScChatSessionsPanel extends LitElement {
         <button type="button" class="new-chat-btn" @click=${this._onNewChat} aria-label="New chat">
           ${icons["file-text"]} New Chat
         </button>
-        ${this.projects.length > 0 || this._creatingProject
-          ? html`
-              <div class="projects-bar" role="toolbar" aria-label="Projects">
-                <button
-                  class="project-chip ${this._activeProjectFilter === null ? "active" : ""}"
-                  type="button"
-                  @click=${() => (this._activeProjectFilter = null)}
-                >
-                  All
-                </button>
-                ${this.projects.map(
-                  (p) => html`
-                    <button
-                      class="project-chip ${this._activeProjectFilter === p.id ? "active" : ""}"
-                      type="button"
-                      @click=${() => this._toggleProjectFilter(p.id)}
-                      title=${p.instructions ? `Instructions: ${p.instructions}` : p.name}
-                    >
-                      <span
-                        class="project-dot"
-                        style="background: ${this._getProjectColor(p)}"
-                      ></span>
-                      ${p.name} ${p.pinned ? icons["push-pin"] : nothing}
-                    </button>
-                  `,
-                )}
-                <button
-                  class="add-project-chip"
-                  type="button"
-                  @click=${this._startCreateProject}
-                  aria-label="Create project"
-                >
-                  ${icons.plus} Project
-                </button>
-              </div>
-            `
-          : html`
-              <div class="projects-bar">
-                <button
-                  class="add-project-chip"
-                  type="button"
-                  @click=${this._startCreateProject}
-                  aria-label="Create project"
-                >
-                  ${icons.plus} New Project
-                </button>
-              </div>
-            `}
-        ${this._creatingProject
-          ? html`
-              <div class="new-project-row">
-                <input
-                  class="new-project-input"
-                  type="text"
-                  placeholder="Project name..."
-                  .value=${this._newProjectName}
-                  @input=${(e: Event) =>
-                    (this._newProjectName = (e.target as HTMLInputElement).value)}
-                  @keydown=${this._onProjectKeydown}
-                  autofocus
-                />
-                <button
-                  class="new-project-confirm"
-                  type="button"
-                  ?disabled=${!this._newProjectName.trim()}
-                  @click=${this._confirmCreateProject}
-                  aria-label="Create"
-                >
-                  ${icons.check}
-                </button>
-              </div>
-            `
-          : nothing}
+        ${
+          this.projects.length > 0 || this._creatingProject
+            ? html`
+                <div class="projects-bar" role="toolbar" aria-label="Projects">
+                  <button
+                    class="project-chip ${this._activeProjectFilter === null ? "active" : ""}"
+                    type="button"
+                    @click=${() => (this._activeProjectFilter = null)}
+                  >
+                    All
+                  </button>
+                  ${this.projects.map(
+                    (p) => html`
+                      <button
+                        class="project-chip ${this._activeProjectFilter === p.id ? "active" : ""}"
+                        type="button"
+                        @click=${() => this._toggleProjectFilter(p.id)}
+                        title=${p.instructions ? `Instructions: ${p.instructions}` : p.name}
+                      >
+                        <span
+                          class="project-dot"
+                          style="background: ${this._getProjectColor(p)}"
+                        ></span>
+                        ${p.name} ${p.pinned ? icons["push-pin"] : nothing}
+                      </button>
+                    `,
+                  )}
+                  <button
+                    class="add-project-chip"
+                    type="button"
+                    @click=${this._startCreateProject}
+                    aria-label="Create project"
+                  >
+                    ${icons.plus} Project
+                  </button>
+                </div>
+              `
+            : html`
+                <div class="projects-bar">
+                  <button
+                    class="add-project-chip"
+                    type="button"
+                    @click=${this._startCreateProject}
+                    aria-label="Create project"
+                  >
+                    ${icons.plus} New Project
+                  </button>
+                </div>
+              `
+        }
+        ${
+          this._creatingProject
+            ? html`
+                <div class="new-project-row">
+                  <input
+                    class="new-project-input"
+                    type="text"
+                    placeholder="Project name..."
+                    .value=${this._newProjectName}
+                    @input=${(e: Event) =>
+                      (this._newProjectName = (e.target as HTMLInputElement).value)}
+                    @keydown=${this._onProjectKeydown}
+                    autofocus
+                  />
+                  <button
+                    class="new-project-confirm"
+                    type="button"
+                    ?disabled=${!this._newProjectName.trim()}
+                    @click=${this._confirmCreateProject}
+                    aria-label="Create"
+                  >
+                    ${icons.check}
+                  </button>
+                </div>
+              `
+            : nothing
+        }
         <div class="search-wrap">
           <input
             class="search-input"
@@ -752,69 +756,71 @@ export class ScChatSessionsPanel extends LitElement {
           aria-label="Session list"
           @keydown=${this._onListKeydown}
         >
-          ${filteredGroups.length === 0
-            ? this.sessions.length === 0 && !this._searchQuery
-              ? html`
-                  <hu-empty-state
-                    heading="No conversations yet"
-                    description="Start a new chat to begin."
-                    .icon=${icons["chat-circle"] ?? icons["message-square"]}
-                  ></hu-empty-state>
-                `
-              : html`
-                  <hu-empty-state
-                    heading="No sessions"
-                    description="Start a new chat to begin a session."
-                    .icon=${icons["chat-circle"] ?? icons["message-square"]}
-                  ></hu-empty-state>
-                `
-            : groupsWithIndices.map((group) => {
-                return html`
-                  <div class="session-group" role="group" aria-label=${group.label}>
-                    <span class="group-label">${group.label}</span>
-                    ${group.sessions.map((s, si) => {
-                      const flatIndex = group.startIndex + si;
-                      const isFocused = flatIndex === this._focusedIndex;
-                      return html`
-                        <div
-                          class="session-item ${s.active ? "active" : ""} ${isFocused
-                            ? "focused"
-                            : ""}"
-                          role="option"
-                          tabindex="-1"
-                          aria-selected=${isFocused}
-                          @click=${() => this._onSelect(s.id)}
-                          @keydown=${(e: KeyboardEvent) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              this._onSelect(s.id);
-                            }
-                          }}
-                        >
-                          <div class="session-content">
-                            <span
-                              class="session-title"
-                              @dblclick=${(e: Event) => this._startRename(e, s)}
-                              @blur=${(e: Event) => this._finishRename(e, s.id)}
-                              @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
-                              >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
-                            >
-                            <span class="session-ts">${formatRelative(s.ts)}</span>
-                          </div>
-                          <button
-                            type="button"
-                            class="delete-btn"
-                            aria-label="Delete session"
-                            @click=${(e: Event) => this._onDelete(e, s.id)}
+          ${
+            filteredGroups.length === 0
+              ? this.sessions.length === 0 && !this._searchQuery
+                ? html`
+                    <hu-empty-state
+                      heading="No conversations yet"
+                      description="Start a new chat to begin."
+                      .icon=${icons["chat-circle"] ?? icons["message-square"]}
+                    ></hu-empty-state>
+                  `
+                : html`
+                    <hu-empty-state
+                      heading="No sessions"
+                      description="Start a new chat to begin a session."
+                      .icon=${icons["chat-circle"] ?? icons["message-square"]}
+                    ></hu-empty-state>
+                  `
+              : groupsWithIndices.map((group) => {
+                  return html`
+                    <div class="session-group" role="group" aria-label=${group.label}>
+                      <span class="group-label">${group.label}</span>
+                      ${group.sessions.map((s, si) => {
+                        const flatIndex = group.startIndex + si;
+                        const isFocused = flatIndex === this._focusedIndex;
+                        return html`
+                          <div
+                            class="session-item ${s.active ? "active" : ""} ${
+                              isFocused ? "focused" : ""
+                            }"
+                            role="option"
+                            tabindex="-1"
+                            aria-selected=${isFocused}
+                            @click=${() => this._onSelect(s.id)}
+                            @keydown=${(e: KeyboardEvent) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                this._onSelect(s.id);
+                              }
+                            }}
                           >
-                            ${icons.x}
-                          </button>
-                        </div>
-                      `;
-                    })}
-                  </div>
-                `;
-              })}
+                            <div class="session-content">
+                              <span
+                                class="session-title"
+                                @dblclick=${(e: Event) => this._startRename(e, s)}
+                                @blur=${(e: Event) => this._finishRename(e, s.id)}
+                                @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
+                                >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
+                              >
+                              <span class="session-ts">${formatRelative(s.ts)}</span>
+                            </div>
+                            <button
+                              type="button"
+                              class="delete-btn"
+                              aria-label="Delete session"
+                              @click=${(e: Event) => this._onDelete(e, s.id)}
+                            >
+                              ${icons.x}
+                            </button>
+                          </div>
+                        `;
+                      })}
+                    </div>
+                  `;
+                })
+          }
         </div>
       </div>
     `;

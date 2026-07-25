@@ -195,34 +195,37 @@ export class ScModelSelector extends LitElement {
       >
         ${label} ${icons["caret-down"]}
       </button>
-      ${this._open
-        ? html`
-            <div class="dropdown" role="listbox">
-              ${this.models.map(
-                (m, i) => html`
-                  <button
-                    class="option ${m.id === this.value ? "selected" : ""} ${i ===
-                    this._focusedIndex
-                      ? "focused"
-                      : ""}"
-                    role="option"
-                    aria-selected=${m.id === this.value}
-                    @click=${() => this._onSelect(m.id)}
-                  >
-                    <span
-                      >${m.name}${m.provider
-                        ? html`<span class="provider">${m.provider}</span>`
-                        : nothing}</span
+      ${
+        this._open
+          ? html`
+              <div class="dropdown" role="listbox">
+                ${this.models.map(
+                  (m, i) => html`
+                    <button
+                      class="option ${m.id === this.value ? "selected" : ""} ${
+                        i === this._focusedIndex ? "focused" : ""
+                      }"
+                      role="option"
+                      aria-selected=${m.id === this.value}
+                      @click=${() => this._onSelect(m.id)}
                     >
-                    ${m.id === this.value
-                      ? html`<span class="check">${icons.check}</span>`
-                      : nothing}
-                  </button>
-                `,
-              )}
-            </div>
-          `
-        : nothing}
+                      <span
+                        >${m.name}${
+                          m.provider ? html`<span class="provider">${m.provider}</span>` : nothing
+                        }</span
+                      >
+                      ${
+                        m.id === this.value
+                          ? html`<span class="check">${icons.check}</span>`
+                          : nothing
+                      }
+                    </button>
+                  `,
+                )}
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 }

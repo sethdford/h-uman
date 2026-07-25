@@ -176,16 +176,18 @@ export class ScFilePreview extends LitElement {
               >
                 ${icons["x-circle"]}
               </button>
-              ${f.dataUrl && this._isImage(f.type)
-                ? html`
-                    <img class="card-image" src=${f.dataUrl} alt=${f.name} loading="lazy" />
-                    <span class="card-size">${this._formatSize(f.size)}</span>
-                  `
-                : html`
-                    <div class="card-icon">${icons["file-text"]}</div>
-                    <span class="card-name">${f.name}</span>
-                    <span class="card-size">${this._formatSize(f.size)}</span>
-                  `}
+              ${
+                f.dataUrl && this._isImage(f.type)
+                  ? html`
+                      <img class="card-image" src=${f.dataUrl} alt=${f.name} loading="lazy" />
+                      <span class="card-size">${this._formatSize(f.size)}</span>
+                    `
+                  : html`
+                      <div class="card-icon">${icons["file-text"]}</div>
+                      <span class="card-name">${f.name}</span>
+                      <span class="card-size">${this._formatSize(f.size)}</span>
+                    `
+              }
             </div>
           `,
         )}

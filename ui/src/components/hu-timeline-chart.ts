@@ -150,9 +150,11 @@ export class HuTimelineChart extends LitElement {
               <text class="axis" x=${m.x} y=${h - 4} text-anchor="middle">${m.label}</text>
             `,
           )}
-          ${todayX != null
-            ? html`<line class="today" x1=${todayX} y1="8" x2=${todayX} y2=${h - 24} />`
-            : nothing}
+          ${
+            todayX != null
+              ? html`<line class="today" x1=${todayX} y1="8" x2=${todayX} y2=${h - 24} />`
+              : nothing
+          }
           ${bars.map((b, i) => {
             const y = 12 + i * rh;
             const x1 = this._x(this._parse(b.start), pl, cw, range);
@@ -183,15 +185,17 @@ export class HuTimelineChart extends LitElement {
           })}
         </svg>
       </div>
-      ${hoverBar
-        ? html`
-            <div class="tooltip" style="left:${this._tipX}px;top:${this._tipY}px">
-              <strong>${hoverBar.label}</strong><br />
-              ${hoverBar.start} → ${hoverBar.end}<br />
-              <span style="color:var(--hu-text-muted)">${hoverBar.status ?? "active"}</span>
-            </div>
-          `
-        : nothing}
+      ${
+        hoverBar
+          ? html`
+              <div class="tooltip" style="left:${this._tipX}px;top:${this._tipY}px">
+                <strong>${hoverBar.label}</strong><br />
+                ${hoverBar.start} → ${hoverBar.end}<br />
+                <span style="color:var(--hu-text-muted)">${hoverBar.status ?? "active"}</span>
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 }

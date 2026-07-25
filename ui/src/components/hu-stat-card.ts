@@ -136,60 +136,68 @@ export class ScStatCard extends LitElement {
     return html`
       <hu-card glass hoverable tilt>
         <div class="stat-card" role="group" aria-label="${this.label}: ${displayValue}">
-          ${this.trend
-            ? html`
-                <div class="trend ${this.trendDirection}">
-                  ${trendIcon ? html`<span class="trend-icon">${trendIcon}</span>` : nothing}
-                  <span class="trend-value">${this.trend}</span>
-                </div>
-              `
-            : nothing}
+          ${
+            this.trend
+              ? html`
+                  <div class="trend ${this.trendDirection}">
+                    ${trendIcon ? html`<span class="trend-icon">${trendIcon}</span>` : nothing}
+                    <span class="trend-value">${this.trend}</span>
+                  </div>
+                `
+              : nothing
+          }
           <div class="value">
-            ${this.valueStr
-              ? html`${this.prefix}${this.valueStr}${this.suffix}`
-              : this.countUp
-                ? html`
-                    <span
-                      data-count-target=${this.value}
-                      data-format="number"
-                      role="status"
-                      aria-live="polite"
-                      >0</span
-                    >
-                  `
-                : html`
-                    <hu-animated-number
-                      .value=${this.value}
-                      .prefix=${this.prefix}
-                      .suffix=${this.suffix}
-                    ></hu-animated-number>
-                  `}
+            ${
+              this.valueStr
+                ? html`${this.prefix}${this.valueStr}${this.suffix}`
+                : this.countUp
+                  ? html`
+                      <span
+                        data-count-target=${this.value}
+                        data-format="number"
+                        role="status"
+                        aria-live="polite"
+                        >0</span
+                      >
+                    `
+                  : html`
+                      <hu-animated-number
+                        .value=${this.value}
+                        .prefix=${this.prefix}
+                        .suffix=${this.suffix}
+                      ></hu-animated-number>
+                    `
+            }
           </div>
           <div class="label">${this.label}</div>
-          ${this.sparklineData.length >= 2
-            ? html`
-                <div class="sparkline-wrap">
-                  <hu-sparkline-enhanced
-                    .data=${this.sparklineData}
-                    width=${120}
-                    height=${32}
-                    .color=${this.sparklineColor}
-                    .showTooltip=${false}
-                    .fillGradient=${true}
-                  ></hu-sparkline-enhanced>
-                </div>
-              `
-            : nothing}
-          ${this.progress >= 0
-            ? html`
-                <div class="progress-bar">
-                  <div
-                    class="progress-fill accent-${this.accent}"
-                    style="width: ${this.progress * 100}%"
-                  ></div>
-                </div>
-              `
-            : nothing}
+          ${
+            this.sparklineData.length >= 2
+              ? html`
+                  <div class="sparkline-wrap">
+                    <hu-sparkline-enhanced
+                      .data=${this.sparklineData}
+                      width=${120}
+                      height=${32}
+                      .color=${this.sparklineColor}
+                      .showTooltip=${false}
+                      .fillGradient=${true}
+                    ></hu-sparkline-enhanced>
+                  </div>
+                `
+              : nothing
+          }
+          ${
+            this.progress >= 0
+              ? html`
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill accent-${this.accent}"
+                      style="width: ${this.progress * 100}%"
+                    ></div>
+                  </div>
+                `
+              : nothing
+          }
         </div>
       </hu-card>
     `;

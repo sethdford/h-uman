@@ -638,9 +638,11 @@ export class ScSidebar extends LitElement {
           data-nav-id=${item.id}
           ?aria-current=${this.activeTab === item.id}
           aria-label=${item.label}
-          aria-describedby=${this._showShortcutTooltip && this._hoveredItemId === item.id
-            ? `shortcut-${item.id}`
-            : undefined}
+          aria-describedby=${
+            this._showShortcutTooltip && this._hoveredItemId === item.id
+              ? `shortcut-${item.id}`
+              : undefined
+          }
           title=${this.collapsed ? item.label : undefined}
           @click=${() => this._dispatchTabChange(item.id)}
           @mouseenter=${() => this._dispatchNavHover(item.id)}
@@ -648,11 +650,13 @@ export class ScSidebar extends LitElement {
           <span class="icon">${item.icon}</span>
           <span class="label">${item.label}</span>
         </button>
-        ${this._showShortcutTooltip && this._hoveredItemId === item.id
-          ? html`<span class="shortcut-tooltip" id=${`shortcut-${item.id}`} role="tooltip"
-              >${NAV_SHORTCUT_MAP[item.id] ?? ""}</span
-            >`
-          : nothing}
+        ${
+          this._showShortcutTooltip && this._hoveredItemId === item.id
+            ? html`<span class="shortcut-tooltip" id=${`shortcut-${item.id}`} role="tooltip"
+                >${NAV_SHORTCUT_MAP[item.id] ?? ""}</span
+              >`
+            : nothing
+        }
       </div>
     `;
   }
@@ -663,13 +667,15 @@ export class ScSidebar extends LitElement {
         <header class="header" role="banner">
           <div class="logo" aria-hidden="true">${unsafeHTML(brandLogoSvg)}</div>
           <div class="brand-wrap">
-            ${this.connectionStatus === "connected"
-              ? html`<span
-                  class="connected-pulse"
-                  aria-hidden="true"
-                  title="Gateway connected"
-                ></span>`
-              : nothing}
+            ${
+              this.connectionStatus === "connected"
+                ? html`<span
+                    class="connected-pulse"
+                    aria-hidden="true"
+                    title="Gateway connected"
+                  ></span>`
+                : nothing
+            }
             <span class="brand">h-uman</span>
           </div>
         </header>

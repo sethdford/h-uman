@@ -288,31 +288,33 @@ export class ScArtifactPanel extends LitElement {
             >${icons[iconKey] ?? icons["file-text"]}</span
           >
           <span class="header-title">${a.title}</span>
-          ${versionCount > 1
-            ? html`
-                <div class="version-nav">
-                  <button
-                    type="button"
-                    class="version-btn"
-                    ?disabled=${!canPrev}
-                    aria-label="Previous version"
-                    @click=${this._prevVersion}
-                  >
-                    ${icons["caret-left"]}
-                  </button>
-                  <span>${this._currentVersionIndex + 1} / ${versionCount}</span>
-                  <button
-                    type="button"
-                    class="version-btn"
-                    ?disabled=${!canNext}
-                    aria-label="Next version"
-                    @click=${this._nextVersion}
-                  >
-                    ${icons["caret-right"]}
-                  </button>
-                </div>
-              `
-            : nothing}
+          ${
+            versionCount > 1
+              ? html`
+                  <div class="version-nav">
+                    <button
+                      type="button"
+                      class="version-btn"
+                      ?disabled=${!canPrev}
+                      aria-label="Previous version"
+                      @click=${this._prevVersion}
+                    >
+                      ${icons["caret-left"]}
+                    </button>
+                    <span>${this._currentVersionIndex + 1} / ${versionCount}</span>
+                    <button
+                      type="button"
+                      class="version-btn"
+                      ?disabled=${!canNext}
+                      aria-label="Next version"
+                      @click=${this._nextVersion}
+                    >
+                      ${icons["caret-right"]}
+                    </button>
+                  </div>
+                `
+              : nothing
+          }
           <button
             type="button"
             class="close-btn"
@@ -327,9 +329,11 @@ export class ScArtifactPanel extends LitElement {
             .type=${a.type}
             .content=${content}
             .language=${a.language ?? ""}
-            .previousContent=${this._currentVersionIndex > 0
-              ? (a.versions[this._currentVersionIndex - 1]?.content ?? "")
-              : ""}
+            .previousContent=${
+              this._currentVersionIndex > 0
+                ? (a.versions[this._currentVersionIndex - 1]?.content ?? "")
+                : ""
+            }
             .artifactId=${a.id}
           ></hu-artifact-viewer>
         </div>

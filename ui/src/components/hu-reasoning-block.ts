@@ -494,9 +494,11 @@ export class ScReasoningBlock extends LitElement {
           <span class="label">${label}</span>
           ${this.streaming ? html`<span class="pulse-dot" aria-hidden="true"></span>` : nothing}
         </button>
-        ${this.collapsed
-          ? html`<div class="preview-row"><span class="preview">${this._preview}</span></div>`
-          : nothing}
+        ${
+          this.collapsed
+            ? html`<div class="preview-row"><span class="preview">${this._preview}</span></div>`
+            : nothing
+        }
         <div
           id="reasoning-content"
           class="content ${this.collapsed ? "collapsed" : "expanded"}"
@@ -504,11 +506,13 @@ export class ScReasoningBlock extends LitElement {
           aria-live=${this.streaming ? "polite" : nothing}
         >
           <div class="content-inner">
-            ${this.collapsed
-              ? nothing
-              : renderMarkdown(this.streaming ? this._visibleContent : this.content, {
-                  streaming: this.streaming,
-                })}
+            ${
+              this.collapsed
+                ? nothing
+                : renderMarkdown(this.streaming ? this._visibleContent : this.content, {
+                    streaming: this.streaming,
+                  })
+            }
           </div>
         </div>
       </div>

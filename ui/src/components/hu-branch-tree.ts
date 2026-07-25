@@ -202,40 +202,44 @@ export class ScBranchTree extends LitElement {
             <div class="node-label">${node.label}</div>
             <div class="node-preview" title=${node.messagePreview}>${node.messagePreview}</div>
           </div>
-          ${hasChildren
-            ? html`
-                <button
-                  type="button"
-                  class="branch-toggle"
-                  aria-label=${isCollapsed ? "Expand subtree" : "Collapse subtree"}
-                  @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this._toggleCollapse(node.id);
-                  }}
-                  @keydown=${(e: KeyboardEvent) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
+          ${
+            hasChildren
+              ? html`
+                  <button
+                    type="button"
+                    class="branch-toggle"
+                    aria-label=${isCollapsed ? "Expand subtree" : "Collapse subtree"}
+                    @click=${(e: Event) => {
                       e.stopPropagation();
                       this._toggleCollapse(node.id);
-                    }
-                  }}
-                >
-                  <svg viewBox="0 0 256 256" fill="currentColor">
-                    <path
-                      d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80a8,8,0,0,1,11.32-11.32L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"
-                    />
-                  </svg>
-                </button>
-              `
-            : nothing}
+                    }}
+                    @keydown=${(e: KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this._toggleCollapse(node.id);
+                      }
+                    }}
+                  >
+                    <svg viewBox="0 0 256 256" fill="currentColor">
+                      <path
+                        d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80a8,8,0,0,1,11.32-11.32L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"
+                      />
+                    </svg>
+                  </button>
+                `
+              : nothing
+          }
         </div>
-        ${hasChildren && !isCollapsed
-          ? html`
-              <div class="branch-children" role="group">
-                ${node.children.map((child) => this._renderNode(child, _depth + 1))}
-              </div>
-            `
-          : nothing}
+        ${
+          hasChildren && !isCollapsed
+            ? html`
+                <div class="branch-children" role="group">
+                  ${node.children.map((child) => this._renderNode(child, _depth + 1))}
+                </div>
+              `
+            : nothing
+        }
       </div>
     `;
   }

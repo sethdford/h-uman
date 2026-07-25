@@ -975,125 +975,139 @@ export class ScChatComposer extends LitElement {
 
     return html`
       <div class="composer-wrap">
-        ${this._mentionActive && this._mentionResults.length > 0
-          ? html`
-              <div class="mention-dropdown" role="listbox" aria-label="File mentions">
-                ${this._mentionResults.map(
-                  (f, i) => html`
-                    <button
-                      class="mention-item ${i === this._mentionIndex ? "active" : ""}"
-                      role="option"
-                      ?aria-selected=${i === this._mentionIndex}
-                      @click=${() => this._selectMention(f)}
-                    >
-                      ${this._renderMentionMatch(f)}
-                    </button>
-                  `,
-                )}
-              </div>
-            `
-          : nothing}
-        ${this._slashOpen && filteredCommands.length > 0
-          ? html`
-              <div class="command-palette" role="listbox" aria-label="Commands">
-                ${filteredCommands.map(
-                  (cmd, i) => html`
-                    <button
-                      class="command-item ${i === this._slashIndex ? "active" : ""}"
-                      role="option"
-                      ?aria-selected=${i === this._slashIndex}
-                      @click=${() => this._selectSlashCommand(cmd.command)}
-                    >
-                      <span class="cmd-icon"
-                        >${(icons as Record<string, unknown>)[cmd.icon] ?? icons["file-text"]}</span
+        ${
+          this._mentionActive && this._mentionResults.length > 0
+            ? html`
+                <div class="mention-dropdown" role="listbox" aria-label="File mentions">
+                  ${this._mentionResults.map(
+                    (f, i) => html`
+                      <button
+                        class="mention-item ${i === this._mentionIndex ? "active" : ""}"
+                        role="option"
+                        ?aria-selected=${i === this._mentionIndex}
+                        @click=${() => this._selectMention(f)}
                       >
-                      <div class="cmd-content">
-                        <span class="cmd-name">${cmd.command}</span>
-                        <span class="cmd-desc">${cmd.desc}</span>
-                      </div>
-                    </button>
-                  `,
-                )}
-              </div>
-            `
-          : nothing}
-        ${this.showSuggestions
-          ? html`
-              <div class="suggestions">
-                ${SUGGESTIONS.map(
-                  (s) =>
-                    html`<button
-                      class="pill"
-                      type="button"
-                      @click=${() => this._handlePillClick(s)}
-                    >
-                      ${s}
-                    </button>`,
-                )}
-              </div>
-            `
-          : nothing}
+                        ${this._renderMentionMatch(f)}
+                      </button>
+                    `,
+                  )}
+                </div>
+              `
+            : nothing
+        }
+        ${
+          this._slashOpen && filteredCommands.length > 0
+            ? html`
+                <div class="command-palette" role="listbox" aria-label="Commands">
+                  ${filteredCommands.map(
+                    (cmd, i) => html`
+                      <button
+                        class="command-item ${i === this._slashIndex ? "active" : ""}"
+                        role="option"
+                        ?aria-selected=${i === this._slashIndex}
+                        @click=${() => this._selectSlashCommand(cmd.command)}
+                      >
+                        <span class="cmd-icon"
+                          >${(icons as Record<string, unknown>)[cmd.icon] ?? icons["file-text"]}</span
+                        >
+                        <div class="cmd-content">
+                          <span class="cmd-name">${cmd.command}</span>
+                          <span class="cmd-desc">${cmd.desc}</span>
+                        </div>
+                      </button>
+                    `,
+                  )}
+                </div>
+              `
+            : nothing
+        }
+        ${
+          this.showSuggestions
+            ? html`
+                <div class="suggestions">
+                  ${SUGGESTIONS.map(
+                    (s) =>
+                      html`<button
+                        class="pill"
+                        type="button"
+                        @click=${() => this._handlePillClick(s)}
+                      >
+                        ${s}
+                      </button>`,
+                  )}
+                </div>
+              `
+            : nothing
+        }
         <div
           class="composer ${this._dragOver ? "drag-over" : ""}"
           @dragover=${this._handleDragOver}
           @dragleave=${this._handleDragLeave}
           @drop=${this._handleDrop}
         >
-          ${this._attachedFiles.length > 0
-            ? html`<hu-file-preview
-                .files=${this._attachedFiles}
-                @hu-file-remove=${this._handleFileRemove}
-              ></hu-file-preview>`
-            : nothing}
-          ${this._contextChips.length > 0
-            ? html`
-                <div class="context-bar">
-                  ${visibleChips.map(
-                    (chip) => html`
-                      <span class="context-chip type-${chip.type}">
-                        <span class="chip-icon"
-                          >${chip.type === "image"
-                            ? icons.image
-                            : chip.type === "code"
-                              ? icons.code
-                              : icons["file-text"]}</span
-                        >
-                        <span>${chip.name}</span>
-                        <button
-                          class="chip-close"
-                          type="button"
-                          aria-label="Remove ${chip.name}"
-                          @click=${() => this._removeContextChip(chip.id)}
-                        >
-                          ${icons.x}
-                        </button>
-                      </span>
-                    `,
-                  )}
-                  ${moreCount > 0 && !this._contextChipsExpanded
-                    ? html`
-                        <button
-                          class="context-more"
-                          type="button"
-                          @click=${() => (this._contextChipsExpanded = true)}
-                        >
-                          and ${moreCount} more
-                        </button>
-                      `
-                    : this._contextChipsExpanded && moreCount > 0
-                      ? html`
-                          <button
-                            class="context-more"
-                            type="button"
-                            @click=${() => (this._contextChipsExpanded = false)}
+          ${
+            this._attachedFiles.length > 0
+              ? html`<hu-file-preview
+                  .files=${this._attachedFiles}
+                  @hu-file-remove=${this._handleFileRemove}
+                ></hu-file-preview>`
+              : nothing
+          }
+          ${
+            this._contextChips.length > 0
+              ? html`
+                  <div class="context-bar">
+                    ${visibleChips.map(
+                      (chip) => html`
+                        <span class="context-chip type-${chip.type}">
+                          <span class="chip-icon"
+                            >${
+                              chip.type === "image"
+                                ? icons.image
+                                : chip.type === "code"
+                                  ? icons.code
+                                  : icons["file-text"]
+                            }</span
                           >
-                            show less
+                          <span>${chip.name}</span>
+                          <button
+                            class="chip-close"
+                            type="button"
+                            aria-label="Remove ${chip.name}"
+                            @click=${() => this._removeContextChip(chip.id)}
+                          >
+                            ${icons.x}
                           </button>
-                        `
-                      : nothing}
-                </div>
-              `
-            : nothing}
+                        </span>
+                      `,
+                    )}
+                    ${
+                      moreCount > 0 && !this._contextChipsExpanded
+                        ? html`
+                            <button
+                              class="context-more"
+                              type="button"
+                              @click=${() => (this._contextChipsExpanded = true)}
+                            >
+                              and ${moreCount} more
+                            </button>
+                          `
+                        : this._contextChipsExpanded && moreCount > 0
+                          ? html`
+                              <button
+                                class="context-more"
+                                type="button"
+                                @click=${() => (this._contextChipsExpanded = false)}
+                              >
+                                show less
+                              </button>
+                            `
+                          : nothing
+                    }
+                  </div>
+                `
+              : nothing
+          }
           <div class="input-row">
             <textarea
               id="composer-textarea"
@@ -1108,25 +1122,29 @@ export class ScChatComposer extends LitElement {
             <input id="file-input" type="file" multiple hidden @change=${this._handleFileChange} />
           </div>
           <div class="toolbar-row">
-            ${this.model
-              ? html`<hu-model-selector
-                  .value=${this.model}
-                  .models=${this.models}
-                ></hu-model-selector>`
-              : nothing}
-            ${this.personas.length > 0
-              ? html`<hu-persona-selector
-                  .value=${this.persona}
-                  .personas=${this.personas}
-                ></hu-persona-selector>`
-              : nothing}
+            ${
+              this.model
+                ? html`<hu-model-selector
+                    .value=${this.model}
+                    .models=${this.models}
+                  ></hu-model-selector>`
+                : nothing
+            }
+            ${
+              this.personas.length > 0
+                ? html`<hu-persona-selector
+                    .value=${this.persona}
+                    .personas=${this.personas}
+                  ></hu-persona-selector>`
+                : nothing
+            }
             <button
               class="thinking-toggle ${this.thinkingEnabled ? "active" : ""}"
               type="button"
               @click=${this._toggleThinking}
-              aria-label=${this.thinkingEnabled
-                ? "Disable extended thinking"
-                : "Enable extended thinking"}
+              aria-label=${
+                this.thinkingEnabled ? "Disable extended thinking" : "Enable extended thinking"
+              }
               aria-pressed=${this.thinkingEnabled}
               title="Extended thinking (${this.thinkingEnabled ? "on" : "off"})"
             >
@@ -1144,21 +1162,23 @@ export class ScChatComposer extends LitElement {
               <span class="toggle-icon">${icons.magnifyingGlass}</span>
               <span>Research</span>
             </button>
-            ${this.activeMemories > 0
-              ? html`<button
-                  class="memory-chip"
-                  type="button"
-                  @click=${() =>
-                    this.dispatchEvent(
-                      new CustomEvent("hu-memory-open", { bubbles: true, composed: true }),
-                    )}
-                  aria-label="${this.activeMemories} active memories"
-                  title="${this.activeMemories} memories active"
-                >
-                  <span class="chip-icon">${icons.brain}</span>
-                  <span>${this.activeMemories}</span>
-                </button>`
-              : nothing}
+            ${
+              this.activeMemories > 0
+                ? html`<button
+                    class="memory-chip"
+                    type="button"
+                    @click=${() =>
+                      this.dispatchEvent(
+                        new CustomEvent("hu-memory-open", { bubbles: true, composed: true }),
+                      )}
+                    aria-label="${this.activeMemories} active memories"
+                    title="${this.activeMemories} memories active"
+                  >
+                    <span class="chip-icon">${icons.brain}</span>
+                    <span>${this.activeMemories}</span>
+                  </button>`
+                : nothing
+            }
             <div class="spacer"></div>
             <div class="actions">
               <button
@@ -1170,38 +1190,44 @@ export class ScChatComposer extends LitElement {
               >
                 ${icons["file-text"]}
               </button>
-              ${this.voiceSupported
-                ? html`<button
-                    class="icon-btn mic-btn ${this.voiceActive ? "active" : ""}"
-                    type="button"
-                    ?disabled=${this.disabled}
-                    @click=${this._handleMicClick}
-                    aria-label="Voice input"
-                  >
-                    ${icons.mic}
-                  </button>`
-                : nothing}
-              ${this.streamElapsed
-                ? html`<span class="elapsed">${this.streamElapsed}</span>`
-                : nothing}
-              ${this.waiting
-                ? html`<button
-                    class="send-btn stop"
-                    type="button"
-                    @click=${this._handleAbort}
-                    aria-label="Stop generating"
-                  >
-                    ${icons.stop ?? icons.x}
-                  </button>`
-                : html`<button
-                    class="send-btn send"
-                    type="button"
-                    ?disabled=${!canSend}
-                    @click=${this._emitSend}
-                    aria-label="Send"
-                  >
-                    ${icons["arrow-up"]}
-                  </button>`}
+              ${
+                this.voiceSupported
+                  ? html`<button
+                      class="icon-btn mic-btn ${this.voiceActive ? "active" : ""}"
+                      type="button"
+                      ?disabled=${this.disabled}
+                      @click=${this._handleMicClick}
+                      aria-label="Voice input"
+                    >
+                      ${icons.mic}
+                    </button>`
+                  : nothing
+              }
+              ${
+                this.streamElapsed
+                  ? html`<span class="elapsed">${this.streamElapsed}</span>`
+                  : nothing
+              }
+              ${
+                this.waiting
+                  ? html`<button
+                      class="send-btn stop"
+                      type="button"
+                      @click=${this._handleAbort}
+                      aria-label="Stop generating"
+                    >
+                      ${icons.stop ?? icons.x}
+                    </button>`
+                  : html`<button
+                      class="send-btn send"
+                      type="button"
+                      ?disabled=${!canSend}
+                      @click=${this._emitSend}
+                      aria-label="Send"
+                    >
+                      ${icons["arrow-up"]}
+                    </button>`
+              }
             </div>
           </div>
         </div>

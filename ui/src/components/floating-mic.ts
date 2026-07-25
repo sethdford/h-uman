@@ -259,9 +259,7 @@ export class ScFloatingMic extends LitElement {
   ): HTMLTextAreaElement | HTMLInputElement | null {
     if (depth > 4) return null;
     const direct = root.querySelector("textarea, input") as
-      | HTMLTextAreaElement
-      | HTMLInputElement
-      | null;
+      HTMLTextAreaElement | HTMLInputElement | null;
     if (direct) return direct;
     const hosts = root.querySelectorAll("*");
     for (const el of hosts) {
@@ -312,21 +310,27 @@ export class ScFloatingMic extends LitElement {
     const btnClass = this.isListening ? "listening" : this.isTranscribing ? "transcribing" : "";
     return html`
       <div>
-        ${this.isListening || this.isTranscribing
-          ? html`<div class="overlay">${this.overlayText}</div>`
-          : ""}
+        ${
+          this.isListening || this.isTranscribing
+            ? html`<div class="overlay">${this.overlayText}</div>`
+            : ""
+        }
         <button
           class="btn ${btnClass}"
           ?disabled=${!this._recorder.isSupported || this.isTranscribing}
-          title=${this._recorder.isSupported
-            ? "Start voice input (Cmd+Shift+M)"
-            : "Audio recording not supported"}
+          title=${
+            this._recorder.isSupported
+              ? "Start voice input (Cmd+Shift+M)"
+              : "Audio recording not supported"
+          }
           @click=${this.toggleRecording}
-          aria-label=${this.isListening
-            ? "Stop recording"
-            : this.isTranscribing
-              ? "Transcribing audio"
-              : "Start voice input"}
+          aria-label=${
+            this.isListening
+              ? "Stop recording"
+              : this.isTranscribing
+                ? "Transcribing audio"
+                : "Start voice input"
+          }
           aria-busy=${this.isTranscribing}
         >
           ${icons.mic}

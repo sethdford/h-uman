@@ -302,8 +302,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     const gw = this.gateway;
     if (!gw) return;
     const res = (await gw.request<{ skills?: InstalledSkill[] }>("skills.list", {})) as
-      | { skills?: InstalledSkill[] }
-      | { result?: { skills?: InstalledSkill[] } };
+      { skills?: InstalledSkill[] } | { result?: { skills?: InstalledSkill[] } };
     const skills =
       (res && "skills" in res && res.skills) ||
       (res && "result" in res && res.result?.skills) ||
@@ -317,8 +316,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     this.registryLoading = true;
     try {
       const res = (await gw.request<{ entries?: RegistrySkill[] }>("skills.search", { query })) as
-        | { entries?: RegistrySkill[] }
-        | { result?: { entries?: RegistrySkill[] } };
+        { entries?: RegistrySkill[] } | { result?: { entries?: RegistrySkill[] } };
       const entries =
         (res && "entries" in res && res.entries) ||
         (res && "result" in res && res.result?.entries) ||
@@ -539,30 +537,32 @@ export class ScSkillsView extends GatewayAwareLitElement {
           >Install</hu-button
         >
       </div>
-      ${filtered.length === 0 && this.skills.length > 0
-        ? html`<hu-empty-state
-            .icon=${icons.magnifyingGlass}
-            heading=${this.localSearch ? `No results for "${this.localSearch}"` : "No matches"}
-            description="Try a different search or clear filters."
-          ></hu-empty-state>`
-        : filtered.length === 0
+      ${
+        filtered.length === 0 && this.skills.length > 0
           ? html`<hu-empty-state
-              .icon=${icons.puzzle}
-              heading="No skills installed"
-              description="Install skills from the registry below or paste a URL above."
+              .icon=${icons.magnifyingGlass}
+              heading=${this.localSearch ? `No results for "${this.localSearch}"` : "No matches"}
+              description="Try a different search or clear filters."
             ></hu-empty-state>`
-          : html`<div class="skills-grid hu-scroll-reveal-stagger">
-              ${filtered.map(
-                (s) => html`
-                  <hu-skill-card
-                    variant="installed"
-                    .skill=${s}
-                    @skill-select=${() => (this.selectedSkill = { source: "installed", skill: s })}
-                    @skill-toggle=${() => this._toggleSkill(s)}
-                  ></hu-skill-card>
-                `,
-              )}
-            </div>`}
+          : filtered.length === 0
+            ? html`<hu-empty-state
+                .icon=${icons.puzzle}
+                heading="No skills installed"
+                description="Install skills from the registry below or paste a URL above."
+              ></hu-empty-state>`
+            : html`<div class="skills-grid hu-scroll-reveal-stagger">
+                ${filtered.map(
+                  (s) => html`
+                    <hu-skill-card
+                      variant="installed"
+                      .skill=${s}
+                      @skill-select=${() => (this.selectedSkill = { source: "installed", skill: s })}
+                      @skill-toggle=${() => this._toggleSkill(s)}
+                    ></hu-skill-card>
+                  `,
+                )}
+              </div>`
+      }
     </div>`;
   }
 
@@ -621,16 +621,23 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   override render() {
     return html` ${this._renderHero()}
-    ${this.error
-      ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-          <hu-button variant="primary" @click=${() => this.load()} aria-label="Retry loading skills"
-            >Retry</hu-button
-          >
-        </hu-empty-state>`
-      : nothing}
-    ${this.loading
-      ? this._renderSkeleton()
-      : html`${this._renderStats()}${this._renderInstalledSection()}${this._renderRegistrySection()}`}
+    ${
+      this.error
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <hu-button
+              variant="primary"
+              @click=${() => this.load()}
+              aria-label="Retry loading skills"
+              >Retry</hu-button
+            >
+          </hu-empty-state>`
+        : nothing
+    }
+    ${
+      this.loading
+        ? this._renderSkeleton()
+        : html`${this._renderStats()}${this._renderInstalledSection()}${this._renderRegistrySection()}`
+    }
     ${this._renderDetailSheet()}`;
   }
 }

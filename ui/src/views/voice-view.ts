@@ -1367,20 +1367,24 @@ export class ScVoiceView extends GatewayAwareLitElement {
             >Get key &rarr;</a
           >
         </div>
-        ${this._setupError
-          ? html`<p
-              style="margin:0 0 var(--hu-space-xs) 0;color:var(--hu-error);font:var(--hu-font-body-xs)"
-            >
-              ${this._setupError}
-            </p>`
-          : nothing}
-        ${this._setupSuccess
-          ? html`<p
-              style="margin:0 0 var(--hu-space-xs) 0;color:var(--hu-success);font:var(--hu-font-body-xs)"
-            >
-              Connected successfully. Ready to talk.
-            </p>`
-          : nothing}
+        ${
+          this._setupError
+            ? html`<p
+                style="margin:0 0 var(--hu-space-xs) 0;color:var(--hu-error);font:var(--hu-font-body-xs)"
+              >
+                ${this._setupError}
+              </p>`
+            : nothing
+        }
+        ${
+          this._setupSuccess
+            ? html`<p
+                style="margin:0 0 var(--hu-space-xs) 0;color:var(--hu-success);font:var(--hu-font-body-xs)"
+              >
+                Connected successfully. Ready to talk.
+              </p>`
+            : nothing
+        }
       </div>
     `;
   }
@@ -1442,9 +1446,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
         <div class="container hu-mesh-gradient">
           ${this._renderStatusBar()} ${this._renderErrorBanner()}
           ${this._showSetup ? this._renderSetupBanner() : nothing}
-          ${this._showClonePanel
-            ? html`<hu-voice-clone .gateway=${this.gateway ?? this._boundGateway}></hu-voice-clone>`
-            : nothing}
+          ${
+            this._showClonePanel
+              ? html`<hu-voice-clone
+                  .gateway=${this.gateway ?? this._boundGateway}
+                ></hu-voice-clone>`
+              : nothing
+          }
           ${this._showCredPanel ? this._renderCredPanel() : nothing}
           <hu-voice-conversation
             .items=${this._chatItems}
@@ -1480,9 +1488,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
                 <span class="session-item-icon">${icons.mic}</span>
                 <span class="session-item-label"
                   >Session ${sessionCount}
-                  ${this._messages.length > 0
-                    ? html` · ${this._messages.length} msg${this._messages.length !== 1 ? "s" : ""}`
-                    : nothing}</span
+                  ${
+                    this._messages.length > 0
+                      ? html` · ${this._messages.length}
+                        msg${this._messages.length !== 1 ? "s" : ""}`
+                      : nothing
+                  }</span
                 >
               </button>
             </div>
@@ -1490,49 +1501,53 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
           <div class="sessions-panel-section">
             <h4>Voice Clones</h4>
-            ${this._showClonePanel
-              ? html`<button
-                  type="button"
-                  class="session-item"
-                  @click=${() => {
-                    this._showClonePanel = true;
-                    if (window.innerWidth < 768) this._sessionsPanelOpen = false;
-                  }}
-                  aria-label="Manage voice clones"
-                >
-                  <span class="session-item-icon">${icons.radio}</span>
-                  <span class="session-item-label">Manage clones</span>
-                </button>`
-              : html`<button
-                  type="button"
-                  class="session-item"
-                  @click=${() => {
-                    this._showClonePanel = true;
-                    if (window.innerWidth < 768) this._sessionsPanelOpen = false;
-                  }}
-                  aria-label="Open voice clone panel"
-                >
-                  <span class="session-item-icon">${icons.radio}</span>
-                  <span class="session-item-label">Clone voice</span>
-                </button>`}
+            ${
+              this._showClonePanel
+                ? html`<button
+                    type="button"
+                    class="session-item"
+                    @click=${() => {
+                      this._showClonePanel = true;
+                      if (window.innerWidth < 768) this._sessionsPanelOpen = false;
+                    }}
+                    aria-label="Manage voice clones"
+                  >
+                    <span class="session-item-icon">${icons.radio}</span>
+                    <span class="session-item-label">Manage clones</span>
+                  </button>`
+                : html`<button
+                    type="button"
+                    class="session-item"
+                    @click=${() => {
+                      this._showClonePanel = true;
+                      if (window.innerWidth < 768) this._sessionsPanelOpen = false;
+                    }}
+                    aria-label="Open voice clone panel"
+                  >
+                    <span class="session-item-icon">${icons.radio}</span>
+                    <span class="session-item-label">Clone voice</span>
+                  </button>`
+            }
           </div>
 
           <div class="sessions-panel-section">
             <h4>Transcripts</h4>
-            ${this._messages.length > 0
-              ? html`<button
-                  type="button"
-                  class="session-item"
-                  @click=${() => {
-                    this._exportConversation();
-                    if (window.innerWidth < 768) this._sessionsPanelOpen = false;
-                  }}
-                  aria-label="Export current transcript"
-                >
-                  <span class="session-item-icon">${icons["clock-counter-clockwise"]}</span>
-                  <span class="session-item-label">Export transcript</span>
-                </button>`
-              : html`<div class="sessions-panel-empty">No transcripts yet</div>`}
+            ${
+              this._messages.length > 0
+                ? html`<button
+                    type="button"
+                    class="session-item"
+                    @click=${() => {
+                      this._exportConversation();
+                      if (window.innerWidth < 768) this._sessionsPanelOpen = false;
+                    }}
+                    aria-label="Export current transcript"
+                  >
+                    <span class="session-item-icon">${icons["clock-counter-clockwise"]}</span>
+                    <span class="session-item-label">Export transcript</span>
+                  </button>`
+                : html`<div class="sessions-panel-empty">No transcripts yet</div>`
+            }
           </div>
         </div>
       </div>
@@ -1580,11 +1595,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
           <span class="status-title">Voice</span>
           <span class="status-meta">${connLabel}</span>
           ${durationLabel ? html`<span class="status-meta">· ${durationLabel}</span>` : nothing}
-          ${this._messages.length > 0
-            ? html`<span class="status-meta"
-                >· ${this._messages.length} message${this._messages.length !== 1 ? "s" : ""}</span
-              >`
-            : nothing}
+          ${
+            this._messages.length > 0
+              ? html`<span class="status-meta"
+                  >· ${this._messages.length} message${this._messages.length !== 1 ? "s" : ""}</span
+                >`
+              : nothing
+          }
         </div>
         <div class="status-right">
           <hu-button
@@ -1618,11 +1635,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
             aria-label="Cycle voice mode"
             title="Voice mode: standard (Cartesia), gemini_live, openai_realtime"
           >
-            ${this._voiceMode === "gemini_live"
-              ? "Gemini Live"
-              : this._voiceMode === "openai_realtime"
-                ? "OpenAI Realtime"
-                : "Standard Voice"}
+            ${
+              this._voiceMode === "gemini_live"
+                ? "Gemini Live"
+                : this._voiceMode === "openai_realtime"
+                  ? "OpenAI Realtime"
+                  : "Standard Voice"
+            }
           </hu-button>
           <hu-button
             variant=${this._showCredPanel ? "tonal" : "ghost"}
@@ -1681,11 +1700,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
           Voice Provider Credentials
         </div>
         <div style="font-size: var(--hu-text-xs); color: var(--hu-text-secondary);">
-          ${this._voiceMode === "gemini_live"
-            ? "Enter your Google AI / Vertex AI API key for Gemini Live."
-            : this._voiceMode === "openai_realtime"
-              ? "Enter your OpenAI API key for Realtime voice."
-              : "Enter your Cartesia API key (or leave blank to use server config)."}
+          ${
+            this._voiceMode === "gemini_live"
+              ? "Enter your Google AI / Vertex AI API key for Gemini Live."
+              : this._voiceMode === "openai_realtime"
+                ? "Enter your OpenAI API key for Realtime voice."
+                : "Enter your Cartesia API key (or leave blank to use server config)."
+          }
         </div>
         <div style="display: flex; gap: var(--hu-space-sm); align-items: flex-end;">
           <hu-input
@@ -1758,9 +1779,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
           ></hu-textarea>
           <hu-button
             variant="primary"
-            ?disabled=${!this.transcript.trim() ||
-            this.voiceStatus === "processing" ||
-            this._connectionStatus === "disconnected"}
+            ?disabled=${
+              !this.transcript.trim() ||
+              this.voiceStatus === "processing" ||
+              this._connectionStatus === "disconnected"
+            }
             @click=${() => this.send()}
             aria-label="Send voice message"
           >

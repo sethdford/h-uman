@@ -472,16 +472,20 @@ export class ScModelsView extends GatewayAwareLitElement {
           style="--hu-stagger-delay: 150ms"
         ></hu-stat-card>
       </hu-stats-row>
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></hu-empty-state>`
-        : nothing}
-      ${!this.error
-        ? html`${this._renderInfoSection()}${this._renderChart()}${this._renderGrid()}${this._renderRoutingDecisions()}`
-        : nothing}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Error"
+              description=${this.error}
+            ></hu-empty-state>`
+          : nothing
+      }
+      ${
+        !this.error
+          ? html`${this._renderInfoSection()}${this._renderChart()}${this._renderGrid()}${this._renderRoutingDecisions()}`
+          : nothing
+      }
     `;
   }
 
@@ -548,15 +552,17 @@ export class ScModelsView extends GatewayAwareLitElement {
     return html`
       <div class="chart-section hu-scroll-reveal-stagger">
         <div class="chart-header">Request distribution by provider</div>
-        ${data
-          ? html`<hu-chart type="doughnut" .data=${data} height="200"></hu-chart>`
-          : html`<hu-empty-state
-              .icon=${icons["chart-line"]}
-              heading="No usage data"
-              description="Provider request distribution will appear here after usage is recorded."
-            >
-              <hu-button variant="ghost" size="sm" @click=${() => this.load()}>Retry</hu-button>
-            </hu-empty-state>`}
+        ${
+          data
+            ? html`<hu-chart type="doughnut" .data=${data} height="200"></hu-chart>`
+            : html`<hu-empty-state
+                .icon=${icons["chart-line"]}
+                heading="No usage data"
+                description="Provider request distribution will appear here after usage is recorded."
+              >
+                <hu-button variant="ghost" size="sm" @click=${() => this.load()}>Retry</hu-button>
+              </hu-empty-state>`
+        }
       </div>
     `;
   }
@@ -565,17 +571,21 @@ export class ScModelsView extends GatewayAwareLitElement {
     const filtered = this.filteredProviders;
     return html`
       <div class="grid hu-scroll-reveal-stagger">
-        ${filtered.length === 0
-          ? html`
-              <hu-empty-state
-                .icon=${icons.cpu}
-                heading=${this.filter ? "No matching providers" : "No providers configured"}
-                description=${this.filter
-                  ? "Try a different search term."
-                  : "Configure an AI provider in your config to get started."}
-              ></hu-empty-state>
-            `
-          : filtered.map((p) => this._renderProviderCard(p))}
+        ${
+          filtered.length === 0
+            ? html`
+                <hu-empty-state
+                  .icon=${icons.cpu}
+                  heading=${this.filter ? "No matching providers" : "No providers configured"}
+                  description=${
+                    this.filter
+                      ? "Try a different search term."
+                      : "Configure an AI provider in your config to get started."
+                  }
+                ></hu-empty-state>
+              `
+            : filtered.map((p) => this._renderProviderCard(p))
+        }
       </div>
     `;
   }
@@ -599,58 +609,62 @@ export class ScModelsView extends GatewayAwareLitElement {
           heading="Routing Decisions"
           description="LLM-as-Judge cost router — recent model selection decisions"
         ></hu-section-header>
-        ${dist
-          ? html`
-              <div class="tier-dist-row">
-                <div class="tier-dist-item">
-                  <span class="tier-pill tier-reflexive">reflexive</span>
-                  <span class="tier-dist-count">${dist.reflexive}</span>
+        ${
+          dist
+            ? html`
+                <div class="tier-dist-row">
+                  <div class="tier-dist-item">
+                    <span class="tier-pill tier-reflexive">reflexive</span>
+                    <span class="tier-dist-count">${dist.reflexive}</span>
+                  </div>
+                  <div class="tier-dist-item">
+                    <span class="tier-pill tier-conversational">conversational</span>
+                    <span class="tier-dist-count">${dist.conversational}</span>
+                  </div>
+                  <div class="tier-dist-item">
+                    <span class="tier-pill tier-analytical">analytical</span>
+                    <span class="tier-dist-count">${dist.analytical}</span>
+                  </div>
+                  <div class="tier-dist-item">
+                    <span class="tier-pill tier-deep">deep</span>
+                    <span class="tier-dist-count">${dist.deep}</span>
+                  </div>
                 </div>
-                <div class="tier-dist-item">
-                  <span class="tier-pill tier-conversational">conversational</span>
-                  <span class="tier-dist-count">${dist.conversational}</span>
-                </div>
-                <div class="tier-dist-item">
-                  <span class="tier-pill tier-analytical">analytical</span>
-                  <span class="tier-dist-count">${dist.analytical}</span>
-                </div>
-                <div class="tier-dist-item">
-                  <span class="tier-pill tier-deep">deep</span>
-                  <span class="tier-dist-count">${dist.deep}</span>
-                </div>
-              </div>
-            `
-          : nothing}
-        ${this.routeDecisions.length
-          ? html`
-              <hu-card>
-                <table class="decisions-table" role="table" aria-label="Routing decisions">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Tier</th>
-                      <th>Source</th>
-                      <th>Model</th>
-                      <th>Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${[...this.routeDecisions].reverse().map(
-                      (d) => html`
-                        <tr>
-                          <td>${this._formatTime(d.timestamp)}</td>
-                          <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
-                          <td><span class="source-badge">${d.source}</span></td>
-                          <td>${d.model || "—"}</td>
-                          <td>${d.heuristic_score}</td>
-                        </tr>
-                      `,
-                    )}
-                  </tbody>
-                </table>
-              </hu-card>
-            `
-          : nothing}
+              `
+            : nothing
+        }
+        ${
+          this.routeDecisions.length
+            ? html`
+                <hu-card>
+                  <table class="decisions-table" role="table" aria-label="Routing decisions">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Tier</th>
+                        <th>Source</th>
+                        <th>Model</th>
+                        <th>Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${[...this.routeDecisions].reverse().map(
+                        (d) => html`
+                          <tr>
+                            <td>${this._formatTime(d.timestamp)}</td>
+                            <td><span class="tier-pill tier-${d.tier}">${d.tier}</span></td>
+                            <td><span class="source-badge">${d.source}</span></td>
+                            <td>${d.model || "—"}</td>
+                            <td>${d.heuristic_score}</td>
+                          </tr>
+                        `,
+                      )}
+                    </tbody>
+                  </table>
+                </hu-card>
+              `
+            : nothing
+        }
       </div>
     `;
   }
@@ -669,21 +683,23 @@ export class ScModelsView extends GatewayAwareLitElement {
           ${p.has_key ? " API key" : " No API key"}
         </div>
         <div class="card-url" title=${p.base_url ?? ""}>${this.truncateUrl(p.base_url)}</div>
-        ${!isDefault
-          ? html`
-              <div class="card-actions">
-                <hu-button
-                  variant="ghost"
-                  size="sm"
-                  ?disabled=${this.settingDefault}
-                  @click=${() => this._setDefaultProvider(p.name ?? "")}
-                  aria-label=${`Set ${p.name ?? "unnamed"} as default`}
-                >
-                  Set as default
-                </hu-button>
-              </div>
-            `
-          : nothing}
+        ${
+          !isDefault
+            ? html`
+                <div class="card-actions">
+                  <hu-button
+                    variant="ghost"
+                    size="sm"
+                    ?disabled=${this.settingDefault}
+                    @click=${() => this._setDefaultProvider(p.name ?? "")}
+                    aria-label=${`Set ${p.name ?? "unnamed"} as default`}
+                  >
+                    Set as default
+                  </hu-button>
+                </div>
+              `
+            : nothing
+        }
       </hu-card>
     `;
   }

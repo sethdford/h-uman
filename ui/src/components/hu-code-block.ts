@@ -408,27 +408,33 @@ export class ScCodeBlock extends LitElement {
             )}
           </div>
           <div class="content ${!this._shikiReady && this.language ? "loading" : ""}">
-            ${showHighlighted
-              ? html`${unsafeHTML(DOMPurify.sanitize(this._highlighted))}`
-              : html`<pre><code>${this.code}</code></pre>`}
+            ${
+              showHighlighted
+                ? html`${unsafeHTML(DOMPurify.sanitize(this._highlighted))}`
+                : html`<pre><code>${this.code}</code></pre>`
+            }
           </div>
           ${shouldTruncate ? html`<div class="truncated-fade"></div>` : ""}
         </div>
-        ${this._shikiFailed
-          ? html`<div class="shiki-error">Syntax highlighting unavailable</div>`
-          : ""}
-        ${canTruncate
-          ? html`
-              <button
-                type="button"
-                class="show-more-btn"
-                @click=${this._toggleExpand}
-                aria-expanded=${this._expanded}
-              >
-                ${this._expanded ? "Show less" : `Show more (${hiddenCount} lines)`}
-              </button>
-            `
-          : ""}
+        ${
+          this._shikiFailed
+            ? html`<div class="shiki-error">Syntax highlighting unavailable</div>`
+            : ""
+        }
+        ${
+          canTruncate
+            ? html`
+                <button
+                  type="button"
+                  class="show-more-btn"
+                  @click=${this._toggleExpand}
+                  aria-expanded=${this._expanded}
+                >
+                  ${this._expanded ? "Show less" : `Show more (${hiddenCount} lines)`}
+                </button>
+              `
+            : ""
+        }
       </div>
     `;
   }

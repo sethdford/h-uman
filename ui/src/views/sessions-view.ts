@@ -407,19 +407,23 @@ export class ScSessionsView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this._renderHero()} ${this._renderStats()} ${this._renderSearch()}
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></hu-empty-state>`
-        : this._renderContent()}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Error"
+              description=${this.error}
+            ></hu-empty-state>`
+          : this._renderContent()
+      }
       <hu-dialog
         ?open=${this._deleteTarget != null}
         title="Delete session"
-        message=${this._deleteTarget
-          ? `Are you sure you want to delete "${this.sessionTitle(this._deleteTarget)}"? This cannot be undone.`
-          : ""}
+        message=${
+          this._deleteTarget
+            ? `Are you sure you want to delete "${this.sessionTitle(this._deleteTarget)}"? This cannot be undone.`
+            : ""
+        }
         confirmLabel="Delete"
         variant="danger"
         @hu-confirm=${this._onDeleteConfirm}
@@ -494,9 +498,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
         <hu-empty-state
           .icon=${icons["chat-circle"]}
           heading=${this.searchQuery ? "No matching sessions" : "No sessions yet"}
-          description=${this.searchQuery
-            ? "Try a different search term."
-            : "Start a conversation to create your first session."}
+          description=${
+            this.searchQuery
+              ? "Try a different search term."
+              : "Start a conversation to create your first session."
+          }
         ></hu-empty-state>
       `;
     }
@@ -532,17 +538,21 @@ export class ScSessionsView extends GatewayAwareLitElement {
                       </hu-button>
                     </div>
                   </div>
-                  ${s.last_message
-                    ? html`<p class="session-card-preview">${s.last_message}</p>`
-                    : nothing}
+                  ${
+                    s.last_message
+                      ? html`<p class="session-card-preview">${s.last_message}</p>`
+                      : nothing
+                  }
                   <div class="session-card-meta">
                     <span>${this.sessionMessageCount(s)} messages</span>
                     <span>${formatRelative(this.sessionTimestamp(s))}</span>
-                    ${(s as Record<string, unknown>).hula_count
-                      ? html`<span class="session-hula-badge"
-                          >${icons.code} ${(s as Record<string, unknown>).hula_count} HuLa</span
-                        >`
-                      : nothing}
+                    ${
+                      (s as Record<string, unknown>).hula_count
+                        ? html`<span class="session-hula-badge"
+                            >${icons.code} ${(s as Record<string, unknown>).hula_count} HuLa</span
+                          >`
+                        : nothing
+                    }
                   </div>
                 </hu-card>
               `,
@@ -567,9 +577,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
           <span>${this.sessionMessageCount(s)} messages</span>
           <span>${formatRelative(this.sessionTimestamp(s))}</span>
           <span>Status: ${s.status === "archived" ? "Archived" : "Active"}</span>
-          ${(s as Record<string, unknown>).hula_count
-            ? html`<span>HuLa Programs: ${(s as Record<string, unknown>).hula_count}</span>`
-            : nothing}
+          ${
+            (s as Record<string, unknown>).hula_count
+              ? html`<span>HuLa Programs: ${(s as Record<string, unknown>).hula_count}</span>`
+              : nothing
+          }
         </div>
         <div class="session-detail-actions">
           <hu-button

@@ -280,13 +280,15 @@ export class HuAgentGraph extends LitElement {
           </div>
         </div>
 
-        ${children
-          ? html`
-              <div class="children" role="group">
-                ${agent.children!.map((child) => this._renderNode(child, depth + 1))}
-              </div>
-            `
-          : ""}
+        ${
+          children
+            ? html`
+                <div class="children" role="group">
+                  ${agent.children!.map((child) => this._renderNode(child, depth + 1))}
+                </div>
+              `
+            : ""
+        }
       </div>
     `;
   }

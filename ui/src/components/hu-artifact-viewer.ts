@@ -496,17 +496,19 @@ export class ScArtifactViewer extends LitElement {
         <div class="toolbar">
           <span class="type-label">${this._getTypeLabel()}</span>
           <div class="toolbar-actions">
-            ${hasPrevious
-              ? html`<button
-                  type="button"
-                  class="diff-toggle ${this.diffMode ? "active" : ""}"
-                  @click=${this._toggleDiff}
-                  aria-label=${this.diffMode ? "Hide diff" : "Show diff"}
-                  aria-pressed=${this.diffMode}
-                >
-                  ${icons.code} Diff
-                </button>`
-              : nothing}
+            ${
+              hasPrevious
+                ? html`<button
+                    type="button"
+                    class="diff-toggle ${this.diffMode ? "active" : ""}"
+                    @click=${this._toggleDiff}
+                    aria-label=${this.diffMode ? "Hide diff" : "Show diff"}
+                    aria-pressed=${this.diffMode}
+                  >
+                    ${icons.code} Diff
+                  </button>`
+                : nothing
+            }
             <button
               type="button"
               class="copy-btn"

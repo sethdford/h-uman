@@ -281,13 +281,15 @@ export class ScChannelsView extends GatewayAwareLitElement {
           style="--hu-stagger-delay: 150ms"
         ></hu-stat-card>
       </hu-stats-row>
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></hu-empty-state>`
-        : nothing}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Error"
+              description=${this.error}
+            ></hu-empty-state>`
+          : nothing
+      }
       <div class="filters" role="group" aria-label="Filter channels by status">
         <hu-segmented-control
           .options=${this.filterOptions}
@@ -298,66 +300,78 @@ export class ScChannelsView extends GatewayAwareLitElement {
         ></hu-segmented-control>
       </div>
       <div class="table-section hu-scroll-reveal-stagger" role="region" aria-label="Channels table">
-        ${this.filteredChannels.length === 0
-          ? html`
-              <hu-empty-state
-                .icon=${icons.radio}
-                heading=${this.filter !== "all" ? "No matching channels" : "No channels configured"}
-                description=${this.filter !== "all"
-                  ? "Try a different filter."
-                  : "Configure messaging channels to receive and send messages."}
-              ></hu-empty-state>
-            `
-          : html`
-              <hu-data-table-v2
-                .columns=${this.columns}
-                .rows=${this.tableRows}
-                searchable
-                @hu-row-click=${this._onRowClick}
-              ></hu-data-table-v2>
-            `}
+        ${
+          this.filteredChannels.length === 0
+            ? html`
+                <hu-empty-state
+                  .icon=${icons.radio}
+                  heading=${this.filter !== "all" ? "No matching channels" : "No channels configured"}
+                  description=${
+                    this.filter !== "all"
+                      ? "Try a different filter."
+                      : "Configure messaging channels to receive and send messages."
+                  }
+                ></hu-empty-state>
+              `
+            : html`
+                <hu-data-table-v2
+                  .columns=${this.columns}
+                  .rows=${this.tableRows}
+                  searchable
+                  @hu-row-click=${this._onRowClick}
+                ></hu-data-table-v2>
+              `
+        }
       </div>
       <hu-sheet ?open=${this._sheetChannel != null} @close=${this._onSheetClose}>
-        ${this._sheetChannel
-          ? html`
-              <div class="sheet-title">
-                ${this._sheetChannel.label ||
-                this._sheetChannel.key ||
-                this._sheetChannel.name ||
-                "Channel"}
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Status</span>
-                <span class="sheet-detail-value">${this.statusLabel(this._sheetChannel)}</span>
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Health</span>
-                <span class="sheet-detail-value"
-                  >${this._sheetChannel.healthy === true
-                    ? "Healthy"
-                    : this._sheetChannel.healthy === false
-                      ? "Unhealthy"
-                      : "-"}</span
-                >
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Build enabled</span>
-                <span class="sheet-detail-value"
-                  >${this._sheetChannel.build_enabled === true ? "Yes" : "No"}</span
-                >
-              </div>
-              ${this._sheetChannel.error
-                ? html`
-                    <div class="sheet-detail-row">
-                      <span class="sheet-detail-label">Error</span>
-                      <span class="sheet-detail-value" style="color: var(--hu-error)"
-                        >${this._sheetChannel.error}</span
-                      >
-                    </div>
-                  `
-                : nothing}
-            `
-          : nothing}
+        ${
+          this._sheetChannel
+            ? html`
+                <div class="sheet-title">
+                  ${
+                    this._sheetChannel.label ||
+                    this._sheetChannel.key ||
+                    this._sheetChannel.name ||
+                    "Channel"
+                  }
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Status</span>
+                  <span class="sheet-detail-value">${this.statusLabel(this._sheetChannel)}</span>
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Health</span>
+                  <span class="sheet-detail-value"
+                    >${
+                      this._sheetChannel.healthy === true
+                        ? "Healthy"
+                        : this._sheetChannel.healthy === false
+                          ? "Unhealthy"
+                          : "-"
+                    }</span
+                  >
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Build enabled</span>
+                  <span class="sheet-detail-value"
+                    >${this._sheetChannel.build_enabled === true ? "Yes" : "No"}</span
+                  >
+                </div>
+                ${
+                  this._sheetChannel.error
+                    ? html`
+                        <div class="sheet-detail-row">
+                          <span class="sheet-detail-label">Error</span>
+                          <span class="sheet-detail-value" style="color: var(--hu-error)"
+                            >${this._sheetChannel.error}</span
+                          >
+                        </div>
+                      `
+                    : nothing
+                }
+              `
+            : nothing
+        }
       </hu-sheet>
     `;
   }

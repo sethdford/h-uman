@@ -202,16 +202,18 @@ export class ScSearch extends LitElement {
           @input=${this._onInput}
           @keydown=${this._onKeyDown}
         />
-        ${showClear
-          ? html`<button
-              type="button"
-              class="icon-end"
-              aria-label="Clear search"
-              @click=${this._onClear}
-            >
-              ${icons.xCircle}
-            </button>`
-          : null}
+        ${
+          showClear
+            ? html`<button
+                type="button"
+                class="icon-end"
+                aria-label="Clear search"
+                @click=${this._onClear}
+              >
+                ${icons.xCircle}
+              </button>`
+            : null
+        }
       </div>
     `;
   }

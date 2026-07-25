@@ -237,53 +237,59 @@ export class ScToolsView extends GatewayAwareLitElement {
           style="--hu-stagger-delay: 100ms"
         ></hu-stat-card>
       </hu-stats-row>
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></hu-empty-state>`
-        : nothing}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Error"
+              description=${this.error}
+            ></hu-empty-state>`
+          : nothing
+      }
       <div class="table-section hu-scroll-reveal-stagger" role="region" aria-label="Tools table">
-        ${rows.length === 0
-          ? html`
-              <hu-empty-state
-                .icon=${icons.wrench}
-                heading="No tools available"
-                description="Tools will appear here when the gateway provides them."
-              ></hu-empty-state>
-            `
-          : html`
-              <hu-data-table-v2
-                .columns=${this.columns}
-                .rows=${rows}
-                searchable
-                @hu-row-click=${this._onRowClick}
-              ></hu-data-table-v2>
-              ${expandedParams !== undefined
-                ? html`
-                    <div class="expand-panel" role="region" aria-label="Parameter schema">
-                      <div class="expand-panel-header">
-                        <span>Parameters: ${this._expandedTool}</span>
-                        <hu-button
-                          variant="ghost"
-                          size="sm"
-                          @click=${() => {
-                            this._expandedTool = null;
-                          }}
-                          aria-label="Close parameter view"
-                        >
-                          Close
-                        </hu-button>
-                      </div>
-                      <hu-json-viewer
-                        .data=${expandedParams}
-                        root-label="parameters"
-                      ></hu-json-viewer>
-                    </div>
-                  `
-                : nothing}
-            `}
+        ${
+          rows.length === 0
+            ? html`
+                <hu-empty-state
+                  .icon=${icons.wrench}
+                  heading="No tools available"
+                  description="Tools will appear here when the gateway provides them."
+                ></hu-empty-state>
+              `
+            : html`
+                <hu-data-table-v2
+                  .columns=${this.columns}
+                  .rows=${rows}
+                  searchable
+                  @hu-row-click=${this._onRowClick}
+                ></hu-data-table-v2>
+                ${
+                  expandedParams !== undefined
+                    ? html`
+                        <div class="expand-panel" role="region" aria-label="Parameter schema">
+                          <div class="expand-panel-header">
+                            <span>Parameters: ${this._expandedTool}</span>
+                            <hu-button
+                              variant="ghost"
+                              size="sm"
+                              @click=${() => {
+                                this._expandedTool = null;
+                              }}
+                              aria-label="Close parameter view"
+                            >
+                              Close
+                            </hu-button>
+                          </div>
+                          <hu-json-viewer
+                            .data=${expandedParams}
+                            root-label="parameters"
+                          ></hu-json-viewer>
+                        </div>
+                      `
+                    : nothing
+                }
+              `
+        }
       </div>
     `;
   }

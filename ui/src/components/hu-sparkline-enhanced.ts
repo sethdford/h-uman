@@ -250,23 +250,28 @@ export class ScSparklineEnhanced extends LitElement {
               <stop offset="1" stop-color=${this.color} stop-opacity="0" />
             </linearGradient>
           </defs>
-          ${this.fillGradient
-            ? html`<path class="area" d=${area} fill="url(#gradient)" />`
-            : nothing}
+          ${
+            this.fillGradient
+              ? html`<path class="area" d=${area} fill="url(#gradient)" />`
+              : nothing
+          }
           <path class="line" d=${line} stroke=${this.color} />
           <circle class="dot" cx=${lastX} cy=${lastY} r=${this.dotSize / 2} fill=${this.color} />
         </svg>
-        ${this.showTooltip && this._hoverIndex >= 0
-          ? html`
-              <div
-                class="tooltip"
-                style="left: ${this._tooltipX}px; top: ${this
-                  ._tooltipY}px; transform: translateX(-50%)"
-              >
-                ${this.tooltipLabel ? `${this.tooltipLabel}: ` : ""}${this.data[this._hoverIndex]}
-              </div>
-            `
-          : nothing}
+        ${
+          this.showTooltip && this._hoverIndex >= 0
+            ? html`
+                <div
+                  class="tooltip"
+                  style="left: ${this._tooltipX}px; top: ${
+                    this._tooltipY
+                  }px; transform: translateX(-50%)"
+                >
+                  ${this.tooltipLabel ? `${this.tooltipLabel}: ` : ""}${this.data[this._hoverIndex]}
+                </div>
+              `
+            : nothing
+        }
       </div>
     `;
   }

@@ -1117,30 +1117,34 @@ export class ScApp extends LitElement {
       >
         Skip to content
       </button>
-      ${this.connectionStatus === "disconnected" &&
-      !this._inFallbackWindow &&
-      !this._bannerDismissed
-        ? html`<div class="disconnect-banner" role="alert">
-            Disconnected from server
-            <button @click=${this._reconnect}>Reconnect</button>
-            <button class="banner-dismiss" @click=${this._dismissBanner} aria-label="Dismiss">
-              ×
-            </button>
-          </div>`
-        : nothing}
-      ${this._demoFallback && !this._bannerDismissed
-        ? html`<div class="demo-fallback-banner" role="status">
-            Demo mode — gateway not reachable
-            <button @click=${this._reconnect}>Retry</button>
-            <button class="banner-dismiss" @click=${this._dismissBanner} aria-label="Dismiss">
-              ×
-            </button>
-          </div>`
-        : nothing}
+      ${
+        this.connectionStatus === "disconnected" &&
+        !this._inFallbackWindow &&
+        !this._bannerDismissed
+          ? html`<div class="disconnect-banner" role="alert">
+              Disconnected from server
+              <button @click=${this._reconnect}>Reconnect</button>
+              <button class="banner-dismiss" @click=${this._dismissBanner} aria-label="Dismiss">
+                ×
+              </button>
+            </div>`
+          : nothing
+      }
+      ${
+        this._demoFallback && !this._bannerDismissed
+          ? html`<div class="demo-fallback-banner" role="status">
+              Demo mode — gateway not reachable
+              <button @click=${this._reconnect}>Retry</button>
+              <button class="banner-dismiss" @click=${this._dismissBanner} aria-label="Dismiss">
+                ×
+              </button>
+            </div>`
+          : nothing
+      }
       <div
-        class="layout ${this._effectiveSidebarCollapsed ? "collapsed" : ""} ${this._hasDetail
-          ? "has-detail"
-          : ""}"
+        class="layout ${this._effectiveSidebarCollapsed ? "collapsed" : ""} ${
+          this._hasDetail ? "has-detail" : ""
+        }"
       >
         <hu-sidebar
           class="hu-glass-scroll-aware"
@@ -1174,9 +1178,11 @@ export class ScApp extends LitElement {
           </div>
         </main>
 
-        ${this._hasDetail
-          ? html`<aside class="detail-panel" role="complementary" aria-label="Detail"></aside>`
-          : nothing}
+        ${
+          this._hasDetail
+            ? html`<aside class="detail-panel" role="complementary" aria-label="Detail"></aside>`
+            : nothing
+        }
 
         <nav class="mobile-nav" aria-label="Mobile navigation">
           ${MOBILE_TABS.map(
@@ -1202,36 +1208,38 @@ export class ScApp extends LitElement {
           </button>
         </nav>
       </div>
-      ${this.moreSheetOpen
-        ? html`
-            <div class="more-backdrop" @click=${() => (this.moreSheetOpen = false)}></div>
-            <div
-              class="more-sheet"
-              role="dialog"
-              aria-modal="true"
-              aria-label="More views"
-              tabindex="-1"
-            >
-              <div class="more-sheet-handle"></div>
-              <div class="more-sheet-grid">
-                ${MORE_TABS.map(
-                  (t) => html`
-                    <button
-                      class="more-item"
-                      @click=${() => {
-                        this.moreSheetOpen = false;
-                        this._switchTab(t.id);
-                      }}
-                    >
-                      <span class="more-icon">${t.icon}</span>
-                      <span>${t.label}</span>
-                    </button>
-                  `,
-                )}
+      ${
+        this.moreSheetOpen
+          ? html`
+              <div class="more-backdrop" @click=${() => (this.moreSheetOpen = false)}></div>
+              <div
+                class="more-sheet"
+                role="dialog"
+                aria-modal="true"
+                aria-label="More views"
+                tabindex="-1"
+              >
+                <div class="more-sheet-handle"></div>
+                <div class="more-sheet-grid">
+                  ${MORE_TABS.map(
+                    (t) => html`
+                      <button
+                        class="more-item"
+                        @click=${() => {
+                          this.moreSheetOpen = false;
+                          this._switchTab(t.id);
+                        }}
+                      >
+                        <span class="more-icon">${t.icon}</span>
+                        <span>${t.label}</span>
+                      </button>
+                    `,
+                  )}
+                </div>
               </div>
-            </div>
-          `
-        : nothing}
+            `
+          : nothing
+      }
 
       <hu-command-palette
         .open=${this.commandPaletteOpen}

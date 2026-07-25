@@ -231,13 +231,15 @@ export class ScToast extends LitElement {
           >
             <span class="message">${item.message}</span>
             <div class="actions">
-              ${item.action
-                ? html`
-                    <button class="action-btn" @click=${() => this._onActionClick(item)}>
-                      ${item.action.label}
-                    </button>
-                  `
-                : nothing}
+              ${
+                item.action
+                  ? html`
+                      <button class="action-btn" @click=${() => this._onActionClick(item)}>
+                        ${item.action.label}
+                      </button>
+                    `
+                  : nothing
+              }
               <button
                 class="dismiss-btn"
                 aria-label="Dismiss"

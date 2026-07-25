@@ -304,15 +304,17 @@ export class HuWorkflowDetail extends LitElement {
             Timeline
           </h2>
           <div class="panel-content">
-            ${this.events.length > 0
-              ? html`
-                  <hu-workflow-timeline
-                    .events=${this.events}
-                    .workflowId=${this.workflowId}
-                    .status=${this.status}
-                  ></hu-workflow-timeline>
-                `
-              : html`<div class="empty-message">No events yet</div>`}
+            ${
+              this.events.length > 0
+                ? html`
+                    <hu-workflow-timeline
+                      .events=${this.events}
+                      .workflowId=${this.workflowId}
+                      .status=${this.status}
+                    ></hu-workflow-timeline>
+                  `
+                : html`<div class="empty-message">No events yet</div>`
+            }
           </div>
         </div>
 
@@ -323,23 +325,25 @@ export class HuWorkflowDetail extends LitElement {
             Approvals
           </h2>
           <div class="panel-content">
-            ${this.approvalGates.length > 0
-              ? html`
-                  <div class="approval-gates">
-                    ${this.approvalGates.map(
-                      (gate) => html`
-                        <hu-approval-gate
-                          .gateId=${gate.gateId}
-                          .description=${gate.description}
-                          .status=${gate.status}
-                          @gate-approve=${this._handleGateApprove.bind(this)}
-                          @gate-reject=${this._handleGateReject.bind(this)}
-                        ></hu-approval-gate>
-                      `,
-                    )}
-                  </div>
-                `
-              : html`<div class="empty-message">No approval gates required</div>`}
+            ${
+              this.approvalGates.length > 0
+                ? html`
+                    <div class="approval-gates">
+                      ${this.approvalGates.map(
+                        (gate) => html`
+                          <hu-approval-gate
+                            .gateId=${gate.gateId}
+                            .description=${gate.description}
+                            .status=${gate.status}
+                            @gate-approve=${this._handleGateApprove.bind(this)}
+                            @gate-reject=${this._handleGateReject.bind(this)}
+                          ></hu-approval-gate>
+                        `,
+                      )}
+                    </div>
+                  `
+                : html`<div class="empty-message">No approval gates required</div>`
+            }
           </div>
         </div>
 
@@ -350,9 +354,11 @@ export class HuWorkflowDetail extends LitElement {
             Agents
           </h2>
           <div class="panel-content">
-            ${this.agents.length > 0
-              ? html` <hu-agent-graph .agents=${this.agents}></hu-agent-graph> `
-              : html`<div class="empty-message">No agents assigned</div>`}
+            ${
+              this.agents.length > 0
+                ? html` <hu-agent-graph .agents=${this.agents}></hu-agent-graph> `
+                : html`<div class="empty-message">No agents assigned</div>`
+            }
           </div>
         </div>
       </div>

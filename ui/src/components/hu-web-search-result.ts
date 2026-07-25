@@ -245,63 +245,69 @@ export class ScWebSearchResult extends LitElement {
           <span class="caret ${this._expanded ? "open" : ""}">${icons["caret-right"]}</span>
         </button>
         <div id="search-detail" class="detail ${this._expanded ? "open" : ""}">
-          ${this.query
-            ? html`
-                <div class="query-section">
-                  <div class="section-label">Query</div>
-                  <div class="query-value">${this.query}</div>
-                </div>
-              `
-            : nothing}
-          ${this.sites.length > 0
-            ? html`
-                <div class="query-section">
-                  <div class="section-label">Sites searched</div>
-                  <div class="sites-list">
-                    ${this.sites.map(
-                      (site) => html`
-                        <span class="site-badge">
-                          <img
-                            class="site-favicon"
-                            src="https://www.google.com/s2/favicons?domain=${this._getDomain(
-                              site,
-                            )}&sz=16"
-                            alt=""
-                            loading="lazy"
-                            width="12"
-                            height="12"
-                          />
-                          ${this._getDomain(site)}
-                        </span>
-                      `,
-                    )}
+          ${
+            this.query
+              ? html`
+                  <div class="query-section">
+                    <div class="section-label">Query</div>
+                    <div class="query-value">${this.query}</div>
                   </div>
-                </div>
-              `
-            : nothing}
-          ${this.sources.length > 0
-            ? html`
-                <div class="query-section">
-                  <div class="section-label">Sources</div>
-                  <ul class="sources-list">
-                    ${this.sources.map(
-                      (source) => html`
-                        <li class="source-item">
-                          <span class="source-bullet"></span>
-                          <a
-                            class="source-link"
-                            href=${source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            >${source.title || this._getDomain(source.url)}</a
-                          >
-                        </li>
-                      `,
-                    )}
-                  </ul>
-                </div>
-              `
-            : nothing}
+                `
+              : nothing
+          }
+          ${
+            this.sites.length > 0
+              ? html`
+                  <div class="query-section">
+                    <div class="section-label">Sites searched</div>
+                    <div class="sites-list">
+                      ${this.sites.map(
+                        (site) => html`
+                          <span class="site-badge">
+                            <img
+                              class="site-favicon"
+                              src="https://www.google.com/s2/favicons?domain=${this._getDomain(
+                                site,
+                              )}&sz=16"
+                              alt=""
+                              loading="lazy"
+                              width="12"
+                              height="12"
+                            />
+                            ${this._getDomain(site)}
+                          </span>
+                        `,
+                      )}
+                    </div>
+                  </div>
+                `
+              : nothing
+          }
+          ${
+            this.sources.length > 0
+              ? html`
+                  <div class="query-section">
+                    <div class="section-label">Sources</div>
+                    <ul class="sources-list">
+                      ${this.sources.map(
+                        (source) => html`
+                          <li class="source-item">
+                            <span class="source-bullet"></span>
+                            <a
+                              class="source-link"
+                              href=${source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              >${source.title || this._getDomain(source.url)}</a
+                            >
+                          </li>
+                        `,
+                      )}
+                    </ul>
+                  </div>
+                `
+              : nothing
+          }
         </div>
       </div>
     `;

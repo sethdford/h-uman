@@ -365,9 +365,11 @@ export class ScChart extends LitElement {
           aria-label="Chart"
           style="display: block; box-sizing: border-box; height: ${this.height}px; width: 100%"
         ></canvas>
-        ${showCenter
-          ? html`<div class="doughnut-center" aria-hidden="true">${total.toLocaleString()}</div>`
-          : nothing}
+        ${
+          showCenter
+            ? html`<div class="doughnut-center" aria-hidden="true">${total.toLocaleString()}</div>`
+            : nothing
+        }
       </div>
     `;
   }

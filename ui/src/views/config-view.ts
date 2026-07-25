@@ -563,43 +563,51 @@ export class ScConfigView extends GatewayAwareLitElement {
       </hu-page-hero>
       <hu-card glass>
         <div class="form">
-          ${this.rawEditing
-            ? html`
-                <hu-textarea
-                  class="raw-area"
-                  .value=${this.rawText}
-                  @hu-input=${(e: CustomEvent<{ value: string }>) => {
-                    this.rawText = e.detail.value;
-                    if (this.saveStatus === "saved") this.saveStatus = "idle";
-                  }}
-                  rows="12"
-                  resize="vertical"
-                ></hu-textarea>
-                <hu-button variant="secondary" size="sm" @click=${() => (this.rawEditing = false)}>
-                  Done editing
-                </hu-button>
-              `
-            : html`
-                <hu-code-block .code=${this.rawText} language="json"></hu-code-block>
-                <hu-button variant="secondary" size="sm" @click=${() => (this.rawEditing = true)}>
-                  Edit
-                </hu-button>
-              `}
+          ${
+            this.rawEditing
+              ? html`
+                  <hu-textarea
+                    class="raw-area"
+                    .value=${this.rawText}
+                    @hu-input=${(e: CustomEvent<{ value: string }>) => {
+                      this.rawText = e.detail.value;
+                      if (this.saveStatus === "saved") this.saveStatus = "idle";
+                    }}
+                    rows="12"
+                    resize="vertical"
+                  ></hu-textarea>
+                  <hu-button
+                    variant="secondary"
+                    size="sm"
+                    @click=${() => (this.rawEditing = false)}
+                  >
+                    Done editing
+                  </hu-button>
+                `
+              : html`
+                  <hu-code-block .code=${this.rawText} language="json"></hu-code-block>
+                  <hu-button variant="secondary" size="sm" @click=${() => (this.rawEditing = true)}>
+                    Edit
+                  </hu-button>
+                `
+          }
         </div>
       </hu-card>
-      ${this.hasChanges()
-        ? html`
-            <div class="unsaved-banner">
-              <span>You have unsaved changes</span>
-              <div class="unsaved-banner-actions">
-                <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
-                <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
-                  Save
-                </hu-button>
+      ${
+        this.hasChanges()
+          ? html`
+              <div class="unsaved-banner">
+                <span>You have unsaved changes</span>
+                <div class="unsaved-banner-actions">
+                  <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
+                  <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                    Save
+                  </hu-button>
+                </div>
               </div>
-            </div>
-          `
-        : nothing}
+            `
+          : nothing
+      }
     `;
   }
 
@@ -697,9 +705,13 @@ export class ScConfigView extends GatewayAwareLitElement {
                   this._onFormChange();
                 }}
               ></hu-input>
-              ${this.temperatureError
-                ? html`<span class="description description-error">${this.temperatureError}</span>`
-                : nothing}
+              ${
+                this.temperatureError
+                  ? html`<span class="description description-error"
+                      >${this.temperatureError}</span
+                    >`
+                  : nothing
+              }
             </div>
           </hu-form-group>
         </hu-card>
@@ -722,19 +734,21 @@ export class ScConfigView extends GatewayAwareLitElement {
           </hu-form-group>
         </hu-card>
       </div>
-      ${this.hasChanges()
-        ? html`
-            <div class="unsaved-banner">
-              <span>You have unsaved changes</span>
-              <div class="unsaved-banner-actions">
-                <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
-                <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
-                  Save
-                </hu-button>
+      ${
+        this.hasChanges()
+          ? html`
+              <div class="unsaved-banner">
+                <span>You have unsaved changes</span>
+                <div class="unsaved-banner-actions">
+                  <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
+                  <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                    Save
+                  </hu-button>
+                </div>
               </div>
-            </div>
-          `
-        : nothing}
+            `
+          : nothing
+      }
     `;
   }
 }

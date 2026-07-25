@@ -131,15 +131,17 @@ export class HuCanvasSandbox extends LitElement {
   override render() {
     return html`
       ${this._error ? html`<div class="error-banner" role="alert">${this._error}</div>` : ""}
-      ${this._harnessSrc
-        ? html`<iframe
-            sandbox="allow-scripts"
-            srcdoc=${this._harnessSrc}
-            style="height: ${this._height}px"
-            title="Canvas preview"
-            aria-label="Sandboxed canvas content preview"
-          ></iframe>`
-        : html`<div class="loading">Initializing sandbox...</div>`}
+      ${
+        this._harnessSrc
+          ? html`<iframe
+              sandbox="allow-scripts"
+              srcdoc=${this._harnessSrc}
+              style="height: ${this._height}px"
+              title="Canvas preview"
+              aria-label="Sandboxed canvas content preview"
+            ></iframe>`
+          : html`<div class="loading">Initializing sandbox...</div>`
+      }
     `;
   }
 }
