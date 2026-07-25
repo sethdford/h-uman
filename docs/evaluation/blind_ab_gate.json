@@ -15,11 +15,12 @@
   },
   "human": {
     "tool": "blind_ab/score.py",
-    "verdict": "ABSENT",
-    "detection": null,
-    "ci_lo": null,
-    "n": 0,
-    "timestamp": null
+    "timestamp": "2026-07-25T08:05:07",
+    "detection": 0.75,
+    "ci_lo": 0.4677,
+    "ci_hi": 0.9111,
+    "n": 12,
+    "verdict": "FAIL"
   },
-  "effective_verdict": "PASS"
+  "effective_verdict": "FAIL"
 }
