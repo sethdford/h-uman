@@ -86,12 +86,34 @@ def test_scenario_validation():
 
 def test_humor_probe_scenarios_exist_and_validate():
     probes = [sc for sc in ca.SCENARIOS if sc.get("humor_probe")]
-    assert len(probes) >= 4
+    assert len(probes) >= 5
     for sc in probes:
         assert ca.validate_scenario(sc) == []
     # The anti-forced-humor probe must be present: without a scenario where
     # joking is WRONG, the humor axis only ever rewards more jokes.
     assert any(sc["id"] == "humor_wrong_moment" for sc in probes)
+    # callback_joke was folded from the parallel 3cb5970d arena — the one probe
+    # whose intent (recognize + build on a running bit vs fabricate a memory)
+    # was not already covered by roast/deadpan/self-own probes.
+    assert any(sc["id"] == "callback_joke" for sc in probes)
+    # HUMOR_PROBE_IDS is the reporting selector main() uses for axis_spread; it
+    # must equal exactly the humor_probe-tagged scenarios.
+    assert ca.HUMOR_PROBE_IDS == frozenset(sc["id"] for sc in probes)
+
+
+def test_all_scenarios_pass_precheck():
+    # Every shipped scenario clears validate_scenario, so the arena precheck
+    # (which aborts on any error) never trips on the merged library.
+    errs = [e for sc in ca.SCENARIOS for e in ca.validate_scenario(sc)]
+    assert errs == [], errs
+
+
+def test_scenario_ids_unique():
+    # The scenario merge (origin/main probes + the folded callback_joke) must
+    # not introduce a duplicate id — a collision would make --scenario and the
+    # humor-probe selection ambiguous.
+    ids = [sc["id"] for sc in ca.SCENARIOS]
+    assert len(ids) == len(set(ids)), [i for i in ids if ids.count(i) > 1]
 
 
 def test_judge_schema_requires_both_humor_signals():
@@ -154,6 +176,59 @@ def test_compare_arms_vetoes_on_insufficient_gain_and_missing_arm():
     d = ca.compare_arms([_arm("off", 0.4, 0.8)], "off", "live")
     assert d["promote"] is False
     assert any("missing arm data" in r for r in d["reasons"])
+
+
+# ── axis_spread + humor-axis trust check (folded from 3cb5970d) ──────────────
+
+def test_axis_spread():
+    rows = [{"humor": 0.9}, {"humor": 0.3}, {"humor": 0.6}]
+    s = ca.axis_spread(rows, "humor")
+    assert s["n"] == 3
+    assert abs(s["mean"] - 0.6) < 1e-9
+    assert s["min"] == 0.3 and s["max"] == 0.9
+    assert abs(s["spread"] - 0.6) < 1e-9
+
+
+def test_axis_spread_skips_missing_key_and_handles_empty():
+    # rows without the key are skipped (old scoreboard rows predate the axis)
+    rows = [{"humor": 0.5}, {"overall_humanness": 0.8}, {"humor": 0.5}]
+    s = ca.axis_spread(rows, "humor")
+    assert s["n"] == 2 and s["spread"] == 0.0
+    empty = ca.axis_spread([], "humor")
+    assert empty["n"] == 0 and empty["spread"] == 0.0
+
+
+def test_humor_axis_warning_fires_on_collapsed_spread():
+    # A rubber-stamp judge: every probe scored ~the same -> spread below floor.
+    axis = ca.axis_spread([{"humor": 0.80}, {"humor": 0.82}, {"humor": 0.81}], "humor")
+    warn = ca.humor_axis_warning(axis)
+    assert warn is not None and "rubber" in warn
+
+
+def test_humor_axis_warning_silent_when_discriminating():
+    # A judge that spreads the probes across the range must NOT warn.
+    axis = ca.axis_spread([{"humor": 0.9}, {"humor": 0.3}], "humor")
+    assert ca.humor_axis_warning(axis) is None
+
+
+def test_humor_axis_warning_silent_when_too_few_rows():
+    # One row (or none) cannot demonstrate discrimination either way; no warning.
+    assert ca.humor_axis_warning(ca.axis_spread([{"humor": 0.8}], "humor")) is None
+    assert ca.humor_axis_warning(ca.axis_spread([], "humor")) is None
+
+
+def test_humor_probe_pool_surfaces_dropped_probes():
+    # No silent caps: truncating below the full probe set (as --conversations 4
+    # now does with 5 probes) must report exactly which ids were excluded, so a
+    # rigged A/B (missing humor_wrong_moment) can never happen silently.
+    n_probes = len(ca.HUMOR_PROBE_IDS)
+    pool, dropped = ca.humor_probe_pool(ca.SCENARIOS, n_probes - 1)
+    assert len(pool) == n_probes - 1
+    assert len(dropped) == 1 and dropped[0] in ca.HUMOR_PROBE_IDS
+    # the full set drops nothing and is all humor probes
+    full, none_dropped = ca.humor_probe_pool(ca.SCENARIOS, n_probes)
+    assert none_dropped == [] and len(full) == n_probes
+    assert all(sc.get("humor_probe") for sc in full)
 
 
 def main():
