@@ -39,12 +39,12 @@
 set -euo pipefail
 
 # ---- Fixed, absolute paths (per worktree-cwd-resets rule) -------------------
-REPO="/Users/sethford/Projects/h-uman"
+# HU_REPO override exists so a worktree copy can be dry-run against itself.
+REPO="${HU_REPO:-/Users/sethford/Projects/h-uman}"
 PY="/opt/homebrew/bin/python3"
 LOG_DIR="/Users/sethford/.human/logs"
 ARCHIVE_DIR="${LOG_DIR}/eval-archive"
 LOCK_DIR="${LOG_DIR}/.nightly-eval.lock"
-ADAPTER_GLOB="/Users/sethford/.human/training-data/adapters/seth-lora-v4-repair*"
 MODEL_ID="mlx-community/gemma-4-31b-it-4bit"
 SERVER_URL="http://127.0.0.1:8741"
 RETAIN=30
@@ -73,16 +73,12 @@ mkdir -p "$LOG_DIR" "$ARCHIVE_DIR"
 ts() { date '+%Y-%m-%dT%H:%M:%S'; }
 log() { echo "[$(ts)] $*" | tee -a "${LOG_DIR}/nightly-eval.log"; }
 
-# ---- Resolve the newest v4-repair adapter dir (survives re-training) --------
-# The launchd plist used to hardcode .../seth-lora-v4-repair (no timestamp
-# suffix), which no longer exists, so every nightly fidelity run SKIPped.
-# Glob + newest-mtime makes the schedule self-healing across re-trains.
-resolve_adapter() {
-  local newest
-  # shellcheck disable=SC2086
-  newest=$(ls -dt $ADAPTER_GLOB 2>/dev/null | head -1 || true)
-  printf '%s' "$newest"
-}
+# ---- Serving-adapter resolution lives in eval_fidelity_nightly.py -----------
+# History: a hardcoded .../seth-lora-v4-repair path skipped silently, then a
+# v4-repair* glob here measured the WRONG adapter for a week while the server
+# served v5-8bit. The harness now resolves the SERVING adapter itself (live
+# mlx-server process, else config.json personalization.lora_adapter_path) and
+# exits 3 with a FIDELITY_SKIP marker when it can't.
 
 # ---- :8741 health: any HTTP response = up; connection refused / 000 = down --
 server_up() {
@@ -132,7 +128,7 @@ archive_verdict() {
 [ -f "$MULTITURN" ]     || { log "FATAL: missing $MULTITURN"; exit 2; }
 [ -f "$FIDELITY" ]      || { log "FATAL: missing $FIDELITY"; exit 2; }
 
-ADAPTER=$(resolve_adapter)
+ADAPTER=$("$PY" "$FIDELITY" --resolve-only 2>/dev/null || true)
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "=== DRY RUN (validate only, run nothing) ==="
@@ -144,7 +140,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  judge ADC:     $(adc_present && echo PRESENT || echo ABSENT)"
   log "  ground truth:  $(ground_truth_exists && echo FOUND || echo MISSING)"
   log "  judge creds:   $(judge_creds_present && echo AVAILABLE || echo UNAVAILABLE)"
-  log "  adapter:       ${ADAPTER:-'(none found for '"$ADAPTER_GLOB"')'}"
+  log "  adapter:       ${ADAPTER:-'(unresolved — fidelity will SKIP loudly)'}"
   log "  archive dir:   $ARCHIVE_DIR (retain last $RETAIN per harness)"
   log "  lock dir:      $LOCK_DIR ($([ -d "$LOCK_DIR" ] && echo HELD || echo free))"
   log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
@@ -182,21 +178,20 @@ else
 fi
 
 # ---- 2) persona-fidelity SOTA gate (loads its own model; serial after #1) ---
+# No --adapter-path: the harness resolves the SERVING adapter itself and
+# exits 3 + FIDELITY_SKIP when it can't (grep the log for FIDELITY_SKIP).
 if [ "$SMOKE" -eq 1 ]; then
   log "[2/3] fidelity: skipped (--smoke)"
-elif [ -z "$ADAPTER" ]; then
-  log "[2/3] fidelity: skipped (no adapter matched $ADAPTER_GLOB)"
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
-  log "[2/3] fidelity: adapter=$ADAPTER — running"
+  log "[2/3] fidelity: serving-adapter=${ADAPTER:-'(unresolved)'} — running"
   set +e
   "$PY" "$FIDELITY" \
-    --adapter-path "$ADAPTER" \
     --model-id "$MODEL_ID" \
     --output-json "$FID_OUT" \
     --log-dir "$LOG_DIR"; fid_rc=$?
   set -e
-  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS-or-SKIP;;1)echo FAIL;;*)echo "rc=$fid_rc";;esac))"
+  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
   archive_verdict fidelity "$FID_OUT"
 fi
 
