@@ -14,6 +14,14 @@ typedef struct hu_http_response {
     bool owned; /* if true, caller must free body */
 } hu_http_response_t;
 
+/* Maximum serialized request body (bytes) posted to any provider by the JSON
+ * POST helpers below. Bodies over this cap are rejected before the request is
+ * sent (HU_ERR_INVALID_ARGUMENT), on EVERY path: first attempt, retries, and
+ * fallback. This stops a pathological multi-MB body (e.g. a base64 image) from
+ * wedging a single-threaded backend via retry amplification. Default 3 MiB;
+ * override with the HU_HTTP_MAX_BODY_BYTES environment variable (min 4096). */
+size_t hu_http_max_provider_body_bytes(void);
+
 hu_error_t hu_http_post_json(hu_allocator_t *alloc, const char *url,
                              const char *auth_header, /* e.g. "Bearer sk-xxx", or NULL */
                              const char *json_body, size_t json_body_len, hu_http_response_t *out);
