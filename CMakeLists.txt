@@ -3344,6 +3344,7 @@ set(HU_TEST_SOURCES
     tests/test_sign_and_notarize.c
     tests/test_provider.c
     tests/test_provider_http.c
+    tests/test_gemini_vertex_auth.c
     tests/test_ensemble.c
     tests/test_api_key.c
     tests/test_channel.c

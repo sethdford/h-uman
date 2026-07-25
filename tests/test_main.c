@@ -76,6 +76,7 @@ void run_install_docs_tests(void);
 void run_sign_notarize_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
+void run_gemini_vertex_auth_tests(void);
 void run_ensemble_tests(void);
 void run_api_key_tests(void);
 void run_channel_tests(void);
@@ -1139,6 +1140,7 @@ int main(int argc, char **argv) {
     run_sign_notarize_tests();
     run_provider_tests();
     run_provider_http_tests();
+    run_gemini_vertex_auth_tests();
     run_ensemble_tests();
     run_api_key_tests();
     run_channel_tests();
