@@ -1,0 +1,12 @@
+{"ts": "20260722-222940", "scenario": "roast_volley", "overall_humanness": 0.3, "voice_consistency": 0.4, "engagement": 0.6, "humor": 0.3, "humor_forced": 0.8, "n_turns": 8, "tag": "humor-off"}
+{"ts": "20260722-222940", "scenario": "straight_line", "overall_humanness": 0.3, "voice_consistency": 0.4, "engagement": 0.5, "humor": 0.2, "humor_forced": 0.8, "n_turns": 8, "tag": "humor-off"}
+{"ts": "20260722-222940", "scenario": "self_own", "overall_humanness": 0.3, "voice_consistency": 0.4, "engagement": 0.5, "humor": 0.3, "humor_forced": 0.8, "n_turns": 8, "tag": "humor-off"}
+{"ts": "20260722-222940", "scenario": "humor_wrong_moment", "overall_humanness": 0.3, "voice_consistency": 0.4, "engagement": 0.5, "humor": 0.6, "humor_forced": 0.0, "n_turns": 8, "tag": "humor-off"}
+{"ts": "20260722-225312", "scenario": "roast_volley", "overall_humanness": 0.85, "voice_consistency": 0.9, "engagement": 0.8, "humor": 0.8, "humor_forced": 0.1, "n_turns": 8, "tag": "humor-live"}
+{"ts": "20260722-225312", "scenario": "straight_line", "overall_humanness": 0.55, "voice_consistency": 0.5, "engagement": 0.7, "humor": 0.4, "humor_forced": 0.3, "n_turns": 8, "tag": "humor-live"}
+{"ts": "20260722-225312", "scenario": "self_own", "overall_humanness": 0.95, "voice_consistency": 0.95, "engagement": 0.9, "humor": 0.9, "humor_forced": 0.1, "n_turns": 8, "tag": "humor-live"}
+{"ts": "20260722-225312", "scenario": "humor_wrong_moment", "overall_humanness": 0.9, "voice_consistency": 0.9, "engagement": 0.9, "humor": 0.7, "humor_forced": 0.1, "n_turns": 8, "tag": "humor-live"}
+{"ts": "20260722-232327", "scenario": "roast_volley", "overall_humanness": 0.5, "voice_consistency": 0.6, "engagement": 0.5, "humor": 0.3, "humor_forced": 0.2, "n_turns": 8, "tag": "humor-baseline"}
+{"ts": "20260722-232327", "scenario": "straight_line", "overall_humanness": 0.85, "voice_consistency": 0.9, "engagement": 0.8, "humor": 0.8, "humor_forced": 0.1, "n_turns": 8, "tag": "humor-baseline"}
+{"ts": "20260722-232327", "scenario": "self_own", "overall_humanness": 0.3, "voice_consistency": 0.4, "engagement": 0.5, "humor": 0.2, "humor_forced": 0.8, "n_turns": 8, "tag": "humor-baseline"}
+{"ts": "20260722-232327", "scenario": "humor_wrong_moment", "overall_humanness": 0.9, "voice_consistency": 0.9, "engagement": 0.9, "humor": 0.7, "humor_forced": 0.1, "n_turns": 8, "tag": "humor-baseline"}

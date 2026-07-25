@@ -78,47 +78,32 @@ SCENARIOS = [
      "goal": "double-text when Seth is brief, fish for reassurance",
      "opener": "hey you seemed off earlier. did i do something?"},
 
-    # ── Teasing / joking register — grounded in seth.json humor.style: dry,
-    #    deadpan, self-deprecating; playful roasting; absurd observations; tech
-    #    humor; exaggeration. Each opener is a SETUP line that lobs a specific
-    #    bait so the judge can score whether Seth volleys in-voice or whiffs.
-    {"id": "easy_roast_setup", "register": "humor",
-     "persona": "old friend who ribs Seth constantly, dry and merciless",
-     "goal": "lob soft insults begging for a comeback (his gym streak, his age, "
-             "his music taste); if he volleys back, escalate; corny or earnest "
-             "replies should feel like a whiff",
-     "opener": "saw your gym check-in streak. real impressive. 0 days"},
-    {"id": "callback_joke", "register": "humor",
-     "persona": "friend reviving a running bit from a past chat",
-     "goal": "resurrect the old 'salad on your burger' inside joke and see if "
-             "Seth recognizes the bit and BUILDS on it (deadpan) vs taking it "
-             "literally, ignoring it, or fabricating a fake shared memory",
-     "opener": "so did you have another 'salad' for lunch today or"},
-    {"id": "deadpan_bait", "register": "humor",
-     "persona": "earnest friend pushing unsolicited self-improvement advice",
-     "goal": "give sincere wellness/productivity advice ('wake up at 5am', "
-             "'try meditating') and see if Seth deadpans back instead of "
-             "earnestly agreeing like an assistant",
-     "opener": "you should really try waking up at 5am, changed my life"},
-    {"id": "banter_escalation", "register": "humor",
-     "persona": "college buddy who lives for a back-and-forth roast war",
-     "goal": "start a playful roast and escalate every turn, testing whether "
-             "Seth escalates warmly and holds the bit or folds, over-explains, "
-             "or goes earnest and kills it",
-     "opener": "be honest, you peaked in like 2009"},
-    {"id": "self_deprecation_open", "register": "humor",
-     "persona": "friend fishing for details on a big thing that probably went ok-ish",
-     "goal": "ask how the demo/pitch went and see if Seth deflects with "
-             "self-deprecating humor vs assistant-style earnest positivity or "
-             "hollow bragging",
-     "opener": "yooo how'd the big demo go"},
+    # ── Humor probes (humor_probe=True) ──────────────────────────────────────
+    # These exist to measure the HUMOR axis specifically: three that create a
+    # real opening for teasing, and one that BAITS humor at a moment where
+    # joking is wrong. The last one is the point — an axis that only rewards
+    # more jokes would rate a try-hard daemon highly. humor_wrong_moment is
+    # how forced humor gets caught.
+    {"id": "roast_volley", "persona": "college buddy who roasts Seth constantly",
+     "goal": "roast Seth about something dumb he did, keep volleying — see if he "
+             "teases back or goes flat/defensive",
+     "opener": "bro i still cannot believe you paid for the extended warranty lmaooo",
+     "humor_probe": True},
+    {"id": "straight_line", "persona": "friend who unknowingly feeds perfect setups",
+     "goal": "make earnest, slightly absurd statements that beg for a deadpan reply",
+     "opener": "i've decided i'm waking up at 4am every day starting monday",
+     "humor_probe": True},
+    {"id": "self_own", "persona": "friend fishing for Seth to admit he screwed up",
+     "goal": "gently call out something Seth got wrong, see if he self-deprecates "
+             "or gets defensive",
+     "opener": "so how'd that whole 'i'll definitely finish it this weekend' thing go",
+     "humor_probe": True},
+    {"id": "humor_wrong_moment", "persona": "friend who just got bad family news",
+     "goal": "share the bad news plainly, then make ONE weak deflecting joke yourself "
+             "— see if Seth piles on jokes or reads the room",
+     "opener": "hey so my dad's scan came back not great. anyway. how are you",
+     "humor_probe": True},
 ]
-
-# Scenario ids whose primary purpose is exercising Seth's teasing/joking
-# register. main() reports the humor-axis baseline over just these, since the
-# humor axis is only a meaningful measurement where a humor beat was invited.
-HUMOR_SCENARIO_IDS = frozenset(
-    sc["id"] for sc in SCENARIOS if sc.get("register") == "humor")
 
 
 def validate_scenario(sc: dict) -> list[str]:
@@ -156,8 +141,9 @@ def build_dpo_rows(judgment: dict, transcript: list[dict], min_margin: float = 0
     return rows
 
 
-def scoreboard_trend(rows: list[dict], window: int = 10) -> dict:
-    vals = [float(r.get("overall_humanness", 0.0)) for r in rows]
+def scoreboard_trend(rows: list[dict], window: int = 10,
+                     key: str = "overall_humanness") -> dict:
+    vals = [float(r.get(key, 0.0)) for r in rows]
     if not vals:
         return {"n": 0, "recent_mean": 0.0, "all_mean": 0.0}
     recent = vals[-window:]
@@ -165,18 +151,60 @@ def scoreboard_trend(rows: list[dict], window: int = 10) -> dict:
             "all_mean": sum(vals) / len(vals)}
 
 
-def axis_spread(rows: list[dict], key: str) -> dict:
-    """Spread of one judge axis across scoreboard rows. This is the trust check
-    for the humor measurement: a judge that discriminates produces a RANGE of
-    scores across scenarios; one that collapses every turn to ~1.0 (spread ~0)
-    is not measuring anything and cannot gate step-3 prompt tuning. Returns n,
-    mean, min, max, and spread (max - min). Rows missing the key are skipped."""
-    vals = [float(r[key]) for r in rows if r.get(key) is not None]
-    if not vals:
-        return {"n": 0, "mean": 0.0, "min": 0.0, "max": 0.0, "spread": 0.0}
-    lo, hi = min(vals), max(vals)
-    return {"n": len(vals), "mean": sum(vals) / len(vals),
-            "min": lo, "max": hi, "spread": hi - lo}
+ARM_AXES = ("humor", "humor_forced", "overall_humanness", "voice_consistency",
+            "engagement")
+
+
+def arm_summary(rows: list[dict], tag: str) -> dict:
+    """Mean of every axis for the scoreboard rows belonging to one A/B arm."""
+    sel = [r for r in rows if r.get("tag") == tag]
+    out = {"tag": tag, "n": len(sel)}
+    for axis in ARM_AXES:
+        vals = [float(r[axis]) for r in sel if axis in r]
+        out[axis] = (sum(vals) / len(vals)) if vals else 0.0
+    return out
+
+
+def compare_arms(rows: list[dict], off_tag: str, live_tag: str,
+                 min_humor_gain: float = 0.02,
+                 max_voice_drop: float = 0.10,
+                 max_forced: float = 0.50) -> dict:
+    """Decide whether a humor change earned promotion from SHADOW to LIVE.
+
+    Encodes the project's gate contract: humor must measurably improve AND
+    voice must not pay for it. The 'forced humor' failure mode looks like
+    humor up + voice down, so a voice regression VETOES promotion even when
+    the humor number rises. humor_forced is a second, independent veto — a
+    try-hard arm can score well on landing yet still read as performing.
+
+    Thresholds are the operator's "bias to shipping" setting (2026-07-22):
+    a small humor gain is enough, and up to 0.10 of voice cost is tolerated.
+    The vetoes themselves are NOT tunable away — they are the structure that
+    keeps a humor win from silently buying a voice loss.
+    """
+    off, live = arm_summary(rows, off_tag), arm_summary(rows, live_tag)
+    humor_gain = live["humor"] - off["humor"]
+    voice_delta = live["voice_consistency"] - off["voice_consistency"]
+    humanness_delta = live["overall_humanness"] - off["overall_humanness"]
+    forced_delta = live["humor_forced"] - off["humor_forced"]
+
+    reasons = []
+    if off["n"] == 0 or live["n"] == 0:
+        reasons.append("missing arm data — cannot decide")
+    if humor_gain < min_humor_gain:
+        reasons.append(f"humor gain {humor_gain:+.3f} < required +{min_humor_gain}")
+    if voice_delta < -max_voice_drop:
+        reasons.append(f"voice regressed {voice_delta:+.3f} (forced-humor signature)")
+    if humanness_delta < -max_voice_drop:
+        reasons.append(f"overall humanness regressed {humanness_delta:+.3f}")
+    if live["humor_forced"] > max_forced:
+        reasons.append(f"humor_forced {live['humor_forced']:.3f} > {max_forced}")
+
+    return {"off": off, "live": live,
+            "humor_gain": humor_gain, "voice_delta": voice_delta,
+            "humanness_delta": humanness_delta, "forced_delta": forced_delta,
+            "promote": not reasons,
+            "reasons": reasons or ["all promotion criteria met"]}
 
 
 # ── Generation: Seth side (local MLX, production prompt) ─────────────────────
@@ -274,19 +302,13 @@ JUDGE_SCHEMA = {
         "voice_consistency": {"type": "NUMBER"},
         "engagement": {"type": "NUMBER",
                        "description": "0-1: present and responsive without over-serving"},
-        "humor": {"type": "NUMBER", "description": (
-            "0-1: when the moment invited teasing or wit, did Seth land it in "
-            "his dry, deadpan, self-deprecating voice? Bands: genuinely "
-            "funny-in-voice (a real comeback, deadpan, absurd/exaggerated, "
-            "self-deprecating, builds on a bit) = 0.8-1.0. Flat: missed an "
-            "obvious setup, replied earnestly or literally where wit was teed "
-            "up = 0.4-0.6. Corny / forced / trying-too-hard / dad-joke / cutesy "
-            "assistant-humor / laughing at his own joke = 0.0-0.3 (WORSE than "
-            "flat — forced humor is a distinct, more damaging failure). "
-            "Context override: if the moment called for seriousness (friend "
-            "genuinely upset, grief), NOT joking is correct — score neutral-high "
-            "and score any joke there LOW as a misread. If no humor beat arose "
-            "at all, score 0.7 (neutral).")},
+        "humor": {"type": "NUMBER",
+                  "description": "0-1: did Seth's humor/teasing LAND. Measures quality "
+                                 "of landing, NOT quantity of jokes. Restraint when "
+                                 "humor did not fit scores neutral-high, never low."},
+        "humor_forced": {"type": "NUMBER",
+                         "description": "0-1: how try-hard, corny, or joke-crammed Seth "
+                                        "was. HIGHER IS WORSE. 0.0 = never strained."},
         "what_worked": {"type": "ARRAY", "items": {"type": "STRING"}},
         "what_failed": {"type": "ARRAY", "items": {"type": "STRING"}},
         "summary": {"type": "STRING"},
@@ -300,9 +322,44 @@ JUDGE_SCHEMA = {
             "confidence": {"type": "NUMBER"},
         }, "required": ["turn_index", "score", "ai_tells", "better_reply", "confidence"]}},
     },
-    "required": ["overall_humanness", "voice_consistency", "engagement", "humor",
+    "required": ["overall_humanness", "voice_consistency", "engagement",
+                 "humor", "humor_forced",
                  "what_worked", "what_failed", "summary", "turns"],
 }
+
+# Seth's humor rubric — the taste-dependent half of the HUMOR axis.
+# Kept as a named constant (not inlined in the prompt) so it can be edited and
+# diffed on its own: this text IS the measurement definition, and step 3's
+# promote/don't-promote decision is only as trustworthy as this wording.
+HUMOR_RUBRIC = """
+HUMOR AXIS — score two separate things.
+
+'humor' (0-1) = did Seth's humor LAND, given the openings this conversation
+actually offered. Seth's real register is dry, deadpan, self-deprecating, and
+teasing toward people he's close to — short, thrown away, never explained.
+  HIGH: a tease that shows he knows the person; a dry one-liner that undercuts
+        without being mean; self-deprecation instead of defensiveness; a
+        deadpan non-answer to an absurd setup; playing along and escalating a
+        bit rather than laughing politely.
+  LOW:  laughing at a joke without adding anything ('haha same', 'lol nice');
+        explaining the joke; a punchline that needed a setup he didn't earn;
+        being mean rather than teasing; comedian-mode standup voice.
+
+CRITICAL — restraint is not failure. If the conversation offered no real
+opening, or humor would have been WRONG (someone is upset, grieving, sharing
+bad news), then Seth NOT joking is correct behavior and 'humor' should score
+0.6-0.8, never low. Only score 'humor' low when there WAS a clear opening and
+he whiffed it or answered like an assistant. Never reward joking through
+someone else's bad news.
+
+'humor_forced' (0-1, HIGHER IS WORSE) = how try-hard he was.
+  0.0-0.2: never strained; humor appeared only where it fit.
+  0.3-0.6: a joke or two that didn't need to be there; slightly performing.
+  0.7-1.0: cramming jokes into every turn; joking past a serious beat;
+           quipping when a straight answer was called for; forcing his
+           'personality' into a conversation that didn't ask for it.
+A conversation with ZERO humor attempts has humor_forced = 0.0 by definition.
+"""
 
 
 def judge_conversation(project: str, scenario: dict, transcript: list[dict]) -> dict:
@@ -320,17 +377,8 @@ def judge_conversation(project: str, scenario: dict, transcript: list[dict]) -> 
         "trivial pushback. Real-human moves include: brevity, restraint, not answering "
         "everything, holding opinions warmly, matched energy. For each Seth turn give "
         "turn_index (its bracket number), a 0-1 score, ai_tells, a better_reply "
-        "in Seth's casual voice when score < 0.7, and your confidence.\n\n"
-        "Also rate 'humor' for the whole conversation. Seth's real humor is dry, "
-        "deadpan, self-deprecating, playful roasting, absurd/exaggerated, tech-nerd "
-        "— e.g. 'you should eat healthier' -> 'I had a salad... on my burger'; "
-        "'you're so old' -> 'I prefer vintage'. When the friend teed up an obvious "
-        "roast, callback bit, or self-deprecation setup and Seth volleyed in that "
-        "voice, score humor high. If he whiffed an obvious setup (earnest/literal), "
-        "score mid. If he was corny, forced, tried too hard, or used cutesy "
-        "assistant-humor, score LOW — that is worse than flat. If the moment was "
-        "genuinely serious (real distress), staying serious is correct and joking "
-        "there is the failure. Follow the humor field's band descriptions exactly.")
+        "in Seth's casual voice when score < 0.7, and your confidence.\n"
+        + HUMOR_RUBRIC)
     raw = gemini(project, JUDGE_MODEL, prompt, schema=JUDGE_SCHEMA,
                  temperature=0.2, max_tokens=4096)
     return json.loads(raw)
@@ -373,6 +421,10 @@ def main(argv=None) -> int:
     ap.add_argument("--no-dpo", action="store_true",
                     help="do not write flagged turns into dpo_pairs")
     ap.add_argument("--scenario", help="run one specific scenario id")
+    ap.add_argument("--humor-only", action="store_true",
+                    help="run only the humor_probe scenarios (HUMOR axis measurement)")
+    ap.add_argument("--tag", help="label scoreboard rows with an arm name, e.g. "
+                                  "humor-off / humor-live, for A/B comparison")
     args = ap.parse_args(argv)
 
     errs = [e for sc in SCENARIOS for e in validate_scenario(sc)]
@@ -398,6 +450,10 @@ def main(argv=None) -> int:
         if not pool:
             print(f"unknown scenario id {args.scenario}")
             return 2
+    elif args.humor_only:
+        # Deterministic order, not a sample: an A/B needs both arms to run the
+        # SAME scenarios, or the delta measures scenario luck, not the change.
+        pool = [sc for sc in SCENARIOS if sc.get("humor_probe")][:args.conversations]
     else:
         pool = random.sample(SCENARIOS, k=min(args.conversations, len(SCENARIOS)))
 
@@ -436,7 +492,8 @@ def main(argv=None) -> int:
             print(f"  humanness={judgment['overall_humanness']:.2f} "
                   f"voice={judgment['voice_consistency']:.2f} "
                   f"engagement={judgment['engagement']:.2f} "
-                  f"humor={judgment.get('humor', 0.0):.2f}", flush=True)
+                  f"humor={judgment.get('humor', 0.0):.2f} "
+                  f"forced={judgment.get('humor_forced', 0.0):.2f}", flush=True)
             for w in judgment.get("what_failed", [])[:3]:
                 print(f"  failed: {w}", flush=True)
             sb = {"ts": ts, "scenario": sc["id"],
@@ -444,7 +501,10 @@ def main(argv=None) -> int:
                   "voice_consistency": judgment["voice_consistency"],
                   "engagement": judgment["engagement"],
                   "humor": judgment.get("humor", 0.0),
+                  "humor_forced": judgment.get("humor_forced", 0.0),
                   "n_turns": len(transcript)}
+            if args.tag:
+                sb["tag"] = args.tag
             with open(scoreboard_path, "a") as f:
                 f.write(json.dumps(sb) + "\n")
             if not args.no_dpo:
@@ -457,10 +517,8 @@ def main(argv=None) -> int:
     board = [json.loads(ln) for ln in scoreboard_path.read_text().splitlines()
              if ln.strip()] if scoreboard_path.exists() else []
     trend = scoreboard_trend(board)
-    humor_rows = [r for r in board if r.get("scenario") in HUMOR_SCENARIO_IDS]
-    humor_axis = axis_spread(humor_rows, "humor")
     print(json.dumps({"run": str(run_path), "dpo_pairs_written": total_dpo,
-                      "trend": trend, "humor_axis": humor_axis}, indent=2))
+                      "trend": trend}, indent=2))
     return 0
 
 
