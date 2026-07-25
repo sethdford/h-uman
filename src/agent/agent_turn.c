@@ -980,8 +980,20 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
         agent->persona, agent->memory_session_id, agent->memory_session_id_len);
     hu_gate_mode_t wt_mode = hu_gate_mode_from_env("HU_WARMTH_TONE_VOCAB", HU_GATE_OFF);
     const char *tone_note = hu_persona_relationship_tone_note(cp, wt_mode == HU_GATE_LIVE);
-    if (wt_mode == HU_GATE_SHADOW && !tone_note && hu_persona_relationship_tone_note(cp, true))
-        hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
+    if (wt_mode == HU_GATE_SHADOW && !tone_note) {
+        /* Log the would-act CONTENT, not just the fire — promotion needs a
+         * quality judgment (feature-gate-requires-measurement.md), and the
+         * shadow soak only proved fire-rate. Prefix stays verbatim for the
+         * existing telemetry grep. Notes are static single-line strings with
+         * a leading "\n\n[" — skip it so the log line stays grep-able. */
+        const char *would = hu_persona_relationship_tone_note(cp, true);
+        if (would) {
+            while (*would == '\n' || *would == ' ')
+                would++;
+            hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note: %.200s",
+                        would);
+        }
+    }
     if (tone_note) {
         /* at_append_owned_directive owns the realloc-append dance (and
          * frees its input), so dup the static note instead of keeping a

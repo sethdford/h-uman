@@ -138,6 +138,61 @@ static void fact_format_for_store_renders_paraphrased_third_person(void) {
     alloc.free(alloc.ctx, value, value_len + 1);
 }
 
+static void fact_log_summary_joins_triple_with_confidence(void) {
+    hu_heuristic_fact_t fact;
+    memset(&fact, 0, sizeof(fact));
+    strcpy(fact.subject, "user");
+    strcpy(fact.predicate, "likes");
+    strcpy(fact.object, "hiking");
+    fact.confidence = 0.8f;
+
+    char buf[200];
+    size_t n = hu_heuristic_fact_log_summary(&fact, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_STR_EQ(buf, "user likes hiking (conf=0.80)");
+}
+
+static void fact_log_summary_scrubs_control_chars(void) {
+    hu_heuristic_fact_t fact;
+    memset(&fact, 0, sizeof(fact));
+    strcpy(fact.subject, "user");
+    strcpy(fact.predicate, "mentioned");
+    strcpy(fact.object, "line one\nline two\ttabbed");
+    fact.confidence = 0.5f;
+
+    char buf[200];
+    size_t n = hu_heuristic_fact_log_summary(&fact, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    /* One grep-able line: embedded newlines/tabs must become spaces. */
+    HU_ASSERT_NULL(strchr(buf, '\n'));
+    HU_ASSERT_NULL(strchr(buf, '\t'));
+    HU_ASSERT_NOT_NULL(strstr(buf, "line one line two tabbed"));
+}
+
+static void fact_log_summary_truncates_to_cap(void) {
+    hu_heuristic_fact_t fact;
+    memset(&fact, 0, sizeof(fact));
+    memset(fact.subject, 'a', HU_FACT_MAX_FIELD - 1);
+    memset(fact.predicate, 'b', HU_FACT_MAX_FIELD - 1);
+    memset(fact.object, 'c', HU_FACT_MAX_FIELD - 1);
+    fact.confidence = 1.0f;
+
+    char buf[64];
+    size_t n = hu_heuristic_fact_log_summary(&fact, buf, sizeof(buf));
+    /* Returns bytes actually written (truncated), always NUL-terminated. */
+    HU_ASSERT_EQ((long)n, (long)(sizeof(buf) - 1));
+    HU_ASSERT_EQ((long)strlen(buf), (long)(sizeof(buf) - 1));
+}
+
+static void fact_log_summary_null_args_return_zero(void) {
+    hu_heuristic_fact_t fact;
+    memset(&fact, 0, sizeof(fact));
+    char buf[8] = "x";
+    HU_ASSERT_EQ((long)hu_heuristic_fact_log_summary(NULL, buf, sizeof(buf)), 0L);
+    HU_ASSERT_EQ((long)hu_heuristic_fact_log_summary(&fact, NULL, 8), 0L);
+    HU_ASSERT_EQ((long)hu_heuristic_fact_log_summary(&fact, buf, 0), 0L);
+}
+
 void run_fact_extract_tests(void) {
     HU_TEST_SUITE("fact_extract");
     HU_RUN_TEST(fact_extract_personal_statement_finds_facts);
@@ -149,4 +204,8 @@ void run_fact_extract_tests(void) {
     HU_RUN_TEST(fact_extract_predicate_no_longer_first_person);
     HU_RUN_TEST(fact_extract_when_im_predicate_normalized);
     HU_RUN_TEST(fact_format_for_store_renders_paraphrased_third_person);
+    HU_RUN_TEST(fact_log_summary_joins_triple_with_confidence);
+    HU_RUN_TEST(fact_log_summary_scrubs_control_chars);
+    HU_RUN_TEST(fact_log_summary_truncates_to_cap);
+    HU_RUN_TEST(fact_log_summary_null_args_return_zero);
 }
