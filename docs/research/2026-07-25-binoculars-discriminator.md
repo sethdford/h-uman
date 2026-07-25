@@ -105,11 +105,13 @@ Copies are therefore archived outside the repo so these numbers stay reproducibl
 
 | Archive (`~/.human/logs/eval-archive/`) | Contents |
 |---|---|
-| `eval-blinded-ab-2026-07-24-binoculars-calibration.json` | the 47 trials + merged `binoculars` block |
+| `binoculars-calibration-corpus-2026-07-24.json` | the 47 trials + merged `binoculars` block |
 | `binoculars-scores-2026-07-24-calibration.json` | per-text scores for all 94 calibration texts |
 | `binoculars-holdout-100-real-2026-07-25.json` | per-text scores for the 100-message real holdout |
 
-Re-run any figure in this doc with `--pairs <the archived calibration file>`.
+All three deliberately avoid the `eval-<harness>-*.json` naming that
+`nightly_eval.sh::archive_verdict` prunes to the newest 30. Re-run any figure in
+this doc with `--pairs <the archived calibration file>`.
 `data/imessage/ground_truth.jsonl` (644 real pairs) supplied the holdout, sampled
 with seed 42 excluding the 47 trials.
 
