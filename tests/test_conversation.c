@@ -3778,55 +3778,64 @@ static void awareness_uses_persona_style_rules(void) {
     alloc.free(alloc.ctx, s, len + 1);
 }
 
-/* ── Inline reply classifier (F40) ────────────────────────────────────── */
+/* ── Parrot guard (replaces the F40 inline-quote fallback) ──────────────
+ * Pins the 2026-07-25 Dermot incident: F40 prepended "> "+inbound[0..80]
+ * +"\n\n" to the reply, the markdown plaintext-ifier stripped the "> "
+ * marker, and the splitter shipped the bare 80-char echo of the contact's
+ * OWN message as its own bubble. The predicate below is the structural
+ * defense: no outbound bubble may be a verbatim prefix of the inbound. */
 
-static void inline_reply_you_said_returns_true(void) {
-    hu_channel_history_entry_t entries[2] = {
-        make_entry(true, "let's meet at 5", "12:00"),
-        make_entry(false, "you said we'd meet at 5 - can we make it 6?", "12:01"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 2,
-                                                 "you said we'd meet at 5 - can we make it 6?", 42);
+static void parrot_exact_80_prefix_returns_true(void) {
+    /* The literal Dermot shape: bubble = first 80 chars of a longer inbound. */
+    const char *inbound = "Did you end up going to any other WC games?! Get the boat yet?! "
+                          "Start an agentic cartel in Florida yet?!\n\nSo many questions!";
+    bool r = hu_conversation_reply_parrots_inbound(inbound, 80, inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_earlier_returns_true(void) {
-    hu_channel_history_entry_t entries[1] = {
-        make_entry(false, "earlier you mentioned pizza", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, "earlier you mentioned pizza", 26);
+static void parrot_whole_inbound_returns_true(void) {
+    const char *inbound = "I've been doing a bunch of stuff the last month actually";
+    bool r =
+        hu_conversation_reply_parrots_inbound(inbound, strlen(inbound), inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_what_about_returns_true(void) {
-    hu_channel_history_entry_t entries[1] = {make_entry(false, "what about the meeting?", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, "what about the meeting?", 21);
+static void parrot_with_quote_marker_returns_true(void) {
+    /* The pre-strip F40 form: "> " + inbound prefix must also be caught. */
+    const char *bubble = "> you said we'd meet at 5 - can we make it 6";
+    const char *inbound = "you said we'd meet at 5 - can we make it 6?";
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_multiple_questions_returns_true(void) {
-    hu_channel_history_entry_t entries[4] = {
-        make_entry(false, "when are we meeting?", "12:00"),
-        make_entry(true, "how about 3pm?", "12:01"),
-        make_entry(false, "where?", "12:02"),
-        make_entry(false, "and who's coming?", "12:03"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 4, "and who's coming?", 16);
-    HU_ASSERT_TRUE(r);
-}
-
-static void inline_reply_single_topic_returns_false(void) {
-    hu_channel_history_entry_t entries[2] = {
-        make_entry(false, "hey how are you", "12:00"),
-        make_entry(true, "good you?", "12:01"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 2, "doing well thanks", 16);
+static void parrot_short_natural_echo_returns_false(void) {
+    /* "lol" back at "lol that's hilarious" is a natural human echo, not a bug. */
+    bool r = hu_conversation_reply_parrots_inbound("lol", 3, "lol that's hilarious", 20);
     HU_ASSERT_FALSE(r);
 }
 
-static void inline_reply_null_last_msg_returns_false(void) {
-    hu_channel_history_entry_t entries[1] = {make_entry(false, "hello", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, NULL, 0);
+static void parrot_normal_reply_returns_false(void) {
+    const char *bubble = "didn't hit any other games. Still hunting for the boat";
+    const char *inbound = "Did you end up going to any other WC games?!";
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
     HU_ASSERT_FALSE(r);
+}
+
+static void parrot_null_inputs_return_false(void) {
+    HU_ASSERT_FALSE(hu_conversation_reply_parrots_inbound(NULL, 0, "hello there friend", 18));
+    HU_ASSERT_FALSE(hu_conversation_reply_parrots_inbound("hello there friend", 18, NULL, 0));
+}
+
+static void parrot_trailing_whitespace_still_true(void) {
+    /* A trailing newline on the bubble must not defeat the guard. */
+    const char *inbound = "Did you end up going to any other WC games?! Get the boat yet?!";
+    char bubble[80];
+    snprintf(bubble, sizeof(bubble), "%.40s\n", inbound);
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
+    HU_ASSERT_TRUE(r);
 }
 
 /* ── Active listening backchannels (F29) ───────────────────────────────── */
@@ -5075,12 +5084,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(awareness_uses_persona_style_rules);
 
     /* Inline reply classifier (F40) */
-    HU_RUN_TEST(inline_reply_you_said_returns_true);
-    HU_RUN_TEST(inline_reply_earlier_returns_true);
-    HU_RUN_TEST(inline_reply_what_about_returns_true);
-    HU_RUN_TEST(inline_reply_multiple_questions_returns_true);
-    HU_RUN_TEST(inline_reply_single_topic_returns_false);
-    HU_RUN_TEST(inline_reply_null_last_msg_returns_false);
+    HU_RUN_TEST(parrot_exact_80_prefix_returns_true);
+    HU_RUN_TEST(parrot_whole_inbound_returns_true);
+    HU_RUN_TEST(parrot_with_quote_marker_returns_true);
+    HU_RUN_TEST(parrot_short_natural_echo_returns_false);
+    HU_RUN_TEST(parrot_normal_reply_returns_false);
+    HU_RUN_TEST(parrot_null_inputs_return_false);
+    HU_RUN_TEST(parrot_trailing_whitespace_still_true);
 
     /* Active listening backchannels (F29) */
     HU_RUN_TEST(backchannel_long_narrative_prob_one_returns_true);

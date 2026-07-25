@@ -11950,32 +11950,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* ── F40: Inline reply (quoted text fallback) ─────────────
-                     * When classifier says inline reply, prepend "> {quoted}\n\n"
-                     * (text-quote fallback for channels without native threading). */
-#ifndef HU_IS_TEST
-                    {
-                        if (response && response_len > 0 &&
-                            hu_conversation_should_inline_reply(history_entries, history_count,
-                                                                combined, combined_len)) {
-                            size_t quote_len = combined_len > 80 ? 80 : combined_len;
-                            size_t prefix_len = 2 + quote_len + 2; /* "> " + quote + "\n\n" */
-                            size_t total_len = prefix_len + response_len;
-                            char *prefixed = (char *)alloc->alloc(alloc->ctx, total_len + 1);
-                            if (prefixed) {
-                                memcpy(prefixed, "> ", 2);
-                                memcpy(prefixed + 2, combined, quote_len);
-                                prefixed[2 + quote_len] = '\n';
-                                prefixed[2 + quote_len + 1] = '\n';
-                                memcpy(prefixed + prefix_len, response, response_len + 1);
-                                alloc->free(alloc->ctx, response, response_alloc_len + 1);
-                                response = prefixed;
-                                response_len = total_len;
-                                response_alloc_len = total_len;
-                            }
-                        }
-                    }
-#endif
+                    /* F40 (inline "> {quoted}" reply fallback) was REMOVED here
+                     * 2026-07-25: native threading owns reply semantics in the
+                     * router, and the fake quote interacted with the markdown
+                     * plaintext-ifier + splitter to ship a bare echo of the
+                     * contact's own message as its own bubble (Dermot
+                     * incident). The router's parrot guard now structurally
+                     * blocks that whole family. */
                     /* ── Pre-send re-check: abort if real user responded while
                      * we were generating.  Prevents piling onto a conversation
                      * the user is actively handling. ─────────────────────────── */

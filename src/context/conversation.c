@@ -5713,43 +5713,32 @@ size_t hu_conversation_build_group_member_directive(const char *const *members, 
     return pos + suffix_len;
 }
 
-/* ── Inline reply classifier (iMessage quoted text fallback) ────────────── */
+/* ── Outbound parrot guard ──────────────────────────────────────────────── */
 
-bool hu_conversation_should_inline_reply(const hu_channel_history_entry_t *entries, size_t count,
-                                         const char *last_msg, size_t last_msg_len) {
-    if (!last_msg || last_msg_len == 0)
+bool hu_conversation_reply_parrots_inbound(const char *bubble, size_t bubble_len,
+                                           const char *inbound, size_t inbound_len) {
+    if (!bubble || !inbound || bubble_len == 0 || inbound_len == 0)
         return false;
 
-    /* Heuristic: "you said" / "earlier" / "what about" in their message → inline reply */
-    if (hu_str_contains_ci_cstr(last_msg, last_msg_len, "you said") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "earlier") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "what about") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "that thing you") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "the one you"))
-        return true;
-
-    /* Heuristic: multiple questions pending in recent history */
-    if (entries && count > 0) {
-        int question_count = 0;
-        size_t recent = count < 8 ? count : 8;
-        for (size_t i = count - recent; i < count; i++) {
-            if (entries[i].from_me)
-                continue;
-            const char *t = entries[i].text;
-            size_t tl = strlen(t);
-            for (size_t j = 0; j < tl; j++) {
-                if (t[j] == '?') {
-                    question_count++;
-                    break;
-                }
-            }
-        }
-        if (question_count > 1)
-            return true;
+    /* Ignore a leading markdown quote marker — the pre-strip F40 form. */
+    if (bubble_len >= 2 && bubble[0] == '>' && bubble[1] == ' ') {
+        bubble += 2;
+        bubble_len -= 2;
     }
 
-    /* Single-topic conversation: no inline reply */
-    return false;
+    /* Ignore trailing whitespace on the bubble. */
+    while (bubble_len > 0 && (bubble[bubble_len - 1] == ' ' || bubble[bubble_len - 1] == '\n' ||
+                              bubble[bubble_len - 1] == '\r' || bubble[bubble_len - 1] == '\t'))
+        bubble_len--;
+
+    /* Short echoes ("lol", "same") are natural human behavior, never flagged. */
+    if (bubble_len < 16)
+        return false;
+
+    if (bubble_len > inbound_len)
+        return false;
+
+    return memcmp(bubble, inbound, bubble_len) == 0;
 }
 
 /* ── Tapback-vs-text decision engine ────────────────────────────────────── */

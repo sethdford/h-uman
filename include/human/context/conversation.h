@@ -579,14 +579,18 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
                                                    const hu_channel_history_entry_t *entries,
                                                    size_t count);
 
-/* ── Inline reply classifier (iMessage quoted text fallback) ───────────────── */
+/* ── Outbound parrot guard ─────────────────────────────────────────────────── */
 
-/* Decide whether to use quoted-text inline reply: "> {original}\n\n{response}".
- * Returns true when: multiple questions pending, conversation diverged topics,
- * or they referenced something from earlier ("you said", "earlier", "what about").
- * Returns false for single-topic conversations. */
-bool hu_conversation_should_inline_reply(const hu_channel_history_entry_t *entries, size_t count,
-                                         const char *last_msg, size_t last_msg_len);
+/* True when an outbound bubble is a verbatim prefix of the inbound message it
+ * answers — i.e. the reply would parrot the contact's own words back at them.
+ * A leading markdown quote marker ("> ") and trailing whitespace on the bubble
+ * are ignored; echoes shorter than 16 bytes ("lol", "same") are natural and
+ * never flagged. Replaces the F40 inline-quote fallback, which composed
+ * "> {inbound[0..80]}\n\n{reply}" — the markdown plaintext-ifier then stripped
+ * the quote marker and the splitter shipped the bare echo as its own bubble
+ * (2026-07-25 Dermot incident). */
+bool hu_conversation_reply_parrots_inbound(const char *bubble, size_t bubble_len,
+                                           const char *inbound, size_t inbound_len);
 
 /* ── Tapback-vs-text decision engine ─────────────────────────────────────── */
 
