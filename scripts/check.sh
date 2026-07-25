@@ -17,6 +17,7 @@ Runs local validation steps:
   2. cmake configure (Debug, all channels) in build-check/
   3. cmake build
   4. run human_tests
+  5. corpus attributedBody decode regression tests (stdlib python, no chat.db)
 
 Exit 0 if all pass, 1 otherwise.
 EOF
@@ -44,7 +45,7 @@ PASS=0
 FAIL=0
 
 # 1. clang-format (skippable via HU_SKIP_FORMAT=1 for cross-version tolerance)
-info "Step 1/4: clang-format check..."
+info "Step 1/5: clang-format check..."
 if [ "${HU_SKIP_FORMAT:-0}" = "1" ]; then
     info "  clang-format: skipped (HU_SKIP_FORMAT=1)"
     PASS=$((PASS + 1))
@@ -57,7 +58,7 @@ else
 fi
 
 # 2 & 3. cmake configure and build
-info "Step 2/4: cmake configure..."
+info "Step 2/5: cmake configure..."
 BUILD_DIR="build-check"
 mkdir -p "$BUILD_DIR"
 CURL_FLAG=""
@@ -73,7 +74,7 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-info "Step 3/4: cmake build..."
+info "Step 3/5: cmake build..."
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 (cd "$BUILD_DIR" && cmake --build . -j"$JOBS") >/dev/null 2>&1
 if [ $? -eq 0 ]; then
@@ -85,7 +86,7 @@ else
 fi
 
 # 4. run tests
-info "Step 4/4: human_tests..."
+info "Step 4/5: human_tests..."
 if [ -x "$BUILD_DIR/human_tests" ]; then
     TEST_LOG="/tmp/hu_check_tests.txt"
     set +e
@@ -104,6 +105,29 @@ if [ -x "$BUILD_DIR/human_tests" ]; then
 else
     warn "  human_tests: binary not found"
     FAIL=$((FAIL + 1))
+fi
+
+# 5. corpus attributedBody decode regression tests
+# Guards the typedstream length-prefix decode that once corrupted ~20% of
+# ground_truth.jsonl. Stdlib-only, fixtures are embedded — no chat.db, no creds.
+info "Step 5/5: corpus decode regression tests..."
+if ! command -v python3 >/dev/null 2>&1; then
+    warn "  corpus decode tests: python3 not found"
+    FAIL=$((FAIL + 1))
+else
+    DECODE_LOG="/tmp/hu_check_decode_tests.txt"
+    set +e
+    python3 scripts/test_extract_imessage_pairs.py > "$DECODE_LOG" 2>&1
+    DECODE_RC=$?
+    set -e
+    if [ "$DECODE_RC" -eq 0 ]; then
+        info "  corpus decode tests: pass"
+        PASS=$((PASS + 1))
+    else
+        warn "  corpus decode tests: fail"
+        tail -20 "$DECODE_LOG"
+        FAIL=$((FAIL + 1))
+    fi
 fi
 
 info ""
