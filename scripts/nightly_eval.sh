@@ -58,6 +58,11 @@ GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
 # Auto-commit refreshed blind_ab_gate.json after stage 3 (env-overridable)
 HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-1}
 
+# Advisory Binoculars AI-tell metric after stage 3 (~12 min GPU, serial,
+# results-JSON only — never feeds the gate). Disable with HU_NIGHTLY_BINOCULARS=0.
+# See docs/research/2026-07-25-binoculars-discriminator.md
+HU_NIGHTLY_BINOCULARS=${HU_NIGHTLY_BINOCULARS:-1}
+
 DRY_RUN=0
 SMOKE=0
 for arg in "$@"; do
@@ -148,6 +153,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  archive dir:   $ARCHIVE_DIR (retain last $RETAIN per harness)"
   log "  lock dir:      $LOCK_DIR ($([ -d "$LOCK_DIR" ] && echo HELD || echo free))"
   log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
+  log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
   log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (loads own model), [3/3] blind-ab gate refresh (REAL measurement), serial"
   exit 0
 fi
@@ -230,8 +236,12 @@ else
     gate_before=""
     [ -f "$BLIND_AB_GATE" ] && gate_before=$(cat "$BLIND_AB_GATE")
 
+    binoc_flag=""
+    [ "$HU_NIGHTLY_BINOCULARS" -eq 1 ] && binoc_flag="--binoculars"
+
     set +e
-    "$PY" "$BLIND_AB" --gate --mlx; ab_rc=$?
+    # shellcheck disable=SC2086  # binoc_flag is intentionally word-split (empty or one flag)
+    "$PY" "$BLIND_AB" --gate --mlx $binoc_flag; ab_rc=$?
     set -e
 
     log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"

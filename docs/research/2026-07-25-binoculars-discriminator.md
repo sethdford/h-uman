@@ -128,13 +128,18 @@ to reuse until the adapter changes.
 Per `feature-gate-requires-measurement`, the human rating tier remains the only
 promotion keystone. Two measurement-side wirings:
 
-1. **Nightly metric alongside the fool rate.** After `eval_blinded_ab.py` writes its
-   trials JSON, run `binoculars_score.py --pairs <that file>` and record per-message
-   AUC + windowed k=5 AUC + mean dirA scores per class next to `fool_rate` in the
-   nightly registry. Cost ≈ 12 min GPU *after* the nightly finishes (stay out of the
-   3am window; run it as the last nightly step, or on the 07:30 deploy-check slot).
-   Trend to watch: windowed AUC drifting *down* toward 0.5 = genuine statistical
-   humanness progress, invisible to the judge today.
+1. **Nightly metric alongside the fool rate — WIRED (2026-07-25).**
+   `eval_blinded_ab.py --binoculars` runs the scorer on the just-written trials
+   JSON and merges a compact summary (`binoculars` key: per-message AUC, windowed
+   k=5 AUC, class means, fraction of AI below the 5%-FPR threshold) into
+   `data/eval_blinded_ab.json`. `nightly_eval.sh` passes the flag by default
+   (`HU_NIGHTLY_BINOCULARS=0` to disable); it runs serially after the stage-3 gate
+   measurement, skips invalid (<50%-judged) runs, is failure-isolated (`error` key,
+   exit code unchanged), and never writes to `blind_ab_gate.json`. The 5%-FPR flag
+   threshold is `HU_BINOCULARS_THR_FPR5` (default 0.9643) — re-set it after any
+   adapter promotion + recalibration. Trend to watch: windowed AUC drifting *down*
+   toward 0.5 = genuine statistical humanness progress, invisible to the judge
+   today.
 2. **DPO rejected-sample miner.** Generations scoring below the 5%-FPR threshold
    (confidently-AI, score < 0.9643 at current calibration) are exactly the "most
    machine-typical" outputs. Pair them as `rejected` against the trial's `real_seth`

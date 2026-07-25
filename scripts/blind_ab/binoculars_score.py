@@ -63,6 +63,8 @@ def load_items(args):
             doc = json.load(f)
         trials = doc["trials"] if isinstance(doc, dict) else doc
         for t in trials:
+            if not t.get("real_seth") or not t.get("ai_response"):
+                continue  # e.g. malformed/partial trial rows
             ctx = t.get("incoming", "")
             items.append({"text": t["real_seth"], "context": ctx,
                           "label": "real", "trial": t.get("i")})
