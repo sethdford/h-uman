@@ -9,6 +9,12 @@ response using the deterministic shape classifier, computes bootstrap CI,
 and gates on both statistical (one-sided t-test α=0.025) and practical
 (delta ≥ 5%) significance.
 
+Generation loads the model ONCE per pass via the mlx_lm Python API (PRE
+without adapter, POST with, memory freed in between) and generates all
+prompts on the warm model — minutes per pass instead of the ~3h the old
+one-subprocess-per-prompt shape took (58 cold loads of the 31B model per
+night). That legacy path survives behind --subprocess-gen as a fallback.
+
 Verdict logged to stdout and JSON, suitable for launchd scheduling.
 
 Usage:
@@ -33,12 +39,16 @@ Exit codes:
 """
 
 import argparse
+import gc
 import json
 import shlex
+import signal
 import statistics
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -181,9 +191,125 @@ def emit_skip(reason: str, output_json: Path | None) -> int:
     return EXIT_SKIP
 
 
+class GenerationTimeout(Exception):
+    """Raised inside wall_clock_guard when the per-call deadline passes."""
+
+
+@contextmanager
+def wall_clock_guard(seconds: int):
+    """Wall-clock deadline for in-process calls, via SIGALRM.
+
+    Replaces the subprocess kill deadline for the in-process path. SIGALRM
+    (not a thread/executor timeout) because an abandoned generation thread
+    would keep the Metal GPU busy and serialize behind every later call;
+    the alarm raises INSIDE the mlx_lm token loop, actually aborting it.
+    Granularity caveat: signals fire between Python bytecodes, so a single
+    long Metal kernel isn't preempted mid-op — the token loop returns to
+    Python every token, which is granular enough here.
+
+    Only usable in the main thread (signal module restriction); elsewhere
+    it degrades to no guard rather than raising.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _on_alarm(signum, frame):
+        raise GenerationTimeout(f"exceeded {seconds}s wall clock")
+
+    prev = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.alarm(max(1, int(seconds)))
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, prev)
+
+
+# Model load gets its own (generous) deadline: cold-loading the 31B weights
+# from disk under GPU/IO contention can take minutes and is expected; a HUNG
+# load should still turn into a DEFERRED verdict instead of an eternal night.
+LOAD_TIMEOUT_SEC = 900
+
+
+def load_model(model_id: str, adapter_path: str | None = None,
+               timeout_sec: int = LOAD_TIMEOUT_SEC):
+    """Load model + tokenizer in-process, ONCE per pass.
+
+    PRE pass calls this with adapter_path=None (base model alone); POST pass
+    with the resolved adapter. Raises on failure — main() maps that to
+    DEFERRED (exit 2), matching the old "mlx_lm or model unavailable" contract.
+    Import is lazy so tests and the --subprocess-gen path never import mlx.
+    """
+    from mlx_lm import load  # noqa: PLC0415 — lazy by design
+    with wall_clock_guard(timeout_sec):
+        return load(str(model_id),
+                    adapter_path=str(adapter_path) if adapter_path else None)
+
+
+def free_model() -> None:
+    """Release model memory between passes (caller drops its refs first).
+
+    The subprocess path got this for free via process exit; in-process the
+    PRE model must be freed before the POST load or two 31B copies coexist.
+    """
+    gc.collect()
+    try:
+        import mlx.core as mx  # noqa: PLC0415 — lazy by design
+        clear = getattr(mx, "clear_cache", None) or mx.metal.clear_cache
+        clear()
+    except Exception:
+        pass  # freeing is best-effort; gc alone still drops the weights
+
+
+def _mlx_generate(model, tokenizer, prompt: str, max_tokens: int) -> str:
+    """One in-process generation. Thin seam: tests patch THIS symbol.
+
+    Mirrors the mlx_lm CLI behavior the subprocess path relied on: apply the
+    tokenizer's chat template when it has one, and sample at temp 0.0
+    (deterministic, same as the old `--temp 0.0`).
+    """
+    from mlx_lm import generate as mlx_generate  # noqa: PLC0415
+    from mlx_lm.sample_utils import make_sampler  # noqa: PLC0415
+
+    prompt_input = prompt
+    if getattr(tokenizer, "chat_template", None):
+        prompt_input = tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}], add_generation_prompt=True
+        )
+    return mlx_generate(model, tokenizer, prompt=prompt_input,
+                        max_tokens=max_tokens, sampler=make_sampler(temp=0.0))
+
+
+def generate_inprocess(model, tokenizer, prompt: str,
+                       max_tokens: int = 80, timeout_sec: int = 600) -> str:
+    """Generate one response on an already-loaded model.
+
+    Same return contract as the subprocess generate(): model text, or one of
+    the SENTINEL_PREFIXES markers ('[timeout]' / '[gen_err: ...]' / '[empty]')
+    that callers filter via is_sentinel(). Never raises for per-prompt
+    failures — a broken PASS (load failure) raises from load_model instead.
+    """
+    try:
+        with wall_clock_guard(timeout_sec):
+            text = _mlx_generate(model, tokenizer, prompt, max_tokens)
+    except GenerationTimeout:
+        return "[timeout]"
+    except Exception as e:
+        return f"[gen_err: {str(e)[:100]}]"
+
+    text = (text or "").strip()
+    return text[-300:].strip() if text else "[empty]"
+
+
 def generate(model_id: str, prompt: str, adapter_path: str | None = None,
              max_tokens: int = 80, timeout_sec: int = 600) -> str:
-    """Invoke mlx_lm.generate via subprocess.
+    """Invoke mlx_lm.generate via subprocess (legacy --subprocess-gen path).
+
+    Cold-loads the model EVERY call — 29 prompts x 2 passes = 58 cold loads
+    per night, ~3h wall time. Kept only as an operational fallback behind
+    --subprocess-gen; the default path is generate_inprocess() on a model
+    loaded once per pass.
 
     Args:
         model_id: HuggingFace model identifier
@@ -234,13 +360,22 @@ def generate(model_id: str, prompt: str, adapter_path: str | None = None,
 
 
 def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None = None,
-                  gen_timeout: int = 600) -> tuple[list[str], dict]:
+                  gen_timeout: int = 600,
+                  use_subprocess: bool = False) -> tuple[list[str], dict]:
     """Run one pass of generation (pre or post adapter).
+
+    Default: load the model ONCE via the mlx_lm Python API, generate every
+    prompt in-process on the warm model, then free it. The old shape (one
+    `python3 -m mlx_lm generate` subprocess per prompt = 58 cold loads of the
+    31B model per night, ~3h wall) survives behind use_subprocess only.
 
     Args:
         model_id: HuggingFace model
         prompts: list of prompt dicts with "prompt" field
-        adapter_path: optional LoRA adapter path
+        adapter_path: optional LoRA adapter path (None = PRE/base pass)
+        gen_timeout: per-prompt wall-clock guard seconds (in-process), or
+            per-subprocess kill deadline (use_subprocess)
+        use_subprocess: legacy per-prompt subprocess path (--subprocess-gen)
 
     Returns:
         (responses, stats) where stats includes pass label and timing
@@ -249,16 +384,38 @@ def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None =
     responses = []
     pass_label = "POST (adapter)" if adapter_path else "PRE (base)"
 
-    for i, p in enumerate(prompts):
-        prompt_text = p["prompt"] if isinstance(p, dict) else p
-        print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
+    if use_subprocess:
+        for i, p in enumerate(prompts):
+            prompt_text = p["prompt"] if isinstance(p, dict) else p
+            print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
+            responses.append(generate(model_id, prompt_text, adapter_path=adapter_path,
+                                      timeout_sec=gen_timeout))
+        elapsed = time.time() - start
+        return (responses, {"pass": pass_label, "elapsed_sec": elapsed,
+                            "count": len(responses)})
 
-        response = generate(model_id, prompt_text, adapter_path=adapter_path,
-                            timeout_sec=gen_timeout)
-        responses.append(response)
+    print(f"  [{pass_label}] loading {model_id} "
+          f"(adapter={adapter_path or 'none'})...", flush=True)
+    load_start = time.time()
+    model, tokenizer = load_model(model_id, adapter_path=adapter_path)
+    load_sec = time.time() - load_start
+    print(f"  [{pass_label}] model loaded in {load_sec:.1f}s", flush=True)
+
+    try:
+        for i, p in enumerate(prompts):
+            prompt_text = p["prompt"] if isinstance(p, dict) else p
+            print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
+            responses.append(generate_inprocess(model, tokenizer, prompt_text,
+                                                timeout_sec=gen_timeout))
+    finally:
+        # Drop OUR refs before free_model's gc pass, or the 31B weights
+        # survive into the next pass's load and two copies coexist.
+        del model, tokenizer
+        free_model()
 
     elapsed = time.time() - start
-    return (responses, {"pass": pass_label, "elapsed_sec": elapsed, "count": len(responses)})
+    return (responses, {"pass": pass_label, "elapsed_sec": elapsed,
+                        "load_sec": load_sec, "count": len(responses)})
 
 
 def main():
@@ -313,8 +470,18 @@ def main():
         "--gen-timeout",
         type=int,
         default=600,
-        help="Per-generation subprocess timeout in seconds (default 600; the "
-             "old 180s cap timed out every call under GPU contention)",
+        help="Per-prompt wall-clock guard in seconds (default 600). In-process "
+             "generations run on a warm model and finish in seconds — this only "
+             "fires on a hang. With --subprocess-gen it is the per-subprocess "
+             "kill deadline, which must also cover a cold model load.",
+    )
+    ap.add_argument(
+        "--subprocess-gen",
+        action="store_true",
+        help="Legacy generation path: spawn `python3 -m mlx_lm generate` per "
+             "prompt (58 cold loads of the 31B model per night, ~3h wall). "
+             "Fallback only — the default loads the model once per pass "
+             "in-process via the mlx_lm Python API.",
     )
     ap.add_argument(
         "--held-out-fixture",
@@ -393,7 +560,8 @@ def main():
     print(f"\n=== PRE PASS (base model) ===", flush=True)
     try:
         pre_responses, pre_stats = run_eval_pass(
-            args.model_id, prompts, gen_timeout=args.gen_timeout
+            args.model_id, prompts, gen_timeout=args.gen_timeout,
+            use_subprocess=args.subprocess_gen,
         )
     except Exception as e:
         verdict = {
@@ -413,6 +581,7 @@ def main():
         post_responses, post_stats = run_eval_pass(
             args.model_id, prompts, adapter_path=str(args.adapter_path),
             gen_timeout=args.gen_timeout,
+            use_subprocess=args.subprocess_gen,
         )
     except Exception as e:
         verdict = {
