@@ -440,7 +440,7 @@ def test_pass_records_post_mean():
     """A PASS verdict still records the real post_mean score."""
     crafted = {"n": 0}
 
-    def fake_scores(responses, channel="imessage"):
+    def fake_scores(responses, channel="imessage", speaker_model=None):
         # First call = PRE (0.7), second = POST (0.8): constant deltas → stderr 0 → PASS
         crafted["n"] += 1
         score = 0.7 if crafted["n"] == 1 else 0.8
@@ -474,6 +474,222 @@ def test_pass_records_post_mean():
     print(f"✓ PASS verdict: exit=0, registry score=post_mean")
 
 
+# --- Blended scorer (shape + speaker-id P(Seth)) tests ---------------------
+#
+# Pins the 2026-07-16 saturation incident: real generations happened, BOTH
+# passes emitted clean casual text, the shape classifier scored every response
+# 1.0, and the delta gate (PASS needs delta >= 0.05) was structurally
+# unwinnable. The blended scorer must produce a non-degenerate delta on that
+# exact scenario.
+
+# Base-model register: clean, capitalized, period-terminated assistant-casual.
+# Every one of these scores 1.0 on the shape classifier (verified empirically).
+BASE_ISH_TEXTS = [
+    "Sounds good. I will check on that today.",
+    "Yes, that works for me.",
+    "Thank you for letting me know.",
+    "Okay, I will send it over shortly.",
+    "That should be fine. I will confirm later.",
+]
+
+# Seth register: lowercase, seth-openers, contractions, no terminal period.
+# These ALSO score 1.0 on the shape classifier — that tie is the bug.
+SETH_ISH_TEXTS = [
+    "yeah lol i'm down",
+    "nah gonna skip it",
+    "kk sounds good",
+    "wait really? that's wild",
+    "yo lemme check real quick",
+]
+
+
+def _make_test_speaker_model():
+    """Deterministic v1-compatible speaker-id logreg model for tests.
+
+    Uses the real 15-feature featurize() from personaeval_speaker_id via
+    classify_text; only the weights are synthetic (favoring Seth-register
+    features), so the blend path is exercised end-to-end without depending
+    on the mutable /tmp/seth_speaker_id.json.
+    """
+    from personaeval_speaker_id import _FEATURE_NAMES
+    weights_by_name = {
+        "lowercase_ratio": 2.0,
+        "is_seth_opener": 2.5,
+        "has_contraction": 1.5,
+        "has_lol_or_ha": 1.5,
+        "is_ai_opener": -2.0,
+        "ends_with_period": -2.5,
+        "has_bullet": -3.0,
+        "has_numbered": -3.0,
+        "has_header": -3.0,
+        "has_bold": -2.0,
+    }
+    return {
+        "feature_names": list(_FEATURE_NAMES),
+        "weights": [weights_by_name.get(f, 0.0) for f in _FEATURE_NAMES],
+        "bias": -1.0,
+        "means": [0.0] * len(_FEATURE_NAMES),
+        "stds": [1.0] * len(_FEATURE_NAMES),
+    }
+
+
+def test_load_speaker_model_missing_returns_none():
+    """A missing or corrupt speaker-model file must yield None, not raise."""
+    from eval_fidelity_helpers import load_speaker_model
+    assert load_speaker_model("/nonexistent/speaker-model-xyz.json") is None
+    with tempfile.TemporaryDirectory() as tmpdir:
+        corrupt = Path(tmpdir) / "corrupt.json"
+        corrupt.write_text("{not json")
+        assert load_speaker_model(str(corrupt)) is None
+        # valid JSON but missing logreg keys is also unusable
+        not_a_model = Path(tmpdir) / "notmodel.json"
+        not_a_model.write_text(json.dumps({"hello": "world"}))
+        assert load_speaker_model(str(not_a_model)) is None
+    print("✓ load_speaker_model: missing/corrupt/invalid → None")
+
+
+def test_shape_only_saturates_on_0716_scenario():
+    """Documents the bug: shape-only scoring ties both registers at 1.0."""
+    _, base_mean = compute_persona_fidelity_scores(BASE_ISH_TEXTS, channel="imessage")
+    _, seth_mean = compute_persona_fidelity_scores(SETH_ISH_TEXTS, channel="imessage")
+    assert base_mean == 1.0 and seth_mean == 1.0, (
+        f"expected saturation (the bug this pins): base={base_mean}, seth={seth_mean}"
+    )
+    print(f"✓ shape-only saturation pinned: base={base_mean}, seth={seth_mean}, delta=0")
+
+
+def test_blended_scorer_separates_base_from_seth():
+    """On the 07-16 scenario the blended scorer must produce delta >= floor."""
+    model = _make_test_speaker_model()
+    base_cls, base_mean = compute_persona_fidelity_scores(
+        BASE_ISH_TEXTS, channel="imessage", speaker_model=model)
+    seth_cls, seth_mean = compute_persona_fidelity_scores(
+        SETH_ISH_TEXTS, channel="imessage", speaker_model=model)
+
+    delta = seth_mean - base_mean
+    assert delta >= 0.05, f"blended delta must clear the 0.05 floor, got {delta:.4f}"
+    assert 0.0 < base_mean < 1.0, f"base mean must have headroom, got {base_mean}"
+    # component provenance must be visible per classification
+    for c in base_cls + seth_cls:
+        assert "shape_score" in c and "p_seth" in c, f"missing components: {c.keys()}"
+        assert 0.0 <= c["p_seth"] <= 1.0
+    print(f"✓ blended scorer: base={base_mean:.3f}, seth={seth_mean:.3f}, delta={delta:.3f}")
+
+
+def test_blended_scorer_still_penalizes_ai_tells():
+    """The shape component must keep AI-telly text below clean text."""
+    model = _make_test_speaker_model()
+    ai_telly = ["Certainly! Here are a few options:\n- one\n- two"]
+    cls, ai_mean = compute_persona_fidelity_scores(
+        ai_telly, channel="imessage", speaker_model=model)
+    _, base_mean = compute_persona_fidelity_scores(
+        BASE_ISH_TEXTS, channel="imessage", speaker_model=model)
+    _, seth_mean = compute_persona_fidelity_scores(
+        SETH_ISH_TEXTS, channel="imessage", speaker_model=model)
+    assert ai_mean < base_mean < seth_mean, (
+        f"ordering must be ai < base < seth: {ai_mean:.3f}, {base_mean:.3f}, {seth_mean:.3f}"
+    )
+    assert cls[0]["shape_score"] < 1.0, "AI tells must still dent the shape component"
+    print(f"✓ blend ordering: ai={ai_mean:.3f} < base={base_mean:.3f} < seth={seth_mean:.3f}")
+
+
+def test_shape_only_backward_compatible():
+    """speaker_model=None must reproduce the pure shape score exactly."""
+    responses = ["hey whatup", "Depending on what you need, I can help.", "cool cool cool"]
+    cls, mean = compute_persona_fidelity_scores(responses, channel="imessage")
+    from eval_shape_classifier import classify
+    for r, c in zip(responses, cls):
+        assert c["score"] == classify(r, channel="imessage")["score"], (
+            f"shape-only score drifted for {r!r}"
+        )
+    print(f"✓ shape-only backward compat: mean={mean:.3f}")
+
+
+def test_nightly_blended_pass_records_scorer_provenance():
+    """End-to-end main(): blended scorer turns a real register shift into PASS,
+    and the verdict JSON records which scorer produced the numbers."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        speaker_model_path = tmpdir / "speaker.json"
+        speaker_model_path.write_text(json.dumps(_make_test_speaker_model()))
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--speaker-model", str(speaker_model_path),
+                "--output-json", str(out_json)]
+
+        def register_shift_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+            text = "yeah lol i'm down" if adapter_path else "Sounds good. I will check on that today."
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=register_shift_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry:
+            rc = eval_fidelity_nightly.main()
+
+        verdict = json.loads(out_json.read_text())
+        assert rc == 0, f"register shift must PASS the blended gate, got rc={rc}: {verdict.get('reason')}"
+        assert verdict["verdict"] == "PASS"
+        assert verdict["scorer"]["mode"] == "blended", f"scorer provenance missing: {verdict.get('scorer')}"
+        assert verdict["scorer"]["shape_weight"] + verdict["scorer"]["speaker_weight"] == 1.0
+        assert verdict["delta"]["mean"] >= 0.05
+        kwargs = mock_registry.record_eval.call_args.kwargs
+        assert kwargs["verdict"] == "PASS"
+    print(f"✓ nightly blended PASS: rc=0, delta={verdict['delta']['mean']}, scorer=blended")
+
+
+def test_nightly_missing_speaker_model_degrades_loudly():
+    """No speaker model → shape-only fallback with a greppable degradation
+    marker and scorer provenance in the verdict (never a silent saturation)."""
+    import io
+    from contextlib import redirect_stdout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--speaker-model", str(tmpdir / "no-such-model.json"),
+                "--output-json", str(out_json)]
+
+        def clean_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+            text = "yeah lol i'm down" if adapter_path else "Sounds good. I will check on that today."
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=clean_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+
+        out = buf.getvalue()
+        verdict = json.loads(out_json.read_text())
+        assert "FIDELITY_SCORER_DEGRADED" in out, "degradation must print a greppable marker"
+        assert verdict["scorer"]["mode"] == "shape-only", f"got {verdict.get('scorer')}"
+        # shape-only saturates on this scenario → delta 0 → SKIP, not PASS
+        assert rc == 3 and verdict["verdict"] == "SKIP", (
+            f"saturated shape-only run must SKIP, got rc={rc} verdict={verdict['verdict']}"
+        )
+    print(f"✓ missing speaker model: FIDELITY_SCORER_DEGRADED marker, shape-only SKIP")
+
+
 def main():
     """Run all tests."""
     tests = [
@@ -498,6 +714,13 @@ def main():
         test_sentinel_responses_defer_not_score,
         test_partial_sentinels_dropped_from_deltas,
         test_pass_records_post_mean,
+        test_load_speaker_model_missing_returns_none,
+        test_shape_only_saturates_on_0716_scenario,
+        test_blended_scorer_separates_base_from_seth,
+        test_blended_scorer_still_penalizes_ai_tells,
+        test_shape_only_backward_compatible,
+        test_nightly_blended_pass_records_scorer_provenance,
+        test_nightly_missing_speaker_model_degrades_loudly,
     ]
 
     print("=" * 60)

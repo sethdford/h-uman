@@ -11,12 +11,59 @@ import json
 import random
 import statistics
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # Import the classifier from the sibling script
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from eval_shape_classifier import classify  # noqa: E402
+from personaeval_speaker_id import classify_text as _speaker_classify  # noqa: E402
+
+# --- Blended scoring: shape (AI-tell penalties) + speaker-id P(Seth) --------
+#
+# The shape classifier is penalty-only: it starts at 1.0 and deducts for
+# AI-tells (bullets, headers, 'Certainly' openers, excessive length). Any
+# plausible short casual string scores 1.0, so on 2026-07-16 BOTH the base
+# pass and the adapter pass saturated at mean 1.0 across 29 real generations
+# and the delta gate (PASS needs delta >= 0.05) was structurally unwinnable.
+#
+# The blend adds a discriminative component with dynamic range on clean text:
+# the PersonaEval speaker-id logistic regression P(Seth | text) over 15 style
+# features (lowercase ratio, Seth-openers, contractions, terminal punctuation
+# — see personaeval_speaker_id.featurize). Base-model "clean assistant casual"
+# and Seth's measured register genuinely differ on those features (memory:
+# measured_style_card — 79% no terminal punct vs model 10%).
+#
+# Threshold provenance (per .claude/rules/classifier-score-plus-flag-gate.md):
+# PRACTICAL_DELTA_FLOOR=0.05 in eval_fidelity_nightly.py was derived for the
+# shape scorer. Under this 0.5/0.5 blend, when shape saturates (both passes
+# clean) a 0.05 blended delta corresponds to a 0.10 P(Seth) delta — well
+# inside measured adapter effects (v4-repair moved fidelity +27pp; register
+# shifts move P(Seth) by 0.3+). The floor is therefore kept at 0.05.
+SHAPE_WEIGHT = 0.5
+SPEAKER_WEIGHT = 0.5
+DEFAULT_SPEAKER_MODEL_PATH = Path("/tmp/seth_speaker_id.json")
+
+# Keys a usable speaker-id logreg model must carry (personaeval_speaker_id
+# serialization format, v1 and v2 alike).
+_SPEAKER_MODEL_REQUIRED_KEYS = ("weights", "bias", "means", "stds", "feature_names")
+
+
+def load_speaker_model(path=DEFAULT_SPEAKER_MODEL_PATH) -> Optional[dict]:
+    """Load the speaker-id classifier; None when missing/corrupt/not-a-model.
+
+    /tmp/seth_speaker_id.json is wiped on reboot, so absence is an expected
+    state — callers must degrade loudly (shape-only saturates!), not crash.
+    """
+    try:
+        model = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(model, dict):
+        return None
+    if not all(k in model for k in _SPEAKER_MODEL_REQUIRED_KEYS):
+        return None
+    return model
 
 
 def bootstrap_ci(
@@ -64,22 +111,37 @@ def bootstrap_ci(
 
 def compute_persona_fidelity_scores(
     responses: List[str],
-    channel: str = "imessage"
+    channel: str = "imessage",
+    speaker_model: Optional[dict] = None,
 ) -> Tuple[List[dict], float]:
-    """Score a list of responses using the deterministic shape classifier.
+    """Score responses with the shape classifier, optionally blended with
+    the speaker-id P(Seth) classifier.
 
     Args:
         responses: list of model response strings
         channel: channel name (imessage, telegram, discord, slack, email)
+        speaker_model: loaded speaker-id logreg dict (load_speaker_model).
+            None → pure shape scoring (backward compatible, saturates at
+            1.0 on clean casual text — not gate-grade for delta measurement).
 
     Returns:
-        (classifications, mean_score) where classifications is a list of
-        classify() result dicts and mean_score is the mean shape score.
+        (classifications, mean_score). Each classification keeps the shape
+        classify() fields; "score" is the blended score when a speaker model
+        is provided, with "shape_score" and "p_seth" recording the components.
     """
     if not responses:
         return ([], 0.0)
 
-    classifications = [classify(r, channel=channel) for r in responses]
+    classifications = []
+    for r in responses:
+        c = dict(classify(r, channel=channel))
+        c["shape_score"] = c["score"]
+        if speaker_model is not None:
+            p = _speaker_classify(speaker_model, r)["p_seth"] if r else 0.0
+            c["p_seth"] = p
+            c["score"] = SHAPE_WEIGHT * c["shape_score"] + SPEAKER_WEIGHT * p
+        classifications.append(c)
+
     mean = statistics.mean(c["score"] for c in classifications)
     return (classifications, mean)
 
