@@ -489,6 +489,21 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
                                                  const struct hu_channel_loop_msg *msg,
                                                  const char *body, size_t body_len) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
+
+    /* Parrot guard: never ship a bubble that verbatim-echoes the inbound
+     * message it answers (2026-07-25 Dermot incident — the F40 quote fallback
+     * + markdown strip + splitter shipped the contact's own words back as a
+     * standalone bubble). Dropping the bubble is safe: sibling bubbles in a
+     * multi-fragment reply still flow, and a whole-reply parrot is exactly
+     * the send we must not make. */
+    if (m && m->content[0] && body && body_len > 0 &&
+        hu_conversation_reply_parrots_inbound(body, body_len, m->content, strlen(m->content))) {
+        hu_log_warn("human", agent ? agent->observer : NULL,
+                    "parrot guard: dropped bubble echoing the inbound (%.*s…)",
+                    (int)(body_len > 40 ? 40 : body_len), body);
+        return HU_OK;
+    }
+
     hu_conversation_snapshot_t snap = hu_daemon_snapshot_for_msg(m ? m->timestamp_sec : 0);
     const char *guid = (m && m->guid[0]) ? m->guid : NULL;
     return hu_daemon_dispatch_imessage_reply(

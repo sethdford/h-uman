@@ -1033,6 +1033,41 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
     return HU_OK;
 }
 
+/* Graph grounding load, shared by BOTH turn paths (see agent.h). Loads the
+ * relationship-graph context per the HU_GRAPH_GROUNDING gate: SHADOW logs and
+ * drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the RAG
+ * leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078) —
+ * casual/unknown-tier turns log and drop the loaded context. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, char **graph_ctx,
+                                   size_t *graph_ctx_len) {
+    if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
+        return;
+    hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
+    hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+    if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
+        agent->memory_session_id_len == 0)
+        return;
+    hu_graph_ground_load(loader, agent->memory_session_id, agent->memory_session_id_len, 0,
+                         graph_ctx, graph_ctx_len);
+    const char *drop_reason = NULL;
+    if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+        hu_log_info("graph_grounding", NULL, "shadow: %zu graph_context bytes (not injected)",
+                    *graph_ctx_len);
+        drop_reason = "shadow";
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
+        hu_log_info("graph_grounding", NULL,
+                    "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
+                    agent->turn_tier);
+        drop_reason = "casual";
+    }
+    if (drop_reason) {
+        if (*graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);
+        *graph_ctx = NULL;
+        *graph_ctx_len = 0;
+    }
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -2186,20 +2221,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * the default-ON rests on the proxy, not a confirmed human blind A/B.
          * graph_ctx is protected-core in the prompt and is NOT subject to the
          * Self-RAG memory-relevance verdict below. */
-        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
-            agent->memory_session_id_len > 0) {
-            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                                 &graph_ctx, &graph_ctx_len);
-            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
-            }
-        }
+        hu_agent_load_graph_grounding(agent, &loader, &graph_ctx, &graph_ctx_len);
 
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
@@ -6395,10 +6417,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* ThinkPRM verifier: score response reasoning steps */
+                /* ThinkPRM verifier: score response reasoning steps.
+                 * Only run when the result can ACT — its sole consumer is the
+                 * reflection retry gate below. With reflection disabled (the
+                 * production default since 2026-07-13) or retries exhausted,
+                 * the verify call was pure pre-send latency on every reactive
+                 * turn (2026-07-25 Dermot latency audit). */
                 hu_prm_verify_result_t prm_verify = {0};
                 bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
+                    agent->reflection.enabled && reflection_retries_left > 0 &&
                     resp.content_len > 50) {
                     if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config, resp.content,
                                                 resp.content_len, msg, msg_len,
@@ -7441,6 +7469,40 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             vcfg.mode = HU_VERIFY_STRICT;
                         else if (strcmp(mode_env, "off") == 0)
                             vcfg.mode = HU_VERIFY_OFF;
+                    }
+                    /* Quality gate (HU_QUALITY_GATE, default off): make the two
+                     * signals that fired-but-couldn't-act on the 2026-07-25
+                     * Dermot echo turns (verifier flags + consistency drift)
+                     * actually gate. LIVE + bad drift escalates TELEMETRY→SOFT
+                     * so unsupported claims get hedged — the verifier's own
+                     * actuator, no regeneration loop. SHADOW logs would-act. */
+                    {
+                        hu_gate_mode_t qg = hu_gate_mode_from_env("HU_QUALITY_GATE", HU_GATE_OFF);
+                        if (qg != HU_GATE_OFF && *response_out && response_effective_len > 0 &&
+                            agent->conversation_context && agent->conversation_context_len > 20) {
+                            float qg_drift = 0.0f;
+                            bool have_drift =
+                                (hu_consistency_score_line(
+                                     agent->conversation_context, agent->conversation_context_len,
+                                     *response_out, response_effective_len, &qg_drift) == HU_OK);
+                            hu_verify_mode_t escalated = hu_response_verify_mode_for_turn(
+                                vcfg.mode, qg, have_drift, qg_drift,
+                                HU_CONSISTENCY_DRIFT_THRESHOLD);
+                            if (escalated != vcfg.mode) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE live: drift %.2f < %.2f — verifier "
+                                            "TELEMETRY→SOFT (hedge unsupported claims)",
+                                            qg_drift, (double)HU_CONSISTENCY_DRIFT_THRESHOLD);
+                                vcfg.mode = escalated;
+                            } else if (qg == HU_GATE_SHADOW && have_drift &&
+                                       qg_drift < HU_CONSISTENCY_DRIFT_THRESHOLD &&
+                                       vcfg.mode == HU_VERIFY_TELEMETRY) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE shadow: would escalate verifier to SOFT "
+                                            "(drift %.2f)",
+                                            qg_drift);
+                            }
+                        }
                     }
                     if (vcfg.mode != HU_VERIFY_OFF) {
                         const char *contact =

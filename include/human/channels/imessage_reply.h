@@ -128,6 +128,25 @@ int64_t hu_imessage_reply_newest_rowid(void);
  * this immediately after a successful reply to report the outcome honestly. */
 bool hu_imessage_reply_last_verified_threaded(void);
 
+/* ── Tier-0 bridge circuit breaker ──────────────────────────────────────────
+ * The IMCore bridge (`imsg send-rich`) can go half-dead: each attempt hangs
+ * until its kill deadline instead of failing fast. 2026-07-25: two 30s bridge
+ * timeouts per reply added a minute of dead air to every threaded reply while
+ * the bridge was down. The breaker skips Tier 0 for a cooldown once failures
+ * are consecutive; any bridge success closes it again. */
+#define HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD   2u
+#define HU_IMESSAGE_BRIDGE_BREAKER_COOLDOWN_MS (5 * 60 * 1000)
+/* Kill deadline for one `imsg send-rich` attempt. A live bridge answers in
+ * well under a second; 5s distinguishes "slow" from "dead" without making
+ * the bridge the dominant reply-latency term (the old deadline was 30s). */
+#define HU_IMESSAGE_BRIDGE_SEND_TIMEOUT_SEC 5
+
+/* Pure predicate: skip Tier 0 right now? True when the breaker is open —
+ * consecutive_failures has reached the threshold AND the last failure is
+ * still inside the cooldown window. last_failure_ms <= 0 = never failed. */
+bool hu_imessage_bridge_breaker_should_skip(unsigned consecutive_failures, int64_t now_ms,
+                                            int64_t last_failure_ms);
+
 #if HU_IS_TEST
 /* Test-only — reset / read the one-shot Tier-3 degradation WARN counter.
  * The count is 0 before any flat-fallback WARN fires and 1 afterward,

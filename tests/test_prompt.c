@@ -623,8 +623,10 @@ static void test_prompt_immersive_trim_extends_to_world_model(void) {
     HU_ASSERT_TRUE(out_len <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
     HU_ASSERT_TRUE(strstr(out, "PERSONA_HEAD_MARKER") != NULL);
     HU_ASSERT_TRUE(strstr(out, "TAIL_REMINDER_MARKER") != NULL);
-    /* memory (higher trim priority) fully consumed before world model */
-    HU_ASSERT_TRUE(strstr(out, "MEMFACT_MARKER") == NULL);
+    /* Memory below its 2 KB floor is PROTECTED (2026-07-25 floors: the
+     * un-floored trim deleted all recall on over-budget turns); the
+     * cascade skips it and takes the overage from world model instead. */
+    HU_ASSERT_TRUE(strstr(out, "MEMFACT_MARKER") != NULL);
     /* world model trimmed head-first: oldest gone, newest kept */
     HU_ASSERT_TRUE(strstr(out, "OLDEST_FACT_MARKER") == NULL);
     HU_ASSERT_TRUE(strstr(out, "NEWEST_FACT_MARKER") != NULL);
@@ -739,12 +741,14 @@ static void test_prompt_continuity_section_absent_when_empty(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
-static void test_prompt_continuity_trimmed_first_under_pressure(void) {
-    /* Continuity is the LOWEST-priority trim tier: under budget pressure it
-     * is cut before every other span, and the persona head + guard tail
-     * always survive. Fixture: >16K memory forces ~4K of overage; the small
-     * continuity span must be consumed entirely (priority 0) while newest
-     * memory and the tail markers remain. */
+static void test_prompt_continuity_survives_under_pressure(void) {
+    /* SUPERSEDED POLICY (2026-07-25): continuity used to be the FIRST
+     * casualty under budget pressure. The Dermot audit showed the live
+     * trim deleting it (cont=112 → 0) along with all recalled memory —
+     * own-last-send/open-promise awareness vanished exactly when threads
+     * were busiest. Continuity is ≤400 B by construction and now floored
+     * at 400 B: it is never cut. The overage comes out of memory above
+     * its own 2 KB floor instead. */
     hu_allocator_t alloc = hu_system_allocator();
     size_t mem_len = 0;
     char *mem = big_memory_context(&alloc, &mem_len);
@@ -765,8 +769,9 @@ static void test_prompt_continuity_trimmed_first_under_pressure(void) {
     unsetenv("HU_PROMPT_TRIM");
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out_len <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
-    /* Continuity (priority 0) is gone before memory is exhausted... */
-    HU_ASSERT_TRUE(strstr(out, "CONTINUITY_SEND_MARKER") == NULL);
+    /* Continuity survives its floor; memory above ITS floor absorbs the
+     * overage head-first (newest kept)... */
+    HU_ASSERT_TRUE(strstr(out, "CONTINUITY_SEND_MARKER") != NULL);
     HU_ASSERT_TRUE(strstr(out, "NEWEST_FACT_MARKER") != NULL);
     /* ...and the protected head/tail are intact. */
     HU_ASSERT_TRUE(strstr(out, "PERSONA_HEAD_MARKER") != NULL);
@@ -794,7 +799,7 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_continuity_render_caps_at_max_bytes);
     HU_RUN_TEST(test_prompt_continuity_section_present_immersive);
     HU_RUN_TEST(test_prompt_continuity_section_absent_when_empty);
-    HU_RUN_TEST(test_prompt_continuity_trimmed_first_under_pressure);
+    HU_RUN_TEST(test_prompt_continuity_survives_under_pressure);
     HU_RUN_TEST(test_prompt_build_with_stm_context);
     HU_RUN_TEST(test_prompt_build_with_custom_instructions);
     HU_RUN_TEST(test_prompt_build_includes_hula_protocol);

@@ -24,7 +24,7 @@
 #include <string.h>
 
 #define FIX_TEXT "PPPP\nmmmmmmm\nMMMMMMM\nxxxx\neeee\neeee\ngggg\nTAIL\n"
-#define FIX_LEN (sizeof(FIX_TEXT) - 1)
+#define FIX_LEN  (sizeof(FIX_TEXT) - 1)
 
 static const hu_prompt_trim_span_t k_fix_spans[3] = {
     {26, 10}, /* self-exemplars — trimmed first */
@@ -126,6 +126,40 @@ static void test_trim_plan_null_inputs_return_zero(void) {
     HU_ASSERT_EQ(hu_prompt_trim_plan(FIX_TEXT, FIX_LEN, 10, k_fix_spans, 3, NULL), (size_t)0);
 }
 
+static void test_trim_plan_floors_protect_span_tail(void) {
+    /* Floors pin the 2026-07-25 Dermot finding: the live trim deleted ALL
+     * 4.7 KB of recalled memory (cuts stop only at span exhaustion), so the
+     * model answered with no memory of the contact. With a floor, a span is
+     * cut only down to its floor. Here: memory avail 16, floor 8 → max cut 8
+     * (the oldest line), even under unbounded overage. */
+    size_t floors[3] = {0, 0, 8};
+    size_t cuts[3] = {0, 0, 0};
+    size_t total = hu_prompt_trim_plan_floors(FIX_TEXT, FIX_LEN, 1, k_fix_spans, 3, floors, cuts);
+    HU_ASSERT_EQ(cuts[0], (size_t)10);
+    HU_ASSERT_EQ(cuts[1], (size_t)5);
+    HU_ASSERT_EQ(cuts[2], (size_t)8); /* stops at the floor, not the full 16 */
+    HU_ASSERT_EQ(total, (size_t)23);
+}
+
+static void test_trim_plan_floor_at_avail_means_never_cut(void) {
+    size_t floors[3] = {0, 0, 16}; /* floor >= avail → span untouchable */
+    size_t cuts[3] = {0, 0, 0};
+    size_t total = hu_prompt_trim_plan_floors(FIX_TEXT, FIX_LEN, 1, k_fix_spans, 3, floors, cuts);
+    HU_ASSERT_EQ(cuts[2], (size_t)0);
+    HU_ASSERT_EQ(total, (size_t)15); /* exemplars 10 + graph 5 only */
+}
+
+static void test_trim_plan_null_floors_matches_plain_plan(void) {
+    size_t cuts_a[3] = {0, 0, 0};
+    size_t cuts_b[3] = {0, 0, 0};
+    size_t ta = hu_prompt_trim_plan(FIX_TEXT, FIX_LEN, 30, k_fix_spans, 3, cuts_a);
+    size_t tb = hu_prompt_trim_plan_floors(FIX_TEXT, FIX_LEN, 30, k_fix_spans, 3, NULL, cuts_b);
+    HU_ASSERT_EQ(ta, tb);
+    HU_ASSERT_EQ(cuts_a[0], cuts_b[0]);
+    HU_ASSERT_EQ(cuts_a[1], cuts_b[1]);
+    HU_ASSERT_EQ(cuts_a[2], cuts_b[2]);
+}
+
 static void test_trim_apply_removes_planned_middle_keeps_head_tail(void) {
     char buf[FIX_LEN + 1];
     memcpy(buf, FIX_TEXT, FIX_LEN + 1);
@@ -185,6 +219,9 @@ void run_prompt_trim_tests(void) {
     HU_RUN_TEST(test_trim_plan_caps_at_available_span_bytes);
     HU_RUN_TEST(test_trim_plan_skips_absent_sections);
     HU_RUN_TEST(test_trim_plan_null_inputs_return_zero);
+    HU_RUN_TEST(test_trim_plan_floors_protect_span_tail);
+    HU_RUN_TEST(test_trim_plan_floor_at_avail_means_never_cut);
+    HU_RUN_TEST(test_trim_plan_null_floors_matches_plain_plan);
     HU_RUN_TEST(test_trim_apply_removes_planned_middle_keeps_head_tail);
     HU_RUN_TEST(test_trim_apply_zero_cuts_is_identity);
     HU_RUN_TEST(test_positional_cap_under_budget_is_identity);

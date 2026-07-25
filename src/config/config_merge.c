@@ -115,7 +115,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         set_defaults_rollback(cfg, a);
         return;
     }
-    cfg->default_model = hu_strdup(a, "gemini-3.1-flash-lite-preview");
+    cfg->default_model = hu_strdup(a, "gemini-3.1-flash-lite");
     if (!cfg->default_model) {
         set_defaults_rollback(cfg, a);
         return;
@@ -134,7 +134,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         }
         if (cfg->default_model)
             a->free(a->ctx, cfg->default_model, strlen(cfg->default_model) + 1);
-        const char *model = "gemini-3.1-flash-lite-preview";
+        const char *model = "gemini-3.1-flash-lite";
         if (strcmp(detected, "openai") == 0)
             model = "gpt-4o";
         else if (strcmp(detected, "anthropic") == 0)

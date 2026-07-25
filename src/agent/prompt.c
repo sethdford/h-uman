@@ -593,8 +593,17 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * overage. */
         if (trim_mode != HU_PROMPT_TRIM_OFF && len > HU_PROMPT_TRIM_BUDGET_BYTES) {
             size_t cuts[HU_TRIM_SLOT_COUNT] = {0};
-            size_t planned = hu_prompt_trim_plan(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, spans,
-                                                 HU_TRIM_SLOT_COUNT, cuts);
+            /* Floors (2026-07-25 Dermot audit): the un-floored trim deleted
+             * ALL recalled memory (4.7 KB) and all continuity on over-budget
+             * turns — the model replied knowing nothing it knew about the
+             * contact. Memory keeps its most-relevant 2 KB head; continuity
+             * (≤400 B by construction) is never cut. Other slots stay fully
+             * sacrificial; the positional cap remains the safety net. */
+            size_t floors[HU_TRIM_SLOT_COUNT] = {0};
+            floors[HU_TRIM_SLOT_CONTINUITY] = HU_TRIM_FLOOR_CONTINUITY_BYTES;
+            floors[HU_TRIM_SLOT_MEMORY] = HU_TRIM_FLOOR_MEMORY_BYTES;
+            size_t planned = hu_prompt_trim_plan_floors(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES,
+                                                        spans, HU_TRIM_SLOT_COUNT, floors, cuts);
             size_t positional_cut = len - HU_PROMPT_TRIM_BUDGET_BYTES;
             if (trim_mode == HU_PROMPT_TRIM_SHADOW) {
                 /* The section lens names the NEXT trim-span candidates when the

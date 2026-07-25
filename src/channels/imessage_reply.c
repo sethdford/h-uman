@@ -166,6 +166,24 @@ int64_t hu_imessage_reply_newest_rowid(void) {
 #endif
 }
 
+/* ── Tier-0 bridge circuit breaker ───────────────────────────────────────
+ * State lives here (one process, one bridge); the DECISION is the pure
+ * predicate below so the truth table is unit-testable without wall-clock
+ * or process state (tests/test_imessage_threaded_reply.c). */
+#if defined(__APPLE__) && !HU_IS_TEST && defined(HU_ENABLE_SQLITE)
+static unsigned g_bridge_consec_failures = 0;
+static int64_t g_bridge_last_failure_ms = 0;
+#endif
+
+bool hu_imessage_bridge_breaker_should_skip(unsigned consecutive_failures, int64_t now_ms,
+                                            int64_t last_failure_ms) {
+    if (consecutive_failures < HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD)
+        return false;
+    if (last_failure_ms <= 0)
+        return false; /* a count with no recorded time must never latch open */
+    return (now_ms - last_failure_ms) < (int64_t)HU_IMESSAGE_BRIDGE_BREAKER_COOLDOWN_MS;
+}
+
 /* One-shot guard for the Tier-3 degradation WARN: a busy reply path that
  * keeps falling through to flat-send should log the "AX unavailable"
  * explanation exactly once per process, not on every message. Increments
@@ -258,8 +276,13 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
     if (parent_msg_guid && parent_msg_guid_len > 0) {
 #if defined(__APPLE__) && !HU_IS_TEST && defined(HU_ENABLE_SQLITE)
         hu_allocator_t sys_alloc = hu_system_allocator();
-        if (hu_imessage_caps_allows(hu_imessage_caps_cached(&sys_alloc),
-                                    HU_IMSG_VERB_REPLY_THREADED)) {
+        if (hu_imessage_bridge_breaker_should_skip(g_bridge_consec_failures, ts_start_ms,
+                                                   g_bridge_last_failure_ms)) {
+            /* Breaker open: a half-dead bridge burns its full kill deadline
+             * per attempt (2026-07-25: 2 x 30s per reply). Skip straight to
+             * the legacy tiers until the cooldown lapses. */
+        } else if (hu_imessage_caps_allows(hu_imessage_caps_cached(&sys_alloc),
+                                           HU_IMSG_VERB_REPLY_THREADED)) {
             char chat_guid[160] = {0};
             if (hu_imessage_reply_chat_guid_for_handle(target, target_len, chat_guid,
                                                        sizeof(chat_guid))) {
@@ -274,14 +297,23 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                     body_z[body_len] = '\0';
                     const char *sr_argv[] = {"imsg", "send-rich",  "--chat", chat_guid, "--text",
                                              body_z, "--reply-to", parent_z, NULL};
-                    bool sr_ok = hu_imsg_run_ok(&sys_alloc, sr_argv, 30);
+                    bool sr_ok =
+                        hu_imsg_run_ok(&sys_alloc, sr_argv, HU_IMESSAGE_BRIDGE_SEND_TIMEOUT_SEC);
                     sys_alloc.free(sys_alloc.ctx, body_z, body_len + 1);
                     if (sr_ok) {
+                        g_bridge_consec_failures = 0; /* success closes the breaker */
                         return reply_tier_succeeded("bridge", target, target_len, since_rowid,
                                                     ts_start_ms);
                     }
+                    g_bridge_consec_failures++;
+                    g_bridge_last_failure_ms = ts_start_ms;
                     hu_log_warn("imessage", NULL,
-                                "bridge threaded reply failed; falling back to legacy tiers");
+                                "bridge threaded reply failed (%u consecutive%s); falling back "
+                                "to legacy tiers",
+                                g_bridge_consec_failures,
+                                g_bridge_consec_failures >= HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD
+                                    ? "; breaker OPEN, skipping bridge for cooldown"
+                                    : "");
                 }
             }
         }

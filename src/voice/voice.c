@@ -620,7 +620,7 @@ tts_fail:
 }
 
 #define HU_VOICE_GEMINI_DEFAULT_ENDPOINT "https://generativelanguage.googleapis.com/v1beta/models/"
-#define HU_VOICE_GEMINI_DEFAULT_MODEL    "gemini-3.1-flash-lite-preview"
+#define HU_VOICE_GEMINI_DEFAULT_MODEL    "gemini-3.1-flash-lite"
 #define HU_VOICE_GEMINI_PROMPT                                \
     "Transcribe the following audio exactly, word for word. " \
     "Output only the spoken words, nothing else. "            \

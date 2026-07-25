@@ -26,7 +26,7 @@ static const max_entry_t MODEL_MAX[] = {
     {"gemini-3.1-pro-preview", 8192},
     {"gemini-3.5-flash", 8192},
     {"gemini-3-flash-preview", 8192},
-    {"gemini-3.1-flash-lite-preview", 8192},
+    {"gemini-3.1-flash-lite", 8192},
     {"deepseek-v3.2", 8192},
     {"deepseek-chat", 8192},
     {"deepseek-reasoner", 8192},

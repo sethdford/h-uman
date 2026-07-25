@@ -28,9 +28,9 @@ hu_prompt_trim_mode_t hu_prompt_trim_mode(void) {
     return hu_prompt_trim_mode_parse(getenv("HU_PROMPT_TRIM"));
 }
 
-size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
-                           const hu_prompt_trim_span_t *spans, size_t span_count,
-                           size_t *cuts_out) {
+size_t hu_prompt_trim_plan_floors(const char *buf, size_t len, size_t budget,
+                                  const hu_prompt_trim_span_t *spans, size_t span_count,
+                                  const size_t *floors, size_t *cuts_out) {
     if (cuts_out && span_count > 0)
         memset(cuts_out, 0, span_count * sizeof(*cuts_out));
     if (!buf || !spans || !cuts_out || span_count == 0 || len <= budget)
@@ -43,16 +43,30 @@ size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
         size_t avail = spans[i].length;
         if (avail == 0 || off >= len || avail > len - off)
             continue; /* absent or out-of-range span */
-        size_t cut = needed < avail ? needed : avail;
+        /* A floor is the byte count of this span that must SURVIVE; the
+         * cuttable region is what lies above it. floor >= avail means the
+         * span is untouchable. */
+        size_t floor_bytes = floors ? floors[i] : 0;
+        if (avail <= floor_bytes)
+            continue;
+        size_t max_cut = avail - floor_bytes;
+        size_t cut = needed < max_cut ? needed : max_cut;
         /* Extend a partial head cut forward to the next newline so the
-         * surviving section content starts at a line boundary. */
-        while (cut < avail && buf[off + cut - 1] != '\n')
+         * surviving section content starts at a line boundary — but never
+         * past the floor. A floor-capped cut may end mid-line. */
+        while (cut < max_cut && buf[off + cut - 1] != '\n')
             cut++;
         cuts_out[i] = cut;
         total += cut;
         needed = needed > cut ? needed - cut : 0;
     }
     return total;
+}
+
+size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
+                           const hu_prompt_trim_span_t *spans, size_t span_count,
+                           size_t *cuts_out) {
+    return hu_prompt_trim_plan_floors(buf, len, budget, spans, span_count, NULL, cuts_out);
 }
 
 size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget) {
