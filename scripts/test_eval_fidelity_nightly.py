@@ -300,7 +300,7 @@ def _run_main_with_argv(argv, fixture_prompts=25):
             a.replace("__ADAPTER__", str(adapter)) for a in argv
         ] + ["--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
-        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
             responses = ["hey whatup"] * len(prompts)
             return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
@@ -380,7 +380,7 @@ def test_sentinel_responses_defer_not_score():
         argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
                 "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
-        def timeout_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+        def timeout_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
             return (["[timeout]"] * len(prompts),
                     {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
@@ -403,7 +403,7 @@ def test_partial_sentinels_dropped_from_deltas():
     """A few sentinel responses are dropped pairwise; the rest still score."""
     calls = {"n": 0}
 
-    def mixed_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+    def mixed_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
         calls["n"] += 1
         responses = ["hey whatup"] * len(prompts)
         responses[0] = "[timeout]"  # same index bad in both passes → 1 pair dropped
@@ -458,7 +458,7 @@ def test_pass_records_post_mean():
         argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
                 "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
-        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
             return (["hey"] * len(prompts), {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
         with mock.patch.object(sys, "argv", argv), \
@@ -472,6 +472,111 @@ def test_pass_records_post_mean():
         assert kwargs["verdict"] == "PASS"
         assert abs(kwargs["score"] - 0.8) < 1e-9, f"PASS must record post_mean, got {kwargs['score']}"
     print(f"✓ PASS verdict: exit=0, registry score=post_mean")
+
+
+def test_generate_inprocess_timeout_sentinel():
+    """A generation exceeding the wall-clock guard returns '[timeout]'."""
+    import time as _time
+
+    def slow_gen(model, tokenizer, prompt, max_tokens):
+        _time.sleep(3)
+        return "too late"
+
+    with mock.patch("eval_fidelity_nightly._mlx_generate", side_effect=slow_gen):
+        r = eval_fidelity_nightly.generate_inprocess(
+            object(), object(), "hi", timeout_sec=1
+        )
+    assert r == "[timeout]", f"expected [timeout], got {r!r}"
+    print(f"✓ generate_inprocess (timeout): {r}")
+
+
+def test_generate_inprocess_error_sentinel():
+    """An exception inside generation returns a '[gen_err: ...]' sentinel."""
+    with mock.patch("eval_fidelity_nightly._mlx_generate",
+                    side_effect=RuntimeError("metal exploded")):
+        r = eval_fidelity_nightly.generate_inprocess(object(), object(), "hi")
+    assert r.startswith("[gen_err:") and "metal exploded" in r, f"got {r!r}"
+    print(f"✓ generate_inprocess (error): {r}")
+
+
+def test_generate_inprocess_empty_sentinel():
+    """Whitespace-only model output returns '[empty]'."""
+    with mock.patch("eval_fidelity_nightly._mlx_generate", return_value="   \n"):
+        r = eval_fidelity_nightly.generate_inprocess(object(), object(), "hi")
+    assert r == "[empty]", f"expected [empty], got {r!r}"
+    print(f"✓ generate_inprocess (empty): {r}")
+
+
+def test_run_eval_pass_loads_model_once():
+    """The whole point of the rewrite: ONE load per pass, not one per prompt."""
+    prompts = [{"prompt": f"p{i}"} for i in range(5)]
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())) as m_load, \
+         mock.patch("eval_fidelity_nightly.generate_inprocess",
+                    return_value="hey") as m_gen, \
+         mock.patch("eval_fidelity_nightly.free_model") as m_free:
+        responses, stats = eval_fidelity_nightly.run_eval_pass(
+            "model-x", prompts, adapter_path="/tmp/adapter-y"
+        )
+    assert m_load.call_count == 1, f"load_model called {m_load.call_count}x, want 1"
+    assert m_gen.call_count == 5, f"generate_inprocess called {m_gen.call_count}x, want 5"
+    assert responses == ["hey"] * 5
+    assert m_free.called, "free_model must run after the pass"
+    # POST pass must load WITH the adapter
+    load_kwargs = m_load.call_args.kwargs
+    load_args = m_load.call_args.args
+    passed_adapter = load_kwargs.get("adapter_path",
+                                     load_args[1] if len(load_args) > 1 else None)
+    assert str(passed_adapter) == "/tmp/adapter-y", f"adapter not passed to load: {m_load.call_args}"
+    assert stats["pass"] == "POST (adapter)"
+    print(f"✓ run_eval_pass: 1 load, 5 generations, model freed")
+
+
+def test_run_eval_pass_pre_loads_without_adapter():
+    """The PRE pass must load the BASE model — adapter_path=None."""
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())) as m_load, \
+         mock.patch("eval_fidelity_nightly.generate_inprocess", return_value="hey"), \
+         mock.patch("eval_fidelity_nightly.free_model"):
+        _, stats = eval_fidelity_nightly.run_eval_pass(
+            "model-x", [{"prompt": "a"}]
+        )
+    load_kwargs = m_load.call_args.kwargs
+    load_args = m_load.call_args.args
+    passed_adapter = load_kwargs.get("adapter_path",
+                                     load_args[1] if len(load_args) > 1 else None)
+    assert passed_adapter is None, f"PRE pass must not load an adapter: {m_load.call_args}"
+    assert stats["pass"] == "PRE (base)"
+    print(f"✓ run_eval_pass (PRE): base model loaded without adapter")
+
+
+def test_run_eval_pass_frees_model_on_error():
+    """free_model must run even when a generation raises unexpectedly."""
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())), \
+         mock.patch("eval_fidelity_nightly.generate_inprocess",
+                    side_effect=KeyboardInterrupt), \
+         mock.patch("eval_fidelity_nightly.free_model") as m_free:
+        try:
+            eval_fidelity_nightly.run_eval_pass("model-x", [{"prompt": "a"}])
+            raise AssertionError("expected KeyboardInterrupt to propagate")
+        except KeyboardInterrupt:
+            pass
+    assert m_free.called, "free_model must run even on error (finally)"
+    print(f"✓ run_eval_pass (error): model freed via finally")
+
+
+def test_run_eval_pass_subprocess_fallback():
+    """--subprocess-gen keeps the legacy per-prompt subprocess path reachable."""
+    with mock.patch("eval_fidelity_nightly.generate", return_value="hey") as m_gen, \
+         mock.patch("eval_fidelity_nightly.load_model") as m_load:
+        responses, _ = eval_fidelity_nightly.run_eval_pass(
+            "model-x", [{"prompt": "a"}, {"prompt": "b"}], use_subprocess=True
+        )
+    assert m_gen.call_count == 2, "fallback must use the subprocess generate()"
+    assert not m_load.called, "fallback must NOT load the model in-process"
+    assert responses == ["hey", "hey"]
+    print(f"✓ run_eval_pass (--subprocess-gen): legacy path reachable, no in-process load")
 
 
 def main():
@@ -498,6 +603,13 @@ def main():
         test_sentinel_responses_defer_not_score,
         test_partial_sentinels_dropped_from_deltas,
         test_pass_records_post_mean,
+        test_generate_inprocess_timeout_sentinel,
+        test_generate_inprocess_error_sentinel,
+        test_generate_inprocess_empty_sentinel,
+        test_run_eval_pass_loads_model_once,
+        test_run_eval_pass_pre_loads_without_adapter,
+        test_run_eval_pass_frees_model_on_error,
+        test_run_eval_pass_subprocess_fallback,
     ]
 
     print("=" * 60)
