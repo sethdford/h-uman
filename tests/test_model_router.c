@@ -20,17 +20,20 @@ static void default_config_has_all_models(void) {
 }
 
 static void default_models_are_not_deprecated(void) {
-    /* CLAUDE.md "AI Model Versions": gemini-3-flash-preview is superseded by
-     * gemini-3.5-flash; gemini-3-pro-preview is discontinued. The router's
-     * default config must not hand out a deprecated model id. */
+    /* CLAUDE.md "AI Model Versions", re-verified 2026-07-25: the router's
+     * default config must hand out only live-probed IDs. gemini-3.5-flash
+     * 404s on this project's Vertex endpoint (despite the 2026-05-24 note)
+     * and gemini-3.1-flash-lite-preview was shut down upstream — the only
+     * verified conversational-quality cloud model is gemini-3.1-pro-preview. */
     cfg = hu_model_router_default_config();
-    HU_ASSERT_STR_EQ(cfg.conversational_model, "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg.conversational_model, "gemini-3.1-pro-preview");
     HU_ASSERT_EQ(cfg.conversational_model_len, strlen(cfg.conversational_model));
-    HU_ASSERT_STR_EQ(cfg.analytical_model, "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg.analytical_model, "gemini-3.1-pro-preview");
     HU_ASSERT_EQ(cfg.analytical_model_len, strlen(cfg.analytical_model));
-    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-flash-preview") == NULL);
-    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-pro-preview") == NULL);
-    HU_ASSERT(strstr(cfg.analytical_model, "gemini-3-flash-preview") == NULL);
+    HU_ASSERT_STR_EQ(cfg.reflexive_model, "gemini-3.1-flash-lite");
+    HU_ASSERT_EQ(cfg.reflexive_model_len, strlen(cfg.reflexive_model));
+    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3.5-flash") == NULL);
+    HU_ASSERT(strstr(cfg.reflexive_model, "-preview") == NULL);
     /* deep tier stays on the canonical pro-preview id (not the discontinued one) */
     HU_ASSERT(strstr(cfg.deep_model, "gemini-3-pro-preview") == NULL);
 }
@@ -502,8 +505,14 @@ static void route_with_judge_cache_hit_returns_cached(void) {
 }
 
 static void analytical_and_deep_use_different_models(void) {
+    /* 2026-07-25: analytical and deep DELIBERATELY share gemini-3.1-pro-preview
+     * — it is the only live-probed conversational-quality Vertex model on this
+     * project today (gemini-3.5-flash 404s). The tier ladder still has real
+     * rungs: reflexive (flash-lite) must stay distinct from deep, and the two
+     * heavyweight tiers differ by thinking budget at request time, not ID. */
     hu_model_router_config_t c = hu_model_router_default_config();
-    HU_ASSERT(strcmp(c.analytical_model, c.deep_model) != 0);
+    HU_ASSERT(strcmp(c.reflexive_model, c.deep_model) != 0);
+    HU_ASSERT_STR_EQ(c.analytical_model, c.deep_model);
 }
 
 static void very_long_message_scores_higher(void) {
