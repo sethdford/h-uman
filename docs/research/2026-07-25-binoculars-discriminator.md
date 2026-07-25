@@ -145,9 +145,29 @@ byte leaking from the attributedBody decode in the extractor. Three consequences
    slightly *lower* (mean 1.309 vs 1.357), i.e. marginally harder to detect. The
    corruption was working mildly against the detector, not inflating it.
 
-The upstream fix belongs in the extractor, not here — note that
-`scripts/extract_imessage_pairs.py` **regenerates `ground_truth.jsonl` on any
-invocation, including `--help`**, so it must be handled deliberately.
+**RESOLVED upstream, 2026-07-25** (`4459b246a`, branch `claude/modest-agnesi-369cac`).
+Two bugs in one decoder, both from a duplicated copy of
+`scripts/blind_ab/imessage_text.py` that never received the `e80af898` fix:
+
+1. Text was read starting **at the length byte**, which leaked as a leading
+   character whenever it was printable (0x20–0x7E, i.e. byte lengths 32–126).
+   `",I don’t know…"` — `0x2c` = 44 = that message's own byte length. Shorter
+   messages had control-character lengths that a downstream `re.sub` stripped,
+   so they decoded correctly *by accident*.
+2. `\x86` was used as an end marker, but 0x86 is a legal UTF-8 **continuation**
+   byte — so any message containing 😆 (`f0 9f 98 86`) or the `↩` that opens a
+   reply-quote (`e2 86 a9`) was truncated mid-character and usually dropped.
+
+Result: **131/644 (20.3%) → 4/690 (0.6%)**, and the corpus *grew by 46 rows* as
+bug 2's dropped messages came back (27 now contain emoji). Of the 4 remaining
+matches, 2 are **false positives of the conservative guard**, not corruption —
+`'#7225'` and `'“Professional misconduct”'` are legitimate messages that merely
+open with punctuation-then-word. Expect a **`corrupt_chosen` floor of ~0–2 per
+run**; that is the guard being deliberately conservative, not corruption
+returning. The guard stays regardless: it costs ~0.6% of pairs and is cheap
+insurance, since `scripts/extract_imessage_pairs.py` **regenerates
+`ground_truth.jsonl` on any invocation, including `--help`** — and the file is
+untracked, so running the *unfixed* extractor from main re-corrupts it.
 
 ## Caveats
 
