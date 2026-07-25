@@ -783,6 +783,8 @@ void run_eval_shape_tests(void);
 void run_register_tests(void);
 void run_relationship_tone_tests(void);
 void run_persona_head_gate_tests(void);
+void run_state_file_tests(void);
+void run_daemon_followup_sched_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
@@ -1774,6 +1776,8 @@ int main(int argc, char **argv) {
     run_register_tests();
     run_relationship_tone_tests();
     run_persona_head_gate_tests();
+    run_state_file_tests();
+    run_daemon_followup_sched_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();

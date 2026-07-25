@@ -3983,6 +3983,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_register.c
     tests/test_relationship_tone.c
     tests/test_persona_head_gate.c
+    tests/test_state_file.c
+    tests/test_daemon_followup_sched.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
