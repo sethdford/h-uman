@@ -9773,6 +9773,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     agent->turn_model_len = sel.model_len;
                     agent->turn_temperature = sel.temperature;
                     agent->turn_thinking_budget = sel.thinking_budget;
+                    /* Tier reaches the turn too — register-conditional features
+                     * (RAG voice grounding, graph grounding) key off it. Only
+                     * the CLI path set this before 2026-07-25, so on the daemon
+                     * path those conditionals never fired. */
+                    agent->turn_tier = (int)sel.tier;
                     static const char *tier_names[] = {"reflexive", "conversational", "analytical",
                                                        "deep"};
                     hu_log_info("human", agent ? agent->observer : NULL,

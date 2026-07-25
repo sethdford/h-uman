@@ -1033,6 +1033,41 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
     return HU_OK;
 }
 
+/* Graph grounding load, shared by BOTH turn paths (see agent.h). Loads the
+ * relationship-graph context per the HU_GRAPH_GROUNDING gate: SHADOW logs and
+ * drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the RAG
+ * leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078) —
+ * casual/unknown-tier turns log and drop the loaded context. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, char **graph_ctx,
+                                   size_t *graph_ctx_len) {
+    if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
+        return;
+    hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
+    hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+    if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
+        agent->memory_session_id_len == 0)
+        return;
+    hu_graph_ground_load(loader, agent->memory_session_id, agent->memory_session_id_len, 0,
+                         graph_ctx, graph_ctx_len);
+    const char *drop_reason = NULL;
+    if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+        hu_log_info("graph_grounding", NULL, "shadow: %zu graph_context bytes (not injected)",
+                    *graph_ctx_len);
+        drop_reason = "shadow";
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
+        hu_log_info("graph_grounding", NULL,
+                    "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
+                    agent->turn_tier);
+        drop_reason = "casual";
+    }
+    if (drop_reason) {
+        if (*graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);
+        *graph_ctx = NULL;
+        *graph_ctx_len = 0;
+    }
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -2186,20 +2221,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * the default-ON rests on the proxy, not a confirmed human blind A/B.
          * graph_ctx is protected-core in the prompt and is NOT subject to the
          * Self-RAG memory-relevance verdict below. */
-        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
-            agent->memory_session_id_len > 0) {
-            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                                 &graph_ctx, &graph_ctx_len);
-            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
-            }
-        }
+        hu_agent_load_graph_grounding(agent, &loader, &graph_ctx, &graph_ctx_len);
 
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&

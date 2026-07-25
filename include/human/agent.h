@@ -885,6 +885,16 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len);
 
+/* Graph-grounding load, shared by BOTH turn paths (same shared-helper shape
+ * as hu_agent_build_persona_head). Honors the HU_GRAPH_GROUNDING gate:
+ * SHADOW logs+drops; ON injects only on ANALYTICAL/DEEP turns (RAG leg's
+ * 2026-05-29 live A/B: substantive +0.110, casual -0.078) and logs+drops on
+ * casual/unknown tiers. loader_v is the turn's hu_memory_loader_t (void* to
+ * keep memory_loader.h out of this header). On return the graph_ctx outputs
+ * either own an allocated context (caller frees len+1) or are NULL/0. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, char **graph_ctx,
+                                   size_t *graph_ctx_len);
+
 /* Build the per-turn humanness directive context — shared references, curiosity,
  * absence, evolved opinions, emotional residue, imperfect delivery — and run the
  * salience gate over those directives. Honors HU_SALIENCE (off|shadow|live;
