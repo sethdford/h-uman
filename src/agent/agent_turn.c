@@ -6395,10 +6395,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* ThinkPRM verifier: score response reasoning steps */
+                /* ThinkPRM verifier: score response reasoning steps.
+                 * Only run when the result can ACT — its sole consumer is the
+                 * reflection retry gate below. With reflection disabled (the
+                 * production default since 2026-07-13) or retries exhausted,
+                 * the verify call was pure pre-send latency on every reactive
+                 * turn (2026-07-25 Dermot latency audit). */
                 hu_prm_verify_result_t prm_verify = {0};
                 bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
+                    agent->reflection.enabled && reflection_retries_left > 0 &&
                     resp.content_len > 50) {
                     if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config, resp.content,
                                                 resp.content_len, msg, msg_len,
