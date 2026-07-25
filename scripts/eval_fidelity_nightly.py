@@ -123,6 +123,46 @@ def resolve_serving_adapter(
     return (None, "no live mlx-server and no usable personalization.lora_adapter_path")
 
 
+def resolve_serving_model(ps_output: str | None = None) -> str:
+    """Resolve the SERVING base model from the live mlx-server process.
+
+    The adapter's delta is only meaningful against the base it was trained on
+    (e.g. seth-lora-v5-8bit belongs to the 8bit base). Before 2026-07-25 the
+    nightly hardcoded the 4bit base while production served 8bit.
+    Falls back to DEFAULT_MODEL when no server is running.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    for line in ps_output.splitlines():
+        if "mlx-server" not in line or "--model" not in line:
+            continue
+        try:
+            tokens = shlex.split(line)
+            return tokens[tokens.index("--model") + 1]
+        except (ValueError, IndexError):
+            continue
+    return DEFAULT_MODEL
+
+
+# Error markers generate() can return in place of model output. These MUST be
+# excluded from scoring: '[timeout]' is short and casual-looking, so the shape
+# classifier scores it 1.0 — for ~10 nights in 2026-07 every call hit the old
+# 180s timeout and pure sentinel passes recorded as pre=post=1.0 SKIP.
+SENTINEL_PREFIXES = ("[timeout]", "[gen_err", "[empty]")
+
+
+def is_sentinel(response: str) -> bool:
+    """True when a response is a generate() error marker, not model output."""
+    return response.startswith(SENTINEL_PREFIXES)
+
+
 def emit_skip(reason: str, output_json: Path | None) -> int:
     """Log a SKIP loudly (greppable FIDELITY_SKIP marker), write verdict, exit 3."""
     verdict = {
@@ -137,7 +177,8 @@ def emit_skip(reason: str, output_json: Path | None) -> int:
     return EXIT_SKIP
 
 
-def generate(model_id: str, prompt: str, adapter_path: str | None = None, max_tokens: int = 80) -> str:
+def generate(model_id: str, prompt: str, adapter_path: str | None = None,
+             max_tokens: int = 80, timeout_sec: int = 600) -> str:
     """Invoke mlx_lm.generate via subprocess.
 
     Args:
@@ -145,6 +186,9 @@ def generate(model_id: str, prompt: str, adapter_path: str | None = None, max_to
         prompt: input text
         adapter_path: optional LoRA adapter path
         max_tokens: max generation tokens (default 80 per design)
+        timeout_sec: subprocess kill deadline. Each call cold-loads the 31B
+            model, which takes >180s under GPU contention with the resident
+            server — the old 180s default timed out EVERY call for ~10 nights.
 
     Returns:
         Generated response string, or error marker if subprocess fails
@@ -160,7 +204,7 @@ def generate(model_id: str, prompt: str, adapter_path: str | None = None, max_to
         cmd.extend(["--adapter-path", str(adapter_path)])
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     except subprocess.TimeoutExpired:
         return "[timeout]"
     except Exception as e:
@@ -185,7 +229,8 @@ def generate(model_id: str, prompt: str, adapter_path: str | None = None, max_to
     return response if response else "[empty]"
 
 
-def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None = None) -> tuple[list[str], dict]:
+def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None = None,
+                  gen_timeout: int = 600) -> tuple[list[str], dict]:
     """Run one pass of generation (pre or post adapter).
 
     Args:
@@ -204,7 +249,8 @@ def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None =
         prompt_text = p["prompt"] if isinstance(p, dict) else p
         print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
 
-        response = generate(model_id, prompt_text, adapter_path=adapter_path)
+        response = generate(model_id, prompt_text, adapter_path=adapter_path,
+                            timeout_sec=gen_timeout)
         responses.append(response)
 
     elapsed = time.time() - start
@@ -229,6 +275,12 @@ def main():
         help="Print the resolved serving adapter path and exit (0 resolved, 3 not)",
     )
     ap.add_argument(
+        "--dump-responses",
+        action="store_true",
+        help="Include raw pre/post responses in the verdict JSON (debugging: "
+             "proves the two passes actually produced different outputs)",
+    )
+    ap.add_argument(
         "--min-prompts",
         type=int,
         default=20,
@@ -237,8 +289,17 @@ def main():
     )
     ap.add_argument(
         "--model-id",
-        default=DEFAULT_MODEL,
-        help=f"HuggingFace model ID (default: {DEFAULT_MODEL})",
+        default=None,
+        help="HuggingFace base model ID. Default: resolve from the live "
+             f"mlx-server --model (else {DEFAULT_MODEL}) so the adapter is "
+             "measured against the base it actually serves on.",
+    )
+    ap.add_argument(
+        "--gen-timeout",
+        type=int,
+        default=600,
+        help="Per-generation subprocess timeout in seconds (default 600; the "
+             "old 180s cap timed out every call under GPU contention)",
     )
     ap.add_argument(
         "--held-out-fixture",
@@ -288,6 +349,10 @@ def main():
         print(args.adapter_path)
         return EXIT_PASS
 
+    if args.model_id is None:
+        args.model_id = resolve_serving_model()
+        print(f"[INFO] Resolved serving base model: {args.model_id}", flush=True)
+
     # Load held-out prompts
     print(f"[INFO] Loading held-out prompts from {args.held_out_fixture}", flush=True)
     prompts = load_held_out_prompts_from_jsonl(str(args.held_out_fixture))
@@ -312,7 +377,9 @@ def main():
     # PRE pass (base model only)
     print(f"\n=== PRE PASS (base model) ===", flush=True)
     try:
-        pre_responses, pre_stats = run_eval_pass(args.model_id, prompts)
+        pre_responses, pre_stats = run_eval_pass(
+            args.model_id, prompts, gen_timeout=args.gen_timeout
+        )
     except Exception as e:
         verdict = {
             "timestamp": datetime.now().isoformat(),
@@ -329,7 +396,8 @@ def main():
     print(f"\n=== POST PASS (base + adapter) ===", flush=True)
     try:
         post_responses, post_stats = run_eval_pass(
-            args.model_id, prompts, adapter_path=str(args.adapter_path)
+            args.model_id, prompts, adapter_path=str(args.adapter_path),
+            gen_timeout=args.gen_timeout,
         )
     except Exception as e:
         verdict = {
@@ -343,10 +411,42 @@ def main():
             args.output_json.write_text(json.dumps(verdict, indent=2))
         return 2
 
+    # Drop pairs where either response is an error sentinel — sentinels like
+    # '[timeout]' score 1.0 on the shape classifier and poisoned 10 nights of
+    # verdicts in 2026-07. If too few real pairs survive, DEFER: this is a
+    # broken harness, not a measured adapter.
+    n_sentinel_pre = sum(1 for r in pre_responses if is_sentinel(r))
+    n_sentinel_post = sum(1 for r in post_responses if is_sentinel(r))
+    valid_idx = [i for i in range(len(prompts))
+                 if not is_sentinel(pre_responses[i]) and not is_sentinel(post_responses[i])]
+    if n_sentinel_pre or n_sentinel_post:
+        print(f"[WARN] sentinel responses excluded: pre={n_sentinel_pre}, "
+              f"post={n_sentinel_post}, valid_pairs={len(valid_idx)}/{len(prompts)}",
+              flush=True)
+
+    min_valid = max(1, (len(prompts) * 4 + 4) // 5)  # ceil(80%)
+    if len(valid_idx) < min_valid:
+        reason = (f"only {len(valid_idx)}/{len(prompts)} valid pairs "
+                  f"(pre sentinels={n_sentinel_pre}, post sentinels={n_sentinel_post}); "
+                  f"generation is failing, not the adapter")
+        verdict = {
+            "timestamp": datetime.now().isoformat(),
+            "verdict": "DEFERRED",
+            "reason": reason,
+            "exit_code": EXIT_DEFERRED,
+        }
+        print(f"[DEFERRED] FIDELITY_DEFERRED {reason}", flush=True)
+        if args.output_json:
+            args.output_json.write_text(json.dumps(verdict, indent=2))
+        return EXIT_DEFERRED
+
+    pre_valid = [pre_responses[i] for i in valid_idx]
+    post_valid = [post_responses[i] for i in valid_idx]
+
     # Score responses
-    print(f"\n=== SCORING ===", flush=True)
-    pre_classifications, pre_mean = compute_persona_fidelity_scores(pre_responses, channel="imessage")
-    post_classifications, post_mean = compute_persona_fidelity_scores(post_responses, channel="imessage")
+    print(f"\n=== SCORING ({len(valid_idx)} valid pairs) ===", flush=True)
+    pre_classifications, pre_mean = compute_persona_fidelity_scores(pre_valid, channel="imessage")
+    post_classifications, post_mean = compute_persona_fidelity_scores(post_valid, channel="imessage")
 
     print(f"PRE mean score:  {pre_mean:.3f}", flush=True)
     print(f"POST mean score: {post_mean:.3f}", flush=True)
@@ -415,6 +515,9 @@ def main():
         "verdict": final_verdict,
         "exit_code": exit_code,
         "n_prompts": len(prompts),
+        "n_valid_pairs": len(valid_idx),
+        "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post},
+        "gen_timeout_sec": args.gen_timeout,
         "model_id": args.model_id,
         "adapter_path": str(args.adapter_path),
         "pre": {
@@ -439,6 +542,9 @@ def main():
             "practical_floor": PRACTICAL_DELTA_FLOOR,
         },
     }
+
+    if args.dump_responses:
+        verdict["responses"] = {"pre": pre_valid, "post": post_valid}
 
     print(f"\n=== FINAL VERDICT: {final_verdict} ===", flush=True)
     if final_verdict == "SKIP":

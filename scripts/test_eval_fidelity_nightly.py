@@ -300,7 +300,7 @@ def _run_main_with_argv(argv, fixture_prompts=25):
             a.replace("__ADAPTER__", str(adapter)) for a in argv
         ] + ["--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
-        def fake_pass(model_id, prompts, adapter_path=None):
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
             responses = ["hey whatup"] * len(prompts)
             return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
@@ -344,6 +344,98 @@ def test_adapter_missing_skip_is_loud_and_unrecorded(capsys=None):
     print(f"✓ adapter-missing skip: exit=3, FIDELITY_SKIP marker present, registry untouched")
 
 
+def test_resolve_serving_model_from_process():
+    """The serving --model must be resolvable from the live mlx-server process."""
+    ps_output = (
+        "/opt/python /x/mlx-server.py --model mlx-community/gemma-4-31b-it-8bit "
+        "--port 8741 --adapter-path /tmp/x\n"
+    )
+    model = eval_fidelity_nightly.resolve_serving_model(ps_output=ps_output)
+    assert model == "mlx-community/gemma-4-31b-it-8bit", f"got {model}"
+    # No live server → fall back to the default
+    fallback = eval_fidelity_nightly.resolve_serving_model(ps_output="")
+    assert fallback == eval_fidelity_nightly.DEFAULT_MODEL
+    print(f"✓ resolve_serving_model: {model} (fallback={fallback})")
+
+
+def test_sentinel_responses_defer_not_score():
+    """All-timeout passes must DEFER (exit 2), never be scored.
+
+    Pins the 2026-07 bug where every mlx_lm call hit the 180s timeout, every
+    response was the literal '[timeout]' sentinel, the shape classifier scored
+    it 1.0, and 10 nights of pure timeouts recorded as pre=post=1.0 SKIP.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
+
+        def timeout_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+            return (["[timeout]"] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=timeout_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+
+        out = buf.getvalue()
+        assert rc == 2, f"all-sentinel run must DEFER (exit 2), got {rc}"
+        assert "FIDELITY_DEFERRED" in out, "deferred run must print greppable marker"
+        assert not mock_registry.record_eval.called, \
+            "sentinel-only run must not write a registry eval entry"
+    print(f"✓ all-sentinel passes: exit=2, FIDELITY_DEFERRED marker, registry untouched")
+
+
+def test_partial_sentinels_dropped_from_deltas():
+    """A few sentinel responses are dropped pairwise; the rest still score."""
+    calls = {"n": 0}
+
+    def mixed_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
+        calls["n"] += 1
+        responses = ["hey whatup"] * len(prompts)
+        responses[0] = "[timeout]"  # same index bad in both passes → 1 pair dropped
+        return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--output-json", str(out_json)]
+
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=mixed_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"):
+            rc = eval_fidelity_nightly.main()
+
+        verdict = json.loads(out_json.read_text())
+        assert verdict["n_valid_pairs"] == 24, f"expected 24 valid pairs, got {verdict.get('n_valid_pairs')}"
+        assert verdict["n_sentinel"]["pre"] == 1 and verdict["n_sentinel"]["post"] == 1
+        # identical valid responses → delta 0 → SKIP (exit 3), but SCORED on 24 pairs
+        assert rc == 3 and verdict["verdict"] == "SKIP"
+    print(f"✓ partial sentinels: 1 pair dropped, verdict computed on 24")
+
+
 def test_pass_records_post_mean():
     """A PASS verdict still records the real post_mean score."""
     crafted = {"n": 0}
@@ -366,7 +458,7 @@ def test_pass_records_post_mean():
         argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
                 "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
-        def fake_pass(model_id, prompts, adapter_path=None):
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600):
             return (["hey"] * len(prompts), {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
         with mock.patch.object(sys, "argv", argv), \
@@ -402,6 +494,9 @@ def main():
         test_resolve_serving_adapter_none_when_unresolvable,
         test_skip_records_null_score_and_exits_3,
         test_adapter_missing_skip_is_loud_and_unrecorded,
+        test_resolve_serving_model_from_process,
+        test_sentinel_responses_defer_not_score,
+        test_partial_sentinels_dropped_from_deltas,
         test_pass_records_post_mean,
     ]
 

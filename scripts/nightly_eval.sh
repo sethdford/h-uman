@@ -45,7 +45,8 @@ PY="/opt/homebrew/bin/python3"
 LOG_DIR="/Users/sethford/.human/logs"
 ARCHIVE_DIR="${LOG_DIR}/eval-archive"
 LOCK_DIR="${LOG_DIR}/.nightly-eval.lock"
-MODEL_ID="mlx-community/gemma-4-31b-it-4bit"
+# Base model + adapter are resolved by eval_fidelity_nightly.py from the live
+# mlx-server (this file used to pin the 4bit base while production served 8bit).
 SERVER_URL="http://127.0.0.1:8741"
 RETAIN=30
 
@@ -187,7 +188,6 @@ else
   log "[2/3] fidelity: serving-adapter=${ADAPTER:-'(unresolved)'} — running"
   set +e
   "$PY" "$FIDELITY" \
-    --model-id "$MODEL_ID" \
     --output-json "$FID_OUT" \
     --log-dir "$LOG_DIR"; fid_rc=$?
   set -e
