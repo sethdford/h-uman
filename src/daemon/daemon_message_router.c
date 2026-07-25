@@ -259,9 +259,14 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
      * side while answers keep arriving — an obvious tell. A human who replies
      * has read it. Best-effort and caps-gated: a down bridge is a silent
      * no-op and never affects the send outcome above. */
+    /* hu_imessage_mark_read is defined in src/channels/imessage.c, compiled
+     * only under HU_HAS_IMESSAGE — guard the call or every build without the
+     * channel (Linux CI, minimal) breaks at link time. */
+#ifdef HU_HAS_IMESSAGE
     if (err == HU_OK && ch && ch->ctx && target && target_len > 0) {
         (void)hu_imessage_mark_read(ch->ctx, target, target_len);
     }
+#endif
 
     /* Pacing — finish (sleep if elapsed < persona.min_reply_delay_ms * 1.2). */
     if (persona) {

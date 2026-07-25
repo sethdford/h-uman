@@ -461,6 +461,12 @@ void run_imessage_caps_tests(void) {
  * sent as a PLAIN TEXT MESSAGE containing an emoji, which reads as fake.
  * With the IMCore bridge live, emoji must map to a real tapback kind. */
 
+#ifdef HU_HAS_IMESSAGE
+/* hu_imessage_reaction_for_emoji lives in src/channels/imessage.c, which is
+ * compiled only under HU_HAS_IMESSAGE — gate the tests to match
+ * (test-source-gate-symmetry.md pattern 2) or every non-mac CI variant
+ * fails at link time. */
+
 static void emoji_maps_to_native_reaction_kind(void) {
     HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("❤️"), (int)HU_REACTION_HEART);
     HU_ASSERT_EQ((int)hu_imessage_reaction_for_emoji("🙏"), (int)HU_REACTION_HEART);
@@ -487,3 +493,11 @@ void run_imessage_emoji_reaction_tests(void) {
     HU_RUN_TEST(emoji_maps_to_native_reaction_kind);
     HU_RUN_TEST(emoji_unknown_defaults_to_thumbs_up_never_none);
 }
+
+#else /* !HU_HAS_IMESSAGE */
+
+void run_imessage_emoji_reaction_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_HAS_IMESSAGE */
