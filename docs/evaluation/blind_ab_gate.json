@@ -15,7 +15,7 @@
   },
   "human": {
     "tool": "blind_ab/score.py",
-    "timestamp": "2026-07-25T08:05:07",
+    "timestamp": "2026-07-25T09:18:40",
     "detection": 0.75,
     "ci_lo": 0.4677,
     "ci_hi": 0.9111,
