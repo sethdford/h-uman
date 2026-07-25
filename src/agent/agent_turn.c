@@ -9862,12 +9862,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 break;
                         }
                         hu_dispatch_result_free(agent->alloc, &dispatch_result);
-
-                        /* Clean up dispatch_allowed array after result processing */
-                        if (dispatch_allowed)
-                            agent->alloc->free(agent->alloc->ctx, dispatch_allowed,
-                                               dispatch_count * sizeof(bool));
-                        dispatch_allowed = NULL;
                     } else {
                         /* Fallback: sequential if dispatcher fails */
                         for (size_t tc = 0; tc < tc_count; tc++) {
@@ -10138,6 +10132,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             if (agent->cancel_requested)
                                 break;
                         }
+                    }
+                    /* Unconditional cleanup: dispatch_allowed must be freed on BOTH the
+                     * result-processing branch AND the sequential fallback. When policy
+                     * denies every call, nothing is dispatched, result_array stays NULL,
+                     * and the fallback branch runs — freeing only inside the result
+                     * branch leaked the array there (caught by LSan in the RL nightly
+                     * once the full suite ran under it again, 2026-07-25). */
+                    if (dispatch_allowed) {
+                        agent->alloc->free(agent->alloc->ctx, dispatch_allowed,
+                                           dispatch_count * sizeof(bool));
+                        dispatch_allowed = NULL;
                     }
                     /* Free TTL cache arrays — merged_results owns cached copies;
                      * dispatch_result.results ownership was transferred into merged_results
