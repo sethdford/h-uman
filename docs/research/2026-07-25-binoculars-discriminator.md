@@ -98,12 +98,20 @@ to reuse until the adapter changes.
 
 ## Data
 
-- `data/eval_blinded_ab.json` — 47 trials from the 07-24 nightly (incoming +
-  real_seth + ai_response), the paired calibration corpus. No
-  `eval-blinded-ab-*.json` archives exist in `~/.human/logs/eval-archive/`, so 94
-  texts is the full paired corpus today.
-- `data/imessage/ground_truth.jsonl` — 644 real pairs; 100-message holdout for FPR
-  validation (real side only).
+The calibration corpus was the 47-trial 07-24 nightly run, which lived only as an
+**uncommitted working-tree** `data/eval_blinded_ab.json`; every nightly overwrites
+that path (it was replaced by a 28-trial run at 09:06 on 07-25, mid-session).
+Copies are therefore archived outside the repo so these numbers stay reproducible:
+
+| Archive (`~/.human/logs/eval-archive/`) | Contents |
+|---|---|
+| `eval-blinded-ab-2026-07-24-binoculars-calibration.json` | the 47 trials + merged `binoculars` block |
+| `binoculars-scores-2026-07-24-calibration.json` | per-text scores for all 94 calibration texts |
+| `binoculars-holdout-100-real-2026-07-25.json` | per-text scores for the 100-message real holdout |
+
+Re-run any figure in this doc with `--pairs <the archived calibration file>`.
+`data/imessage/ground_truth.jsonl` (644 real pairs) supplied the holdout, sampled
+with seed 42 excluding the 47 trials.
 
 ## Corpus finding: 20% of real Seth ground truth carries a stray leading byte
 
