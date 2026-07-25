@@ -1018,6 +1018,15 @@ int hu_llamacpp_sanity_gate_main(int argc, char **argv);
 #endif
 
 int main(int argc, char **argv) {
+    /* Line-buffer stdout even when piped (non-TTY stdout is fully buffered by
+     * default), so the per-suite progress and the final "Results:" line reach
+     * the pipe/log BEFORE any end-of-process LeakSanitizer abort discards the
+     * unflushed tail. Done here instead of wrapping the binary in `stdbuf`:
+     * stdbuf injects libstdbuf.so via LD_PRELOAD, which displaces the ASan
+     * runtime from the front of the initial library list and makes ASan-built
+     * binaries abort at startup on Linux (broke the RL nightly 05-31..07-25). */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     if (argc >= 2 && strcmp(argv[1], "--sanity-gate") == 0) {
 #ifdef HU_ENABLE_LLAMACPP
         return hu_llamacpp_sanity_gate_main(argc, argv);

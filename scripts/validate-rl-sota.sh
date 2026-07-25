@@ -66,15 +66,17 @@ LORA_BASELINE_BIN="${ROOT}/build-rl-sota/human" bash scripts/check-lora-baseline
 
 if [ "$QUICK" -eq 0 ]; then
     info "Full test suite"
-  # Line-buffer (stdbuf -oL) so the "Results:" / "FAIL  (...)" lines flush
-  # BEFORE any end-of-process LeakSanitizer abort. A plain pipe is fully
-  # buffered on a non-TTY, so SIGABRT at exit discarded the unflushed tail —
-  # which is exactly why a CI leak failure used to show the LSan SUMMARY but no
-  # Results line, leaving it undiagnosable. Tee the full output to a log so CI
-  # can upload it as an artifact, then show the tail. pipefail still propagates
-  # a non-zero human_tests exit.
+  # human_tests line-buffers its own stdout (setvbuf in tests/test_main.c) so
+  # the "Results:" / "FAIL  (...)" lines flush BEFORE any end-of-process
+  # LeakSanitizer abort even through this non-TTY pipe. Do NOT wrap in
+  # `stdbuf`: it LD_PRELOADs libstdbuf.so ahead of the ASan runtime, and
+  # ASan-built binaries then abort at startup on Linux ("ASan runtime does not
+  # come first in initial library list") — that broke every nightly from
+  # 2026-05-31 to 2026-07-25. Tee the full output to a log so CI can upload it
+  # as an artifact, then show the tail. pipefail still propagates a non-zero
+  # human_tests exit.
   HU_FULL_SUITE_LOG="${HU_FULL_SUITE_LOG:-${ROOT}/build-rl-sota/full-suite.log}"
-  stdbuf -oL -eL ./build-rl-sota/human_tests 2>&1 | tee "${HU_FULL_SUITE_LOG}" | tail -5
+  ./build-rl-sota/human_tests 2>&1 | tee "${HU_FULL_SUITE_LOG}" | tail -5
 fi
 
 info "Demo CLI (HUML wiring, no Gemma)"
