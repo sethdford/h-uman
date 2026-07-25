@@ -27,16 +27,15 @@ static void open_graph(hu_graph_t **g) {
 }
 
 /* Seed two entities and a relation with provenance text the verifier can find. */
-static void seed_alice_works_at_acme(hu_graph_t *g, const char *prov,
-                                     int64_t event_start_ms) {
+static void seed_alice_works_at_acme(hu_graph_t *g, const char *prov, int64_t event_start_ms) {
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              event_start_ms, 0, 1.0f, "context", 7, prov,
-                                              prov ? strlen(prov) : 0),
+                                             event_start_ms, 0, 1.0f, "context", 7, prov,
+                                             prov ? strlen(prov) : 0),
                  HU_OK);
 }
 
@@ -194,14 +193,14 @@ static void test_w4_erase_entity_cascades_across_surfaces(void) {
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+                                             1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
                  HU_OK);
     /* Cross-edge from alice to a synthetic episode 100. */
     HU_ASSERT_EQ(hu_cross_edge_upsert(g, "u1", 2, "entity", alice, "episode", 100, "ABOUT", 1.0f,
-                                       1735689600000LL, 0, 1.0f),
+                                      1735689600000LL, 0, 1.0f),
                  HU_OK);
 
     hu_erase_report_t r;
@@ -214,8 +213,8 @@ static void test_w4_erase_entity_cascades_across_surfaces(void) {
     /* The cross_edges table should now have no row for alice. */
     hu_cross_edge_t *out = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(
-        hu_cross_graph_traverse(g, A(), "u1", 2, "entity", alice, 1, 32, 0, 0, &out, &n), HU_OK);
+    HU_ASSERT_EQ(hu_cross_graph_traverse(g, A(), "u1", 2, "entity", alice, 1, 32, 0, 0, &out, &n),
+                 HU_OK);
     HU_ASSERT_EQ(n, 0);
     if (out)
         hu_cross_edges_free(A(), out, n);
@@ -229,13 +228,12 @@ static void test_w4_erase_by_provenance_redacts_only_matching_rows(void) {
 
     seed_alice_works_at_acme(g, "imessage:thread-7", 1735689600000LL);
     int64_t bob = 0, globex = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "bob", 3, HU_ENTITY_PERSON, NULL, &bob),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "bob", 3, HU_ENTITY_PERSON, NULL, &bob), HU_OK);
     HU_ASSERT_EQ(
         hu_graph_upsert_entity(g, "u1", 2, "globex", 6, HU_ENTITY_ORGANIZATION, NULL, &globex),
         HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, bob, globex, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "ctx", 3, "discord", 7),
+                                             1735689600000LL, 0, 1.0f, "ctx", 3, "discord", 7),
                  HU_OK);
 
     hu_erase_report_t r;
@@ -258,8 +256,56 @@ static void test_w4_erase_by_provenance_redacts_only_matching_rows(void) {
 
 #endif /* HU_ENABLE_SQLITE */
 
+/* ── Quality-gate verify-mode selector (pure, no sqlite) ────────────────────
+ * Pins the 2026-07-25 Dermot finding: verifier flagged 3/3 claims and drift
+ * hit 0.09 on the echo turns, and neither signal could act. The selector
+ * escalates TELEMETRY→SOFT only when the gate is LIVE and drift is bad. */
+
+static void test_quality_gate_live_bad_drift_escalates_to_soft(void) {
+    hu_verify_mode_t m = hu_response_verify_mode_for_turn(HU_VERIFY_TELEMETRY, HU_GATE_LIVE,
+                                                          /*have_drift=*/true,
+                                                          /*drift=*/0.09f, /*threshold=*/0.30f);
+    HU_ASSERT_EQ((int)m, (int)HU_VERIFY_SOFT);
+}
+
+static void test_quality_gate_good_drift_keeps_telemetry(void) {
+    hu_verify_mode_t m =
+        hu_response_verify_mode_for_turn(HU_VERIFY_TELEMETRY, HU_GATE_LIVE, true, 0.80f, 0.30f);
+    HU_ASSERT_EQ((int)m, (int)HU_VERIFY_TELEMETRY);
+}
+
+static void test_quality_gate_off_and_shadow_never_change_mode(void) {
+    HU_ASSERT_EQ(
+        (int)hu_response_verify_mode_for_turn(HU_VERIFY_TELEMETRY, HU_GATE_OFF, true, 0.01f, 0.30f),
+        (int)HU_VERIFY_TELEMETRY);
+    HU_ASSERT_EQ((int)hu_response_verify_mode_for_turn(HU_VERIFY_TELEMETRY, HU_GATE_SHADOW, true,
+                                                       0.01f, 0.30f),
+                 (int)HU_VERIFY_TELEMETRY);
+}
+
+static void test_quality_gate_never_overrides_operator_mode(void) {
+    /* An explicit HU_VERIFY_MODE (strict/soft/off) is the operator's call. */
+    HU_ASSERT_EQ(
+        (int)hu_response_verify_mode_for_turn(HU_VERIFY_STRICT, HU_GATE_LIVE, true, 0.01f, 0.30f),
+        (int)HU_VERIFY_STRICT);
+    HU_ASSERT_EQ(
+        (int)hu_response_verify_mode_for_turn(HU_VERIFY_OFF, HU_GATE_LIVE, true, 0.01f, 0.30f),
+        (int)HU_VERIFY_OFF);
+}
+
+static void test_quality_gate_no_drift_signal_keeps_base(void) {
+    hu_verify_mode_t m = hu_response_verify_mode_for_turn(HU_VERIFY_TELEMETRY, HU_GATE_LIVE,
+                                                          /*have_drift=*/false, 0.0f, 0.30f);
+    HU_ASSERT_EQ((int)m, (int)HU_VERIFY_TELEMETRY);
+}
+
 void run_w4_verifier_tests(void) {
     HU_TEST_SUITE("W4 verifier + provenance + erasure");
+    HU_RUN_TEST(test_quality_gate_live_bad_drift_escalates_to_soft);
+    HU_RUN_TEST(test_quality_gate_good_drift_keeps_telemetry);
+    HU_RUN_TEST(test_quality_gate_off_and_shadow_never_change_mode);
+    HU_RUN_TEST(test_quality_gate_never_overrides_operator_mode);
+    HU_RUN_TEST(test_quality_gate_no_drift_signal_keeps_base);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w4_verifier_off_mode_is_passthrough);
     HU_RUN_TEST(test_w4_verifier_telemetry_mode_extracts_without_mutation);

@@ -7470,6 +7470,40 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         else if (strcmp(mode_env, "off") == 0)
                             vcfg.mode = HU_VERIFY_OFF;
                     }
+                    /* Quality gate (HU_QUALITY_GATE, default off): make the two
+                     * signals that fired-but-couldn't-act on the 2026-07-25
+                     * Dermot echo turns (verifier flags + consistency drift)
+                     * actually gate. LIVE + bad drift escalates TELEMETRY→SOFT
+                     * so unsupported claims get hedged — the verifier's own
+                     * actuator, no regeneration loop. SHADOW logs would-act. */
+                    {
+                        hu_gate_mode_t qg = hu_gate_mode_from_env("HU_QUALITY_GATE", HU_GATE_OFF);
+                        if (qg != HU_GATE_OFF && *response_out && response_effective_len > 0 &&
+                            agent->conversation_context && agent->conversation_context_len > 20) {
+                            float qg_drift = 0.0f;
+                            bool have_drift =
+                                (hu_consistency_score_line(
+                                     agent->conversation_context, agent->conversation_context_len,
+                                     *response_out, response_effective_len, &qg_drift) == HU_OK);
+                            hu_verify_mode_t escalated = hu_response_verify_mode_for_turn(
+                                vcfg.mode, qg, have_drift, qg_drift,
+                                HU_CONSISTENCY_DRIFT_THRESHOLD);
+                            if (escalated != vcfg.mode) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE live: drift %.2f < %.2f — verifier "
+                                            "TELEMETRY→SOFT (hedge unsupported claims)",
+                                            qg_drift, (double)HU_CONSISTENCY_DRIFT_THRESHOLD);
+                                vcfg.mode = escalated;
+                            } else if (qg == HU_GATE_SHADOW && have_drift &&
+                                       qg_drift < HU_CONSISTENCY_DRIFT_THRESHOLD &&
+                                       vcfg.mode == HU_VERIFY_TELEMETRY) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE shadow: would escalate verifier to SOFT "
+                                            "(drift %.2f)",
+                                            qg_drift);
+                            }
+                        }
+                    }
                     if (vcfg.mode != HU_VERIFY_OFF) {
                         const char *contact =
                             (agent->contact_context && agent->contact_context_len > 0)
