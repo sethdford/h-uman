@@ -993,6 +993,46 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
     }
 }
 
+/* Persona head selection, shared by BOTH turn paths (see agent.h).
+ *
+ * HU_PERSONA_HEAD activation gated on the blind-A/B human rating sheet
+ * (scripts/blind_ab): do not flip to default-ON without a measurement showing
+ * the compact head is judged at least as human as the full head by real
+ * raters. Motivation (2026-07-22 soak): the full head's median 16,585 B alone
+ * exceeds HU_PROMPT_TRIM_BUDGET_BYTES, so HU_PROMPT_TRIM's middle-trim can
+ * never fit the prompt and the positional cap truncates the guard tail. */
+hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                       char **out, size_t *out_len) {
+    if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *ch = agent->active_channel;
+    size_t ch_len = agent->active_channel_len;
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_PERSONA_HEAD", HU_GATE_OFF);
+    if (mode == HU_GATE_LIVE) {
+        hu_error_t cerr = hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona,
+                                                                    ch, ch_len, out, out_len);
+        if (cerr == HU_OK)
+            return HU_OK;
+        /* fail-safe: any compact-build failure reverts to OFF behavior */
+    }
+    hu_error_t err = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, topic,
+                                             topic_len, out, out_len);
+    if (err != HU_OK)
+        return err;
+    if (mode == HU_GATE_SHADOW) {
+        char *compact = NULL;
+        size_t compact_len = 0;
+        if (hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona, ch, ch_len,
+                                                      &compact, &compact_len) == HU_OK) {
+            hu_log_info("persona_head", agent->observer,
+                        "shadow: full_head=%zu compact_head=%zu budget=%d", *out_len, compact_len,
+                        HU_PROMPT_TRIM_BUDGET_BYTES);
+            agent->alloc->free(agent->alloc->ctx, compact, compact_len + 1);
+        }
+    }
+    return HU_OK;
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -3025,10 +3065,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
     if (agent->persona) {
-        const char *ch = agent->active_channel;
-        size_t ch_len = agent->active_channel_len;
-        hu_error_t perr = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, msg,
-                                                  msg_len, &persona_prompt, &persona_prompt_len);
+        /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
+         * hu_agent_turn_stream_v2. */
+        hu_error_t perr =
+            hu_agent_build_persona_head(agent, msg, msg_len, &persona_prompt, &persona_prompt_len);
         if (perr != HU_OK) {
             if (pref_ctx)
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);

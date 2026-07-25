@@ -5291,9 +5291,10 @@ static hu_error_t persona_compact_append_str(hu_allocator_t *alloc, char **buf, 
     return append_prompt(alloc, buf, len, cap, s, strlen(s));
 }
 
-hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
-                                           const char *channel, size_t channel_len, char **out,
-                                           size_t *out_len) {
+static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
+                                                  const hu_persona_t *persona, const char *channel,
+                                                  size_t channel_len, bool immersive, char **out,
+                                                  size_t *out_len) {
     if (!alloc || !persona || !channel || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     size_t cap = HU_PERSONA_PROMPT_INIT_CAP; /* 4 KB initial, doubles as needed */
@@ -5462,6 +5463,55 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         break;
     }
 
+    /* 6.2. Immersive essentials (HU_PERSONA_HEAD compact head only) —
+     * Director's Notes + immersive_reinforcement, the anti-AI-tell content
+     * the full head carries. Capped at 5 entries x 250 chars per section so
+     * the whole head stays <= 8 KB on heavy personas (the 2026-07-22 soak
+     * showed the FULL head alone overflows the 16 KB prompt budget); the
+     * core anchor + identity lock are already section 1. Placed BEFORE the
+     * absolute rules so the guard block keeps last-position salience. */
+    if (immersive) {
+        if (persona->directors_notes && persona->directors_notes_count > 0) {
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "Director's Notes:\n");
+            if (err != HU_OK)
+                goto fail;
+            size_t d_max = persona->directors_notes_count < 5 ? persona->directors_notes_count : 5;
+            for (size_t i = 0; i < d_max; i++) {
+                if (!persona->directors_notes[i])
+                    continue;
+                char tmp[300];
+                int n = snprintf(tmp, sizeof(tmp), "- %.250s\n", persona->directors_notes[i]);
+                err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
+                if (err != HU_OK)
+                    goto fail;
+            }
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
+        if (persona->immersive_reinforcement && persona->immersive_reinforcement_count > 0) {
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "Stay immersed:\n");
+            if (err != HU_OK)
+                goto fail;
+            size_t r_lim = persona->immersive_reinforcement_count < 5
+                               ? persona->immersive_reinforcement_count
+                               : 5;
+            for (size_t i = 0; i < r_lim; i++) {
+                const char *s = persona->immersive_reinforcement[i];
+                if (!s || !s[0])
+                    continue;
+                char tmp[300];
+                int n = snprintf(tmp, sizeof(tmp), "- %.250s\n", s);
+                err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
+                if (err != HU_OK)
+                    goto fail;
+            }
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
+    }
+
     /* 6.5. Formality-aware absolute rules — the SAME block the live reactive
      * path appends (src/agent/agent_stream.c via
      * hu_persona_build_absolute_rules_fmt). Without it, the eval/A-B
@@ -5502,6 +5552,21 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
 fail:
     alloc->free(alloc->ctx, buf, cap);
     return err;
+}
+
+hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                           const char *channel, size_t channel_len, char **out,
+                                           size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, out,
+                                           out_len);
+}
+
+hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
+                                                     const hu_persona_t *persona,
+                                                     const char *channel, size_t channel_len,
+                                                     char **out, size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, out,
+                                           out_len);
 }
 
 /* Feedback recording and apply are in feedback.c */

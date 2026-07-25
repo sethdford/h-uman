@@ -1228,6 +1228,115 @@ static void imessage_typing_duration_jitter_bounded(void) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * PART 15b — IMCore selector-conformance (pure predicate, mock resolver)
+ *
+ * Pins the exact drift that produced the 2026-07-21 typing phantom: a required
+ * selector silently stops resolving on an OS bump. These exercise the pure
+ * conformance pass with injected resolvers — no ObjC runtime needed.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Mock resolver: everything resolves. */
+static bool imcore_resolver_all_present(const char *cls, const char *sel, bool is_class, void *ud) {
+    (void)cls;
+    (void)sel;
+    (void)is_class;
+    (void)ud;
+    return true;
+}
+
+/* Mock resolver: nothing resolves (simulates IMCore absent entirely). */
+static bool imcore_resolver_none_present(const char *cls, const char *sel, bool is_class,
+                                         void *ud) {
+    (void)cls;
+    (void)sel;
+    (void)is_class;
+    (void)ud;
+    return false;
+}
+
+/* Mock resolver: everything resolves EXCEPT setLocalUserIsTyping: — the exact
+ * shape of a real drift where the one write we depend on gets renamed. */
+static bool imcore_resolver_typing_setter_drifted(const char *cls, const char *sel, bool is_class,
+                                                  void *ud) {
+    (void)cls;
+    (void)is_class;
+    (void)ud;
+    return strcmp(sel, "setLocalUserIsTyping:") != 0;
+}
+
+/* Reporter that records the selectors flagged missing into a fixed buffer. */
+typedef struct {
+    const char *names[16];
+    size_t count;
+} imcore_missing_capture_t;
+
+static void imcore_capture_missing(const char *cls, const char *sel, bool is_class, void *ud) {
+    (void)cls;
+    (void)is_class;
+    imcore_missing_capture_t *cap = (imcore_missing_capture_t *)ud;
+    if (cap && cap->count < 16)
+        cap->names[cap->count++] = sel;
+}
+
+static void imcore_required_table_nonempty_and_pins_typing_setter(void) {
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    HU_ASSERT_NOT_NULL(reqs);
+    HU_ASSERT_TRUE(n >= 1);
+    /* The table MUST include the one write the typing path cannot live without. */
+    bool has_setter = false;
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(reqs[i].class_name, "IMChat") == 0 &&
+            strcmp(reqs[i].selector, "setLocalUserIsTyping:") == 0)
+            has_setter = true;
+    }
+    HU_ASSERT_TRUE(has_setter);
+}
+
+static void imcore_conformance_all_present_reports_zero_missing(void) {
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    imcore_missing_capture_t cap = {0};
+    size_t missing = hu_imessage_imcore_conformance(reqs, n, imcore_resolver_all_present,
+                                                    imcore_capture_missing, &cap);
+    HU_ASSERT_EQ((int)missing, 0);
+    HU_ASSERT_EQ((int)cap.count, 0); /* on_missing never fired */
+}
+
+static void imcore_conformance_none_present_flags_every_selector(void) {
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    imcore_missing_capture_t cap = {0};
+    size_t missing = hu_imessage_imcore_conformance(reqs, n, imcore_resolver_none_present,
+                                                    imcore_capture_missing, &cap);
+    HU_ASSERT_EQ((int)missing, (int)n);   /* every one flagged */
+    HU_ASSERT_EQ((int)cap.count, (int)n); /* on_missing fired per selector */
+}
+
+static void imcore_conformance_pins_single_drifted_selector(void) {
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    imcore_missing_capture_t cap = {0};
+    size_t missing = hu_imessage_imcore_conformance(reqs, n, imcore_resolver_typing_setter_drifted,
+                                                    imcore_capture_missing, &cap);
+    /* Exactly one selector drifted, and it is the typing setter — this is the
+     * real-world failure the whole check exists to surface loudly. */
+    HU_ASSERT_EQ((int)missing, 1);
+    HU_ASSERT_EQ((int)cap.count, 1);
+    HU_ASSERT_STR_EQ(cap.names[0], "setLocalUserIsTyping:");
+}
+
+static void imcore_conformance_null_args_safe(void) {
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    /* NULL resolver -> 0 (nothing to check), no crash. */
+    HU_ASSERT_EQ((int)hu_imessage_imcore_conformance(reqs, n, NULL, NULL, NULL), 0);
+    /* NULL reqs -> 0, no crash. */
+    HU_ASSERT_EQ(
+        (int)hu_imessage_imcore_conformance(NULL, 5, imcore_resolver_all_present, NULL, NULL), 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * PART 16 — Tapback decision exhaustive branch coverage
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -2388,6 +2497,13 @@ void run_imessage_adversarial_tests(void) {
     HU_RUN_TEST(imessage_typing_duration_zero_len);
     HU_RUN_TEST(imessage_typing_duration_varies_by_seed);
     HU_RUN_TEST(imessage_typing_duration_jitter_bounded);
+
+    /* Part 15b: IMCore selector conformance (pins the typing-phantom drift) */
+    HU_RUN_TEST(imcore_required_table_nonempty_and_pins_typing_setter);
+    HU_RUN_TEST(imcore_conformance_all_present_reports_zero_missing);
+    HU_RUN_TEST(imcore_conformance_none_present_flags_every_selector);
+    HU_RUN_TEST(imcore_conformance_pins_single_drifted_selector);
+    HU_RUN_TEST(imcore_conformance_null_args_safe);
 
     /* Part 16: Tapback decision exhaustive (red team) */
     HU_RUN_TEST(imessage_tapback_decision_question_prefers_text);

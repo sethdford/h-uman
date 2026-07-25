@@ -1230,6 +1230,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 if (cfg->channels.imessage.loopback_handle)
                     hu_imessage_set_loopback_handle(&bi->channel_slots[ch_count],
                                                     cfg->channels.imessage.loopback_handle);
+                if (cfg->channels.imessage.exclude_from_count > 0)
+                    hu_imessage_set_exclude_from(
+                        &bi->channel_slots[ch_count],
+                        (const char *const *)cfg->channels.imessage.exclude_from,
+                        cfg->channels.imessage.exclude_from_count);
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
                 bi->channels[ch_count].poll_fn = hu_imessage_poll;

@@ -869,6 +869,22 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
 void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
                                       size_t *persona_prompt_len);
 
+/* Build the persona head (system-prompt opening) for the current channel,
+ * honoring HU_PERSONA_HEAD (off|shadow|live, default off):
+ *   off    — hu_persona_build_prompt (full immersive head), unchanged behavior
+ *   shadow — full head emitted; logs full-vs-compact head sizes against
+ *            HU_PROMPT_TRIM_BUDGET_BYTES so the swap can be sized from soak logs
+ *   live   — hu_persona_build_prompt_compact_immersive head (<= 8 KB); any
+ *            compact-build failure fails safe to the full head
+ * `topic`/`topic_len` feed the full build's topic-aware example selection
+ * (the compact form is topic-free). Must be called by BOTH hu_agent_turn and
+ * hu_agent_turn_stream_v2 — single-path wiring was dead in prod for
+ * HU_WARMTH_TONE_VOCAB (424ead87); same shared-helper shape as
+ * hu_agent_apply_relationship_tone. On success *out and *out_len own a
+ * freshly allocated head (caller frees len+1). */
+hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                       char **out, size_t *out_len);
+
 /* Build the per-turn humanness directive context — shared references, curiosity,
  * absence, evolved opinions, emotional residue, imperfect delivery — and run the
  * salience gate over those directives. Honors HU_SALIENCE (off|shadow|live;

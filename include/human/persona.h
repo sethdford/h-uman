@@ -579,6 +579,21 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
                                            const char *channel, size_t channel_len, char **out,
                                            size_t *out_len);
 
+/* 2026-07-22: compact-IMMERSIVE variant — the compact form above plus the
+ * anti-AI-tell essentials the full immersive prompt carries (Director's
+ * Notes and immersive_reinforcement; the core anchor + identity lock are
+ * already the compact form's opening). Per-entry and per-section caps keep
+ * the whole head <= 8 KB (pinned in tests/test_persona_head_gate.c) so it
+ * fits HU_PROMPT_TRIM_BUDGET_BYTES (16 KB) with room for memory/graph
+ * context and the guard tail — the 2026-07-22 soak showed the FULL head
+ * (median 16.6 KB) alone overflows that budget on 81% of over-budget
+ * turns. Production head selection is gated by HU_PERSONA_HEAD via
+ * hu_agent_build_persona_head (agent.h); this builder is gate-free. */
+hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
+                                                     const hu_persona_t *persona,
+                                                     const char *channel, size_t channel_len,
+                                                     char **out, size_t *out_len);
+
 /* P6-5: shared absolute-rules block. Writes the highest-weight
  * formatting/identity instructions ("You are HUMAN", lowercase, no
  * markdown, etc.) into the caller's buffer. Called from BOTH the

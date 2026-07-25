@@ -196,6 +196,9 @@ typedef struct hu_imessage_ctx {
     int64_t last_rowid;
     const char *const *allow_from;
     size_t allow_from_count;
+    /* Borrowed, owned by config. Handles that must never be messaged. */
+    const char *const *exclude_from;
+    size_t exclude_from_count;
     /* Persona: borrowed pointer for overlay-aware rendering. */
     const hu_persona_t *persona;
     char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
@@ -402,6 +405,53 @@ static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
  * `.claude/rules/security-predicate-extraction.md`: the poll loop runs
  * inside a (hard-to-test) fork-and-SQL boundary, but the decision itself
  * is four facts → one bool. Tests pin all 16 rows without forking. */
+
+/* Longest digit suffix we compare when both sides look like phone numbers.
+ * 10 digits is a full US subscriber number; comparing the tail absorbs country
+ * code and punctuation differences ("+1 (484) 678-4914" vs "14846784914"). */
+#define HU_IMESSAGE_EXCLUDE_DIGIT_TAIL 10
+
+/* Copy the trailing digits of `s` into `out` (most-significant last). Returns
+ * the number of digits written. Non-digits are skipped entirely, so formatting
+ * never affects the comparison. */
+static size_t imessage_digit_tail(const char *s, char *out, size_t out_cap) {
+    if (!s || !out || out_cap == 0)
+        return 0;
+    size_t n = 0;
+    for (size_t i = strlen(s); i-- > 0 && n < out_cap;) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch >= '0' && ch <= '9')
+            out[n++] = (char)ch;
+    }
+    return n;
+}
+
+bool hu_imessage_handle_excluded(const char *handle, const char *const *exclude, size_t count) {
+    if (!handle || !handle[0] || !exclude || count == 0)
+        return false;
+    char h_tail[HU_IMESSAGE_EXCLUDE_DIGIT_TAIL];
+    size_t h_digits = imessage_digit_tail(handle, h_tail, sizeof(h_tail));
+    size_t handle_len = strlen(handle);
+    for (size_t i = 0; i < count; i++) {
+        const char *e = exclude[i];
+        if (!e || !e[0])
+            continue;
+        /* Exact (case-insensitive) match covers emails / Apple IDs. */
+        size_t e_len = strlen(e);
+        if (e_len == handle_len && strncasecmp(handle, e, e_len) == 0)
+            return true;
+        /* Phone-shaped: compare the digit tails. Require a full tail on both
+         * sides so a short string of digits can't accidentally exclude a
+         * broader set of contacts. */
+        char e_tail[HU_IMESSAGE_EXCLUDE_DIGIT_TAIL];
+        size_t e_digits = imessage_digit_tail(e, e_tail, sizeof(e_tail));
+        if (e_digits == HU_IMESSAGE_EXCLUDE_DIGIT_TAIL &&
+            h_digits == HU_IMESSAGE_EXCLUDE_DIGIT_TAIL &&
+            memcmp(e_tail, h_tail, HU_IMESSAGE_EXCLUDE_DIGIT_TAIL) == 0)
+            return true;
+    }
+    return false;
+}
 
 bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_already_replied,
                                        bool courtesy_replies_enabled,
@@ -1692,6 +1742,46 @@ unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed) {
     return base;
 }
 
+/*
+ * IMCore selector conformance — see include/human/channels/imessage.h.
+ * Pure + injectable so it is unit-testable without the ObjC runtime (which is
+ * compiled out under HU_IS_TEST). The production resolver + logger live inside
+ * the __APPLE__ guard below; imcore_init() runs the pass once per process.
+ */
+static const hu_imcore_selector_req_t k_imcore_required_selectors[] = {
+    /* IMCore daemon connection (imcore_init) */
+    {"IMDaemonController", "sharedInstance", true},
+    {"IMDaemonController", "connectToDaemon", false},
+    {"IMDaemonController", "isConnected", false},
+    /* Chat lookup for typing (imcore_start_typing / imcore_stop_typing) */
+    {"IMChatRegistry", "sharedInstance", true},
+    {"IMChatRegistry", "existingChatWithChatIdentifier:", false},
+    /* The typing setter itself — the one write that must never silently drift */
+    {"IMChat", "setLocalUserIsTyping:", false},
+};
+
+const hu_imcore_selector_req_t *hu_imessage_imcore_required_selectors(size_t *count) {
+    if (count)
+        *count = sizeof(k_imcore_required_selectors) / sizeof(k_imcore_required_selectors[0]);
+    return k_imcore_required_selectors;
+}
+
+size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size_t n,
+                                      hu_imcore_selector_resolver_fn resolve,
+                                      hu_imcore_selector_missing_fn on_missing, void *ud) {
+    if (!reqs || !resolve)
+        return 0;
+    size_t missing = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (resolve(reqs[i].class_name, reqs[i].selector, reqs[i].is_class_method, ud))
+            continue;
+        missing++;
+        if (on_missing)
+            on_missing(reqs[i].class_name, reqs[i].selector, reqs[i].is_class_method, ud);
+    }
+    return missing;
+}
+
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 /*
  * Typing indicator with chat ID caching and group chat support.
@@ -1884,6 +1974,29 @@ size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
+    /* Outbound exclusion guard. imessage_send is the single chokepoint for
+     * every outbound path — reactive replies, proactive/initiated messages,
+     * and the non-allowlisted courtesy reply — so blocking here is what makes
+     * "the assistant never texts this person" true in all directions rather
+     * than only for inbound-triggered replies. Idempotent: an upstream retry
+     * simply hits the same guard. */
+    {
+        const hu_imessage_ctx_t *xc = (const hu_imessage_ctx_t *)ctx;
+        if (xc && xc->exclude_from_count > 0 && target && target_len > 0) {
+            /* `target` is a (ptr, len) pair and is NOT guaranteed to be
+             * NUL-terminated, so copy before any string compare. Keep the
+             * TAIL on overflow: the digit suffix is the significant part for
+             * phone matching. */
+            char tgt[128];
+            size_t copy = target_len < sizeof(tgt) - 1 ? target_len : sizeof(tgt) - 1;
+            memcpy(tgt, target + (target_len - copy), copy);
+            tgt[copy] = '\0';
+            if (hu_imessage_handle_excluded(tgt, xc->exclude_from, xc->exclude_from_count)) {
+                hu_log_info("imessage", NULL, "outbound to excluded handle %s blocked", tgt);
+                return HU_ERR_PERMISSION_DENIED;
+            }
+        }
+    }
 #if HU_IS_TEST
     (void)target;
     (void)target_len;
@@ -4372,6 +4485,55 @@ int64_t hu_imessage_ax_reply_newest_rowid(void) {
 #endif
 
 /* ── IMCore private framework bridge ────────────────────────────────── */
+/* Production resolver for the conformance pass: does class respond to selector
+ * on the live ObjC runtime? Injected into the pure hu_imessage_imcore_conformance. */
+static bool imcore_objc_selector_resolves(const char *class_name, const char *selector,
+                                          bool is_class_method, void *ud) {
+    (void)ud;
+    if (!class_name || !selector)
+        return false;
+    Class cls = (Class)objc_getClass(class_name);
+    if (!cls)
+        return false;
+    SEL sel = sel_registerName(selector);
+    Method m = is_class_method ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
+    return m != NULL;
+}
+
+/* Reporter: one loud warning per selector that no longer resolves. This is the
+ * whole point — silent drift (nil / hardcoded zero) becomes a visible log line. */
+static void imcore_selector_missing_warn(const char *class_name, const char *selector,
+                                         bool is_class_method, void *ud) {
+    (void)ud;
+    hu_log_warn("imessage", NULL,
+                "IMCore selector MISSING: %c[%s %s] does not resolve on this OS — native "
+                "iMessage path degraded (Apple likely renamed/re-signatured it on an OS bump; "
+                "update the selector or rebuild the imsg bridge)",
+                is_class_method ? '+' : '-', class_name, selector);
+}
+
+/* Run the conformance pass once per process, right after IMCore loads. Reports
+ * every required selector that has drifted, independent of daemon-connect state
+ * (which fails by design on macOS 26+). Cheap: a handful of runtime lookups. */
+static void imcore_run_conformance_check(void) {
+    static atomic_bool s_checked = false;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&s_checked, &expected, true))
+        return;
+    size_t n = 0;
+    const hu_imcore_selector_req_t *reqs = hu_imessage_imcore_required_selectors(&n);
+    size_t missing = hu_imessage_imcore_conformance(reqs, n, imcore_objc_selector_resolves,
+                                                    imcore_selector_missing_warn, NULL);
+    if (missing == 0)
+        hu_log_info("imessage", NULL,
+                    "IMCore selector conformance: all %zu required selectors resolve", n);
+    else
+        hu_log_warn("imessage", NULL,
+                    "IMCore selector conformance: %zu of %zu required selectors MISSING (see "
+                    "warnings above) — native iMessage features may silently no-op",
+                    missing, n);
+}
+
 static bool imcore_init(hu_imessage_ctx_t *c) {
     if (!c || c->imcore_tried)
         return c ? c->imcore_connected : false;
@@ -4381,6 +4543,10 @@ static bool imcore_init(hu_imessage_ctx_t *c) {
         dlopen("/System/Library/PrivateFrameworks/IMCore.framework/IMCore", RTLD_LAZY);
     if (!c->imcore_handle)
         return false;
+
+    /* Report any drifted IMCore selectors now, before we depend on them. Runs
+     * even when the daemon connection below fails (as it does on macOS 26+). */
+    imcore_run_conformance_check();
 
     Class daemon_cls = (Class)objc_getClass("IMDaemonController");
     if (!daemon_cls) {
@@ -4916,6 +5082,21 @@ void hu_imessage_set_loopback_handle(hu_channel_t *ch, const char *handle) {
         return;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     c->loopback_handle = handle;
+}
+
+void hu_imessage_set_exclude_from(hu_channel_t *ch, const char *const *exclude, size_t count) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->exclude_from = exclude;
+    c->exclude_from_count = count;
+    /* Announce at startup per `.claude/rules/silent-config-gated-subsystems.md`.
+     * This is a do-not-contact guarantee for a real person: an operator must be
+     * able to confirm from the log that it is actually loaded, rather than
+     * inferring it from the absence of messages. */
+    if (count > 0)
+        hu_log_info("imessage", NULL, "exclude_from active: %zu handle(s) will never be messaged",
+                    count);
 }
 
 bool hu_imessage_watch_active(hu_channel_t *ch) {
@@ -5460,6 +5641,17 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         }
 
         size_t handle_len = strlen(handle);
+        /* Exclusion is checked BEFORE the allowlist and drops silently: this
+         * handle belongs to a person who asked not to be texted by the
+         * assistant, so the non-allowlisted courtesy reply below would itself
+         * be the unwanted message. Advance last_rowid so the message is
+         * consumed and never re-processed. */
+        if (hu_imessage_handle_excluded(handle, c->exclude_from, c->exclude_from_count)) {
+            hu_log_info("imessage", NULL, "excluded handle %s; dropping silently (no reply)",
+                        handle);
+            c->last_rowid = rowid;
+            continue;
+        }
         if (c->allow_from_count > 0) {
             bool allowed = false;
             for (size_t i = 0; i < c->allow_from_count; i++) {
@@ -6154,7 +6346,16 @@ hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char 
     /* Send through the same path the production poll loop uses (static
      * imessage_send in this TU). This populates the echo ring and, under
      * HU_IS_TEST, records to c->last_message. */
-    (void)imessage_send(c, handle, strlen(handle), reply, reply_len, NULL, 0);
+    hu_error_t send_err = imessage_send(c, handle, strlen(handle), reply, reply_len, NULL, 0);
+    if (send_err != HU_OK) {
+        /* Nothing went out — do not mirror and do not burn this handle's
+         * once-per-24h dedup slot. Previously the result was discarded, so a
+         * failed send still recorded as "replied" and suppressed the real
+         * reply for a day. An excluded handle reaches here only via the
+         * direct test seam (the poll loop drops it earlier), and must stay
+         * silent either way. */
+        return HU_OK;
+    }
     /* Mirror to the test-only courtesy field. */
     size_t mirror = reply_len < sizeof(c->last_courtesy_message) - 1
                         ? reply_len
@@ -6162,7 +6363,7 @@ hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char 
     memcpy(c->last_courtesy_message, reply, mirror);
     c->last_courtesy_message[mirror] = '\0';
     c->last_courtesy_message_len = mirror;
-    /* Record AFTER successful send (best-effort; we already sent). */
+    /* Record only after a genuinely successful send. */
     hu_imessage_courtesy_dedup_record(handle, bucket);
     return HU_OK;
 }

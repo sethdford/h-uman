@@ -25,6 +25,29 @@ void hu_imessage_set_use_imsg_cli(hu_channel_t *ch, bool use);
 /** Treat is_from_me=1 messages from this handle as incoming (self-test via same Apple ID). */
 void hu_imessage_set_loopback_handle(hu_channel_t *ch, const char *handle);
 
+/**
+ * Handles the assistant must never message, in either direction. Borrowed
+ * pointer (caller owns the array), matching hu_imessage_create's allow_from.
+ */
+void hu_imessage_set_exclude_from(hu_channel_t *ch, const char *const *exclude, size_t count);
+
+/**
+ * True when `handle` is on the exclusion list — a person who asked not to be
+ * texted by the assistant.
+ *
+ * Pure predicate (see `.claude/rules/security-predicate-extraction.md`): the
+ * enforcement sites sit inside the poll loop and the send path, but the
+ * decision is (handle, list) -> bool and is unit-tested without either.
+ *
+ * Matching is digit-suffix normalized and deliberately OVER-matches. This is
+ * the inverse of an allowlist's bias: when an allowlist fails to match it
+ * safely denies, but when an exclusion fails to match it SENDS — to the one
+ * person who must not be messaged. So "+1 (484) 678-4914", "+14846784914" and
+ * "14846784914" all match, and any doubt resolves toward excluding. Non-numeric
+ * handles (emails, Apple IDs) fall back to case-insensitive exact compare.
+ */
+bool hu_imessage_handle_excluded(const char *handle, const char *const *exclude, size_t count);
+
 /** Returns true if default target (phone/email) is configured. */
 bool hu_imessage_is_configured(hu_channel_t *ch);
 
@@ -182,6 +205,42 @@ size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blo
  * seed-driven jitter to prevent statistical detection of linear timing.
  * Returns milliseconds, clamped to [800, 6000]. */
 unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed);
+
+/* ── IMCore selector-conformance check ───────────────────────────────────────
+ * h-uman's native iMessage path binds a handful of PRIVATE IMCore selectors via
+ * the ObjC runtime. When Apple renames or re-signatures one on an OS bump, the
+ * bind silently returns nil or a hardcoded zero — see the 2026-07-21 typing
+ * phantom, where -[IMChat isCurrentlyTyping] and -[IMAccount loggedIn] had been
+ * removed on macOS 26 yet were still called, reporting 0 forever. A boot-time
+ * conformance pass turns that silent drift into one loud log line.
+ *
+ * Factored as a pure predicate + injected resolver so it is unit-testable
+ * without the ObjC runtime (which is compiled out under HU_IS_TEST). */
+typedef struct hu_imcore_selector_req {
+    const char *class_name; /* e.g. "IMChat" */
+    const char *selector;   /* e.g. "setLocalUserIsTyping:" */
+    bool is_class_method;   /* true for +class methods (e.g. "sharedInstance") */
+} hu_imcore_selector_req_t;
+
+/** The canonical table of IMCore selectors h-uman's iMessage path depends on.
+ * Sets *count to the entry count. Never returns NULL. */
+const hu_imcore_selector_req_t *hu_imessage_imcore_required_selectors(size_t *count);
+
+/** Resolver: does class_name respond to selector? is_class_method selects
+ * +class vs -instance lookup. ud is opaque caller data. Must be non-NULL. */
+typedef bool (*hu_imcore_selector_resolver_fn)(const char *class_name, const char *selector,
+                                               bool is_class_method, void *ud);
+/** Reporter: invoked once per selector that does NOT resolve. May be NULL. */
+typedef void (*hu_imcore_selector_missing_fn)(const char *class_name, const char *selector,
+                                              bool is_class_method, void *ud);
+
+/** Pure conformance pass: for each of the n reqs, call resolve(); for each that
+ * returns false, call on_missing() (when non-NULL). Returns the count of
+ * unresolved selectors (0 == fully conformant). Returns 0 if reqs or resolve is
+ * NULL. No ObjC dependency — the caller injects the resolver. */
+size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size_t n,
+                                      hu_imcore_selector_resolver_fn resolve,
+                                      hu_imcore_selector_missing_fn on_missing, void *ud);
 
 /** Search Tenor for a GIF matching the query and download to a temp file.
  * Returns the local path to the downloaded GIF (caller owns, free with alloc).
