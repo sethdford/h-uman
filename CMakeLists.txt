@@ -2705,6 +2705,14 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_LEARNING)
+    # human_core's HU_ENABLE_LEARNING define is PRIVATE and does not reach
+    # this executable's own TUs: bootstrap.c compiled its #else branch,
+    # logged "learner subsystem not built (HU_ENABLE_LEARNING=OFF)" on a
+    # learning-ON build, and never opened the learner — dead W13 loop in
+    # every shipped daemon (found 2026-07-25).
+    target_compile_definitions(human PRIVATE HU_ENABLE_LEARNING=1)
+endif()
 if(HU_HAS_IMESSAGE)
     target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
 endif()

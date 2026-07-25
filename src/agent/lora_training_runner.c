@@ -363,7 +363,15 @@ static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const ch
     static char adapters_output_path[512];
     static char timestamp_buf[32];
 
-    snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s/..", home_dir);
+    /* Repo root: HU_REPO_DIR env override, else <home>/Projects/h-uman.
+     * The old "%s/.." (= /Users for home=/Users/sethford) made every
+     * dispatch run `python3 /Users/scripts/training_loop.py` — instant
+     * failure, so no training run ever completed (found 2026-07-25). */
+    const char *repo_env = getenv("HU_REPO_DIR");
+    if (repo_env && repo_env[0])
+        snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s", repo_env);
+    else
+        snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s/Projects/h-uman", home_dir);
     snprintf(outcomes_jsonl_path, sizeof(outcomes_jsonl_path),
              "%s/.human/training-data/m3-outcomes.jsonl", home_dir);
     time_t now = time(NULL);
@@ -381,10 +389,17 @@ static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const ch
      * the command and let Python's stderr go to the daemon log. */
     char cmd_buf[2048]; /* 2048: multi-path shell command exceeds 1024 (GCC
                            -Werror=format-truncation). */
+    /* Two-step: the outcomes JSONL does not exist until the M3 outcome
+     * driver exports it from the gateway (scripts/m3_outcome_driver.py:16
+     * documents the flow). Chain export && train so a fresh machine or a
+     * consumed/absent JSONL regenerates instead of failing on a missing
+     * file. Both steps append to the same per-dispatch log. */
     snprintf(cmd_buf, sizeof(cmd_buf),
-             "python3 %s/scripts/training_loop.py --source-jsonl %s --adapter-out %s "
+             "{ python3 %s/scripts/m3_outcome_driver.py && "
+             "python3 %s/scripts/training_loop.py --source-jsonl %s --adapter-out %s ; } "
              ">> %s/.human/logs/training-loop-%s.log 2>&1",
-             repo_scripts_path, outcomes_jsonl_path, adapters_output_path, home_dir, timestamp_buf);
+             repo_scripts_path, repo_scripts_path, outcomes_jsonl_path, adapters_output_path,
+             home_dir, timestamp_buf);
 
     hu_log_info("lora_training_runner", observer, "executing: %s", cmd_buf);
 

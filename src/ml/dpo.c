@@ -138,6 +138,20 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
             sqlite3_free(err_msg);
         return HU_ERR_IO;
     }
+    /* Hydrate pair_count from persisted rows. Without this the counter
+     * restarts at 0 every process boot, so the pair-count training trigger
+     * (daemon_maintenance.c, threshold 100) could only fire if 100 pairs
+     * accumulated within a SINGLE daemon uptime — with near-daily restarts
+     * it never fired, and 558 banked pairs sat untrainable (2026-07-25). */
+    {
+        sqlite3_stmt *cnt = NULL;
+        if (sqlite3_prepare_v2(collector->db, "SELECT COUNT(*) FROM dpo_pairs", -1, &cnt, NULL) ==
+                SQLITE_OK &&
+            sqlite3_step(cnt) == SQLITE_ROW)
+            collector->pair_count = (size_t)sqlite3_column_int64(cnt, 0);
+        if (cnt)
+            sqlite3_finalize(cnt);
+    }
 #endif
     return HU_OK;
 }
