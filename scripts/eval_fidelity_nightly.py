@@ -56,9 +56,13 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from eval_fidelity_helpers import (
+    DEFAULT_SPEAKER_MODEL_PATH,
+    SHAPE_WEIGHT,
+    SPEAKER_WEIGHT,
     bootstrap_ci,
     compute_persona_fidelity_scores,
     load_held_out_prompts_from_jsonl,
+    load_speaker_model,
 )  # noqa: E402
 import adapter_registry
 
@@ -452,6 +456,17 @@ def main():
              "measured against the base it actually serves on.",
     )
     ap.add_argument(
+        "--speaker-model",
+        type=Path,
+        default=DEFAULT_SPEAKER_MODEL_PATH,
+        help="Speaker-id P(Seth) classifier JSON blended with the shape score "
+             f"(default: {DEFAULT_SPEAKER_MODEL_PATH}). The shape classifier "
+             "alone saturates at 1.0 on clean casual text (2026-07-16: both "
+             "passes scored mean 1.0 across 29 real generations), so without "
+             "this component the delta gate cannot PASS. Missing model → "
+             "loud shape-only fallback.",
+    )
+    ap.add_argument(
         "--gen-timeout",
         type=int,
         default=600,
@@ -612,10 +627,25 @@ def main():
     pre_valid = [pre_responses[i] for i in valid_idx]
     post_valid = [post_responses[i] for i in valid_idx]
 
-    # Score responses
-    print(f"\n=== SCORING ({len(valid_idx)} valid pairs) ===", flush=True)
-    pre_classifications, pre_mean = compute_persona_fidelity_scores(pre_valid, channel="imessage")
-    post_classifications, post_mean = compute_persona_fidelity_scores(post_valid, channel="imessage")
+    # Score responses. Blend shape (AI-tell penalties) with speaker-id P(Seth):
+    # shape alone saturates at 1.0 on clean casual text, which made the delta
+    # gate unwinnable on 2026-07-16 (both passes mean 1.0 across 29 prompts).
+    speaker_model = load_speaker_model(args.speaker_model)
+    if speaker_model is None:
+        # /tmp model is wiped on reboot — degrade loudly, never silently:
+        # shape-only deltas saturate to ~0, so this run can at best SKIP.
+        print(f"[WARN] FIDELITY_SCORER_DEGRADED speaker-id model unavailable at "
+              f"{args.speaker_model}; falling back to shape-only scoring, which "
+              f"saturates at 1.0 on clean casual text — the delta gate cannot "
+              f"PASS. Retrain via: python3 scripts/personaeval_speaker_id.py "
+              f"--train --out {args.speaker_model}", flush=True)
+    scorer_mode = "blended" if speaker_model is not None else "shape-only"
+
+    print(f"\n=== SCORING ({len(valid_idx)} valid pairs, scorer={scorer_mode}) ===", flush=True)
+    pre_classifications, pre_mean = compute_persona_fidelity_scores(
+        pre_valid, channel="imessage", speaker_model=speaker_model)
+    post_classifications, post_mean = compute_persona_fidelity_scores(
+        post_valid, channel="imessage", speaker_model=speaker_model)
 
     print(f"PRE mean score:  {pre_mean:.3f}", flush=True)
     print(f"POST mean score: {post_mean:.3f}", flush=True)
@@ -686,6 +716,12 @@ def main():
         "n_prompts": len(prompts),
         "n_valid_pairs": len(valid_idx),
         "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post},
+        "scorer": {
+            "mode": scorer_mode,
+            "shape_weight": SHAPE_WEIGHT if scorer_mode == "blended" else 1.0,
+            "speaker_weight": SPEAKER_WEIGHT if scorer_mode == "blended" else 0.0,
+            "speaker_model_path": str(args.speaker_model) if scorer_mode == "blended" else None,
+        },
         "gen_timeout_sec": args.gen_timeout,
         "model_id": args.model_id,
         "adapter_path": str(args.adapter_path),
