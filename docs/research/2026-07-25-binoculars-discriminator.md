@@ -105,6 +105,40 @@ to reuse until the adapter changes.
 - `data/imessage/ground_truth.jsonl` — 644 real pairs; 100-message holdout for FPR
   validation (real side only).
 
+## Corpus finding: 20% of real Seth ground truth carries a stray leading byte
+
+Surfaced by the miner's first shadow run (exactly what shadow mode is for). **131
+of 644** (20.3%) `seth_reply` values in `data/imessage/ground_truth.jsonl` — and
+9 of the 47 `real_seth` values in the 07-24 trials — begin with a stray character
+before the real text:
+
+```
+',I don’t know if I have there phone numbers'     '0Oh hey there! Jesus why don’t I…'
+'%A ton, you know I got feelings for ya'          'HYeah works for me, I love a good bar…'
+'.Edison and my brother and his family 8 people'  ';No he doesn’t want to come…'
+```
+
+The prefix varies (`. ; 9 J " - , 0 > % H ' ( =`), consistent with a length/type
+byte leaking from the attributedBody decode in the extractor. Three consequences:
+
+1. **Training (handled).** A corrupted `chosen` would teach the model to *emit*
+   the artifact. `binoculars_to_dpo.py` refuses these pairs
+   (`corrupt_chosen` counter); the guard is deliberately conservative since a
+   false positive costs one skipped pair while a false negative poisons the corpus.
+2. **The fool rate is probably overstated (unquantified).** The judge sees the
+   corrupted string as the "human" option; a reply that opens with `%` reads as
+   broken and pushes the judge toward the AI option. Some share of the 53.2%
+   fool rate may be this artifact rather than genuine humanness. Not corrected
+   here — it needs the extractor fix plus a re-judge.
+3. **AUC is NOT affected (checked).** Recomputing on the 38 clean pairs only:
+   **0.832** vs 0.845 published — well inside the CI, and corrupted rows scored
+   slightly *lower* (mean 1.309 vs 1.357), i.e. marginally harder to detect. The
+   corruption was working mildly against the detector, not inflating it.
+
+The upstream fix belongs in the extractor, not here — note that
+`scripts/extract_imessage_pairs.py` **regenerates `ground_truth.jsonl` on any
+invocation, including `--help`**, so it must be handled deliberately.
+
 ## Caveats
 
 1. **The detector is coupled to the adapter version.** dirA's power comes from the
@@ -140,12 +174,32 @@ promotion keystone. Two measurement-side wirings:
    adapter promotion + recalibration. Trend to watch: windowed AUC drifting *down*
    toward 0.5 = genuine statistical humanness progress, invisible to the judge
    today.
-2. **DPO rejected-sample miner.** Generations scoring below the 5%-FPR threshold
-   (confidently-AI, score < 0.9643 at current calibration) are exactly the "most
-   machine-typical" outputs. Pair them as `rejected` against the trial's `real_seth`
-   as `chosen`, source-tagged `binoculars_miner`, into the existing dpo_pairs
-   pipeline. Ships OFF; first run in shadow (log candidate pairs, write nothing)
-   per the gate contract.
+2. **DPO rejected-sample miner — WIRED OFF (2026-07-25).**
+   `scripts/blind_ab/binoculars_to_dpo.py` pairs each below-threshold generation
+   as `rejected` against the trial's `real_seth` as `chosen`, source-tagged
+   `binoculars_miner`. `HU_NIGHTLY_BINOCULARS_DPO` selects 0=off (default),
+   1=shadow (candidates appended to `~/.human/logs/eval-archive/binoc-dpo-candidates.jsonl`,
+   no DB writes), 2=live. `--live` is opt-in even when invoked by hand.
+
+   **Why the safety posture is strict here:** every consumer of `dpo_pairs`
+   reads it *unfiltered* (`finetune-gemma.py:392`, `src/ml/dpo.c:598`), so a
+   mined row enters the training corpus on the next run; and `src/ml/dpo.c:191`
+   evicts FIFO by lowest id past `max_pairs`, so over-mining would delete older
+   human-verified pairs. Hence `--max-insert` (default 25) and OFF-by-default.
+
+   **Why it does not need judge_to_dpo's different-family gate:** that gate
+   exists because a same-family judge's *verdict* becomes the training label.
+   Here no verdict is ever a label — `chosen` is real Seth text from chat.db,
+   and the Binoculars score only *selects* which rejected samples to train
+   against. The genuine risk is different: the score is measured against the
+   generator's current distribution, so iterating without recalibration could
+   drift toward merely-atypical rather than Seth-like. Held in check by (a) the
+   human-text anchor on `chosen`, (b) mandatory per-adapter recalibration,
+   (c) the per-run cap.
+
+   Shadow yield on the 07-24 corpus: 14 candidates from 47 trials → 9 after the
+   corruption guard below, **3 of which the Gemini judge had been fooled by** —
+   pairs no judge-driven miner can find.
 
 Not proposed: any per-message runtime gate on the send path (too noisy at 32% TPR,
 and it would double per-turn GPU cost).
@@ -162,3 +216,11 @@ and it would double per-turn GPU cost).
 `scripts/blind_ab/binoculars_score.py` also takes `--texts file.json` (list of
 `{text, context?, label?}`), `--text "..."` for one-offs, `--no-context` for
 paper-style raw scoring, and `--stage base|adapted|combine` for resumable runs.
+
+The miner reads the per-trial scores merged by `--binoculars`, so it needs no
+GPU pass of its own:
+
+```bash
+python3 scripts/blind_ab/binoculars_to_dpo.py --selftest
+python3 scripts/blind_ab/binoculars_to_dpo.py --pairs data/eval_blinded_ab.json  # shadow
+```

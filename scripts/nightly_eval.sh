@@ -63,6 +63,15 @@ HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-1}
 # See docs/research/2026-07-25-binoculars-discriminator.md
 HU_NIGHTLY_BINOCULARS=${HU_NIGHTLY_BINOCULARS:-1}
 
+# Binoculars -> DPO miner. OFF by default (feature-gate contract): every
+# consumer reads dpo_pairs UNFILTERED, so mined rows enter training on the next
+# run. 0=off, 1=SHADOW (candidates logged to the archive, no DB writes),
+# 2=LIVE (inserts). Do not set 2 without a threshold recalibrated for the
+# CURRENTLY-SERVED adapter.
+HU_NIGHTLY_BINOCULARS_DPO=${HU_NIGHTLY_BINOCULARS_DPO:-0}
+BINOC_DPO="${REPO}/scripts/blind_ab/binoculars_to_dpo.py"
+BLIND_AB_RESULTS="${REPO}/data/eval_blinded_ab.json"
+
 DRY_RUN=0
 SMOKE=0
 for arg in "$@"; do
@@ -154,6 +163,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  lock dir:      $LOCK_DIR ($([ -d "$LOCK_DIR" ] && echo HELD || echo free))"
   log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
   log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
+  log "  binoc-dpo:     HU_NIGHTLY_BINOCULARS_DPO=$HU_NIGHTLY_BINOCULARS_DPO (0=off, 1=shadow, 2=live)"
   log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (loads own model), [3/3] blind-ab gate refresh (REAL measurement), serial"
   exit 0
 fi
@@ -245,6 +255,26 @@ else
     set -e
 
     log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"
+
+    # ---- Binoculars -> DPO miner (advisory; OFF by default) -----------------
+    # Reads the per-trial scores eval_blinded_ab.py --binoculars merged into the
+    # results file — no extra GPU pass. Never fails the wrapper.
+    if [ "$HU_NIGHTLY_BINOCULARS_DPO" -ne 0 ] && [ -f "$BLIND_AB_RESULTS" ]; then
+      dpo_mode_args="--shadow-out ${ARCHIVE_DIR}/binoc-dpo-candidates.jsonl"
+      dpo_mode_name="SHADOW"
+      if [ "$HU_NIGHTLY_BINOCULARS_DPO" -eq 2 ]; then
+        dpo_mode_args="--live"
+        dpo_mode_name="LIVE"
+      fi
+      log "[3/3] binoc-dpo: mining in $dpo_mode_name mode"
+      set +e
+      # shellcheck disable=SC2086  # dpo_mode_args is intentionally word-split
+      "$PY" "$BINOC_DPO" --pairs "$BLIND_AB_RESULTS" $dpo_mode_args 2>&1 \
+        | while IFS= read -r line; do log "[3/3] binoc-dpo: $line"; done
+      set -e
+    elif [ "$HU_NIGHTLY_BINOCULARS_DPO" -eq 0 ]; then
+      log "[3/3] binoc-dpo: OFF (HU_NIGHTLY_BINOCULARS_DPO=0)"
+    fi
 
     # Auto-commit if the gate file changed
     if [ "$HU_NIGHTLY_AUTOPUSH" -eq 1 ] && [ -f "$BLIND_AB_GATE" ]; then

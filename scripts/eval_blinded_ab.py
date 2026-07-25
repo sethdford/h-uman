@@ -348,6 +348,13 @@ def _run_binoculars(results_path):
                 round(sum(1 for s in ai if s < thr_fpr5) / len(ai), 4)
                 if ai else None,
             "elapsed_s": round(time.time() - started, 1),
+            # Per-trial AI scores so binoculars_to_dpo.py can mine from this
+            # file alone — no second 12-minute scoring pass.
+            "ai_by_trial": {
+                str(r["trial"]): {"score": round(r["score_dirA"], 5),
+                                  "n_tokens": r["n_tokens"]}
+                for r in rows
+                if r.get("label") == "ai" and r.get("trial") is not None},
         }
     except Exception as e:  # advisory metric — swallow everything
         summary = {"error": f"{type(e).__name__}: {e}",
