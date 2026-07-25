@@ -42,7 +42,11 @@ from personaeval_speaker_id import classify_text as _speaker_classify  # noqa: E
 # shifts move P(Seth) by 0.3+). The floor is therefore kept at 0.05.
 SHAPE_WEIGHT = 0.5
 SPEAKER_WEIGHT = 0.5
-DEFAULT_SPEAKER_MODEL_PATH = Path("/tmp/seth_speaker_id.json")
+# Persistent home, NOT /tmp: macOS wipes /tmp on reboot, and a wiped model
+# means every subsequent nightly silently degrades to shape-only scoring —
+# which saturates, SKIPs, and leaves the adapter unmeasured until someone
+# notices the FIDELITY_SCORER_DEGRADED marker. Reboot must not cost the gate.
+DEFAULT_SPEAKER_MODEL_PATH = Path.home() / ".human/models/seth_speaker_id.json"
 
 # Keys a usable speaker-id logreg model must carry (personaeval_speaker_id
 # serialization format, v1 and v2 alike).
@@ -52,8 +56,9 @@ _SPEAKER_MODEL_REQUIRED_KEYS = ("weights", "bias", "means", "stds", "feature_nam
 def load_speaker_model(path=DEFAULT_SPEAKER_MODEL_PATH) -> Optional[dict]:
     """Load the speaker-id classifier; None when missing/corrupt/not-a-model.
 
-    /tmp/seth_speaker_id.json is wiped on reboot, so absence is an expected
-    state — callers must degrade loudly (shape-only saturates!), not crash.
+    The model may be absent on a fresh machine or before first training, so
+    absence is an expected state — callers must degrade loudly (shape-only
+    saturates!), not crash.
     """
     try:
         model = json.loads(Path(path).read_text())
