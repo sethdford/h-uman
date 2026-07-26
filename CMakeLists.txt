@@ -1993,6 +1993,24 @@ set(HU_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${HU_ROOT}/include)
 include_directories(${HU_ROOT}/asm/generic)
 
+# --- Build provenance: stamp git HEAD into a generated header at BUILD time ---
+# src/app/version.c picks this up (via __has_include) and embeds an
+# "HU_BUILD_SHA=<sha>" literal that scripts/install-human-daemon.sh extracts
+# with `strings` to refuse installing a binary that is not a descendant of the
+# currently deployed one (the 2026-07-25 deploy-clobber class). Build-time, not
+# configure-time: sessions commit and rebuild incrementally without ever
+# reconfiguring, so a configure-time SHA would go stale immediately.
+set(HU_GIT_SHA_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/hu_git_sha.h)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_custom_target(hu_git_sha_stamp
+    COMMAND ${CMAKE_COMMAND}
+            -DGIT_DIR=${HU_ROOT}
+            -DOUT=${HU_GIT_SHA_HEADER}
+            -P ${HU_ROOT}/cmake/GenGitSha.cmake
+    BYPRODUCTS ${HU_GIT_SHA_HEADER}
+    COMMENT "Stamping git SHA into hu_git_sha.h")
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
+
 # Phase 5 Task 2 (RL SOTA) — bootstrap CI helper.  Gated behind
 # HU_ENABLE_RL_FULL so default release/dev builds pay zero binary cost.
 # Consumed by Task 5 hu_eval_gate_decide (LoRA promotion gate) and Task
@@ -2024,6 +2042,7 @@ list(REMOVE_DUPLICATES HU_CORE_SOURCES)
 
 # --- Core static library ---
 add_library(human_core STATIC ${HU_CORE_SOURCES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
+add_dependencies(human_core hu_git_sha_stamp)
 target_include_directories(human_core PUBLIC ${HU_ROOT}/include)
 if(Threads_FOUND)
     target_link_libraries(human_core PUBLIC Threads::Threads)
@@ -2964,6 +2983,7 @@ if(NOT HU_ENABLE_SQLITE)
     )
 endif()
 add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} ${HU_TEST_EXTRA_MODULES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
+add_dependencies(human_core_test hu_git_sha_stamp)
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)

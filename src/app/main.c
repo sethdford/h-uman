@@ -63,6 +63,7 @@
 #include "human/session.h"
 #include "human/skill_registry.h"
 #include "human/skill_scaffold.h"
+#include "human/version.h"
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
 #endif
@@ -619,9 +620,13 @@ static void print_usage(FILE *out) {
 
 static hu_error_t cmd_version(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
-    (void)argc;
-    (void)argv;
-    printf("%s v%s\n", HU_CODENAME, HU_VERSION);
+    /* `human version --sha` prints only the build commit — machine-readable
+     * for the install provenance guard (scripts/install-human-daemon.sh). */
+    if (argc > 2 && strcmp(argv[2], "--sha") == 0) {
+        printf("%s\n", hu_build_sha());
+        return HU_OK;
+    }
+    printf("%s v%s (%s)\n", HU_CODENAME, HU_VERSION, hu_build_sha());
     return HU_OK;
 }
 

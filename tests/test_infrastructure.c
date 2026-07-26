@@ -12,6 +12,20 @@ static void test_version_string(void) {
     HU_ASSERT(strlen(v) > 0);
 }
 
+/* The installer's provenance guard greps binaries for "HU_BUILD_SHA=<sha>"
+ * and validates the sha as exactly 40 lowercase hex chars (or the "unknown"
+ * fallback for non-git build trees). Pin that contract here so a stamping
+ * regression fails the suite, not the next deploy. */
+static void test_build_sha_is_40_hex_or_unknown(void) {
+    const char *sha = hu_build_sha();
+    HU_ASSERT_NOT_NULL(sha);
+    if (strcmp(sha, "unknown") == 0)
+        return;
+    HU_ASSERT_EQ(strlen(sha), 40u);
+    for (const char *p = sha; *p; p++)
+        HU_ASSERT_TRUE((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'));
+}
+
 static void test_heartbeat_init_clamps_interval(void) {
     hu_heartbeat_engine_t e;
     hu_heartbeat_engine_init(&e, true, 2, "/tmp");
@@ -258,6 +272,7 @@ static void test_heartbeat_tick_missing_file(void) {
 void run_infrastructure_tests(void) {
     HU_TEST_SUITE("Infrastructure (version, heartbeat, cost)");
     HU_RUN_TEST(test_version_string);
+    HU_RUN_TEST(test_build_sha_is_40_hex_or_unknown);
     HU_RUN_TEST(test_heartbeat_init_clamps_interval);
     HU_RUN_TEST(test_heartbeat_init_preserves_valid_interval);
     HU_RUN_TEST(test_heartbeat_is_content_empty);
