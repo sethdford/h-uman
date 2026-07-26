@@ -41,6 +41,8 @@ Exit codes:
 import argparse
 import gc
 import json
+import os
+import re
 import shlex
 import signal
 import statistics
@@ -84,6 +86,42 @@ CONFIDENCE = 1 - 2 * ALPHA_ONESIDED  # 0.95 for two-sided, 0.975 for one-sided
 PRACTICAL_DELTA_FLOOR = 0.05  # 5% absolute minimum improvement
 
 
+def production_mlx_port(env: dict | None = None) -> str:
+    """Port of the PRODUCTION mlx-server — the one the nightly must eval.
+    Mirrors lora_training_runner.c resolve_mlx_base_url():
+    HU_MLX_BASE_URL env override, else 8741.
+
+    This filter matters: multiple mlx-servers run concurrently (observed
+    2026-07-26: gemma-8bit realtime on :8747 alongside production GLM on
+    :8741), and `ps` order is arbitrary — first-match would eval whichever
+    server happened to be listed first.
+    """
+    env = os.environ if env is None else env
+    url = env.get("HU_MLX_BASE_URL", "")
+    m = re.search(r"//[^/]*:(\d+)", url)
+    return m.group(1) if m else "8741"
+
+
+def _iter_production_mlx_server_tokens(ps_output: str, port: str):
+    """Yield shlex-token lists for mlx-server processes on `port` only.
+    A process with no --port flag is assumed to be on the default 8741."""
+    for line in ps_output.splitlines():
+        if "mlx-server" not in line:
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        line_port = "8741"
+        if "--port" in tokens:
+            try:
+                line_port = tokens[tokens.index("--port") + 1]
+            except IndexError:
+                continue
+        if line_port == port:
+            yield tokens
+
+
 def resolve_serving_adapter(
     ps_output: str | None = None,
     config_path: Path = DEFAULT_CONFIG_PATH,
@@ -91,8 +129,9 @@ def resolve_serving_adapter(
     """Resolve the adapter that is ACTUALLY serving, not a hardcoded name.
 
     Priority (each candidate must exist on disk to win):
-      1. The live mlx-server process's --adapter-path argument — ground truth
-         for what is serving right now.
+      1. The PRODUCTION mlx-server process's --adapter-path argument — ground
+         truth for what is serving right now. Only processes on the
+         production port count (see production_mlx_port).
       2. config.json personalization.lora_adapter_path — what will serve
          after the next restart.
 
@@ -113,16 +152,15 @@ def resolve_serving_adapter(
         except Exception:
             ps_output = ""
 
-    for line in ps_output.splitlines():
-        if "mlx-server" not in line or "--adapter-path" not in line:
-            continue
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
         try:
-            tokens = shlex.split(line)
             candidate = Path(tokens[tokens.index("--adapter-path") + 1])
         except (ValueError, IndexError):
             continue
         if candidate.exists():
-            return (candidate, "live mlx-server process --adapter-path")
+            return (candidate,
+                    f"live mlx-server process --adapter-path (port {port})")
 
     try:
         config = json.loads(Path(config_path).read_text())
@@ -142,8 +180,10 @@ def resolve_serving_model(ps_output: str | None = None) -> str:
 
     The adapter's delta is only meaningful against the base it was trained on
     (e.g. seth-lora-v5-8bit belongs to the 8bit base). Before 2026-07-25 the
-    nightly hardcoded the 4bit base while production served 8bit.
-    Falls back to DEFAULT_MODEL when no server is running.
+    nightly hardcoded the 4bit base while production served 8bit. Only
+    processes on the production port count (see production_mlx_port) — a
+    spare mlx-server on another port must not win by ps ordering.
+    Falls back to DEFAULT_MODEL when no production server is running.
     """
     if ps_output is None:
         try:
@@ -154,11 +194,9 @@ def resolve_serving_model(ps_output: str | None = None) -> str:
         except Exception:
             ps_output = ""
 
-    for line in ps_output.splitlines():
-        if "mlx-server" not in line or "--model" not in line:
-            continue
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
         try:
-            tokens = shlex.split(line)
             return tokens[tokens.index("--model") + 1]
         except (ValueError, IndexError):
             continue

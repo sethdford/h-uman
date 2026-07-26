@@ -7,6 +7,7 @@ using mocked subprocess outputs.
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -279,6 +280,124 @@ def test_resolve_serving_adapter_none_when_unresolvable():
         )
         assert path is None, f"Expected None, got {path}"
     print(f"✓ resolve_serving_adapter: unresolvable → None ({source})")
+
+
+GEMMA_8BIT = "mlx-community/gemma-4-31b-it-8bit"
+GLM_4BIT = "mlx-community/GLM-4.5-Air-4bit"
+
+
+def test_resolve_serving_adapter_filters_to_production_port():
+    """Regression: observed live 2026-07-26 — a gemma-8bit realtime spare on
+    :8747 was listed by `ps` BEFORE the production GLM server on :8741.
+    First-match resolution evaluated the wrong adapter. Resolution must
+    filter mlx-server lines by the production port."""
+    with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        tmpdir = Path(tmpdir)
+        gemma_adapter = tmpdir / "gemma-adapter"
+        gemma_adapter.mkdir()
+        glm_adapter = tmpdir / "glm-adapter"
+        glm_adapter.mkdir()
+
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--realtime --adapter-path {gemma_adapter}\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path {glm_adapter}\n"
+        )
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=two_servers, config_path=tmpdir / "missing.json"
+        )
+        assert path == glm_adapter, f"Expected :8741 adapter, got {path}"
+        assert "8741" in source, f"Source must name the port, got {source}"
+
+        # A server line with NO --port flag counts as the default 8741.
+        no_port = (
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} "
+            f"--adapter-path {glm_adapter}\n"
+        )
+        path, _ = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=no_port, config_path=tmpdir / "missing.json"
+        )
+        assert path == glm_adapter, f"No --port must count as 8741, got {path}"
+    print("✓ resolve_serving_adapter: filters ps to production port")
+
+
+def test_resolve_serving_adapter_nonproduction_only_falls_to_config():
+    """With only a non-production server running, the resolver must ignore it
+    and fall through to config.json, never eval the spare's adapter."""
+    with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        tmpdir = Path(tmpdir)
+        gemma_adapter = tmpdir / "gemma-adapter"
+        gemma_adapter.mkdir()
+        config_adapter = tmpdir / "config-adapter"
+        config_adapter.mkdir()
+        config = tmpdir / "config.json"
+        config.write_text(json.dumps(
+            {"personalization": {"lora_adapter_path": str(config_adapter)}}
+        ))
+
+        spare_only = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--adapter-path {gemma_adapter}\n"
+        )
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=spare_only, config_path=config
+        )
+        assert path == config_adapter, f"Expected config adapter, got {path}"
+        assert "config" in source, f"Expected config source, got {source}"
+    print("✓ resolve_serving_adapter: non-production-only ps falls to config")
+
+
+def test_resolve_serving_model_filters_to_production_port():
+    """Same regression on the model axis: the nightly must eval the base that
+    :8741 serves, not whichever mlx-server `ps` lists first."""
+    with mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--realtime --adapter-path /tmp/x\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path /tmp/y\n"
+        )
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=two_servers)
+        assert model == GLM_4BIT, f"Expected :8741 model, got {model}"
+
+        # No --port flag counts as the default 8741.
+        no_port = f"/opt/python /x/mlx-server.py --model {GLM_4BIT}\n"
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=no_port)
+        assert model == GLM_4BIT, f"No --port must count as 8741, got {model}"
+
+        # Only the spare running → same as no server: hardcoded default.
+        spare_only = f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747\n"
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=spare_only)
+        assert model == eval_fidelity_nightly.DEFAULT_MODEL, \
+            f"Non-production-only ps must fall to default, got {model}"
+    print("✓ resolve_serving_model: filters ps to production port")
+
+
+def test_production_mlx_port_honors_hu_mlx_base_url():
+    """HU_MLX_BASE_URL overrides the production port (mirrors
+    lora_training_runner.c resolve_mlx_base_url), default 8741."""
+    assert eval_fidelity_nightly.production_mlx_port(env={}) == "8741"
+    assert eval_fidelity_nightly.production_mlx_port(
+        env={"HU_MLX_BASE_URL": "http://127.0.0.1:8743/v1"}) == "8743"
+
+    # End-to-end through the resolver: pointing production at :8747 flips
+    # which server the same two-server ps output resolves to.
+    with mock.patch.dict(
+        "os.environ", {"HU_MLX_BASE_URL": "http://127.0.0.1:8747"}
+    ):
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--adapter-path /tmp/x\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path /tmp/y\n"
+        )
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=two_servers)
+        assert model == GEMMA_8BIT, f"Env port must be honored, got {model}"
+    print("✓ production_mlx_port: HU_MLX_BASE_URL honored, default 8741")
 
 
 def _run_main_with_argv(argv, fixture_prompts=25):
@@ -827,6 +946,10 @@ def main():
         test_resolve_serving_adapter_prefers_live_process,
         test_resolve_serving_adapter_falls_back_to_config,
         test_resolve_serving_adapter_none_when_unresolvable,
+        test_resolve_serving_adapter_filters_to_production_port,
+        test_resolve_serving_adapter_nonproduction_only_falls_to_config,
+        test_resolve_serving_model_filters_to_production_port,
+        test_production_mlx_port_honors_hu_mlx_base_url,
         test_skip_records_null_score_and_exits_3,
         test_adapter_missing_skip_is_loud_and_unrecorded,
         test_no_registry_flag_skips_registry_write,
