@@ -317,6 +317,13 @@ static void cli_stream_token(const char *delta, size_t len, void *ctx) {
 
 /* ── Background agent turn (async mode) ──────────────────────────────── */
 #if HU_CLI_ASYNC
+
+/* Stack for the agent-turn worker. macOS gives non-main pthreads 512 KB, but
+ * hu_agent_turn's own frame is ~466 KB on arm64 — so the default overflows into
+ * the guard page (SIGBUS in ___chkstk_darwin). 8 MB matches the main-thread
+ * stack the daemon path enjoys. See the rationale at the pthread_create site. */
+#define HU_AGENT_TURN_THREAD_STACK_BYTES ((size_t)8 * 1024 * 1024)
+
 typedef struct agent_turn_ctx {
     hu_agent_t *agent;
     const char *msg;
@@ -1292,8 +1299,45 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         tctx->msg = line;
         tctx->msg_len = line_len;
 
+        /* The worker needs a MAIN-THREAD-SIZED stack, not pthread's default.
+         *
+         * hu_agent_turn's own frame is ~466 KB on arm64 (disassembly:
+         * `sub sp, sp, #0x74, lsl #12` = 475,136 B plus `sub sp, sp, #0x9a0`),
+         * and macOS gives non-main pthreads only 512 KB. That left ~46 KB for
+         * everything hu_agent_turn calls — provider HTTP, JSON parsing, persona
+         * assembly — so `human agent -m ...` died in ___chkstk_darwin against
+         * the guard page:
+         *
+         *   EXC_BAD_ACCESS (SIGBUS), KERN_PROTECTION_FAILURE
+         *   "Could not determine thread index for stack guard region"
+         *     ___chkstk_darwin / hu_agent_turn / agent_turn_thread
+         *
+         * i.e. a plain stack overflow, reproducible on every invocation. It
+         * worked until ~2026-07-19 and broke as agent_turn.c grew past the
+         * limit. Under ASan the same overflow surfaces as a misleading
+         * cross-thread "stack-use-after-scope" in hu_agent_free_turn_context
+         * (see ~/.claude/rules/asan-pthread-stack-aliasing-darwin.md) — that
+         * report is a SYMPTOM of the undersized stack, not a lifetime bug, and
+         * chasing it with heap-allocation hoists never fixes this.
+         *
+         * The daemon path is unaffected: it calls hu_agent_turn without
+         * spawning a worker, so it runs on an 8 MB main-thread stack. Matching
+         * that here is the fix. If hu_agent_turn's frame keeps growing this
+         * needs raising again — or, better, its large locals moved to the heap. */
+        pthread_attr_t turn_attr;
+        pthread_attr_t *turn_attr_p = NULL;
+        if (pthread_attr_init(&turn_attr) == 0) {
+            if (pthread_attr_setstacksize(&turn_attr, HU_AGENT_TURN_THREAD_STACK_BYTES) == 0)
+                turn_attr_p = &turn_attr;
+            else
+                pthread_attr_destroy(&turn_attr);
+        }
+
         pthread_t tid;
-        if (pthread_create(&tid, NULL, agent_turn_thread, tctx) != 0) {
+        int turn_rc = pthread_create(&tid, turn_attr_p, agent_turn_thread, tctx);
+        if (turn_attr_p)
+            pthread_attr_destroy(turn_attr_p);
+        if (turn_rc != 0) {
             hu_log_error("error", NULL, "failed to start agent thread");
             alloc->free(alloc->ctx, tctx, sizeof(*tctx));
             if (line_owned)
