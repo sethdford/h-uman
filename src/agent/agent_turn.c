@@ -5571,6 +5571,44 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             msgs = all;
             msgs_count = total;
 
+            /* Oversized multimodal guard (2026-07-25 retry-amplification fix).
+             *
+             * iMessage attachments arrive as base64 image content parts up to
+             * HU_MULTIMODAL_MAX_IMAGE_SIZE (5 MiB -> ~6.7 MiB base64). Inlining
+             * one into the request body ballooned it to 4-6 MB, which the
+             * single-threaded local model chokes on; the agent then re-POSTs
+             * that same giant body on every transport retry AND cloud fallback,
+             * wedging the server (the observed doom loop). The A1b budget below
+             * only summed content_len and was blind to content_parts, so it
+             * never trimmed these. Drop any content-part payload heavier than
+             * the per-part cap BEFORE dispatch; the message text is preserved.
+             *
+             * SAFE: msgs content_parts alias persistent history (see
+             * hu_context_format_messages) — the helper only NULLs the turn-local
+             * copy's pointer, never freeing the aliased buffers. Runs on every
+             * loop iteration, so transport retries + fallback get the same lean
+             * request (idempotent -> the retry body never grows). */
+            {
+                size_t max_part_bytes = (size_t)2 << 20; /* 2 MiB default */
+                const char *cap_env = getenv("HU_TURN_MAX_INLINE_PART_BYTES");
+                if (cap_env && cap_env[0]) {
+                    char *cap_end = NULL;
+                    unsigned long cap_v = strtoul(cap_env, &cap_end, 10);
+                    if (cap_end != cap_env && cap_v >= 4096)
+                        max_part_bytes = (size_t)cap_v;
+                }
+                size_t parts_dropped =
+                    hu_chat_messages_drop_oversized_parts(msgs, msgs_count, max_part_bytes);
+                if (parts_dropped > 0) {
+                    static atomic_bool warned_oversized_parts = false;
+                    hu_log_warn_once(&warned_oversized_parts, "agent_turn", NULL,
+                                     "dropped oversized multimodal content part(s) from %zu "
+                                     "message(s) to prevent request-body amplification "
+                                     "(per-part cap %zu bytes)",
+                                     parts_dropped, max_part_bytes);
+                }
+            }
+
             /* A1b — message-history budget cap (2026-05-19).
              *
              * A1 capped the system_prompt at 16 KB, but the messages
@@ -5594,13 +5632,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 const size_t HISTORY_BUDGET = 20 * 1024;
                 size_t total_bytes = 0;
                 for (size_t i = 0; i < msgs_count; i++)
-                    total_bytes += msgs[i].content_len;
+                    total_bytes += hu_chat_message_estimate_bytes(&msgs[i]);
                 if (total_bytes > HISTORY_BUDGET) {
                     /* Drop oldest non-system, non-last messages first. */
                     size_t dropped = 0;
                     size_t drop_idx = 1; /* start after system */
                     while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1) {
-                        total_bytes -= msgs[drop_idx].content_len;
+                        total_bytes -= hu_chat_message_estimate_bytes(&msgs[drop_idx]);
                         drop_idx++;
                         dropped++;
                     }
