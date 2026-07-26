@@ -289,22 +289,30 @@ def test_real_path_suffix_and_symlink():
     with tempfile.TemporaryDirectory() as td:
         tmpdir = Path(td)
 
-        # Fixture DB + outcomes JSONL (one resolvable user/assistant pair).
+        # Fixture DB + outcomes JSONL. TWO resolvable user/assistant pairs:
+        # this test is about base-suffix/symlink routing, not batch size, but
+        # train_from_outcomes now refuses anything under
+        # MIN_TRAINABLE_OUTCOMES (a 1-outcome batch cannot be split into
+        # train/valid, so its verdict is INCONCLUSIVE before it runs).
         db_path = tmpdir / "memory.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, "
                      "session_id TEXT, role TEXT, content BLOB, created_at INTEGER)")
-        prompt, reply = "you up?", "yeah what's good"
-        conn.execute("INSERT INTO messages VALUES (1,'s','user',?,1)", (prompt,))
-        conn.execute("INSERT INTO messages VALUES (2,'s','assistant',?,2)", (reply,))
+        pairs = [("you up?", "yeah what's good"),
+                 ("still on for tomorrow?", "yep 10am works")]
+        for i, (p, r) in enumerate(pairs):
+            conn.execute("INSERT INTO messages VALUES (?,'s','user',?,?)",
+                         (i * 2 + 1, p, i * 2 + 1))
+            conn.execute("INSERT INTO messages VALUES (?,'s','assistant',?,?)",
+                         (i * 2 + 2, r, i * 2 + 2))
         conn.commit()
         conn.close()
         jsonl = tmpdir / "outcomes.jsonl"
-        jsonl.write_text(json.dumps({
-            "t": 1, "l": 10, "pt": 5, "ct": 5, "m": 1, "a": 1, "g": 0,
-            "ph": tl.fnv1a_64(prompt.encode()),
-            "rh": tl.fnv1a_64(reply.encode()),
-        }) + "\n")
+        jsonl.write_text("".join(json.dumps({
+            "t": i + 1, "l": 10, "pt": 5, "ct": 5, "m": 1, "a": 1, "g": 0,
+            "ph": tl.fnv1a_64(p.encode()),
+            "rh": tl.fnv1a_64(r.encode()),
+        }) + "\n" for i, (p, r) in enumerate(pairs)))
 
         requested_out = tmpdir / "auto-42"
 

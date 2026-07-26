@@ -77,5 +77,84 @@ ok("None val_loss routes to INCONCLUSIVE verdict",
 ok("INCONCLUSIVE blocks the swap (returns 1)",
    "if verdict == 'INCONCLUSIVE':" in src_main)
 
+# ── 4. sub-minimum batches are refused BEFORE any GPU is spent ───────────
+# "Refuse early" has three separable claims, and the cheap one (non-zero rc)
+# is the least important:
+#   - the trainer is never invoked at all (that is the "early" part)
+#   - no adapters.safetensors is left behind (nothing for the C dispatcher to
+#     hot-swap; lora_training_runner.c:407 POSTs /v1/adapters/swap on exit 0
+#     with NO check on adapter contents, so a stray empty adapter here would
+#     strip the persona weights off the live mlx-server)
+#   - the exit code is non-zero, so that dispatcher bails with HU_ERR_IO
+import sqlite3
+from types import SimpleNamespace
+
+with tempfile.TemporaryDirectory() as td:
+    tmp = Path(td)
+    db = tmp / "memory.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, "
+                 "role TEXT, content BLOB, created_at INTEGER)")
+    _p, _r = "you up?", "yeah what's good"
+    conn.execute("INSERT INTO messages VALUES (1,'s','user',?,1)", (_p,))
+    conn.execute("INSERT INTO messages VALUES (2,'s','assistant',?,2)", (_r,))
+    conn.commit()
+    conn.close()
+
+    # Exactly ONE outcome — the degenerate case: index 0 is the only index and
+    # 0 % 10 == 0, so the 90/10 split leaves the train side empty.
+    jsonl = tmp / "outcomes.jsonl"
+    jsonl.write_text(json.dumps({
+        "t": 1, "l": 10, "pt": 5, "ct": 5, "m": 1, "a": 1, "g": 0,
+        "ph": training_loop.fnv1a_64(_p.encode()),
+        "rh": training_loop.fnv1a_64(_r.encode()),
+    }) + "\n")
+
+    out = tmp / "auto-99"
+    calls = []
+
+    def _tripwire(*a, **kw):
+        calls.append((a, kw))
+        raise AssertionError("run_mlx_lora_training must not be reached")
+
+    _saved = {k: getattr(training_loop, k) for k in (
+        "resolve_serving_base_model", "resolve_serving_adapter",
+        "run_mlx_lora_training", "append_lineage_entry",
+        "dpo_results", "adapter_registry")}
+    try:
+        training_loop.resolve_serving_base_model = (
+            lambda **kw: ("mlx-community/GLM-4.5-Air-4bit", "test-injected"))
+        training_loop.resolve_serving_adapter = (
+            lambda **kw: (tmp / "serving-ref", "test-injected"))
+        training_loop.run_mlx_lora_training = _tripwire
+        training_loop.append_lineage_entry = lambda *a, **kw: None
+        training_loop.dpo_results = SimpleNamespace(
+            append_result=lambda *a, **kw: None,
+            load_recent=lambda *a, **kw: [],
+            regression_verdict=lambda *a, **kw: "PASS",
+            get_git_commit=lambda: "test",
+            parse_mlx_losses=lambda o: (None, None))
+        training_loop.adapter_registry = SimpleNamespace(
+            record_training=lambda **kw: None)
+
+        rc = training_loop.train_from_outcomes(jsonl, out, db, dry_run=False)
+    finally:
+        for _k, _v in _saved.items():
+            setattr(training_loop, _k, _v)
+
+    ok("1-outcome batch exits non-zero (C dispatcher bails, no swap)", rc != 0)
+    ok("trainer never invoked — no GPU spent", calls == [])
+    # Both the requested and base-suffixed paths: neither may hold something
+    # the swap could pick up.
+    ok("no swappable adapter left at requested path",
+       not (out / "adapters.safetensors").exists())
+    ok("no swappable adapter left at suffixed path",
+       not any(p.name == "adapters.safetensors" for p in tmp.rglob("*")))
+
+    # MIN_TRAINABLE_OUTCOMES is the floor for "splittable", so 2 must be the
+    # first accepted size — pin the boundary, not just the rejected side.
+    ok("minimum is the split floor (2), not an arbitrary number",
+       training_loop.MIN_TRAINABLE_OUTCOMES == 2)
+
 print(("FAILED" if fails else "PASSED") + f" ({fails} failures)")
 sys.exit(1 if fails else 0)

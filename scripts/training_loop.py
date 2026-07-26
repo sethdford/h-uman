@@ -59,6 +59,14 @@ HISTORY_PATH = REPO_ROOT / "data" / "training_history.json"
 DEFAULT_BASE_MODEL = "mlx-community/gemma-4-31b-it-4bit"
 HUMAN_CONFIG_PATH = Path.home() / ".human" / "config.json"
 
+# Fewest resolved outcomes worth spending GPU on. Below this the 90/10
+# train/valid split in run_mlx_lora_training cannot produce a valid.jsonl, so
+# mlx_lm reports no Val loss, val_loss parses as None, and the regression gate
+# returns INCONCLUSIVE — a verdict known before the run starts. Raise this if
+# a 1-sample valid set turns out to be too thin to judge against (it is the
+# floor for "splittable", not a claim about statistical adequacy).
+MIN_TRAINABLE_OUTCOMES = 2
+
 
 def run_script(script: str, args: list[str] | None = None, check: bool = True) -> int:
     cmd = [sys.executable, str(SCRIPTS / script)]
@@ -904,6 +912,12 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
         print(f"  No resolved outcomes to train on")
         return 0, None, None
 
+    # NOTE: callers that reach here have already passed the
+    # MIN_TRAINABLE_OUTCOMES guard in train_from_outcomes. This len == 0 check
+    # stays as a defensive floor for direct callers (tests import this
+    # function directly), but a refusal here CANNOT block the adapter swap —
+    # see the placement note on that guard for why it has to live upstream.
+
     # Build SFT batch
     sft_batch = write_sft_batch_jsonl(resolved)
 
@@ -1141,6 +1155,33 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
             "source_jsonl": str(source_jsonl),
         })
         return 0
+
+    # Refuse batches too small to train on, BEFORE spending any GPU. At
+    # len(resolved) == 1 the 90/10 split in run_mlx_lora_training degenerates:
+    # index 0 is the only index and 0 % 10 == 0, so the train side comes out
+    # empty and the tiny-batch fallback drops the val split entirely. mlx_lm
+    # then emits no "Val loss" line, val_loss parses as None, and the
+    # regression gate returns INCONCLUSIVE — an outcome fully determined
+    # before the run starts, bought with minutes-to-hours of GLM-4.5-Air GPU.
+    #
+    # Two placement constraints make this the only correct site:
+    #
+    #   1. It must be HERE, not in run_mlx_lora_training. That function's
+    #      caller below treats any non-zero rc as "training failed", writes a
+    #      ZERO-TENSOR dry-run adapter over adapters.safetensors, and returns
+    #      0 regardless — so a refusal down there is laundered into success.
+    #   2. It must return NON-ZERO. main() does sys.exit(train_from_outcomes(...)),
+    #      and lora_training_runner.c:407 POSTs /v1/adapters/swap on any
+    #      exit 0 with no check on adapter contents. Exiting 0 here would hot-
+    #      swap an empty adapter onto the live mlx-server, stripping the
+    #      persona weights off production. Non-zero makes the C dispatcher
+    #      bail with HU_ERR_IO before it reaches the swap.
+    if len(resolved) < MIN_TRAINABLE_OUTCOMES:
+        print(f"  REFUSED: {len(resolved)} resolved outcome(s) is below the "
+              f"{MIN_TRAINABLE_OUTCOMES}-outcome minimum for a train/valid split.")
+        print(f"  No adapter could be judged, so none was trained and no swap "
+              f"will be attempted. Exiting non-zero so the C dispatcher stops here.")
+        return 1
 
     # Phase C3 — real LoRA training via mlx_lm.lora against the SERVING
     # base model (resolved above), producing a real rank-8 LoRA adapter.
