@@ -333,13 +333,53 @@ def test_mlx_offline_is_soft_failure(tmpdir: Path):
         gateway_srv.shutdown()
 
 
+def test_db_fallback_synthesizes_rehydratable_records(tmp: Path):
+    """Ring-empty fallback: records carry REAL FNV hashes of the stored
+    text (so training_loop rehydration works), pass the selection policy,
+    and respect the since_ms watermark. Pins the 2026-07-25 first-dispatch
+    starvation: in-memory ring empties at restart, trigger fires at boot."""
+    import sqlite3
+    import m3_outcome_driver as drv
+    from training_loop import fnv1a_64
+
+    db = tmp / "memory.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE production_outcomes("
+                 "id INTEGER PRIMARY KEY, channel TEXT, target TEXT,"
+                 "prompt TEXT, chosen TEXT, send_timestamp INTEGER)")
+    rows = [("imessage", "+15550001111", "hey whatup", "not much, u?", 1000),
+            ("imessage", "+15550001111", "did u see the game", "yeah wild ending", 2000),
+            ("imessage", "+15550002222", None, "orphan chosen", 3000),       # skipped: no prompt
+            ("imessage", "+15550002222", "old row", "old reply", 10)]        # below watermark
+    conn.executemany("INSERT INTO production_outcomes(channel,target,prompt,chosen,"
+                     "send_timestamp) VALUES (?,?,?,?,?)", rows)
+    conn.commit(); conn.close()
+
+    out = drv.load_db_fallback_outcomes(db, since_ms=500 * 1000)
+    _ok("fallback yields only complete rows above watermark", len(out) == 2)
+    _ok("ph is real FNV of prompt bytes",
+           out[0]["ph"] == fnv1a_64(b"hey whatup"))
+    _ok("rh is real FNV of chosen bytes",
+           out[0]["rh"] == fnv1a_64(b"not much, u?"))
+    _ok("records marked with provenance",
+           all(o["src"] == "production_outcomes" for o in out))
+    _ok("watermark honored (t oldest-first, all > since)",
+           out[0]["t"] == 1000 * 1000 and all(o["t"] > 500 * 1000 for o in out))
+    selected = drv.select_training_outcomes(out)
+    _ok("synthesized records pass selection policy", len(selected) == 2)
+
+    _ok("missing db returns empty list",
+           drv.load_db_fallback_outcomes(tmp / "nope.db", 0) == [])
+
+
 def main():
     print("M3 outcome driver e2e tests")
 
     for test_fn in [test_full_loop_with_simulate_train,
                     test_below_threshold_skips_train,
                     test_dedup_across_runs,
-                    test_mlx_offline_is_soft_failure]:
+                    test_mlx_offline_is_soft_failure,
+                    test_db_fallback_synthesizes_rehydratable_records]:
         with tempfile.TemporaryDirectory() as d:
             test_fn(Path(d))
 

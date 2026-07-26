@@ -111,6 +111,62 @@ def poll_outcomes(gateway: str, since_ms: int, turn_kind: int = 1,
     return out
 
 
+def load_db_fallback_outcomes(db_path: Path, since_ms: int) -> list[dict]:
+    """Synthesize ring-shaped outcome records from production_outcomes.
+
+    The gateway's outcome ring is in-memory and empties on every daemon
+    restart, but the pair-count training trigger fires right AFTER restart
+    (pair hydration runs at boot) — so the first dispatch always found an
+    empty ring and starved (first observed on the first-ever auto-dispatch,
+    2026-07-25). production_outcomes is the DURABLE record of the same
+    events, including the actual prompt/chosen text, so we can synthesize
+    records that flow through the existing selection + rehydration
+    unchanged: "ph"/"rh" are real FNV-1a-64 hashes of the stored text
+    (the same hashing training_loop applies to messages.content, verified
+    141/346 rows fully rehydratable on 2026-07-25).
+
+    Telemetry-only fields we cannot recover are filled with neutral
+    IN-RANGE values, marked by "src":"production_outcomes": these rows were
+    actually SENT, so guard=PASS by construction; latency is set mid-range
+    purely to pass the cached/outlier filters.
+    """
+    import sqlite3
+    from training_loop import fnv1a_64  # sibling script; import-safe (defs only)
+    if not db_path or not Path(db_path).exists():
+        return []
+    conn = sqlite3.connect(str(db_path))
+    conn.text_factory = bytes  # tolerate non-UTF8 rows, hash raw bytes
+    try:
+        rows = conn.execute(
+            "SELECT prompt, chosen, target, send_timestamp FROM production_outcomes "
+            "WHERE prompt IS NOT NULL AND chosen IS NOT NULL "
+            "AND send_timestamp * 1000 > ? ORDER BY send_timestamp ASC",
+            (since_ms,)).fetchall()
+    finally:
+        conn.close()
+    out: list[dict] = []
+    for prompt_b, chosen_b, target_b, ts in rows:
+        prompt = bytes(prompt_b) if prompt_b else b""
+        chosen = bytes(chosen_b) if chosen_b else b""
+        if not prompt or not chosen:
+            continue
+        out.append({
+            "t": int(ts) * 1000,
+            "ph": fnv1a_64(prompt),
+            "rh": fnv1a_64(chosen),
+            "ch": fnv1a_64(bytes(target_b)) if target_b else 0,
+            "pt": max(1, len(prompt) // 4),
+            "ct": max(1, len(chosen) // 4),
+            "l": 1000,            # neutral in-range; real latency not stored
+            "m": "db-fallback",
+            "a": 0,
+            "g": GUARD_PASS,      # sent messages passed the guard by construction
+            "k": 1,               # channel messages = stream turn kind
+            "src": "production_outcomes",
+        })
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Selection policy — USER CONTRIBUTION GOES HERE
 # ─────────────────────────────────────────────────────────────────────
@@ -367,6 +423,20 @@ def main() -> int:
                          "instead of running real LoRA training (for testing)")
     ap.add_argument("--mlx-url", default=MLX_SERVER_URL,
                     help="MLX server URL for /v1/adapters/swap (default %(default)s)")
+    ap.add_argument("--db-fallback", type=Path,
+                    default=Path.home() / ".human/memory.db",
+                    help="When the gateway ring returns 0 outcomes, synthesize "
+                         "outcome records from this DB's production_outcomes "
+                         "table instead (default %(default)s). The ring is "
+                         "IN-MEMORY and empties on every daemon restart, while "
+                         "the pair-count trigger fires right AFTER restart — "
+                         "without this fallback the first dispatch always "
+                         "starves (observed 2026-07-25, first-ever auto-"
+                         "dispatch). Records carry real FNV-1a hashes of the "
+                         "stored prompt/chosen text so training_loop's "
+                         "rehydration works unchanged.")
+    ap.add_argument("--no-db-fallback", action="store_true",
+                    help="Disable the production_outcomes fallback.")
     args = ap.parse_args()
 
     state = load_state()
@@ -379,6 +449,12 @@ def main() -> int:
     raw = poll_outcomes(args.gateway, since_ms, args.turn_kind, args.limit)
     poll_ms = int((time.time() - t0) * 1000)
     print(f"[m3-driver] fetched {len(raw)} outcomes in {poll_ms}ms")
+
+    if not raw and not args.no_db_fallback:
+        raw = load_db_fallback_outcomes(args.db_fallback, since_ms)
+        if raw:
+            print(f"[m3-driver] ring empty — DB fallback yielded {len(raw)} "
+                  f"outcome(s) from production_outcomes ({args.db_fallback})")
 
     if not raw:
         print("[m3-driver] no new outcomes — exit")
