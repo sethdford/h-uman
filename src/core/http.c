@@ -7,6 +7,41 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Maximum serialized request body we will POST to any provider. Guards against
+ * the retry-amplification doom loop (2026-07-25): an oversized body — e.g. a
+ * multi-MB base64 image content part inlined from an iMessage attachment — that
+ * a single-threaded local model chokes on and that the agent then re-POSTs on
+ * every transport retry AND cloud fallback, wedging the server. A transport
+ * failure (connection refused / peer closed mid-body) is NEVER fixed by sending
+ * a bigger body, so we refuse to send one on ANY path. Overridable via
+ * HU_HTTP_MAX_BODY_BYTES (min 4096). Default 3 MiB: comfortably above a normal
+ * text turn (a few KB) plus a modest inline image, well below the 4-6 MB
+ * pathological bodies that trigger the loop. */
+size_t hu_http_max_provider_body_bytes(void) {
+    const char *env = getenv("HU_HTTP_MAX_BODY_BYTES");
+    if (env && env[0]) {
+        char *end = NULL;
+        unsigned long v = strtoul(env, &end, 10);
+        if (end != env && v >= 4096)
+            return (size_t)v;
+    }
+    return (size_t)3 << 20; /* 3 MiB */
+}
+
+/* True if `body_len` is within the outbound cap. On the over-cap path it logs
+ * once per offending request (no secrets: length + URL only). Callers must
+ * reject the POST when this returns false. */
+static bool hu_http_body_within_cap(const char *url, size_t body_len) {
+    size_t cap = hu_http_max_provider_body_bytes();
+    if (body_len <= cap)
+        return true;
+    hu_log_error("http", NULL,
+                 "refusing oversized POST body (%zu bytes > cap %zu bytes) to %s — guards "
+                 "against request-amplification doom loop; set HU_HTTP_MAX_BODY_BYTES to override",
+                 body_len, cap, url ? url : "(null)");
+    return false;
+}
+
 #if HU_IS_TEST
 /* In test mode, skip real HTTP and return mock response */
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
@@ -509,12 +544,22 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
 
 hu_error_t hu_http_post_json(hu_allocator_t *alloc, const char *url, const char *auth_header,
                              const char *json_body, size_t json_body_len, hu_http_response_t *out) {
+    if (!hu_http_body_within_cap(url, json_body_len)) {
+        if (out)
+            memset(out, 0, sizeof(*out));
+        return HU_ERR_INVALID_ARGUMENT;
+    }
     return hu_http_post_json_impl(alloc, url, auth_header, NULL, json_body, json_body_len, out);
 }
 
 hu_error_t hu_http_post_json_ex(hu_allocator_t *alloc, const char *url, const char *auth_header,
                                 const char *extra_headers, const char *json_body,
                                 size_t json_body_len, hu_http_response_t *out) {
+    if (!hu_http_body_within_cap(url, json_body_len)) {
+        if (out)
+            memset(out, 0, sizeof(*out));
+        return HU_ERR_INVALID_ARGUMENT;
+    }
     return hu_http_post_json_impl(alloc, url, auth_header, extra_headers, json_body, json_body_len,
                                   out);
 }
@@ -662,6 +707,8 @@ hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, cons
                                     const char *extra_headers, const char *json_body,
                                     size_t json_body_len, hu_http_stream_cb callback,
                                     void *userdata) {
+    if (!hu_http_body_within_cap(url, json_body_len))
+        return HU_ERR_INVALID_ARGUMENT;
     return hu_http_post_json_stream_impl(alloc, url, auth_header, extra_headers, json_body,
                                          json_body_len, callback, userdata);
 }
