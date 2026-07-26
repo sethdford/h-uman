@@ -302,6 +302,45 @@ static void decide_null_args(void) {
     HU_ASSERT_EQ(res.count, (size_t)0);
 }
 
+/* ── Contractions must not evade the clause-word blocklist ──────────────
+ * 2026-07-26 15:05 the daemon sent Seth's SISTER:
+ *   "hey how are you doing with don't understand provide?"
+ * She replied "Turn AI off".
+ *
+ * Every contraction in topic_clause_words is spelled apostrophe-less
+ * ("dont","cant","wont","hes","shes","theyre") but the word-boundary scan
+ * treats an apostrophe AS a boundary, so real "don't" tokenized to
+ * "don" + "t" and matched neither entry. Those entries only ever fired when
+ * the bare prefix was independently listed ("I'm" via "i", "what's" via
+ * "what", "it's" via "it"); don't / won't / he's / she's / they're had no
+ * backstop and sailed through. */
+static void topic_contractions_are_blocked(void) {
+    /* THE incident string. */
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("don't understand provide", 24));
+    /* The apostrophe-less spelling was always blocked — the pair is the bug. */
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("dont understand provide", 23));
+    /* The family that had no bare-prefix backstop. */
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("won't work", 10));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("he's late", 9));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("she's here", 10));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("they're coming", 14));
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("can't make it", 13));
+}
+
+static void topic_curly_apostrophe_is_blocked(void) {
+    /* iMessage autocorrects to U+2019, so the ASCII-only fold would miss it. */
+    const char *curly = "don\xe2\x80\x99t understand provide";
+    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(curly, strlen(curly)));
+}
+
+static void topic_real_events_still_send_after_the_fold(void) {
+    /* The fix must not over-block: these are the whole point of the feature. */
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("interview", 9));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("dentist appointment", 19));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("internet installers", 19));
+    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("parent teacher conference", 25));
+}
+
 void run_contextual_proactive_tests(void) {
     HU_TEST_SUITE("contextual_proactive");
     HU_RUN_TEST(mode_parse_defaults_off);
@@ -326,4 +365,7 @@ void run_contextual_proactive_tests(void) {
     HU_RUN_TEST(shadow_summary_empty_result_is_zero);
     HU_RUN_TEST(mode_str_labels);
     HU_RUN_TEST(decide_null_args);
+    HU_RUN_TEST(topic_contractions_are_blocked);
+    HU_RUN_TEST(topic_curly_apostrophe_is_blocked);
+    HU_RUN_TEST(topic_real_events_still_send_after_the_fold);
 }

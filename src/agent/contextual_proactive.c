@@ -333,8 +333,45 @@ bool hu_contextual_proactive_topic_is_sendable(const char *topic, size_t len) {
     if (words == 0 || words > 4)
         return false;
 
+    /* Apostrophe-FOLDED copy for the clause-word scan.
+     *
+     * Every contraction in topic_clause_words is spelled without an apostrophe
+     * ("dont", "cant", "wont", "hes", "shes", "theyre", "youre", "im", ...)
+     * while hu_str_contains_word_ci_n treats an apostrophe as a word boundary.
+     * So real text "don't" tokenized to "don" + "t" and matched NEITHER, and the
+     * entry that exists to catch it never fired. Those entries only ever worked
+     * by accident, when the bare prefix was independently listed ("I'm" caught
+     * by "i", "what's" by "what", "it's" by "it"); "don't", "won't", "he's",
+     * "she's" and "they're" had no such backstop and passed the gate.
+     *
+     * That is how "hey how are you doing with don't understand provide?" reached
+     * Seth's sister on 2026-07-26 15:05 — she replied "Turn AI off". Folding the
+     * apostrophe out makes "don't" read as "dont" and the existing list work as
+     * written. Same class as ~/.claude/rules/substring-classifier-pitfalls.md:
+     * the tokenizer and the keyword list disagreed about word shape. */
+    char folded[49]; /* len is <= 48, checked above */
+    size_t folded_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = topic[i];
+        if (c == '\'' || (unsigned char)c == 0x92) /* ASCII and CP-1252 curly */
+            continue;
+        folded[folded_len++] = c;
+    }
+    /* UTF-8 right single quote (U+2019 = E2 80 99) — drop the 3-byte sequence. */
+    size_t clean_len = 0;
+    for (size_t i = 0; i < folded_len;) {
+        if (i + 2 < folded_len && (unsigned char)folded[i] == 0xE2 &&
+            (unsigned char)folded[i + 1] == 0x80 && (unsigned char)folded[i + 2] == 0x99) {
+            i += 3;
+            continue;
+        }
+        folded[clean_len++] = folded[i++];
+    }
+    folded_len = clean_len;
+
     for (size_t w = 0; topic_clause_words[w]; w++) {
-        if (hu_str_contains_word_ci_n(topic, len, topic_clause_words[w]))
+        if (hu_str_contains_word_ci_n(topic, len, topic_clause_words[w]) ||
+            hu_str_contains_word_ci_n(folded, folded_len, topic_clause_words[w]))
             return false;
     }
     return true;
