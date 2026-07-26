@@ -28,6 +28,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -48,6 +50,14 @@ ADAPTER_BASE = Path.home() / ".human" / "training-data" / "adapters"
 ADAPTER_PATH = ADAPTER_BASE / "seth-lora"
 FINETUNE_DIR = Path.home() / ".human" / "training-data" / "finetune"
 HISTORY_PATH = REPO_ROOT / "data" / "training_history.json"
+
+# C3 serving-base resolution (2026-07-26). Production flipped to
+# GLM-4.5-Air-4bit on 2026-07-26; a hardcoded gemma base here meant every
+# auto-training run produced adapters that cannot load on the serving model.
+# The default remains gemma only as the last-resort fallback when neither a
+# live mlx-server nor config.json can be consulted.
+DEFAULT_BASE_MODEL = "mlx-community/gemma-4-31b-it-4bit"
+HUMAN_CONFIG_PATH = Path.home() / ".human" / "config.json"
 
 
 def run_script(script: str, args: list[str] | None = None, check: bool = True) -> int:
@@ -658,15 +668,224 @@ def write_sft_batch_jsonl(resolved: list[dict]) -> str:
     return str(tmp_batch)
 
 
+def production_mlx_port(env: dict | None = None) -> str:
+    """Port of the PRODUCTION mlx-server — the daemon's post-train hot-swap
+    target. Mirrors lora_training_runner.c resolve_mlx_base_url():
+    HU_MLX_BASE_URL env override, else 8741.
+
+    This filter matters: multiple mlx-servers run concurrently (observed
+    2026-07-26: gemma-8bit realtime on :8747 alongside production GLM on
+    :8741), and `ps` order is arbitrary — first-match would train against
+    whichever server happened to be listed first.
+    """
+    env = os.environ if env is None else env
+    url = env.get("HU_MLX_BASE_URL", "")
+    m = re.search(r"//[^/]*:(\d+)", url)
+    return m.group(1) if m else "8741"
+
+
+def _iter_production_mlx_server_tokens(ps_output: str, port: str):
+    """Yield shlex-token lists for mlx-server processes on `port` only.
+    A process with no --port flag is assumed to be on the default 8741."""
+    for line in ps_output.splitlines():
+        if "mlx-server" not in line:
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        line_port = "8741"
+        if "--port" in tokens:
+            try:
+                line_port = tokens[tokens.index("--port") + 1]
+            except IndexError:
+                continue
+        if line_port == port:
+            yield tokens
+
+
+def resolve_serving_base_model(
+    ps_output: str | None = None,
+    config_path: Path = HUMAN_CONFIG_PATH,
+    override: str | None = None,
+) -> tuple[str, str]:
+    """Resolve the base model that is ACTUALLY serving, not a hardcoded name.
+
+    Pattern copied from scripts/eval_fidelity_nightly.py (f66863e15): an
+    adapter's delta is only meaningful against the base it was trained on.
+    Training gemma while :8741 serves GLM produces dead-weight adapters
+    (gemma-shaped LoRA cannot load on GLM).
+
+    Priority:
+      1. Explicit --model-id override — operator knows best.
+      2. The live mlx-server process's --model argument — ground truth for
+         what is serving right now.
+      3. config.json mlx_local.model — what will serve after next restart.
+      4. DEFAULT_BASE_MODEL as last resort.
+
+    Args:
+        ps_output: process listing to scan (injectable for tests);
+                   None = run `ps ax -o command` here
+        config_path: path to ~/.human/config.json (injectable for tests)
+        override: explicit model id from --model-id (wins outright)
+
+    Returns:
+        (model_id, source_description)
+    """
+    if override:
+        return override, "explicit --model-id"
+
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
+        try:
+            candidate = tokens[tokens.index("--model") + 1]
+        except (ValueError, IndexError):
+            continue
+        if candidate:
+            return candidate, f"live mlx-server process --model (port {port})"
+
+    try:
+        config = json.loads(Path(config_path).read_text())
+        raw = config.get("mlx_local", {}).get("model")
+        if raw:
+            return raw, "config.json mlx_local.model"
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return DEFAULT_BASE_MODEL, "hardcoded default (no live server, no config)"
+
+
+def resolve_serving_adapter(
+    ps_output: str | None = None,
+    config_path: Path = HUMAN_CONFIG_PATH,
+) -> tuple[Path | None, str]:
+    """Resolve the adapter that is ACTUALLY serving (reference for lineage).
+
+    Same priority as eval_fidelity_nightly.resolve_serving_adapter: live
+    mlx-server --adapter-path first, then config.json
+    personalization.lora_adapter_path. Each candidate must exist on disk.
+
+    Returns (adapter_path, source_description); (None, reason) when
+    unresolvable.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
+        try:
+            candidate = Path(tokens[tokens.index("--adapter-path") + 1])
+        except (ValueError, IndexError):
+            continue
+        if candidate.exists():
+            return (candidate,
+                    f"live mlx-server process --adapter-path (port {port})")
+
+    try:
+        config = json.loads(Path(config_path).read_text())
+        raw = config.get("personalization", {}).get("lora_adapter_path")
+        if raw:
+            candidate = Path(raw).expanduser()
+            if candidate.exists():
+                return (candidate, "config.json personalization.lora_adapter_path")
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return (None, "no live mlx-server and no usable personalization.lora_adapter_path")
+
+
+def base_model_tag(model_id: str) -> str:
+    """Short tag identifying the base-model family, for adapter naming.
+
+    auto-<ts>-glm vs auto-<ts>-gemma lets the registry and promotion
+    tooling refuse cross-base swaps by inspecting the name alone. Model
+    ids are structural strings, so plain substring matching is safe here
+    (per ~/.claude/rules/substring-classifier-pitfalls.md scope).
+    """
+    low = model_id.lower()
+    if "glm" in low:
+        return "glm"
+    if "gemma" in low:
+        return "gemma"
+    tail = low.rsplit("/", 1)[-1]
+    tag = re.sub(r"[^a-z0-9]+", "-", tail).strip("-")
+    return tag[:24] or "unknown"
+
+
+def suffix_adapter_name(adapter_out: Path, tag: str) -> Path:
+    """Append -<tag> to the adapter directory name (idempotent)."""
+    if adapter_out.name.endswith(f"-{tag}"):
+        return adapter_out
+    return adapter_out.with_name(f"{adapter_out.name}-{tag}")
+
+
+def training_config_for_model(model: str, iters: int, scale: float) -> dict:
+    """Build the mlx_lm.lora YAML config for the given base model.
+
+    mlx_lm only honors the NESTED `lora_parameters` form. The old flat
+    lora_rank/lora_alpha/lora_scale keys were silently IGNORED, so scale
+    fell back to mlx_lm's catastrophic 20.0 default — the proven-e2e run
+    auto-manual-1785053731 trained at scale 20.0 and is dead weight
+    (renamed *-INVALID-scale20-gemma on disk). Per
+    ~/.claude/rules/lora-scale-default-or-die.md the scale must be pinned
+    here AND verified in adapter_config.json after every real run.
+    """
+    config = {
+        "model": model,
+        "train": True,
+        "fine_tune_type": "lora",
+        "lora_parameters": {"rank": 8, "scale": scale, "dropout": 0.0},
+        "num_layers": 8,
+        "batch_size": 1,
+        "iters": iters,
+        "learning_rate": 1e-5,
+        "steps_per_report": 50,
+        "max_seq_length": 2048,
+        "optimizer": "adamw",
+    }
+    if base_model_tag(model) == "glm":
+        # Mirror the proven GLM recipe (glm-v5-config.yaml, adapter
+        # seth-glm-air-v5-20260725-093742: val 7.08→2.94, 0.88 it/s,
+        # peak 62.9 GB): grad checkpointing keeps the 106B MoE inside
+        # memory, plain adam + fixed seed match the validated run.
+        config.update({
+            "grad_checkpoint": True,
+            "optimizer": "adam",
+            "steps_per_report": 10,
+            "seed": 42,
+        })
+    return config
+
+
 def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
-                          iters: int = 500, scale: float = 2.0) -> Tuple[int, Optional[float], Optional[float]]:
+                          iters: int = 500, scale: float = 2.0,
+                          model: str | None = None) -> Tuple[int, Optional[float], Optional[float]]:
     """Run mlx_lm.lora training on the resolved outcomes.
 
     Args:
         resolved: list of {outcome, prompt_text, response_text} dicts
         adapter_out: output path for the adapter directory/file
         iters: number of training iterations (default 500, 10 for tests)
-        scale: LoRA scale multiplier (default 2.0, per mlx_lm default)
+        scale: LoRA scale multiplier (default 2.0 — mlx_lm's own default is
+               the catastrophic 20.0, see lora-scale-default-or-die.md)
+        model: HuggingFace base model id; None falls back to
+               DEFAULT_BASE_MODEL (callers should pass the SERVING base
+               from resolve_serving_base_model)
 
     Returns: tuple of (exit_code, train_loss, val_loss)
         exit_code: process exit code (0 = success)
@@ -708,35 +927,14 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     if _val:
         (train_data_dir / "valid.jsonl").write_text("\n".join(_val) + "\n")
 
-    # Model and hyperparameters (per US-8 design)
-    model = "mlx-community/gemma-4-31b-it-4bit"
-    rank = 8
-    num_layers = 8  # Number of LoRA layers to train
-    batch_size = 1
-    learning_rate = 1e-5
-    max_seq_length = 2048
-
-    # Create YAML config file for mlx_lm
-    # mlx_lm requires rank and scale to be in a config file
-    config = {
-        "model": model,
-        "train": True,
-        "fine_tune_type": "lora",
-        # NESTED lora_parameters is the schema mlx_lm 0.31.x actually reads.
-        # The previous flat lora_rank/lora_alpha/lora_scale keys were silently
-        # IGNORED, so every run inherited mlx_lm's catastrophic scale=20.0
-        # default (rules/lora-scale-default-or-die.md) — caught 2026-07-26 when
-        # the recovery run's adapter_config.json read scale 20.0 despite the
-        # yaml saying 2.0. verify_adapter_scale() below now hard-fails on drift.
-        "lora_parameters": {"rank": rank, "scale": scale, "dropout": 0.0},
-        "num_layers": num_layers,
-        "batch_size": batch_size,
-        "iters": iters,
-        "learning_rate": learning_rate,
-        "steps_per_report": 50,
-        "max_seq_length": max_seq_length,
-        "optimizer": "adamw",
-    }
+    # Base model + hyperparameters. Model comes from the serving resolution
+    # (train_from_outcomes passes it); config keys use the nested
+    # lora_parameters form mlx_lm actually honors. The post-run
+    # read_adapter_scale() check below is the machine-verified other half of
+    # that contract — the config only REQUESTS a scale.
+    if model is None:
+        model = DEFAULT_BASE_MODEL
+    config = training_config_for_model(model, iters, scale)
 
     config_path = Path(tmpdir) / "config.yaml"
     with open(config_path, "w") as f:
@@ -756,17 +954,19 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     # Ensure adapter output directory exists
     adapter_out.mkdir(parents=True, exist_ok=True)
 
-    # Build mlx_lm.lora command
+    # Build mlx_lm.lora command. Scalar flags mirror the config values so
+    # the two can never diverge; lora_parameters/grad_checkpoint/optimizer
+    # ride in via -c (no stable CLI flags for the nested form).
     cmd = [
         sys.executable, "-m", "mlx_lm", "lora",
         "--model", model,
-        "--data", str(train_data_dir),  # Directory with train.jsonl
+        "--data", str(train_data_dir),  # Directory with train.jsonl + valid.jsonl
         "--adapter-path", str(adapter_out),  # Output directory (mlx_lm writes adapters.safetensors + adapter_config.json here)
         "--iters", str(iters),
-        "--batch-size", str(batch_size),
-        "--learning-rate", f"{learning_rate:g}",
-        "--max-seq-length", str(max_seq_length),
-        "--steps-per-report", "50",
+        "--batch-size", str(config["batch_size"]),
+        "--learning-rate", f"{config['learning_rate']:g}",
+        "--max-seq-length", str(config["max_seq_length"]),
+        "--steps-per-report", str(config["steps_per_report"]),
         "--train",
         "-c", str(config_path),
     ]
@@ -872,8 +1072,16 @@ def write_dry_run_adapter(adapter_out: Path, summary: dict,
 
 
 def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
-                        db_path: Path, dry_run: bool) -> int:
+                        db_path: Path, dry_run: bool,
+                        model_id_override: str | None = None) -> int:
     """Phase C3 entry point. Returns process-style exit code (0 = OK)."""
+    # Resolve the SERVING base + adapter up front (2026-07-26): production
+    # flipped to GLM while this path hardcoded gemma, so every auto-trained
+    # adapter was un-loadable dead weight.
+    model, model_source = resolve_serving_base_model(override=model_id_override)
+    tag = base_model_tag(model)
+    serving_adapter, serving_adapter_source = resolve_serving_adapter()
+
     print(f"\n{'='*60}")
     print(f"  TRAIN FROM OUTCOMES (C3)")
     print(f"{'='*60}")
@@ -881,6 +1089,10 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Adapter out:  {adapter_out}")
     print(f"  Conv DB:      {db_path}")
     print(f"  Dry run:      {dry_run}")
+    print(f"  Base model:   {model} (via {model_source})")
+    print(f"  Base tag:     {tag}")
+    print(f"  Serving adapter (reference): {serving_adapter} "
+          f"(via {serving_adapter_source})")
     print(f"{'='*60}")
 
     if not source_jsonl.exists():
@@ -919,6 +1131,9 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
             "adapter_path": str(adapter_out),
             "size_bytes": adapter_out.stat().st_size,
             "kind": "dry-run",
+            "model": model,
+            "model_source": model_source,
+            "base_tag": tag,
             "outcome_count": summary.get("count", 0),
             "resolved_count": len(resolved),
             "skipped_count": skipped,
@@ -927,20 +1142,29 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         })
         return 0
 
-    # Phase C3 (2026-05-26) — real LoRA training via mlx_lm.lora.
-    # This path trains the frontier Gemma-4-31B model directly using MLX,
-    # producing a real rank-8 LoRA adapter (A/B rank-decomposition tensors).
+    # Phase C3 — real LoRA training via mlx_lm.lora against the SERVING
+    # base model (resolved above), producing a real rank-8 LoRA adapter.
     # Per ~/.claude/rules/lora-scale-default-or-die.md, scale MUST be 2.0
-    # (the default). Over-scaling destroyed instruction-following catastrophically
-    # in v3 (scale=20.0); v4-repair at scale=2.0 fixed it.
-    #
-    # Hyperparameters:
-    #   - rank=8: compact, fast training (~30s on M2 Max for 32 samples)
-    #   - iters=500: converges on small persona datasets; per C3 plan
-    #   - batch-size=1: fits in memory on M1/M2; parallelism not needed
-    #   - max-seq-length=2048: matches persona example banks
-    #   - learning-rate=1e-5: conservative for frontier model
-    #   - scale=2.0: mlx_lm DEFAULT; overridable via HUMAN_LORA_SCALE env var
+    # explicitly — mlx_lm's own default is the catastrophic 20.0 that
+    # destroyed instruction-following in v3; v4-repair at scale=2.0 fixed it.
+    # Hyperparameters live in training_config_for_model (GLM recipe parity
+    # with the proven glm-v5-config.yaml when the resolved base is GLM).
+
+    # The adapter directory name carries the base tag (auto-<ts>-glm vs
+    # auto-<ts>-gemma) so registry/promotion tooling can refuse cross-base
+    # swaps. The C dispatcher (lora_training_runner.c) hot-swaps
+    # <requested_out>/adapters.safetensors after we exit, so when we rename
+    # we leave a symlink at the requested path pointing at the real dir.
+    requested_out = adapter_out
+    adapter_out = suffix_adapter_name(adapter_out, tag)
+    if adapter_out != requested_out:
+        print(f"  Adapter dir renamed for base tag: {adapter_out.name}")
+        try:
+            requested_out.parent.mkdir(parents=True, exist_ok=True)
+            if not requested_out.exists() and not requested_out.is_symlink():
+                os.symlink(adapter_out.name, requested_out)
+        except OSError as e:
+            print(f"  WARN: could not create compat symlink {requested_out}: {e}")
 
     # Check for test/dry-run modes where iters should be shorter
     iters = 10 if os.environ.get("HUMAN_LORA_TEST_ITERS") else 500
@@ -957,7 +1181,9 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         except ValueError:
             print(f"  WARN: HUMAN_LORA_SCALE={scale_env} is not a valid float, using 2.0")
 
-    rc, train_loss, val_loss = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
+    rc, train_loss, val_loss = run_mlx_lora_training(resolved, adapter_out,
+                                                     iters=iters, scale=scale,
+                                                     model=model)
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
@@ -978,7 +1204,11 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         "adapter_path": str(adapter_out),
         "size_bytes": size,
         "kind": "mlx_lm.lora",
-        "model": "mlx-community/gemma-4-31b-it-4bit",
+        "model": model,
+        "model_source": model_source,
+        "base_tag": tag,
+        "serving_adapter_ref": str(serving_adapter) if serving_adapter else None,
+        "requested_adapter_out": str(requested_out),
         "rank": 8,
         "iters": iters,
         "scale": scale,
@@ -1001,7 +1231,11 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     results_file = Path.home() / ".human" / "logs" / "dpo-training-results.jsonl"
     n_pairs_by_source = {"outcomes": len(resolved)}
 
-    # Warn if val_loss parsing failed — regression gate cannot judge this run
+    # Warn if val_loss parsing failed — regression gate cannot judge this run.
+    # This is the early heads-up only; the run is BLOCKED further down, where
+    # val_loss=None routes to INCONCLUSIVE and returns non-zero. Do not turn
+    # that into a fallthrough: warning-then-proceed is how the toothless
+    # "PASS (val_loss=None)" verdict shipped on 2026-07-26.
     if val_loss is None:
         print(f"  [quality-gate] WARNING: val loss unparsed from training output "
               f"— regression gate cannot judge this run")
@@ -1031,6 +1265,8 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
                 "val_loss": val_loss,
                 "lora_scale": scale,
                 "iters": iters,
+                "base_model": model,
+                "base_tag": tag,
             },
             timestamp=datetime.now().isoformat()
         )
@@ -1097,6 +1333,11 @@ def main():
                         help="C3: directory where to write the produced LoRA adapter "
                              "(will contain adapters.safetensors + adapter_config.json). "
                              "Required when --source-jsonl is set.")
+    parser.add_argument("--model-id", type=str, default=None,
+                        help="C3: explicit HuggingFace base model id. "
+                             "Default: resolve the SERVING base dynamically "
+                             "(live mlx-server --model, then config.json "
+                             "mlx_local.model, then the gemma default).")
     parser.add_argument("--memory-db", type=Path,
                         default=Path.home() / ".human" / "memory.db",
                         help="C3: path to the conversations DB for hash "
@@ -1110,7 +1351,8 @@ def main():
                   file=sys.stderr)
             sys.exit(2)
         sys.exit(train_from_outcomes(args.source_jsonl, args.adapter_out,
-                                      args.memory_db, args.dry_run))
+                                      args.memory_db, args.dry_run,
+                                      model_id_override=args.model_id))
 
     print(f"\n{'#'*60}")
     print(f"  h-uman AUTOMATED TRAINING LOOP")

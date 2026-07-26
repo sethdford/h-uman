@@ -27,10 +27,34 @@ def ok(name, cond, detail=""):
 
 
 # ── 1. config emission uses the nested schema mlx_lm actually reads ──────
+# Asserted against the EMITTED config, not against the source text of one
+# function: the emitter moved to training_config_for_model() in 614137d32 and
+# a source-grep pin silently stopped covering anything. Behavioural pins
+# survive the code moving; textual ones quietly stop being pins.
 import inspect
-src = inspect.getsource(training_loop.run_mlx_lora_training)
-ok("config uses nested lora_parameters", '"lora_parameters"' in src)
-ok("flat lora_scale key removed", '"lora_scale": scale' not in src)
+
+for _model, _label in (("mlx-community/gemma-4-31b-it-4bit", "gemma"),
+                       ("mlx-community/GLM-4.5-Air-4bit", "glm")):
+    cfg = training_loop.training_config_for_model(_model, iters=10, scale=2.0)
+    ok(f"[{_label}] config uses nested lora_parameters",
+       isinstance(cfg.get("lora_parameters"), dict))
+    ok(f"[{_label}] nested scale is the requested one",
+       cfg.get("lora_parameters", {}).get("scale") == 2.0)
+    # The flat keys are the bug: mlx_lm 0.31.x ignores them, so their presence
+    # means the scale silently reverts to the catastrophic 20.0 default.
+    ok(f"[{_label}] no flat lora_* keys survive",
+       not any(k in cfg for k in ("lora_scale", "lora_alpha", "lora_rank")))
+
+# Prod serves GLM since 2026-07-26 — the GLM branch must actually differ, or
+# the recipe that produced seth-glm-air-v5 is not the one being replayed.
+_glm = training_loop.training_config_for_model("mlx-community/GLM-4.5-Air-4bit", 10, 2.0)
+ok("glm recipe enables grad checkpointing (106B MoE fits)",
+   _glm.get("grad_checkpoint") is True)
+
+# Wiring pin: the emitter above is worthless if the training path stopped
+# calling it (integration-done-contract — a fix with no caller is dead code).
+ok("run_mlx_lora_training delegates to training_config_for_model",
+   "training_config_for_model(" in inspect.getsource(training_loop.run_mlx_lora_training))
 
 # ── 2. read_adapter_scale reads what mlx_lm recorded ─────────────────────
 with tempfile.TemporaryDirectory() as d:
