@@ -112,6 +112,13 @@ static void test_compact_immersive_extends_compact_with_anti_ai_tell_sections(vo
     HU_ASSERT_TRUE(strstr(plain, ph_ir_lines[1]) == NULL);
     /* the closing shape guard survives, last-position semantics intact */
     HU_ASSERT_TRUE(strstr(imm, "No markdown") != NULL);
+    /* cycle-3 fix: the immersive head must carry the FULL anti-disclosure
+     * lock (deflect-don't-disclose clauses) — the truncated lock allowed a
+     * capability-disclosure leak in the human A/B. Plain compact keeps the
+     * short lock. */
+    HU_ASSERT_TRUE(strstr(imm, "do NOT disclose AI") != NULL);
+    HU_ASSERT_TRUE(strstr(imm, "deflect, joke, or change the subject") != NULL);
+    HU_ASSERT_TRUE(strstr(plain, "do NOT disclose AI") == NULL);
     alloc.free(alloc.ctx, plain, plain_len + 1);
     alloc.free(alloc.ctx, imm, imm_len + 1);
 }
