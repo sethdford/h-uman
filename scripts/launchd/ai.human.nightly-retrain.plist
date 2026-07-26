@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.human.nightly-retrain</string>
+
+    <!-- Stops the mlx-server, retrains, restarts it. The two must never be
+         resident at once: on 2026-07-26 a LoRA run on the 56 GB serving base
+         beside the 56 GB server drove a 128 GB machine to 154 MB free and four
+         reboots (04:01, 05:02, 06:45, 14:38). scripts/training_loop.py now
+         REFUSES such a run, which stops the crashes but also means training can
+         only happen inside a window where serving is down. This job is that
+         window.
+
+         This REPLACES the in-daemon nightly LoRA path
+         (learning.nightly_lora_enabled, daemon.c:3467), which hardcoded a base
+         model, had no resource preflight, and hot-swapped the result onto the
+         live server. That flag is false and lora_nightly.c's default base is
+         now empty. Do not run both. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/sethford/Projects/h-uman/scripts/nightly-retrain.sh</string>
+    </array>
+
+    <!-- 03:07, not 03:00. Every scheduled job on this machine already piles
+         onto the :00 mark; the model load alone is ~20 s of heavy I/O and it
+         should not contend with the rest. The window in the script is
+         02:00-05:00, so 03:07 sits comfortably inside it with room for a
+         30-minute run. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>7</integer>
+    </dict>
+
+    <!-- Explicitly NOT RunAtLoad: loading this agent (login, reinstall, or a
+         manual bootstrap) must never stop the live serving path as a side
+         effect. It runs only at the scheduled time. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sethford/.human/logs/nightly-retrain.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sethford/.human/logs/nightly-retrain.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/sethford</string>
+        <key>HU_TRAIN_WINDOW</key>
+        <string>02:00-05:00</string>
+    </dict>
+</dict>
+</plist>

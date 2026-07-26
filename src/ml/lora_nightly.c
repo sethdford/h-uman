@@ -44,7 +44,29 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
      * the future daemon config block. Previous default was the stale M3
      * runbook example (gemma-2-2b-it-4bit), which also made the nightly
      * subprocess train a model nothing serves. */
-    snprintf(cfg->base_model, sizeof(cfg->base_model), "mlx-community/gemma-4-31b-it-8bit");
+    /* DELIBERATELY EMPTY as of 2026-07-26 — see the skip branch in
+     * hu_lora_nightly_run(), which treats an unset base as "export + rotate,
+     * do not train".
+     *
+     * A hardcoded default here has been WRONG THREE TIMES, each time producing
+     * an adapter trained against a base nothing serves:
+     *   - gemma-2-2b-it-4bit  (stale M3 runbook example)
+     *   - the 8bit/4bit mismatch found by the 2026-07-18 audit
+     *   - gemma-4-31b-it-8bit while production flipped to GLM-4.5-Air-4bit
+     *     on 2026-07-26
+     * The third was the worst: this path also POSTs /v1/adapters/swap at step
+     * 5, so it would have hot-swapped a gemma-shaped adapter onto a live GLM
+     * server. It additionally spawns mlx_lm WITHOUT any resource preflight, so
+     * it would load a second multi-GB base beside the resident one — the exact
+     * co-residency that caused four reboots on 2026-07-26.
+     *
+     * The fix is not a fourth guess. Training belongs to
+     * scripts/nightly-retrain.sh, which resolves the SERVING base at run time
+     * (training_loop.py::resolve_serving_base_model), refuses on insufficient
+     * memory or co-residency, and stops serving for the window so the two
+     * never overlap. Set base_model explicitly on the struct only if you have
+     * verified it matches what :8741 is actually serving. */
+    cfg->base_model[0] = '\0';
     cfg->dry_run = false;
     return true;
 }
@@ -301,8 +323,11 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
         hu_log_info("lora-nightly", NULL, "dry-run mode: skipping mlx_lm.lora subprocess");
     } else if (!cfg->base_model[0]) {
         hu_log_warn("lora-nightly", NULL,
-                    "base_model not configured; skipping subprocess (rotation + swap continue "
-                    "against empty dir)");
+                    "base_model not set; skipping in-daemon training (rotation + swap continue "
+                    "against empty dir). This is the DEFAULT since 2026-07-26: in-daemon "
+                    "training hardcodes a base and has no resource preflight. Use "
+                    "scripts/nightly-retrain.sh, which resolves the serving base and stops "
+                    "serving for the training window");
     } else {
         hu_lora_subprocess_config_t sp;
         memset(&sp, 0, sizeof(sp));

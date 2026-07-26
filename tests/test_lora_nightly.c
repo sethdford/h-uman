@@ -69,11 +69,19 @@ static void test_config_defaults_fills_paths_from_home(void) {
     HU_ASSERT_TRUE(strstr(cfg.adapters_dir, "/.human/adapters") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.current_symlink, "/.human/adapter-current") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.mlx_base_url, "127.0.0.1:8741") != NULL);
-    /* N1: defaults now include a base_model. Verify it's a non-empty,
-     * mlx-community-shaped identifier (just sanity — exact id may
-     * change as the runbook recommends different starting models). */
-    HU_ASSERT_TRUE(cfg.base_model[0] != '\0');
-    HU_ASSERT_TRUE(strstr(cfg.base_model, "/") != NULL); /* org/model shape */
+    /* The default base_model is DELIBERATELY EMPTY as of 2026-07-26, inverting
+     * the N1 assertion that used to pin a non-empty id.
+     *
+     * A hardcoded default was wrong three times running (gemma-2-2b-it-4bit;
+     * the 8bit/4bit mismatch; gemma-4-31b-it-8bit after production flipped to
+     * GLM-4.5-Air-4bit), each time training an adapter against a base nothing
+     * serves — and this path hot-swaps that adapter onto the live server. An
+     * empty base routes to the skip branch: export + rotate, no training.
+     * Training belongs to scripts/nightly-retrain.sh, which resolves the
+     * SERVING base at run time instead of guessing at compile time.
+     *
+     * If this assertion is ever flipped back, the hazard returns. */
+    HU_ASSERT_TRUE(cfg.base_model[0] == '\0');
     HU_ASSERT_TRUE(!cfg.dry_run);
     if (orig_home) {
         setenv("HOME", orig_home, 1);
@@ -273,7 +281,8 @@ static void test_gate_verdict_parse_oversized_input(void) {
 /* ── blind-A/B gate verdict file loader ───────────────────────────── */
 
 static void test_gate_verdict_from_file_missing_file(void) {
-    hu_lora_gate_verdict_t v = hu_lora_gate_verdict_from_file("/tmp/nonexistent_blind_ab_gate_xyz.json");
+    hu_lora_gate_verdict_t v =
+        hu_lora_gate_verdict_from_file("/tmp/nonexistent_blind_ab_gate_xyz.json");
     HU_ASSERT_EQ((int)v, (int)HU_LORA_GATE_ABSENT);
 }
 
@@ -402,8 +411,7 @@ static void test_kto_pending_rejects_zero_signals(void) {
 
     HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(kto_path, 0, 1700000000),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(NULL, 5, 1700000000),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_lora_nightly_write_kto_pending(NULL, 5, 1700000000), HU_ERR_INVALID_ARGUMENT);
     FILE *f = fopen(pending_path, "r");
     HU_ASSERT_NULL(f);
     if (f)
