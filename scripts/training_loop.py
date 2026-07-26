@@ -42,6 +42,217 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 
+# ── Training resource preflight (2026-07-26 crash-loop fix) ──────────────────
+#
+# Four reboots on 2026-07-26 (04:01, 05:02, 06:45, 14:38) traced to LoRA
+# training running CONCURRENTLY with the mlx-server holding the same base
+# resident. C3 flipped this loop to target the SERVING base, which is correct
+# for adapter validity, but made every run compete for the same ~56 GB. Eleven
+# runs fired that day, six inside 28 minutes (06:09-06:37), driving a 128 GB
+# machine to 154 MB free / 28 GB compressed / 13.2 GB swap. The trainer exiting
+# recovered 53 GB instantly, which is what pinned the cause.
+#
+# lora_training_runner.c has no cooldown, no lock, and no memory precondition —
+# its only trigger is a pair-count threshold crossing. These guards live HERE
+# because every path (daemon runner, m3_loop_cycle.sh, manual) funnels through
+# run_mlx_lora_training.
+LORA_LOCK_PATH = Path.home() / ".human" / "lora_training.lock"
+
+# Peak training residency as a multiple of the base's on-disk size: training
+# holds the weights PLUS optimizer state, gradients and activations. Measured
+# on GLM-4.5-Air-4bit (56 GB on disk): peak demand exceeded 70 GB while a
+# 57 GB server was resident on a 128 GB box.
+TRAIN_MEM_FACTOR = 1.25
+TRAIN_MEM_OVERHEAD_BYTES = 6 * 1024 ** 3
+
+# Empty default = no window restriction, so manual and CI runs are unaffected.
+# Set learning.training_window (config) or HU_TRAIN_WINDOW (env) to "02:00-05:00"
+# to confine automated retraining to hours when serving can be stopped.
+DEFAULT_TRAIN_WINDOW = ""
+
+
+def training_preflight_decision(need_bytes: int, available_bytes: int,
+                                now_minutes: int | None = None,
+                                window: tuple[int, int] | None = None,
+                                lock_held: bool = False,
+                                serving_conflict: bool = False) -> tuple[bool, str]:
+    """Pure predicate: may a LoRA training run start? Returns (ok, reason).
+
+    Takes FACTS, not the machine — no vm_stat, no clock, no filesystem — so the
+    whole truth table is unit-testable without a 56 GB model or a real lock
+    (.claude/rules/security-predicate-extraction.md). The impure fact-gathering
+    lives in training_preflight().
+    """
+    if lock_held:
+        return False, "another LoRA training run holds the lock (single-flight)"
+    # Checked BEFORE the memory heuristic on purpose: a just-restarted server's
+    # pages still count as reclaimable in vm_stat, so available_memory_bytes()
+    # reads optimistically high while the server is about to fault all 56 GB
+    # back in. Same-base co-residency is the exact crash condition, so assert it
+    # structurally rather than inferring it from a byte count.
+    if serving_conflict:
+        return False, ("the production mlx-server is already serving this base; two copies "
+                       "of the same multi-GB base cannot co-reside — stop serving for the "
+                       "training window or train off-peak")
+    if window is not None and now_minutes is not None:
+        start, end = window
+        inside = (start <= now_minutes < end) if start <= end \
+            else (now_minutes >= start or now_minutes < end)  # window crosses midnight
+        if not inside:
+            return False, (f"outside the training window "
+                           f"{start // 60:02d}:{start % 60:02d}-{end // 60:02d}:{end % 60:02d} "
+                           f"(now {now_minutes // 60:02d}:{now_minutes % 60:02d})")
+    if need_bytes > 0 and available_bytes < need_bytes:
+        return False, (f"insufficient memory: need ~{need_bytes / 1024 ** 3:.0f} GB, "
+                       f"only {available_bytes / 1024 ** 3:.0f} GB available "
+                       f"(is the serving model resident?)")
+    return True, "ok"
+
+
+def parse_train_window(spec: str) -> tuple[int, int] | None:
+    """"02:00-05:00" -> (120, 300) minutes-since-midnight. None when unset/invalid.
+
+    A window crossing midnight ("22:00-04:00") is represented as start > end and
+    handled by training_preflight_decision.
+    """
+    if not spec or "-" not in spec:
+        return None
+    try:
+        lo, hi = spec.split("-", 1)
+        lh, lm = (int(x) for x in lo.strip().split(":"))
+        hh, hm = (int(x) for x in hi.strip().split(":"))
+    except (ValueError, AttributeError):
+        return None
+    if not (0 <= lh < 24 and 0 <= hh < 24 and 0 <= lm < 60 and 0 <= hm < 60):
+        return None
+    start, end = lh * 60 + lm, hh * 60 + hm
+    return None if start == end else (start, end)
+
+
+def available_memory_bytes() -> int:
+    """Reclaimable memory: free + inactive + purgeable + speculative.
+
+    Deliberately NOT just "Pages free": macOS keeps free low by design, and
+    inactive/purgeable pages are reclaimable under pressure. Counting only free
+    would refuse every run on a healthy machine.
+    """
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    page = 16384
+    m = re.search(r"page size of (\d+) bytes", out)
+    if m:
+        page = int(m.group(1))
+    total = 0
+    for label in ("Pages free", "Pages inactive", "Pages purgeable", "Pages speculative"):
+        m = re.search(rf"{label}:\s+(\d+)", out)
+        if m:
+            total += int(m.group(1))
+    return total * page
+
+
+def model_disk_bytes(model: str) -> int:
+    """On-disk size of the HuggingFace snapshot for `model`, or 0 if unknown.
+
+    0 means "can't estimate" and the memory check is skipped rather than
+    guessed — refusing on an unknown model would break local/test bases.
+    """
+    if not model:
+        return 0
+    repo = "models--" + model.replace("/", "--")
+    root = Path.home() / ".cache" / "huggingface" / "hub" / repo / "snapshots"
+    if not root.is_dir():
+        return 0
+    best = 0
+    for snap in root.iterdir():
+        size = 0
+        for f in snap.rglob("*"):
+            try:
+                if f.is_file():
+                    size += f.stat().st_size
+            except OSError:
+                continue
+        best = max(best, size)
+    return best
+
+
+def estimated_training_bytes(model: str) -> int:
+    """Peak memory a LoRA run on `model` is expected to need. 0 if unknown."""
+    disk = model_disk_bytes(model)
+    return 0 if disk == 0 else int(disk * TRAIN_MEM_FACTOR) + TRAIN_MEM_OVERHEAD_BYTES
+
+
+def training_window_spec(env: dict | None = None) -> str:
+    """Window from HU_TRAIN_WINDOW, else config learning.training_window, else ''."""
+    env = os.environ if env is None else env
+    spec = (env.get("HU_TRAIN_WINDOW") or "").strip()
+    if spec:
+        return spec
+    try:
+        cfg = json.loads((Path.home() / ".human" / "config.json").read_text())
+        return str(cfg.get("learning", {}).get("training_window", DEFAULT_TRAIN_WINDOW) or "")
+    except (OSError, ValueError):
+        return DEFAULT_TRAIN_WINDOW
+
+
+def serving_base_from_ps(ps_output: str | None = None, port: str | None = None) -> str | None:
+    """The --model of the PRODUCTION mlx-server, or None if it isn't running.
+
+    Reuses the port-filtered scanner so a spare eval server (:8743/:8747) is
+    never mistaken for production — the same footgun documented on
+    production_mlx_port(). Distinct from resolve_serving_base_model(), which
+    falls back to config when no server is up; here "no server" must read as
+    None so the conflict check stays honest.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(["ps", "-eo", "command"], capture_output=True,
+                                       text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port or production_mlx_port()):
+        if "--model" in tokens:
+            try:
+                return tokens[tokens.index("--model") + 1]
+            except IndexError:
+                continue
+    return None
+
+
+def training_preflight(model: str) -> tuple[bool, str, object]:
+    """Gather facts, apply training_preflight_decision, hold the lock on success.
+
+    Returns (ok, reason, lock_handle). The caller MUST keep lock_handle alive for
+    the duration of training; dropping it releases the flock.
+    """
+    import fcntl
+    lock_handle = None
+    lock_held = False
+    try:
+        LORA_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = open(LORA_LOCK_PATH, "w")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_held = True  # someone else holds it
+        if lock_handle:
+            lock_handle.close()
+        lock_handle = None
+
+    now = datetime.now()
+    ok, reason = training_preflight_decision(
+        need_bytes=estimated_training_bytes(model),
+        available_bytes=available_memory_bytes(),
+        now_minutes=now.hour * 60 + now.minute,
+        window=parse_train_window(training_window_spec()),
+        lock_held=lock_held,
+        serving_conflict=(serving_base_from_ps() == model and bool(model)),
+    )
+    if not ok and lock_handle:
+        lock_handle.close()
+        lock_handle = None
+    return ok, reason, lock_handle
+
 # Import the DPO quality gate module and adapter registry
 import dpo_results
 import adapter_registry
@@ -918,6 +1129,33 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     # function directly), but a refusal here CANNOT block the adapter swap —
     # see the placement note on that guard for why it has to live upstream.
 
+    # Resource preflight — the 2026-07-26 crash-loop guard. Refusing here is a
+    # SUCCESS path (rc=0, no losses): a skipped retrain is a no-op, whereas
+    # thrashing the machine into a reboot loses the whole session. Set
+    # HU_TRAIN_SKIP_PREFLIGHT=1 to bypass (manual runs on a quiet machine).
+    _preflight_lock = None
+    if os.environ.get("HU_TRAIN_SKIP_PREFLIGHT", "").strip() not in ("1", "true", "yes"):
+        _model_for_check = model or DEFAULT_BASE_MODEL
+        _ok, _why, _preflight_lock = training_preflight(_model_for_check)
+        if not _ok:
+            print(f"  [preflight] REFUSING to train: {_why}")
+            print(f"  [preflight] model={_model_for_check}")
+            print(f"  [preflight] set HU_TRAIN_WINDOW / learning.training_window to allow a "
+                  f"nightly slot, or HU_TRAIN_SKIP_PREFLIGHT=1 to override")
+            return 0, None, None
+
+    try:
+        return _run_mlx_lora_training_inner(resolved, adapter_out, iters, scale, model)
+    finally:
+        if _preflight_lock is not None:
+            _preflight_lock.close()
+
+
+def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
+                                 iters: int, scale: float,
+                                 model: str | None) -> Tuple[int, Optional[float], Optional[float]]:
+    """Body of run_mlx_lora_training, split out so the preflight lock is held
+    across the whole run via try/finally rather than leaking on every return."""
     # Build SFT batch
     sft_batch = write_sft_batch_jsonl(resolved)
 
