@@ -302,5 +302,76 @@ class TestDecodeFailureTripwire(unittest.TestCase):
         self.assertTrue(healthy)
 
 
+class TestAllDecodersAgree(unittest.TestCase):
+    """Every attributedBody decoder in scripts/ must agree with the shared one.
+
+    The original defect was not one bad function — it was eight independent
+    copies of the decoder, of which three had drifted. `e80af898` fixed one
+    copy; `extract_imessage_pairs.py`, `persona_style_card.py` and
+    `classify_contact_formality.py` kept broken ones for months because nothing
+    compared them. This test is the structural guard: add a new decoder that
+    disagrees, or let an existing one drift, and it fails here.
+
+    Prefer deleting a duplicate and delegating to
+    scripts/blind_ab/imessage_text.py over making a new copy pass.
+    """
+
+    # (module path relative to scripts/, decoder attribute name)
+    DECODERS = [
+        ("blind_ab/imessage_text.py", "decode_attributed_body"),
+        ("extract_imessage_pairs.py", "extract_text_from_attributed_body"),
+        ("persona_style_card.py", "extract_text_from_attributed_body"),
+        ("classify_contact_formality.py", "decode_attributed_body"),
+        ("harvest_imessage_voice.py", "decode_attributed_body"),
+        ("blind_ab/export_seth_triples.py", "decode_attributed_body"),
+        ("m3_extract_corpus.py", "decode_attributed_body"),
+        ("m3_probe_collector.py", "_decode_attributed_body"),
+    ]
+
+    @staticmethod
+    def _load(rel_path, attr):
+        import importlib.util
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        full = os.path.join(here, rel_path)
+        if not os.path.exists(full):
+            return None
+        sys.path.insert(0, os.path.join(here, "blind_ab"))
+        spec = importlib.util.spec_from_file_location(
+            "_decoder_" + re.sub(r"\W", "_", rel_path), full
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return getattr(mod, attr, None)
+
+    def test_every_decoder_matches_the_shared_implementation(self):
+        for rel_path, attr in self.DECODERS:
+            try:
+                fn = self._load(rel_path, attr)
+            except Exception as exc:  # a module we can't import can't be checked
+                self.skipTest("%s did not import: %r" % (rel_path, exc))
+                continue
+            if fn is None:
+                continue  # decoder renamed or removed; nothing to compare
+            for label, blob, expected in ALL_FIXTURES:
+                with self.subTest(module=rel_path, fixture=label):
+                    got = fn(blob)
+                    # Some copies legitimately skip the trailing-space strip.
+                    normalised = got.strip() if isinstance(got, str) else got
+                    self.assertEqual(
+                        normalised,
+                        expected,
+                        "%s:%s disagrees with the shared decoder — delegate to "
+                        "blind_ab/imessage_text.py rather than keeping a copy"
+                        % (rel_path, attr),
+                    )
+
+    def test_at_least_the_shared_decoder_is_discoverable(self):
+        """Guards the guard: if loading silently broke, the sweep proves nothing."""
+        self.assertIsNotNone(
+            self._load("blind_ab/imessage_text.py", "decode_attributed_body")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

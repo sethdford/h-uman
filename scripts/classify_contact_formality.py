@@ -19,12 +19,17 @@ import sqlite3
 import re
 import sys
 import os
-import struct
 from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
 import hashlib
+
+# Shared typedstream decoder — the single source of truth for attributedBody.
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab")
+)
+from imessage_text import decode_attributed_body as _shared_decode_attributed_body
 
 
 @dataclass
@@ -71,81 +76,30 @@ def truncate_handle(handle: str, keep_chars: int = 4) -> str:
 
 
 def decode_attributed_body(blob: bytes) -> Optional[str]:
+    """Extract the message string from an ``attributedBody`` typedstream blob.
+
+    Delegates to the shared decoder in scripts/blind_ab/imessage_text.py, which
+    reads the length prefix and slices exactly.
+
+    This previously used a guess-and-check heuristic: it slid an offset forward
+    from the ``NSString`` marker trying every byte as a candidate length, and
+    returned the first slice that decoded as printable UTF-8. Two failure modes
+    followed, both of which returned a wrong answer confidently rather than
+    None:
+
+    1. The scan reached ``+`` (0x2b = 43) before the real length byte, took 43
+       as the length, and started the payload one byte early — emitting the
+       length byte as leading text and truncating the tail (a 44-byte message
+       decoded as ",Finished … that's goo").
+    2. When no candidate satisfied the printable/len>2 test, it fell through to
+       "longest valid UTF-8 run anywhere in the blob", which returns archive
+       class names. A lone "\\U0001f606" message decoded as "NSDictionary".
+
+    Both are structural: the length prefix is authoritative and does not need
+    to be guessed. Format description and regression fixtures live in
+    scripts/test_extract_imessage_pairs.py.
     """
-    Attempt to extract a UTF-8 string from an NSAttributedString typedstream blob.
-
-    Apple typedstream format: NSString/NSMutableString payload is preceded by
-    length-prefixing. Heuristics (in order):
-    1. Find b"NSString" or b"NSMutableString", then look for length+payload
-    2. Scan for plausible UTF-8 runs of increasing length
-    3. Return longest valid UTF-8 found, or None
-
-    Returns None if decoding fails or blob is too small.
-    """
-    if not blob or len(blob) < 4:
-        return None
-
-    # Heuristic 1: Look for NSString marker and extract length-prefixed string
-    for marker in [b"NSString", b"NSMutableString"]:
-        idx = blob.find(marker)
-        if idx == -1:
-            continue
-
-        # Skip marker, look for length encoding starting within next ~50 bytes
-        search_start = idx + len(marker)
-        if search_start + 2 >= len(blob):
-            continue
-
-        # Try to parse length starting right after the marker
-        # Length encoding: 1 byte if < 0x80, or 0x81 followed by uint16-LE
-        offset = search_start
-        text_len = None
-        payload_start = None
-
-        while offset < min(search_start + 50, len(blob) - 1):
-            byte = blob[offset]
-
-            # Try 1-byte length
-            if byte < 0x80 and byte > 0:  # Plausible string length
-                text_len = byte
-                payload_start = offset + 1
-                if payload_start + text_len <= len(blob):
-                    try:
-                        text = blob[payload_start:payload_start + text_len].decode('utf-8')
-                        if text and text.isprintable() and len(text) > 2:
-                            return text
-                    except UnicodeDecodeError:
-                        pass
-
-            # Try 0x81 + uint16-LE encoding
-            if byte == 0x81 and offset + 2 < len(blob):
-                text_len = struct.unpack('<H', blob[offset+1:offset+3])[0]
-                payload_start = offset + 3
-                if payload_start + text_len <= len(blob) and text_len < 4000:
-                    try:
-                        text = blob[payload_start:payload_start + text_len].decode('utf-8')
-                        if text and text.isprintable() and len(text) > 2:
-                            return text
-                    except (UnicodeDecodeError, struct.error):
-                        pass
-
-            offset += 1
-
-    # Heuristic 2: Scan for longest valid UTF-8 runs (fallback)
-    longest_text = None
-    longest_len = 0
-
-    for start in range(len(blob) - 3):
-        for end in range(start + 3, min(start + 4000, len(blob))):
-            try:
-                text = blob[start:end].decode('utf-8')
-                if text.isprintable() and len(text) > longest_len and len(text) > 2:
-                    longest_text = text
-                    longest_len = len(text)
-            except UnicodeDecodeError:
-                continue
-
-    return longest_text if longest_text and longest_len > 5 else None
+    return _shared_decode_attributed_body(blob)
 
 
 def _word_stretch_hit(tok: str, text_lower: str) -> bool:
