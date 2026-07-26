@@ -1,10 +1,13 @@
-/* Contextual (context-driven) proactive outreach — detect a future-dated event
- * in a message, freeze a post-event "how'd it go?" from the real topic, and
- * decide when it should fire. See include/human/agent/contextual_proactive.h.
+/* Contextual (context-driven) proactive outreach — detect a future-dated event in
+ * a message and decide WHEN it becomes worth mentioning. Emits a SITUATION
+ * ({topic, send_at, confidence}), never an outbound message: this module used to
+ * freeze "how'd the <topic> go?" here, which sent three garbled texts to real
+ * contacts before the template was removed 2026-07-26. Composition belongs to
+ * init_proposer at send time. See include/human/agent/contextual_proactive.h.
  *
  * Everything here is pure w.r.t. the clock (resolve/decide take now_ts) so the
  * temporal grammar is testable without the daemon. The activation gate and the
- * actual scheduling/send live in the daemon caller, not here. */
+ * hand-off to the proposer live in the daemon caller, not here. */
 #include "human/agent/contextual_proactive.h"
 #include "human/context/event_extract.h"
 #include "human/core/string.h"
