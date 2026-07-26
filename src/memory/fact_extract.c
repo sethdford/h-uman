@@ -276,3 +276,22 @@ float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact, in
     float decay = lo + (hi - lo) * frac;
     return fact->confidence * decay;
 }
+
+size_t hu_heuristic_fact_log_summary(const hu_heuristic_fact_t *fact, char *buf, size_t cap) {
+    if (!fact || !buf || cap == 0)
+        return 0;
+    int w = snprintf(buf, cap, "%s %s %s (conf=%.2f)", fact->subject, fact->predicate, fact->object,
+                     (double)fact->confidence);
+    if (w < 0) {
+        buf[0] = '\0';
+        return 0;
+    }
+    size_t len = ((size_t)w >= cap) ? cap - 1 : (size_t)w;
+    /* LLM-extracted fields can carry embedded newlines/tabs; one control
+     * char would split the log line and corrupt grep-based telemetry. */
+    for (size_t i = 0; i < len; i++) {
+        if ((unsigned char)buf[i] < 0x20)
+            buf[i] = ' ';
+    }
+    return len;
+}

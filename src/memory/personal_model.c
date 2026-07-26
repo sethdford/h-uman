@@ -1,10 +1,10 @@
 #include "human/memory/personal_model.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/memory/anticipatory.h"
-#include "human/core/gate_mode.h"
-#include "human/memory/fact_extract_llm.h" /* LLM fact-extraction fallback (casual-text recall) */
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
+#include "human/memory/fact_extract_llm.h" /* LLM fact-extraction fallback (casual-text recall) */
 #include "human/memory/identity_continuity.h"
 #include "human/memory/identity_resolver.h" /* hu_identity_graph_t for the setter borrow */
 #include "human/memory/minja_guard.h"
@@ -56,8 +56,8 @@ void hu_personal_model_set_llm_extractor(void *alloc, void *provider, const char
                                          size_t model_len) {
     s_llm_extract_alloc = (hu_allocator_t *)alloc;
     s_llm_extract_provider = (hu_provider_t *)provider;
-    size_t n = model_len < sizeof(s_llm_extract_model) - 1 ? model_len
-                                                           : sizeof(s_llm_extract_model) - 1;
+    size_t n =
+        model_len < sizeof(s_llm_extract_model) - 1 ? model_len : sizeof(s_llm_extract_model) - 1;
     if (model && n > 0)
         memcpy(s_llm_extract_model, model, n);
     s_llm_extract_model[n] = '\0';
@@ -119,10 +119,21 @@ static void maybe_llm_fact_fallback(const char *message, size_t message_len, int
     }
 
     if (gate == 1) {
-        /* SHADOW: observe, do not merge. */
+        /* SHADOW: observe, do not merge. The count line stays verbatim (the
+         * shadow-soak telemetry greps 'would extract'); the per-fact lines
+         * below add the would-act CONTENT so a human (or the arena
+         * scoreboard) can judge quality before promotion — fire-rate alone
+         * can't (feature-gate-requires-measurement.md). ~200B/line, control
+         * chars scrubbed by the formatter. */
         hu_log_info("llm_fact_extract", NULL,
                     "shadow: would extract %zu fact(s) from a regex-missed message",
                     llm.fact_count);
+        for (size_t i = 0; i < llm.fact_count; i++) {
+            char summary[200];
+            if (hu_heuristic_fact_log_summary(&llm.facts[i], summary, sizeof(summary)) > 0)
+                hu_log_info("llm_fact_extract", NULL, "shadow: fact[%zu/%zu]: %s", i + 1,
+                            llm.fact_count, summary);
+        }
         return;
     }
     /* LIVE: hand the LLM batch to the caller's stamp/promote/merge flow.
