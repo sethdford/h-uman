@@ -254,20 +254,40 @@ def test_mlx_lora_training():
         outcomes = parse_outcomes_jsonl(jsonl_path)
         resolved, skipped = resolve_hashes_against_db(outcomes, db_path)
 
-        # Run mlx_lm training with test iters (10, not 500)
+        # Run mlx_lm training with test iters (10, not 500).
+        # run_mlx_lora_training returns a 3-TUPLE (exit_code, train_loss,
+        # val_loss). This was previously assigned to a bare `rc` and compared
+        # `rc == 0`, which is never true for a tuple — so this test always took
+        # the failure branch, printed "Training failed with rc=(0, 11.82,
+        # 9.669)", and asserted nothing. A live test that burns ~18 GB of GPU
+        # and cannot fail is worse than no test: it reads as coverage.
         print(f"  Running mlx_lm.lora with {len(resolved)} resolved outcomes...")
-        rc = run_mlx_lora_training(resolved, adapter_out, iters=10, scale=2.0)
+        rc, train_loss, val_loss = run_mlx_lora_training(
+            resolved, adapter_out, iters=10, scale=2.0)
 
-        if rc == 0:
-            if adapter_out.exists():
-                # Should be a directory with adapters.safetensors inside
-                size = (adapter_out / "adapters.safetensors").stat().st_size if (adapter_out / "adapters.safetensors").exists() else 0
-                print(f"  Training succeeded: {adapter_out} ({size} bytes)")
-                print(f"  PASS: mlx_lm.lora training completed")
-            else:
-                print(f"  WARNING: Training returned 0 but no adapter output at {adapter_out}")
-        else:
-            print(f"  Training failed with rc={rc}")
+        assert rc == 0, f"mlx_lm.lora training failed (rc={rc})"
+        adapters_file = adapter_out / "adapters.safetensors"
+        assert adapters_file.exists(), \
+            f"training returned 0 but wrote no adapter at {adapters_file}"
+        size = adapters_file.stat().st_size
+        assert size > 0, f"adapter at {adapters_file} is empty (0 bytes)"
+
+        # The e2e proof that the train/valid split actually works. mlx_lm only
+        # emits "Val loss" lines when a valid.jsonl exists; before that split
+        # landed, val_loss parsed as None and the regression gate had nothing to
+        # judge — which is how "Regression verdict: PASS (val_loss=None)"
+        # shipped on 2026-07-26. No unit pin can prove this: it requires a real
+        # mlx_lm run to observe that the file we write is the file it reads.
+        assert train_loss is not None, \
+            "no train loss parsed from a real mlx_lm run — output format drifted?"
+        assert val_loss is not None, (
+            "no VAL loss parsed from a real mlx_lm run. The 90/10 split in "
+            "run_mlx_lora_training is not producing a valid.jsonl mlx_lm reads, "
+            "so the regression gate is judging on absent evidence.")
+
+        print(f"  Training succeeded: {adapter_out} ({size} bytes, "
+              f"train_loss={train_loss}, val_loss={val_loss})")
+        print(f"  PASS: mlx_lm.lora training completed with real val evidence")
 
 
 def main():
