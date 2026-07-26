@@ -92,6 +92,16 @@ if [[ "${HU_SKIP_GUARD_SENTINEL:-0}" != "1" ]]; then
     echo "==> guard-sentinel: all ${#GUARD_SENTINELS[@]} outbound guards present in candidate binary"
 fi
 
+# ── Provenance guard: refuse to clobber a newer deploy with an older build
+# Sibling of the guard-sentinel above, but generic: instead of checking for
+# specific guard symbols, compare the git commit embedded in each binary
+# (HU_BUILD_SHA=<sha>, stamped by cmake/GenGitSha.cmake) and refuse when the
+# candidate is not a descendant of the installed commit. Catches the
+# 2026-07-25 class where a concurrent session's pre-merge build silently
+# un-deployed hu_graph_ground_compose. Advisory-only when either SHA is
+# unavailable (old binary, non-git tree). Override: HU_INSTALL_FORCE=1.
+"$SCRIPT_DIR/check-install-provenance.sh" "$SOURCE_BIN" "$INSTALL_BIN" "$ROOT"
+
 # Verify the local cert exists; if not, refuse to fall back to ad-hoc because
 # that produces an even less stable TCC identity.
 if ! security find-identity -v -p codesigning 2>/dev/null | grep -qE "\"$CODESIGN_IDENT\""; then
