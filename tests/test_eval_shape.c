@@ -112,6 +112,47 @@ static void test_shape_excessive_emoji_fails(void) {
     HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_EXCESSIVE_EMOJI) != 0);
 }
 
+/* ── HU_SHAPE_FAIL_TRAILING_QUESTION — measurement-only ─────────────────
+ * Measured 2026-07-26 over 689 real matched reply pairs: Seth ends a reply
+ * with '?' 7.7% of the time; the model ran 42-70%. Four prompt layers already
+ * forbid it and one added anti-pattern made it WORSE (55% -> 70%), so the
+ * reflex is prompt-resistant and this flag is the SHADOW instrument. It must
+ * never gate a send: no score penalty, absent from the persona mask. */
+
+static void test_shape_trailing_question_is_flagged(void) {
+    hu_shape_result_t r;
+    const char *resp = "damn that sucks. how long till you take off?";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_TRAILING_QUESTION) != 0);
+}
+
+static void test_shape_trailing_question_does_not_fail_the_response(void) {
+    /* THE contract: flagged but still passing, and full score. If this ever
+     * fails, someone gave the flag a penalty and it can now regenerate real
+     * sends — that is the LIVE step and needs its own measurement first. */
+    hu_shape_result_t r;
+    const char *resp = "damn that sucks. how long till you take off?";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_TRAILING_QUESTION) != 0);
+    HU_ASSERT_TRUE(r.passed);
+    HU_ASSERT_TRUE(r.score > 0.99);
+}
+
+static void test_shape_no_trailing_question_not_flagged(void) {
+    hu_shape_result_t r;
+    const char *resp = "damn that sucks";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_TRAILING_QUESTION) == 0);
+}
+
+static void test_shape_bare_question_mark_not_flagged(void) {
+    /* A lone "?" is a reaction, not the close-every-turn reflex. */
+    hu_shape_result_t r;
+    const char *resp = "?";
+    HU_ASSERT_EQ(hu_shape_classify(resp, strlen(resp), HU_SHAPE_CHANNEL_IMESSAGE, &r), HU_OK);
+    HU_ASSERT_TRUE((r.fail_flags & HU_SHAPE_FAIL_TRAILING_QUESTION) == 0);
+}
+
 static void test_shape_channel_from_string_case_insensitive(void) {
     HU_ASSERT_EQ(hu_shape_channel_from_string("imessage", 8), HU_SHAPE_CHANNEL_IMESSAGE);
     HU_ASSERT_EQ(hu_shape_channel_from_string("IMessage", 8), HU_SHAPE_CHANNEL_IMESSAGE);
@@ -298,4 +339,8 @@ void run_eval_shape_tests(void) {
     HU_RUN_TEST(test_shape_ai_no_access_disclaimer_fails_imessage);
     HU_RUN_TEST(test_shape_ai_self_disclosure_allowed_on_email);
     HU_RUN_TEST(test_shape_no_self_disclosure_false_positive);
+    HU_RUN_TEST(test_shape_trailing_question_is_flagged);
+    HU_RUN_TEST(test_shape_trailing_question_does_not_fail_the_response);
+    HU_RUN_TEST(test_shape_no_trailing_question_not_flagged);
+    HU_RUN_TEST(test_shape_bare_question_mark_not_flagged);
 }

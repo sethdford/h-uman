@@ -67,6 +67,25 @@ typedef struct hu_shape_result {
  * north-star nightly, where such replies wrongly scored anti_ai 1.0. */
 #define HU_SHAPE_FAIL_AI_SELF_DISCLOSURE 0x10000
 
+/* Reply ends in '?' — the assistant reflex of closing every turn with a
+ * follow-up question.
+ *
+ * MEASUREMENT-ONLY. Deliberately NOT in HU_PERSONA_SHAPE_AI_OPENER_MASK
+ * (src/agent/outbound/persona.c) and carries NO score penalty, so it cannot
+ * gate or regenerate a send. Per .claude/rules/feature-gate-requires-measurement.md
+ * a behaviour change ships OFF -> SHADOW -> LIVE on a measurement; this is the
+ * SHADOW instrument.
+ *
+ * Why an instrument rather than a prompt rule: measured 2026-07-26 over 689 real
+ * matched reply pairs, Seth ends a reply with '?' just 7.7% of the time, while
+ * the model ran 42-70%. FOUR prompt layers already forbid it — hu_rules_casual
+ * ("Question marks only when actually asking"), style_rules[3] ("about 1 in 12
+ * texts"), core.communication_rules[6], and an anti_patterns entry added and then
+ * REVERTED because it moved the rate the wrong way (55% -> 70%). The reflex is
+ * prompt-resistant, so closing the gap needs a deterministic mechanism whose
+ * effect can be measured before it touches sends. */
+#define HU_SHAPE_FAIL_TRAILING_QUESTION 0x20000
+
 /* M9: compile-time guard against bit-flag exhaustion. If the highest
  * fail flag exceeds 31 bits we'd silently corrupt masking in shape.c.
  * Update this bound when adding a flag. */
