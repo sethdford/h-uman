@@ -91,6 +91,43 @@ squash-merges, an ancestry check reports safely-merged branches as unmerged, so
 gh pr list --head <branch> --state all --limit 1 --json number,state
 ```
 
+## Beyond git: ports and ~/.human state need a single writer too
+
+Worktrees only isolate the REPO. Three incidents on 2026-07-25/26 came from
+concurrent sessions mutating shared NON-git state:
+
+1. **The sheet wipe.** One session bulk-filled `~/.human/blind_ab_human/`
+   (valid human ratings, Seth as rater via a scribe session); the session that
+   owned the sheet saw file-level anomalies, concluded contamination, and reset
+   it — nearly destroying the cycle-2 human gate data. Provenance lived only in
+   the scribe session's transcript.
+2. **The near-double-flip.** Two sessions each held a user instruction about
+   promoting the base on :8741; only an explicit "are you executing? reply
+   before acting" exchange prevented a race on the live server.
+3. **The mid-run kill.** A session killed the :8743 server on a misread idle
+   signal while another session's driver was actively generating against it —
+   55 generations lost.
+
+The discipline, matching the worktree rule's shape:
+
+- **One owner per shared resource, named in the session bus.** Serving ports
+  (:8741 live — NEVER touched without its owner; :8743/:8745/:8747 spares),
+  `~/.human/config.json`, `~/.human/blind_ab_human/`, the launchd plists, and
+  the adapters registry each have exactly one session that writes them at a
+  time. Everyone else reads.
+- **Claim before you touch.** Before mutating any of the above, send the
+  owning/likely-owning session a message and wait for an ack — or, if idle and
+  unowned, announce the claim so the next session finds it. A queued message
+  costs a minute; the sheet wipe cost an afternoon.
+- **Kills require two idle signals, correctly parsed.** `ps etime` is
+  `[[dd-]hh:]mm:ss` (09:14 = nine MINUTES); output-file mtime gaps must exceed
+  2x the job's known logging cadence; when in doubt `sample <pid>`. And message
+  the owner first — a wedged process can wait five more minutes.
+- **Act-on-behalf leaves provenance where the owner will look.** If you write
+  another session's files at the user's request (scribe pattern), drop a
+  note in the resource dir or the session bus at write time, not after the
+  owner notices.
+
 ## Related
 
 - `~/.claude/rules/worktree-merge-before-cleanup.md` — never delete a worktree
