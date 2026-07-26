@@ -282,116 +282,6 @@ size_t hu_contextual_proactive_normalize_topic(const char *topic, size_t len, ch
     return copy;
 }
 
-/* ── topic-quality gate ───────────────────────────────────────────────────── */
-
-/* Words that mark a topic as a clause rather than a noun phrase. Matched with
- * word boundaries (hu_str_contains_word_ci_n) per
- * .claude/rules/substring-classifier-pitfalls.md — "im" must not fire inside
- * "swimming", "will" must not fire inside "goodwill". Apostrophes are word
- * boundaries, so "I'll" is caught by "i". */
-static const char *const topic_clause_words[] = {
-    /* pronouns */
-    "i", "im", "ive", "ill", "id", "me", "you", "your", "youre", "we", "weve", "hes", "shes",
-    "theyre",
-    /* auxiliaries / copulas */
-    "is", "are", "was", "were", "will", "be", "been", "being", "am", "dont", "cant", "wont",
-    /* clause verbs seen in real extractor output */
-    "going", "gonna", "get", "got", "went", "think", "thinking", "know", "need", "want", "try",
-    "trying", "come",
-    /* question words + discourse markers (2026-07-21 leak wave: "What's" splits
-     * at the apostrophe into "what"+"s", which passed the original list and
-     * scheduled "how'd the What's go?"; "So" and "How ya feeling" likewise). */
-    "what", "whats", "how", "when", "where", "why", "who", "whos", "so", "well", "oh", "hey", "ya",
-    "it", "its", "this", "that", "feeling",
-    /* interjections */
-    "okay", "ok", "yeah", "yep", "sure", "thanks", NULL};
-
-bool hu_contextual_proactive_topic_is_sendable(const char *topic, size_t len) {
-    if (!topic || len == 0 || len > 48)
-        return false;
-
-    /* Sentence punctuation ANYWHERE means the "topic" is a clause. The
-     * normalizer already strips trailing punctuation, so any survivor is
-     * internal ("It will be tomorrow. Im working"). */
-    size_t words = 0;
-    bool in_word = false;
-    for (size_t i = 0; i < len; i++) {
-        char c = topic[i];
-        if (c == '.' || c == '!' || c == '?' || c == ';' || c == ':' || c == ',' || c == '\n')
-            return false;
-        bool sp = ((unsigned char)c <= 32);
-        if (!sp && !in_word) {
-            words++;
-            in_word = true;
-        } else if (sp) {
-            in_word = false;
-        }
-    }
-
-    /* Real event topics are 1-4 words ("interview", "dentist appointment",
-     * "parent teacher conference"). Longer means the extractor grabbed prose. */
-    if (words == 0 || words > 4)
-        return false;
-
-    /* Apostrophe-FOLDED copy for the clause-word scan.
-     *
-     * Every contraction in topic_clause_words is spelled without an apostrophe
-     * ("dont", "cant", "wont", "hes", "shes", "theyre", "youre", "im", ...)
-     * while hu_str_contains_word_ci_n treats an apostrophe as a word boundary.
-     * So real text "don't" tokenized to "don" + "t" and matched NEITHER, and the
-     * entry that exists to catch it never fired. Those entries only ever worked
-     * by accident, when the bare prefix was independently listed ("I'm" caught
-     * by "i", "what's" by "what", "it's" by "it"); "don't", "won't", "he's",
-     * "she's" and "they're" had no such backstop and passed the gate.
-     *
-     * That is how "hey how are you doing with don't understand provide?" reached
-     * Seth's sister on 2026-07-26 15:05 — she replied "Turn AI off". Folding the
-     * apostrophe out makes "don't" read as "dont" and the existing list work as
-     * written. Same class as ~/.claude/rules/substring-classifier-pitfalls.md:
-     * the tokenizer and the keyword list disagreed about word shape. */
-    char folded[49]; /* len is <= 48, checked above */
-    size_t folded_len = 0;
-    for (size_t i = 0; i < len; i++) {
-        char c = topic[i];
-        if (c == '\'' || (unsigned char)c == 0x92) /* ASCII and CP-1252 curly */
-            continue;
-        folded[folded_len++] = c;
-    }
-    /* UTF-8 right single quote (U+2019 = E2 80 99) — drop the 3-byte sequence. */
-    size_t clean_len = 0;
-    for (size_t i = 0; i < folded_len;) {
-        if (i + 2 < folded_len && (unsigned char)folded[i] == 0xE2 &&
-            (unsigned char)folded[i + 1] == 0x80 && (unsigned char)folded[i + 2] == 0x99) {
-            i += 3;
-            continue;
-        }
-        folded[clean_len++] = folded[i++];
-    }
-    folded_len = clean_len;
-
-    for (size_t w = 0; topic_clause_words[w]; w++) {
-        if (hu_str_contains_word_ci_n(topic, len, topic_clause_words[w]) ||
-            hu_str_contains_word_ci_n(folded, folded_len, topic_clause_words[w]))
-            return false;
-    }
-    return true;
-}
-
-size_t hu_contextual_proactive_build_message(const char *topic, size_t len, char *out, size_t cap) {
-    if (!out || cap == 0)
-        return 0;
-    out[0] = '\0';
-    if (!topic || len == 0)
-        return 0; /* never fabricate a topicless contextual proactive */
-
-    int n = snprintf(out, cap, "how'd the %.*s go?", (int)len, topic);
-    if (n <= 0 || (size_t)n >= cap) {
-        out[0] = '\0';
-        return 0;
-    }
-    return (size_t)n;
-}
-
 /* ── decision aggregator ──────────────────────────────────────────────────── */
 
 hu_error_t hu_contextual_proactive_decide(hu_allocator_t *alloc, const char *inbound, size_t len,
@@ -424,22 +314,14 @@ hu_error_t hu_contextual_proactive_decide(hu_allocator_t *alloc, const char *inb
         if (tlen == 0)
             continue;
 
-        /* Topic-quality gate (2026-07-18 audit): the extractor can hand back a
-         * whole clause as a "description"; splicing that into the template
-         * produced real sends like "how'd the It will be tomorrow. Im working
-         * go?". Only short noun-phrase topics survive — skipping a follow-up
-         * costs nothing, sending garbage costs trust. */
-        if (!hu_contextual_proactive_topic_is_sendable(cand.topic, tlen))
-            continue;
-
+        /* No topic-quality blocklist here any more. It existed to keep garbage
+         * out of "how'd the %s go?" and could not — three garbled messages
+         * shipped past it. The topic is now a SITUATION handed to a model that
+         * reads the live thread and can decline, so a weak topic costs a
+         * declined tick instead of a bad send. */
         int64_t send_at =
             hu_contextual_proactive_resolve_send_at(ev->temporal_ref, ev->temporal_ref_len, now_ts);
         if (send_at <= now_ts || send_at == 0)
-            continue;
-
-        size_t mlen = hu_contextual_proactive_build_message(cand.topic, tlen, cand.message,
-                                                            sizeof(cand.message));
-        if (mlen == 0)
             continue;
 
         /* De-duplicate by topic so two mentions in one burst don't double-fire. */
@@ -460,6 +342,48 @@ hu_error_t hu_contextual_proactive_decide(hu_allocator_t *alloc, const char *inb
 
     hu_event_extract_result_deinit(&events, alloc);
     return HU_OK;
+}
+
+/* ── situation frame (replaces the deleted message template) ──────────────── */
+
+size_t hu_contextual_proactive_situation_frame(const hu_contextual_proactive_decision_t *d,
+                                               int64_t now_ts, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!d || !d->topic[0])
+        return 0; /* never fabricate a topicless situation */
+
+    /* Describe, do not instruct. The proposer decides whether to say anything
+     * and what; handing it an imperative ("ask how it went") would just be the
+     * old template wearing a different hat. Relative days are the useful frame
+     * — "3 days ago" tells the model an ask is timely, a future date tells it to
+     * wait or reference it forward. */
+    int64_t at_s = d->send_at_ms / 1000;
+    long long days = (long long)((at_s - now_ts) / 86400);
+    const char *when;
+    char when_buf[64];
+    if (days == 0)
+        when = "today";
+    else if (days == 1)
+        when = "tomorrow";
+    else if (days == -1)
+        when = "yesterday";
+    else if (days > 1) {
+        snprintf(when_buf, sizeof(when_buf), "in %lld days", days);
+        when = when_buf;
+    } else {
+        snprintf(when_buf, sizeof(when_buf), "%lld days ago", -days);
+        when = when_buf;
+    }
+
+    int n = snprintf(out, cap, "they mentioned %s (%s); confidence %.2f", d->topic, when,
+                     d->confidence);
+    if (n <= 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n;
 }
 
 /* ── SHADOW metric capture ────────────────────────────────────────────────── */

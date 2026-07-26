@@ -5497,9 +5497,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                          "(set HU_PROACTIVE_CONTEXTUAL=off to disable)",
                                          hu_contextual_proactive_mode_str(cp_mode));
                         hu_contextual_proactive_result_t cpr;
-                        if (hu_contextual_proactive_decide(alloc, combined, combined_len,
-                                                           (int64_t)time(NULL), &cpr) == HU_OK) {
-                            size_t cp_ch_len = strlen(cp_channel);
+                        /* One clock read for the whole batch: detection and the
+                         * situation frame must agree on "now", or the frame's
+                         * relative-day wording can disagree with the send_at it
+                         * was derived from. */
+                        const int64_t cp_now = (int64_t)time(NULL);
+                        if (hu_contextual_proactive_decide(alloc, combined, combined_len, cp_now,
+                                                           &cpr) == HU_OK) {
                             /* SHADOW metric: structured decision-distribution capture
                              * for offline measurement (hu_salience_summarize shape). */
                             if (cp_mode == HU_CONTEXTUAL_PROACTIVE_SHADOW && cpr.count > 0) {
@@ -5509,42 +5513,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_log_info("human", agent ? agent->observer : NULL, "%s",
                                                 cp_metric);
                             }
+                            /* Detections are SITUATIONS now, not messages — the
+                             * frozen "how'd the %s go?" enqueue is gone; see the
+                             * rationale on hu_contextual_proactive_decision_t.
+                             * Composition moves to send time in init_proposer via
+                             * hu_proactive_compose_inputs.situation_context. Until
+                             * that wiring lands this logs the frame and enqueues
+                             * NOTHING (subsystem is OFF by default). */
                             for (size_t cpi = 0; cpi < cpr.count; cpi++) {
                                 const hu_contextual_proactive_decision_t *cpd = &cpr.items[cpi];
-                                size_t cp_msg_len = strlen(cpd->message);
-                                if (cp_mode == HU_CONTEXTUAL_PROACTIVE_SHADOW) {
-                                    /* SHADOW: log what WOULD be sent; never enqueue. */
-                                    hu_log_info(
-                                        "human", agent ? agent->observer : NULL,
-                                        "[contextual-proactive SHADOW] would schedule to %s via %s "
-                                        "at %lld: %s",
-                                        batch_key, cp_channel, (long long)(cpd->send_at_ms / 1000),
-                                        cpd->message);
+                                char cp_frame[320];
+                                if (hu_contextual_proactive_situation_frame(cpd, cp_now, cp_frame,
+                                                                            sizeof(cp_frame)) == 0)
                                     continue;
-                                }
-                                /* ON: dedup against the existing schedule queue so a
-                                 * repeated mention doesn't double-fire, then enqueue
-                                 * via the governed scheduled-send path. */
-                                bool cp_dup = false;
-                                for (size_t si = 0; si < HU_SCHED_MAX; si++) {
-                                    const hu_sched_slot_t *slot = hu_conversation_sched_slot(si);
-                                    if (slot && slot->active &&
-                                        strcmp(slot->contact_id, batch_key) == 0 &&
-                                        strcmp(slot->message, cpd->message) == 0) {
-                                        cp_dup = true;
-                                        break;
-                                    }
-                                }
-                                if (cp_dup)
-                                    continue;
-                                hu_error_t cp_serr = hu_conversation_schedule_message_on(
-                                    batch_key, key_len, cp_channel, cp_ch_len, cpd->message,
-                                    cp_msg_len, (uint64_t)cpd->send_at_ms);
                                 hu_log_info("human", agent ? agent->observer : NULL,
-                                            "[contextual-proactive] %s to %s via %s at %lld: %s",
-                                            cp_serr == HU_OK ? "scheduled" : "schedule FAILED",
+                                            "[contextual-proactive] situation for %s via %s "
+                                            "relevant at %lld: %s (awaiting init_proposer "
+                                            "compose-at-send wiring; nothing enqueued)",
                                             batch_key, cp_channel,
-                                            (long long)(cpd->send_at_ms / 1000), cpd->message);
+                                            (long long)(cpd->send_at_ms / 1000), cp_frame);
                             }
                         }
                     }
