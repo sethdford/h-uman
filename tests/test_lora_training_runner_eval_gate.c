@@ -152,9 +152,70 @@ static void test_runner_promotes_measured_gate_scores(void) {
     unlink(path);
 }
 
+/* ── Attempt cooldown (2026-07-26 crash-loop fix) ──────────────────────────
+ *
+ * Eleven frontier-MLX dispatches fired on 2026-07-26, six inside 28 minutes
+ * (06:09, 06:15, 06:21, 06:27, 06:30, 06:37), because the only trigger was a
+ * pair-count threshold crossing with nothing rate-limiting the retry. Each
+ * dispatch loads the 56 GB serving base for training; the pile-up drove a
+ * 128 GB machine to 154 MB free and four reboots that day. */
+
+static void cooldown_never_attempted_allows_run(void) {
+    /* Fails OPEN: a missing/unreadable stamp must not wedge training forever. */
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(0, 1785000000, 3600));
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(-1, 1785000000, 3600));
+}
+
+static void cooldown_blocks_immediate_retry(void) {
+    time_t t = 1785000000;
+    HU_ASSERT_TRUE(hu_lora_runner_attempt_cooldown_active(t, t, 3600));
+    HU_ASSERT_TRUE(hu_lora_runner_attempt_cooldown_active(t, t + 1, 3600));
+    HU_ASSERT_TRUE(hu_lora_runner_attempt_cooldown_active(t, t + 3599, 3600));
+}
+
+static void cooldown_expires_at_the_boundary(void) {
+    time_t t = 1785000000;
+    /* Exactly `cooldown_seconds` elapsed = expired, not still active. */
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(t, t + 3600, 3600));
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(t, t + 7200, 3600));
+}
+
+static void cooldown_treats_backwards_clock_as_active(void) {
+    /* An NTP step or manual clock change must not open a retry window. */
+    time_t t = 1785000000;
+    HU_ASSERT_TRUE(hu_lora_runner_attempt_cooldown_active(t, t - 600, 3600));
+}
+
+static void cooldown_disabled_when_interval_non_positive(void) {
+    time_t t = 1785000000;
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(t, t, 0));
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(t, t, -1));
+}
+
+static void cooldown_blocks_the_2026_07_26_retry_storm(void) {
+    /* The exact observed cadence: attempts six minutes apart. Under the shipped
+     * 6 h cooldown every one of these must be refused after the first. */
+    const int cd = HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS;
+    time_t first = 1785000000; /* stands in for 06:09 */
+    const int offsets_s[] = {6 * 60, 12 * 60, 18 * 60, 21 * 60, 28 * 60};
+    for (size_t i = 0; i < sizeof(offsets_s) / sizeof(offsets_s[0]); i++) {
+        HU_ASSERT_TRUE(hu_lora_runner_attempt_cooldown_active(first, first + offsets_s[i], cd));
+    }
+    /* ...and the next day's run is allowed again. */
+    HU_ASSERT_FALSE(hu_lora_runner_attempt_cooldown_active(first, first + 24 * 3600, cd));
+    /* The shipped interval must actually be long enough to break a 28-min storm. */
+    HU_ASSERT_TRUE(cd > 28 * 60);
+}
+
 void run_runner_eval_gate_tests(void) {
     HU_TEST_SUITE("runner-eval-gate");
     HU_RUN_TEST(test_runner_skips_gate_when_eval_gate_is_null);
     HU_RUN_TEST(test_runner_blocks_promotion_when_gate_rejects);
     HU_RUN_TEST(test_runner_promotes_measured_gate_scores);
+    HU_RUN_TEST(cooldown_never_attempted_allows_run);
+    HU_RUN_TEST(cooldown_blocks_immediate_retry);
+    HU_RUN_TEST(cooldown_expires_at_the_boundary);
+    HU_RUN_TEST(cooldown_treats_backwards_clock_as_active);
+    HU_RUN_TEST(cooldown_disabled_when_interval_non_positive);
+    HU_RUN_TEST(cooldown_blocks_the_2026_07_26_retry_storm);
 }

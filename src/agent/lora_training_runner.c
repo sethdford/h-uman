@@ -72,6 +72,53 @@ static time_t runner_now(void) {
 }
 #endif
 
+static hu_error_t mkdir_p(const char *path); /* defined below; used by the stamp writer */
+
+bool hu_lora_runner_attempt_cooldown_active(time_t last_attempt, time_t now, int cooldown_seconds) {
+    if (last_attempt <= 0)
+        return false; /* never attempted — fail OPEN, don't wedge training */
+    if (cooldown_seconds <= 0)
+        return false; /* cooldown disabled */
+    if (now < last_attempt)
+        return true; /* clock moved backwards — conservative direction */
+    return (now - last_attempt) < (time_t)cooldown_seconds;
+}
+
+/* Path of the attempt stamp. Lives beside the training data it rate-limits so
+ * it travels with a training-data reset. */
+static void attempt_stamp_path(const char *home_dir, char *out, size_t out_cap) {
+    snprintf(out, out_cap, "%s/.human/training-data/.last_lora_attempt", home_dir);
+}
+
+/* Last attempt time, or 0 when absent/unreadable (which reads as "never" and
+ * therefore allows the attempt — see the fail-open note on the predicate). */
+static time_t read_attempt_stamp(const char *home_dir) {
+    char path[512];
+    attempt_stamp_path(home_dir, path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return 0;
+    long long v = 0;
+    int n = fscanf(f, "%lld", &v);
+    (void)fclose(f);
+    return (n == 1 && v > 0) ? (time_t)v : 0;
+}
+
+/* Record an attempt. Best-effort: a write failure must not block training, it
+ * only means the next attempt isn't rate-limited. */
+static void write_attempt_stamp(const char *home_dir, time_t when) {
+    char path[512];
+    attempt_stamp_path(home_dir, path, sizeof(path));
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/.human/training-data/", home_dir);
+    (void)mkdir_p(dir);
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return;
+    (void)fprintf(f, "%lld\n", (long long)when);
+    (void)fclose(f);
+}
+
 static hu_error_t mkdir_p(const char *path) {
     char tmp[512];
     snprintf(tmp, sizeof(tmp), "%s", path);
@@ -478,6 +525,36 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
          * field is documented as optional in hu_lora_runner_ctx_t). */
         hu_allocator_t sys_alloc = hu_system_allocator();
         hu_allocator_t *swap_alloc = (ctx && ctx->alloc) ? ctx->alloc : &sys_alloc;
+
+#ifndef HU_IS_TEST
+        /* Attempt cooldown (2026-07-26). training_loop.py is the AUTHORITY on
+         * whether a run may proceed (memory, serving co-residency, window);
+         * this only stops the daemon from spawning subprocesses destined to
+         * refuse. Eleven dispatches fired on 2026-07-26, six inside 28 minutes,
+         * because "the next threshold crossing will retry" had no rate limit.
+         * Stamped on ATTEMPT, not success, so a refused or crashed run still
+         * spends the cooldown — otherwise a fast-failing run reinstates the
+         * tight loop this prevents. */
+        time_t last_attempt = read_attempt_stamp(home);
+        time_t now = runner_now();
+        if (hu_lora_runner_attempt_cooldown_active(last_attempt, now,
+                                                   HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS)) {
+            hu_log_info("lora_training_runner", NULL,
+                        "frontier-mlx dispatch skipped: attempt cooldown active "
+                        "(%lld s since last attempt, cooldown %d s)",
+                        (long long)(now - last_attempt), HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS);
+            return HU_OK;
+        }
+        write_attempt_stamp(home, now);
+#endif /* !HU_IS_TEST */
+        /* Compiled out under HU_IS_TEST on purpose. The dispatch below is
+         * already stubbed in test builds, so a cooldown here would guard
+         * nothing — while the stamp write would be a real side effect in the
+         * developer's ~/.human and would PERSIST between runs, making the suite
+         * order-dependent (observed: the first dispatch test silenced the next
+         * three). The predicate itself is covered directly by
+         * tests/test_lora_training_runner_eval_gate.c. */
+
         hu_error_t fmx_err = dispatch_frontier_mlx_training(swap_alloc, home, NULL);
         /* Dispatch errors are logged but don't block cache warming below. */
         if (fmx_err == HU_OK) {
