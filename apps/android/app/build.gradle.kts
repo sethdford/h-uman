@@ -5,7 +5,14 @@ plugins {
 
 android {
     namespace = "ai.human.app"
-    compileSdk = 36
+    // 37 is REQUIRED by androidx.lifecycle 2.11.0: both
+    // lifecycle-runtime-compose-android and lifecycle-viewmodel-compose-android
+    // publish AAR metadata demanding consumers "compile against version 37 or
+    // later of the Android APIs", so CheckAarMetadataWorkAction hard-fails the
+    // build at 36. targetSdk deliberately stays 36 — compileSdk is what the
+    // metadata check reads, and raising targetSdk opts into new runtime
+    // behaviours that need their own testing pass.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.human.app"
