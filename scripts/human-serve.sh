@@ -354,6 +354,37 @@ do_foreground() {
         exit 1
     fi
 
+    # Memory-release barrier — added 2026-07-26 after the GLM OOM abort.
+    #
+    # The LISTEN check above clears the instant a dying server closes its
+    # socket, but a 57 GB GLM-4.5-Air process needs tens of seconds MORE to
+    # hand its Metal/mmap pages back to the kernel. Exec'ing a second 57 GB
+    # copy inside that window puts ~114 GB against this M4 Max's 107.5 GiB
+    # Metal max_recommended_working_set_size, and the new process's first
+    # command buffer aborts:
+    #   [METAL] Command buffer execution failed: Insufficient Memory
+    #   (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+    #
+    # Never fired in 59 gemma-era starts: at 31 GB/copy two copies fit in
+    # 62 GB. GLM at 56 GB/copy is what made restart overlap fatal.
+    #
+    # NOTE: the same-day crash loop had a DIFFERENT cause — a concurrent
+    # `mlx_lm lora` training run, not a second server. That is guarded
+    # separately by scripts/training_loop.py's preflight. This barrier only
+    # covers server-vs-server overlap.
+    #
+    # Port-filtered on purpose: a spare eval server (:8743/:8747) is not a
+    # predecessor and must not gate the prod start. Capped at ~120s so a
+    # wedged predecessor degrades to "try anyway" rather than blocking
+    # launchd forever.
+    for _ in $(seq 1 60); do
+        pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 || break
+        echo "  waiting for previous mlx-server on :${PORT} to release memory..."
+        sleep 2
+    done
+    # Page reclaim continues briefly after the process is reaped.
+    sleep 3
+
     # exec replaces this shell with the python process — same PID.
     # No backgrounding, no PIDFILE write, no parent to be reaped.
     exec "${cmd_array[@]}"

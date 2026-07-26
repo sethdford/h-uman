@@ -9,6 +9,7 @@ Both pin 2026-07-26 recovery-run findings:
      evidence (the toothless-gate shape from the 2026-07-11 fleet lessons).
 """
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -53,8 +54,48 @@ ok("glm recipe enables grad checkpointing (106B MoE fits)",
 
 # Wiring pin: the emitter above is worthless if the training path stopped
 # calling it (integration-done-contract — a fix with no caller is dead code).
+#
+# BEHAVIOURAL, not textual. This was a source-grep for "training_config_for_model("
+# in run_mlx_lora_training until 2026-07-26, when that function grew a resource
+# preflight and its body moved to a helper — the grep went false while the
+# delegation was entirely intact. That is precisely the failure this file's
+# header warns about ("behavioural pins survive the code moving; textual ones
+# quietly stop being pins"), so the pin is now a spy: it survives any refactor
+# that preserves the call, and fails the moment the call actually disappears.
+_real_cfg = training_loop.training_config_for_model
+_real_run = training_loop.subprocess.run
+_cfg_calls = {"n": 0}
+
+
+class _StubbedProc:
+    """Stands in for the mlx_lm subprocess so the pin never spawns training."""
+    returncode = 1
+    stdout = ""
+    stderr = "stubbed by test_training_loop_gates"
+
+
+def _spy_cfg(*a, **k):
+    _cfg_calls["n"] += 1
+    return _real_cfg(*a, **k)
+
+
+try:
+    training_loop.training_config_for_model = _spy_cfg
+    training_loop.subprocess.run = lambda *a, **k: _StubbedProc()
+    os.environ["HU_TRAIN_SKIP_PREFLIGHT"] = "1"  # the pin is about wiring, not resources
+    with tempfile.TemporaryDirectory() as _d:
+        training_loop.run_mlx_lora_training(
+            [{"outcome": "good", "prompt_text": "a", "response_text": "b"},
+             {"outcome": "good", "prompt_text": "c", "response_text": "d"}],
+            Path(_d) / "adapter", iters=2, scale=2.0,
+            model="mlx-community/GLM-4.5-Air-4bit")
+finally:
+    training_loop.training_config_for_model = _real_cfg
+    training_loop.subprocess.run = _real_run
+    os.environ.pop("HU_TRAIN_SKIP_PREFLIGHT", None)
+
 ok("run_mlx_lora_training delegates to training_config_for_model",
-   "training_config_for_model(" in inspect.getsource(training_loop.run_mlx_lora_training))
+   _cfg_calls["n"] >= 1, f"spy saw {_cfg_calls['n']} calls")
 
 # ── 2. read_adapter_scale reads what mlx_lm recorded ─────────────────────
 with tempfile.TemporaryDirectory() as d:

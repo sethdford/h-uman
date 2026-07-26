@@ -116,5 +116,21 @@ ok("a server with no --port defaults to 8741",
 ok("no mlx-server at all reads as None (not a config fallback)",
    training_loop.serving_base_from_ps("some other process\n", port="8741") is None)
 
+# ── 7. mlx_lm runs on the PINNED interpreter, not whatever python3 resolves to ─
+# 2026-07-26: the daemon spawned `python3 training_loop.py`, PATH gave
+# python@3.14, and sys.executable carried 3.14 into the mlx_lm subprocess --
+# the exact interpreter human-serve.sh deliberately avoids ("3.14 has loky
+# semaphore crash bug"). Serving and training must share one interpreter.
+resolved = training_loop.mlx_python({})
+ok("mlx_python never resolves to python@3.14", "3.14" not in resolved, resolved)
+venv = Path.home() / "Documents/gemma-realtime-1/.venv312/bin/python3.12"
+if venv.exists():
+    ok("mlx_python prefers the pinned .venv312", resolved == str(venv), resolved)
+ok("HU_MLX_PYTHON override is honored",
+   training_loop.mlx_python({"HU_MLX_PYTHON": sys.executable}) == sys.executable)
+ok("a non-existent override falls back rather than breaking training",
+   training_loop.mlx_python({"HU_MLX_PYTHON": "/nonexistent/python"}) != "/nonexistent/python")
+ok("empty override falls back", training_loop.mlx_python({"HU_MLX_PYTHON": "  "}) == resolved)
+
 print(("FAILED" if fails else "PASSED") + f" ({fails} failures)")
 sys.exit(1 if fails else 0)

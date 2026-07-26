@@ -71,6 +71,30 @@ TRAIN_MEM_OVERHEAD_BYTES = 6 * 1024 ** 3
 DEFAULT_TRAIN_WINDOW = ""
 
 
+def mlx_python(env: dict | None = None) -> str:
+    """Interpreter to run `-m mlx_lm` with — the pinned venv, not whatever
+    `python3` resolves to on PATH.
+
+    2026-07-26: the daemon spawns `python3 scripts/training_loop.py`, PATH
+    resolved that to python@3.14, and sys.executable therefore carried 3.14 into
+    the mlx_lm subprocess. scripts/human-serve.sh deliberately avoids 3.14
+    ("Python 3.14 has loky semaphore crash bug; python@3.13 was uninstalled
+    2026-07-25") and pins .venv312 — the training path silently did not.
+
+    Mirrors human-serve.sh's VENV_PYTHON choice so serving and training run the
+    same interpreter and the same mlx/mlx_lm pins. Falls back to sys.executable
+    when the venv is absent, so CI and non-mac checkouts still work.
+    """
+    env = os.environ if env is None else env
+    override = (env.get("HU_MLX_PYTHON") or "").strip()
+    if override and Path(override).exists():
+        return override
+    venv = Path.home() / "Documents" / "gemma-realtime-1" / ".venv312" / "bin" / "python3.12"
+    if venv.exists():
+        return str(venv)
+    return sys.executable
+
+
 def training_preflight_decision(need_bytes: int, available_bytes: int,
                                 now_minutes: int | None = None,
                                 window: tuple[int, int] | None = None,
@@ -1209,8 +1233,17 @@ def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
     # Build mlx_lm.lora command. Scalar flags mirror the config values so
     # the two can never diverge; lora_parameters/grad_checkpoint/optimizer
     # ride in via -c (no stable CLI flags for the nested form).
+    # --save-every: mlx_lm defaults to 100, and on a 56 GB MoE base each
+    # checkpoint is ~556 MB — a 500-iter run left 5.4 GB of intermediates in one
+    # adapter dir (measured 2026-07-26 on auto-1785091280-glm). prune_old_adapters
+    # rotates whole DIRECTORIES but never the checkpoints inside one, so the
+    # intermediates were pure accumulation. These runs take ~4 minutes, so
+    # mid-run crash-recovery checkpoints buy almost nothing; save once at the
+    # end. Overridable for long runs where resumability does matter.
+    save_every = int(os.environ.get("HU_TRAIN_SAVE_EVERY") or max(1, iters))
+
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        mlx_python(), "-m", "mlx_lm", "lora",
         "--model", model,
         "--data", str(train_data_dir),  # Directory with train.jsonl + valid.jsonl
         "--adapter-path", str(adapter_out),  # Output directory (mlx_lm writes adapters.safetensors + adapter_config.json here)
@@ -1219,6 +1252,7 @@ def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
         "--learning-rate", f"{config['learning_rate']:g}",
         "--max-seq-length", str(config["max_seq_length"]),
         "--steps-per-report", str(config["steps_per_report"]),
+        "--save-every", str(save_every),
         "--train",
         "-c", str(config_path),
     ]
