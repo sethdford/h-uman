@@ -61,6 +61,15 @@ fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
 
+# Capture the serving base BEFORE stopping the server — resolution is
+# ps-based, so it returns nothing once the process is gone.
+SERVING_BASE="$(python3 -c "
+import sys; sys.path.insert(0, '$REPO/scripts')
+import training_loop as t
+print(t.serving_base_from_ps() or '')
+" 2>/dev/null || true)"
+log "serving base: ${SERVING_BASE:-<none detected>}"
+
 # ── Stop serving, and guarantee it comes back ───────────────────────────────
 # The trap fires on normal exit AND on error/interrupt: leaving the persona's
 # serving path down because training crashed would be a far worse failure than
@@ -107,6 +116,33 @@ if [[ -f "$SOURCE_JSONL" ]]; then
     log "training exited rc=${PIPESTATUS[0]}"
 else
     log "no source jsonl at $SOURCE_JSONL — skipping training"
+fi
+
+# ── Steering vectors for the serving base ───────────────────────────────────
+# Persona steering has been running UNSTEERED since the 2026-07-26 GLM flip:
+#   [steering] probe FAIL: formality shape (60, 5376) != [46, hidden] for
+#   'GLM-4.5-Air-4bit' — these vectors were extracted from a DIFFERENT base
+# Commit 41fad87 keys vectors by base model so a flip can no longer silently
+# reuse the wrong ones; what remained was actually EXTRACTING them for GLM.
+# Extraction loads the full base, so like training it can only run while
+# serving is down — this window is the only safe place for it. Runs after
+# training so the two never hold the weights at once, and only when the
+# vectors are genuinely missing.
+if [[ -n "$SERVING_BASE" ]]; then
+    vec_dir="$HOME/.human/persona_vectors/$(basename "$SERVING_BASE")"
+    extractor="$HOME/Documents/gemma-realtime-1/scripts/extract_persona_vectors.py"
+    if [[ -d "$vec_dir" ]] && compgen -G "$vec_dir/*.npy" >/dev/null 2>&1; then
+        log "steering vectors already present for $SERVING_BASE — skipping extraction"
+    elif [[ "${HU_RETRAIN_SKIP_VECTORS:-0}" == "1" ]]; then
+        log "steering extraction skipped (HU_RETRAIN_SKIP_VECTORS=1)"
+    elif [[ ! -f "$extractor" ]]; then
+        log "steering extractor not found at $extractor — skipping"
+    else
+        log "extracting steering vectors for $SERVING_BASE -> $vec_dir"
+        mkdir -p "$vec_dir"
+        python3 "$extractor" --model "$SERVING_BASE" --out-dir "$vec_dir" 2>&1 | tee -a "$LOG"
+        log "steering extraction exited rc=${PIPESTATUS[0]}"
+    fi
 fi
 
 log "=== nightly retrain done ==="
