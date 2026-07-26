@@ -1,5 +1,6 @@
 #include "human/agent.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_trim.h"
 #include "human/agent/spawn.h"
 #include "human/agent/tool_context.h"
 #include "human/config.h"
@@ -3730,6 +3731,142 @@ static void test_persona_immersive_in_prompt(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+/* ── Director-style persona direction (HU_PERSONA_DIRECTION gate) ─────────
+ *
+ * The block is referenced through the PRODUCTION symbols rather than a copied
+ * string literal, so these tests cannot drift from the text the prompt builder
+ * actually emits (.claude/rules/test-references-production-symbol.md). */
+extern const char hu_persona_direction_text[];
+extern const size_t hu_persona_direction_text_len;
+
+/* Build an immersive system prompt with the direction gate set to `mode`.
+ * Caller frees *sys_out. Returns the persona prompt so the caller can free it. */
+static char *direction_build(hu_allocator_t *alloc, hu_persona_t *p, const char *mode,
+                             char **sys_out, size_t *sys_len_out, size_t *persona_len_out) {
+    if (mode)
+        setenv("HU_PERSONA_DIRECTION", mode, 1);
+    else
+        unsetenv("HU_PERSONA_DIRECTION");
+
+    char *persona_prompt = NULL;
+    size_t persona_prompt_len = 0;
+    if (hu_persona_build_prompt(alloc, p, NULL, 0, NULL, 0, &persona_prompt, &persona_prompt_len) !=
+        HU_OK)
+        return NULL;
+
+    hu_prompt_config_t cfg = {0};
+    cfg.persona_prompt = persona_prompt;
+    cfg.persona_prompt_len = persona_prompt_len;
+    cfg.persona_immersive = true;
+    cfg.persona = p;
+
+    *sys_out = NULL;
+    *sys_len_out = 0;
+    if (hu_prompt_build_system(alloc, &cfg, NULL, NULL, sys_out, sys_len_out) != HU_OK) {
+        alloc->free(alloc->ctx, persona_prompt, persona_prompt_len + 1);
+        return NULL;
+    }
+    *persona_len_out = persona_prompt_len;
+    unsetenv("HU_PERSONA_DIRECTION");
+    return persona_prompt;
+}
+
+static void direction_persona_init(hu_allocator_t *alloc, hu_persona_t *p, char **reinf) {
+    memset(p, 0, sizeof(*p));
+    p->name = hu_strndup(alloc, "test-direction", 14);
+    p->identity = hu_strndup(alloc, "A directed persona", 18);
+    p->immersive_reinforcement = reinf;
+    p->immersive_reinforcement_count = 1;
+}
+
+static void direction_persona_free(hu_allocator_t *alloc, hu_persona_t *p) {
+    p->immersive_reinforcement = NULL;
+    p->immersive_reinforcement_count = 0;
+    hu_persona_deinit(alloc, p);
+}
+
+static void persona_direction_absent_when_gate_unset(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    char *reinf[] = {"You are Seth, not an AI"};
+    direction_persona_init(&alloc, &p, reinf);
+
+    char *sys = NULL;
+    size_t sys_len = 0, plen = 0;
+    char *pp = direction_build(&alloc, &p, NULL, &sys, &sys_len, &plen);
+    HU_ASSERT_NOT_NULL(pp);
+    HU_ASSERT_NOT_NULL(sys);
+    /* Default OFF: the emitted prompt must be byte-identical to pre-feature. */
+    HU_ASSERT_TRUE(strstr(sys, hu_persona_direction_text) == NULL);
+    HU_ASSERT_TRUE(strstr(sys, "Direction for this scene") == NULL);
+    /* The persona itself must still be there — proves we asserted on a real prompt. */
+    HU_ASSERT_TRUE(strstr(sys, "You are Seth, not an AI") != NULL);
+
+    alloc.free(alloc.ctx, sys, sys_len + 1);
+    alloc.free(alloc.ctx, pp, plen + 1);
+    direction_persona_free(&alloc, &p);
+}
+
+static void persona_direction_shadow_does_not_change_prompt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    char *reinf[] = {"You are Seth, not an AI"};
+    direction_persona_init(&alloc, &p, reinf);
+
+    char *sys_off = NULL, *sys_shadow = NULL;
+    size_t off_len = 0, shadow_len = 0, p1 = 0, p2 = 0;
+    char *pp1 = direction_build(&alloc, &p, NULL, &sys_off, &off_len, &p1);
+    char *pp2 = direction_build(&alloc, &p, "shadow", &sys_shadow, &shadow_len, &p2);
+    HU_ASSERT_NOT_NULL(sys_off);
+    HU_ASSERT_NOT_NULL(sys_shadow);
+    /* SHADOW measures but must emit the identical prompt as OFF. */
+    HU_ASSERT_EQ(shadow_len, off_len);
+    HU_ASSERT_STR_EQ(sys_shadow, sys_off);
+    HU_ASSERT_TRUE(strstr(sys_shadow, hu_persona_direction_text) == NULL);
+
+    alloc.free(alloc.ctx, sys_off, off_len + 1);
+    alloc.free(alloc.ctx, sys_shadow, shadow_len + 1);
+    alloc.free(alloc.ctx, pp1, p1 + 1);
+    alloc.free(alloc.ctx, pp2, p2 + 1);
+    direction_persona_free(&alloc, &p);
+}
+
+static void persona_direction_live_lands_ahead_of_the_tail_cut(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    char *reinf[] = {"You are Seth, not an AI"};
+    direction_persona_init(&alloc, &p, reinf);
+
+    char *sys = NULL;
+    size_t sys_len = 0, plen = 0;
+    char *pp = direction_build(&alloc, &p, "live", &sys, &sys_len, &plen);
+    HU_ASSERT_NOT_NULL(pp);
+    HU_ASSERT_NOT_NULL(sys);
+
+    /* LIVE: the exact production text is present, verbatim. */
+    const char *dir = strstr(sys, hu_persona_direction_text);
+    HU_ASSERT_NOT_NULL(dir);
+
+    /* The load-bearing contract: direction must sit AHEAD of the trailing
+     * reinforcement guard, because agent_turn.c's 16 KB positional cap deletes
+     * the TAIL. Compare against the LAST occurrence: hu_persona_build_prompt
+     * also embeds the reinforcement text inside the persona head, so the first
+     * occurrence legitimately precedes the direction and is the wrong anchor. */
+    const char *tail_guard = NULL;
+    for (const char *q = sys; (q = strstr(q, "You are Seth, not an AI")) != NULL; q++)
+        tail_guard = q;
+    HU_ASSERT_NOT_NULL(tail_guard);
+    HU_ASSERT_TRUE(dir < tail_guard);
+
+    /* And it must fit inside the surviving window by a wide margin. */
+    HU_ASSERT_TRUE((size_t)(dir - sys) + hu_persona_direction_text_len <
+                   (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+
+    alloc.free(alloc.ctx, sys, sys_len + 1);
+    alloc.free(alloc.ctx, pp, plen + 1);
+    direction_persona_free(&alloc, &p);
+}
+
 static void test_persona_immersive_fallback_when_no_reinforcement(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_persona_t p = {0};
@@ -5237,6 +5374,9 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_persona_externalized_fields_absent);
     HU_RUN_TEST(test_persona_externalized_deinit_frees);
     HU_RUN_TEST(test_persona_immersive_in_prompt);
+    HU_RUN_TEST(persona_direction_absent_when_gate_unset);
+    HU_RUN_TEST(persona_direction_shadow_does_not_change_prompt);
+    HU_RUN_TEST(persona_direction_live_lands_ahead_of_the_tail_cut);
     HU_RUN_TEST(test_persona_immersive_fallback_when_no_reinforcement);
 
     /* E2E dry run */

@@ -44,6 +44,49 @@ static const char *const k_verbalized_confidence_addendum =
     "hurts trust.\n";
 static const size_t DEFAULT_TONE_HINTS_LEN[3] = {49, 66, 65};
 
+/* Director-style persona direction gate — off (default) / shadow / live, per
+ * .claude/rules/feature-gate-requires-measurement.md. This changes what gets
+ * SENT, so it ships OFF and is promoted only by the blind-A/B human tier
+ * (0/12 as of 2026-07-26), never by a green suite. */
+typedef enum {
+    HU_PERSONA_DIRECTION_OFF = 0,
+    HU_PERSONA_DIRECTION_SHADOW,
+    HU_PERSONA_DIRECTION_LIVE,
+} hu_persona_direction_mode_t;
+
+static hu_persona_direction_mode_t hu_persona_direction_mode(void) {
+    const char *v = getenv("HU_PERSONA_DIRECTION");
+    if (!v || !*v)
+        return HU_PERSONA_DIRECTION_OFF;
+    if (strcmp(v, "live") == 0)
+        return HU_PERSONA_DIRECTION_LIVE;
+    if (strcmp(v, "shadow") == 0)
+        return HU_PERSONA_DIRECTION_SHADOW;
+    return HU_PERSONA_DIRECTION_OFF;
+}
+
+/* The direction block itself. Exposed (non-static) so tests can assert the
+ * emitted prompt contains exactly this text rather than reimplementing it —
+ * see .claude/rules/test-references-production-symbol.md. */
+const char hu_persona_direction_text[] =
+    "## Direction for this scene\n"
+    "Play the person, not the assistant. You are mid-conversation with someone "
+    "you know — not answering a query.\n"
+    "- Objective: move the relationship one small step. Being useful is not the "
+    "goal.\n"
+    "- In your way: the pull to be complete, balanced and helpful. Resist it.\n"
+    "- Register: how you actually type on a phone — one-handed, half distracted, "
+    "mid-something-else.\n"
+    "- A reaction, a fragment, or a short nothing is a complete reply. Not every "
+    "message earns a full answer.\n"
+    "- Do NOT summarize what they said back at them. Do NOT offer a menu of "
+    "options. Do NOT close with a question you don't care about.\n"
+    "- If you have nothing to add, say something short and human rather than "
+    "manufacturing substance.\n"
+    "\n";
+
+const size_t hu_persona_direction_text_len = sizeof(hu_persona_direction_text) - 1;
+
 static hu_error_t hu_prompt_data_init(hu_allocator_t *alloc) {
     if (!alloc)
         return HU_ERR_INVALID_ARGUMENT;
@@ -411,6 +454,36 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             err = append(alloc, &buf, &len, &cap, "\n", 1);
             if (err != HU_OK)
                 goto fail;
+        }
+
+        /* Director-style direction, EARLY — same rationale as the compact
+         * safety block above: the 16 KB positional cap in agent_turn.c cuts the
+         * TAIL, so anything ahead of the trim spans is structurally safe.
+         *
+         * Why direction instead of more rules: the enumerated voice sections
+         * (## Expression Style, ## Creative Voice, ## Humor Guidance,
+         * ## Anti-Sycophancy) live on the NON-immersive path below and return
+         * early at the immersive `return HU_OK` — so the immersive persona,
+         * which is what production runs, never receives any of them. Rather
+         * than duplicate ~6 KB of rule prose into a prompt already 78% over
+         * budget (29129 B observed 2026-07-26, cut to 16340), this is the
+         * ~800-byte directorial equivalent: objective, obstacle, register, and
+         * negative direction. Placed ahead of the cap so it cannot be the thing
+         * that gets deleted.
+         *
+         * Gated OFF by default; SHADOW measures without changing the emitted
+         * prompt, matching the trim gate's contract. */
+        hu_persona_direction_mode_t dir_mode = hu_persona_direction_mode();
+        if (dir_mode == HU_PERSONA_DIRECTION_LIVE) {
+            err = append(alloc, &buf, &len, &cap, hu_persona_direction_text,
+                         hu_persona_direction_text_len);
+            if (err != HU_OK)
+                goto fail;
+        } else if (dir_mode == HU_PERSONA_DIRECTION_SHADOW) {
+            hu_log_info("persona_direction", NULL,
+                        "shadow: would prepend %zu B of direction ahead of the cap "
+                        "(prompt %zu B at this point); emitted prompt unchanged",
+                        hu_persona_direction_text_len, len);
         }
 
         /* Immersive middle sections, in prompt order. One row per section
