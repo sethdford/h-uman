@@ -1033,13 +1033,15 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
     return HU_OK;
 }
 
-/* Graph grounding load, shared by BOTH turn paths (see agent.h). Loads the
- * relationship-graph context per the HU_GRAPH_GROUNDING gate: SHADOW logs and
- * drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the RAG
- * leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078) —
- * casual/unknown-tier turns log and drop the loaded context. */
-void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, char **graph_ctx,
-                                   size_t *graph_ctx_len) {
+/* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
+ * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
+ * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
+ * per the HU_GRAPH_GROUNDING gate: SHADOW logs size + relevance fingerprint
+ * and drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the
+ * RAG leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078)
+ * — casual/unknown-tier turns log and drop the loaded context. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char *msg,
+                                   size_t msg_len, char **graph_ctx, size_t *graph_ctx_len) {
     if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
         return;
     hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
@@ -1047,12 +1049,19 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, char **gra
     if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
         agent->memory_session_id_len == 0)
         return;
-    hu_graph_ground_load(loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                         graph_ctx, graph_ctx_len);
+    size_t matched_entities = 0;
+    hu_graph_ground_compose(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
+                            msg_len, 0, graph_ctx, graph_ctx_len, &matched_entities);
     const char *drop_reason = NULL;
     if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-        hu_log_info("graph_grounding", NULL, "shadow: %zu graph_context bytes (not injected)",
-                    *graph_ctx_len);
+        /* Shadow contract: size AND a relevance fingerprint (matched-entity
+         * count + content hash), so the pre-2026-07 failure signature (274
+         * events, 5 distinct sizes, constant content) is distinguishable
+         * from conversation-varying injection straight from the log. */
+        hu_log_info("graph_grounding", NULL,
+                    "shadow: %zu graph_context bytes matched=%zu fp=%08x (not injected)",
+                    *graph_ctx_len, matched_entities,
+                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
         drop_reason = "shadow";
     } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
         hu_log_info("graph_grounding", NULL,
@@ -2214,14 +2223,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
-        /* GraphRAG activation gated on Story D blind A/B measurement.
-         * Default is ON since 53b0958b; SHADOW logs metrics without injecting,
-         * OFF disables. NOTE: docs/evaluation/blind_ab_gate.json is still
-         * ADVISORY/ABSENT — the gating measurement has not recorded a pass, so
-         * the default-ON rests on the proxy, not a confirmed human blind A/B.
+        /* GraphRAG activation gated on a blind A/B measurement. Default is
+         * SHADOW since 2026-05-31 (the first A/B measured ON-win-rate 43.3%,
+         * below 50% — see hu_graph_grounding_mode). 2026-07-25: the read path
+         * became query-conditioned (hu_graph_ground_compose keys retrieval on
+         * the incoming msg, empty when nothing matches) but the gate stays
+         * SHADOW; do not flip to default-ON without a FRESH blind A/B showing
+         * the conversation-specific injection is judged superior by humans.
          * graph_ctx is protected-core in the prompt and is NOT subject to the
          * Self-RAG memory-relevance verdict below. */
-        hu_agent_load_graph_grounding(agent, &loader, &graph_ctx, &graph_ctx_len);
+        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
 
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&

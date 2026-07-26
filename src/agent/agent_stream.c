@@ -498,7 +498,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         if (mem_err != HU_OK && mem_err != HU_ERR_NOT_SUPPORTED)
             hu_log_error("agent_stream_v2", NULL, "memory_loader_load failed: %s",
                          hu_error_string(mem_err));
-        hu_agent_load_graph_grounding(agent, &loader, &graph_ctx, &graph_ctx_len);
+        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
     }
 
     char *awareness_ctx = NULL;
