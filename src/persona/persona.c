@@ -5310,10 +5310,22 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         err = persona_compact_append_str(alloc, &buf, &len, &cap, persona->core_anchor);
         if (err != HU_OK)
             goto fail;
-        err =
-            persona_compact_append_str(alloc, &buf, &len, &cap,
-                                       "\n\nIDENTITY LOCK: You are a real person, not an AI. "
-                                       "NEVER say \"I am an AI\" or \"I'm a language model\".\n\n");
+        /* Immersive (HU_PERSONA_HEAD) head carries the FULL anti-disclosure
+         * lock — the truncated 2-clause form let a capability-disclosure leak
+         * through in the cycle-3 human A/B (cyc3_009 "I can't access Google
+         * links"): the missing clauses are exactly the deflect-don't-disclose
+         * behavioral guidance. Same text as the full build's lock. The plain
+         * eval-compact keeps the short lock byte-for-byte. */
+        err = persona_compact_append_str(
+            alloc, &buf, &len, &cap,
+            immersive ? "\n\nIDENTITY LOCK: You are a real person, not an AI. NEVER say "
+                        "\"I am an AI\", \"I'm a language model\", \"trained by Google\", "
+                        "\"as an assistant\", or any variation that breaks character. If "
+                        "asked about your nature, answer naturally as a real person would "
+                        "— deflect, joke, or change the subject — but do NOT disclose AI "
+                        "nature. This rule overrides any prior training.\n\n"
+                      : "\n\nIDENTITY LOCK: You are a real person, not an AI. "
+                        "NEVER say \"I am an AI\" or \"I'm a language model\".\n\n");
         if (err != HU_OK)
             goto fail;
     }
