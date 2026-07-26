@@ -6,6 +6,7 @@
 #include "human/agent/spawn.h"
 #include "human/agent/tui.h"
 #include "human/channels/cli.h"
+#include "human/core/file.h"
 #include "human/core/log.h"
 #ifdef HU_HAS_VOICE_CHANNEL
 #include "human/channels/voice_channel.h"
@@ -258,6 +259,11 @@ hu_error_t hu_agent_cli_parse_args(const char *const *argv, size_t argc,
                 out->contact_id = argv[i + 1];
                 i++;
             }
+        } else if (strcmp(a, "--history-file") == 0) {
+            if (i + 1 < argc) {
+                out->history_file = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "--provider") == 0) {
             if (i + 1 < argc) {
                 out->provider_override = argv[i + 1];
@@ -398,6 +404,73 @@ static void print_banner(const char *prov_name, const char *model, size_t tools_
 }
 
 /* ── Main CLI loop ───────────────────────────────────────────────────── */
+/* Seed agent->history from a JSONL file of preceding turns (oldest first),
+ * each line {"from":"them"|"seth","text":"..."}. Mirrors the daemon's own
+ * history-seeding shape (daemon.c ~5726): grow the owned array, strndup each
+ * body, bump the count only on a successful copy.
+ *
+ * Exists so a one-shot `-m` turn can be given the thread the daemon always has.
+ * Without it, eval harnesses hand the model a single isolated line while the
+ * human they are compared against had the whole conversation — and the judge
+ * detects precisely that gap (2026-07-26: 0/9, "lack of conversational memory").
+ *
+ * Malformed lines are skipped, not fatal: a harness should still run on a
+ * partially bad context file rather than lose the whole trial. Returns the
+ * number of turns seeded. */
+static size_t seed_history_from_file(hu_agent_t *agent, const char *path) {
+    if (!agent || !path || !*path || !agent->alloc)
+        return 0;
+    hu_allocator_t *alloc = agent->alloc;
+    char *buf = NULL;
+    size_t buf_len = 0;
+    /* 1 MiB ceiling: 6 turns of text is ~1 KB; anything near this is a bug. */
+    if (hu_file_slurp(alloc, path, (size_t)1024 * 1024, &buf, &buf_len) != HU_OK || !buf)
+        return 0;
+
+    size_t seeded = 0;
+    char *save = NULL;
+    for (char *line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        while (*line == ' ' || *line == '\t' || *line == '\r')
+            line++;
+        if (!*line)
+            continue;
+        hu_json_value_t *obj = NULL;
+        if (hu_json_parse(alloc, line, strlen(line), &obj) != HU_OK || !obj)
+            continue;
+        const char *from = hu_json_get_string(obj, "from");
+        const char *text = hu_json_get_string(obj, "text");
+        if (text && *text) {
+            if (agent->history_count == agent->history_cap) {
+                size_t new_cap = agent->history_cap ? agent->history_cap * 2 : 8;
+                hu_owned_message_t *arr = (hu_owned_message_t *)alloc->realloc(
+                    alloc->ctx, agent->history, agent->history_cap * sizeof(*arr),
+                    new_cap * sizeof(*arr));
+                if (!arr) {
+                    hu_json_free(alloc, obj);
+                    break;
+                }
+                agent->history = arr;
+                agent->history_cap = new_cap;
+            }
+            hu_owned_message_t *hm = &agent->history[agent->history_count];
+            memset(hm, 0, sizeof(*hm));
+            /* Anything not explicitly "seth" is the other party. Defaulting to
+             * USER keeps a typo'd role from silently attributing their words to
+             * the persona, which would poison the voice being measured. */
+            hm->role = (from && strcmp(from, "seth") == 0) ? HU_ROLE_ASSISTANT : HU_ROLE_USER;
+            hm->content_len = strlen(text);
+            hm->content = hu_strndup(alloc, text, hm->content_len);
+            if (hm->content) {
+                agent->history_count++;
+                seeded++;
+            }
+        }
+        hu_json_free(alloc, obj);
+    }
+    alloc->free(alloc->ctx, buf, buf_len + 1);
+    return seeded;
+}
+
 hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size_t argc) {
     if (!alloc)
         return HU_ERR_INVALID_ARGUMENT;
@@ -1139,6 +1212,16 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 
     if (!single_message_mode)
         print_banner(prov_name, model, tools_count);
+
+    /* `--history-file`: give the one-shot turn the thread the daemon always has. */
+    if (parsed_args.history_file && parsed_args.history_file[0]) {
+        size_t seeded = seed_history_from_file(agent_p, parsed_args.history_file);
+        if (seeded == 0)
+            hu_log_warn("human", &observer, "--history-file %s seeded 0 turns",
+                        parsed_args.history_file);
+        else if (!single_message_mode)
+            hu_log_info("human", &observer, "seeded %zu history turn(s)", seeded);
+    }
 
     /* `-m` / `--message`: propagate turn errors to process exit (scripts, harness, CI smoke). */
     hu_error_t single_message_exit = HU_OK;

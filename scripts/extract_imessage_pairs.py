@@ -32,6 +32,9 @@ MAX_GAP_SECONDS = 3600  # 1 hour
 
 # Minimum Seth reply length to be useful training data
 MIN_REPLY_LENGTH = 2
+# Preceding turns attached to each ground-truth pair as `context_turns`. 6 covers
+# the typical iMessage exchange depth without blowing the eval's prompt budget.
+GT_CONTEXT_TURNS = 6
 
 # Filter out system/verification messages
 SKIP_PATTERNS = [
@@ -275,6 +278,16 @@ def extract_ground_truth(windows):
     """
     Extract (incoming_message, seth_reply) pairs for evaluation.
     Only include cases where someone sends a message and Seth replies next.
+
+    Each pair carries `context_turns`: up to GT_CONTEXT_TURNS messages that
+    PRECEDED `incoming`, oldest first, as {"from": "them"|"seth", "text": ...}.
+
+    Without this the blind A/B is unwinnable by construction: the human's reply
+    was written with the thread in front of him, while the model saw one
+    isolated line, so the judge detects "lack of conversational memory" — an
+    asymmetry the harness created (measured 2026-07-26: 0/9 fooled, with the
+    judge citing exactly that). Anything consuming ground truth for generation
+    MUST feed context_turns to the model, or it is scoring the harness.
     """
     gt = []
     for window in windows:
@@ -284,9 +297,16 @@ def extract_ground_truth(windows):
             if not incoming["is_from_me"] and reply["is_from_me"]:
                 if len(reply["text"]) >= MIN_REPLY_LENGTH:
                     delay_s = reply["timestamp"] - incoming["timestamp"]
+                    lo = max(0, i - GT_CONTEXT_TURNS)
+                    context_turns = [
+                        {"from": "seth" if m["is_from_me"] else "them", "text": m["text"]}
+                        for m in window[lo:i]
+                        if m.get("text")
+                    ]
                     gt.append({
                         "incoming": incoming["text"],
                         "seth_reply": reply["text"],
+                        "context_turns": context_turns,
                         "delay_seconds": round(delay_s, 1),
                         "chat_id": incoming["chat_id"],
                         "timestamp": reply["datetime"],

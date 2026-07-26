@@ -10,11 +10,21 @@ typedef struct hu_parsed_agent_args {
     const char *config_path;
     const char *message;
     const char *session_id;
-    const char *contact_id; /* --contact: binds agent->memory_session_id so
-                             * per-contact memory recall + GraphRAG community-
-                             * summary grounding fire on a one-shot CLI turn.
-                             * The daemon binds this from the channel contact;
-                             * the CLI previously had no equivalent seam. */
+    const char *contact_id;   /* --contact: binds agent->memory_session_id so
+                               * per-contact memory recall + GraphRAG community-
+                               * summary grounding fire on a one-shot CLI turn.
+                               * The daemon binds this from the channel contact;
+                               * the CLI previously had no equivalent seam. */
+    const char *history_file; /* --history-file: JSONL of preceding turns,
+                               * {"from":"them"|"seth","text":"..."} one per
+                               * line, oldest first, seeded into agent->history
+                               * BEFORE a -m one-shot turn. The daemon always
+                               * has thread history; the CLI had no seam for it,
+                               * so eval harnesses compared a context-free model
+                               * reply against a context-rich human one and the
+                               * judge simply detected the missing memory. A
+                               * file (not an argv string) keeps arbitrary
+                               * message text away from shell quoting. */
     const char *provider_override;
     const char *model_override;
     double temperature_override;

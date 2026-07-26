@@ -16,6 +16,7 @@ import json
 import os
 import random
 import subprocess
+import tempfile
 import sys
 import time
 import urllib.parse
@@ -118,7 +119,12 @@ SETH_SYSTEM_PROMPT = (
     "Speak Japanese, lived in Japan (lost home in 2011 tsunami). "
     "23 years at Fidelity before this. Build AI runtimes as side projects.\n\n"
     "Style: casual, warm, direct. Short messages. Lowercase. "
-    "Abbreviate (gonna, tbh, idk, hru). Emoji rare. Strong opinions. Dry humor."
+    # Measured over 1,789 of Seth's own decoded iMessages (2026-07-26): tbh
+    # 0.34%, idk 0.56%, hru 0.17%, gonna 0.34%. Instructing the model to
+    # "abbreviate (gonna, tbh, idk, hru)" drove tbh to 71% of replies — a
+    # 213x amplification and the single clearest AI tell in the corpus.
+    "Emoji rare. Strong opinions. Dry humor. "
+    "Do NOT use texting abbreviations (tbh, ngl, idk, hru, imo) \u2014 he almost never does."
 )
 
 SYNTHETIC_SCENARIOS = [
@@ -173,12 +179,12 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def get_ai_response(message):
+def get_ai_response(message, context_turns=None):
     if USE_GATEWAY:
         return get_ai_response_gateway(message)
     if USE_MLX:
         return get_ai_response_mlx(message)
-    return get_ai_response_cli(message)
+    return get_ai_response_cli(message, context_turns=context_turns)
 
 
 def get_ai_response_mlx(message):
@@ -210,11 +216,36 @@ def get_ai_response_mlx(message):
         return f"(error: {e})"
 
 
-def get_ai_response_cli(message):
+def get_ai_response_cli(message, context_turns=None):
+    """Generate via the real C pipeline.
+
+    context_turns (from ground truth) is seeded into agent->history via
+    --history-file. Omitting it makes this measurement meaningless: the human
+    reply being compared against was written with the thread visible, so a
+    context-free model reply loses on "lack of conversational memory" — an
+    asymmetry the harness invented, not a property of the model. Measured
+    2026-07-26: 0/9 fooled, with the judge citing exactly that. A/B on the same
+    prompt: without history "5pm works for me. Please confirm..."; with the
+    3-turn thread, "I'll be there at 7pm."
+    """
+    hist_path = None
     try:
         env = {**os.environ, "PATH": os.path.expanduser("~/bin") + ":" + os.environ.get("PATH", "")}
-        result = subprocess.run([HU_BIN, "agent", "-m", message],
-                                capture_output=True, text=True, timeout=30, env=env)
+        cmd = [HU_BIN, "agent", "-m", message]
+        if context_turns:
+            # A file, not argv: message bodies contain quotes/newlines/emoji.
+            fd, hist_path = tempfile.mkstemp(prefix="blindab-hist-", suffix=".jsonl")
+            with os.fdopen(fd, "w") as hf:
+                for t in context_turns:
+                    txt = (t or {}).get("text") or ""
+                    if not txt.strip():
+                        continue
+                    frm = "seth" if (t or {}).get("from") == "seth" else "them"
+                    hf.write(json.dumps({"from": frm, "text": txt}) + "\n")
+            cmd += ["--history-file", hist_path]
+        # 30s -> 180s: a 106B MoE on a serial queue routinely exceeds 30s, and a
+        # timeout here silently degrades the trial into "(error: ...)".
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         import re
         output = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result.stdout)
         output = re.sub(r'\x1b\[\?25[hl]', '', output)
@@ -222,6 +253,12 @@ def get_ai_response_cli(message):
         return " ".join(lines) if lines else "(empty)"
     except Exception as e:
         return f"(error: {e})"
+    finally:
+        if hist_path:
+            try:
+                os.unlink(hist_path)
+            except OSError:
+                pass
 
 
 def get_ai_response_gateway(message):
@@ -455,7 +492,9 @@ def main():
             print(f"  Real Seth: \"{real_seth}\"")
             sys.stdout.flush()
 
-            ai_response = get_ai_response(incoming)  # serial — model_lock floor
+            # Feed the SAME thread the human had — see get_ai_response_cli.
+            ai_response = get_ai_response(
+                incoming, context_turns=pair.get('context_turns'))  # serial — model_lock floor
             print(f"  AI Seth:   \"{ai_response}\"")
 
             if ai_response.startswith("("):
