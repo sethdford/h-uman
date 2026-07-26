@@ -403,6 +403,20 @@ FNV_PRIME_64 = 0x100000001b3
 FNV_64_MOD = 1 << 64
 
 
+def read_adapter_scale(adapter_dir: Path):
+    """Return lora_parameters.scale from an adapter's adapter_config.json,
+    or None if the file/key is missing or unreadable.
+
+    This is the machine-checked half of rules/lora-scale-default-or-die.md:
+    what mlx_lm RECORDS is the truth about the scale the adapter was trained
+    at, regardless of what any config requested."""
+    try:
+        cfg = json.loads((Path(adapter_dir) / "adapter_config.json").read_text())
+        return cfg.get("lora_parameters", {}).get("scale")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
 def fnv1a_64(data: bytes) -> int:
     """FNV-1a 64-bit hash of the given bytes. Mirrors the C
     implementation including the "0 → 1 sentinel" adjustment so the
@@ -679,10 +693,20 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     tmpdir = tempfile.mkdtemp(prefix="mlx-lora-")
     print(f"  Using temp output dir: {tmpdir}")
 
-    # Create a temp directory with train.jsonl (mlx_lm expects dir structure)
+    # Create a temp directory with train.jsonl + valid.jsonl (mlx_lm expects
+    # dir structure). The valid split matters: without it mlx_lm reports no
+    # "Val loss" lines, val_loss parses as None, and the regression gate has
+    # nothing to judge (the 2026-07-26 recovery run shipped exactly that).
     train_data_dir = Path(tmpdir) / "data"
     train_data_dir.mkdir(parents=True)
-    shutil.copy(sft_batch, str(train_data_dir / "train.jsonl"))
+    _all_lines = Path(sft_batch).read_text().splitlines()
+    _val = _all_lines[::10][:64]          # every 10th sample, capped
+    _train = [l for i, l in enumerate(_all_lines) if i % 10 != 0]
+    if not _train:                        # tiny batches: don't starve training
+        _train, _val = _all_lines, []
+    (train_data_dir / "train.jsonl").write_text("\n".join(_train) + "\n")
+    if _val:
+        (train_data_dir / "valid.jsonl").write_text("\n".join(_val) + "\n")
 
     # Model and hyperparameters (per US-8 design)
     model = "mlx-community/gemma-4-31b-it-4bit"
@@ -698,9 +722,13 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
         "model": model,
         "train": True,
         "fine_tune_type": "lora",
-        "lora_rank": rank,
-        "lora_alpha": rank * 2,  # mlx_lm uses alpha instead of scale
-        "lora_scale": scale,  # Some versions support this; fallback is alpha
+        # NESTED lora_parameters is the schema mlx_lm 0.31.x actually reads.
+        # The previous flat lora_rank/lora_alpha/lora_scale keys were silently
+        # IGNORED, so every run inherited mlx_lm's catastrophic scale=20.0
+        # default (rules/lora-scale-default-or-die.md) — caught 2026-07-26 when
+        # the recovery run's adapter_config.json read scale 20.0 despite the
+        # yaml saying 2.0. verify_adapter_scale() below now hard-fails on drift.
+        "lora_parameters": {"rank": rank, "scale": scale, "dropout": 0.0},
         "num_layers": num_layers,
         "batch_size": batch_size,
         "iters": iters,
@@ -771,6 +799,19 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             return 1, train_loss, val_loss
 
         print(f"  mlx_lm lora training succeeded (train_loss={train_loss}, val_loss={val_loss})")
+
+        # Rule-as-code (lora-scale-default-or-die): the scale the adapter was
+        # ACTUALLY trained at is whatever mlx_lm wrote to adapter_config.json.
+        # If it drifted from what we requested (schema change, ignored key),
+        # the adapter is invalid — a scale-20 adapter destroyed production
+        # instruction-following for ~2 weeks in May 2026. Fail loudly here.
+        actual = read_adapter_scale(adapter_out)
+        if actual is None or abs(actual - scale) > 1e-6:
+            print(f"  ERROR: adapter trained at scale={actual}, requested {scale} "
+                  f"— config not honored by mlx_lm; adapter is INVALID "
+                  f"(see rules/lora-scale-default-or-die.md)", file=sys.stderr)
+            return 1, train_loss, val_loss
+
         return 0, train_loss, val_loss
 
     except FileNotFoundError:
@@ -996,10 +1037,22 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     except Exception as e:
         print(f"  [WARNING] Failed to record training to registry: {e}", file=sys.stderr)
 
-    # Run regression verdict (checks if val_loss is worse than prior 4 weeks)
+    # Run regression verdict (checks if val_loss is worse than prior 4 weeks).
+    # Absent evidence is NOT a pass: val_loss=None means the gate cannot judge,
+    # and "cannot judge" must block the swap, not wave it through — the
+    # toothless-gate shape from the 2026-07-11 fleet lessons resurfaced on
+    # 2026-07-26 ("Regression verdict: PASS (val_loss=None)").
     history = dpo_results.load_recent(results_file)
-    verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
+    if val_loss is None:
+        verdict = 'INCONCLUSIVE'
+    else:
+        verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
     print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss})")
+
+    if verdict == 'INCONCLUSIVE':
+        print(f"  [quality-gate] INCONCLUSIVE: no validation loss to judge — "
+              f"adapter stays STAGED at {adapter_out}, swap blocked.")
+        return 1  # Exit non-zero — blocks adapter swap in C side
 
     if verdict == 'FAIL':
         print(f"  [quality-gate] FAIL: Training regression detected. "
