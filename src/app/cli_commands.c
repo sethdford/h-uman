@@ -919,7 +919,7 @@ hu_error_t cmd_models(hu_allocator_t *alloc, int argc, char **argv) {
         printf("  %-16s %s\n", "apple", "Apple Intelligence (on-device)");
         printf("  %-16s %s\n", "openai", "gpt-4o");
         printf("  %-16s %s\n", "anthropic", "claude-sonnet-4-20250514");
-        printf("  %-16s %s\n", "google", "gemini-3.1-flash-lite-preview");
+        printf("  %-16s %s\n", "google", "gemini-3.1-flash-lite");
         printf("  %-16s %s\n", "groq", "llama-3.3-70b-versatile");
         printf("  %-16s %s\n", "deepseek", "deepseek-chat");
         printf("  %-16s %s\n", "ollama", "(local)");

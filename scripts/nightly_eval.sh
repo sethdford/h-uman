@@ -39,13 +39,14 @@
 set -euo pipefail
 
 # ---- Fixed, absolute paths (per worktree-cwd-resets rule) -------------------
-REPO="/Users/sethford/Projects/h-uman"
+# HU_REPO override exists so a worktree copy can be dry-run against itself.
+REPO="${HU_REPO:-/Users/sethford/Projects/h-uman}"
 PY="/opt/homebrew/bin/python3"
 LOG_DIR="/Users/sethford/.human/logs"
 ARCHIVE_DIR="${LOG_DIR}/eval-archive"
 LOCK_DIR="${LOG_DIR}/.nightly-eval.lock"
-ADAPTER_GLOB="/Users/sethford/.human/training-data/adapters/seth-lora-v4-repair*"
-MODEL_ID="mlx-community/gemma-4-31b-it-4bit"
+# Base model + adapter are resolved by eval_fidelity_nightly.py from the live
+# mlx-server (this file used to pin the 4bit base while production served 8bit).
 SERVER_URL="http://127.0.0.1:8741"
 RETAIN=30
 
@@ -57,6 +58,20 @@ GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
 
 # Auto-commit refreshed blind_ab_gate.json after stage 3 (env-overridable)
 HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-1}
+
+# Advisory Binoculars AI-tell metric after stage 3 (~12 min GPU, serial,
+# results-JSON only — never feeds the gate). Disable with HU_NIGHTLY_BINOCULARS=0.
+# See docs/research/2026-07-25-binoculars-discriminator.md
+HU_NIGHTLY_BINOCULARS=${HU_NIGHTLY_BINOCULARS:-1}
+
+# Binoculars -> DPO miner. OFF by default (feature-gate contract): every
+# consumer reads dpo_pairs UNFILTERED, so mined rows enter training on the next
+# run. 0=off, 1=SHADOW (candidates logged to the archive, no DB writes),
+# 2=LIVE (inserts). Do not set 2 without a threshold recalibrated for the
+# CURRENTLY-SERVED adapter.
+HU_NIGHTLY_BINOCULARS_DPO=${HU_NIGHTLY_BINOCULARS_DPO:-0}
+BINOC_DPO="${REPO}/scripts/blind_ab/binoculars_to_dpo.py"
+BLIND_AB_RESULTS="${REPO}/data/eval_blinded_ab.json"
 
 DRY_RUN=0
 SMOKE=0
@@ -73,16 +88,12 @@ mkdir -p "$LOG_DIR" "$ARCHIVE_DIR"
 ts() { date '+%Y-%m-%dT%H:%M:%S'; }
 log() { echo "[$(ts)] $*" | tee -a "${LOG_DIR}/nightly-eval.log"; }
 
-# ---- Resolve the newest v4-repair adapter dir (survives re-training) --------
-# The launchd plist used to hardcode .../seth-lora-v4-repair (no timestamp
-# suffix), which no longer exists, so every nightly fidelity run SKIPped.
-# Glob + newest-mtime makes the schedule self-healing across re-trains.
-resolve_adapter() {
-  local newest
-  # shellcheck disable=SC2086
-  newest=$(ls -dt $ADAPTER_GLOB 2>/dev/null | head -1 || true)
-  printf '%s' "$newest"
-}
+# ---- Serving-adapter resolution lives in eval_fidelity_nightly.py -----------
+# History: a hardcoded .../seth-lora-v4-repair path skipped silently, then a
+# v4-repair* glob here measured the WRONG adapter for a week while the server
+# served v5-8bit. The harness now resolves the SERVING adapter itself (live
+# mlx-server process, else config.json personalization.lora_adapter_path) and
+# exits 3 with a FIDELITY_SKIP marker when it can't.
 
 # ---- :8741 health: any HTTP response = up; connection refused / 000 = down --
 server_up() {
@@ -132,7 +143,7 @@ archive_verdict() {
 [ -f "$MULTITURN" ]     || { log "FATAL: missing $MULTITURN"; exit 2; }
 [ -f "$FIDELITY" ]      || { log "FATAL: missing $FIDELITY"; exit 2; }
 
-ADAPTER=$(resolve_adapter)
+ADAPTER=$("$PY" "$FIDELITY" --resolve-only 2>/dev/null || true)
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "=== DRY RUN (validate only, run nothing) ==="
@@ -144,10 +155,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  judge ADC:     $(adc_present && echo PRESENT || echo ABSENT)"
   log "  ground truth:  $(ground_truth_exists && echo FOUND || echo MISSING)"
   log "  judge creds:   $(judge_creds_present && echo AVAILABLE || echo UNAVAILABLE)"
-  log "  adapter:       ${ADAPTER:-'(none found for '"$ADAPTER_GLOB"')'}"
+  log "  adapter:       ${ADAPTER:-'(unresolved — fidelity will SKIP loudly)'}"
   log "  archive dir:   $ARCHIVE_DIR (retain last $RETAIN per harness)"
   log "  lock dir:      $LOCK_DIR ($([ -d "$LOCK_DIR" ] && echo HELD || echo free))"
   log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
+  log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
+  log "  binoc-dpo:     HU_NIGHTLY_BINOCULARS_DPO=$HU_NIGHTLY_BINOCULARS_DPO (0=off, 1=shadow, 2=live)"
   log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (loads own model), [3/3] blind-ab gate refresh (REAL measurement), serial"
   exit 0
 fi
@@ -182,21 +195,19 @@ else
 fi
 
 # ---- 2) persona-fidelity SOTA gate (loads its own model; serial after #1) ---
+# No --adapter-path: the harness resolves the SERVING adapter itself and
+# exits 3 + FIDELITY_SKIP when it can't (grep the log for FIDELITY_SKIP).
 if [ "$SMOKE" -eq 1 ]; then
   log "[2/3] fidelity: skipped (--smoke)"
-elif [ -z "$ADAPTER" ]; then
-  log "[2/3] fidelity: skipped (no adapter matched $ADAPTER_GLOB)"
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
-  log "[2/3] fidelity: adapter=$ADAPTER — running"
+  log "[2/3] fidelity: serving-adapter=${ADAPTER:-'(unresolved)'} — running"
   set +e
   "$PY" "$FIDELITY" \
-    --adapter-path "$ADAPTER" \
-    --model-id "$MODEL_ID" \
     --output-json "$FID_OUT" \
     --log-dir "$LOG_DIR"; fid_rc=$?
   set -e
-  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS-or-SKIP;;1)echo FAIL;;*)echo "rc=$fid_rc";;esac))"
+  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
   archive_verdict fidelity "$FID_OUT"
 fi
 
@@ -230,11 +241,35 @@ else
     gate_before=""
     [ -f "$BLIND_AB_GATE" ] && gate_before=$(cat "$BLIND_AB_GATE")
 
+    binoc_flag=""
+    [ "$HU_NIGHTLY_BINOCULARS" -eq 1 ] && binoc_flag="--binoculars"
+
     set +e
-    "$PY" "$BLIND_AB" --gate --mlx; ab_rc=$?
+    # shellcheck disable=SC2086  # binoc_flag is intentionally word-split (empty or one flag)
+    "$PY" "$BLIND_AB" --gate --mlx $binoc_flag; ab_rc=$?
     set -e
 
     log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"
+
+    # ---- Binoculars -> DPO miner (advisory; OFF by default) -----------------
+    # Reads the per-trial scores eval_blinded_ab.py --binoculars merged into the
+    # results file — no extra GPU pass. Never fails the wrapper.
+    if [ "$HU_NIGHTLY_BINOCULARS_DPO" -ne 0 ] && [ -f "$BLIND_AB_RESULTS" ]; then
+      dpo_mode_args="--shadow-out ${ARCHIVE_DIR}/binoc-dpo-candidates.jsonl"
+      dpo_mode_name="SHADOW"
+      if [ "$HU_NIGHTLY_BINOCULARS_DPO" -eq 2 ]; then
+        dpo_mode_args="--live"
+        dpo_mode_name="LIVE"
+      fi
+      log "[3/3] binoc-dpo: mining in $dpo_mode_name mode"
+      set +e
+      # shellcheck disable=SC2086  # dpo_mode_args is intentionally word-split
+      "$PY" "$BINOC_DPO" --pairs "$BLIND_AB_RESULTS" $dpo_mode_args 2>&1 \
+        | while IFS= read -r line; do log "[3/3] binoc-dpo: $line"; done
+      set -e
+    elif [ "$HU_NIGHTLY_BINOCULARS_DPO" -eq 0 ]; then
+      log "[3/3] binoc-dpo: OFF (HU_NIGHTLY_BINOCULARS_DPO=0)"
+    fi
 
     # Auto-commit if the gate file changed
     if [ "$HU_NIGHTLY_AUTOPUSH" -eq 1 ] && [ -f "$BLIND_AB_GATE" ]; then

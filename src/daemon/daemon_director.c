@@ -27,8 +27,8 @@
  * Shared with daemon.c for initialization and hybrid routing decisions. */
 hu_provider_t g_classify_provider;
 bool g_classify_provider_ok = false;
-const char *g_classify_model = "gemini-3.1-flash-lite-preview";
-size_t g_classify_model_len = 29;
+const char *g_classify_model = "gemini-3.1-flash-lite";
+size_t g_classify_model_len = 21;
 
 /* W9: real-time emotion detection stays here (per-message, from live
  * history) while the world model caches a snapshot. The two compose:

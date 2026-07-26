@@ -281,7 +281,7 @@ static void test_generate_null_args_return_invalid(void) {
  * tolerates NULL, empty, and over-long names without crashing or
  * leaking. */
 static void test_set_model_override_accepts_null_empty_and_name(void) {
-    hu_predictive_drafts_set_model_override("gemini-3.1-flash-lite-preview");
+    hu_predictive_drafts_set_model_override("gemini-3.1-flash-lite");
     hu_predictive_drafts_set_model_override(NULL);
     hu_predictive_drafts_set_model_override("");
     hu_predictive_drafts_set_model_override(

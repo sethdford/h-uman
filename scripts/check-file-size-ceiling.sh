@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14161   # src/daemon.c, 2026-07-19: reply-dedup glue carve (-44) + situation-context wire (+8). Lower as god-files are carved.
+MAX_BASELINE=14146   # src/daemon.c, 2026-07-25 post-F40-removal (was 14159). Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

@@ -1033,6 +1033,50 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
     return HU_OK;
 }
 
+/* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
+ * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
+ * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
+ * per the HU_GRAPH_GROUNDING gate: SHADOW logs size + relevance fingerprint
+ * and drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the
+ * RAG leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078)
+ * — casual/unknown-tier turns log and drop the loaded context. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char *msg,
+                                   size_t msg_len, char **graph_ctx, size_t *graph_ctx_len) {
+    if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
+        return;
+    hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
+    hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
+    if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
+        agent->memory_session_id_len == 0)
+        return;
+    size_t matched_entities = 0;
+    hu_graph_ground_compose(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
+                            msg_len, 0, graph_ctx, graph_ctx_len, &matched_entities);
+    const char *drop_reason = NULL;
+    if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
+        /* Shadow contract: size AND a relevance fingerprint (matched-entity
+         * count + content hash), so the pre-2026-07 failure signature (274
+         * events, 5 distinct sizes, constant content) is distinguishable
+         * from conversation-varying injection straight from the log. */
+        hu_log_info("graph_grounding", NULL,
+                    "shadow: %zu graph_context bytes matched=%zu fp=%08x (not injected)",
+                    *graph_ctx_len, matched_entities,
+                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
+        drop_reason = "shadow";
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
+        hu_log_info("graph_grounding", NULL,
+                    "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
+                    agent->turn_tier);
+        drop_reason = "casual";
+    }
+    if (drop_reason) {
+        if (*graph_ctx)
+            agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);
+        *graph_ctx = NULL;
+        *graph_ctx_len = 0;
+    }
+}
+
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -2179,27 +2223,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
-        /* GraphRAG activation gated on Story D blind A/B measurement.
-         * Default is ON since 53b0958b; SHADOW logs metrics without injecting,
-         * OFF disables. NOTE: docs/evaluation/blind_ab_gate.json is still
-         * ADVISORY/ABSENT — the gating measurement has not recorded a pass, so
-         * the default-ON rests on the proxy, not a confirmed human blind A/B.
+        /* GraphRAG activation gated on a blind A/B measurement. Default is
+         * SHADOW since 2026-05-31 (the first A/B measured ON-win-rate 43.3%,
+         * below 50% — see hu_graph_grounding_mode). 2026-07-25: the read path
+         * became query-conditioned (hu_graph_ground_compose keys retrieval on
+         * the incoming msg, empty when nothing matches) but the gate stays
+         * SHADOW; do not flip to default-ON without a FRESH blind A/B showing
+         * the conversation-specific injection is judged superior by humans.
          * graph_ctx is protected-core in the prompt and is NOT subject to the
          * Self-RAG memory-relevance verdict below. */
-        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
-            agent->memory_session_id_len > 0) {
-            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                                 &graph_ctx, &graph_ctx_len);
-            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
-            }
-        }
+        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
 
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
@@ -5538,6 +5571,44 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             msgs = all;
             msgs_count = total;
 
+            /* Oversized multimodal guard (2026-07-25 retry-amplification fix).
+             *
+             * iMessage attachments arrive as base64 image content parts up to
+             * HU_MULTIMODAL_MAX_IMAGE_SIZE (5 MiB -> ~6.7 MiB base64). Inlining
+             * one into the request body ballooned it to 4-6 MB, which the
+             * single-threaded local model chokes on; the agent then re-POSTs
+             * that same giant body on every transport retry AND cloud fallback,
+             * wedging the server (the observed doom loop). The A1b budget below
+             * only summed content_len and was blind to content_parts, so it
+             * never trimmed these. Drop any content-part payload heavier than
+             * the per-part cap BEFORE dispatch; the message text is preserved.
+             *
+             * SAFE: msgs content_parts alias persistent history (see
+             * hu_context_format_messages) — the helper only NULLs the turn-local
+             * copy's pointer, never freeing the aliased buffers. Runs on every
+             * loop iteration, so transport retries + fallback get the same lean
+             * request (idempotent -> the retry body never grows). */
+            {
+                size_t max_part_bytes = (size_t)2 << 20; /* 2 MiB default */
+                const char *cap_env = getenv("HU_TURN_MAX_INLINE_PART_BYTES");
+                if (cap_env && cap_env[0]) {
+                    char *cap_end = NULL;
+                    unsigned long cap_v = strtoul(cap_env, &cap_end, 10);
+                    if (cap_end != cap_env && cap_v >= 4096)
+                        max_part_bytes = (size_t)cap_v;
+                }
+                size_t parts_dropped =
+                    hu_chat_messages_drop_oversized_parts(msgs, msgs_count, max_part_bytes);
+                if (parts_dropped > 0) {
+                    static atomic_bool warned_oversized_parts = false;
+                    hu_log_warn_once(&warned_oversized_parts, "agent_turn", NULL,
+                                     "dropped oversized multimodal content part(s) from %zu "
+                                     "message(s) to prevent request-body amplification "
+                                     "(per-part cap %zu bytes)",
+                                     parts_dropped, max_part_bytes);
+                }
+            }
+
             /* A1b — message-history budget cap (2026-05-19).
              *
              * A1 capped the system_prompt at 16 KB, but the messages
@@ -5561,13 +5632,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 const size_t HISTORY_BUDGET = 20 * 1024;
                 size_t total_bytes = 0;
                 for (size_t i = 0; i < msgs_count; i++)
-                    total_bytes += msgs[i].content_len;
+                    total_bytes += hu_chat_message_estimate_bytes(&msgs[i]);
                 if (total_bytes > HISTORY_BUDGET) {
                     /* Drop oldest non-system, non-last messages first. */
                     size_t dropped = 0;
                     size_t drop_idx = 1; /* start after system */
                     while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1) {
-                        total_bytes -= msgs[drop_idx].content_len;
+                        total_bytes -= hu_chat_message_estimate_bytes(&msgs[drop_idx]);
                         drop_idx++;
                         dropped++;
                     }
@@ -6395,10 +6466,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* ThinkPRM verifier: score response reasoning steps */
+                /* ThinkPRM verifier: score response reasoning steps.
+                 * Only run when the result can ACT — its sole consumer is the
+                 * reflection retry gate below. With reflection disabled (the
+                 * production default since 2026-07-13) or retries exhausted,
+                 * the verify call was pure pre-send latency on every reactive
+                 * turn (2026-07-25 Dermot latency audit). */
                 hu_prm_verify_result_t prm_verify = {0};
                 bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
+                    agent->reflection.enabled && reflection_retries_left > 0 &&
                     resp.content_len > 50) {
                     if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config, resp.content,
                                                 resp.content_len, msg, msg_len,
@@ -7441,6 +7518,40 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             vcfg.mode = HU_VERIFY_STRICT;
                         else if (strcmp(mode_env, "off") == 0)
                             vcfg.mode = HU_VERIFY_OFF;
+                    }
+                    /* Quality gate (HU_QUALITY_GATE, default off): make the two
+                     * signals that fired-but-couldn't-act on the 2026-07-25
+                     * Dermot echo turns (verifier flags + consistency drift)
+                     * actually gate. LIVE + bad drift escalates TELEMETRY→SOFT
+                     * so unsupported claims get hedged — the verifier's own
+                     * actuator, no regeneration loop. SHADOW logs would-act. */
+                    {
+                        hu_gate_mode_t qg = hu_gate_mode_from_env("HU_QUALITY_GATE", HU_GATE_OFF);
+                        if (qg != HU_GATE_OFF && *response_out && response_effective_len > 0 &&
+                            agent->conversation_context && agent->conversation_context_len > 20) {
+                            float qg_drift = 0.0f;
+                            bool have_drift =
+                                (hu_consistency_score_line(
+                                     agent->conversation_context, agent->conversation_context_len,
+                                     *response_out, response_effective_len, &qg_drift) == HU_OK);
+                            hu_verify_mode_t escalated = hu_response_verify_mode_for_turn(
+                                vcfg.mode, qg, have_drift, qg_drift,
+                                HU_CONSISTENCY_DRIFT_THRESHOLD);
+                            if (escalated != vcfg.mode) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE live: drift %.2f < %.2f — verifier "
+                                            "TELEMETRY→SOFT (hedge unsupported claims)",
+                                            qg_drift, (double)HU_CONSISTENCY_DRIFT_THRESHOLD);
+                                vcfg.mode = escalated;
+                            } else if (qg == HU_GATE_SHADOW && have_drift &&
+                                       qg_drift < HU_CONSISTENCY_DRIFT_THRESHOLD &&
+                                       vcfg.mode == HU_VERIFY_TELEMETRY) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE shadow: would escalate verifier to SOFT "
+                                            "(drift %.2f)",
+                                            qg_drift);
+                            }
+                        }
                     }
                     if (vcfg.mode != HU_VERIFY_OFF) {
                         const char *contact =

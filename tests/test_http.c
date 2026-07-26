@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 static void test_http_get_mock(void) {
@@ -132,6 +133,40 @@ static void test_http_post_json_mock(void) {
 }
 #endif
 
+/* ── Outbound body cap (2026-07-25 retry-amplification doom-loop guard) ─────── */
+
+static void test_http_max_body_default_and_env(void) {
+    unsetenv("HU_HTTP_MAX_BODY_BYTES");
+    HU_ASSERT_EQ(hu_http_max_provider_body_bytes(), (size_t)3 << 20); /* 3 MiB default */
+    /* Operator override is honored. */
+    setenv("HU_HTTP_MAX_BODY_BYTES", "1048576", 1);
+    HU_ASSERT_EQ(hu_http_max_provider_body_bytes(), (size_t)1048576);
+    /* Below-floor values are ignored (fall back to default). */
+    setenv("HU_HTTP_MAX_BODY_BYTES", "10", 1);
+    HU_ASSERT_EQ(hu_http_max_provider_body_bytes(), (size_t)3 << 20);
+    unsetenv("HU_HTTP_MAX_BODY_BYTES");
+}
+
+static void test_http_rejects_oversized_body_before_post(void) {
+    /* The doom-loop guarantee: an oversized body is rejected BEFORE any POST,
+     * on the shared provider path, so a 4 MB base64 image can never reach the
+     * wire and wedge the backend. The cap check lives in the public wrapper,
+     * ahead of the (network) transport, so it is reachable without a server. */
+    hu_allocator_t alloc = hu_system_allocator();
+    setenv("HU_HTTP_MAX_BODY_BYTES", "1048576", 1); /* 1 MiB cap */
+    size_t oversized = (size_t)4 << 20;             /* 4 MiB "body" */
+    char *body = (char *)alloc.alloc(alloc.ctx, oversized);
+    HU_ASSERT_NOT_NULL(body);
+    memset(body, 'x', oversized);
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_post_json(&alloc, "http://127.0.0.1:8741/v1/chat/completions", NULL,
+                                       body, oversized, &resp);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NULL(resp.body); /* nothing was sent, no response produced */
+    alloc.free(alloc.ctx, body, oversized);
+    unsetenv("HU_HTTP_MAX_BODY_BYTES");
+}
+
 void run_http_tests(void) {
     HU_TEST_SUITE("HTTP GET");
     HU_RUN_TEST(test_http_get_mock);
@@ -144,6 +179,8 @@ void run_http_tests(void) {
     HU_RUN_TEST(test_http_response_body_extraction);
     HU_RUN_TEST(test_http_get_ex_mock);
     HU_RUN_TEST(test_http_request_get_mock);
+    HU_RUN_TEST(test_http_max_body_default_and_env);
+    HU_RUN_TEST(test_http_rejects_oversized_body_before_post);
 #if HU_IS_TEST
     HU_RUN_TEST(test_http_post_json_mock);
 #endif
