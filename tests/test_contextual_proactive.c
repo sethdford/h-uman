@@ -48,25 +48,6 @@ static void mode_parse_shadow_and_on(void) {
                  (int)HU_CONTEXTUAL_PROACTIVE_ON);
 }
 
-/* ── message build references the stored topic, never fabricates ──────────── */
-
-static void build_message_references_topic(void) {
-    char buf[256];
-    size_t n = hu_contextual_proactive_build_message("interview", 9, buf, sizeof(buf));
-    HU_ASSERT_TRUE(n > 0);
-    HU_ASSERT_TRUE(strstr(buf, "interview") != NULL); /* the specific comes from the topic */
-    HU_ASSERT_TRUE(strstr(buf, "how'd") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "go?") != NULL);
-}
-
-static void build_message_empty_topic_no_fabrication(void) {
-    char buf[256];
-    /* A topicless contextual proactive must never be invented. */
-    HU_ASSERT_EQ(hu_contextual_proactive_build_message("", 0, buf, sizeof(buf)), (size_t)0);
-    HU_ASSERT_EQ(hu_contextual_proactive_build_message(NULL, 0, buf, sizeof(buf)), (size_t)0);
-    HU_ASSERT_EQ(buf[0], '\0');
-}
-
 /* ── topic normalization strips filler ────────────────────────────────────── */
 
 static void normalize_topic_strips_filler(void) {
@@ -82,81 +63,6 @@ static void normalize_topic_strips_filler(void) {
     HU_ASSERT_TRUE(
         hu_contextual_proactive_normalize_topic("the appointment.", 16, buf, sizeof(buf)) > 0);
     HU_ASSERT_STR_EQ(buf, "appointment");
-}
-
-/* ── topic quality: only noun-phrase-like topics are sendable ─────────────── */
-
-/* Regression pins from the 2026-07-18 iMessage quality audit: the event
- * extractor can hand back whole clauses as "descriptions"; splicing those into
- * "how'd the %s go?" produced real sends like "how'd the It will be tomorrow.
- * Im working go?". An unprompted text has an asymmetric cost profile — a
- * skipped send costs nothing, a garbage send costs trust — so the predicate
- * biases hard toward precision. */
-static void topic_sendable_accepts_noun_phrases(void) {
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("interview", 9));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("surgery", 7));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("internet installers", 19));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("dentist appointment", 19));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("job interview", 13));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("swimming lessons", 16));
-}
-
-static void topic_sendable_rejects_sentence_fragments(void) {
-    /* The four real-world garbage topics that were sent or queued. */
-    static const char *garbage[] = {
-        "It will be tomorrow. Im working",
-        "went over to your place to measure walls.  Im thinking about doing a wall",
-        "Im meeting the v internet installers",
-        "Okay, I'll try",
-    };
-    for (size_t i = 0; i < sizeof(garbage) / sizeof(garbage[0]); i++)
-        HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(garbage[i], strlen(garbage[i])));
-
-    /* Structural rejects: sentence punctuation, clause words, length. */
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("meeting. then dinner", 20));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("you know that thing", 19));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("think we need groceries", 23));
-    HU_ASSERT_FALSE(
-        hu_contextual_proactive_topic_is_sendable("really long topic with far too many words", 41));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("", 0));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(NULL, 0));
-}
-
-/* Second wave of real leaked topics (service-loop log, 2026-07-15..21): the
- * 07-18 clause-word gate misses bare question words and discourse markers —
- * "What's" splits at the apostrophe into "what"+"s", neither of which was in
- * the list, producing the scheduled send "how'd the What's go?". */
-static void topic_sendable_rejects_question_words_and_discourse_markers(void) {
-    static const char *leaked[] = {
-        "What\xe2\x80\x99s", /* curly apostrophe, as iMessage delivers it */
-        "What's",            /* ASCII apostrophe variant */
-        "So",
-        "How ya feeling",
-        "it\xe2\x80\x99s a lot better",
-    };
-    for (size_t i = 0; i < sizeof(leaked) / sizeof(leaked[0]); i++)
-        HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(leaked[i], strlen(leaked[i])));
-
-    /* Legit noun-phrase topics containing none of the new stop words must
-     * keep passing — the additions must not regress recall. */
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("happy hour", 10));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("press release", 13));
-}
-
-/* End-to-end: decide() must drop obligations whose topic fails the predicate.
- * This inbound is the EXACT production message that generated the mangled
- * "how'd the It will be tomorrow. Im working go?" send on 2026-07-16. */
-static void decide_sentence_like_description_no_obligation(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_contextual_proactive_result_t res;
-    static const char inbound[] = "It will be tomorrow. Im working today. ";
-    HU_ASSERT_EQ(hu_contextual_proactive_decide(&alloc, inbound, sizeof(inbound) - 1, CP_NOW, &res),
-                 HU_OK);
-    /* Every extracted candidate is clause-like; none may survive the gate. */
-    for (size_t i = 0; i < res.count; i++)
-        HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable(res.items[i].topic,
-                                                                 strlen(res.items[i].topic)));
-    HU_ASSERT_EQ(res.count, (size_t)0);
 }
 
 /* ── temporal resolution: future, never past ──────────────────────────────── */
@@ -223,9 +129,18 @@ static void decide_dated_event_stores_contextual_obligation(void) {
 
     /* Topic is the REAL detected topic, not invented. */
     HU_ASSERT_TRUE(strstr(res.items[0].topic, "interview") != NULL);
-    /* Frozen message references the stored topic. */
-    HU_ASSERT_TRUE(strstr(res.items[0].message, "interview") != NULL);
-    HU_ASSERT_TRUE(strstr(res.items[0].message, "how'd") != NULL);
+
+    /* A SITUATION, not a message. The decision used to carry a `message[256]`
+     * frozen here by "how'd the %s go?"; composition now happens at send time in
+     * init_proposer. The frame describes what was detected and leaves
+     * whether-and-how to the model. */
+    char frame[320];
+    HU_ASSERT_TRUE(
+        hu_contextual_proactive_situation_frame(&res.items[0], CP_NOW, frame, sizeof(frame)) > 0);
+    HU_ASSERT_TRUE(strstr(frame, "interview") != NULL);
+    /* No imperative, no pre-written outbound: handing the proposer "ask how it
+     * went" would just be the template wearing a different hat. */
+    HU_ASSERT_TRUE(strstr(frame, "how'd") == NULL);
 
     /* Fires in the future, after the event, on a Friday evening. */
     int64_t send_ms = res.items[0].send_at_ms;
@@ -302,56 +217,71 @@ static void decide_null_args(void) {
     HU_ASSERT_EQ(res.count, (size_t)0);
 }
 
-/* ── Contractions must not evade the clause-word blocklist ──────────────
- * 2026-07-26 15:05 the daemon sent Seth's SISTER:
- *   "hey how are you doing with don't understand provide?"
- * She replied "Turn AI off".
- *
- * Every contraction in topic_clause_words is spelled apostrophe-less
- * ("dont","cant","wont","hes","shes","theyre") but the word-boundary scan
- * treats an apostrophe AS a boundary, so real "don't" tokenized to
- * "don" + "t" and matched neither entry. Those entries only ever fired when
- * the bare prefix was independently listed ("I'm" via "i", "what's" via
- * "what", "it's" via "it"); don't / won't / he's / she's / they're had no
- * backstop and sailed through. */
-static void topic_contractions_are_blocked(void) {
-    /* THE incident string. */
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("don't understand provide", 24));
-    /* The apostrophe-less spelling was always blocked — the pair is the bug. */
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("dont understand provide", 23));
-    /* The family that had no bare-prefix backstop. */
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("won't work", 10));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("he's late", 9));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("she's here", 10));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("they're coming", 14));
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable("can't make it", 13));
+/* ── situation frame (replaced the message template) ──────────────────────── */
+
+static hu_contextual_proactive_decision_t cp_dec(const char *topic, int64_t at_s, double conf) {
+    hu_contextual_proactive_decision_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.topic, sizeof(d.topic), "%s", topic);
+    d.send_at_ms = at_s * 1000;
+    d.confidence = conf;
+    return d;
 }
 
-static void topic_curly_apostrophe_is_blocked(void) {
-    /* iMessage autocorrects to U+2019, so the ASCII-only fold would miss it. */
-    const char *curly = "don\xe2\x80\x99t understand provide";
-    HU_ASSERT_FALSE(hu_contextual_proactive_topic_is_sendable(curly, strlen(curly)));
+static void situation_frame_describes_not_instructs(void) {
+    hu_contextual_proactive_decision_t d = cp_dec("interview", CP_NOW + 3 * 86400, 0.9);
+    char f[320];
+    HU_ASSERT_TRUE(hu_contextual_proactive_situation_frame(&d, CP_NOW, f, sizeof(f)) > 0);
+    HU_ASSERT_TRUE(strstr(f, "interview") != NULL);
+    HU_ASSERT_TRUE(strstr(f, "in 3 days") != NULL);
+    /* Never an outbound message and never an order. */
+    HU_ASSERT_TRUE(strstr(f, "how'd") == NULL);
+    HU_ASSERT_TRUE(strstr(f, "ask ") == NULL);
 }
 
-static void topic_real_events_still_send_after_the_fold(void) {
-    /* The fix must not over-block: these are the whole point of the feature. */
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("interview", 9));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("dentist appointment", 19));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("internet installers", 19));
-    HU_ASSERT_TRUE(hu_contextual_proactive_topic_is_sendable("parent teacher conference", 25));
+static void situation_frame_relative_days_both_directions(void) {
+    char f[320];
+    hu_contextual_proactive_decision_t past = cp_dec("dentist", CP_NOW - 2 * 86400, 0.8);
+    HU_ASSERT_TRUE(hu_contextual_proactive_situation_frame(&past, CP_NOW, f, sizeof(f)) > 0);
+    HU_ASSERT_TRUE(strstr(f, "2 days ago") != NULL);
+
+    hu_contextual_proactive_decision_t tmr = cp_dec("flight", CP_NOW + 86400, 0.8);
+    HU_ASSERT_TRUE(hu_contextual_proactive_situation_frame(&tmr, CP_NOW, f, sizeof(f)) > 0);
+    HU_ASSERT_TRUE(strstr(f, "tomorrow") != NULL);
+}
+
+static void situation_frame_refuses_topicless(void) {
+    /* Never fabricate a situation with no subject. */
+    hu_contextual_proactive_decision_t empty = cp_dec("", CP_NOW + 86400, 0.9);
+    char f[320];
+    HU_ASSERT_EQ(hu_contextual_proactive_situation_frame(&empty, CP_NOW, f, sizeof(f)), (size_t)0);
+    HU_ASSERT_EQ(f[0], '\0');
+    HU_ASSERT_EQ(hu_contextual_proactive_situation_frame(NULL, CP_NOW, f, sizeof(f)), (size_t)0);
+}
+
+static void situation_frame_carries_weak_topics_instead_of_splicing_them(void) {
+    /* The three topics that produced real garbled sends. Under the template they
+     * were spliced into an outbound string; as situations they are just weak
+     * context a model reading the thread can decline on. The point of this pin is
+     * that the frame NEVER looks like a message. */
+    const char *weak[] = {"Friday or Saturday of", "don't understand provide", "What's", NULL};
+    for (size_t i = 0; weak[i]; i++) {
+        hu_contextual_proactive_decision_t d = cp_dec(weak[i], CP_NOW + 86400, 0.7);
+        char f[320];
+        size_t n = hu_contextual_proactive_situation_frame(&d, CP_NOW, f, sizeof(f));
+        HU_ASSERT_TRUE(n > 0);
+        HU_ASSERT_TRUE(strstr(f, "how'd") == NULL);
+        HU_ASSERT_TRUE(strstr(f, "hey how are you doing with") == NULL);
+        /* It reads as an observation about them, not as words to send. */
+        HU_ASSERT_TRUE(strstr(f, "they mentioned") != NULL);
+    }
 }
 
 void run_contextual_proactive_tests(void) {
     HU_TEST_SUITE("contextual_proactive");
     HU_RUN_TEST(mode_parse_defaults_off);
     HU_RUN_TEST(mode_parse_shadow_and_on);
-    HU_RUN_TEST(build_message_references_topic);
-    HU_RUN_TEST(build_message_empty_topic_no_fabrication);
     HU_RUN_TEST(normalize_topic_strips_filler);
-    HU_RUN_TEST(topic_sendable_accepts_noun_phrases);
-    HU_RUN_TEST(topic_sendable_rejects_sentence_fragments);
-    HU_RUN_TEST(topic_sendable_rejects_question_words_and_discourse_markers);
-    HU_RUN_TEST(decide_sentence_like_description_no_obligation);
     HU_RUN_TEST(resolve_tomorrow_is_future_evening);
     HU_RUN_TEST(resolve_yesterday_and_vague_reject);
     HU_RUN_TEST(resolve_weekday_lands_on_that_weekday);
@@ -360,12 +290,13 @@ void run_contextual_proactive_tests(void) {
     HU_RUN_TEST(resolve_in_n_days);
     HU_RUN_TEST(decide_dated_event_stores_contextual_obligation);
     HU_RUN_TEST(decide_no_temporal_no_obligation);
+    HU_RUN_TEST(situation_frame_describes_not_instructs);
+    HU_RUN_TEST(situation_frame_relative_days_both_directions);
+    HU_RUN_TEST(situation_frame_refuses_topicless);
+    HU_RUN_TEST(situation_frame_carries_weak_topics_instead_of_splicing_them);
     HU_RUN_TEST(decide_past_event_no_obligation);
     HU_RUN_TEST(shadow_summary_captures_distribution);
     HU_RUN_TEST(shadow_summary_empty_result_is_zero);
     HU_RUN_TEST(mode_str_labels);
     HU_RUN_TEST(decide_null_args);
-    HU_RUN_TEST(topic_contractions_are_blocked);
-    HU_RUN_TEST(topic_curly_apostrophe_is_blocked);
-    HU_RUN_TEST(topic_real_events_still_send_after_the_fold);
 }

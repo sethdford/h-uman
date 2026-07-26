@@ -55,10 +55,31 @@ typedef enum hu_contextual_proactive_mode {
  * a daytime event ("interview is Friday") is followed up Friday evening. */
 #define HU_CONTEXTUAL_PROACTIVE_SEND_HOUR 19
 
+/* A detected SITUATION — "something happened//will happen worth noticing" — not
+ * a message.
+ *
+ * This carried a `message[256]` frozen at detection time until 2026-07-26. That
+ * design produced three separate garbled sends because it interpolated
+ * extractor output into "how'd the %s go?" and validated the fragment against a
+ * finite word blocklist:
+ *   07-21  "how'd the What's go?"
+ *   07-26  "hey how are you doing with don't understand provide?"  (sister
+ *          replied "Turn AI off")
+ *   07-26  "how'd the Friday or Saturday of go?" — was still QUEUED to send on
+ *          Aug 2 when it was purged
+ * Each was patched by adding words to the blocklist. Validating arbitrary
+ * extracted prose against a word list is unwinnable, and freezing the string
+ * days ahead of delivery means a bad one sits in the queue waiting.
+ *
+ * So the detector now emits only what it can actually know — WHAT and WHEN —
+ * and the message is composed at SEND time by init_proposer, which already owns
+ * propose-or-decline with the persona, the G1-G9 guards and DPO capture on
+ * reject (see hu_proactive_compose_inputs.situation_context, built for exactly
+ * this in docs/plans/2026-05-26-m3-dispatch-unification/). An LLM looking at the
+ * live thread can decline a nonsense topic; snprintf cannot. */
 typedef struct hu_contextual_proactive_decision {
     char topic[128];    /* normalized topic, e.g. "interview" (from the message) */
-    char message[256];  /* frozen outbound, e.g. "how'd the interview go?" */
-    int64_t send_at_ms; /* absolute epoch millis the message should fire */
+    int64_t send_at_ms; /* absolute epoch millis the situation becomes relevant */
     double confidence;  /* event-extraction confidence [0,1] */
 } hu_contextual_proactive_decision_t;
 
@@ -95,22 +116,28 @@ int64_t hu_contextual_proactive_resolve_send_at(const char *temporal_ref, size_t
 size_t hu_contextual_proactive_normalize_topic(const char *topic, size_t len, char *out,
                                                size_t cap);
 
-/* Topic-quality gate: true only when a normalized topic reads as a short
- * noun phrase that can be spliced into "how'd the <topic> go?" without
- * producing a non-human sentence. Rejects clause-like topics: sentence
- * punctuation anywhere in the string, pronoun/auxiliary/verb clause words
- * (word-boundary, case-insensitive), more than 4 words, or over-long strings.
- * Regression context (2026-07-18 audit): the event extractor can return whole
- * clauses as descriptions ("It will be tomorrow. Im working"); those spliced
- * templates were sent to real contacts. An unprompted text has an asymmetric
- * cost profile — skipping a send costs nothing, sending garbage costs trust —
- * so this predicate biases hard toward precision. Pure; NULL-safe. */
-bool hu_contextual_proactive_topic_is_sendable(const char *topic, size_t len);
-
-/* Build the frozen outbound message from a (preferably normalized) topic:
- * "how'd the <topic> go?". Returns 0 and writes nothing if topic is empty — we
- * never fabricate a topicless contextual proactive. Pure. */
-size_t hu_contextual_proactive_build_message(const char *topic, size_t len, char *out, size_t cap);
+/* Render a detected situation as the SITUATION FRAME handed to init_proposer —
+ * "what's up with this contact right now", not an outbound message.
+ *
+ * Replaces hu_contextual_proactive_build_message + the
+ * hu_contextual_proactive_topic_is_sendable blocklist, both deleted 2026-07-26.
+ * Those took extractor output, spliced it into "how'd the %s go?", and tried to
+ * validate the fragment against ~40 clause words. Three garbled messages reached
+ * real contacts anyway, each "fixed" by adding words to the list; validating
+ * arbitrary prose against a finite word list cannot be completed.
+ *
+ * The frame is deliberately DESCRIPTIVE, not imperative: it states what was
+ * detected and leaves whether-and-how entirely to the proposer, which sees the
+ * live thread and can decline. Feeds
+ * hu_proactive_compose_inputs.situation_context, whose doc comment already
+ * scoped it as "silence duration, event/calendar triggers, joke callbacks".
+ *
+ * A low-quality topic is no longer a correctness problem: the model reads it in
+ * context and declines, where snprintf could only splice. Writes a
+ * NUL-terminated line; returns bytes written (0 on empty topic — never fabricate
+ * a topicless situation). Pure. */
+size_t hu_contextual_proactive_situation_frame(const hu_contextual_proactive_decision_t *d,
+                                               int64_t now_ts, char *out, size_t cap);
 
 /* Detect future-dated events in an inbound/outbound message and decide the set
  * of contextual proactive obligations to store. For each extracted event with
