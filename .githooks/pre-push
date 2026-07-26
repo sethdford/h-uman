@@ -12,9 +12,49 @@ if [ -f "CMakeLists.txt" ]; then
     echo "Running human tests..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
-    if [ ! -f "CMakeCache.txt" ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_CURL=ON 2>/dev/null
-    fi
+    # Configure with the portable feature set.
+    #
+    # This used to pass only -DHU_ENABLE_ALL_CHANNELS -DHU_ENABLE_CURL, which
+    # left whole suites uncompiled: measured 12,617 tests versus 13,933 from a
+    # fully-configured build. That was a 1,316-test (9.4%) blind spot in the
+    # gate — those tests did not run before a push. It also fed
+    # update-stats.sh (which reads the first available build/, build2/,
+    # build-check/ or build-release/ binary), so every push stamped an
+    # undercounted test total across AGENTS.md, README.md and friends, and the
+    # rewrite had to be discarded by hand.
+    #
+    # The flags below are the ones that add test coverage without adding an
+    # external dependency: measured 13,827 tests, closing ~92% of that gap.
+    # Deliberately NOT enabled, to keep this hook runnable on any dev machine:
+    #   HU_ENABLE_ASAN               too slow for a local hook (CI-only, see header)
+    #   HU_ENABLE_LIBSODIUM          needs a system library
+    #   HU_ENABLE_INTEGRATION_TESTS  needs live services
+    #   HU_ENABLE_IMESSAGE, _APPLE_INTELLIGENCE, _EMBEDDED_MODEL, _CARTESIA
+    #                                platform- or asset-specific
+    # A residual delta against a dev-preset build is therefore expected, as is
+    # a delta whenever the local branch is behind main (different sources,
+    # different test count) — update-stats.sh reports whatever this tree
+    # builds, so treat its output as "this tree", not "the project".
+    #
+    # Configure unconditionally: the old `if [ ! -f CMakeCache.txt ]` guard
+    # meant an existing build-check kept its original flags forever, so a
+    # change here would never reach anyone who already had one. Re-running
+    # cmake with unchanged arguments is a cheap no-op.
+    cmake .. -DCMAKE_BUILD_TYPE=Debug \
+        -DHU_ENABLE_ALL_CHANNELS=ON \
+        -DHU_ENABLE_CURL=ON \
+        -DHU_ENABLE_SQLITE=ON \
+        -DHU_ENABLE_PERSONA=ON \
+        -DHU_ENABLE_SKILLS=ON \
+        -DHU_ENABLE_ML=ON \
+        -DHU_ENABLE_LEARNING=ON \
+        -DHU_ENABLE_RL_FULL=ON \
+        -DHU_ENABLE_FEEDS=ON \
+        -DHU_ENABLE_SYNTHETIC=ON \
+        -DHU_ENABLE_CHANNEL_TESTS=ON >/dev/null 2>&1 || {
+        echo "cmake configure failed. Fix before pushing."
+        exit 1
+    }
     cmake --build . -j"$JOBS" 2>&1 | tail -3
     if [ $? -ne 0 ]; then
         echo "Build failed. Fix before pushing."
