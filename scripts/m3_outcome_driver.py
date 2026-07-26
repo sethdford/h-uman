@@ -97,9 +97,13 @@ def poll_outcomes(gateway: str, since_ms: int, turn_kind: int = 1,
               file=sys.stderr)
         sys.exit(2)
     except urllib.error.URLError as e:
+        # Unreachable ≠ empty: the gateway may be mid-restart (observed
+        # 2026-07-26: recovery run polled 3s into a daemon boot, before the
+        # gateway thread bound). Return None so main() can engage the
+        # DB fallback instead of dying — the durable store doesn't restart.
         print(f"[m3-driver] could not reach gateway {gateway}: {e.reason}",
               file=sys.stderr)
-        sys.exit(2)
+        return None
 
     if not body.strip():
         return []
@@ -448,15 +452,21 @@ def main() -> int:
     t0 = time.time()
     raw = poll_outcomes(args.gateway, since_ms, args.turn_kind, args.limit)
     poll_ms = int((time.time() - t0) * 1000)
-    print(f"[m3-driver] fetched {len(raw)} outcomes in {poll_ms}ms")
+    print(f"[m3-driver] fetched {len(raw) if raw else 0} outcomes in {poll_ms}ms")
 
-    if not raw and not args.no_db_fallback:
+    unreachable = raw is None
+    if (not raw) and not args.no_db_fallback:
         raw = load_db_fallback_outcomes(args.db_fallback, since_ms)
         if raw:
-            print(f"[m3-driver] ring empty — DB fallback yielded {len(raw)} "
+            why = "gateway unreachable" if unreachable else "ring empty"
+            print(f"[m3-driver] {why} — DB fallback yielded {len(raw)} "
                   f"outcome(s) from production_outcomes ({args.db_fallback})")
 
     if not raw:
+        if unreachable:
+            print("[m3-driver] gateway unreachable and no fallback data — exit 2",
+                  file=sys.stderr)
+            return 2
         print("[m3-driver] no new outcomes — exit")
         return 0
 

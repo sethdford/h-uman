@@ -371,6 +371,12 @@ def test_db_fallback_synthesizes_rehydratable_records(tmp: Path):
     _ok("missing db returns empty list",
            drv.load_db_fallback_outcomes(tmp / "nope.db", 0) == [])
 
+    # Gateway UNREACHABLE (not just empty) must also engage the fallback:
+    # the ring lives in the daemon and vanishes for seconds on every
+    # restart — the 2026-07-26 recovery run raced exactly that window.
+    unreachable = drv.poll_outcomes("http://127.0.0.1:9", 0)
+    _ok("unreachable gateway returns None sentinel, not exit", unreachable is None)
+
 
 def main():
     print("M3 outcome driver e2e tests")
