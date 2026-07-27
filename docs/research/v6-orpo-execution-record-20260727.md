@@ -132,6 +132,43 @@ listening socket alone is what let this go unnoticed.
 Not done, deliberately: no promotion, no repoint, no config edit, no touching the
 unattributed :8743 orphan.
 
+## SUPERSEDING EVENT: the n=40 human gate landed mid-session and re-ranked the targets
+
+At 06:18:26, while this run was in flight, a 4th human cycle scored at **n=40,
+detection 0.225, Wilson CI [0.123, 0.350], PASS** (`~/.human/blind_ab_gate.json`;
+rated sheet `~/.human/blind_ab_human/rating_sheet.csv`, 40/40). That is 3.3× the power
+of the n=12 evidence v6 was designed against, and it supersedes the 0.167/n=12 estimate
+of the same arm. (It measures the **generic 3621 B prompt** arm, not the deployed
+compact head — cycle 3 measured that at 0.500/n=12.)
+
+Note `docs/evaluation/blind_ab_gate.json` in the repo still carries the stale
+`n=12 / 0.500` from 07-26; `~/.human/` is the current one.
+
+**All 9 detections were read individually rather than taken from summary.** They do not
+form one cluster:
+
+| Cluster | n | Example |
+|---|---:|---|
+| wrong event-state facts | 3 | `bab_005` "done moving all settled in now" (he was still moving); `bab_114` "last day's friday" (it was the 31st) |
+| performed wit | 2 | `bab_090` answers "500 right?" with "i can spot a bot from a mile away" — it does not answer at all |
+| generic platitude / coach register | 2 | `bab_053` "yeah that's the corporate grind for you" vs Seth naming Vanguard, LinkedIn, incoming executives |
+| flat where Seth is warm | 1 | `bab_150` "i never mentioned divorce" vs "Ha ha no no, let's get it done! ASAP" |
+| over-elaboration | 1 | `bab_013` three paragraphs vs "Old as dirt" |
+
+**This invalidates v6's corpus weighting.** Over-elaboration was the headline and is
+~1/9 at n=40. My 42 curated pairs were selected almost entirely by the length detector
+(74 of the 75 flagged on LEN), and `generated_v2` is terse-vs-verbose — so nearly the
+whole 415-pair corpus targets the demoted axis. Combined with the negative margin, there
+are two independent reasons not to rate this adapter.
+
+**3 of the 9 are not LoRA-addressable at all.** Wrong event-state facts need
+memory/retrieval; the "chosen" reply asserts a date the model has no way to know, so
+training it teaches confident assertion rather than accuracy. They are excluded by id.
+
+A re-weighted corpus is built and ready at `~/.human/training-data/glm-v61-pref`:
+**463 pairs**, adding the 6 trainable human detections at weight ×8 (48 rows) so the
+only human-certified pairs in the set do not drown in 400 synthetic ones.
+
 ## Recommended next step: v6.1, not a rating cycle for this adapter
 
 Asking for human ratings is the expensive resource. Spending a cycle on an adapter whose

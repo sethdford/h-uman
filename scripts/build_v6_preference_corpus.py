@@ -6,11 +6,25 @@ It targets the three failure modes HUMAN blind raters identified on the v5 arm -
 NOT the stale-fact premise, which `docs/research/v6-corpus-regeneration-scope-20260727.md`
 measured and ruled out (0.7% corpus contamination).
 
-    1. OVER-ELABORATION   -- the dominant tell. Measured on the 160 cycle-4 items:
-                             the model's reply is longer than Seth's in 82% of cases,
-                             median length ratio 2.25x, p90 7.67x.
-    2. REGISTER / WARMTH  -- flat where Seth is warm or playful.
-    3. ASSISTANT-DISCLOSURE -- capability talk and scheduling-assistant register.
+TARGETS, AS RE-RANKED BY THE n=40 HUMAN GATE (2026-07-27, detection 0.225 PASS).
+The original v6 headline was over-elaboration, on cycle-2/3 evidence at n=12. At
+n=40 -- 3.3x the power -- that axis accounts for ~1 of 9 detections. Reading all
+nine (see the block above FACTUAL_NOT_TRAINABLE), the trainable tells are:
+
+    1. PERFORMED WIT      -- reaching for a quip instead of answering. Strongest
+                             single cluster; bab_090 answers "500 right?" with
+                             "i can spot a bot from a mile away".
+    2. GENERIC PLATITUDE  -- anonymous-plausible where Seth names names, and
+                             coach register ("take a breath you got this") where
+                             Seth is flat ("Yeah, it is").
+    3. FLAT WHERE WARM    -- literal correction where Seth is warm and playful.
+    4. OVER-ELABORATION   -- demoted from headline to fourth. Still real and still
+                             systematic (model longer than Seth in 82% of the 160
+                             cycle-4 items, median ratio 2.25x), but it is not what
+                             human raters actually catch.
+
+NOT a target: wrong event-state facts (3 of the 9). A preference round cannot
+teach a fact the model does not have; that is the memory/retrieval path.
 
 SOURCE ADMISSION IS DEFAULT-DENY. Every candidate source was audited; the ones
 admitted are listed in ADMITTED with the evidence that admitted them, and the ones
@@ -24,6 +38,7 @@ Output (default ~/.human/training-data/glm-v6-pref/):
                                   exclude these or it measures memorisation)
 """
 import argparse
+import csv
 import json
 import os
 import random
@@ -34,6 +49,40 @@ from pathlib import Path
 HOME = Path(os.path.expanduser("~"))
 CYCLE4_TRIPLES = HOME / "blind_ab_run/cycle4-20260726/triples.json"
 MEMORY_DB = HOME / ".human/memory.db"
+RATED_SHEET = HOME / ".human/blind_ab_human/rating_sheet.csv"
+RATED_KEY = HOME / ".human/blind_ab_human/answer_key.json"
+
+# --- The n=40 human detections: the highest-signal pairs that exist -------------
+# Cycle-4 human gate 2026-07-27: detection 0.225 (9/40), Wilson CI [0.123, 0.350],
+# PASS (~/.human/blind_ab_gate.json). Each detection is a case where a rater who
+# knows Seth picked his real reply out of the pair -- so chosen=real, rejected=the
+# model's own output, on the exact axis that gave it away.
+#
+# THE n=40 RESULT RE-RANKED THE TARGETS. Over-elaboration, v6's original headline,
+# accounts for ~1 of the 9. Reading all nine, they cluster four ways:
+#
+#   performed_wit    (2) bab_095 "wrong take: pineapple on pizza is actually fine"
+#                        bab_090 "i can spot a bot from a mile away" -- to "500 right?",
+#                        i.e. it does not even answer the question
+#   generic_platitude(2) bab_053 "yeah that's the corporate grind for you" against
+#                        Seth naming Vanguard, LinkedIn, incoming executives
+#                        bab_047 "take a breath you got this" against a flat "Yeah, it is"
+#   flat_where_warm  (1) bab_150 "i never mentioned divorce" against Seth's
+#                        "Ha ha no no, let's get it done! ASAP"
+#   over_elaboration (1) bab_013 three paragraphs against "Old as dirt"
+#
+# The remaining 3 (bab_005 "done moving all settled in now", bab_114 "last day's
+# friday", bab_155 "i don't have anything settling by may 22nd") are WRONG
+# EVENT-STATE FACTS. A preference round cannot teach a fact the model does not
+# have -- that is the memory/retrieval path. They are EXCLUDED by id below rather
+# than trained on, because the "chosen" reply asserts a date the model has no way
+# to know, so training it teaches confident assertion, not accuracy.
+FACTUAL_NOT_TRAINABLE = {"bab_005", "bab_114", "bab_155"}
+
+# Repeat count for the human-detected pairs. They are ~1.5% of the corpus by
+# count but are the only pairs certified by a human who knows Seth, so they are
+# oversampled rather than left to drown in 400 synthetic rows.
+HUMAN_PAIR_WEIGHT = 8
 
 # --- Admitted dpo_pairs sources -------------------------------------------------
 # Audited 2026-07-27 against the whole table (700 rows).
@@ -116,6 +165,43 @@ def norm(s):
     return (s or "").strip()
 
 
+def load_human_detections(sheet=RATED_SHEET, keyfile=RATED_KEY, weight=HUMAN_PAIR_WEIGHT):
+    """Pairs a human rater actually detected. chosen=real Seth, rejected=the model.
+
+    Returns [] (with a warning) rather than a fabricated set if the sheet is not
+    rated -- an unrated sheet must never silently contribute training pairs.
+    """
+    if not sheet.exists() or not keyfile.exists():
+        print(f"WARNING: no rated sheet at {sheet}; skipping human detections",
+              file=sys.stderr)
+        return []
+    key = json.load(open(keyfile))
+    key = key.get("key", key)
+    rows = list(csv.DictReader(open(sheet)))
+    rated = [r for r in rows if (r.get("choice") or "").strip()]
+    if not rated:
+        print(f"WARNING: {sheet} has 0 rated rows; skipping human detections",
+              file=sys.stderr)
+        return []
+
+    out = []
+    for r in rated:
+        k = key.get(r["id"])
+        if not k or (r["choice"] or "").strip().upper() != str(k).strip().upper():
+            continue                      # rater was fooled -> no preference signal
+        if r["id"] in FACTUAL_NOT_TRAINABLE:
+            continue                      # wrong-fact tells are not LoRA-addressable
+        real = r["option_A"] if k == "A" else r["option_B"]
+        ai = r["option_B"] if k == "A" else r["option_A"]
+        if not norm(real) or not norm(ai) or norm(real) == norm(ai):
+            continue
+        for _ in range(weight):
+            out.append({"prompt": norm(r["context"]), "chosen": norm(real),
+                        "rejected": norm(ai), "_src": "human_detected_n40",
+                        "_id": r["id"]})
+    return out
+
+
 def load_cycle4(path):
     rows, keep = [], set(CYCLE4_KEEP)
     triples = json.load(open(path))
@@ -182,7 +268,8 @@ def main():
 
     gold = load_cycle4(Path(args.cycle4))
     synth = load_dpo_pairs(Path(args.db))
-    rows = gold + synth
+    human = load_human_detections()
+    rows = human + gold + synth
     validate(rows, args.floor)
 
     rng = random.Random(args.seed)
