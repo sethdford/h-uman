@@ -410,6 +410,40 @@ class TestRaterGateSeparation(unittest.TestCase):
         self.assertEqual(repo["synthetic"]["n"], 4)
         self.assertEqual(repo["effective_verdict"], "ADVISORY")
 
+    def _write_stamped_fixture(self):
+        """Sheet whose rows carry the judge_api/judge_model provenance stamps
+        that synthetic_judge.py writes on every judged row."""
+        import csv as _csv
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["id", "choice", "confidence", "judge_api", "judge_model"])
+            for i in range(4):
+                w.writerow([str(i), "A" if i < 2 else "B", "4",
+                            "openai", "gemma-4-31b-it-8bit"])
+
+    def test_stamped_sheet_vetoes_rater_human(self):
+        """A sheet stamped by synthetic_judge.py must refuse --rater human:
+        provenance beats the operator's claim (fail safe)."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        self._write_stamped_fixture()
+        r = self._run_score("--rater", "human", "--emit-gate", self.repo_gate)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        with open(self.home_gate) as f:
+            self.assertEqual(_json.load(f), {"human": genuine},
+                             "vetoed run must write nothing")
+
+    def test_stamped_sheet_as_synthetic_records_judge_model(self):
+        """--rater synthetic on a stamped sheet works and carries the
+        judge_model provenance into the synthetic gate record."""
+        import json as _json
+        self._write_stamped_fixture()
+        r = self._run_score("--rater", "synthetic")
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["synthetic"]["judge_model"], "gemma-4-31b-it-8bit")
+
     def test_human_rater_writes_human_key_and_preserves_synthetic(self):
         """rater=human keeps the original behavior and must not clobber a
         previously-recorded synthetic key."""
