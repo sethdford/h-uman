@@ -40,21 +40,25 @@
 #include "human/ml/mlx_admin.h"
 #include "human/provider.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#ifdef HU_ENABLE_RL_FULL
-#include "human/agent/adapter_id.h"
-#include "human/eval/eval_gate.h"
-#include "human/eval/leaderboard.h"
-#include "human/eval/persona_rollout.h"
-#include "human/memory/personal_model.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Attempt-cooldown cluster — UNCONDITIONAL on purpose.
+ *
+ * These live outside HU_ENABLE_RL_FULL because their only caller,
+ * hu_lora_training_runner(), is itself unguarded, and because
+ * hu_lora_runner_attempt_cooldown_active() is declared unconditionally in
+ * lora_runner.h. Defining them under the RL_FULL gate broke every build with
+ * that flag off two different ways: three implicit declarations at the call
+ * site, and — once those were silenced — an undefined symbol at link for the
+ * public predicate the header already promised. Keep definition and
+ * declaration on the same side of the gate. */
+
+static hu_error_t mkdir_p(const char *path); /* defined below; used by the stamp writer */
 
 #ifdef HU_IS_TEST
 static time_t g_lora_runner_test_clock = 0;
@@ -71,8 +75,6 @@ static time_t runner_now(void) {
     return time(NULL);
 }
 #endif
-
-static hu_error_t mkdir_p(const char *path); /* defined below; used by the stamp writer */
 
 bool hu_lora_runner_attempt_cooldown_active(time_t last_attempt, time_t now, int cooldown_seconds) {
     if (last_attempt <= 0)
@@ -131,6 +133,22 @@ static hu_error_t mkdir_p(const char *path) {
     }
     return mkdir(tmp, 0755) == 0 || access(tmp, F_OK) == 0 ? HU_OK : HU_ERR_IO;
 }
+
+#ifdef HU_ENABLE_RL_FULL
+#include "human/agent/adapter_id.h"
+#include "human/eval/eval_gate.h"
+#include "human/eval/leaderboard.h"
+#include "human/eval/persona_rollout.h"
+#include "human/memory/personal_model.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+
+/* runner_now / hu_lora_runner_attempt_cooldown_active / attempt_stamp_path /
+ * read_attempt_stamp / write_attempt_stamp / mkdir_p now live above this gate,
+ * unconditionally — their caller and header declaration are both unguarded. */
 
 static hu_error_t write_stub_file(const char *path, const char *body) {
     FILE *f = fopen(path, "w");

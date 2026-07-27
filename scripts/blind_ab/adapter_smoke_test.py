@@ -94,15 +94,29 @@ PROMPTS = [
 
 # --------------------------------------------------------------- checkers ---
 
-def is_degenerate(text, min_reps=4):
-    """True if the reply collapses into a repeated token/phrase runaway."""
+def is_degenerate(text, max_cycle=12):
+    """True if the reply collapses into a repeated token/phrase runaway.
+
+    Two things this must get right, both learned from a real miss:
+
+    1. **Cycle length is not bounded by 3.** v6 emitted "I'm not sure I'm a
+       team" over and over — a SIX-word cycle — and an earlier version that
+       only tested n-grams of length 1-3 scored that reply as clean. n now
+       runs up to max_cycle (bounded by what the text can actually support).
+
+    2. **Long cycles need fewer repetitions to be damning.** That same reply
+       repeated its 6-gram only ~3 times, so a flat min_reps=4 would still
+       have missed it. Short cycles need 4 reps (so "ha ha ha" stays clean),
+       longer ones need 3 — 3x a 6-word phrase is 18 words of pure loop.
+    """
     words = text.split()
-    for n in (1, 2, 3):
-        if len(words) < n * min_reps:   # not enough words for n reps of an n-gram
-            continue
-        for i in range(len(words) - n * min_reps + 1):
+    for n in range(1, min(max_cycle, len(words)) + 1):
+        reps = 4 if n <= 2 else 3
+        if len(words) < n * reps:
+            break                      # no longer cycle can fit either
+        for i in range(len(words) - n * reps + 1):
             gram = words[i:i + n]
-            if all(words[i + k * n: i + (k + 1) * n] == gram for k in range(min_reps)):
+            if all(words[i + k * n: i + (k + 1) * n] == gram for k in range(reps)):
                 return True
     return False
 
@@ -239,6 +253,18 @@ def selftest():
     assert not is_degenerate("hey what's up, running a bit late but on my way")
     assert not is_degenerate("")
     assert is_degenerate("go now go now go now go now")
+    # REGRESSION: the real v6 reply an earlier detector scored as clean — a
+    # 6-word cycle repeated only ~3 times. Both the n<=3 bound and a flat
+    # min_reps=4 would miss it.
+    assert is_degenerate(
+        "I'm not sure I'm a team I'm not sure I'm a team I'm not sure I'm a team I'm not sure I")
+    assert is_degenerate("a b c d e f a b c d e f a b c d e f")      # 6-gram x3
+    assert is_degenerate("one two three one two three one two three")  # 3-gram x3
+    # ...without flagging ordinary terse texting (Seth's median reply is ~6 words)
+    for ok in ("ok", "yeah", "7", "Same!", "no lol", "red, blue, yellow",
+               "on my way", "hey what is up", "I'll send it over as soon as I'm out",
+               "Yeah it's good. A bit of a learning curve with the legacy code."):
+        assert not is_degenerate(ok), ok
 
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
@@ -274,11 +300,33 @@ def main():
     ap.add_argument("--out", help="write full JSON results here")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--rescore", help="re-evaluate a previous results JSON with the "
+                    "CURRENT checkers (no model load, no GPU) — use after fixing a "
+                    "checker so old runs get corrected verdicts")
     a = ap.parse_args()
 
     if a.selftest:
         selftest()
         return
+
+    if a.rescore:
+        with open(a.rescore) as f:
+            prev = json.load(f)
+        rows = prev["report"]["rows"]
+        la, lb = a.label_a, a.label_b
+        if rows and la not in rows[0]:
+            sys.exit(f"--label-a/--label-b must match the saved file "
+                     f"(found: {[k for k in rows[0] if k not in ('id','cat','prompt')]})")
+        res_a = {r["id"]: r[la]["text"] for r in rows}
+        res_b = {r["id"]: r[lb]["text"] for r in rows}
+        rep = build_report(res_a, res_b, la, lb)
+        clean = print_report(rep, la, lb)
+        if a.out:
+            with open(a.out, "w") as f:
+                json.dump({**{k: v for k, v in prev.items() if k != "report"},
+                           "report": rep, "rescored_from": a.rescore}, f, indent=1)
+            print(f"wrote {a.out}")
+        sys.exit(0 if clean else 1)
     if not a.a or not a.b:
         ap.error("--a and --b are required (or --selftest)")
     for p in (a.a, a.b):
