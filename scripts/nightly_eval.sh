@@ -106,6 +106,28 @@ adc_present() {
   [ -f "/Users/sethford/.config/gcloud/application_default_credentials.json" ]
 }
 
+# The gate runs --gateway so it measures the PRODUCT (real agent turn, real
+# persona) rather than a harness-authored prompt against raw MLX. That needs
+# the daemon's gateway listening, on the CONFIGURED port — not the legacy
+# hardcoded :3002. Without this check a dead gateway degrades every trial to
+# "(gateway error: ...)" and the run aborts on consecutive failures.
+gateway_url() {
+  python3 - <<'PY' 2>/dev/null || echo "http://127.0.0.1:3002"
+import json, os
+try:
+    port = json.load(open(os.path.expanduser("~/.human/config.json")))["gateway"]["port"]
+except Exception:
+    port = 3002
+print(f"http://127.0.0.1:{port}")
+PY
+}
+
+gateway_up() {
+  local code
+  code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$(gateway_url)/api/status" 2>/dev/null || echo 000)
+  [ "$code" = "200" ]
+}
+
 # ---- Stage 3 precondition checks ------------------------------------------------
 # Sufficiency, not existence: the gate stamps ENFORCING only at >= 30 real pairs
 # (ENFORCE_MIN_PAIRS in blind_ab_gate.py); below that a run wastes GPU on an
@@ -211,10 +233,18 @@ else
   archive_verdict fidelity "$FID_OUT"
 fi
 
-# ---- 3) REAL blind-A/B gate refresh (local serving via :8741 + Gemini judge) ---
+# ---- 3) REAL blind-A/B gate refresh (product via daemon gateway + Gemini judge) ---
 # This stage runs the REAL proxy blind-A/B, not a dry-run, so the measurement
 # refreshes the committed verdict artifact. Only skipped on --smoke; precondition
 # failures log loudly but do NOT fail the wrapper (contract: run evals, don't gate).
+#
+# --gateway, NOT --mlx (changed 2026-07-27). --mlx posted a hand-written
+# SETH_SYSTEM_PROMPT straight to :8741, so the persona pipeline was never
+# exercised and every style claim in that prompt became an AI tell the moment it
+# was wrong — twice measured ("Lowercase." ~10x off, "Abbreviate (gonna, tbh,
+# idk, hru)" drove tbh ~200x over Seth's real rate). --gateway runs the real
+# agent turn through the daemon, which builds the persona itself. Generation
+# still lands on :8741 underneath, so server_up remains a precondition.
 if [ "$SMOKE" -eq 1 ]; then
   log "[3/3] blind-ab: skipped (--smoke)"
 else
@@ -228,6 +258,12 @@ else
   fi
   if [ "$stage3_skip" -eq 0 ] && ! server_up; then
     log "[3/3] blind-ab: SKIPPED — :8741 server not responding"
+    stage3_skip=1
+  fi
+  if [ "$stage3_skip" -eq 0 ] && ! gateway_up; then
+    log "[3/3] blind-ab: SKIPPED — daemon gateway not responding at $(gateway_url)"
+    log "           the gate measures the product via --gateway; start the daemon"
+    log "           with --with-gateway, or set HU_GATEWAY_URL."
     stage3_skip=1
   fi
   if [ "$stage3_skip" -eq 0 ] && ! judge_creds_present; then
@@ -246,7 +282,7 @@ else
 
     set +e
     # shellcheck disable=SC2086  # binoc_flag is intentionally word-split (empty or one flag)
-    "$PY" "$BLIND_AB" --gate --mlx $binoc_flag; ab_rc=$?
+    "$PY" "$BLIND_AB" --gate --gateway $binoc_flag; ab_rc=$?
     set -e
 
     log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"

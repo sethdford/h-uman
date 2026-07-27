@@ -59,7 +59,9 @@ def _gemini_url():
     return (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/global/"
             f"publishers/google/models/{EVAL_MODEL}:generateContent")
 
-GATEWAY_URL = os.environ.get("HU_GATEWAY_URL", "http://127.0.0.1:3002")
+# Resolved after gateway_url_from_config/_load_human_config are defined, so the
+# configured daemon port wins over the legacy hardcoded :3002.
+GATEWAY_URL = None
 MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8741/v1/chat/completions")
 USE_GATEWAY = "--gateway" in sys.argv
 USE_SYNTHETIC = "--synthetic" in sys.argv
@@ -256,7 +258,7 @@ def build_mlx_messages(system_prompt, message, context_turns=None):
 
 def get_ai_response(message, context_turns=None):
     if USE_GATEWAY:
-        return get_ai_response_gateway(message)
+        return get_ai_response_gateway(message, context_turns=context_turns)
     if USE_MLX:
         return get_ai_response_mlx(message, context_turns=context_turns)
     return get_ai_response_cli(message, context_turns=context_turns)
@@ -333,11 +335,69 @@ def get_ai_response_cli(message, context_turns=None):
                 pass
 
 
-def get_ai_response_gateway(message):
+def build_gateway_messages(message, context_turns=None):
+    """Chat messages for the gateway (product) path.
+
+    Deliberately NO system prompt. The gateway runs the real agent turn, which
+    builds the persona itself from ~/.human/personas + src/persona. Injecting a
+    harness-authored persona here would reintroduce the exact artifact class
+    this path exists to remove: every style claim the harness asserts becomes
+    an AI tell the moment it is wrong, and it has been wrong twice
+    ("Lowercase." ~10x, "Abbreviate (gonna, tbh, idk, hru)" ~200x on tbh).
+
+    hu_openai_compat_handle_chat_completions clears agent history and repopulates
+    it from this array, mapping every message but the trailing user turn into
+    history — so the thread arrives natively, no C-side change needed.
+    """
+    msgs = []
+    for t in (context_turns or []):
+        if not isinstance(t, dict):
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        msgs.append({"role": "assistant" if t.get("from") == "seth" else "user",
+                     "content": text})
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
+def gateway_url_from_config(config, env_url=None, default_port=3002):
+    """Resolve the gateway base URL from ~/.human/config.json.
+
+    The default was hardcoded to :3002 while the daemon binds the configured
+    port (3006 as of 2026-07-27), so --gateway failed connection-refused before
+    it generated anything.
+    """
+    if env_url:
+        return env_url
+    port = default_port
+    try:
+        cfg_port = (config or {}).get("gateway", {}).get("port")
+        if isinstance(cfg_port, int) and cfg_port > 0:
+            port = cfg_port
+    except AttributeError:
+        pass
+    return f"http://127.0.0.1:{port}"
+
+
+def _load_human_config():
+    try:
+        with open(os.path.expanduser("~/.human/config.json")) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+GATEWAY_URL = gateway_url_from_config(_load_human_config(),
+                                      os.environ.get("HU_GATEWAY_URL"))
+
+
+def get_ai_response_gateway(message, context_turns=None):
     try:
         payload = json.dumps({
             "model": "default",
-            "messages": [{"role": "user", "content": message}],
+            "messages": build_gateway_messages(message, context_turns),
         }).encode()
         req = urllib.request.Request(
             f"{GATEWAY_URL}/v1/chat/completions",

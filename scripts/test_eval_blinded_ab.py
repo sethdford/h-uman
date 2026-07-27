@@ -125,6 +125,56 @@ def test_judge_config_without_schema_omits_schema_keys():
     assert "thinkingConfig" in cfg
 
 
+# ---- 4. gateway (product) path --------------------------------------------
+# The --mlx path scores a hand-written SETH_SYSTEM_PROMPT against raw MLX, so
+# the persona pipeline is never exercised and every style claim in that prompt
+# becomes an AI tell the moment it is wrong ("Lowercase." was ~10x off, and
+# "Abbreviate (gonna, tbh...)" drove tbh 200x). The gateway path runs the real
+# agent turn, which supplies the persona itself.
+
+def test_gateway_messages_carry_no_system_prompt():
+    """The product owns the persona. A harness-authored system prompt here
+    would reintroduce exactly the artifact class --gateway exists to remove."""
+    m = E.build_gateway_messages("hey", None)
+    assert all(x["role"] != "system" for x in m), (
+        "the gateway must not be fed a harness-authored persona")
+
+
+def test_gateway_messages_minimal_is_single_user_turn():
+    assert E.build_gateway_messages("hey", None) == [
+        {"role": "user", "content": "hey"}]
+
+
+def test_gateway_messages_include_thread_in_order():
+    turns = [{"from": "them", "text": "you around?"},
+             {"from": "seth", "text": "yeah whats up"}]
+    m = E.build_gateway_messages("dinner at 7?", turns)
+    assert [x["role"] for x in m] == ["user", "assistant", "user"]
+    assert m[-1]["content"] == "dinner at 7?"
+
+
+def test_gateway_messages_skip_blank_and_malformed():
+    turns = [None, {}, {"from": "them", "text": "  "}, {"from": "them", "text": "ok"}]
+    m = E.build_gateway_messages("x", turns)
+    assert [x["content"] for x in m] == ["ok", "x"]
+
+
+def test_gateway_url_prefers_env_override():
+    assert E.gateway_url_from_config({"gateway": {"port": 3006}},
+                                     env_url="http://host:9999") == "http://host:9999"
+
+
+def test_gateway_url_reads_configured_port():
+    """Default was hardcoded :3002 while the daemon listens on the configured
+    port (3006 here) — --gateway would have failed connection-refused."""
+    assert E.gateway_url_from_config({"gateway": {"port": 3006}}) == "http://127.0.0.1:3006"
+
+
+def test_gateway_url_falls_back_when_config_unusable():
+    for bad in (None, {}, {"gateway": {}}, {"gateway": None}):
+        assert E.gateway_url_from_config(bad).endswith(":3002")
+
+
 # ---- runner ----------------------------------------------------------------
 
 def _run():
