@@ -115,12 +115,22 @@ this doc with `--pairs <the archived calibration file>`.
 `data/imessage/ground_truth.jsonl` (644 real pairs) supplied the holdout, sampled
 with seed 42 excluding the 47 trials.
 
-## Corpus finding: 20% of real Seth ground truth carries a stray leading byte
+## Corpus finding: real Seth ground truth carried a stray leading byte
+
+> **Rate correction (2026-07-26).** The "20%" below is the **conservative
+> guard's** count, which deliberately over-flags: it also catches legitimate
+> openers like `'“Professional misconduct”'` and `'#7225'`. The *true* corruption
+> rate, measured by the exact signature — a printable leading byte whose ordinal
+> equals the message's own utf-8 byte length — is **7.5%** of assistant targets
+> in the affected training set (202/2676), against a **0.3–0.4% baseline
+> coincidence** floor. Real and material, but smaller than first reported. Prefer
+> the signature test over the guard regex when quantifying; the guard exists to
+> refuse pairs cheaply, not to measure.
 
 Surfaced by the miner's first shadow run (exactly what shadow mode is for). **131
-of 644** (20.3%) `seth_reply` values in `data/imessage/ground_truth.jsonl` — and
-9 of the 47 `real_seth` values in the 07-24 trials — begin with a stray character
-before the real text:
+of 644** (20.3% by the conservative guard) `seth_reply` values in
+`data/imessage/ground_truth.jsonl` — and 9 of the 47 `real_seth` values in the
+07-24 trials — begin with a stray character before the real text:
 
 ```
 ',I don’t know if I have there phone numbers'     '0Oh hey there! Jesus why don’t I…'
@@ -168,6 +178,44 @@ returning. The guard stays regardless: it costs ~0.6% of pairs and is cheap
 insurance, since `scripts/extract_imessage_pairs.py` **regenerates
 `ground_truth.jsonl` on any invocation, including `--help`** — and the file is
 untracked, so running the *unfixed* extractor from main re-corrupts it.
+
+## Behavioral confirmation: the decoder bug reached the model (2026-07-26)
+
+The corpus fix was verified at the *data* layer above. This is the confirmation it
+changed **model behavior** — the part that actually matters.
+
+`seth-lora-v6-8bit-20260725-114316` is the v5 recipe with **only the data
+changed** (same base, iters, LR, layers, rank; `scale: 2.0` verified in
+`adapter_config.json` both mid-run and at completion). Head-to-head via
+`scripts/blind_ab/adapter_smoke_test.py`:
+
+| category | n | v5 | v6 |
+|---|---|---|---|
+| persona | 6 | 4 | 5 |
+| instruction | 6 | **1** | **4** |
+| reasoning | 4 | 0 | 1 |
+| **leading-byte artifact** | — | **5** | **0** |
+
+The artifact count is the headline: v5 emitted the stray prefix in 5 of 16 replies
+(`'.I’m good. Just getting through a mountain of emails'`), v6 in **none**. v5 also
+leaked raw template tokens (`"<|turn>user\nI'm doing great! I'm doing amazing!…"`),
+which is what a corrupted-target adapter degrading its base looks like. No
+base-capability regressions; 4 checks moved v5-fail → v6-pass.
+
+**v6 is still NOT promotable on voice.** It emits degenerate loops and a truncated
+fragment (`'ing'`), which the corruption hypothesis does not explain — that points
+elsewhere, plausibly sampling parameters. v5 remains the served adapter.
+
+### Scope: this bug did NOT affect every corpus
+A GLM-shaped adapter trained the same week was initially assumed to share the
+confound. Measured directly, its training data sits at **0.3%** — the baseline
+coincidence floor, i.e. clean. The discriminator was never *when* a dataset was
+built but **which extractor built it**: only `extract_imessage_pairs.py` and
+`persona_style_card.py` carried the buggy decoder copies, while
+`export_seth_triples.py`, `m3_extract_corpus.py`, `harvest_imessage_voice.py`, and
+`classify_contact_formality.py` were already on the shared fixed decoder from
+`e80af898`. Before attributing any downstream result to this bug, **measure that
+dataset's signature rate** rather than reasoning from build timestamps.
 
 ## Caveats
 
