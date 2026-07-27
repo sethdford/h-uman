@@ -272,7 +272,7 @@ def send_question(target, text, dry_run=False):
 
 def run_score():
     r = subprocess.run([sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
-                        "--emit-gate", REPO_GATE],
+                        "--rater", "human", "--emit-gate", REPO_GATE],
                        capture_output=True, text=True, timeout=60)
     print(r.stdout[-500:] if r.stdout else r.stderr[-300:])
     # score.py exit semantics: 0 = PASS verdict, 1 = ran but verdict != PASS

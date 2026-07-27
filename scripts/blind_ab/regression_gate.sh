@@ -27,7 +27,10 @@ python3 "$BA/make_rating_sheet.py" "$RUN/triples.json" --out-dir "$RUN"
 echo "[gate] synthetic judge (--api $API)..."
 python3 "$BA/synthetic_judge.py" "$RUN/rating_sheet.csv" --api "$API" --out "$RUN/judged.csv"
 echo "[gate] scoring..."
-python3 "$BA/score.py" "$RUN/judged.csv" --key "$RUN/answer_key.json" --json-out "$RUN/results.json" || true
+# --rater synthetic: this is a machine-judged sheet. It records under the
+# non-authoritative "synthetic" gate key and must NEVER write the "human"
+# half (2026-07-26: a synthetic run replaced the genuine human verdict).
+python3 "$BA/score.py" "$RUN/judged.csv" --key "$RUN/answer_key.json" --rater synthetic --json-out "$RUN/results.json" || true
 
 # B3 reward wire: feed corrective pairs (rounds h-uman was distinguishable) into
 # dpo_pairs so the loop is always-learning. judge_to_dpo.py enforces a HARD

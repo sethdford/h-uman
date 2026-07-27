@@ -11,10 +11,18 @@ Reports, per the protocol:
   - PASS/FAIL vs the two criteria (detection <= 0.60 AND Wilson lower <= 0.55)
 
 Usage:
-    python3 score.py sheet_alice.csv sheet_bob.csv --key answer_key.json
+    python3 score.py sheet_alice.csv sheet_bob.csv --key answer_key.json --rater human
+    python3 score.py judged.csv --key answer_key.json --rater synthetic
+    python3 score.py sheet.csv --key answer_key.json   # score-only, no gate writes
     python3 score.py --selftest        # verify the math on synthetic data
+
+Gate writes are opt-in via --rater. "human" is promotion-authoritative
+(the C LoRA gate reads only the human key); "synthetic" records machine-
+judged runs under a separate key that never gates promotion. Without
+--rater nothing is written (2026-07-26: an unconditional write let a
+synthetic-judge run replace the genuine human verdict).
 """
-import argparse, csv, json, math, os, sys
+import argparse, csv, json, math, os, sys, time
 
 
 def wilson(k, n, z=1.96):
@@ -220,13 +228,26 @@ def main():
     ap.add_argument("--key")
     ap.add_argument("--json-out", help="Write JSON output to this file")
     ap.add_argument("--emit-gate", default=None,
-                    help="Write the human half of the blind_ab gate JSON to this path")
+                    help="Write this rater's half of the blind_ab gate JSON to "
+                         "this path (requires --rater)")
+    ap.add_argument("--rater", choices=("human", "synthetic"), default=None,
+                    help="Who produced the ratings. Gate files are written ONLY "
+                         "when this is given: 'human' writes the promotion-"
+                         "authoritative human half; 'synthetic' records under a "
+                         "separate non-authoritative key. Omit to score-and-print "
+                         "without touching any gate file.")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest(); return
     if not a.sheets or not a.key:
         print("need sheets + --key (or --selftest)", file=sys.stderr); sys.exit(2)
+    if a.emit_gate and not a.rater:
+        print("--emit-gate requires --rater {human,synthetic}: refusing to "
+              "write gate evidence without knowing who rated the sheet "
+              "(2026-07-26: a synthetic run silently replaced the genuine "
+              "human verdict)", file=sys.stderr)
+        sys.exit(2)
     with open(a.key) as f:
         key = json.load(f)
     rows = load_sheets(a.sheets)
@@ -250,37 +271,57 @@ def main():
     if a.json_out:
         with open(a.json_out, 'w') as f:
             json.dump(agg, f, indent=2)
+
+    if not a.rater:
+        # Scoring-only invocation: gate writes are opt-in via --rater.
+        # (2026-07-26: an unconditional write here let a synthetic-judge run
+        # replace the genuine human verdict in ~/.human/blind_ab_gate.json.)
+        print("\nNo --rater given: no gate files written (scoring-only run).")
+        sys.exit(0 if verdict == "PASS" else 1)
+
+    half_fields = {
+        "detection": round(agg["detect"], 4),
+        "ci_lo": round(agg["ci_lo"], 4),
+        "ci_hi": round(agg["ci_hi"], 4),
+        "n": agg["n"],
+        "verdict": verdict,
+    }
     if a.emit_gate:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         import blind_ab_gate as _gate
-        _gate.write_human_half(a.emit_gate, {
-            "detection": round(agg["detect"], 4),
-            "ci_lo": round(agg["ci_lo"], 4),
-            "ci_hi": round(agg["ci_hi"], 4),
-            "n": agg["n"],
-            "verdict": verdict,
-        })
-        print(f"\nWrote human gate half ({verdict}) to {a.emit_gate}")
+        if a.rater == "human":
+            _gate.write_human_half(a.emit_gate, half_fields)
+        else:
+            _gate.write_synthetic_half(a.emit_gate, half_fields)
+        print(f"\nWrote {a.rater} gate half ({verdict}) to {a.emit_gate}")
 
-    # Write the LoRA gate verdict to ~/.human/blind_ab_gate.json.
-    # This verdict is consumed by hu_lora_gate_verdict_from_file() in the C code.
+    # Record the LoRA gate verdict in ~/.human/blind_ab_gate.json under this
+    # rater's key. hu_lora_gate_verdict_from_file() in the C code reads ONLY
+    # the "human" key, so a synthetic record can never gate promotion.
+    # Read-modify-write: never wipe the other rater's record.
     # Policy: detection <= 0.65 → PASS, >= 0.75 → FAIL, between → INCONCLUSIVE.
     lora_gate_verdict = compute_gate_verdict(agg["detect"])
     lora_gate_path = os.path.expanduser("~/.human/blind_ab_gate.json")
     try:
         os.makedirs(os.path.dirname(lora_gate_path), exist_ok=True)
+        gate_data = {}
+        if os.path.exists(lora_gate_path):
+            try:
+                with open(lora_gate_path) as f:
+                    gate_data = json.load(f)
+            except (ValueError, OSError):
+                gate_data = {}
+        gate_data[a.rater] = {
+            "verdict": lora_gate_verdict,
+            "detection": round(agg["detect"], 4),
+            "ci_lo": round(agg["ci_lo"], 4),
+            "n": agg["n"],
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
         with open(lora_gate_path, 'w') as f:
-            gate_data = {
-                "human": {
-                    "verdict": lora_gate_verdict,
-                    "detection": round(agg["detect"], 4),
-                    "ci_lo": round(agg["ci_lo"], 4),
-                    "n": agg["n"],
-                    "timestamp": None,  # Operator may populate this
-                }
-            }
             json.dump(gate_data, f, indent=2)
-        print(f"\nWrote LoRA gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+        print(f"\nWrote LoRA gate verdict ({lora_gate_verdict}) under "
+              f"'{a.rater}' to {lora_gate_path}")
     except Exception as e:
         print(f"Warning: failed to write LoRA gate JSON to {lora_gate_path}: {e}", file=sys.stderr)
 

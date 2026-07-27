@@ -171,7 +171,7 @@ def run_score():
     try:
         r = subprocess.run(
             [sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
-             "--emit-gate", REPO_GATE],
+             "--rater", "human", "--emit-gate", REPO_GATE],
             capture_output=True,
             text=True,
             timeout=60,

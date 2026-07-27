@@ -309,5 +309,125 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(agg_no_axes["n"], agg_with_axes["n"])
 
 
+class TestRaterGateSeparation(unittest.TestCase):
+    """End-to-end pinning tests for the --rater gate-write separation.
+
+    Background (2026-07-26): a synthetic-judge run of score.py (n=160,
+    machine rater) overwrote the genuine cycle-3 human verdict (detection
+    0.500, n=12) in ~/.human/blind_ab_gate.json because main() wrote the
+    "human" key unconditionally. These tests pin the fix: gate writes are
+    opt-in via --rater, and synthetic runs must never touch the human key.
+    """
+
+    SCORE_PY = os.path.join(os.path.dirname(__file__), "score.py")
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.home = os.path.join(d, "home")
+        os.makedirs(os.path.join(self.home, ".human"))
+        self.home_gate = os.path.join(self.home, ".human", "blind_ab_gate.json")
+        self.repo_gate = os.path.join(d, "gate.json")
+        self.sheet = os.path.join(d, "sheet.csv")
+        self.key = os.path.join(d, "key.json")
+        self._write_fixture()
+
+    def _write_fixture(self):
+        import csv as _csv
+        import json as _json
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["id", "choice", "confidence"])
+            for i in range(4):
+                w.writerow([str(i), "A" if i < 2 else "B", "4"])
+        with open(self.key, "w") as f:
+            _json.dump({str(i): "A" for i in range(4)}, f)
+
+    def _seed_human_verdict(self):
+        """Pre-populate a genuine human verdict in both gate files."""
+        import json as _json
+        genuine = {"verdict": "PASS", "detection": 0.5, "ci_lo": 0.2538,
+                   "n": 12, "timestamp": "2026-07-26T04:38:02"}
+        with open(self.home_gate, "w") as f:
+            _json.dump({"human": dict(genuine)}, f)
+        with open(self.repo_gate, "w") as f:
+            _json.dump({"schema_version": 1, "commit": None,
+                        "proxy": {"verdict": "ADVISORY", "mode": "ADVISORY"},
+                        "human": dict(genuine),
+                        "effective_verdict": "ADVISORY"}, f)
+        return genuine
+
+    def _run_score(self, *extra):
+        import subprocess
+        env = dict(os.environ, HOME=self.home)
+        return subprocess.run(
+            [sys.executable, self.SCORE_PY, self.sheet, "--key", self.key]
+            + list(extra),
+            capture_output=True, text=True, env=env, timeout=60)
+
+    def test_no_rater_writes_no_gate_files(self):
+        """Scoring-only invocation (no --rater) must print but write nothing."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        r = self._run_score()
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        self.assertIn("RESULT_blind_ab=", r.stdout)
+        with open(self.home_gate) as f:
+            data = _json.load(f)
+        self.assertEqual(data, {"human": genuine},
+                         "no-rater run must not touch the home gate file")
+
+    def test_emit_gate_without_rater_is_an_error(self):
+        """--emit-gate without --rater must fail loudly, not write silently."""
+        r = self._run_score("--emit-gate", self.repo_gate)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(self.repo_gate))
+
+    def test_synthetic_does_not_touch_human_key(self):
+        """rater=synthetic must leave the human verdict byte-identical and
+        record its result under a separate 'synthetic' key."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        r = self._run_score("--rater", "synthetic",
+                            "--emit-gate", self.repo_gate)
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        # Home gate: human key unchanged, synthetic recorded separately.
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["human"], genuine,
+                         "synthetic run overwrote the human verdict")
+        self.assertIn("synthetic", home)
+        self.assertEqual(home["synthetic"]["n"], 4)
+        # Repo gate: human half unchanged, synthetic half present, and the
+        # effective verdict is still computed from proxy+human only.
+        with open(self.repo_gate) as f:
+            repo = _json.load(f)
+        self.assertEqual(repo["human"], genuine,
+                         "synthetic run overwrote the repo human half")
+        self.assertIn("synthetic", repo)
+        self.assertEqual(repo["synthetic"]["n"], 4)
+        self.assertEqual(repo["effective_verdict"], "ADVISORY")
+
+    def test_human_rater_writes_human_key_and_preserves_synthetic(self):
+        """rater=human keeps the original behavior and must not clobber a
+        previously-recorded synthetic key."""
+        import json as _json
+        with open(self.home_gate, "w") as f:
+            _json.dump({"synthetic": {"verdict": "PASS", "n": 160}}, f)
+        r = self._run_score("--rater", "human", "--emit-gate", self.repo_gate)
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["human"]["n"], 4)
+        self.assertIn(home["human"]["verdict"], ("PASS", "FAIL"))
+        self.assertEqual(home["synthetic"], {"verdict": "PASS", "n": 160},
+                         "human run clobbered the synthetic record")
+        with open(self.repo_gate) as f:
+            repo = _json.load(f)
+        self.assertEqual(repo["human"]["n"], 4)
+
+
 if __name__ == "__main__":
     unittest.main()
