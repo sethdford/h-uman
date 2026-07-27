@@ -200,7 +200,49 @@ def resolve_serving_model(ps_output: str | None = None) -> str:
             return tokens[tokens.index("--model") + 1]
         except (ValueError, IndexError):
             continue
+
+    # Server down (3am nightly races the restart window) — fall back to CONFIG,
+    # not to the hardcoded constant. The adapter half of this resolution already
+    # falls back to config.json (personalization.lora_adapter_path); before
+    # 2026-07-27 the base half did not, so a server-down night silently paired
+    # the config's GLM adapter with the hardcoded gemma base. A cross-family
+    # LoRA cannot bind, so it was a no-op: pre == post == 0.3178 exactly, delta
+    # 0, recorded as a legitimate-looking SKIP. Config is the same source the
+    # daemon serves from, so it is right whenever the process probe is merely absent.
+    try:
+        config = json.loads(DEFAULT_CONFIG_PATH.read_text())
+        model = config.get("mlx_local", {}).get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    except (OSError, json.JSONDecodeError):
+        pass
     return DEFAULT_MODEL
+
+
+def model_family(name: str | None) -> str | None:
+    """Coarse model-family tag ('glm' / 'gemma') from a model id or adapter path.
+
+    Deliberately conservative: returns None when no known family marker is
+    present, so unknown naming never fabricates a mismatch."""
+    if not name:
+        return None
+    lowered = str(name).lower()
+    for family in ("glm", "gemma"):
+        if family in lowered:
+            return family
+    return None
+
+
+def base_adapter_family_mismatch(model_id: str | None, adapter_path) -> bool:
+    """True when base and adapter are confidently from DIFFERENT families.
+
+    A cross-family LoRA does not bind — it applies no delta at all, so the run
+    scores pre == post and reports a SKIP that reads as 'the adapter didn't
+    help' when the truth is 'the adapter was never applied'. That is a
+    measurement fault, not a verdict, and must DEFER (2026-07-27 nightly)."""
+    base = model_family(model_id)
+    adapter = model_family(adapter_path)
+    return bool(base and adapter and base != adapter)
 
 
 # Error markers generate() can return in place of model output. These MUST be
@@ -580,6 +622,25 @@ def main():
     if args.model_id is None:
         args.model_id = resolve_serving_model()
         print(f"[INFO] Resolved serving base model: {args.model_id}", flush=True)
+
+    # A cross-family pair cannot produce a delta (the LoRA never binds), so any
+    # verdict from it would be fiction. DEFER — do not record.
+    if base_adapter_family_mismatch(args.model_id, args.adapter_path):
+        reason = (f"base {args.model_id} and adapter {args.adapter_path} are from "
+                  f"different model families — the adapter cannot bind, so any "
+                  f"delta would be an artifact")
+        print(f"[DEFERRED] FIDELITY_DEFERRED {reason}", file=sys.stderr, flush=True)
+        verdict = {
+            "timestamp": datetime.now().isoformat(),
+            "verdict": "DEFERRED",
+            "reason": reason,
+            "exit_code": EXIT_DEFERRED,
+            "model_id": args.model_id,
+            "adapter_path": str(args.adapter_path),
+        }
+        if args.output_json:
+            args.output_json.write_text(json.dumps(verdict, indent=2))
+        return EXIT_DEFERRED
 
     # Load held-out prompts
     print(f"[INFO] Loading held-out prompts from {args.held_out_fixture}", flush=True)

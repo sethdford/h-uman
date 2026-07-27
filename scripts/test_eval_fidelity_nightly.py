@@ -286,6 +286,23 @@ GEMMA_8BIT = "mlx-community/gemma-4-31b-it-8bit"
 GLM_4BIT = "mlx-community/GLM-4.5-Air-4bit"
 
 
+def _expected_serverless_fallback():
+    """What resolve_serving_model must return when no production server runs.
+
+    Config first (that IS what the daemon serves), hardcoded default only as a
+    last resort. Computed rather than hardcoded so this pins the CHAIN, not
+    whatever base happens to be configured on the machine running the test."""
+    try:
+        import json as _json
+        model = _json.loads(eval_fidelity_nightly.DEFAULT_CONFIG_PATH.read_text()) \
+            .get("mlx_local", {}).get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    except Exception:
+        pass
+    return eval_fidelity_nightly.DEFAULT_MODEL
+
+
 def test_resolve_serving_adapter_filters_to_production_port():
     """Regression: observed live 2026-07-26 — a gemma-8bit realtime spare on
     :8747 was listed by `ps` BEFORE the production GLM server on :8741.
@@ -369,10 +386,14 @@ def test_resolve_serving_model_filters_to_production_port():
         model = eval_fidelity_nightly.resolve_serving_model(ps_output=no_port)
         assert model == GLM_4BIT, f"No --port must count as 8741, got {model}"
 
-        # Only the spare running → same as no server: hardcoded default.
+        # Only the spare running → same as no server. The POINT is that the
+        # spare must not win; where the fallback lands is the serverless chain
+        # (config mlx_local.model, then the hardcoded default) — see
+        # _expected_serverless_fallback and the 2026-07-27 note above.
         spare_only = f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747\n"
         model = eval_fidelity_nightly.resolve_serving_model(ps_output=spare_only)
-        assert model == eval_fidelity_nightly.DEFAULT_MODEL, \
+        assert model != GEMMA_8BIT, f"spare on :8747 must never win, got {model}"
+        assert model == _expected_serverless_fallback(), \
             f"Non-production-only ps must fall to default, got {model}"
     print("✓ resolve_serving_model: filters ps to production port")
 
@@ -485,9 +506,14 @@ def test_resolve_serving_model_from_process():
     )
     model = eval_fidelity_nightly.resolve_serving_model(ps_output=ps_output)
     assert model == "mlx-community/gemma-4-31b-it-8bit", f"got {model}"
-    # No live server → fall back to the default
+    # No live server → fall back to CONFIG (mlx_local.model), and only then to
+    # the hardcoded default. Updated 2026-07-27: this used to assert
+    # DEFAULT_MODEL unconditionally, which pinned the asymmetric-fallback bug —
+    # the adapter half already fell back to config, so a server-down night
+    # paired the config's GLM adapter with the constant's gemma base and
+    # produced a no-op run scored as a legitimate SKIP.
     fallback = eval_fidelity_nightly.resolve_serving_model(ps_output="")
-    assert fallback == eval_fidelity_nightly.DEFAULT_MODEL
+    assert fallback == _expected_serverless_fallback(), f"got {fallback}"
     print(f"✓ resolve_serving_model: {model} (fallback={fallback})")
 
 
