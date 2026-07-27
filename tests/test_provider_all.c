@@ -2622,6 +2622,32 @@ static void test_max_tokens_lookup_unknown(void) {
     HU_ASSERT_TRUE(v == 0 || v >= 4096);
 }
 
+/* The local serving base must be a TABLE HIT, not a fallback.
+ *
+ * Before the entry existed this returned 0 — no key matched and no prefix in
+ * infer_from_pattern applied — and the caller substituted
+ * HU_DEFAULT_MODEL_MAX_TOKENS. Same number, different mechanism: a future
+ * prefix rule could change it silently. Asserting == 8192 (not >= 4096, and
+ * not "0 or big") makes the lookup itself the thing under test, so this fails
+ * if the entry is removed even though the effective budget would be unchanged.
+ *
+ * The value is load-bearing: mlx-server generates up to max_tokens plus a
+ * 512-token thinking headroom and then strips the thought block, and GLM
+ * reasons out loud on the analytical/deep tiers (614-1912 generated tokens
+ * measured 2026-07-27). A small cap truncates mid-thought. */
+static void test_max_tokens_lookup_glm_serving_base_is_table_hit(void) {
+    uint32_t v = hu_max_tokens_lookup("GLM-4.5-Air-4bit", 16);
+    HU_ASSERT_EQ(v, 8192u);
+}
+
+/* Config and logs spell it "GLM-4.5-Air-4bit"; the table key is lowercase.
+ * str_eql compares with strncasecmpx, and this pins that — a case-sensitive
+ * regression would drop the entry back to the silent fallback. */
+static void test_max_tokens_lookup_glm_is_case_insensitive(void) {
+    HU_ASSERT_EQ(hu_max_tokens_lookup("glm-4.5-air-4bit", 16), 8192u);
+    HU_ASSERT_EQ(hu_max_tokens_lookup("GLM-4.5-AIR-4BIT", 16), 8192u);
+}
+
 static void test_max_tokens_resolve_override(void) {
     uint32_t v = hu_max_tokens_resolve(16384, "gpt-4", 5);
     HU_ASSERT_EQ(v, 16384u);
@@ -3598,6 +3624,8 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_max_tokens_default);
     HU_RUN_TEST(test_max_tokens_lookup_gpt4o);
     HU_RUN_TEST(test_max_tokens_lookup_claude);
+    HU_RUN_TEST(test_max_tokens_lookup_glm_serving_base_is_table_hit);
+    HU_RUN_TEST(test_max_tokens_lookup_glm_is_case_insensitive);
     HU_RUN_TEST(test_max_tokens_lookup_unknown);
     HU_RUN_TEST(test_max_tokens_resolve_override);
     HU_RUN_TEST(test_max_tokens_resolve_fallback);
