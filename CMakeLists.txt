@@ -1247,6 +1247,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
+    src/daemon/daemon_identity_graph.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
