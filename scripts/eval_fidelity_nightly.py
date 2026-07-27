@@ -31,7 +31,9 @@ Usage:
 Exit codes:
   0 = PASS (gate executed, adapter measurably better)
   1 = FAIL (adapter measurably worse, or gate missing components)
-  2 = DEFERRED (mlx_lm or model unavailable)
+  2 = DEFERRED (no measurement happened: mlx_lm or model unavailable, too few
+      valid pairs, a cross-family base/adapter pair, or PRE and POST produced
+      byte-identical output — see responses_identical)
   3 = SKIP (no adapter / no prompts / no measurable delta) — deliberately
       non-zero and paired with a greppable FIDELITY_SKIP stdout marker so a
       silent skip can never masquerade as a healthy nightly again (a stale
@@ -233,6 +235,48 @@ def model_family(name: str | None) -> str | None:
     return None
 
 
+def adapter_declared_base(adapter_path) -> str | None:
+    """The base model an adapter records it was trained against, or None.
+
+    mlx_lm writes the training base into adapter_config.json['model']. That is
+    EXACT provenance where model_family() is only a substring heuristic — it
+    also separates quantizations of one model, which the family tag cannot.
+
+    Reported as evidence and warned on, never gated: an adapter trained on one
+    quantization of a base can legitimately bind to another, so a declared-base
+    difference is not by itself proof of a fault. Only the OBSERVED no-op
+    (responses_identical) is allowed to DEFER.
+    """
+    try:
+        config = json.loads((Path(adapter_path) / "adapter_config.json").read_text())
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    declared = config.get("model")
+    return declared.strip() if isinstance(declared, str) and declared.strip() else None
+
+
+def responses_identical(pre: list[str], post: list[str]) -> bool:
+    """True when the two passes produced byte-identical output on EVERY prompt.
+
+    This is the general no-op detector, and it catches a class the family guard
+    structurally cannot. mlx_lm's load_adapters() ends in
+
+        model.load_weights(adapter_path / "adapters.safetensors", strict=False)
+
+    so an adapter whose tensor keys do not match the base loads ZERO weights —
+    no error, no warning. LoRALinear initialises `lora_b` to zeros, so the LoRA
+    branch computes `(x @ lora_a) @ 0 == 0` and the "adapted" model is
+    bit-identical to base. Wrong base family, wrong quantization, renamed
+    modules, a truncated adapter file: all land here, all silently.
+
+    At temp 0.0 a genuinely bound LoRA perturbs the logits, so across ~29
+    prompts at least one greedy decode diverges. Total identity across every
+    prompt means no delta was applied at all — evidence about the plumbing,
+    never about the adapter.
+    """
+    return bool(pre) and len(pre) == len(post) and all(a == b for a, b in zip(pre, post))
+
+
 def base_adapter_family_mismatch(model_id: str | None, adapter_path) -> bool:
     """True when base and adapter are confidently from DIFFERENT families.
 
@@ -269,6 +313,26 @@ def emit_skip(reason: str, output_json: Path | None) -> int:
     if output_json:
         output_json.write_text(json.dumps(verdict, indent=2))
     return EXIT_SKIP
+
+
+def emit_deferred(reason: str, output_json: Path | None, **extra) -> int:
+    """Log a DEFERRED loudly (greppable FIDELITY_DEFERRED marker), write it, exit 2.
+
+    DEFERRED, not SKIP: a deferral says "no measurement happened", where SKIP
+    says "the adapter measurably did not help". Emitting the latter for the
+    former is how a plumbing fault gets attributed to the model.
+    """
+    verdict = {
+        "timestamp": datetime.now().isoformat(),
+        "verdict": "DEFERRED",
+        "reason": reason,
+        "exit_code": EXIT_DEFERRED,
+        **extra,
+    }
+    print(f"[DEFERRED] FIDELITY_DEFERRED {reason}", flush=True)
+    if output_json:
+        output_json.write_text(json.dumps(verdict, indent=2))
+    return EXIT_DEFERRED
 
 
 class GenerationTimeout(Exception):
@@ -663,11 +727,17 @@ def main():
     if not args.adapter_path.exists():
         return emit_skip(f"Adapter not found: {args.adapter_path}", args.output_json)
 
-    # PRE pass (base model only)
+    # PRE pass (base model only).
+    # adapter_path=None is passed EXPLICITLY rather than left to the default:
+    # this is the contract that makes the run a comparison at all, and it should
+    # be legible at the call site. Nothing downstream can re-introduce an
+    # adapter — load_model() forwards this straight to mlx_lm.load() and never
+    # consults config.json, so the config-inheritance path that bit mlx-server.py
+    # (a gemma adapter silently applied to GLM) has no equivalent here.
     print(f"\n=== PRE PASS (base model) ===", flush=True)
     try:
         pre_responses, pre_stats = run_eval_pass(
-            args.model_id, prompts, gen_timeout=args.gen_timeout,
+            args.model_id, prompts, adapter_path=None, gen_timeout=args.gen_timeout,
             use_subprocess=args.subprocess_gen,
         )
     except Exception as e:
@@ -733,6 +803,37 @@ def main():
 
     pre_valid = [pre_responses[i] for i in valid_idx]
     post_valid = [post_responses[i] for i in valid_idx]
+
+    # ── The adapter must actually have changed something ────────────────────
+    # Byte-identical passes mean the LoRA applied no delta at all. mlx_lm loads
+    # adapter weights with strict=False and zero-initialises lora_b, so a
+    # non-binding adapter is a silent no-op (see responses_identical). Every
+    # degenerate nightly in the record has this signature:
+    #   2026-07-12..07-25  pre == post == 1.0     (all sentinels, 14 nights)
+    #   2026-07-27 03:14   pre == post == 0.3178  (GLM adapter on a gemma base)
+    # All 15 were recorded as SKIP — "the adapter did not help" — when the truth
+    # was that no measurement occurred. DEFER instead, and say which.
+    declared_base = adapter_declared_base(args.adapter_path)
+    if declared_base and declared_base != args.model_id:
+        print(f"[WARN] adapter declares base {declared_base!r} but this run uses "
+              f"{args.model_id!r}; a different quantization of one base can still "
+              f"bind, so this is advisory — the no-op check below is the gate.",
+              flush=True)
+    if responses_identical(pre_valid, post_valid):
+        return emit_deferred(
+            f"PRE and POST produced byte-identical output on all "
+            f"{len(pre_valid)} valid prompts — the adapter applied no delta, so "
+            f"no comparison was measured. Most likely the adapter did not bind "
+            f"to this base (mlx_lm loads adapter weights with strict=False and "
+            f"fails silently). base={args.model_id} "
+            f"adapter={args.adapter_path} adapter_declared_base={declared_base}",
+            args.output_json,
+            model_id=args.model_id,
+            adapter_path=str(args.adapter_path),
+            adapter_declared_base=declared_base,
+            n_valid_pairs=len(pre_valid),
+        )
+    n_differing = sum(1 for a, b in zip(pre_valid, post_valid) if a != b)
 
     # Score responses. Blend shape (AI-tell penalties) with speaker-id P(Seth):
     # shape alone saturates at 1.0 on clean casual text, which made the delta
@@ -832,6 +933,17 @@ def main():
         "gen_timeout_sec": args.gen_timeout,
         "model_id": args.model_id,
         "adapter_path": str(args.adapter_path),
+        # Positive evidence that the two passes were actually different runs.
+        # Without it, a reader of a SKIP cannot distinguish "the adapter did not
+        # help" from "the adapter was never applied" — the two are identical on
+        # every other field. n_differing_pairs == 0 is unreachable here (the
+        # guard above DEFERs first); it is recorded so the claim is checkable
+        # rather than implied.
+        "differentiation": {
+            "n_differing_pairs": n_differing,
+            "n_valid_pairs": len(valid_idx),
+            "adapter_declared_base": declared_base,
+        },
         "pre": {
             "mean_score": round(pre_mean, 4),
             "elapsed_sec": pre_stats["elapsed_sec"],

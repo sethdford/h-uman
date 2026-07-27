@@ -5219,7 +5219,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     req.prompt_cache_id = prompt_cache_id;
     req.prompt_cache_id_len = prompt_cache_id_len;
 
-    clock_t turn_start = clock();
+    uint64_t turn_start_ms = hu_agent_internal_monotonic_ms();
     uint64_t turn_tokens = 0;
     const char *prov_name = agent->provider.vtable->get_name
                                 ? agent->provider.vtable->get_name(agent->provider.ctx)
@@ -5870,7 +5870,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
-        clock_t llm_start = clock();
+        /* Wall clock, NOT clock(). `clock()` returns process CPU time; a
+         * provider round trip is spent BLOCKED in poll()/recv() burning
+         * ~zero CPU, so CPU-clock timing reported a 150ms call as ~27ms
+         * (CI run 30232892253) and a multi-second cloud call as ~30ms.
+         * The value below is handed to hu_agent_m3_record_chat_outcome,
+         * where m3_outcome_driver.py drops anything under MIN_LATENCY_MS
+         * (50) as a cached/stub path — so CPU timing silently discarded
+         * every training outcome. */
+        uint64_t llm_start_ms = hu_agent_internal_monotonic_ms();
         hu_chat_response_t resp;
         memset(&resp, 0, sizeof(resp));
 
@@ -6012,7 +6020,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
 
         (void)degrade_strategy;
-        uint64_t llm_duration_ms = hu_agent_internal_clock_diff_ms(llm_start, clock());
+        uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
@@ -6466,7 +6474,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 #endif
 
         if (resp.tool_calls_count == 0) {
-            uint64_t turn_duration_ms = hu_agent_internal_clock_diff_ms(turn_start, clock());
+            uint64_t turn_duration_ms = hu_agent_internal_monotonic_ms() - turn_start_ms;
             {
                 hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_AGENT_END, .data = {{0}}};
                 ev.data.agent_end.duration_ms = turn_duration_ms;

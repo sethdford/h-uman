@@ -942,5 +942,14 @@ jobs:
         run: |
           python3 scripts/test_blind_ab_gate.py
           python3 scripts/test_check_capability_gates.py
+      # Measurement-integrity pins for the fidelity nightly. Both are hermetic
+      # and stdlib-only (no mlx, no model, no ~/.human reads), so they belong on
+      # this job rather than a GPU host. They guard the class where the harness
+      # emits a well-formed verdict from a run in which no measurement happened
+      # — 15 such nights are in the archive (2026-07-12..07-27).
+      - name: Fidelity-nightly measurement-integrity pins
+        run: |
+          python3 scripts/test_fidelity_family_guard.py
+          python3 scripts/test_fidelity_differentiation.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py
