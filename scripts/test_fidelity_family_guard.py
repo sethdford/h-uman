@@ -59,19 +59,43 @@ ok("unknown adapter naming never blocks a run",
 
 # ── server-down fallback reads CONFIG, not the hardcoded constant ───────
 # ps_output="" simulates the 03:10 restart window that caused the fault.
-resolved = e.resolve_serving_model(ps_output="")
-config_model = None
-try:
-    import json
-    config_model = json.loads(e.DEFAULT_CONFIG_PATH.read_text()).get("mlx_local", {}).get("model")
-except Exception:
-    pass
-if config_model:
-    ok("server-down resolves to config mlx_local.model, not DEFAULT_MODEL",
-       resolved == config_model, f"got {resolved!r}, config says {config_model!r}")
-else:
-    ok("config unreadable -> DEFAULT_MODEL (documented last resort)",
-       resolved == e.DEFAULT_MODEL)
+#
+# HERMETIC: a synthetic config with a sentinel base, not the live machine's.
+# Reading the real config recomputes the same chain production computes, which
+# only discriminates while config != DEFAULT_MODEL — revert the base to gemma,
+# or run where no config exists (CI), and the assertion silently becomes a
+# tautology. Caught in cross-session review, 2026-07-27.
+import contextlib
+import json
+import tempfile
+
+SENTINEL_CONFIG_BASE = "test-only/base-from-config"
+
+
+@contextlib.contextmanager
+def config_override(model):
+    """Point the resolver at a synthetic config; model=None → no config file."""
+    saved = e.DEFAULT_CONFIG_PATH
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "config.json"
+        if model is not None:
+            path.write_text(json.dumps({"mlx_local": {"model": model}}))
+        try:
+            e.DEFAULT_CONFIG_PATH = path
+            yield
+        finally:
+            e.DEFAULT_CONFIG_PATH = saved
+
+
+with config_override(SENTINEL_CONFIG_BASE):
+    resolved = e.resolve_serving_model(ps_output="")
+ok("server-down resolves to config mlx_local.model, never DEFAULT_MODEL",
+   resolved == SENTINEL_CONFIG_BASE, f"got {resolved!r}")
+
+with config_override(None):
+    last_resort = e.resolve_serving_model(ps_output="")
+ok("no config at all -> DEFAULT_MODEL (documented last resort)",
+   last_resort == e.DEFAULT_MODEL, f"got {last_resort!r}")
 
 print(("FAILED" if fails else "PASSED") + f" ({fails} failures)")
 sys.exit(1 if fails else 0)

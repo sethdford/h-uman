@@ -6,6 +6,7 @@ Tests the gate logic, bootstrap CI, and verdict generation
 using mocked subprocess outputs.
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -286,21 +287,32 @@ GEMMA_8BIT = "mlx-community/gemma-4-31b-it-8bit"
 GLM_4BIT = "mlx-community/GLM-4.5-Air-4bit"
 
 
-def _expected_serverless_fallback():
-    """What resolve_serving_model must return when no production server runs.
+# A base id that can never equal DEFAULT_MODEL or any real serving model, so
+# "config wins over the constant" is discriminated UNCONDITIONALLY.
+SENTINEL_CONFIG_BASE = "test-only/base-from-config"
 
-    Config first (that IS what the daemon serves), hardcoded default only as a
-    last resort. Computed rather than hardcoded so this pins the CHAIN, not
-    whatever base happens to be configured on the machine running the test."""
-    try:
-        import json as _json
-        model = _json.loads(eval_fidelity_nightly.DEFAULT_CONFIG_PATH.read_text()) \
-            .get("mlx_local", {}).get("model")
-        if isinstance(model, str) and model.strip():
-            return model.strip()
-    except Exception:
-        pass
-    return eval_fidelity_nightly.DEFAULT_MODEL
+
+@contextlib.contextmanager
+def _config_override(model):
+    """Point the resolver at a synthetic config (model=None → no config file).
+
+    HERMETIC on purpose. The first version of this helper read the live
+    ~/.human/config.json and recomputed the same chain production computes,
+    which is conditionally vacuous: the assertion only discriminates while
+    config != DEFAULT_MODEL. Revert the base to gemma (a one-line rollback) or
+    run on a machine with no config — CI is exactly that machine — and both
+    sides collapse to DEFAULT_MODEL, so the test passes while testing nothing.
+    Caught in cross-session review, 2026-07-27."""
+    saved = eval_fidelity_nightly.DEFAULT_CONFIG_PATH
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "config.json"
+        if model is not None:
+            path.write_text(json.dumps({"mlx_local": {"model": model}}))
+        try:
+            eval_fidelity_nightly.DEFAULT_CONFIG_PATH = path
+            yield
+        finally:
+            eval_fidelity_nightly.DEFAULT_CONFIG_PATH = saved
 
 
 def test_resolve_serving_adapter_filters_to_production_port():
@@ -391,10 +403,11 @@ def test_resolve_serving_model_filters_to_production_port():
         # (config mlx_local.model, then the hardcoded default) — see
         # _expected_serverless_fallback and the 2026-07-27 note above.
         spare_only = f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747\n"
-        model = eval_fidelity_nightly.resolve_serving_model(ps_output=spare_only)
+        with _config_override(SENTINEL_CONFIG_BASE):
+            model = eval_fidelity_nightly.resolve_serving_model(ps_output=spare_only)
         assert model != GEMMA_8BIT, f"spare on :8747 must never win, got {model}"
-        assert model == _expected_serverless_fallback(), \
-            f"Non-production-only ps must fall to default, got {model}"
+        assert model == SENTINEL_CONFIG_BASE, \
+            f"spare-only ps must fall to the serverless chain (config), got {model}"
     print("✓ resolve_serving_model: filters ps to production port")
 
 
@@ -512,9 +525,14 @@ def test_resolve_serving_model_from_process():
     # the adapter half already fell back to config, so a server-down night
     # paired the config's GLM adapter with the constant's gemma base and
     # produced a no-op run scored as a legitimate SKIP.
-    fallback = eval_fidelity_nightly.resolve_serving_model(ps_output="")
-    assert fallback == _expected_serverless_fallback(), f"got {fallback}"
-    print(f"✓ resolve_serving_model: {model} (fallback={fallback})")
+    with _config_override(SENTINEL_CONFIG_BASE):
+        fallback = eval_fidelity_nightly.resolve_serving_model(ps_output="")
+    assert fallback == SENTINEL_CONFIG_BASE, f"config must win over the constant, got {fallback}"
+    # Only with NO config at all does the hardcoded default apply.
+    with _config_override(None):
+        last_resort = eval_fidelity_nightly.resolve_serving_model(ps_output="")
+    assert last_resort == eval_fidelity_nightly.DEFAULT_MODEL, f"got {last_resort}"
+    print(f"✓ resolve_serving_model: {model} (config={fallback}, no-config={last_resort})")
 
 
 def test_sentinel_responses_defer_not_score():
