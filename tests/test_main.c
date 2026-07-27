@@ -470,6 +470,7 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void);                        /* Sprint 46 R5.3 carryover */
 void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
@@ -1497,6 +1498,8 @@ int main(int argc, char **argv) {
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
+    run_agent_llm_latency_wall_clock_tests();
     /* G11: per-turn request override parity helper (G5 regression guard) */
     run_agent_turn_request_overrides_tests();
     run_w6_e2e_adversarial_tests();

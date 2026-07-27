@@ -175,10 +175,6 @@ void hu_agent_internal_generate_trace_id(char *buf) {
              (uint16_t)(counter & 0xFFFF));
 }
 
-uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end) {
-    return (uint64_t)((end - start) * 1000 / CLOCKS_PER_SEC);
-}
-
 /* Spec 2026-05-19 self-model-scaffold — Phase B.
  *
  * FNV-1a 64-bit hash for opaque contact-id / channel-name hashing.
