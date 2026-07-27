@@ -65,6 +65,7 @@
 #endif
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
+#include "human/daemon/config_reload.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
@@ -3040,6 +3041,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
     while (!HU_STOP_FLAG) {
+        /* SIGHUP reload — between turns, never during one. Scope + threading
+         * contract: include/human/daemon/config_reload.h. */
+        hu_daemon_config_reload_tick(agent, agent ? agent->observer : NULL);
+
         /* A3 intrinsic motivation idle tick (default-off via cfg.intrinsic). Runs
          * at most once/minute so the drive rises on a human timescale, not the
          * ~1s loop cadence. The runner self-gates on enabled + budget + quiet +

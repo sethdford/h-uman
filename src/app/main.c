@@ -34,6 +34,7 @@
 #include "human/cron.h"
 #include "human/crontab.h"
 #include "human/daemon.h"
+#include "human/daemon/config_reload.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
 #include "human/doctor_fix.h"
@@ -1711,6 +1712,14 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         svc_agent_bridge.thread_binding = NULL;
         hu_bus_subscribe(&svc_bus, svc_agent_on_message_locked, &svc_agent_bridge,
                          HU_BUS_MESSAGE_RECEIVED);
+
+        /* The bus handler above runs a full agent turn on the gateway thread
+         * under svc_agent_mutex. The service loop's SIGHUP reload mutates the
+         * same agent (it destroys and recreates the hook registry), so hand it
+         * the same mutex — otherwise a reload can free the registry out from
+         * under a turn in flight. Only registered on the gateway path; without
+         * a gateway the service loop is the agent's only thread. */
+        hu_daemon_config_reload_set_guard(&svc_agent_mutex);
 
         if (pthread_create(&gw_tid, NULL, svc_gateway_thread, &gw_tctx) == 0) {
             /* 2026-05-27 — was previously "gateway listening on..." which
