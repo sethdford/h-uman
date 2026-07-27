@@ -3,13 +3,13 @@
   "commit": "1cb08aad0a2caa188ceb623c2031294b131586c7",
   "proxy": {
     "tool": "eval_blinded_ab.py",
-    "timestamp": "2026-07-27T00:56:17",
+    "timestamp": "2026-07-27T03:20:55",
     "verdict": "FAIL",
     "mode": "ENFORCING",
-    "fool_rate": 16.3265306122449,
-    "baseline_fool_rate": 28.57142857142857,
-    "n_trials": 49,
-    "n_real_pairs": 49,
+    "fool_rate": 20.0,
+    "baseline_fool_rate": 16.3265306122449,
+    "n_trials": 45,
+    "n_real_pairs": 45,
     "fail_under": 45.0,
     "max_regression": 5.0
   },
