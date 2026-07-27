@@ -1,0 +1,50 @@
+# Ratchet decay configuration — one row per decayable baseline.
+#
+# The ratchets in .githooks/pre-commit are fail-on-GROWTH gates. That freezes
+# the level but never lowers it: as of 2026-07-27 every counter below sat at or
+# within a rounding error of its ceiling, and src/daemon.c had not moved off
+# 14,132 LOC since May. A gate that only fails on growth converges to
+# "never worse, never better".
+#
+# This file adds the missing second derivative. Two mechanisms, deliberately
+# split by blast radius:
+#
+#   1. AUTO-LOCK (hard, in pre-commit, no calendar): whenever a counter measures
+#      BELOW its baseline, scripts/lib/ratchet.sh rewrites the baseline constant
+#      to the measured value and stages it. This replaces the manual
+#      "NOTE: lower BASELINE to lock the gain" step that was inconsistently
+#      followed. Zero risk: it can only tighten, never block a commit.
+#
+#   2. DECAY TARGET (advisory in pre-commit, hard in the weekly CI job): a
+#      per-week reduction the counter is expected to meet. Missing it never
+#      blocks a commit or the merge queue — .claude/rules/ci-required-checks.md
+#      makes these gates blocking, and session-worktree-isolation.md records that
+#      a hard gate "would have blocked the same day's three urgent red-CI fixes".
+#      Instead scripts/ratchet-debt-report.sh fails, and the weekly workflow
+#      files/updates one durable GitHub issue naming the debt.
+#
+# RATE semantics:
+#   auto   — derive the rate from this counter's OWN git history (see
+#            ratchet-debt-report.sh). The target is a fraction of the velocity
+#            the counter has actually demonstrated, so it is achievable by
+#            construction rather than invented. Preferred.
+#   <N>    — fixed units per week. Use only when history is too short to fit.
+#   off    — participate in auto-lock but set no decay target.
+#
+# FLOOR: decay stops here. Use the target documented in the matching
+# .claude/rules/*.md where one exists; `none` where the rules file states no
+# endpoint — inventing one would be a number without a measurement.
+#
+# PATTERN: grep -E pattern selecting this ratchet's output line from its script's
+# stdout. Required because check-agent-core-boundary.sh emits two counters, and
+# because the scripts phrase their counts differently ("N (ceiling B)" vs
+# "= N LOC (ceiling B)"). The report reads the integer immediately preceding
+# "(ceiling" on the matched line.
+#
+# name	script	var	floor	rate	rule	pattern
+clone	scripts/check-clone-ratchet.sh	CLONE_BASELINE	none	auto	.claude/rules/clone-ratchet.md	^Clone groups found:
+file-size	scripts/check-file-size-ceiling.sh	MAX_BASELINE	800	auto	.claude/rules/file-size-ceiling.md	^largest src/
+sqlite-includers	scripts/check-sqlite-includer-ratchet.sh	BASELINE	0	auto	.claude/rules/sqlite-includer-ratchet.md	^sqlite3\.h includers
+root-files	scripts/check-no-new-root-files.sh	ROOT_BASELINE	0	auto	.claude/rules/no-new-root-files.md	^loose src/
+agent-factory	scripts/check-agent-core-boundary.sh	FACTORY_BASELINE	0	auto	.claude/rules/agent-core-boundary.md	provider-factory includes:
+edge-cross-channel	scripts/check-edge-context-isolation.sh	BASELINE	6	off	.claude/rules/edge-context-isolation.md	cross-channel

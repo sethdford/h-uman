@@ -1,5 +1,10 @@
 # Agent-Core Boundary — No Concrete Provider/Channel Knowledge
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 `src/agent/` is the orchestration core. It must not know about concrete
 providers or channels by name:
 
