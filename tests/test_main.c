@@ -870,6 +870,8 @@ void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
 void run_daemon_promise_keeper_tests(void);
+void run_daemon_config_reload_tests(void);
+void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
 void run_reply_dedup_tests(void);
 void run_proactive_policy_tests(void);
@@ -1882,6 +1884,8 @@ int main(int argc, char **argv) {
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
     run_daemon_promise_keeper_tests();
+    run_daemon_config_reload_tests();
+    run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();
     run_reply_dedup_tests();
     run_proactive_policy_tests();
