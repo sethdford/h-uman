@@ -92,6 +92,39 @@ def test_mlx_messages_tolerates_malformed_turn():
     assert [x["content"] for x in m] == ["SYS", "no from key", "x"]
 
 
+# ---- 3. judge thinking budget ---------------------------------------------
+# gemini-3.x shares maxOutputTokens between invisible thinking and the visible
+# reply (CLAUDE.md). Unset, a judgment that thinks hard leaves too few tokens
+# for the JSON body -> "Unterminated string" -> the trial is silently dropped.
+# 18/50 trials were lost this way on 2026-07-27, and the loss is biased: the
+# judge thinks longest on the closest calls.
+
+def test_judge_config_sets_thinking_budget_explicitly():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    assert "thinkingConfig" in cfg, "gemini-3.x needs an explicit thinking budget"
+    assert isinstance(cfg["thinkingConfig"].get("thinkingBudget"), int)
+
+
+def test_judge_config_leaves_room_for_the_json_body():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    budget = cfg["thinkingConfig"]["thinkingBudget"]
+    assert cfg["maxOutputTokens"] - budget >= 2048, (
+        "thinking must not be able to starve the response body")
+
+
+def test_judge_config_still_carries_schema_and_temperature():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    assert cfg["temperature"] == 0.2
+    assert cfg["responseSchema"] is E._BLINDED_AB_JUDGE_SCHEMA
+    assert cfg["responseMimeType"] == "application/json"
+
+
+def test_judge_config_without_schema_omits_schema_keys():
+    cfg = E.judge_gen_config(0.7, None)
+    assert "responseSchema" not in cfg and "responseMimeType" not in cfg
+    assert "thinkingConfig" in cfg
+
+
 # ---- runner ----------------------------------------------------------------
 
 def _run():

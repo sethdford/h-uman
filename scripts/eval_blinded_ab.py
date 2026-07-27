@@ -172,11 +172,31 @@ _BLINDED_AB_JUDGE_SCHEMA = {
 }
 
 
-def call_gemini(prompt, temperature=0.3, response_schema=None):
-    gen_cfg = {"temperature": temperature, "maxOutputTokens": 2048}
+# Judge thinking budget. gemini-3.x is thinking-enabled by default and shares
+# maxOutputTokens between the invisible thinking and the visible reply, so an
+# unset budget lets a hard judgment starve its own JSON body — the response is
+# truncated mid-string and json.loads raises "Unterminated string". On
+# 2026-07-27 that silently dropped 18/50 trials, and the loss is BIASED: the
+# judge thinks longest on the closest calls, so the surviving sample is
+# skewed toward easy ones. Budget it explicitly and leave the body room.
+JUDGE_THINKING_BUDGET = 1024
+JUDGE_MAX_OUTPUT_TOKENS = 4096
+
+
+def judge_gen_config(temperature, response_schema=None):
+    cfg = {
+        "temperature": temperature,
+        "maxOutputTokens": JUDGE_MAX_OUTPUT_TOKENS,
+        "thinkingConfig": {"thinkingBudget": JUDGE_THINKING_BUDGET},
+    }
     if response_schema is not None:
-        gen_cfg["responseMimeType"] = "application/json"
-        gen_cfg["responseSchema"] = response_schema
+        cfg["responseMimeType"] = "application/json"
+        cfg["responseSchema"] = response_schema
+    return cfg
+
+
+def call_gemini(prompt, temperature=0.3, response_schema=None):
+    gen_cfg = judge_gen_config(temperature, response_schema)
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": gen_cfg,
