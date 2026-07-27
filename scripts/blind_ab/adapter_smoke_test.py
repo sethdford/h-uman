@@ -17,7 +17,7 @@ base's ability to follow instructions, and validation loss will not show it
 usable replies for ~2 weeks).
 
 Also reports the LEADING-BYTE ARTIFACT rate per adapter. v5 was trained on a
-corpus that was 18.8% corrupted on the target side (a typedstream decoder
+corpus that was 7.5% corrupted on the target side (a typedstream decoder
 leaked a length byte as text), so it was taught to emit a stray leading
 character. v6 is the same recipe on the fixed corpus. A drop in this rate is
 direct evidence the corpus fix reached the model.
