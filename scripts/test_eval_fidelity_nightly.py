@@ -438,6 +438,16 @@ def _run_main_with_argv(argv, fixture_prompts=25):
     """Drive eval_fidelity_nightly.main() with a synthetic fixture + mocked passes.
 
     Returns (rc, record_eval_mock). run_eval_pass is mocked so no model loads.
+
+    The mocked passes return DIFFERENT text per pass and are scored to an equal
+    mean, which is the real shape of a SKIP: the adapter changed the wording but
+    did not improve fidelity. Byte-identical passes used to be the shortcut to
+    delta 0 here, but that is now a DEFERRED measurement fault (an adapter that
+    applies no delta was never measured) — a fixture that leans on it pins the
+    2026-07-27 bug instead of the registry contract these callers care about.
+    Scoring is mocked rather than real so the fixture is hermetic: the default
+    speaker model lives under ~/.human and exists on the dev box but not in CI,
+    which would otherwise make the verdict machine-dependent.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -454,11 +464,20 @@ def _run_main_with_argv(argv, fixture_prompts=25):
         ] + ["--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
         def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
-            responses = ["hey whatup"] * len(prompts)
-            return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+            # Differentiated per pass: the adapter changed the wording, so a real
+            # comparison happened and the no-op guard must not fire.
+            text = "hey whatup" if adapter_path is None else "hey whatsup"
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        def flat_scores(responses, channel="imessage", speaker_model=None):
+            # Equal means → delta 0 → below the practical floor → SKIP.
+            return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
 
         with mock.patch.object(sys, "argv", full_argv), \
              mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=fake_pass), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores",
+                        side_effect=flat_scores), \
              mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry:
             rc = eval_fidelity_nightly.main()
         return rc, mock_registry.record_eval
@@ -470,7 +489,8 @@ def test_skip_records_null_score_and_exits_3():
     Pins the 2026-07 bug where 13 nightly SKIPs landed in registry.json as
     {"score": 1.0, "verdict": "SKIP"} — indistinguishable from a perfect eval.
     """
-    # Identical pre/post responses → delta 0 → practical gate fails → SKIP
+    # Differentiated responses scoring the same → delta 0 → practical gate fails
+    # → SKIP. (Byte-identical responses would now DEFER: see _run_main_with_argv.)
     rc, record_eval = _run_main_with_argv(["--adapter-path", "__ADAPTER__"])
     assert rc == eval_fidelity_nightly.EXIT_SKIP == 3, f"SKIP must exit 3, got {rc}"
     assert record_eval.called, "SKIP after a full eval must still be recorded"
@@ -504,7 +524,7 @@ def test_no_registry_flag_skips_registry_write():
     rc, record_eval = _run_main_with_argv(
         ["--adapter-path", "__ADAPTER__", "--no-registry"]
     )
-    # identical pre/post → SKIP (exit 3): the eval RAN, only the registry write is off
+    # equal-scoring pre/post → SKIP (exit 3): the eval RAN, only the registry write is off
     assert rc == 3, f"eval must still run to a verdict, got rc={rc}"
     assert not record_eval.called, \
         "--no-registry must not write adapter-registry entries"
@@ -582,9 +602,18 @@ def test_partial_sentinels_dropped_from_deltas():
 
     def mixed_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
         calls["n"] += 1
-        responses = ["hey whatup"] * len(prompts)
+        # Valid responses differ per pass (a real comparison), so the SKIP here
+        # comes from equal SCORES, not from an unapplied adapter — the latter is
+        # now a DEFERRED measurement fault.
+        responses = [("hey whatup" if adapter_path is None else "hey whatsup")] * len(prompts)
         responses[0] = "[timeout]"  # same index bad in both passes → 1 pair dropped
         return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+    def flat_scores(responses, channel="imessage", speaker_model=None):
+        # Flat so the verdict is hermetic: the default speaker model lives under
+        # ~/.human (present on the dev box, absent in CI) and would otherwise
+        # decide this test's verdict differently on each.
+        return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -602,13 +631,15 @@ def test_partial_sentinels_dropped_from_deltas():
 
         with mock.patch.object(sys, "argv", argv), \
              mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=mixed_pass), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores",
+                        side_effect=flat_scores), \
              mock.patch("eval_fidelity_nightly.adapter_registry"):
             rc = eval_fidelity_nightly.main()
 
         verdict = json.loads(out_json.read_text())
         assert verdict["n_valid_pairs"] == 24, f"expected 24 valid pairs, got {verdict.get('n_valid_pairs')}"
         assert verdict["n_sentinel"]["pre"] == 1 and verdict["n_sentinel"]["post"] == 1
-        # identical valid responses → delta 0 → SKIP (exit 3), but SCORED on 24 pairs
+        # equal-scoring valid responses → delta 0 → SKIP (exit 3), SCORED on 24 pairs
         assert rc == 3 and verdict["verdict"] == "SKIP"
     print(f"✓ partial sentinels: 1 pair dropped, verdict computed on 24")
 
@@ -636,7 +667,11 @@ def test_pass_records_post_mean():
                 "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
 
         def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
-            return (["hey"] * len(prompts), {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+            # Differentiated per pass — a PASS is only reachable from a run where
+            # the adapter actually changed the output (see the no-op guard).
+            text = "hey" if adapter_path is None else "hey lol"
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
 
         with mock.patch.object(sys, "argv", argv), \
              mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=fake_pass), \
