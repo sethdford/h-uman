@@ -124,9 +124,37 @@ def is_degenerate(text, max_cycle=12):
 ERROR_MARKERS = ("<error", "GENERATE_ERROR", "TIMEOUT", "[ERROR")
 
 
+_SCAFFOLD_RE = re.compile(r"\A(?:\s*<think>.*?</think>\s*)+", re.S)
+
+
+def strip_scaffolding(text):
+    """Remove leading reasoning-channel scaffolding the server strips in prod.
+
+    GLM emits a ``<think>…</think>`` block before the reply. mlx-server scrubs
+    it before anything is sent, so the user never sees it — but this script
+    calls mlx_lm directly and therefore does. Scoring the raw string punishes
+    an adapter for a prefix production removes.
+
+    That is not hypothetical: the first cross-base run (v6-gemma vs the SERVED
+    glm-air-v5) scored glm-v5 **0 of 16** with 16 `leading_artifact` failures,
+    every one of them this prefix. Read literally it said "production is
+    totally broken, promote the candidate". Stripping first flips the result to
+    12–10 in the SERVED adapter's favour. Any GLM adapter scored without this
+    lands near zero, so the trap is silent and total.
+
+    Blocks repeat: GLM emitted ``<think></think>\\n<think></think>\\n`` on 3 of
+    16 prompts, and a single non-repeating substitution left the second one in
+    place — which still tripped the artifact check.
+
+    Only leading blocks are removed. A ``<think>`` appearing mid-reply is real
+    output leaking scaffolding and should still fail.
+    """
+    return _SCAFFOLD_RE.sub("", text or "", count=1)
+
+
 def evaluate(entry, text):
     """Per-response checks. Returns (passed, list_of_failure_tags)."""
-    t = (text or "").strip()
+    t = strip_scaffolding(text or "").strip()
     fails = []
     if not t or any(m in t for m in ERROR_MARKERS):
         fails.append("empty_or_error")
@@ -234,8 +262,14 @@ def print_report(rep, label_a, label_b):
         if r["cat"] != "persona":
             continue
         print(f"\n  > {r['prompt']}")
-        print(f"    {label_a}: {r[label_a]['text'][:100]!r}")
-        print(f"    {label_b}: {r[label_b]['text'][:100]!r}")
+        for lbl in (label_a, label_b):
+            raw = r[lbl]["text"]
+            shown = strip_scaffolding(raw)
+            # Flag rather than hide: the voice call should be made on what the
+            # user would receive, but a reader still needs to know the raw
+            # output carried scaffolding.
+            note = "  [<think> stripped]" if shown != raw else ""
+            print(f"    {lbl}: {shown[:100]!r}{note}")
 
     verdict = "BLOCKED — base-capability regression" if rep["regressions"] \
         else "NO BLOCKER — persona quality is a human call"
@@ -265,6 +299,24 @@ def selftest():
                "on my way", "hey what is up", "I'll send it over as soon as I'm out",
                "Yeah it's good. A bit of a learning curve with the legacy code."):
         assert not is_degenerate(ok), ok
+
+    # REGRESSION: GLM reasoning-channel scaffolding must not be scored as
+    # message text. The first cross-base run scored the SERVED glm-air-v5
+    # 0/16 — every failure was this prefix, which mlx-server strips in prod.
+    assert strip_scaffolding("<think></think>\nSure!") == "Sure!"
+    assert strip_scaffolding("<think>reasoning here</think>\nyeah ok") == "yeah ok"
+    # repeated blocks: GLM emitted two on 3 of 16 prompts, and a single
+    # non-repeating substitution left the second one behind
+    assert strip_scaffolding("<think></think>\n<think></think>\nYes") == "Yes"
+    # a reply with no scaffolding must be untouched, byte for byte
+    assert strip_scaffolding("on my way") == "on my way"
+    assert strip_scaffolding("") == ""
+    assert strip_scaffolding(None) == ""
+    # mid-reply scaffolding is real leakage — do NOT rescue it
+    assert "<think>" in strip_scaffolding("ok <think>hmm</think> sure")
+    # end to end: the scaffolded reply must now score exactly like the bare one
+    assert evaluate({}, "<think></think>\nSure!") == evaluate({}, "Sure!")
+    assert not evaluate({"expect": r"\bred\b"}, "<think></think>\nred, green")[1]
 
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
