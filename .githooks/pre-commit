@@ -114,6 +114,22 @@ if [ -x "scripts/check-test-references.sh" ]; then
     fi
 fi
 
+# Ratchet mechanism guard. ratchet_autolock rewrites committed baseline
+# constants and stages them, so a regression in it could silently loosen an
+# architecture gate. Fires only when the mechanism itself is staged; the smoke
+# test is hermetic (throwaway repos in $TMPDIR) and runs in ~1s.
+# See .claude/rules/ratchet-decay.md.
+staged_ratchet_inputs=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'scripts/lib/ratchet.sh' 'scripts/ratchet-config.tsv' 'scripts/ratchet-debt-report.sh')
+if [ -n "$staged_ratchet_inputs" ] && [ -x "scripts/test-ratchet-lib.sh" ]; then
+    if ! bash scripts/test-ratchet-lib.sh; then
+        echo ""
+        echo "Pre-commit blocked: ratchet mechanism smoke test failed."
+        echo "See .claude/rules/ratchet-decay.md."
+        exit 1
+    fi
+fi
+
 # Test/source gate-symmetry check — added after PR #113 hit the same
 # systemic failure 6+ times across 13 rounds. Fires when a staged change
 # touches CMakeLists.txt OR a tests/test_*.c file, since those are the

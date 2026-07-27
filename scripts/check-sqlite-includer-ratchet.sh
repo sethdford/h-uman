@@ -14,6 +14,17 @@
 # include, lower BASELINE to lock the gain. The script tells you when to.
 set -euo pipefail
 
+# Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
+# Sourced defensively: this gate must keep working — and keep BLOCKING growth —
+# even in a tree where the helper is absent, so a missing helper degrades to
+# "no auto-lock" rather than to "commit refused".
+_hu_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -r "$_hu_root/scripts/lib/ratchet.sh" ]; then
+    . "$_hu_root/scripts/lib/ratchet.sh"
+else
+    ratchet_autolock() { :; }
+fi
+
 # Measured 2026-05-29 at the start of Phase 0.
 # Updated 2026-05-29 after boundary_repo migration: 110 -> 109
 # Updated 2026-05-29 after feed_items_repo migration (inbox.c): 109 -> 108
@@ -36,6 +47,7 @@ count=$({ grep -rln '#include <sqlite3.h>' src/ 2>/dev/null \
   | wc -l | tr -d ' ')
 
 echo "sqlite3.h includers (excl engines/repos): $count (ceiling $BASELINE)"
+ratchet_autolock BASELINE "${count}" "scripts/check-sqlite-includer-ratchet.sh"
 
 if [ "$count" -gt "$BASELINE" ]; then
   echo "FAIL: a new file added '#include <sqlite3.h>'. Domain code must use a" >&2
@@ -46,6 +58,7 @@ if [ "$count" -gt "$BASELINE" ]; then
 fi
 
 if [ "$count" -lt "$BASELINE" ]; then
+  [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
   echo "NOTE: count dropped below baseline — lower BASELINE to $count in" >&2
   echo "      scripts/check-sqlite-includer-ratchet.sh to lock the gain." >&2
 fi
