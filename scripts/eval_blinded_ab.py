@@ -216,6 +216,17 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def harness_run_is_valid(total_valid, attempted):
+    """False when too few trials produced a valid judgment to call it a run.
+
+    Mirrors the long-standing `total < len(pairs) / 2` predicate; extracted so
+    the gate write can be gated on it BEFORE the artifact is touched.
+    """
+    if not attempted:
+        return True
+    return not (total_valid < attempted / 2)
+
+
 def run_mode(use_gateway, use_mlx):
     """Which generator produced the replies — for the results JSON.
 
@@ -752,6 +763,21 @@ def main():
         fool_rate = ai_detected_correctly / total * 100 if total else 0.0
         n_real_pairs = sum(1 for t in results if not t.get("is_synthetic"))
         baseline = _load_baseline()
+
+        # A run where fewer than half the attempted trials produced a valid
+        # judgment is a HARNESS failure, not a measurement — so it must not
+        # touch the gate at all. This check used to run AFTER write_proxy_half,
+        # which meant a broken run still clobbered the artifact: on 2026-07-27
+        # an 8/50 run and then a 0/50 run (daemon down, connection refused)
+        # replaced a genuine fool_rate=44.0% n=50 verdict with ADVISORY n=0.
+        # Refusing to emit is the point; refusing to DESTROY is the other half.
+        if not harness_run_is_valid(total, len(pairs)):
+            print(f"\n  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
+                  "not a measurement; fix serving/judge and re-run.")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left at its last real "
+                  "measurement rather than overwritten with this run.")
+            sys.exit(1)
+
         mode, verdict, should_fail = _gate.proxy_gate_decision(
             fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
         _gate.write_proxy_half(_GATE_PATH, {
@@ -765,14 +791,10 @@ def main():
         banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
                   if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
         print(f"\n  GATE: {banner}")
-        # A run where fewer than half the attempted trials produced a valid
-        # judgment is a HARNESS failure, not a measurement — exit non-zero so
-        # nightly logs record it as failed instead of a polite ADVISORY
-        # (2026-07-11: 0/50 valid exited 0 and read like a completed run).
-        if len(pairs) and total < len(pairs) / 2:
-            print(f"  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
-                  "not a measurement; fix serving/judge and re-run.")
-            sys.exit(1)
+        # (The <50%-valid harness check now runs BEFORE the write above, so a
+        # broken run exits without touching the artifact. 2026-07-11: 0/50
+        # valid exited 0 and read like a completed run; 2026-07-27: it also
+        # destroyed the previous real measurement.)
         sys.exit(1 if should_fail else 0)
 
 
