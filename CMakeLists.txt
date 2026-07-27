@@ -3655,6 +3655,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
+    tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
