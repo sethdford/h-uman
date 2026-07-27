@@ -211,7 +211,42 @@ def selftest():
     assert "ci_lo" in agg, "Legacy 'ci_lo' field missing"
     assert "ci_hi" in agg, "Legacy 'ci_hi' field missing"
 
-    print("selftest OK: Likert conversion, axis aggregation, backward-compat verified")
+    # Provenance detection (2026-07-26 regression guard). A synthetic run must
+    # never be mistaken for human ratings — that mistake overwrote the human
+    # certification bar with an LLM-judge proxy.
+    assert detect_rater_kind([]) == "human", "empty sheet must not claim synthetic"
+    assert detect_rater_kind([{"id": "a", "choice": "A"}]) == "human", \
+        "unstamped rows are human-rated"
+    assert detect_rater_kind([{"id": "a", "choice": "A", "judge_api": "openai",
+                               "judge_model": "gemma-4-31b-it-8bit"}]) == "synthetic", \
+        "judge_api/judge_model stamp means an LLM judged this"
+    assert detect_rater_kind([{"id": "a", "choice": "A", "judge_model": "x"},
+                              {"id": "b", "choice": "B"}]) == "synthetic", \
+        "ANY stamped row makes the sheet synthetic (fail safe: never claim human)"
+
+    # The gate-key contract itself: synthetic verdicts must land somewhere the
+    # C promotion parser does not read. hu_lora_gate_verdict_parse() navigates
+    # "human" -> "verdict" (src/ml/lora_nightly.c), so "synthetic" is inert.
+    assert ("human" if detect_rater_kind([{"judge_model": "m"}]) == "human"
+            else "synthetic") == "synthetic", "synthetic must not map to the human key"
+
+    print("selftest OK: Likert conversion, axis aggregation, backward-compat, "
+          "rater-provenance detection verified")
+
+
+def detect_rater_kind(rows):
+    """Return "synthetic" if these rows were judged by a model, else "human".
+
+    synthetic_judge.py stamps judge_api + judge_model on EVERY row it writes
+    (so the reward wire can enforce the different-family-only gate). Sheets
+    filled in by real people have no such column. That stamp is therefore a
+    reliable provenance marker, and it means existing callers get the correct
+    behaviour with no flag changes.
+    """
+    if not rows:
+        return "human"
+    stamped = sum(1 for r in rows if (r.get("judge_api") or r.get("judge_model")))
+    return "synthetic" if stamped else "human"
 
 
 def main():
@@ -221,6 +256,10 @@ def main():
     ap.add_argument("--json-out", help="Write JSON output to this file")
     ap.add_argument("--emit-gate", default=None,
                     help="Write the human half of the blind_ab gate JSON to this path")
+    ap.add_argument("--rater-kind", choices=["auto", "human", "synthetic"], default="auto",
+                    help="Whose ratings these are. 'auto' (default) infers from the "
+                         "judge_api/judge_model columns synthetic_judge.py stamps. "
+                         "Only 'human' may write the promotion-gating 'human' key.")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -263,24 +302,55 @@ def main():
         print(f"\nWrote human gate half ({verdict}) to {a.emit_gate}")
 
     # Write the LoRA gate verdict to ~/.human/blind_ab_gate.json.
-    # This verdict is consumed by hu_lora_gate_verdict_from_file() in the C code.
+    # This verdict is consumed by hu_lora_gate_verdict_from_file() in the C code,
+    # which navigates specifically to "human" → "verdict" (src/ml/lora_nightly.c:97).
     # Policy: detection <= 0.65 → PASS, >= 0.75 → FAIL, between → INCONCLUSIVE.
+    #
+    # PROVENANCE SEPARATION (2026-07-26). This block used to write the "human" key
+    # unconditionally and truncate the file while doing it. Scoring a SYNTHETIC
+    # sheet therefore overwrote the human certification bar with an LLM-judge
+    # proxy: a 160-item gemma-judged run replaced a real n=12 human verdict, so
+    # anything reading the gate would have believed 160 people rated it. Two rules
+    # now hold:
+    #   1. Only genuinely human-rated sheets may touch the "human" key. Synthetic
+    #      runs land under "synthetic", which the C parser does not read — a proxy
+    #      can no longer green-light a promotion.
+    #   2. The write MERGES into the existing file instead of replacing it, so
+    #      writing one half never destroys the other.
+    rater_kind = a.rater_kind if a.rater_kind != "auto" else detect_rater_kind(rows)
+    gate_key = "human" if rater_kind == "human" else "synthetic"
     lora_gate_verdict = compute_gate_verdict(agg["detect"])
     lora_gate_path = os.path.expanduser("~/.human/blind_ab_gate.json")
     try:
         os.makedirs(os.path.dirname(lora_gate_path), exist_ok=True)
+        # Read-modify-write: preserve every key we are not responsible for.
+        gate_data = {}
+        if os.path.exists(lora_gate_path):
+            try:
+                with open(lora_gate_path) as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    gate_data = loaded
+            except (ValueError, OSError):
+                pass  # corrupt/unreadable → start clean rather than fail the run
+        gate_data[gate_key] = {
+            "verdict": lora_gate_verdict,
+            "detection": round(agg["detect"], 4),
+            "ci_lo": round(agg["ci_lo"], 4),
+            "n": agg["n"],
+            "timestamp": None,  # Operator may populate this
+        }
+        if gate_key == "synthetic":
+            gate_data[gate_key]["judge_model"] = next(
+                (r.get("judge_model") for r in rows if r.get("judge_model")), None)
         with open(lora_gate_path, 'w') as f:
-            gate_data = {
-                "human": {
-                    "verdict": lora_gate_verdict,
-                    "detection": round(agg["detect"], 4),
-                    "ci_lo": round(agg["ci_lo"], 4),
-                    "n": agg["n"],
-                    "timestamp": None,  # Operator may populate this
-                }
-            }
             json.dump(gate_data, f, indent=2)
-        print(f"\nWrote LoRA gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+        print(f"\nWrote {gate_key} gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+        if gate_key == "synthetic":
+            kept = gate_data.get("human")
+            print("  (synthetic — the promotion-gating 'human' key was NOT touched"
+                  + (f"; it still reads detection={kept.get('detection')} n={kept.get('n')})"
+                     if isinstance(kept, dict) else "; no human verdict on file yet)"))
     except Exception as e:
         print(f"Warning: failed to write LoRA gate JSON to {lora_gate_path}: {e}", file=sys.stderr)
 
