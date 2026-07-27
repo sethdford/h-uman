@@ -118,12 +118,26 @@ SETH_SYSTEM_PROMPT = (
     "Three kids (Annette, Emerson, Edison) who don't live with you. "
     "Speak Japanese, lived in Japan (lost home in 2011 tsunami). "
     "23 years at Fidelity before this. Build AI runtimes as side projects.\n\n"
-    "Style: casual, warm, direct. Short messages. Lowercase. "
+    # EVERY style claim below is MEASURED, not authored. Source: the 689 real
+    # replies in data/imessage/ground_truth.jsonl (2026-07-27, post decoder fix).
+    # Authored style rules here have twice been the largest AI tell in the
+    # corpus, because the model obeys them literally while Seth does not:
+    #   - "Abbreviate (gonna, tbh, idk, hru)" drove tbh to 59.6% of replies
+    #     against his real 0.29% — a ~200x amplification (removed in 10faedaee).
+    #   - "Lowercase." was wrong by ~10x: he starts lowercase only 8.9% of the
+    #     time, because his phone autocapitalizes. Corrected 2026-07-27.
+    # Re-measure before changing any number here; do not estimate.
+    "Style: casual, warm, direct. Very short: median 5 words, 44% under 20 characters. "
+    # 80.7% no terminal punctuation — per scripts/persona_style_card.py the
+    # strongest single discriminator in his voice, and omitted here until now.
+    "Most of his texts end with NO terminal punctuation at all (81%); only 4% end "
+    "in a period and 8% in a question mark. Do not end every message with '.' or '?'. "
+    "Normal capitalization (his phone autocapitalizes; only 9% of texts start lowercase). "
     # Measured over 1,789 of Seth's own decoded iMessages (2026-07-26): tbh
     # 0.34%, idk 0.56%, hru 0.17%, gonna 0.34%. Instructing the model to
     # "abbreviate (gonna, tbh, idk, hru)" drove tbh to 71% of replies — a
     # 213x amplification and the single clearest AI tell in the corpus.
-    "Emoji rare. Strong opinions. Dry humor. "
+    "Emoji rare (5%). Strong opinions. Dry humor. "
     "Do NOT use texting abbreviations (tbh, ngl, idk, hru, imo) \u2014 he almost never does."
 )
 
@@ -179,22 +193,60 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def run_mode(use_gateway, use_mlx):
+    """Which generator produced the replies — for the results JSON.
+
+    Precedence MUST mirror get_ai_response(): gateway, then mlx, then cli.
+    This was `"gateway" if USE_GATEWAY else "cli"`, which labelled every
+    --mlx run (i.e. every nightly run) as "cli". Downstream readers were
+    told the C pipeline generated replies that raw MLX generated.
+    """
+    if use_gateway:
+        return "gateway"
+    if use_mlx:
+        return "mlx"
+    return "cli"
+
+
+def build_mlx_messages(system_prompt, message, context_turns=None):
+    """Chat messages for the MLX path, including the thread.
+
+    Seth's turns are `assistant`, everyone else's are `user`. Omitting the
+    thread is not a neutral simplification: the real reply this is scored
+    against was written with the thread visible, so a context-free model
+    reply loses on "lack of conversational memory" — an asymmetry the
+    harness invented. See get_ai_response_cli's docstring; that fix landed
+    on the CLI path only while the nightly runs --mlx.
+
+    Malformed turns are skipped, not fatal: ground truth is machine-extracted
+    and one bad row must not abort a 45-trial run.
+    """
+    msgs = [{"role": "system", "content": system_prompt}]
+    for t in (context_turns or []):
+        if not isinstance(t, dict):
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        role = "assistant" if t.get("from") == "seth" else "user"
+        msgs.append({"role": role, "content": text})
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
 def get_ai_response(message, context_turns=None):
     if USE_GATEWAY:
         return get_ai_response_gateway(message)
     if USE_MLX:
-        return get_ai_response_mlx(message)
+        return get_ai_response_mlx(message, context_turns=context_turns)
     return get_ai_response_cli(message, context_turns=context_turns)
 
 
-def get_ai_response_mlx(message):
+def get_ai_response_mlx(message, context_turns=None):
     """Get AI response from the local MLX server with Seth persona."""
     try:
         payload = json.dumps({
-            "messages": [
-                {"role": "system", "content": SETH_SYSTEM_PROMPT},
-                {"role": "user", "content": message},
-            ],
+            "messages": build_mlx_messages(SETH_SYSTEM_PROMPT, message, context_turns),
             "max_tokens": 200,
             "temperature": 0.7,
         }).encode()
@@ -590,7 +642,7 @@ def main():
     with open(RESULTS_PATH, "w") as f:
         json.dump({
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "mode": "gateway" if USE_GATEWAY else "cli",
+            "mode": run_mode(USE_GATEWAY, USE_MLX),
             "total_trials": total,
             "human_detected": human_detected_correctly,
             "ai_fooled": ai_detected_correctly,

@@ -32,6 +32,17 @@ static const max_entry_t MODEL_MAX[] = {
     {"deepseek-reasoner", 8192},
     {"llama-4-70b-instruct", 8192},
     {"k2p5", 32768},
+    /* Local MLX serving base since the 2026-07-26 GLM flip. It matched no key
+     * and no prefix in infer_from_pattern, so it silently fell through to
+     * HU_DEFAULT_MODEL_MAX_TOKENS. 8192 happens to be right, but "right by
+     * fallback" is one added prefix rule away from changing under us — and it
+     * is load-bearing here: mlx-server generates up to max_tokens + a 512-token
+     * thinking headroom, then strips the thought block. GLM reasons out loud on
+     * the analytical/deep tiers (measured 614-1912 generated tokens on a
+     * bat-and-ball prompt, 2026-07-27), so a small cap would truncate it
+     * mid-thought and hand the strip extractor a fragment. State the number. */
+    {"glm-4.5-air-4bit", 8192},
+    {"glm-4.5-air", 8192},
 };
 
 static const max_entry_t PROVIDER_MAX[] = {
