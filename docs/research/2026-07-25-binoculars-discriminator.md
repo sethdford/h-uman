@@ -145,11 +145,20 @@ byte leaking from the attributedBody decode in the extractor. Three consequences
    the artifact. `binoculars_to_dpo.py` refuses these pairs
    (`corrupt_chosen` counter); the guard is deliberately conservative since a
    false positive costs one skipped pair while a false negative poisons the corpus.
-2. **The fool rate is probably overstated (unquantified).** The judge sees the
-   corrupted string as the "human" option; a reply that opens with `%` reads as
-   broken and pushes the judge toward the AI option. Some share of the 53.2%
-   fool rate may be this artifact rather than genuine humanness. Not corrected
-   here — it needs the extractor fix plus a re-judge.
+2. ~~**The fool rate is probably overstated.**~~ **DISPROVEN, measured
+   2026-07-27.** The guess was that a corrupted `real_seth` reads as broken and
+   pushes the judge toward the AI option, inflating the fool rate. Measured
+   within the 07-24 run, the effect runs the **other way**:
+
+   | 07-24 trials | fool rate |
+   |---|---|
+   | `real_seth` corrupted (n=8) | **25.0%** |
+   | `real_seth` clean (n=39) | **59.0%** |
+
+   Corruption made the human option *easier* to identify, not harder — mangled
+   text reads as weird, and weird reads as human, whereas AI text is polished.
+   So the corpus fix should if anything have *raised* the fool rate. (n=8 is
+   small; the direction is clear, the magnitude is not.)
 3. **AUC is NOT affected (checked).** Recomputing on the 38 clean pairs only:
    **0.832** vs 0.845 published — well inside the CI, and corrupted rows scored
    slightly *lower* (mean 1.309 vs 1.357), i.e. marginally harder to detect. The
@@ -216,6 +225,39 @@ built but **which extractor built it**: only `extract_imessage_pairs.py` and
 `classify_contact_formality.py` were already on the shared fixed decoder from
 `e80af898`. Before attributing any downstream result to this bug, **measure that
 dataset's signature rate** rather than reasoning from build timestamps.
+
+## The fool-rate drop was a harness artifact, not a regression (2026-07-27)
+
+The Gemini-judge fool rate fell 53.2% (07-24) → 28.6% (07-25) → 16.3% and 20.0%
+(two 07-27 runs) while the Binoculars AUC barely moved (0.845 → 0.801). **That
+divergence is the finding**, and it is what a second independent signal is for.
+
+Cause: `10faedaee` (07-26 11:00) removed *"Abbreviate (gonna, tbh, idk, hru)"*
+from the harness's own `SETH_SYSTEM_PROMPT`. Measured across the trials:
+
+| | 07-24 (pre-fix) | 07-27 (post-fix) |
+|---|---|---|
+| AI replies containing "tbh" | **59.6%** | **0.0%** |
+| real Seth containing "tbh" | **0.0%** | 0.0% |
+
+The harness was coaching the model into a caricature of a texter, and the LLM
+judge reads stereotypical texting markers as authentically human — so the model
+"fooled" the judge by being *less* like Seth, who never used the word in this
+corpus. **The 53.2% was substantially manufactured by the eval's own prompt.**
+
+The same commit pushed the other way by giving the model the conversation thread
+(it had been comparing a context-free AI reply against a context-rich human one;
+the judge explicitly cited *"a LACK OF CONVERSATIONAL MEMORY"*). Its author
+measured 0% → 16.7% from that half alone. Net of both, ~16–20% is the honest
+number and 53.2% never was.
+
+**Implication for this detector.** Binoculars stayed flat across a 33-point swing
+in the judge metric because the model's *statistical typicality* genuinely did not
+change — only surface lexical markers did. That is the intended behaviour, and it
+is the clearest evidence so far that the two metrics measure different things:
+the judge is sensitive to surface style (and therefore to prompt wording), while
+Binoculars tracks distributional fit. Do not treat a fool-rate move as an
+adapter-quality signal without checking whether the harness prompt changed.
 
 ## Caveats
 
