@@ -110,7 +110,20 @@ while IFS=$'\t' read -r name script var floor rate rule pattern; do
 
     # --- derive velocity + anchor from this counter's own history ---
     hist=$(baseline_history "$var" "$script")
-    anchor_ts=$(echo "$hist" | awk 'NF==2{t=$1} END{print t+0}')
+    # Anchor on when the baseline VALUE last changed, not when the file was last
+    # touched. Using file mtime/commit time lets any unrelated edit to a gate
+    # script silently zero its accrued debt — observed immediately: wiring
+    # auto-lock into check-sqlite-includer-ratchet.sh reset a genuine 8.1-week
+    # staleness to 0.000w and the counter reported "on track" while nothing had
+    # actually been paid down. If the value never moved inside the window,
+    # anchor at the window's start so pressure still accrues.
+    anchor_ts=$(echo "$hist" | awk '
+        NF==2 {
+            if (!seen) { first = $1; seen = 1 }
+            else if ($2 != prev) changed = $1
+            prev = $2
+        }
+        END { print (changed ? changed : first) + 0 }')
     [ "${anchor_ts:-0}" -gt 0 ] 2>/dev/null || anchor_ts=$now
 
     # Observed velocity = MEDIAN of the per-drop rates, not total/elapsed.
