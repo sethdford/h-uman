@@ -175,6 +175,19 @@ def test_gateway_url_falls_back_when_config_unusable():
         assert E.gateway_url_from_config(bad).endswith(":3002")
 
 
+def test_gateway_deadline_is_not_shorter_than_mlx():
+    """The gateway path does strictly MORE work than a bare MLX completion —
+    a full agent turn fans out into several :8741 generations, all queued
+    behind live service-loop traffic on the same serial server. It must not
+    have the tighter deadline. At 60s vs MLX's 120s it did, and a --gate run
+    aborted after 8/50 trials on MAX_CONSECUTIVE_FAILURES.
+
+    Per the MLX timeout's own comment, an early timeout is worse than a lost
+    trial: the request still generates server-side, then BrokenPipes, so it
+    degrades LIVE serving for the drain duration."""
+    assert E.GATEWAY_TIMEOUT_S >= E.MLX_TIMEOUT_S
+
+
 # ---- runner ----------------------------------------------------------------
 
 def _run():

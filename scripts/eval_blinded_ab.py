@@ -63,6 +63,7 @@ def _gemini_url():
 # configured daemon port wins over the legacy hardcoded :3002.
 GATEWAY_URL = None
 MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8741/v1/chat/completions")
+MLX_TIMEOUT_S = 120
 USE_GATEWAY = "--gateway" in sys.argv
 USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
@@ -266,7 +267,7 @@ def get_ai_response_mlx(message, context_turns=None):
         # 2026-07-11 a 30s timeout abandoned 50/50 requests into the
         # single-threaded server's queue (each still generated, then
         # BrokenPipe'd) — degrading live serving for the drain duration.
-        resp = urllib.request.urlopen(req, timeout=120)
+        resp = urllib.request.urlopen(req, timeout=MLX_TIMEOUT_S)
         data = json.loads(resp.read())
         choices = data.get("choices", [])
         if choices:
@@ -378,6 +379,15 @@ def _load_human_config():
 GATEWAY_URL = gateway_url_from_config(_load_human_config(),
                                       os.environ.get("HU_GATEWAY_URL"))
 
+# A gateway trial is a full agent turn: several :8741 generations, queued
+# behind live service-loop traffic on the same serial server. It must never
+# have a tighter deadline than the bare MLX completion (see MLX_TIMEOUT_S's
+# comment — an early timeout still generates server-side, then BrokenPipes,
+# degrading LIVE serving for the drain duration). At 60s a --gate run aborted
+# after 8/50 trials on MAX_CONSECUTIVE_FAILURES while single turns measured
+# ~21s idle.
+GATEWAY_TIMEOUT_S = 240
+
 
 def get_ai_response_gateway(message, context_turns=None):
     try:
@@ -391,7 +401,7 @@ def get_ai_response_gateway(message, context_turns=None):
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        resp = urllib.request.urlopen(req, timeout=60)
+        resp = urllib.request.urlopen(req, timeout=GATEWAY_TIMEOUT_S)
         data = json.loads(resp.read())
         choices = data.get("choices", [])
         if choices:
