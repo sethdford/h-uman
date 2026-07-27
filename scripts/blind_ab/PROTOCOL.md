@@ -45,7 +45,9 @@ A `triples.json` — a list of items, each:
    private `answer_key.json` (you keep this; raters never see it).
 2. Send each rater the sheet + `RATER_INSTRUCTIONS.txt`. They fill `choice` (A/B) and
    `confidence` (1–5) for every row.
-3. Collect completed sheets → `score.py rating_sheet_<rater>.csv ... --key answer_key.json`.
+3. Collect completed sheets → `score.py rating_sheet_<rater>.csv ... --key answer_key.json --rater human`
+   (`--rater human` marks the promotion-authoritative gate write; machine-judged
+   sheets use `--rater synthetic`, which records under a separate key).
 
 ## Pass criteria (both must hold)
 

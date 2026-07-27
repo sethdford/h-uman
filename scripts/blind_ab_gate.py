@@ -103,3 +103,22 @@ def write_human_half(path, human_fields):
     data["human"] = human
     _save(path, data)
     return data
+
+
+def write_synthetic_half(path, synthetic_fields):
+    """Record a machine-rater (synthetic-judge) scoring run.
+
+    Deliberately a separate key from "human" and "proxy": a synthetic
+    2AFC run must never masquerade as human evidence (2026-07-26: one
+    did, replacing the genuine n=12 human verdict with an n=160 machine
+    one), and it is not the nightly Binoculars proxy either.
+    compute_effective_verdict ignores this key — synthetic results are
+    observability, never promotion input.
+    """
+    data = _load(path)
+    synthetic = {"tool": "blind_ab/score.py (synthetic rater)",
+                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    synthetic.update(synthetic_fields)
+    data["synthetic"] = synthetic
+    _save(path, data)
+    return data

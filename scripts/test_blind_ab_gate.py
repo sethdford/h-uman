@@ -105,9 +105,13 @@ def test_score_emit_gate_writes_human_half():
                 choice = "A" if i < 2 else "B"
                 w.writerow([str(i), choice, "4"])
         json.dump({str(i): "A" for i in range(4)}, open(keyf, "w"))
+        # HOME=tmpdir: score.py also writes ~/.human/blind_ab_gate.json for
+        # the C promotion gate; the test must not touch the real one.
+        env = dict(os.environ, HOME=d)
         r = subprocess.run(
-            ["python3", score, sheet, "--key", keyf, "--emit-gate", gate],
-            capture_output=True, text=True, timeout=60)
+            ["python3", score, sheet, "--key", keyf,
+             "--rater", "human", "--emit-gate", gate],
+            capture_output=True, text=True, env=env, timeout=60)
         assert r.returncode == 0, f"returncode={r.returncode}, stderr={r.stderr}"
         data = json.load(open(gate))
         assert data["human"]["verdict"] in ("PASS", "FAIL")

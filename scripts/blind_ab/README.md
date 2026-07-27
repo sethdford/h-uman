@@ -11,7 +11,7 @@ python3 make_rating_sheet.py example_triples.json --seed 42
 #   -> rating_sheet.csv  (give to raters; no labels)
 #   -> answer_key.json   (KEEP PRIVATE)
 # ... raters fill the `choice` (A/B) and `confidence` (1-5) columns ...
-python3 score.py rating_sheet.csv --key answer_key.json
+python3 score.py rating_sheet.csv --key answer_key.json --rater human
 python3 score.py --selftest        # verify the math without any data
 ```
 
@@ -29,9 +29,12 @@ python3 score.py --selftest        # verify the math without any data
    `rating_sheet.csv` + `RATER_INSTRUCTIONS.txt` to 5–8 people who know Seth. Save one
    completed file per rater, e.g. `rating_sheet_alice.csv`.
 
-3. **Score** — `python3 score.py rating_sheet_*.csv --key answer_key.json`. Prints the
-   detection rate, 95% Wilson CI, confidence-weighted rate, per-rater breakdown, and
-   `RESULT_blind_ab=PASS|FAIL`.
+3. **Score** — `python3 score.py rating_sheet_*.csv --key answer_key.json --rater human`.
+   Prints the detection rate, 95% Wilson CI, confidence-weighted rate, per-rater
+   breakdown, and `RESULT_blind_ab=PASS|FAIL`. Gate files are written only with
+   `--rater`: `human` is the promotion-authoritative key; machine-judged sheets
+   must use `--rater synthetic` (separate key, never gates promotion). Omit
+   `--rater` to score without writing any gate file.
 
 ## Generating h-uman replies — WIRED (2026-05-30)
 
@@ -44,7 +47,7 @@ path the product uses), reading each reply back from `~/.human/memory.db`:
 python3 gen_huuman_replies.py contexts.json --out triples.json
 python3 make_rating_sheet.py triples.json
 # ... raters fill rating_sheet.csv ...
-python3 score.py rating_sheet_*.csv --key answer_key.json
+python3 score.py rating_sheet_*.csv --key answer_key.json --rater human
 ```
 
 The full chain (gen → sheet → score) is smoke-tested. Verified replies are convincingly
