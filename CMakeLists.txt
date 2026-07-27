@@ -1481,6 +1481,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/replay.c
     src/persona/circadian.c
     src/agent/follow_up.c
+    src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -3503,6 +3504,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_dispatcher.c
     tests/test_imessage_sticker.c
     tests/test_follow_up.c
+    tests/test_followup_compose.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
