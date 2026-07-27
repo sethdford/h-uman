@@ -241,10 +241,17 @@ hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_le
     return HU_OK;
 }
 
-/* Escape single quotes for SQLite: ' -> '' */
-static size_t escape_sql_string(char *out, size_t cap, const char *in, size_t in_len) {
+/* Escape single quotes for SQLite: ' -> ''
+ *
+ * Forwarder to the canonical hu_sql_quote_escape_into (see docs/dedupe-debt.md).
+ * The parameter order matches the other four `return size_t` forwarders
+ * (conv_goals, planning, intelligence, feeds/processor, behavior/rel_dynamics):
+ * (src, src_len, dst, dst_cap). It previously took (dst, dst_cap, src, src_len)
+ * — the exact reverse — so copying a call between these files silently swapped
+ * source and destination. Keep this order. */
+static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out_cap) {
     size_t n = 0;
-    (void)hu_sql_quote_escape_into(in, in_len, out, cap, &n);
+    (void)hu_sql_quote_escape_into(s, len, out, out_cap, &n);
     return n;
 }
 
@@ -262,15 +269,15 @@ hu_error_t hu_life_thread_insert_sql(const char *contact_id, size_t contact_id_l
     size_t to_escape = thread_len < max_escaped / 2 ? thread_len : max_escaped / 2;
     char escaped[2048];
     size_t esc_cap = sizeof(escaped) < max_escaped ? sizeof(escaped) : max_escaped;
-    size_t esc_len = escape_sql_string(escaped, esc_cap, thread, to_escape);
+    size_t esc_len = escape_sql_string(thread, to_escape, escaped, esc_cap);
 
     /* P3-2 — normalize and escape contact_id. */
     const char *cid = contact_id ? contact_id : "";
     size_t cid_len = contact_id ? contact_id_len : 0;
     char cid_escaped[256];
-    size_t cid_esc_len =
-        escape_sql_string(cid_escaped, sizeof(cid_escaped), cid,
-                          cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2);
+    size_t cid_esc_len = escape_sql_string(
+        cid, cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2, cid_escaped,
+        sizeof(cid_escaped));
 
     int n = snprintf(buf, cap,
                      "INSERT INTO life_threads (contact_id, thread, timestamp, active) "
@@ -291,9 +298,9 @@ hu_error_t hu_life_thread_query_active_sql(const char *contact_id, size_t contac
     const char *cid = contact_id ? contact_id : "";
     size_t cid_len = contact_id ? contact_id_len : 0;
     char cid_escaped[256];
-    size_t cid_esc_len =
-        escape_sql_string(cid_escaped, sizeof(cid_escaped), cid,
-                          cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2);
+    size_t cid_esc_len = escape_sql_string(
+        cid, cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2, cid_escaped,
+        sizeof(cid_escaped));
 
     int n = snprintf(buf, cap,
                      "SELECT id, thread, timestamp FROM life_threads "

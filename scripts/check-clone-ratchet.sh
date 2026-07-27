@@ -21,9 +21,18 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
+# Rebase resolution 2026-07-27: main lowered this to 11514 (reliable.c
+# extras_model dedup) while this branch lowered it to 11507 (MLX endpoint
+# consolidation). Both dedups are present in the merged tree, so the true count
+# is at or below the lower of the two — but each figure was measured against a
+# tree the other's change was missing from, so neither is valid here. Take the
+# HIGHER value: the gate stays green, and ratchet_autolock re-measures on the
+# next run and tightens to the real number. A ratchet may only tighten, so this
+# cannot lose a gain — it just defers locking it by one run.
 CLONE_BASELINE=11514   # locked 2026-07-27: reliable.c extras_model() collapsed the
                        # duplicated extras-dispatch preamble in reliable_chat and
                        # reliable_chat_with_system to one line each
+# prior: 11507         # MLX default endpoint consolidated to human/core/endpoints.h
 # prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read
                        # sites (file_edit, pdf, image, meeting_transcribe, computer_use
                        # PNG reader), retiring their hand-rolled fopen/fseek/ftell
