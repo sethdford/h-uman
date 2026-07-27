@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Head-to-head smoke test of two LoRA adapters on the same base model.
+"""Head-to-head smoke test of two LoRA adapters (same base, or cross-base).
 
 Implements the pre-promotion gate required by
 .claude/rules/lora-scale-default-or-die.md: a persona adapter must be checked
@@ -30,7 +30,18 @@ Usage:
     python3 adapter_smoke_test.py --a <v5_adapter_path> --b <v6_adapter_path> \
         --out /tmp/smoke.json
 
+    # cross-base: the served adapter is on a different base than the candidate
+    python3 adapter_smoke_test.py \
+        --a <glm_adapter> --base-a mlx-community/GLM-4.5-Air-4bit  --label-a glm-v5 \
+        --b <gemma_adapter> --base-b mlx-community/gemma-4-31b-it-8bit --label-b v6
+
     python3 adapter_smoke_test.py --selftest      # checkers only, no model load
+    python3 adapter_smoke_test.py --rescore old.json   # re-score, no GPU
+
+A cross-base run answers "which served CONFIGURATION is better", not "which
+adapter is better" — the delta carries the base model too. The script says so
+on both stderr and stdout when the bases differ, because the numbers alone
+invite the stronger claim.
 """
 import argparse
 import gc
@@ -318,6 +329,18 @@ def selftest():
     assert evaluate({}, "<think></think>\nSure!") == evaluate({}, "Sure!")
     assert not evaluate({"expect": r"\bred\b"}, "<think></think>\nred, green")[1]
 
+    # --base-a/--base-b resolution: each side falls back to --base, and a run
+    # is "cross" only when the two resolve differently. Checked without a model
+    # load so the flag wiring cannot silently rot.
+    def _resolve(base, ba, bb):
+        a_, b_ = ba or base, bb or base
+        return a_, b_, a_ != b_
+    assert _resolve("X", None, None) == ("X", "X", False)      # same-base default
+    assert _resolve("X", "Y", None) == ("Y", "X", True)        # side A overridden
+    assert _resolve("X", None, "Y") == ("X", "Y", True)        # side B overridden
+    assert _resolve("X", "Y", "Y") == ("Y", "Y", False)        # both, but equal
+    assert _resolve("X", "Y", "Z") == ("Y", "Z", True)         # genuinely cross
+
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
     assert evaluate(e, "The answer is 115.")[0]
@@ -347,7 +370,11 @@ def main():
     ap.add_argument("--b", help="candidate adapter path (e.g. v6)")
     ap.add_argument("--label-a", default="v5")
     ap.add_argument("--label-b", default="v6")
-    ap.add_argument("--base", default=DEFAULT_BASE)
+    ap.add_argument("--base", default=DEFAULT_BASE,
+                    help="base model for both sides (default: %(default)s)")
+    ap.add_argument("--base-a", help="override the base for side A only — use when "
+                    "the served adapter sits on a different base than the candidate")
+    ap.add_argument("--base-b", help="override the base for side B only")
     ap.add_argument("--max-tokens", type=int, default=96)
     ap.add_argument("--out", help="write full JSON results here")
     ap.add_argument("--quiet", action="store_true")
@@ -385,14 +412,32 @@ def main():
         if not os.path.isdir(p):
             sys.exit(f"adapter path not found: {p}")
 
-    res_a = run_adapter(a.base, a.a, a.label_a, a.max_tokens, a.quiet)
-    res_b = run_adapter(a.base, a.b, a.label_b, a.max_tokens, a.quiet)
+    base_a = a.base_a or a.base
+    base_b = a.base_b or a.base
+    cross = base_a != base_b
+    if cross:
+        print(f"CROSS-BASE: A={base_a}  B={base_b}\n"
+              "  This measures BASE + ADAPTER as a unit. A difference is NOT\n"
+              "  attributable to the adapter alone — read it as 'which served\n"
+              "  configuration is better', not 'which adapter is better'.",
+              file=sys.stderr)
+
+    # Side A first: it is the SERVED config by convention, so if the second
+    # load OOMs the run that matters most for a promotion call is captured.
+    # One model resident at a time — run_adapter frees before returning.
+    res_a = run_adapter(base_a, a.a, a.label_a, a.max_tokens, a.quiet)
+    res_b = run_adapter(base_b, a.b, a.label_b, a.max_tokens, a.quiet)
     rep = build_report(res_a, res_b, a.label_a, a.label_b)
     clean = print_report(rep, a.label_a, a.label_b)
+    if cross:
+        print("NOTE: cross-base run — the delta includes the base model, not "
+              "just the adapter.\n")
 
     if a.out:
         with open(a.out, "w") as f:
-            json.dump({"base": a.base, "adapter_a": a.a, "adapter_b": a.b,
+            json.dump({"base": a.base, "base_a": base_a, "base_b": base_b,
+                       "cross_base": cross,
+                       "adapter_a": a.a, "adapter_b": a.b,
                        "report": rep}, f, indent=1)
         print(f"wrote {a.out}")
     sys.exit(0 if clean else 1)

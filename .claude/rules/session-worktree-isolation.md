@@ -98,6 +98,22 @@ The tell that a push landed somewhere unintended: `git push` reports
 **"Everything up-to-date"** right after a successful-looking commit. That means
 your commit is real but sits on a branch nobody is pushing to `main`.
 
+**Attributing a stranded commit: read the `Co-Authored-By` trailer, nothing
+else.** Every session commits as `Seth Ford <sethford@Mac.lan>` — the machine
+identity — so author, committer and `git blame` cannot separate sessions. The
+trailer names the model (`Claude Opus 5`, `Claude Fable 5`) and is the only
+reliable discriminator. Do **not** infer ownership from topic, file, or "this
+continues that other commit": every session reads the same corpus and the same
+open problems, so topic continuity is the norm, not evidence. Concretely
+(2026-07-27): a stranded eval-harness commit was attributed to the session that
+had produced the corpus it measured and had authored the adjacent commit in the
+same file — both wrong. The two commits carried *different* model trailers,
+which settled it in one line:
+
+```bash
+git log -1 --format='%(trailers:key=Co-Authored-By)' <sha>
+```
+
 ## Enforcement
 
 `scripts/check-session-worktree.sh`, wired into `.githooks/pre-commit`. It fires
