@@ -1622,6 +1622,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/celebration_repo_sqlite.c
         src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/forgetting_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c

@@ -36,7 +36,7 @@ fi
 # Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
 # Updated 2026-05-29 after social_graph aggregate migration (social_graph.c): 99 -> 98
 # Updated 2026-05-29 after self_awareness aggregate migration (self_awareness.c): 98 -> 97
-BASELINE=97
+BASELINE=94   # auto-locked 2026-07-27 (was 97)
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
@@ -58,9 +58,13 @@ if [ "$count" -gt "$BASELINE" ]; then
 fi
 
 if [ "$count" -lt "$BASELINE" ]; then
-  [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
-  echo "NOTE: count dropped below baseline — lower BASELINE to $count in" >&2
-  echo "      scripts/check-sqlite-includer-ratchet.sh to lock the gain." >&2
+  # Guard BOTH lines: prefixing only the first left an orphaned continuation
+  # ("      scripts/... to lock the gain.") printing after auto-lock had already
+  # done it.
+  if [ "${HU_RATCHET_LOCKED:-0}" != 1 ]; then
+    echo "NOTE: count dropped below baseline — lower BASELINE to $count in" >&2
+    echo "      scripts/check-sqlite-includer-ratchet.sh to lock the gain." >&2
+  fi
 fi
 
 exit 0
