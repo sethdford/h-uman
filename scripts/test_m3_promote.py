@@ -133,11 +133,24 @@ def test_promote_dry_run_no_swap():
         with tempfile.TemporaryDirectory() as d:
             adapter = Path(d) / "new-lora.bin"
             adapter.touch()
+            # --evidence is required even for --dry-run: the gate runs before
+            # the dry-run short-circuit in m3_promote.py, deliberately. A
+            # dry-run that exits 0 where the real promote would exit 2 is a
+            # false green, and preview is exactly when an operator is deciding
+            # whether they have the evidence. Pass it so this test measures
+            # what its name claims — that dry-run does not swap.
             result = run_cli(Path(d), url, "--dry-run",
-                              "promote", "--adapter", str(adapter), "--no-prod-check")
-            _ok("dry-run exits 0", result.returncode == 0)
+                              "promote", "--adapter", str(adapter), "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("dry-run exits 0", result.returncode == 0,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
             _ok("dry-run did NOT swap", len(FakeMLX.SWAP_HISTORY) == 0,
                 f"swap history: {FakeMLX.SWAP_HISTORY}")
+            # And the gate is not bypassable via --dry-run.
+            r2 = run_cli(Path(d), url, "--dry-run",
+                         "promote", "--adapter", str(adapter), "--no-prod-check")
+            _ok("dry-run still requires evidence", r2.returncode != 0,
+                f"rc={r2.returncode}\n{r2.stdout}\n{r2.stderr}")
     finally:
         srv.shutdown()
 
@@ -152,7 +165,8 @@ def test_promote_real_swap_and_lineage():
             adapter = Path(d) / "new-lora.bin"
             adapter.touch()
             result = run_cli(Path(d), url, "promote", "--adapter", str(adapter),
-                              "--yes", "--no-prod-check")
+                              "--yes", "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
             _ok("promote exits 0", result.returncode == 0,
                 f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
             _ok("swap was executed", FakeMLX.CURRENT_ADAPTER == str(adapter),
@@ -204,8 +218,10 @@ def test_rollback_reverses_promote():
             new_adapter.touch()
             # First promote
             r1 = run_cli(home, url, "promote", "--adapter", str(new_adapter),
-                          "--yes", "--no-prod-check")
-            _ok("promote rc=0", r1.returncode == 0)
+                          "--yes", "--no-prod-check",
+                          "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("promote rc=0", r1.returncode == 0,
+                f"{r1.stdout}\n{r1.stderr}")
             # Now rollback
             r2 = run_cli(home, url, "rollback", "--yes")
             _ok("rollback rc=0", r2.returncode == 0,
@@ -243,12 +259,50 @@ def test_last_promotion_from_lineage():
             promote.LINEAGE_PATH = original
 
 
+def test_promote_blocked_without_evidence():
+    """The evidence gate itself (e922b887b). Nothing covered this contract, so
+    when promote started requiring --evidence the only signal was six unrelated
+    assertions going red in the happy-path tests — which reads as "promote is
+    broken", not "promote grew a gate". Assert the gate directly: refusal must
+    be a non-zero exit AND no swap, so a regression that merely warns and
+    proceeds still fails here."""
+    print("\n--- test_promote_blocked_without_evidence ---")
+    FakeMLX.CURRENT_ADAPTER = "/original"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            adapter = Path(d) / "new-lora.bin"
+            adapter.touch()
+            r = run_cli(Path(d), url, "promote", "--adapter", str(adapter),
+                        "--yes", "--no-prod-check")
+            _ok("promote without --evidence exits non-zero", r.returncode != 0,
+                f"rc={r.returncode}\n{r.stdout}\n{r.stderr}")
+            _ok("refused promote did NOT swap", len(FakeMLX.SWAP_HISTORY) == 0,
+                f"swap history: {FakeMLX.SWAP_HISTORY}")
+            _ok("server still on original adapter",
+                FakeMLX.CURRENT_ADAPTER == "/original",
+                f"current={FakeMLX.CURRENT_ADAPTER}")
+            # The documented override must still work — otherwise the gate is a
+            # wall, not a gate, and operators will reach for --no-prod-check.
+            r2 = run_cli(Path(d), url, "promote", "--adapter", str(adapter),
+                         "--yes", "--no-prod-check", "--force-no-evidence")
+            _ok("--force-no-evidence override promotes", r2.returncode == 0,
+                f"rc={r2.returncode}\n{r2.stdout}\n{r2.stderr}")
+            _ok("override actually swapped",
+                FakeMLX.CURRENT_ADAPTER == str(adapter),
+                f"current={FakeMLX.CURRENT_ADAPTER}")
+    finally:
+        srv.shutdown()
+
+
 def main():
     print("M3 promote CLI (G2) verifier")
     test_current_against_unreachable()
     test_promote_dry_run_no_swap()
     test_promote_real_swap_and_lineage()
     test_production_heuristic_blocks_without_yes()
+    test_promote_blocked_without_evidence()
     test_rollback_reverses_promote()
     test_last_promotion_from_lineage()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
