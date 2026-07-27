@@ -197,6 +197,21 @@ bool hu_imessage_service_is_blue(hu_imessage_service_t svc) {
     return svc == HU_IMSG_SERVICE_IMESSAGE;
 }
 
+hu_imessage_service_t hu_imessage_recent_service_email_filter(bool handle_is_email,
+                                                              hu_imessage_service_t recent) {
+    /* An email address cannot route over SMS or RCS — those are carrier
+     * services bound to phone numbers. chat.db nevertheless records
+     * SMS-service message rows against email handles (Text Message
+     * Forwarding attribution artifacts), and on 2026-07-27 three such rows
+     * made the blue guard HOLD the account's own iMessage-active Apple-ID
+     * handle. Impossible evidence must not bind: discard it so the verdict
+     * falls through to the handle row (which prefers the iMessage row and
+     * still fails CLOSED when no iMessage evidence exists at all). */
+    if (handle_is_email && (recent == HU_IMSG_SERVICE_SMS || recent == HU_IMSG_SERVICE_RCS))
+        return HU_IMSG_SERVICE_UNKNOWN;
+    return recent;
+}
+
 hu_blue_verdict_t hu_imessage_blue_verdict(hu_imessage_service_t recent_msg_service,
                                            hu_imessage_service_t handle_service) {
     /* Freshest evidence wins: whatever Apple actually routed the last message

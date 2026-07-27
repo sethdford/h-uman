@@ -762,16 +762,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                     sched_len = sched_san_len;
                 }
-                channels[sc].channel->vtable->send(channels[sc].channel->ctx, sched_contact,
-                                                   strlen(sched_contact), sched_msg, sched_len,
-                                                   NULL, 0);
-                if (agent) {
-                    hu_contact_send_recency_record(&agent->contact_send_recency, sched_contact,
-                                                   strlen(sched_contact), (int64_t)time(NULL),
-                                                   HU_SEND_PATH_SCHEDULED);
-                }
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "scheduled message delivered to %s via %s", sched_contact, sched_ch);
+                hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
+                                             sched_msg, sched_len);
                 const char *sh = getenv("HOME");
                 if (sh) {
                     char sp[512];

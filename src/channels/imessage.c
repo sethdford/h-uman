@@ -2089,6 +2089,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
         hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
         imsg_lookup_services_for_handle(tgt, tgt_len, &recent, &handle_svc);
+        /* Email handles: SMS/RCS message rows are chat.db attribution
+         * artifacts (impossible routes) — must not bind the verdict. */
+        recent = hu_imessage_recent_service_email_filter(memchr(tgt, '@', tgt_len) != NULL, recent);
         /* T0.1b: chat.db only says how this handle routed in the PAST. When the
          * IMCore bridge is live, ask Apple the current question directly and
          * let that answer win; an unavailable/failed lookup returns

@@ -80,6 +80,15 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, struct hu_agent *a
 void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t *channels,
                                    size_t channel_count);
 
+/* Send one due scheduled message and log the REAL outcome. Extracted from the
+ * service loop (file-size ratchet); the unchecked send it replaces logged
+ * "delivered" over a blue_guard HOLD (2026-07-27), so lost messages read as
+ * successes. Failures log 'FAILED — entry dropped' and skip the send-recency
+ * record. Implemented in src/daemon/daemon_followup_sched.c. */
+void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
+                                  const char *channel_name, const char *contact, const char *msg,
+                                  size_t msg_len);
+
 hu_error_t hu_daemon_install(hu_allocator_t *alloc);
 hu_error_t hu_daemon_uninstall(void);
 hu_error_t hu_daemon_logs(void);
