@@ -3413,6 +3413,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_config_reload.c
+    tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_proactive_policy.c
