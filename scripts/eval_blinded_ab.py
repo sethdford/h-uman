@@ -179,22 +179,60 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def run_mode(use_gateway, use_mlx):
+    """Which generator produced the replies — for the results JSON.
+
+    Precedence MUST mirror get_ai_response(): gateway, then mlx, then cli.
+    This was `"gateway" if USE_GATEWAY else "cli"`, which labelled every
+    --mlx run (i.e. every nightly run) as "cli". Downstream readers were
+    told the C pipeline generated replies that raw MLX generated.
+    """
+    if use_gateway:
+        return "gateway"
+    if use_mlx:
+        return "mlx"
+    return "cli"
+
+
+def build_mlx_messages(system_prompt, message, context_turns=None):
+    """Chat messages for the MLX path, including the thread.
+
+    Seth's turns are `assistant`, everyone else's are `user`. Omitting the
+    thread is not a neutral simplification: the real reply this is scored
+    against was written with the thread visible, so a context-free model
+    reply loses on "lack of conversational memory" — an asymmetry the
+    harness invented. See get_ai_response_cli's docstring; that fix landed
+    on the CLI path only while the nightly runs --mlx.
+
+    Malformed turns are skipped, not fatal: ground truth is machine-extracted
+    and one bad row must not abort a 45-trial run.
+    """
+    msgs = [{"role": "system", "content": system_prompt}]
+    for t in (context_turns or []):
+        if not isinstance(t, dict):
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        role = "assistant" if t.get("from") == "seth" else "user"
+        msgs.append({"role": role, "content": text})
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
 def get_ai_response(message, context_turns=None):
     if USE_GATEWAY:
         return get_ai_response_gateway(message)
     if USE_MLX:
-        return get_ai_response_mlx(message)
+        return get_ai_response_mlx(message, context_turns=context_turns)
     return get_ai_response_cli(message, context_turns=context_turns)
 
 
-def get_ai_response_mlx(message):
+def get_ai_response_mlx(message, context_turns=None):
     """Get AI response from the local MLX server with Seth persona."""
     try:
         payload = json.dumps({
-            "messages": [
-                {"role": "system", "content": SETH_SYSTEM_PROMPT},
-                {"role": "user", "content": message},
-            ],
+            "messages": build_mlx_messages(SETH_SYSTEM_PROMPT, message, context_turns),
             "max_tokens": 200,
             "temperature": 0.7,
         }).encode()
@@ -590,7 +628,7 @@ def main():
     with open(RESULTS_PATH, "w") as f:
         json.dump({
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "mode": "gateway" if USE_GATEWAY else "cli",
+            "mode": run_mode(USE_GATEWAY, USE_MLX),
             "total_trials": total,
             "human_detected": human_detected_correctly,
             "ai_fooled": ai_detected_correctly,
