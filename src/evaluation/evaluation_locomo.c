@@ -18,11 +18,12 @@
  * deterministic across runs.
  */
 
-#include "human/evaluation/evaluation.h"
 #include "evaluation_dataset_loader.h"
 #include "evaluation_internal.h"
+#include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -48,8 +49,8 @@ typedef struct {
 static const locomo_item_t LOCOMO_ITEMS[] = {
     {"f1", "Alice's favourite tea is genmaicha and she drinks it every morning.",
      "what tea does alice drink in the morning?", "f1"},
-    {"f2", "Bob moved to Berlin in 2019 to join a robotics startup.",
-     "where does bob live now?", "f2"},
+    {"f2", "Bob moved to Berlin in 2019 to join a robotics startup.", "where does bob live now?",
+     "f2"},
     {"f3", "Carla broke her left wrist climbing in Yosemite last spring.",
      "which wrist did carla injure climbing?", "f3"},
     {"f4", "Daniel learned to bake sourdough during the 2020 lockdown.",
@@ -60,8 +61,8 @@ static const locomo_item_t LOCOMO_ITEMS[] = {
      "what food allergy does felix have?", "f6"},
     {"f7", "Grace finished her marathon in three hours forty-two minutes.",
      "what was grace's marathon time?", "f7"},
-    {"f8", "Hank's son was born on the morning of October 12th, 2024.",
-     "when was hank's son born?", "f8"},
+    {"f8", "Hank's son was born on the morning of October 12th, 2024.", "when was hank's son born?",
+     "f8"},
     {"f9", "Iris keeps a beehive on the roof of her apartment in Lisbon.",
      "where is iris keeping bees?", "f9"},
     {"f10", "Jamal's grandmother taught him to play the cumbia accordion.",
@@ -99,7 +100,9 @@ typedef struct {
 /* ── word-overlap retriever ─────────────────────────────────────────────── */
 
 /* Lowercase a single char without locale weirdness. */
-static int low(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+static int low(int c) {
+    return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
 
 /* Case-insensitive substring search restricted to whole-word match. Avoids
  * counting "the" inside "another". */
@@ -111,8 +114,7 @@ static bool contains_word_ci(const char *hay, const char *word, size_t wlen) {
         return false;
     for (size_t i = 0; i + wlen <= hlen; i++) {
         bool prev_boundary = (i == 0) || !isalnum((unsigned char)hay[i - 1]);
-        bool next_boundary =
-            (i + wlen == hlen) || !isalnum((unsigned char)hay[i + wlen]);
+        bool next_boundary = (i + wlen == hlen) || !isalnum((unsigned char)hay[i + wlen]);
         if (!prev_boundary || !next_boundary)
             continue;
         size_t j = 0;
@@ -169,7 +171,8 @@ static const char *const LOCOMO_JUDGE_SYSTEM =
  * Skipped under HU_IS_TEST to avoid real network calls. */
 static bool locomo_judge_init(locomo_ctx_t *c, hu_allocator_t *alloc) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
-    (void)c; (void)alloc;
+    (void)c;
+    (void)alloc;
     return false;
 #else
     const char *env = getenv("HU_EVAL_LLM_JUDGE");
@@ -182,15 +185,11 @@ static bool locomo_judge_init(locomo_ctx_t *c, hu_allocator_t *alloc) {
 
     const char *base_url = getenv("HU_EVAL_LLM_JUDGE_URL");
     if (!base_url || !base_url[0])
-        base_url = "http://localhost:8741/v1";
+        base_url = HU_MLX_DEFAULT_BASE_URL;
 
-    hu_error_t err = hu_provider_create(
-        alloc, provider_name, strlen(provider_name),
-        "none", 4,
-        base_url, strlen(base_url),
-        &c->judge_provider);
-    if (err != HU_OK || !c->judge_provider.vtable ||
-        !c->judge_provider.vtable->chat_with_system)
+    hu_error_t err = hu_provider_create(alloc, provider_name, strlen(provider_name), "none", 4,
+                                        base_url, strlen(base_url), &c->judge_provider);
+    if (err != HU_OK || !c->judge_provider.vtable || !c->judge_provider.vtable->chat_with_system)
         return false;
 
     c->judge_active = 1;
@@ -200,8 +199,8 @@ static bool locomo_judge_init(locomo_ctx_t *c, hu_allocator_t *alloc) {
 
 /* Ask the LLM judge whether candidate conveys the same information as
  * reference. Returns true for YES, false for NO or any failure. */
-static bool locomo_judge_equivalent(locomo_ctx_t *c, hu_allocator_t *alloc,
-                                    const char *reference, const char *candidate) {
+static bool locomo_judge_equivalent(locomo_ctx_t *c, hu_allocator_t *alloc, const char *reference,
+                                    const char *candidate) {
     if (!c->judge_active || !reference || !candidate)
         return false;
 
@@ -215,21 +214,16 @@ static bool locomo_judge_equivalent(locomo_ctx_t *c, hu_allocator_t *alloc,
                      "Candidate answer: %.*s\n\n"
                      "Does the candidate convey the same information? "
                      "Answer YES or NO.",
-                     (int)(strlen(reference) < 800 ? strlen(reference) : 800),
-                     reference,
-                     (int)(strlen(candidate) < 800 ? strlen(candidate) : 800),
-                     candidate);
+                     (int)(strlen(reference) < 800 ? strlen(reference) : 800), reference,
+                     (int)(strlen(candidate) < 800 ? strlen(candidate) : 800), candidate);
     if (n <= 0 || (size_t)n >= sizeof(prompt))
         return false;
 
     char *resp = NULL;
     size_t resp_len = 0;
     hu_error_t err = c->judge_provider.vtable->chat_with_system(
-        c->judge_provider.ctx, alloc,
-        LOCOMO_JUDGE_SYSTEM, strlen(LOCOMO_JUDGE_SYSTEM),
-        prompt, (size_t)n,
-        model, strlen(model),
-        0.0, &resp, &resp_len);
+        c->judge_provider.ctx, alloc, LOCOMO_JUDGE_SYSTEM, strlen(LOCOMO_JUDGE_SYSTEM), prompt,
+        (size_t)n, model, strlen(model), 0.0, &resp, &resp_len);
 
     if (err != HU_OK || !resp)
         return false;
@@ -238,9 +232,7 @@ static bool locomo_judge_equivalent(locomo_ctx_t *c, hu_allocator_t *alloc,
     bool yes = false;
     for (size_t i = 0; i + 2 < resp_len && i < 10; i++) {
         char a = resp[i], b = resp[i + 1], c2 = resp[i + 2];
-        if ((a == 'Y' || a == 'y') &&
-            (b == 'E' || b == 'e') &&
-            (c2 == 'S' || c2 == 's')) {
+        if ((a == 'Y' || a == 'y') && (b == 'E' || b == 'e') && (c2 == 'S' || c2 == 's')) {
             yes = true;
             break;
         }
@@ -283,8 +275,8 @@ static hu_error_t locomo_ensure_working_set(locomo_ctx_t *c, hu_allocator_t *all
         return HU_OK;
     hu_error_t err = hu_eval_locomo_load(alloc, &c->owned);
     if (err == HU_OK && c->owned.count > 0) {
-        locomo_view_t *view = (locomo_view_t *)alloc->alloc(
-            alloc->ctx, c->owned.count * sizeof(locomo_view_t));
+        locomo_view_t *view =
+            (locomo_view_t *)alloc->alloc(alloc->ctx, c->owned.count * sizeof(locomo_view_t));
         if (!view) {
             hu_eval_locomo_free(alloc, &c->owned);
             return HU_ERR_OUT_OF_MEMORY;
@@ -347,10 +339,9 @@ static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run
 
         /* Exact ID didn't match — try LLM judge on the answer texts. */
         if (use_judge) {
-            const char *picked_text = locomo_find_fact_text(
-                c->items, c->count, pick);
-            const char *expected_text = locomo_find_fact_text(
-                c->items, c->count, c->items[i].expected_id);
+            const char *picked_text = locomo_find_fact_text(c->items, c->count, pick);
+            const char *expected_text =
+                locomo_find_fact_text(c->items, c->count, c->items[i].expected_id);
             if (picked_text && expected_text &&
                 locomo_judge_equivalent(c, alloc, expected_text, picked_text)) {
                 correct++;
@@ -371,17 +362,17 @@ static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run
     }
     /* Annotate which corpus was used so report consumers (CI, regression
      * gate, dashboards) can tell synthetic from real. */
-    err = hu_evaluation_report_add_metric(alloc, out, "real_corpus",
-                                          c->loaded ? 1.0 : 0.0, c->count);
+    err =
+        hu_evaluation_report_add_metric(alloc, out, "real_corpus", c->loaded ? 1.0 : 0.0, c->count);
     if (err != HU_OK) {
         hu_evaluation_report_free(alloc, out);
         return err;
     }
     /* Annotate whether the LLM judge contributed any additional matches
      * beyond exact fact_id comparison. */
-    err = hu_evaluation_report_add_metric(alloc, out, "llm_judge_matches",
-                                          c->count > 0 ? (double)judge_used / (double)c->count : 0.0,
-                                          c->count);
+    err = hu_evaluation_report_add_metric(
+        alloc, out, "llm_judge_matches", c->count > 0 ? (double)judge_used / (double)c->count : 0.0,
+        c->count);
     if (err != HU_OK) {
         hu_evaluation_report_free(alloc, out);
         return err;
@@ -394,8 +385,7 @@ static void locomo_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
     locomo_ctx_t *c = (locomo_ctx_t *)ctx;
-    if (c->judge_active && c->judge_provider.vtable &&
-        c->judge_provider.vtable->deinit)
+    if (c->judge_active && c->judge_provider.vtable && c->judge_provider.vtable->deinit)
         c->judge_provider.vtable->deinit(c->judge_provider.ctx, alloc);
     if (c->items) {
         alloc->free(alloc->ctx, c->items, c->count * sizeof(locomo_view_t));

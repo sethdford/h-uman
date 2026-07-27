@@ -2874,7 +2874,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             if (primary && strstr(primary, "mlx_local")) {
                 const char *mlx_url = getenv("HUMAN_MLX_URL");
                 if (!mlx_url || !mlx_url[0])
-                    mlx_url = "http://127.0.0.1:8741/v1";
+                    mlx_url = HU_MLX_DEFAULT_BASE_URL;
                 hu_mlx_admin_swap_result_t swap = {0};
                 hu_error_t se = hu_mlx_admin_swap_adapter(
                     alloc, mlx_url, strlen(mlx_url), adapter_path, strlen(adapter_path), &swap);

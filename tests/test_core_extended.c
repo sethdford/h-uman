@@ -1,6 +1,7 @@
 /* Core utility edge cases (~30 tests). */
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/core/slice.h"
 #include "human/core/string.h"
@@ -245,8 +246,46 @@ static void test_assert_str_contains_macros(void) {
     HU_ASSERT_STR_NOT_CONTAINS("short", "longer_than_short");
 }
 
+/* --- HU_MLX_DEFAULT_* derivation contract (human/core/endpoints.h) ---
+ *
+ * These three macros are documented as deriving from ONE port so that moving
+ * the serving base is a one-line edit. That guarantee holds only while they
+ * remain composed; if a future edit re-spells any of them as an independent
+ * literal, the composition silently breaks and the next base-move re-creates
+ * the 16-scattered-literals problem these replaced.
+ *
+ * Each assertion below fails under exactly that rewrite, so none is vacuous:
+ * a hand-written HU_MLX_DEFAULT_BASE_URL pointing at a different host or port
+ * would no longer be prefixed by ORIGIN. */
+static void mlx_default_port_str_matches_numeric_port(void) {
+    char rendered[16];
+    (void)snprintf(rendered, sizeof(rendered), "%d", HU_MLX_DEFAULT_PORT);
+    HU_ASSERT_STR_EQ(rendered, HU_MLX_DEFAULT_PORT_STR);
+}
+
+static void mlx_default_origin_ends_with_port_str(void) {
+    const char *origin = HU_MLX_DEFAULT_ORIGIN;
+    const char *port = HU_MLX_DEFAULT_PORT_STR;
+    size_t olen = strlen(origin), plen = strlen(port);
+    HU_ASSERT_TRUE(olen > plen);
+    HU_ASSERT_STR_EQ(origin + (olen - plen), port);
+}
+
+static void mlx_default_base_url_extends_origin(void) {
+    const char *base = HU_MLX_DEFAULT_BASE_URL;
+    const char *origin = HU_MLX_DEFAULT_ORIGIN;
+    size_t olen = strlen(origin);
+    /* base must be origin + a path suffix, not an independently spelled URL. */
+    HU_ASSERT_TRUE(strlen(base) > olen);
+    HU_ASSERT_EQ(strncmp(base, origin, olen), 0);
+    HU_ASSERT_STR_EQ(base + olen, "/v1");
+}
+
 void run_core_extended_tests(void) {
     HU_TEST_SUITE("Core Extended");
+    HU_RUN_TEST(mlx_default_port_str_matches_numeric_port);
+    HU_RUN_TEST(mlx_default_origin_ends_with_port_str);
+    HU_RUN_TEST(mlx_default_base_url_extends_origin);
     HU_RUN_TEST(test_arena_multiple_allocs);
     HU_RUN_TEST(test_arena_reset);
     HU_RUN_TEST(test_string_empty_concat);

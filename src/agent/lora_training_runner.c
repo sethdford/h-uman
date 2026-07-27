@@ -32,6 +32,7 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/training_runner_shared.h"
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
 #include "human/memory/lifecycle/semantic_cache.h"
@@ -387,7 +388,7 @@ static const char *resolve_mlx_base_url(void) {
     const char *env = getenv("HU_MLX_BASE_URL");
     if (env && env[0])
         return env;
-    return "http://127.0.0.1:8741/v1";
+    return HU_MLX_DEFAULT_BASE_URL;
 }
 
 static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const char *home_dir,

@@ -5,6 +5,7 @@
 
 #include "human/ml/lora_nightly.h"
 
+#include "human/core/endpoints.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/ml/lora_export.h"
@@ -33,7 +34,7 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
              home);
     snprintf(cfg->adapters_dir, sizeof(cfg->adapters_dir), "%s/.human/adapters", home);
     snprintf(cfg->current_symlink, sizeof(cfg->current_symlink), "%s/.human/adapter-current", home);
-    snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), "http://127.0.0.1:8741/v1");
+    snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), HU_MLX_DEFAULT_BASE_URL);
     snprintf(cfg->gate_verdict_path, sizeof(cfg->gate_verdict_path), "%s/.human/blind_ab_gate.json",
              home);
     /* Default base model — MUST match the SERVING base so the trained

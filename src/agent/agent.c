@@ -18,6 +18,7 @@
 #include "human/agent/workflow_event.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/config.h"
+#include "human/core/endpoints.h"
 #include "human/core/log.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
@@ -1395,7 +1396,7 @@ void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
      * takes the v1 root, so include "/v1" suffix. */
     const char *mlx_url = getenv("HUMAN_MLX_URL");
     if (!mlx_url || !mlx_url[0])
-        mlx_url = "http://127.0.0.1:8741/v1";
+        mlx_url = HU_MLX_DEFAULT_BASE_URL;
 
     hu_mlx_admin_swap_result_t swap_result = {0};
     hu_error_t serr = hu_mlx_admin_swap_adapter(agent->alloc, mlx_url, strlen(mlx_url), target,

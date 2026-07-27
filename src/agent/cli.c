@@ -6,6 +6,7 @@
 #include "human/agent/spawn.h"
 #include "human/agent/tui.h"
 #include "human/channels/cli.h"
+#include "human/core/endpoints.h"
 #include "human/core/file.h"
 #include "human/core/log.h"
 #ifdef HU_HAS_VOICE_CHANNEL
@@ -139,7 +140,7 @@ static bool mlx_auto_serve(const char *prov_name) {
         return true;
     if (strcmp(prov_name, "mlx_local") != 0 && strcmp(prov_name, "mlx-local") != 0)
         return true;
-    if (mlx_port_is_open(8741))
+    if (mlx_port_is_open(HU_MLX_DEFAULT_PORT))
         return true;
 
     hu_log_info("human", NULL, "MLX server not running — auto-starting...");
@@ -200,7 +201,7 @@ static bool mlx_auto_serve(const char *prov_name) {
 
     /* Verify the port is now open */
     for (int i = 0; i < 5; i++) {
-        if (mlx_port_is_open(8741))
+        if (mlx_port_is_open(HU_MLX_DEFAULT_PORT))
             return true;
         usleep(500000);
     }
