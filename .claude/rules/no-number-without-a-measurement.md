@@ -8,8 +8,9 @@ evidence about the plumbing.
 
 ## The hazard
 
-Five instances in ~24 hours (2026-07-25 → 07-27), all the same shape: **the
-pipeline produced output on a path where no measurement occurred.**
+Seven instances in ~two weeks (2026-07-12 → 07-27), across at least three
+sessions, all the same shape: **the pipeline produced output on a path where no
+measurement occurred.**
 
 | Where | What was emitted | What actually happened |
 |---|---|---|
@@ -18,8 +19,10 @@ pipeline produced output on a path where no measurement occurred.**
 | `gen_direct.py` | `DONE … 160 triples`, exit **0** | The server had died; 55 rows were `ECONNREFUSED` and written as empty strings. A dead server looked like a finished run |
 | `eval_fidelity_nightly` | `pre == post == 0.3178`, verdict SKIP | Server-down fallback paired a **GLM adapter with a gemma base**; a cross-family LoRA can't bind, so the delta was structurally 0 (fixed `32d1011b4`) |
 | `ab_driver` `complete_p` | "gemma_v5: 60/60 — complete" | A run killed mid-flight checkpointed only processed rows, so a **truncated 60-row file self-certified** against its own length |
+| `eval_fidelity_nightly` | `SKIP, score 1.0` — **13 consecutive nights** | Every generate() hit the 180s timeout; the literal `"[timeout]"` string scores **1.0** on the shape classifier, so pre = post = 1.0. The v5 adapter served unmeasured for two weeks behind perfect registry scores (fixed `f66863e15`) |
+| DPO regression gate | `Regression verdict: PASS (val_loss=None)` | No `valid.jsonl` in the data dir, so mlx_lm never reported a Val loss — the gate had no evidence and passed anyway (fixed: `INCONCLUSIVE` now blocks the swap) |
 
-Every one of these was *green*. None threw. Four of five were caught by a human
+Every one of these was *green*. None threw. Six of seven were caught by a human
 noticing the number looked odd — which does not scale.
 
 The cost is worse than a crash: `pre == post` reads as "the adapter didn't
@@ -63,6 +66,24 @@ to a well-formed number loses. The number is what gets read.
 5. **Distinguish "0" from "absent".** `detection = 0.0, n = 0` must not be
    representable as a verdict. Guard `n == 0` explicitly wherever a rate is
    computed from a denominator that can be empty.
+
+## Detection — the cheap signatures
+
+Before believing any verdict, check for the tells this class leaves behind.
+Each one below actually appeared above:
+
+- **Identical values to full precision.** `pre == post == 0.3178` is not a weak
+  effect — it is the treatment never being applied. Real measurements have
+  noise; a structural zero does not.
+- **A verdict beside a null/empty evidence field**: `PASS (val_loss=None)`,
+  `score: null`, `n: 0`.
+- **A run of identical verdicts.** N consecutive `SKIP`s is a degenerate
+  measurement until proven otherwise (the caretaker's loop-liveness check flags
+  3; the fidelity nightly reached 13 before anyone looked).
+- **Exit 0 with zero valid rows**, or per-item errors that never aggregate into
+  the exit status.
+- **A number under a key naming a source that stage cannot produce** — synthetic
+  under `human`, self-judged under `blind`.
 
 ## How to verify a guard actually guards
 
