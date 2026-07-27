@@ -68,6 +68,35 @@ worktree already provisioned, both forgot on the same day. This is the exact
    leaked to the main checkout.
 4. **Read-only sessions don't need a worktree.** Analysis, audits, and
    log-reading collide with nothing — the cost is only justified when you write.
+5. **A worktree on `main` IS a lock on `main`.** Give a rescue/scratch worktree
+   its own branch (`git worktree add <dir> -b <name>`), never the shared branch,
+   and remove it as soon as its work is pushed. Git permits a branch in exactly
+   one worktree; while yours holds `main`, `git checkout main` in the shared
+   checkout fails with *"fatal: 'main' is already checked out at …"* and every
+   commit made there lands on whatever branch it was stranded on — including
+   other sessions' commits.
+
+### Evidence (2026-07-27) — the lock, and what it cost
+
+Recovering a stranded commit, I created a worktree with `git worktree add -f
+/private/tmp/hu-hermetic-fix main`. That was the correct instinct (stop
+committing in the shared checkout) executed the wrong way: it took `main`
+itself. For the next hour the shared checkout was pinned to another session's
+branch, and **two commits from two different sessions** landed there —
+
+| Commit | Author session | Fate |
+|---|---|---|
+| `498722d40` (test hermeticity) | mine | cherry-picked to `main` as `0bd7cd9aa` |
+| `f4e785d52` (eval harness prompt) | a third session's | preserved only because the branch owner spotted it and pushed `rescue/eval-harness-measured-style` |
+
+Neither author noticed at commit time; both were found by the *branch owner*
+reading their own log before a force-push. The second had no copy anywhere
+else. Cost: two cross-session rescues, a rescue branch, and a force-push that
+had to be cleared with two sessions first.
+
+The tell that a push landed somewhere unintended: `git push` reports
+**"Everything up-to-date"** right after a successful-looking commit. That means
+your commit is real but sits on a branch nobody is pushing to `main`.
 
 ## Enforcement
 
