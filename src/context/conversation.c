@@ -8652,6 +8652,47 @@ hu_error_t hu_conversation_sched_save(const char *path, size_t path_len) {
     return HU_OK;
 }
 
+hu_error_t hu_conversation_sched_reload_if_changed(const char *path, size_t path_len) {
+    if (!path || path_len == 0 || path_len >= 512)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Last-loaded fingerprint. A once-per-process load (the previous shape)
+     * made `human schedule add` invisible to a running daemon until its next
+     * restart (2026-07-27: a message scheduled at 10:33 sat unread by the
+     * 06:47 daemon all day). stat() per delivery pass is cheap; reload only
+     * when the file actually changed. Size is part of the fingerprint so a
+     * same-second rewrite (mtime granularity) is still detected. */
+    static char last_path[512];
+    static int64_t last_mtime = INT64_MIN;
+    static int64_t last_size = INT64_MIN;
+
+    char path_buf[512];
+    memcpy(path_buf, path, path_len);
+    path_buf[path_len] = '\0';
+
+    struct stat st;
+    if (stat(path_buf, &st) != 0) {
+        /* Absent file: either never written or removed by sched_save on an
+         * empty queue. Memory stays authoritative; remember the absence so a
+         * later re-appearance registers as a change. */
+        last_path[0] = '\0';
+        last_mtime = INT64_MIN;
+        last_size = INT64_MIN;
+        return HU_OK;
+    }
+    if (strcmp(last_path, path_buf) == 0 && (int64_t)st.st_mtime == last_mtime &&
+        (int64_t)st.st_size == last_size)
+        return HU_OK; /* unchanged since last load */
+
+    hu_error_t err = hu_conversation_sched_load(path, path_len);
+    if (err != HU_OK)
+        return err;
+    memcpy(last_path, path_buf, path_len + 1);
+    last_mtime = (int64_t)st.st_mtime;
+    last_size = (int64_t)st.st_size;
+    return HU_OK;
+}
+
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len) {
     if (!path || path_len == 0)
         return HU_ERR_INVALID_ARGUMENT;

@@ -441,6 +441,11 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
         if (when_str[0] == '+') {
             char *end = NULL;
             long minutes = strtol(when_str + 1, &end, 10);
+            /* Accept the documented +Nm form: strtol stops at the 'm', and the
+             * bare *end=='\0' check rejected exactly what the usage string
+             * advertises (2026-07-27: "+2m" -> "Invalid delay: +2m (use +Nm)"). */
+            if (end && end[0] == 'm' && end[1] == '\0')
+                end++;
             if (!end || *end != '\0' || minutes <= 0 || minutes > 525600) {
                 fprintf(stderr, "Invalid delay: %s (use +Nm, 1-525600 minutes)\n", when_str);
                 if (lock_fd >= 0) {

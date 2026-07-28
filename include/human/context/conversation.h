@@ -976,6 +976,13 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
 hu_error_t hu_conversation_sched_save(const char *path, size_t path_len);
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len);
 
+/* Reload the scheduled-message queue from `path` only when the file's
+ * mtime/size fingerprint changed since the last load. Call once per delivery
+ * pass: it makes CLI `schedule add` visible to a RUNNING daemon (the
+ * once-per-process load left new entries invisible until restart). An absent
+ * file is not an error — memory stays authoritative. */
+hu_error_t hu_conversation_sched_reload_if_changed(const char *path, size_t path_len);
+
 #define HU_SCHED_MAX 16
 
 typedef struct hu_sched_slot {
