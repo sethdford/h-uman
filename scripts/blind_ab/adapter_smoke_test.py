@@ -181,16 +181,70 @@ def evaluate(entry, text):
 
 # ------------------------------------------------------------- generation ---
 
+# --- production generation parity -------------------------------------------
+# mlx-server.py applies three settings that this script did not, and each maps
+# onto a failure this gate reported as an adapter defect. Values mirror the
+# server's defaults; it remains the source of truth.
+#
+#   headroom 512   thinking is generated BEFORE the visible reply, so a bare
+#                  max_tokens budget is eaten by deliberation and the reply is
+#                  starved. The server measured max_tokens=80 degenerating
+#                  "every casual prompt to a single word" — which is exactly
+#                  the 'ing' reply this gate scored as a v6 persona failure.
+#   penalty 1.1    without it, short prompts collapse into token-repetition
+#                  runaways. That is the "I'm not sure I'm a team" loop.
+#   enable_thinking  suppresses the auto-primed thought block — the <think>
+#                  and <|turn>thought prefixes this gate had to strip.
+#
+# Verified 2026-07-27: the SERVED glm-air-v5 answered "how's the new job going"
+# with "I'm not Seth Ford" through this script, and "Pretty good. Lot on my
+# plate with the new architecture rollout" through the server, same adapter and
+# same prompt. The gate was measuring a path production does not use.
+THINKING_HEADROOM_TOKENS = 512
+REPETITION_PENALTY = 1.1
+REPETITION_CONTEXT = 20
+
+
+def thinking_suppressed_value(base):
+    """The ``enable_thinking`` value that SUPPRESSES an auto-primed thought block.
+
+    The polarity is INVERTED on Gemma relative to every other family:
+      - Gemma:  ``enable_thinking=False`` force-prepends the thought channel,
+        so ``True`` is what suppresses it.
+      - GLM-4.5, Qwen3, the rest: the flag reads literally — ``False`` suppresses.
+
+    Mixing them up is not theoretical. mlx-server records sending Gemma's
+    polarity to GLM-4.5-Air making "every reply open with a `<think>` block and
+    burn its token budget deliberating" (measured on :8745, 2026-07-25).
+
+    Derived per side from that side's base, so a cross-base run sends each
+    family its own value — a single global flag would be wrong for one side.
+    """
+    return "gemma" in (base or "").lower()
+
+
 def run_adapter(base, adapter_path, label, max_tokens, quiet=False):
-    """Load base+adapter, generate every prompt, free the model."""
+    """Load base+adapter, generate every prompt, free the model.
+
+    Generation mirrors mlx-server.py so the gate measures what production
+    serves; see the parity note above.
+    """
     import mlx.core as mx
     from mlx_lm import load, generate as mlx_generate
-    from mlx_lm.sample_utils import make_sampler
+    from mlx_lm.sample_utils import make_sampler, make_logits_processors
 
     if not quiet:
         print(f"[{label}] loading {base} + {adapter_path}", file=sys.stderr)
     model, tokenizer = load(base, adapter_path=adapter_path)
     sampler = make_sampler(temp=0.0)  # deterministic, matches eval_fidelity_nightly
+    logits_processors = make_logits_processors(
+        repetition_penalty=REPETITION_PENALTY,
+        repetition_context_size=REPETITION_CONTEXT)
+    think_flag = thinking_suppressed_value(base)
+    budget = max_tokens + THINKING_HEADROOM_TOKENS
+    if not quiet:
+        print(f"[{label}] enable_thinking={think_flag} budget={budget} "
+              f"rep_penalty={REPETITION_PENALTY}", file=sys.stderr)
 
     out = {}
     for e in PROMPTS:
@@ -198,10 +252,21 @@ def run_adapter(base, adapter_path, label, max_tokens, quiet=False):
         system = e.get("system", SYSTEM) if "system" in e else SYSTEM
         if system:
             msgs = [{"role": "system", "content": system}] + msgs
-        prompt = tokenizer.apply_chat_template(msgs, add_generation_prompt=True)
+        try:
+            prompt = tokenizer.apply_chat_template(
+                msgs, add_generation_prompt=True, enable_thinking=think_flag)
+        except TypeError:
+            # Template predates the flag — fall back rather than fail the run,
+            # but say so: the result is then NOT production-equivalent.
+            if not quiet:
+                print(f"[{label}] WARNING: chat template rejects "
+                      "enable_thinking; output may carry thought channels",
+                      file=sys.stderr)
+            prompt = tokenizer.apply_chat_template(msgs, add_generation_prompt=True)
         try:
             text = mlx_generate(model, tokenizer, prompt=prompt,
-                                max_tokens=max_tokens, sampler=sampler)
+                                max_tokens=budget, sampler=sampler,
+                                logits_processors=logits_processors)
         except Exception as ex:  # a crash on one prompt shouldn't kill the run
             text = f"[ERROR {type(ex).__name__}: {ex}]"
         out[e["id"]] = (text or "").strip()
@@ -340,6 +405,22 @@ def selftest():
     assert _resolve("X", None, "Y") == ("X", "Y", True)        # side B overridden
     assert _resolve("X", "Y", "Y") == ("Y", "Y", False)        # both, but equal
     assert _resolve("X", "Y", "Z") == ("Y", "Z", True)         # genuinely cross
+
+    # Production-parity: enable_thinking polarity is INVERTED on Gemma. Sending
+    # Gemma's value to GLM made every reply open with <think> and burn its
+    # budget (mlx-server, :8745, 2026-07-25), so pin both families explicitly.
+    assert thinking_suppressed_value("mlx-community/gemma-4-31b-it-8bit") is True
+    assert thinking_suppressed_value("mlx-community/GLM-4.5-Air-4bit") is False
+    assert thinking_suppressed_value("Qwen/Qwen3-32B") is False
+    assert thinking_suppressed_value("") is False
+    assert thinking_suppressed_value(None) is False
+    # case-insensitive: the real ids are mixed case
+    assert thinking_suppressed_value("MLX-Community/Gemma-4-31B") is True
+    # a cross-base run must give the two sides DIFFERENT values
+    assert thinking_suppressed_value("mlx-community/gemma-4-31b-it-8bit") != \
+        thinking_suppressed_value("mlx-community/GLM-4.5-Air-4bit")
+    # headroom must actually be added, or deliberation starves the reply
+    assert THINKING_HEADROOM_TOKENS > 0 and REPETITION_PENALTY > 1.0
 
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
