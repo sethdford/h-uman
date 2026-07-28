@@ -602,6 +602,7 @@ void run_belief_update_tests(void);
 void run_taste_tests(void);
 void run_somatic_tests(void);
 void run_narrative_self_tests(void);
+void run_persona_life_events_tests(void);
 void run_attachment_tests(void);
 void run_intrinsic_drive_tests(void);
 void run_prosocial_routine_tests(void);
@@ -1629,6 +1630,7 @@ int main(int argc, char **argv) {
     run_taste_tests();
     run_somatic_tests();
     run_narrative_self_tests();
+    run_persona_life_events_tests();
     run_attachment_tests();
     run_intrinsic_drive_tests();
     run_prosocial_routine_tests();

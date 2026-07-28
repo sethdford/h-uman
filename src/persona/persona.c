@@ -477,6 +477,11 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
                     persona->important_dates_count * sizeof(hu_important_date_t));
     }
 
+    if (persona->life_events) {
+        alloc->free(alloc->ctx, persona->life_events,
+                    persona->life_events_count * sizeof(hu_life_event_t));
+    }
+
     if (persona->contacts) {
         for (size_t i = 0; i < persona->contacts_count; i++)
             free_contact_profile(alloc, &persona->contacts[i]);
@@ -2138,6 +2143,48 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
         }
     }
 
+    /* Life events (default: empty array -> zero prompt bytes, zero behavior
+     * change for every persona that predates this field). */
+    out->life_events = NULL;
+    out->life_events_count = 0;
+    hu_json_value_t *le_arr = hu_json_object_get(root, "life_events");
+    if (le_arr && le_arr->type == HU_JSON_ARRAY && le_arr->data.array.items) {
+        size_t n = le_arr->data.array.len;
+        if (n > 0) {
+            hu_life_event_t *evs =
+                (hu_life_event_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_life_event_t));
+            if (evs) {
+                memset(evs, 0, n * sizeof(hu_life_event_t));
+                size_t count = 0;
+                for (size_t i = 0; i < n; i++) {
+                    const hu_json_value_t *item = le_arr->data.array.items[i];
+                    if (!item || item->type != HU_JSON_OBJECT)
+                        continue;
+                    const char *desc = hu_json_get_string(item, "description");
+                    if (!desc || !desc[0])
+                        continue; /* an event with no description renders nothing */
+                    (void)snprintf(evs[count].description, sizeof(evs[count].description), "%s",
+                                   desc);
+                    const char *st = hu_json_get_string(item, "state");
+                    /* Absent/unrecognized state -> UNKNOWN, which triggers the
+                     * do-not-assert guidance. Failing toward hedging means a
+                     * typo can never manufacture a completion claim. */
+                    evs[count].state = st ? hu_life_event_state_from_string(st, strlen(st))
+                                          : HU_LIFE_EVENT_STATE_UNKNOWN;
+                    const char *as_of = hu_json_get_string(item, "as_of");
+                    if (as_of)
+                        evs[count].as_of = hu_life_event_parse_date(as_of, strlen(as_of));
+                    const char *exp = hu_json_get_string(item, "expected_date");
+                    if (exp)
+                        evs[count].expected_date = hu_life_event_parse_date(exp, strlen(exp));
+                    count++;
+                }
+                out->life_events = evs;
+                out->life_events_count = count;
+            }
+        }
+    }
+
     /* Context awareness (default: calendar_enabled=false) */
     out->context_awareness.calendar_enabled = false;
     out->context_awareness.weather_enabled = false;
@@ -3249,6 +3296,56 @@ hu_error_t hu_persona_build_humor_directive(const hu_persona_t *persona, char *o
     return HU_OK;
 }
 
+/* Life-event block, shared by BOTH prompt heads (full + compact-immersive) so
+ * the two cannot drift — same reason hu_persona_build_absolute_rules is shared
+ * between the reactive and proactive paths.
+ *
+ * HU_LIFE_EVENTS activation gated on the cycle-5 human blind A/B rating sheet:
+ * OFF (default) emits nothing; SHADOW logs the block it WOULD emit and still
+ * emits nothing; LIVE emits. Per
+ * .claude/rules/feature-gate-requires-measurement.md, do not flip this to
+ * default-ON without a measurement showing the hedging reads as more human
+ * than the confident-wrong completions it replaces — a green suite is not that
+ * measurement. */
+static void persona_life_events_block(const hu_persona_t *persona, char *out, size_t cap,
+                                      size_t *out_len) {
+    if (!out || cap == 0 || !out_len)
+        return;
+    out[0] = '\0';
+    *out_len = 0;
+    if (!persona || persona->life_events_count == 0)
+        return;
+    hu_gate_mode_t gate = hu_life_events_gate();
+    if (gate == HU_GATE_OFF)
+        return;
+
+    int64_t now = 0;
+#ifndef HU_IS_TEST
+    now = (int64_t)time(NULL);
+#endif
+    size_t built = 0;
+    if (hu_life_events_build_directive(persona->life_events, persona->life_events_count, now, out,
+                                       cap, &built) != HU_OK)
+        return;
+
+    if (gate == HU_GATE_SHADOW) {
+        /* Shadow captures the metric (how many events, how many bytes the block
+         * would add) without changing a single emitted byte. */
+        size_t hedged = 0;
+        for (size_t i = 0; i < persona->life_events_count; i++) {
+            if (hu_life_event_must_not_assert_completion(&persona->life_events[i], now))
+                hedged++;
+        }
+        hu_log_info("life_events", NULL,
+                    "shadow: would add %zu bytes for %zu event(s), %zu hedged (not emitted)", built,
+                    persona->life_events_count, hedged);
+        out[0] = '\0';
+        *out_len = 0;
+        return;
+    }
+    *out_len = built;
+}
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len) {
@@ -3311,6 +3408,27 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
     err = append_prompt(alloc, &buf, &len, &cap, "\n\n", 2);
     if (err != HU_OK)
         goto fail;
+
+    /* Life events go IMMEDIATELY after identity, and deliberately so: the
+     * identity string states life transitions as completed steady-state ("Lives
+     * in a waterfront place in St. Petersburg"), which is precisely what the
+     * model over-reads. This block is the qualifier for the sentence directly
+     * above it, so adjacency carries the correction. Placing it late would also
+     * risk the trim budget dropping it from the tail exactly when the prompt is
+     * long. Default OFF — see persona_life_events_block. */
+    {
+        char le_block[1024];
+        size_t le_len = 0;
+        persona_life_events_block(persona, le_block, sizeof(le_block), &le_len);
+        if (le_len > 0) {
+            err = append_prompt(alloc, &buf, &len, &cap, le_block, le_len);
+            if (err != HU_OK)
+                goto fail;
+            err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
+            if (err != HU_OK)
+                goto fail;
+        }
+    }
 
     if (persona->traits && persona->traits_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Personality traits: ", 20);
@@ -5351,6 +5469,24 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n\n");
         if (err != HU_OK)
             goto fail;
+    }
+
+    /* 2b. Life events — same block as the full head (shared helper, so the two
+     * heads cannot drift), same reason for sitting right after identity. This
+     * is the head production actually ships when HU_PERSONA_HEAD is live, so
+     * omitting it here would make the feature a no-op in prod. */
+    {
+        char le_block[1024];
+        size_t le_len = 0;
+        persona_life_events_block(persona, le_block, sizeof(le_block), &le_len);
+        if (le_len > 0) {
+            err = persona_compact_append(alloc, &buf, &len, &cap, le_block, le_len);
+            if (err != HU_OK)
+                goto fail;
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
     }
 
     /* 3. Channel overlay. */
