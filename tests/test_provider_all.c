@@ -2486,6 +2486,164 @@ static void test_reliable_create_ex_deep_copies_inner_fallback_arrays(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+/* 2026-07-27 — regression pin: a declared model_fallback must reach the
+ * FALLBACK provider as the fallback MODEL, not as the primary's model.
+ *
+ * Live symptom (service-loop-error.log, 2026-07-27): with mlx_local down,
+ * the daemon POSTed the LOCAL model id to Vertex —
+ *   POST .../publishers/google/models/GLM-4.5-Air-4bit:generateContent
+ *   HTTP 400 "Invalid Endpoint name: .../models/GLM-4.5-Air-4bit"
+ * three times, before finally reaching the declared gemini-3.5-flash.
+ *
+ * Root cause: reliable_chat nested model as the OUTER loop and provider as
+ * the INNER one, so at m=0 every extra provider was offered chain[0] — the
+ * primary-only model. The fix offers extras the declared fallback models
+ * first and the original model only as a last resort (rotated index), which
+ * keeps full provider x model coverage while never leading with a model the
+ * fallback provider cannot serve.
+ *
+ * The assertion is on the ORDER of models each provider was asked for, so it
+ * fails loudly against the pre-fix code (extra's first ask was the local id). */
+#define HU_REC_MAX_CALLS 8
+#define HU_REC_MODEL_MAX 64
+
+typedef struct hu_rec_provider_ctx {
+    char models[HU_REC_MAX_CALLS][HU_REC_MODEL_MAX];
+    size_t count;
+    const char *succeed_on; /* NULL => always fail */
+} hu_rec_provider_ctx_t;
+
+static void hu_rec_record(hu_rec_provider_ctx_t *r, const char *model, size_t model_len) {
+    if (r->count >= HU_REC_MAX_CALLS)
+        return;
+    size_t n = model_len < (HU_REC_MODEL_MAX - 1) ? model_len : (HU_REC_MODEL_MAX - 1);
+    memcpy(r->models[r->count], model, n);
+    r->models[r->count][n] = '\0';
+    r->count++;
+}
+
+static bool hu_rec_should_succeed(const hu_rec_provider_ctx_t *r, const char *model,
+                                  size_t model_len) {
+    if (!r->succeed_on)
+        return false;
+    size_t want = strlen(r->succeed_on);
+    return want == model_len && memcmp(model, r->succeed_on, want) == 0;
+}
+
+/* Shared body for both vtable entry points: record the model, then either fail
+ * or hand back a small canned reply. Kept as one helper so the two thin
+ * wrappers below don't duplicate the record-decide-allocate block. */
+static hu_error_t hu_rec_dispatch(void *ctx, hu_allocator_t *alloc, const char *model,
+                                  size_t model_len, char **out_text, size_t *out_len) {
+    hu_rec_provider_ctx_t *r = (hu_rec_provider_ctx_t *)ctx;
+    hu_rec_record(r, model, model_len);
+    if (!hu_rec_should_succeed(r, model, model_len))
+        return HU_ERR_PROVIDER_UNAVAILABLE;
+    char *c = (char *)alloc->alloc(alloc->ctx, 3);
+    if (!c)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(c, "ok", 3);
+    *out_text = c;
+    *out_len = 2;
+    return HU_OK;
+}
+
+static hu_error_t hu_rec_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
+                              const char *model, size_t model_len, double temperature,
+                              hu_chat_response_t *out) {
+    (void)request;
+    (void)temperature;
+    char *text = NULL;
+    size_t text_len = 0;
+    hu_error_t err = hu_rec_dispatch(ctx, alloc, model, model_len, &text, &text_len);
+    if (err != HU_OK)
+        return err;
+    out->content = text;
+    out->content_len = text_len;
+    return HU_OK;
+}
+
+static hu_error_t hu_rec_chat_with_system(void *ctx, hu_allocator_t *alloc,
+                                          const char *system_prompt, size_t system_prompt_len,
+                                          const char *message, size_t message_len,
+                                          const char *model, size_t model_len, double temperature,
+                                          char **out, size_t *out_len) {
+    (void)system_prompt;
+    (void)system_prompt_len;
+    (void)message;
+    (void)message_len;
+    (void)temperature;
+    return hu_rec_dispatch(ctx, alloc, model, model_len, out, out_len);
+}
+
+static bool hu_rec_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static const char *hu_rec_get_name(void *ctx) {
+    (void)ctx;
+    return "rec";
+}
+
+static const hu_provider_vtable_t hu_rec_vtable = {
+    .chat_with_system = hu_rec_chat_with_system,
+    .chat = hu_rec_chat,
+    .supports_native_tools = hu_rec_supports_native_tools,
+    .get_name = hu_rec_get_name,
+    .deinit = NULL,
+};
+
+static void test_reliable_fallback_provider_gets_fallback_model_first(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* Primary is "down" (mlx_local refused): never succeeds. */
+    hu_rec_provider_ctx_t primary_rec = {.count = 0, .succeed_on = NULL};
+    hu_provider_t primary = {.vtable = &hu_rec_vtable, .ctx = &primary_rec};
+
+    /* Extra is the cloud provider: it can ONLY serve the declared fallback. */
+    hu_rec_provider_ctx_t extra_rec = {.count = 0, .succeed_on = "gemini-3.5-flash"};
+    hu_provider_t extra = {.vtable = &hu_rec_vtable, .ctx = &extra_rec};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "gemini", .name_len = 6, .provider = extra}};
+
+    hu_reliable_fallback_model_t inner[1] = {{.model = "gemini-3.5-flash", .model_len = 16}};
+    hu_reliable_model_fallback_entry_t model_fallbacks[1] = {
+        {.model = "GLM-4.5-Air-4bit", .model_len = 16, .fallbacks = inner, .fallbacks_count = 1}};
+
+    hu_provider_t prov;
+    /* max_retries = 0 keeps one attempt per (provider, model) pair so the
+     * recorded order is the dispatch order, not retry noise. */
+    hu_error_t cerr =
+        hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, model_fallbacks, 1, &prov);
+    HU_ASSERT_EQ(cerr, HU_OK);
+
+    hu_chat_message_t msgs[1] = {make_user_msg("hi", 2)};
+    hu_chat_request_t req = make_simple_request(msgs, 1);
+    hu_chat_response_t resp = {0};
+    hu_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "GLM-4.5-Air-4bit", 16, 0.0, &resp);
+
+    /* The chain must resolve: the cloud provider serves the declared model. */
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Primary is still asked for its own model first — no regression. */
+    HU_ASSERT_GT(primary_rec.count, 0u);
+    HU_ASSERT_STR_EQ(primary_rec.models[0], "GLM-4.5-Air-4bit");
+
+    /* THE CONTRACT: the fallback provider is never LED with the primary-only
+     * model. Pre-fix this was "GLM-4.5-Air-4bit" -> Vertex 400. */
+    HU_ASSERT_GT(extra_rec.count, 0u);
+    HU_ASSERT_STR_EQ(extra_rec.models[0], "gemini-3.5-flash");
+
+    /* And it must never have been sent the local id at all on this path. */
+    for (size_t i = 0; i < extra_rec.count; i++) {
+        HU_ASSERT_STR_NOT_CONTAINS(extra_rec.models[i], "GLM-4.5-Air-4bit");
+    }
+
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 static void test_reliable_chat_with_extras_primary_succeeds(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_provider_t primary;
@@ -3610,6 +3768,7 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_reliable_create_with_extras);
     HU_RUN_TEST(test_reliable_create_with_model_fallbacks);
     HU_RUN_TEST(test_reliable_create_ex_deep_copies_inner_fallback_arrays);
+    HU_RUN_TEST(test_reliable_fallback_provider_gets_fallback_model_first);
     HU_RUN_TEST(test_reliable_chat_with_extras_primary_succeeds);
     HU_RUN_TEST(test_reliable_warmup_calls_all);
     HU_RUN_TEST(test_reliable_supports_vision_from_gemini);
