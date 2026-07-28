@@ -174,6 +174,10 @@ static void directive_for_stale_event_forbids_completion_claim(void) {
     /* And it offers the alternative move, so the model is not left to invent
      * one — a bare prohibition is what produced the confident guess. */
     HU_ASSERT_TRUE(strstr(out, "hedge or ask") != NULL);
+    /* The closing rule IS present here — paired with its absence in
+     * directive_for_completed_event_omits_the_guard, this pins that the rule
+     * tracks whether anything is actually unresolved. */
+    HU_ASSERT_TRUE(strstr(out, "Never upgrade") != NULL);
 }
 
 /* NON-VACUITY TWIN of the test above. Same builder, confirmed-completed event:
@@ -191,6 +195,10 @@ static void directive_for_completed_event_omits_the_guard(void) {
     HU_ASSERT_TRUE(strstr(out, STATUS_COMPLETED) != NULL);
     HU_ASSERT_TRUE(strstr(out, STATUS_UNKNOWN) == NULL);
     HU_ASSERT_TRUE(strstr(out, GUIDANCE_MARKER) == NULL);
+    /* The closing "never upgrade to finished" rule is also absent: with nothing
+     * unresolved it would be a rule with no referent, spending head budget and
+     * inviting the model to hedge facts it should state plainly. */
+    HU_ASSERT_TRUE(strstr(out, "Never upgrade") == NULL);
 }
 
 /* Mixed set: the guard attaches per-event, not to the whole block. */

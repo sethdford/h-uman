@@ -206,6 +206,7 @@ hu_error_t hu_life_events_build_directive(const hu_life_event_t *events, size_t 
 
     size_t pos = 0;
     size_t rendered = 0;
+    size_t hedged = 0;
 
     for (size_t i = 0; i < count; i++) {
         const hu_life_event_t *ev = &events[i];
@@ -231,6 +232,7 @@ hu_error_t hu_life_events_build_directive(const hu_life_event_t *events, size_t 
             break;
 
         if (hu_life_event_must_not_assert_completion(ev, now_ts)) {
+            hedged++;
             /* THE CONTRACT. Per-event so it cannot be separated from the event
              * it governs by prompt trimming, and phrased as a concrete
              * behavior ("ask") rather than a prohibition alone — a bare "do not
@@ -246,7 +248,12 @@ hu_error_t hu_life_events_build_directive(const hu_life_event_t *events, size_t 
             break;
     }
 
-    if (rendered > 0 && pos > 0)
+    /* The closing rule is about NOT upgrading an unresolved event, so it only
+     * earns its prompt bytes when at least one event is actually unresolved.
+     * Emitting it under a list of settled facts states a rule with no referent
+     * — noise against an 8 KB head budget, and the kind of free-floating
+     * instruction a model can misapply to facts it should state plainly. */
+    if (hedged > 0 && pos > 0)
         (void)append_str(out, cap, &pos,
                          "Never upgrade one of these to finished just because its date has "
                          "passed. Saying \"i don't know yet\" or asking is always better than "
