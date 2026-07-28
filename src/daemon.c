@@ -65,9 +65,11 @@
 #endif
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
+#include "human/daemon/config_reload.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
+#include "human/daemon/identity_graph.h"
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
@@ -203,8 +205,8 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
  * the file is absent on first-run users, in which case the graph stays
  * zeroed and the reaction handler is never wired (preserving the current
  * "no canonicalization" behavior for unconfigured deployments). */
-hu_identity_graph_t g_identity_graph;
-bool g_identity_graph_loaded = false;
+/* g_identity_graph / g_identity_graph_loaded now live in
+ * src/daemon/daemon_identity_graph.c (E2 carve-out). */
 
 /* BUG #2 crash-resume outbound reply dedup:
  * MOVED TO: src/daemon/reply_dedup.c (process-wide store + mark/check glue) */
@@ -760,16 +762,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                     sched_len = sched_san_len;
                 }
-                channels[sc].channel->vtable->send(channels[sc].channel->ctx, sched_contact,
-                                                   strlen(sched_contact), sched_msg, sched_len,
-                                                   NULL, 0);
-                if (agent) {
-                    hu_contact_send_recency_record(&agent->contact_send_recency, sched_contact,
-                                                   strlen(sched_contact), (int64_t)time(NULL),
-                                                   HU_SEND_PATH_SCHEDULED);
-                }
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "scheduled message delivered to %s via %s", sched_contact, sched_ch);
+                hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
+                                             sched_msg, sched_len);
                 const char *sh = getenv("HOME");
                 if (sh) {
                     char sp[512];
@@ -2298,18 +2292,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     }
 #endif
 
-    /* Sprint A.7 — daemon-side identity-graph loader.
-     *
-     * Activates cross-channel canonicalization: "Alice@imessage" +
-     * "Alice@slack" reactions cluster under one persona contact instead
-     * of two strangers. The setter borrows g_identity_graph for the full
-     * process lifetime (cleared in teardown at the end of this function).
-     *
-     * Conservative on absence: a missing file is the first-run default,
-     * NOT an error — we log at info level and leave the reaction handler
-     * un-wired, which preserves the prior "no canonicalization" behavior.
-     * Only actual parse failures escalate to a warning. */
-
     /* Inject the LLM fact-extraction fallback into the personal model. The
      * regex fast-path misses casual/indirect text ("Did you not get the
      * email?"), starving the knowledge graph; this borrow lets
@@ -2322,38 +2304,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             agent->model_name_len);
     }
 
-    {
-        const char *home = getenv("HOME");
-        char ident_path[1024];
-        if (home && home[0] &&
-            snprintf(ident_path, sizeof(ident_path), "%s/.human/identity_graph.json", home) > 0) {
-            hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);
-            if (ie == HU_OK) {
-                hu_reaction_handler_set_identity_graph(&g_identity_graph);
-                /* Sprint B.8 wire — share the same graph borrow with the
-                 * prompt builder so the IDENTITY suggestion block fires. */
-                hu_personal_model_set_identity_graph(&g_identity_graph);
-                g_identity_graph_loaded = true;
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "identity graph loaded: %zu contacts from %s",
-                            g_identity_graph.contact_count, ident_path);
-            } else if (ie == HU_ERR_NOT_FOUND) {
-                /* First-run default: no identity_graph.json yet. Silent at
-                 * info level — operators who want cross-channel merging
-                 * will know to create the file. */
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "identity graph: no file at %s — cross-channel "
-                            "reactor canonicalization disabled (create the "
-                            "file via hu_identity_save to enable)",
-                            ident_path);
-            } else {
-                hu_log_error("human", agent ? agent->observer : NULL,
-                             "identity graph: load failed (err=%d) for %s — "
-                             "cross-channel canonicalization disabled",
-                             (int)ie, ident_path);
-            }
-        }
-    }
+    /* Sprint A.7 — cross-channel canonicalization. Carved to
+     * src/daemon/daemon_identity_graph.c (E2). */
+    hu_daemon_identity_graph_load(agent);
 
     /* Sprint B.3 D1 — load the autoresponder config from
      * ~/.human/autoresponder.json. Per silent-config-gated-subsystems
@@ -3080,6 +3033,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
     while (!HU_STOP_FLAG) {
+        /* SIGHUP reload — between turns, never during one. Scope + threading
+         * contract: include/human/daemon/config_reload.h. */
+        hu_daemon_config_reload_tick(agent, agent ? agent->observer : NULL);
+
         /* A3 intrinsic motivation idle tick (default-off via cfg.intrinsic). Runs
          * at most once/minute so the drive rises on a human timescale, not the
          * ~1s loop cadence. The runner self-gates on enabled + budget + quiet +
@@ -14093,14 +14050,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * a freed handle. */
     hu_reaction_handler_set_reflection_db(NULL);
 #endif
-    /* Sprint A.7 teardown: detach the identity graph borrow. The static
-     * storage itself is process-lifetime; this just ensures the reaction
-     * handler doesn't hold a stale pointer if the process ever live-reloads. */
-    if (g_identity_graph_loaded) {
-        hu_reaction_handler_set_identity_graph(NULL);
-        hu_personal_model_set_identity_graph(NULL); /* B.8 teardown */
-        g_identity_graph_loaded = false;
-    }
+    hu_daemon_identity_graph_teardown();
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

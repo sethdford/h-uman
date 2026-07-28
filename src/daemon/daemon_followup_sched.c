@@ -183,3 +183,29 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
         }
     }
 }
+
+/* ── Scheduled-send outcome (carved from the service loop, 2026-07-27) ──
+ * The service loop's flush consumes the queue entry BEFORE the send, so a
+ * failed send (most commonly a blue_guard HOLD, HU_ERR_NOT_SUPPORTED) drops
+ * the message. The unchecked call this replaces logged "delivered" anyway;
+ * say what actually happened, and only record send-recency on success. */
+void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
+                                  const char *channel_name, const char *contact, const char *msg,
+                                  size_t msg_len) {
+    if (!channel || !channel->vtable || !channel->vtable->send || !contact || !msg)
+        return;
+    hu_error_t err =
+        channel->vtable->send(channel->ctx, contact, strlen(contact), msg, msg_len, NULL, 0);
+    if (err != HU_OK) {
+        hu_log_warn("human", agent ? agent->observer : NULL,
+                    "scheduled send to %s via %s FAILED (err=%d) — entry dropped", contact,
+                    channel_name ? channel_name : "?", (int)err);
+        return;
+    }
+    if (agent) {
+        hu_contact_send_recency_record(&agent->contact_send_recency, contact, strlen(contact),
+                                       (int64_t)time(NULL), HU_SEND_PATH_SCHEDULED);
+    }
+    hu_log_info("human", agent ? agent->observer : NULL, "scheduled message delivered to %s via %s",
+                contact, channel_name ? channel_name : "?");
+}
