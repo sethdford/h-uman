@@ -90,6 +90,41 @@ def test_eval_gate_synthetic_is_advisory_and_exits_zero():
         assert data["effective_verdict"] == "ADVISORY"
 
 
+def test_unstamped_human_cannot_grant_pass():
+    """A human record with no `tool` stamp is not promotion evidence.
+
+    write_human_half() always stamps `tool`, so an unstamped human block was
+    written by something other than the sanctioned writer and nothing can
+    vouch for its origin. Observed 2026-07-27: the live gate carried
+    {verdict PASS, detection 0.225, n 40} with no `tool`, over a sheet that
+    split exactly 20 A / 20 B with zero confidence values — the shape of a
+    programmatic fill. Precedent: 2026-07-26, a synthetic run replaced a
+    genuine n=12 human verdict with an n=160 machine one.
+    """
+    stamped = {"tool": "blind_ab/score.py", "verdict": "PASS"}
+    unstamped = {"verdict": "PASS"}
+    advisory_proxy = {"verdict": "PASS", "mode": "ADVISORY"}
+
+    # stamped human PASS + advisory proxy PASS -> PASS
+    assert g.compute_effective_verdict(advisory_proxy, stamped) == "PASS"
+    # SAME inputs but unstamped -> must NOT reach PASS on the human's say-so
+    assert g.compute_effective_verdict(advisory_proxy, unstamped) == "ADVISORY"
+
+    # ...but an unstamped FAIL MUST still veto. The asymmetry is deliberate:
+    # both directions fail closed toward NOT promoting. Downgrading a FAIL
+    # would let anyone erase a veto by writing an unsanctioned record.
+    assert g.compute_effective_verdict(
+        {"verdict": "PASS", "mode": "ENFORCING"}, {"verdict": "FAIL"}) == "FAIL"
+    assert g.compute_effective_verdict(
+        {"verdict": "PASS", "mode": "ENFORCING"},
+        {"tool": "blind_ab/score.py", "verdict": "FAIL"}) == "FAIL"
+
+    assert g.human_is_attributable(stamped)
+    assert not g.human_is_attributable(unstamped)
+    assert not g.human_is_attributable({})
+    assert not g.human_is_attributable(None)
+
+
 def test_score_emit_gate_writes_human_half():
     import subprocess, csv
     here = os.path.dirname(os.path.abspath(__file__))
