@@ -359,6 +359,10 @@ def main():
     lora_gate_verdict = compute_gate_verdict(agg["detect"])
     lora_gate_path = os.path.expanduser("~/.human/blind_ab_gate.json")
     try:
+        # Imported here as well as in the --emit-gate block above: this path
+        # runs unconditionally, so it cannot rely on that block having executed.
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        import blind_ab_gate as _gate  # noqa: F811
         os.makedirs(os.path.dirname(lora_gate_path), exist_ok=True)
         # Read-modify-write: preserve every key we are not responsible for.
         gate_data = {}
@@ -370,18 +374,31 @@ def main():
                     gate_data = loaded
             except (ValueError, OSError):
                 pass  # corrupt/unreadable → start clean rather than fail the run
-        gate_data[a.rater] = {
+        # Build the record through the SAME stamping path as --emit-gate.
+        #
+        # This block used to construct the dict inline, which silently omitted
+        # the `tool` stamp that write_human_half()/write_synthetic_half() add.
+        # The result: the promotion-authoritative record — the one the C LoRA
+        # gate reads — was the only gate half nobody could attribute. On
+        # 2026-07-27 that produced a live {verdict PASS, detection 0.225, n 40}
+        # with no `tool`, indistinguishable from an unsanctioned write, which
+        # is exactly what compute_effective_verdict now refuses to honour.
+        #
+        # Two constructors for one record is the duplication that caused this;
+        # there is now one.
+        half = {
             "verdict": lora_gate_verdict,
             "detection": round(agg["detect"], 4),
             "ci_lo": round(agg["ci_lo"], 4),
             "n": agg["n"],
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
         if a.rater == "synthetic":
-            gate_data[a.rater]["judge_model"] = next(
+            half["judge_model"] = next(
                 (r.get("judge_model") for r in rows if r.get("judge_model")), None)
-        with open(lora_gate_path, 'w') as f:
-            json.dump(gate_data, f, indent=2)
+            _gate.write_synthetic_half(lora_gate_path, half)
+        else:
+            _gate.write_human_half(lora_gate_path, half)
+        gate_data = json.load(open(lora_gate_path))
         print(f"\nWrote {a.rater} gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
         if a.rater == "synthetic":
             kept = gate_data.get("human")
