@@ -1248,6 +1248,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
+    src/daemon/daemon_identity_graph.c
+    src/daemon/daemon_config_reload.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
@@ -1482,6 +1484,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/replay.c
     src/persona/circadian.c
     src/agent/follow_up.c
+    src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -3411,6 +3414,8 @@ set(HU_TEST_SOURCES
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
     tests/test_daemon_promise_keeper.c
+    tests/test_daemon_config_reload.c
+    tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_proactive_policy.c
@@ -3504,6 +3509,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_dispatcher.c
     tests/test_imessage_sticker.c
     tests/test_follow_up.c
+    tests/test_followup_compose.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c

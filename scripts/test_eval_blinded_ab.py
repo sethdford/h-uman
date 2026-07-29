@@ -175,6 +175,48 @@ def test_gateway_url_falls_back_when_config_unusable():
         assert E.gateway_url_from_config(bad).endswith(":3002")
 
 
+def test_gateway_deadline_is_not_shorter_than_mlx():
+    """The gateway path does strictly MORE work than a bare MLX completion —
+    a full agent turn fans out into several :8741 generations, all queued
+    behind live service-loop traffic on the same serial server. It must not
+    have the tighter deadline. At 60s vs MLX's 120s it did, and a --gate run
+    aborted after 8/50 trials on MAX_CONSECUTIVE_FAILURES.
+
+    Per the MLX timeout's own comment, an early timeout is worse than a lost
+    trial: the request still generates server-side, then BrokenPipes, so it
+    degrades LIVE serving for the drain duration."""
+    assert E.GATEWAY_TIMEOUT_S >= E.MLX_TIMEOUT_S
+
+
+# ---- 5. a harness failure must not destroy the last real measurement -------
+# write_proxy_half() ran BEFORE the <50%-valid check, so a run that the script
+# itself declares "not a measurement" still overwrote the gate. On 2026-07-27
+# an 8/50 run and then a 0/50 run (daemon down, connection refused) replaced a
+# genuine fool_rate=44.0% n=50 verdict with ADVISORY n=0. The guard stopped a
+# false verdict; it did not stop evidence loss.
+
+def test_zero_valid_trials_is_not_a_valid_run():
+    assert E.harness_run_is_valid(0, 50) is False
+
+
+def test_far_short_run_is_not_valid():
+    assert E.harness_run_is_valid(8, 50) is False
+
+
+def test_exactly_half_is_valid():
+    """Boundary must match the existing `total < attempted / 2` predicate."""
+    assert E.harness_run_is_valid(25, 50) is True
+
+
+def test_full_run_is_valid():
+    assert E.harness_run_is_valid(50, 50) is True
+
+
+def test_nothing_attempted_is_vacuously_valid():
+    """No pairs attempted makes no claim either way; the caller writes nothing."""
+    assert E.harness_run_is_valid(0, 0) is True
+
+
 # ---- runner ----------------------------------------------------------------
 
 def _run():

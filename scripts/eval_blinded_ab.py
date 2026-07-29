@@ -63,6 +63,7 @@ def _gemini_url():
 # configured daemon port wins over the legacy hardcoded :3002.
 GATEWAY_URL = None
 MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8741/v1/chat/completions")
+MLX_TIMEOUT_S = 120
 USE_GATEWAY = "--gateway" in sys.argv
 USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
@@ -215,6 +216,17 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def harness_run_is_valid(total_valid, attempted):
+    """False when too few trials produced a valid judgment to call it a run.
+
+    Mirrors the long-standing `total < len(pairs) / 2` predicate; extracted so
+    the gate write can be gated on it BEFORE the artifact is touched.
+    """
+    if not attempted:
+        return True
+    return not (total_valid < attempted / 2)
+
+
 def run_mode(use_gateway, use_mlx):
     """Which generator produced the replies — for the results JSON.
 
@@ -280,8 +292,17 @@ def get_ai_response_mlx(message, context_turns=None):
         # 2026-07-11 a 30s timeout abandoned 50/50 requests into the
         # single-threaded server's queue (each still generated, then
         # BrokenPipe'd) — degrading live serving for the drain duration.
-        resp = urllib.request.urlopen(req, timeout=120)
+        resp = urllib.request.urlopen(req, timeout=MLX_TIMEOUT_S)
         data = json.loads(resp.read())
+        # Record which model actually generated this, for the Binoculars
+        # precondition. Taken from the generation response rather than a
+        # separate GET /v1/models probe: this server is single-threaded, so a
+        # metadata request queues behind in-flight generation and times out on
+        # a busy box — which would silently disable the metric. This costs
+        # nothing and reports the true generator.
+        served = data.get("model")
+        if served:
+            _SERVED_MODEL_SEEN.add(str(served))
         choices = data.get("choices", [])
         if choices:
             return choices[0].get("message", {}).get("content", "(empty)")
@@ -392,6 +413,15 @@ def _load_human_config():
 GATEWAY_URL = gateway_url_from_config(_load_human_config(),
                                       os.environ.get("HU_GATEWAY_URL"))
 
+# A gateway trial is a full agent turn: several :8741 generations, queued
+# behind live service-loop traffic on the same serial server. It must never
+# have a tighter deadline than the bare MLX completion (see MLX_TIMEOUT_S's
+# comment — an early timeout still generates server-side, then BrokenPipes,
+# degrading LIVE serving for the drain duration). At 60s a --gate run aborted
+# after 8/50 trials on MAX_CONSECUTIVE_FAILURES while single turns measured
+# ~21s idle.
+GATEWAY_TIMEOUT_S = 240
+
 
 def get_ai_response_gateway(message, context_turns=None):
     try:
@@ -405,7 +435,7 @@ def get_ai_response_gateway(message, context_turns=None):
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        resp = urllib.request.urlopen(req, timeout=60)
+        resp = urllib.request.urlopen(req, timeout=GATEWAY_TIMEOUT_S)
         data = json.loads(resp.read())
         choices = data.get("choices", [])
         if choices:
@@ -470,6 +500,94 @@ BINOCULARS_SCRIPT = os.path.join(
     os.path.dirname(__file__), "blind_ab", "binoculars_score.py")
 
 
+# Model ids observed in this run's generation responses (populated by
+# get_ai_response_mlx). The Binoculars precondition reads this.
+_SERVED_MODEL_SEEN = set()
+
+
+def _model_family(model_id):
+    """Coarse family key for comparing a served model id to a detector base.
+
+    Compares the last path segment case-insensitively, so
+    'mlx-community/gemma-4-31b-it-8bit' and 'gemma-4-31b-it-8bit' match, while
+    'GLM-4.5-Air-4bit' does not. Deliberately coarse: the goal is to catch a
+    base FLIP (gemma -> GLM), not to police quantisation or revision drift,
+    which shift the scores far less than a different model family does.
+    """
+    if not model_id:
+        return None
+    return str(model_id).rstrip("/").split("/")[-1].strip().lower()
+
+
+def _served_model_id():
+    """Which model actually generated this run's replies. None if unobserved.
+
+    Read from the `model` field of the generation responses themselves (see
+    get_ai_response_mlx), NOT from a GET /v1/models probe. The MLX server is
+    single-threaded: a metadata request queues behind in-flight generation and
+    times out on a busy box, which would make the precondition fail spuriously
+    and silently disable the metric. Observed here on 2026-07-28 — curl got a
+    fast 200 while the box was idle, then the same request timed out once
+    another session started loading it.
+
+    If a run somehow saw more than one model (a mid-run serving flip), return
+    them joined so the precondition fails loudly rather than picking one.
+    """
+    if not _SERVED_MODEL_SEEN:
+        return None
+    if len(_SERVED_MODEL_SEEN) > 1:
+        return "+".join(sorted(_SERVED_MODEL_SEEN))
+    return next(iter(_SERVED_MODEL_SEEN))
+
+
+def _binoculars_precondition():
+    """(ok, detail) — is the detector's base the model that generated the text?
+
+    Returns ok=False with a human-readable reason when the served model and the
+    detector base disagree, or when the served model cannot be determined at
+    all (unknown is NOT assumed-fine: an unverifiable precondition is a failed
+    one). HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 forces ok=True, loudly.
+    """
+    detector_base = os.environ.get("HU_BINOCULARS_BASE",
+                                   "mlx-community/gemma-4-31b-it-8bit")
+    override = os.environ.get("HU_BINOCULARS_ALLOW_BASE_MISMATCH") == "1"
+
+    # Only the --mlx path routes generation through the serving endpoint; the
+    # CLI/gateway paths go through the daemon, whose model this cannot observe.
+    if not USE_MLX:
+        return True, "not --mlx: generator not observable here"
+
+    served = _served_model_id()
+    if served is None:
+        if override:
+            return True, "served model unknown (override set)"
+        return False, ("no generation response reported a model id (all "
+                       "generations failed, or the server omits the field) — "
+                       "precondition unverifiable, so treated as failed")
+
+    if _model_family(served) == _model_family(detector_base):
+        return True, f"served={served} matches detector base"
+
+    msg = (f"served model '{served}' != detector base '{detector_base}' — the "
+           "Binoculars performer is not the generator, so the score would be "
+           "uncalibrated")
+    if override:
+        return True, msg + " (OVERRIDDEN)"
+    return False, msg
+
+
+def _merge_binoculars_summary(results_path, summary):
+    """Merge a summary under the 'binoculars' key. Never raises."""
+    try:
+        with open(results_path) as f:
+            doc = json.load(f)
+        doc["binoculars"] = summary
+        with open(results_path, "w") as f:
+            json.dump(doc, f, indent=2)
+    except Exception as e:
+        print(f"  BINOCULARS: could not merge summary: {e}")
+
+
 def _run_binoculars(results_path):
     """Compute the Binoculars AI-tell summary for the just-written results file
     and merge it under the "binoculars" key.
@@ -484,6 +602,33 @@ def _run_binoculars(results_path):
     """
     started = time.time()
     thr_fpr5 = float(os.environ.get("HU_BINOCULARS_THR_FPR5", "0.9643"))
+
+    # PRECONDITION: the detector's performer must BE the generator.
+    #
+    # Binoculars' dirA direction works because the performer half of the pair is
+    # the model that actually produced the text — that is what lets the
+    # cross-entropy denominator explain away the generator's own predictability.
+    # If serving flips to a different base, the pair no longer straddles the
+    # generator and the ratio measures nothing calibrated.
+    #
+    # This is not hypothetical. On 2026-07-28, :8741 was serving
+    # GLM-4.5-Air-4bit while the detector pair was still gemma. The run emitted
+    # per-message AUC 0.5998 (calibrated: 0.845) with mean_ai drifting 1.028 ->
+    # 1.245 toward mean_real. Read naively that says "output is now nearly
+    # indistinguishable"; it actually said "this detector cannot characterise
+    # this generator". A well-formed number where no valid measurement happened
+    # is exactly what .claude/rules/no-number-without-a-measurement.md forbids,
+    # so REFUSE rather than emit it.
+    ok, detail = _binoculars_precondition()
+    if not ok:
+        summary = {"skipped": detail, "elapsed_s": 0.0}
+        print(f"\n  BINOCULARS: SKIPPED — {detail}")
+        print("    Refusing to emit an uncalibrated AUC. Recalibrate the detector "
+              "against the SERVED base, or set HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 "
+              "to override (the number will not be comparable to the baseline).")
+        _merge_binoculars_summary(results_path, summary)
+        return summary
+
     try:
         py = os.environ.get("HU_BINOCULARS_PYTHON",
                             os.path.expanduser("~/.human/venv/bin/python"))
@@ -742,6 +887,21 @@ def main():
         fool_rate = ai_detected_correctly / total * 100 if total else 0.0
         n_real_pairs = sum(1 for t in results if not t.get("is_synthetic"))
         baseline = _load_baseline()
+
+        # A run where fewer than half the attempted trials produced a valid
+        # judgment is a HARNESS failure, not a measurement — so it must not
+        # touch the gate at all. This check used to run AFTER write_proxy_half,
+        # which meant a broken run still clobbered the artifact: on 2026-07-27
+        # an 8/50 run and then a 0/50 run (daemon down, connection refused)
+        # replaced a genuine fool_rate=44.0% n=50 verdict with ADVISORY n=0.
+        # Refusing to emit is the point; refusing to DESTROY is the other half.
+        if not harness_run_is_valid(total, len(pairs)):
+            print(f"\n  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
+                  "not a measurement; fix serving/judge and re-run.")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left at its last real "
+                  "measurement rather than overwritten with this run.")
+            sys.exit(1)
+
         mode, verdict, should_fail = _gate.proxy_gate_decision(
             fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
         _gate.write_proxy_half(_GATE_PATH, {
@@ -755,14 +915,10 @@ def main():
         banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
                   if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
         print(f"\n  GATE: {banner}")
-        # A run where fewer than half the attempted trials produced a valid
-        # judgment is a HARNESS failure, not a measurement — exit non-zero so
-        # nightly logs record it as failed instead of a polite ADVISORY
-        # (2026-07-11: 0/50 valid exited 0 and read like a completed run).
-        if len(pairs) and total < len(pairs) / 2:
-            print(f"  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
-                  "not a measurement; fix serving/judge and re-run.")
-            sys.exit(1)
+        # (The <50%-valid harness check now runs BEFORE the write above, so a
+        # broken run exits without touching the artifact. 2026-07-11: 0/50
+        # valid exited 0 and read like a completed run; 2026-07-27: it also
+        # destroyed the previous real measurement.)
         sys.exit(1 if should_fail else 0)
 
 

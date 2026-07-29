@@ -411,6 +411,58 @@ static void whois_failure_falls_back_to_chatdb_and_fails_closed(void) {
                  (int)HU_BLUE_ALLOW);
 }
 
+/* 2026-07-27 incident: chat.db carried service='SMS' message rows against the
+ * account's own Apple-ID EMAIL handle (Text Message Forwarding attribution
+ * artifacts) and the guard HELD every scheduled send to it. An email address
+ * cannot route SMS/RCS — that evidence must be discarded so the verdict falls
+ * through to the iMessage handle row. */
+static void blue_email_handle_discards_impossible_sms_rcs_evidence(void) {
+    /* The exact incident shape: email handle, artifact SMS recent rows,
+     * iMessage handle row → filter clears recent → verdict ALLOWS. */
+    hu_imessage_service_t recent =
+        hu_imessage_recent_service_email_filter(true, HU_IMSG_SERVICE_SMS);
+    HU_ASSERT_EQ((int)recent, (int)HU_IMSG_SERVICE_UNKNOWN);
+    HU_ASSERT_EQ((int)hu_imessage_blue_verdict_live(HU_WHOIS_INDETERMINATE, recent,
+                                                    HU_IMSG_SERVICE_IMESSAGE, false),
+                 (int)HU_BLUE_ALLOW);
+    /* RCS artifacts are equally impossible for an email handle. */
+    HU_ASSERT_EQ((int)hu_imessage_recent_service_email_filter(true, HU_IMSG_SERVICE_RCS),
+                 (int)HU_IMSG_SERVICE_UNKNOWN);
+    /* Real iMessage evidence on an email handle passes through untouched. */
+    HU_ASSERT_EQ((int)hu_imessage_recent_service_email_filter(true, HU_IMSG_SERVICE_IMESSAGE),
+                 (int)HU_IMSG_SERVICE_IMESSAGE);
+}
+
+static void blue_email_filter_still_fails_closed_without_imessage_evidence(void) {
+    /* An email handle with ONLY artifact rows and no iMessage handle row must
+     * still HOLD — the filter removes impossible evidence, it does not
+     * manufacture reachability. */
+    hu_imessage_service_t recent =
+        hu_imessage_recent_service_email_filter(true, HU_IMSG_SERVICE_SMS);
+    HU_ASSERT_EQ((int)hu_imessage_blue_verdict_live(HU_WHOIS_INDETERMINATE, recent,
+                                                    HU_IMSG_SERVICE_UNKNOWN, false),
+                 (int)HU_BLUE_HOLD);
+    /* SMS-typed handle row (the artifact's twin) also stays held. */
+    HU_ASSERT_EQ((int)hu_imessage_blue_verdict_live(HU_WHOIS_INDETERMINATE, recent,
+                                                    HU_IMSG_SERVICE_SMS, false),
+                 (int)HU_BLUE_HOLD);
+}
+
+static void blue_phone_handle_sms_rcs_evidence_still_binds(void) {
+    /* Phone numbers CAN route SMS/RCS — the filter must not touch them, or the
+     * guard would green-bubble a contact who genuinely left iMessage (e.g.
+     * +1801... switched to Android on 2026-07-27, all inbound RCS). */
+    HU_ASSERT_EQ((int)hu_imessage_recent_service_email_filter(false, HU_IMSG_SERVICE_RCS),
+                 (int)HU_IMSG_SERVICE_RCS);
+    HU_ASSERT_EQ((int)hu_imessage_recent_service_email_filter(false, HU_IMSG_SERVICE_SMS),
+                 (int)HU_IMSG_SERVICE_SMS);
+    HU_ASSERT_EQ((int)hu_imessage_blue_verdict_live(
+                     HU_WHOIS_INDETERMINATE,
+                     hu_imessage_recent_service_email_filter(false, HU_IMSG_SERVICE_RCS),
+                     HU_IMSG_SERVICE_IMESSAGE, false),
+                 (int)HU_BLUE_HOLD);
+}
+
 /* In test builds the probe must never spawn a subprocess. */
 static void whois_probe_never_spawns_under_test(void) {
     hu_allocator_t sys = hu_system_allocator();
@@ -436,6 +488,9 @@ void run_imessage_caps_tests(void) {
     HU_RUN_TEST(whois_negative_is_advisory_and_does_not_mute_live_threads);
     HU_RUN_TEST(whois_negative_binds_in_strict_mode);
     HU_RUN_TEST(whois_failure_falls_back_to_chatdb_and_fails_closed);
+    HU_RUN_TEST(blue_email_handle_discards_impossible_sms_rcs_evidence);
+    HU_RUN_TEST(blue_email_filter_still_fails_closed_without_imessage_evidence);
+    HU_RUN_TEST(blue_phone_handle_sms_rcs_evidence_still_binds);
     HU_RUN_TEST(whois_probe_never_spawns_under_test);
     HU_RUN_TEST(blue_service_parse_from_chatdb_values);
     HU_RUN_TEST(blue_only_imessage_is_blue);

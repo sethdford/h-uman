@@ -158,6 +158,14 @@ hu_blue_verdict_t hu_imessage_blue_verdict_live(hu_whois_reach_t live,
                                                 hu_imessage_service_t handle_service,
                                                 bool negative_is_authoritative);
 
+/* Drop physically-impossible routing evidence before the verdict: an email
+ * handle cannot route SMS/RCS, yet chat.db records such rows against email
+ * handles (Text Message Forwarding attribution artifacts) and they would
+ * otherwise HOLD an iMessage-active Apple-ID handle. Returns `recent`
+ * unchanged for phone handles and for iMessage/UNKNOWN evidence. */
+hu_imessage_service_t hu_imessage_recent_service_email_filter(bool handle_is_email,
+                                                              hu_imessage_service_t recent);
+
 /* Run `imsg whois` for one handle, memoised per handle with a short TTL (this
  * sits on the send hot path). Returns HU_WHOIS_INDETERMINATE on any spawn,
  * timeout, or parse failure, and in test builds (never spawns under HU_IS_TEST).
