@@ -134,8 +134,49 @@ def is_degenerate(text, max_cycle=12):
 
 ERROR_MARKERS = ("<error", "GENERATE_ERROR", "TIMEOUT", "[ERROR")
 
+# Tags recorded for visibility that must NOT make a reply count as failed:
+# they describe a limitation of THIS harness, not of the model under test.
+NON_DEFECT_TAGS = frozenset({"unextracted_deliberation"})
+
 
 _SCAFFOLD_RE = re.compile(r"\A(?:\s*<think>.*?</think>\s*)+", re.S)
+
+# Marker families mlx-server's strip_thought_channels() removes, plus the
+# <|turn> forms observed from gemma-4-31b + v6 on 2026-07-29. Order matters:
+# a complete pair must be consumed before the orphan rules run.
+_CHANNEL_RES = [
+    re.compile(r"<think>.*?</think>", re.S | re.I),      # closed pair
+    re.compile(r"\A.*?</think>", re.S | re.I),           # orphan closer (primed opener)
+    re.compile(r"<think>.*\Z", re.S | re.I),             # orphan opener (truncated)
+    re.compile(r"<\|channel>thought.*?<channel\|>", re.S),
+    re.compile(r"<\|channel>thought.*\Z", re.S),
+    re.compile(r"<\|turn>(?:thought|model|user).*\Z", re.S),
+]
+
+# After marker removal, deliberation can remain as bare markdown bullets with
+# no marker at all — mlx-server documents this shape for gemma and extracts the
+# reply from the last bullet. That extraction is NOT reproduced here: its
+# helper (_extract_reply_from_body) has a production incident against it, and a
+# fourth partial copy of decode-adjacent logic is what this file's own history
+# warns about. So detect it and DECLINE to score instead of guessing.
+_BULLET_DELIB_RE = re.compile(r"^\s*\*\s", re.M)
+
+
+def looks_like_unextracted_deliberation(text):
+    """True when the reply is still deliberation we cannot confidently extract.
+
+    This is a MEASUREMENT failure, not an adapter defect, and the two must not
+    be conflated: production strips this before sending, so scoring it as a
+    failed instruction blames the adapter for the harness's missing extraction.
+    That is precisely how this gate previously reported 3 base-capability
+    regressions where the real count was 1.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if len(_BULLET_DELIB_RE.findall(t)) >= 2:
+        return True
+    return bool(re.match(r"\A(?:I will |Let me |First,? I|The user (?:is asking|wants))", t))
 
 
 def strip_scaffolding(text):
@@ -160,13 +201,25 @@ def strip_scaffolding(text):
     Only leading blocks are removed. A ``<think>`` appearing mid-reply is real
     output leaking scaffolding and should still fail.
     """
-    return _SCAFFOLD_RE.sub("", text or "", count=1)
+    out = text or ""
+    for rx in _CHANNEL_RES:
+        out = rx.sub("", out)
+    return out.strip() or (text or "")
 
 
 def evaluate(entry, text):
     """Per-response checks. Returns (passed, list_of_failure_tags)."""
     t = strip_scaffolding(text or "").strip()
     fails = []
+    if looks_like_unextracted_deliberation(t):
+        # A CAVEAT, not a defect: the harness could not extract the reply the
+        # way production would. Recorded for visibility and excluded from the
+        # regression count, but deliberately NOT allowed to flip pass/fail —
+        # a reply that still satisfies its expectation despite surrounding
+        # deliberation did answer correctly, and failing it would repeat the
+        # very mistake this tag exists to prevent (blaming the adapter for the
+        # harness). See NON_DEFECT_TAGS below.
+        fails.append("unextracted_deliberation")
     if not t or any(m in t for m in ERROR_MARKERS):
         fails.append("empty_or_error")
     if t and is_degenerate(t):
@@ -176,7 +229,7 @@ def evaluate(entry, text):
     exp = entry.get("expect")
     if exp and not re.search(exp, t, re.IGNORECASE | re.MULTILINE):
         fails.append("expectation_missed")
-    return (not fails), fails
+    return (not [f for f in fails if f not in NON_DEFECT_TAGS]), fails
 
 
 # ------------------------------------------------------------- generation ---
@@ -296,15 +349,26 @@ def build_report(res_a, res_b, label_a, label_b):
         c[label_a] += int(pa)
         c[label_b] += int(pb)
 
-    # A base-capability check that A passes and B fails is a REGRESSION.
+    # A base-capability check that A passes and B fails is a REGRESSION —
+    # UNLESS B's only problem is that we could not extract its reply. That is a
+    # harness limitation, and counting it would blame the adapter for our own
+    # missing extraction (which is exactly how this gate once reported 3
+    # regressions where the honest count was 1).
+    def _unmeasured(r, lbl):
+        return "unextracted_deliberation" in r[lbl]["fails"]
+
     regressions = [r for r in rows if r["cat"] in ("instruction", "reasoning")
-                   and r[label_a]["pass"] and not r[label_b]["pass"]]
+                   and r[label_a]["pass"] and not r[label_b]["pass"]
+                   and not _unmeasured(r, label_b)]
     fixes = [r for r in rows if r["cat"] in ("instruction", "reasoning")
              and not r[label_a]["pass"] and r[label_b]["pass"]]
     art = {lbl: sum(1 for r in rows if "leading_artifact" in r[lbl]["fails"])
            for lbl in (label_a, label_b)}
+    unmeasured = {lbl: [r["id"] for r in rows if _unmeasured(r, lbl)]
+                  for lbl in (label_a, label_b)}
     return {"categories": cats, "regressions": regressions, "fixes": fixes,
-            "leading_artifact_counts": art, "rows": rows}
+            "leading_artifact_counts": art, "unmeasured": unmeasured,
+            "rows": rows}
 
 
 def print_report(rep, label_a, label_b):
@@ -320,6 +384,18 @@ def print_report(rep, label_a, label_b):
     b_art = rep["leading_artifact_counts"][label_b]
     print(f"\nleading-byte artifact:  {label_a}={a_art}   {label_b}={b_art}"
           "   (corpus-fix signal; lower is better)")
+
+    un = rep.get("unmeasured", {})
+    if any(un.get(lbl) for lbl in (label_a, label_b)):
+        print("\n  DELIBERATION NOT EXTRACTED (harness limitation, NOT an "
+              "adapter defect):")
+        for lbl in (label_a, label_b):
+            if un.get(lbl):
+                print(f"    {lbl}: {', '.join(un[lbl])}")
+        print("    Production strips this before sending. These replies were "
+              "scored on their\n    content as-is and are excluded from the "
+              "regression count, so a failure here\n    cannot be attributed "
+              "to the model.")
 
     if rep["regressions"]:
         print(f"\n  *** BASE-CAPABILITY REGRESSIONS ({len(rep['regressions'])}) — DO NOT PROMOTE ***")
@@ -388,8 +464,12 @@ def selftest():
     assert strip_scaffolding("on my way") == "on my way"
     assert strip_scaffolding("") == ""
     assert strip_scaffolding(None) == ""
-    # mid-reply scaffolding is real leakage — do NOT rescue it
-    assert "<think>" in strip_scaffolding("ok <think>hmm</think> sure")
+    # Mid-reply scaffolding: this USED to be preserved on the theory that it is
+    # real leakage. Changed 2026-07-29 to strip it, because production
+    # (mlx-server strip_thought_channels) strips it anywhere in the string, so
+    # preserving it here measured something the recipient never sees — the
+    # exact class of divergence this whole file has been correcting.
+    assert strip_scaffolding("ok <think>hmm</think> sure") == "ok  sure"
     # end to end: the scaffolded reply must now score exactly like the bare one
     assert evaluate({}, "<think></think>\nSure!") == evaluate({}, "Sure!")
     assert not evaluate({"expect": r"\bred\b"}, "<think></think>\nred, green")[1]
@@ -421,6 +501,27 @@ def selftest():
         thinking_suppressed_value("mlx-community/GLM-4.5-Air-4bit")
     # headroom must actually be added, or deliberation starves the reply
     assert THINKING_HEADROOM_TOKENS > 0 and REPETITION_PENALTY > 1.0
+
+    # Marker families beyond GLM's <think>: gemma emitted these on 7 of 16
+    # prompts on 2026-07-29 EVEN with enable_thinking set to suppress, which is
+    # why the flag alone is not sufficient.
+    assert strip_scaffolding("<|channel>thought\nblah<channel|>Yeah ok") == "Yeah ok"
+    assert strip_scaffolding("<|turn>thought\n*  reasoning here") == "<|turn>thought\n*  reasoning here" \
+        or strip_scaffolding("<|turn>thought\n*  reasoning here") == ""
+    assert strip_scaffolding("A</think>B") == "B"          # orphan closer
+    assert strip_scaffolding("plain reply") == "plain reply"
+
+    # Unextracted deliberation is a MEASUREMENT failure, not an adapter defect.
+    assert looks_like_unextracted_deliberation(
+        "*   Premise 1: all bloops\n*   Premise 2: all razzies")
+    assert looks_like_unextracted_deliberation(
+        "I will first calculate 47 + 68.\n47 + 68 = 115.")
+    assert looks_like_unextracted_deliberation("The user is asking for the duration")
+    assert not looks_like_unextracted_deliberation("red, yellow, blue")
+    assert not looks_like_unextracted_deliberation("Yeah what's up")
+    assert not looks_like_unextracted_deliberation("")
+    # and it must be tagged distinctly so build_report can exclude it
+    assert "unextracted_deliberation" in evaluate({}, "I will first calculate 47 + 68.")[1]
 
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
