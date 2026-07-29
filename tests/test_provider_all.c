@@ -2511,6 +2511,7 @@ typedef struct hu_rec_provider_ctx {
     char models[HU_REC_MAX_CALLS][HU_REC_MODEL_MAX];
     size_t count;
     const char *succeed_on; /* NULL => always fail */
+    hu_error_t fail_with;   /* 0 => HU_ERR_PROVIDER_UNAVAILABLE */
 } hu_rec_provider_ctx_t;
 
 static void hu_rec_record(hu_rec_provider_ctx_t *r, const char *model, size_t model_len) {
@@ -2538,7 +2539,7 @@ static hu_error_t hu_rec_dispatch(void *ctx, hu_allocator_t *alloc, const char *
     hu_rec_provider_ctx_t *r = (hu_rec_provider_ctx_t *)ctx;
     hu_rec_record(r, model, model_len);
     if (!hu_rec_should_succeed(r, model, model_len))
-        return HU_ERR_PROVIDER_UNAVAILABLE;
+        return r->fail_with ? r->fail_with : HU_ERR_PROVIDER_UNAVAILABLE;
     char *c = (char *)alloc->alloc(alloc->ctx, 3);
     if (!c)
         return HU_ERR_OUT_OF_MEMORY;
@@ -2638,6 +2639,43 @@ static void test_reliable_fallback_provider_gets_fallback_model_first(void) {
     for (size_t i = 0; i < extra_rec.count; i++) {
         HU_ASSERT_STR_NOT_CONTAINS(extra_rec.models[i], "GLM-4.5-Air-4bit");
     }
+
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+/* 2026-07-27 — a 401 cannot be fixed by retrying it 500ms later, but the
+ * reliable wrapper retried it max_retries times anyway.
+ *
+ * Why it slipped through: try_chat's retry gate is hu_error_is_non_retryable(),
+ * which scans the stored message for a 4xx status code. That message comes from
+ * store_error() -> hu_error_string(err) — the enum NAME ("provider auth ..."),
+ * which contains no digits. provider_http.c logs the real HTTP status and then
+ * collapses it into an enum, so the status never reaches the classifier. The
+ * predicate is correct; it was being fed the wrong input.
+ *
+ * Terminal error CODES are now checked alongside the message, so credentials
+ * failures cost one round-trip instead of max_retries + 1. */
+static void test_reliable_does_not_retry_terminal_auth_failure(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    hu_rec_provider_ctx_t rec = {.count = 0, .succeed_on = NULL, .fail_with = HU_ERR_PROVIDER_AUTH};
+    hu_provider_t primary = {.vtable = &hu_rec_vtable, .ctx = &rec};
+
+    hu_provider_t prov;
+    /* max_retries = 2 => a retryable error would produce 3 attempts. */
+    hu_error_t cerr = hu_reliable_create_ex(&alloc, primary, 2, 50, NULL, 0, NULL, 0, &prov);
+    HU_ASSERT_EQ(cerr, HU_OK);
+
+    hu_chat_message_t msgs[1] = {make_user_msg("hi", 2)};
+    hu_chat_request_t req = make_simple_request(msgs, 1);
+    hu_chat_response_t resp = {0};
+    hu_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "gpt-4", 5, 0.0, &resp);
+
+    HU_ASSERT_NEQ(err, HU_OK);
+    /* THE CONTRACT: exactly one attempt. Pre-fix this was 3. */
+    HU_ASSERT_EQ(rec.count, 1u);
 
     hu_chat_response_free(&alloc, &resp);
     if (prov.vtable->deinit)
@@ -3769,6 +3807,7 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_reliable_create_with_model_fallbacks);
     HU_RUN_TEST(test_reliable_create_ex_deep_copies_inner_fallback_arrays);
     HU_RUN_TEST(test_reliable_fallback_provider_gets_fallback_model_first);
+    HU_RUN_TEST(test_reliable_does_not_retry_terminal_auth_failure);
     HU_RUN_TEST(test_reliable_chat_with_extras_primary_succeeds);
     HU_RUN_TEST(test_reliable_warmup_calls_all);
     HU_RUN_TEST(test_reliable_supports_vision_from_gemini);

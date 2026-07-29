@@ -64,6 +64,24 @@ static void circuit_record_success(hu_reliable_ctx_t *r) {
 }
 
 /* Store error for retry-after / classification */
+/* Failures that cannot change between attempts, decided on the error CODE.
+ *
+ * The message-based hu_error_is_non_retryable() scans for a 4xx HTTP status,
+ * but store_error() records hu_error_string(err) — the enum NAME, which has no
+ * digits — because provider_http.c logs the real status and then collapses it
+ * into an enum. The classifier is correct; it just never sees a number for
+ * these. Retrying them only multiplies the round-trips and the latency. */
+static bool error_code_is_terminal(hu_error_t err) {
+    switch (err) {
+    case HU_ERR_PROVIDER_AUTH:    /* 401 — credentials will not change in 500ms */
+    case HU_ERR_INVALID_ARGUMENT: /* malformed request / unknown model */
+    case HU_ERR_NOT_SUPPORTED:    /* provider cannot serve this at all */
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void store_error(hu_reliable_ctx_t *r, hu_error_t err) {
     const char *name = hu_error_string(err);
     if (name) {
@@ -196,7 +214,7 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
         const char *msg = r->last_error_msg;
         size_t len = r->last_error_len;
 
-        if (hu_error_is_non_retryable(msg, len))
+        if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
         if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
             break; /* try next provider */
@@ -246,7 +264,7 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
         const char *msg = r->last_error_msg;
         size_t len = r->last_error_len;
 
-        if (hu_error_is_non_retryable(msg, len))
+        if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
         if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
             break;

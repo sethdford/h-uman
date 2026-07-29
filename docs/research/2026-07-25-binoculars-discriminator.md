@@ -261,11 +261,37 @@ adapter-quality signal without checking whether the harness prompt changed.
 
 ## Caveats
 
-1. **The detector is coupled to the adapter version.** dirA's power comes from the
-   performer being the production generator. Retraining/promoting a new adapter
-   shifts both distributions — thresholds must be recalibrated per adapter (cheap:
-   one 94-text run), and the score is *not* a general AI detector for other models'
-   text.
+1. **The detector is coupled to the SERVING BASE, not just the adapter version.**
+   dirA's power comes from the performer *being* the production generator.
+   Recalibrate when **either** half changes:
+
+   | change | effect |
+   |---|---|
+   | new adapter, same base | distributions shift; recalibrate thresholds (one 94-text run) |
+   | **different serving base** | the pair no longer straddles the generator — scores are **meaningless**, not merely shifted |
+
+   This doc originally said "per adapter", and that was wrong in a way that
+   produced a believable number. On **2026-07-28** `:8741` had flipped to
+   GLM-4.5-Air-4bit while the detector pair was still gemma. The run emitted
+   per-message AUC **0.5998** (calibrated 0.845), `mean_ai` drifting 1.028 →
+   **1.245** toward `mean_real`, and `ai_frac_below_fpr5_thr` collapsing 0.37 →
+   **0.07**. Read naively: "output is now nearly indistinguishable." Actually:
+   "this detector cannot characterise this generator." A base flip does not
+   degrade the score gracefully — it silently converts it into noise centred
+   near 0.5, which is exactly the value that reads as success.
+
+   **Guarded since `d93bfeadb`.** `eval_blinded_ab.py` compares the model id
+   reported in the *generation responses* against `HU_BINOCULARS_BASE` (default
+   gemma) and writes `{"skipped": reason}` instead of a score on mismatch. It
+   fails closed on an unverifiable precondition and on a mid-run serving flip.
+   `HU_BINOCULARS_ALLOW_BASE_MISMATCH=1` overrides, loudly.
+
+   Note the guard reads the generation response, *not* `GET /v1/models`: the MLX
+   server is single-threaded, so a metadata probe queues behind in-flight
+   generation and times out on a busy box — a probe-based guard would fail
+   spuriously and silently disable the metric.
+
+   The score is also *not* a general AI detector for other models' text.
 2. **Single-night corpus.** All 47 AI generations are from one nightly (07-24) under
    one gate configuration. AUC should be re-estimated as more nightly corpora
    accumulate before trusting the exact TPR numbers.
@@ -291,9 +317,15 @@ promotion keystone. Two measurement-side wirings:
    measurement, skips invalid (<50%-judged) runs, is failure-isolated (`error` key,
    exit code unchanged), and never writes to `blind_ab_gate.json`. The 5%-FPR flag
    threshold is `HU_BINOCULARS_THR_FPR5` (default 0.9643) — re-set it after any
-   adapter promotion + recalibration. Trend to watch: windowed AUC drifting *down*
-   toward 0.5 = genuine statistical humanness progress, invisible to the judge
-   today.
+   adapter promotion **or serving-base change** + recalibration (see Caveat 1).
+   Trend to watch: windowed AUC drifting *down* toward 0.5 = genuine statistical
+   humanness progress, invisible to the judge today.
+
+   **Read a falling AUC together with the guard.** Since `d93bfeadb` a base
+   mismatch produces `{"skipped": …}` rather than a low score, so a *number*
+   near 0.5 now means what it should. Before that commit it could equally mean
+   the detector had been decoupled from the generator — the 2026-07-28 run is
+   the worked example.
 2. **DPO rejected-sample miner — WIRED OFF (2026-07-25).**
    `scripts/blind_ab/binoculars_to_dpo.py` pairs each below-threshold generation
    as `rejected` against the trial's `real_seth` as `chosen`, source-tagged
