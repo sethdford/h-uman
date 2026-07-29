@@ -177,19 +177,22 @@ hu_gate_mode_t hu_life_events_gate(void) {
      *
      * BUDGET INTERACTION — read before flipping this live. Measured 2026-07-29
      * against the real seth.json (4 events, 2 of them hedged): this block costs
-     * 838 B. That is safe on the COMPACT head (prod compact_head=5042 B, cap
-     * 8192) but NOT free on the FULL head: prod full_head measured 17225-17834 B
-     * against HU_PROMPT_TRIM_BUDGET_BYTES=16384, i.e. already over by
-     * ~850-1450 B, and per hu_agent_build_persona_head the overflow is absorbed
-     * by the positional cap truncating the GUARD TAIL. This block renders right
-     * after identity, so it survives trimming and displaces ~838 B of that tail
-     * instead.
+     * 838 B.
      *
-     * Note HU_PERSONA_HEAD=shadow still SHIPS the full head (it only logs the
-     * compact size), so "shadow" is not protection here. Prefer enabling
-     * HU_LIFE_EVENTS together with HU_PERSONA_HEAD=live; enabling it on the
-     * full head trades guard-tail bytes for life-event bytes, which is a
-     * different measurement than the one cycle-5 makes. */
+     * On the COMPACT head that is comfortably safe: prod compact_head=5042 B
+     * against an 8192 B cap, so the block lands ~5880 B. Production runs
+     * HU_PERSONA_HEAD=live (verified in the service-loop plist 2026-07-29), so
+     * this is the path that applies today.
+     *
+     * It is NOT free on the FULL head, which is what runs when HU_PERSONA_HEAD
+     * is off or shadow: full_head measured 17225-17834 B against
+     * HU_PROMPT_TRIM_BUDGET_BYTES=16384 — already over by ~850-1450 B, with the
+     * overflow absorbed by the positional cap truncating the GUARD TAIL. This
+     * block renders right after identity, so it survives trimming and would
+     * displace ~838 B of that tail instead. Note HU_PERSONA_HEAD=shadow still
+     * SHIPS the full head (it only logs the compact size), so "shadow" is not
+     * protection. If HU_PERSONA_HEAD is ever reverted, re-measure before
+     * leaving HU_LIFE_EVENTS on. */
     return hu_gate_mode_from_env("HU_LIFE_EVENTS", HU_GATE_OFF);
 }
 

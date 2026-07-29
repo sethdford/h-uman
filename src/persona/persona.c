@@ -3346,6 +3346,25 @@ static void persona_life_events_block(const hu_persona_t *persona, char *out, si
     *out_len = built;
 }
 
+/* Emit the life-event block into an in-progress prompt buffer.
+ *
+ * Both heads call this, so the emit stanza exists exactly once — the two
+ * near-identical call sites were real duplication and tripped the clone
+ * ratchet. persona_compact_append is a thin alias for append_prompt, so a
+ * single function serves the full and compact heads alike. */
+static hu_error_t persona_append_life_events(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                             char **buf, size_t *len, size_t *cap) {
+    char block[1024];
+    size_t block_len = 0;
+    persona_life_events_block(persona, block, sizeof(block), &block_len);
+    if (block_len == 0)
+        return HU_OK; /* gate off, or no events declared */
+    hu_error_t err = append_prompt(alloc, buf, len, cap, block, block_len);
+    if (err != HU_OK)
+        return err;
+    return append_prompt(alloc, buf, len, cap, "\n", 1);
+}
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len) {
@@ -3416,19 +3435,9 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
      * above it, so adjacency carries the correction. Placing it late would also
      * risk the trim budget dropping it from the tail exactly when the prompt is
      * long. Default OFF — see persona_life_events_block. */
-    {
-        char le_block[1024];
-        size_t le_len = 0;
-        persona_life_events_block(persona, le_block, sizeof(le_block), &le_len);
-        if (le_len > 0) {
-            err = append_prompt(alloc, &buf, &len, &cap, le_block, le_len);
-            if (err != HU_OK)
-                goto fail;
-            err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-            if (err != HU_OK)
-                goto fail;
-        }
-    }
+    err = persona_append_life_events(alloc, persona, &buf, &len, &cap);
+    if (err != HU_OK)
+        goto fail;
 
     if (persona->traits && persona->traits_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Personality traits: ", 20);
@@ -5475,19 +5484,9 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
      * heads cannot drift), same reason for sitting right after identity. This
      * is the head production actually ships when HU_PERSONA_HEAD is live, so
      * omitting it here would make the feature a no-op in prod. */
-    {
-        char le_block[1024];
-        size_t le_len = 0;
-        persona_life_events_block(persona, le_block, sizeof(le_block), &le_len);
-        if (le_len > 0) {
-            err = persona_compact_append(alloc, &buf, &len, &cap, le_block, le_len);
-            if (err != HU_OK)
-                goto fail;
-            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
-            if (err != HU_OK)
-                goto fail;
-        }
-    }
+    err = persona_append_life_events(alloc, persona, &buf, &len, &cap);
+    if (err != HU_OK)
+        goto fail;
 
     /* 3. Channel overlay. */
     const hu_persona_overlay_t *overlay = NULL;
