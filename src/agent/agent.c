@@ -20,6 +20,7 @@
 #include "human/config.h"
 #include "human/core/endpoints.h"
 #include "human/core/log.h"
+#include "human/core/tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
@@ -1499,12 +1500,12 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     if (usage && usage->prompt_tokens > 0) {
         outcome.prompt_tokens = usage->prompt_tokens;
     } else {
-        outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+        outcome.prompt_tokens = (uint32_t)hu_tokens_estimate_len(prompt_len);
     }
     if (usage && usage->completion_tokens > 0) {
         outcome.completion_tokens = usage->completion_tokens;
     } else {
-        outcome.completion_tokens = (uint32_t)(response_len / 4);
+        outcome.completion_tokens = (uint32_t)hu_tokens_estimate_len(response_len);
     }
     outcome.guard_decision = (uint8_t)guard_decision;
     outcome.turn_kind = turn_kind;
@@ -2249,9 +2250,9 @@ void hu_agent_clear_history(hu_agent_t *agent) {
 }
 
 uint32_t hu_agent_estimate_tokens(const char *text, size_t len) {
-    if (!text)
-        return 0;
-    return (uint32_t)((len + 3) / 4);
+    /* Thin alias kept for its existing callers; the ratio and the measurement
+     * behind it live in human/core/tokens.h. */
+    return (uint32_t)hu_tokens_estimate_text(text, len);
 }
 
 hu_policy_action_t hu_agent_internal_check_policy(hu_agent_t *agent, const char *tool_name,

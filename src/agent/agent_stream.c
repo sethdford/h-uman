@@ -45,6 +45,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/eval/consistency.h"
 #include "human/experience.h"
 #include "human/hook.h"
@@ -1697,11 +1698,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * metrics before the canonical write site. tool_count + the rest
          * left zero — not computed at this stream-chat site. */
         hu_agent_m3_stash_behavior_metrics(
-            agent, &(hu_agent_behavior_stash_t){
-                       .response_length_chars = (uint32_t)sresp.content_len,
-                       .response_length_tokens_est = (uint32_t)(sresp.content_len / 4),
-                       .response_latency_ms = (uint32_t)llm_duration_ms,
-                   });
+            agent,
+            &(hu_agent_behavior_stash_t){
+                .response_length_chars = (uint32_t)sresp.content_len,
+                .response_length_tokens_est = (uint32_t)hu_tokens_estimate_len(sresp.content_len),
+                .response_latency_ms = (uint32_t)llm_duration_ms,
+            });
         hu_agent_m3_on_provider_success(agent);
         /* B1 redefined (2026-05-17 r3): record outcome at the top of each
          * tool-loop iteration. sresp.content may be empty when there are
@@ -1876,7 +1878,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 agent,
                                 &(hu_agent_behavior_stash_t){
                                     .response_length_chars = (uint32_t)safe_content_len,
-                                    .response_length_tokens_est = (uint32_t)(safe_content_len / 4),
+                                    .response_length_tokens_est =
+                                        (uint32_t)hu_tokens_estimate_len(safe_content_len),
                                     .response_latency_ms = (uint32_t)recovered_retry_latency_ms,
                                 });
                             hu_agent_m3_on_provider_success(agent);
@@ -2243,7 +2246,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)final_content_len,
-                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(final_content_len),
                                .response_latency_ms = (uint32_t)gvr_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -2338,7 +2342,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_agent_m3_stash_behavior_metrics(
                         agent, &(hu_agent_behavior_stash_t){
                                    .response_length_chars = (uint32_t)final_content_len,
-                                   .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                                   .response_length_tokens_est =
+                                       (uint32_t)hu_tokens_estimate_len(final_content_len),
                                    .response_latency_ms = (uint32_t)rethink_latency_ms,
                                });
                     hu_agent_m3_on_provider_success(agent);
@@ -2388,7 +2393,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)final_content_len,
-                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(final_content_len),
                                .response_latency_ms = (uint32_t)const_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -2835,11 +2841,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                  * stash retry-text length. No latency in scope
                                  * at this slim-retry RECOVERED branch. */
                                 hu_agent_m3_stash_behavior_metrics(
-                                    agent,
-                                    &(hu_agent_behavior_stash_t){
-                                        .response_length_chars = (uint32_t)retry_txt_len,
-                                        .response_length_tokens_est = (uint32_t)(retry_txt_len / 4),
-                                    });
+                                    agent, &(hu_agent_behavior_stash_t){
+                                               .response_length_chars = (uint32_t)retry_txt_len,
+                                               .response_length_tokens_est =
+                                                   (uint32_t)hu_tokens_estimate_len(retry_txt_len),
+                                           });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 redefined (2026-05-17 r3): response_guard
                                  * RECOVERED path — the retry rewrote a

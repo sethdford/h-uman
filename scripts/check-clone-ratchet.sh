@@ -32,7 +32,7 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11507   # locked 2026-07-27: MLX default endpoint consolidated to human/core/endpoints.h
+CLONE_BASELINE=11505   # auto-locked 2026-07-30 (was 11507)
                        # sites (file_edit, pdf, image, meeting_transcribe, computer_use
                        # PNG reader), retiring their hand-rolled fopen/fseek/ftell
                        # preambles (was 11541 after origin's reflection

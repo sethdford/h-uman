@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/core/slice.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
@@ -281,8 +282,46 @@ static void mlx_default_base_url_extends_origin(void) {
     HU_ASSERT_STR_EQ(base + olen, "/v1");
 }
 
+/* --- byte->token estimate contract (human/core/tokens.h) ---
+ *
+ * The ratio is deliberately 4 and deliberately BELOW the measured mean of ~4.5
+ * (GLM-4.5-Air 4.506 B/tok, gemma-4-31b 4.514, measured 2026-07-27 on 1,384
+ * real strings — see scripts/measure-bytes-per-token.py). These pin the two
+ * properties that make it safe for BUDGETING, so a future "correction" toward
+ * the mean fails here rather than silently shrinking the safety margin. */
+static void tokens_estimate_rounds_up_never_zero_for_nonempty(void) {
+    /* The defect this replaced: `len / 4` reported a 3-byte reply as 0 tokens.
+     * Anything non-empty must cost at least one token. */
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(1), 1);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(3), 1);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(4), 1);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(5), 2);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(0), 0);
+}
+
+static void tokens_estimate_never_under_reports_at_the_ratio(void) {
+    /* Budgeting safety: the estimate must be >= the true count for any text at
+     * or above HU_TOKENS_BYTES_PER_TOKEN bytes/token. Raising the constant to
+     * the measured mean (4.5) would break this for the p10 of the real corpus,
+     * which runs ~3.28 B/tok. Concretely: 1000 bytes of p10-density text is
+     * ~305 real tokens; at /4 we estimate 250 (already low), at /4.5 we would
+     * estimate 223 — strictly worse. This asserts we did not move that way. */
+    HU_ASSERT_TRUE(HU_TOKENS_BYTES_PER_TOKEN <= 4u);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_len(1000), 250);
+}
+
+static void tokens_estimate_text_is_null_safe_and_matches_len_form(void) {
+    HU_ASSERT_EQ((int)hu_tokens_estimate_text(NULL, 100), 0);
+    const char *s = "hello world, this is some text";
+    size_t n = strlen(s);
+    HU_ASSERT_EQ((int)hu_tokens_estimate_text(s, n), (int)hu_tokens_estimate_len(n));
+}
+
 void run_core_extended_tests(void) {
     HU_TEST_SUITE("Core Extended");
+    HU_RUN_TEST(tokens_estimate_rounds_up_never_zero_for_nonempty);
+    HU_RUN_TEST(tokens_estimate_never_under_reports_at_the_ratio);
+    HU_RUN_TEST(tokens_estimate_text_is_null_safe_and_matches_len_form);
     HU_RUN_TEST(mlx_default_port_str_matches_numeric_port);
     HU_RUN_TEST(mlx_default_origin_ends_with_port_str);
     HU_RUN_TEST(mlx_default_base_url_extends_origin);

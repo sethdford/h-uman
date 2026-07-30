@@ -554,6 +554,7 @@ set(HU_CORE_SOURCES
     src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
+    src/core/tokens.c
     src/core/io_secure.c
     src/core/file.c
     src/core/json.c
