@@ -695,16 +695,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
     /* Scheduled message delivery: once per channel, independent of contacts */
     {
-        static bool sched_loaded_once;
-        if (!sched_loaded_once) {
-            const char *sh = getenv("HOME");
-            if (sh) {
-                char sp[512];
-                int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sh);
-                if (sn > 0 && (size_t)sn < sizeof(sp))
-                    hu_conversation_sched_load(sp, (size_t)sn);
-            }
-            sched_loaded_once = true;
+        /* Re-sync from disk when the file changed — `human schedule add`
+         * writes from a separate process, and the previous once-per-process
+         * load left those entries invisible until the next daemon restart
+         * (2026-07-27). Cheap: one stat() per pass, load only on change. */
+        const char *sched_home = getenv("HOME");
+        if (sched_home) {
+            char sp[512];
+            int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sched_home);
+            if (sn > 0 && (size_t)sn < sizeof(sp))
+                hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
         }
         uint64_t sched_now = (uint64_t)time(NULL) * 1000ULL;
         for (size_t sc = 0; sc < channel_count; sc++) {

@@ -64,6 +64,24 @@ static void circuit_record_success(hu_reliable_ctx_t *r) {
 }
 
 /* Store error for retry-after / classification */
+/* Failures that cannot change between attempts, decided on the error CODE.
+ *
+ * The message-based hu_error_is_non_retryable() scans for a 4xx HTTP status,
+ * but store_error() records hu_error_string(err) — the enum NAME, which has no
+ * digits — because provider_http.c logs the real status and then collapses it
+ * into an enum. The classifier is correct; it just never sees a number for
+ * these. Retrying them only multiplies the round-trips and the latency. */
+static bool error_code_is_terminal(hu_error_t err) {
+    switch (err) {
+    case HU_ERR_PROVIDER_AUTH:    /* 401 — credentials will not change in 500ms */
+    case HU_ERR_INVALID_ARGUMENT: /* malformed request / unknown model */
+    case HU_ERR_NOT_SUPPORTED:    /* provider cannot serve this at all */
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void store_error(hu_reliable_ctx_t *r, hu_error_t err) {
     const char *name = hu_error_string(err);
     if (name) {
@@ -107,6 +125,25 @@ static bool model_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
     if (a_len != b_len)
         return false;
     return memcmp(a, b, a_len) == 0;
+}
+
+/* Which model index a NON-primary (extra) provider should be offered on the
+ * m-th pass of the chain walk.
+ *
+ * A model_fallbacks entry ("when GLM-4.5-Air-4bit is unavailable, use
+ * gemini-3.5-flash") names models the operator expects a DIFFERENT provider to
+ * serve. Offering an extra provider chain[0] — the primary's own model — is a
+ * category error: on 2026-07-27 it made the daemon POST the local model id to
+ * Vertex and collect `HTTP 400 Invalid Endpoint name` (x3, one per retry)
+ * before the declared gemini-3.5-flash was ever tried.
+ *
+ * Rotating by one puts the declared fallbacks first and keeps chain[0] as the
+ * extras' LAST resort. Rotation is a bijection over [0, chain_count), so every
+ * (extra provider, model) pair is still reachable — this reorders coverage, it
+ * does not reduce it. With no fallbacks declared (chain_count == 1) the index
+ * is unchanged, so single-model configs behave exactly as before. */
+static hu_model_ref_t extras_model(const hu_model_ref_t *chain, size_t m, size_t chain_count) {
+    return chain[chain_count < 2 ? m : (m + 1) % chain_count];
 }
 
 /* Build model chain: [model, fallback1, fallback2, ...]. Caller frees chain. */
@@ -177,7 +214,7 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
         const char *msg = r->last_error_msg;
         size_t len = r->last_error_len;
 
-        if (hu_error_is_non_retryable(msg, len))
+        if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
         if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
             break; /* try next provider */
@@ -227,7 +264,7 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
         const char *msg = r->last_error_msg;
         size_t len = r->last_error_len;
 
-        if (hu_error_is_non_retryable(msg, len))
+        if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
         if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
             break;
@@ -287,11 +324,13 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
             circuit_record_failure(r);
         }
 
-        /* Try extras */
+        /* Try extras — see extras_model() for why they do NOT get cur_model
+         * when the operator declared model fallbacks. */
+        hu_model_ref_t xm = extras_model(chain, m, chain_count);
         for (size_t e = 0; e < r->extras_count; e++) {
             err = try_chat_with_system(r, alloc, &r->extras[e].provider, system_prompt,
-                                       system_prompt_len, message, message_len, cur_model, cur_len,
-                                       temperature, out, out_len);
+                                       system_prompt_len, message, message_len, xm.model,
+                                       xm.model_len, temperature, out, out_len);
             if (err == HU_OK) {
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
                 return HU_OK;
@@ -329,8 +368,11 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
             circuit_record_failure(r);
         }
 
+        /* Extras get the declared fallback models first; chain[0] is the
+         * primary's model and is their last resort. See extras_model(). */
+        hu_model_ref_t xm = extras_model(chain, m, chain_count);
         for (size_t e = 0; e < r->extras_count; e++) {
-            err = try_chat(r, alloc, &r->extras[e].provider, request, cur_model, cur_len,
+            err = try_chat(r, alloc, &r->extras[e].provider, request, xm.model, xm.model_len,
                            temperature, out);
             if (err == HU_OK) {
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));

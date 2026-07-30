@@ -294,6 +294,15 @@ def get_ai_response_mlx(message, context_turns=None):
         # BrokenPipe'd) — degrading live serving for the drain duration.
         resp = urllib.request.urlopen(req, timeout=MLX_TIMEOUT_S)
         data = json.loads(resp.read())
+        # Record which model actually generated this, for the Binoculars
+        # precondition. Taken from the generation response rather than a
+        # separate GET /v1/models probe: this server is single-threaded, so a
+        # metadata request queues behind in-flight generation and times out on
+        # a busy box — which would silently disable the metric. This costs
+        # nothing and reports the true generator.
+        served = data.get("model")
+        if served:
+            _SERVED_MODEL_SEEN.add(str(served))
         choices = data.get("choices", [])
         if choices:
             return choices[0].get("message", {}).get("content", "(empty)")
@@ -491,6 +500,94 @@ BINOCULARS_SCRIPT = os.path.join(
     os.path.dirname(__file__), "blind_ab", "binoculars_score.py")
 
 
+# Model ids observed in this run's generation responses (populated by
+# get_ai_response_mlx). The Binoculars precondition reads this.
+_SERVED_MODEL_SEEN = set()
+
+
+def _model_family(model_id):
+    """Coarse family key for comparing a served model id to a detector base.
+
+    Compares the last path segment case-insensitively, so
+    'mlx-community/gemma-4-31b-it-8bit' and 'gemma-4-31b-it-8bit' match, while
+    'GLM-4.5-Air-4bit' does not. Deliberately coarse: the goal is to catch a
+    base FLIP (gemma -> GLM), not to police quantisation or revision drift,
+    which shift the scores far less than a different model family does.
+    """
+    if not model_id:
+        return None
+    return str(model_id).rstrip("/").split("/")[-1].strip().lower()
+
+
+def _served_model_id():
+    """Which model actually generated this run's replies. None if unobserved.
+
+    Read from the `model` field of the generation responses themselves (see
+    get_ai_response_mlx), NOT from a GET /v1/models probe. The MLX server is
+    single-threaded: a metadata request queues behind in-flight generation and
+    times out on a busy box, which would make the precondition fail spuriously
+    and silently disable the metric. Observed here on 2026-07-28 — curl got a
+    fast 200 while the box was idle, then the same request timed out once
+    another session started loading it.
+
+    If a run somehow saw more than one model (a mid-run serving flip), return
+    them joined so the precondition fails loudly rather than picking one.
+    """
+    if not _SERVED_MODEL_SEEN:
+        return None
+    if len(_SERVED_MODEL_SEEN) > 1:
+        return "+".join(sorted(_SERVED_MODEL_SEEN))
+    return next(iter(_SERVED_MODEL_SEEN))
+
+
+def _binoculars_precondition():
+    """(ok, detail) — is the detector's base the model that generated the text?
+
+    Returns ok=False with a human-readable reason when the served model and the
+    detector base disagree, or when the served model cannot be determined at
+    all (unknown is NOT assumed-fine: an unverifiable precondition is a failed
+    one). HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 forces ok=True, loudly.
+    """
+    detector_base = os.environ.get("HU_BINOCULARS_BASE",
+                                   "mlx-community/gemma-4-31b-it-8bit")
+    override = os.environ.get("HU_BINOCULARS_ALLOW_BASE_MISMATCH") == "1"
+
+    # Only the --mlx path routes generation through the serving endpoint; the
+    # CLI/gateway paths go through the daemon, whose model this cannot observe.
+    if not USE_MLX:
+        return True, "not --mlx: generator not observable here"
+
+    served = _served_model_id()
+    if served is None:
+        if override:
+            return True, "served model unknown (override set)"
+        return False, ("no generation response reported a model id (all "
+                       "generations failed, or the server omits the field) — "
+                       "precondition unverifiable, so treated as failed")
+
+    if _model_family(served) == _model_family(detector_base):
+        return True, f"served={served} matches detector base"
+
+    msg = (f"served model '{served}' != detector base '{detector_base}' — the "
+           "Binoculars performer is not the generator, so the score would be "
+           "uncalibrated")
+    if override:
+        return True, msg + " (OVERRIDDEN)"
+    return False, msg
+
+
+def _merge_binoculars_summary(results_path, summary):
+    """Merge a summary under the 'binoculars' key. Never raises."""
+    try:
+        with open(results_path) as f:
+            doc = json.load(f)
+        doc["binoculars"] = summary
+        with open(results_path, "w") as f:
+            json.dump(doc, f, indent=2)
+    except Exception as e:
+        print(f"  BINOCULARS: could not merge summary: {e}")
+
+
 def _run_binoculars(results_path):
     """Compute the Binoculars AI-tell summary for the just-written results file
     and merge it under the "binoculars" key.
@@ -505,6 +602,33 @@ def _run_binoculars(results_path):
     """
     started = time.time()
     thr_fpr5 = float(os.environ.get("HU_BINOCULARS_THR_FPR5", "0.9643"))
+
+    # PRECONDITION: the detector's performer must BE the generator.
+    #
+    # Binoculars' dirA direction works because the performer half of the pair is
+    # the model that actually produced the text — that is what lets the
+    # cross-entropy denominator explain away the generator's own predictability.
+    # If serving flips to a different base, the pair no longer straddles the
+    # generator and the ratio measures nothing calibrated.
+    #
+    # This is not hypothetical. On 2026-07-28, :8741 was serving
+    # GLM-4.5-Air-4bit while the detector pair was still gemma. The run emitted
+    # per-message AUC 0.5998 (calibrated: 0.845) with mean_ai drifting 1.028 ->
+    # 1.245 toward mean_real. Read naively that says "output is now nearly
+    # indistinguishable"; it actually said "this detector cannot characterise
+    # this generator". A well-formed number where no valid measurement happened
+    # is exactly what .claude/rules/no-number-without-a-measurement.md forbids,
+    # so REFUSE rather than emit it.
+    ok, detail = _binoculars_precondition()
+    if not ok:
+        summary = {"skipped": detail, "elapsed_s": 0.0}
+        print(f"\n  BINOCULARS: SKIPPED — {detail}")
+        print("    Refusing to emit an uncalibrated AUC. Recalibrate the detector "
+              "against the SERVED base, or set HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 "
+              "to override (the number will not be comparable to the baseline).")
+        _merge_binoculars_summary(results_path, summary)
+        return summary
+
     try:
         py = os.environ.get("HU_BINOCULARS_PYTHON",
                             os.path.expanduser("~/.human/venv/bin/python"))

@@ -3230,6 +3230,64 @@ static void sched_save_and_load_roundtrip(void) {
     (void)unlink(path);
 }
 
+/* 2026-07-27 incident: the daemon loaded scheduled.json ONCE per process, so
+ * a `human schedule add` from a separate process (which rewrites the file)
+ * stayed invisible until the next daemon restart. The reload-if-changed
+ * contract: a file rewrite AFTER the initial load is picked up on the next
+ * delivery pass; an unchanged file is not re-read (no thrash); an absent
+ * file leaves memory authoritative. */
+static void sched_reload_if_changed_picks_up_external_add(void) {
+    const char *path = "/tmp/hu_test_sched_reload.json";
+    (void)unlink(path);
+    uint64_t now = (uint64_t)time(NULL) * 1000ULL;
+
+    /* Initial state on disk: one entry (as if written at daemon start). */
+    hu_conversation_schedule_message_on("first_user", 10, "imessage", 8, "first msg", 9,
+                                        now - 1000);
+    HU_ASSERT_EQ(hu_conversation_sched_save(path, strlen(path)), HU_OK);
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+
+    /* Simulate the CLI: a separate process loads, adds, saves. Here: add a
+     * second entry in memory and rewrite the file (size changes, so the
+     * fingerprint registers even within the same mtime second). */
+    hu_conversation_schedule_message_on("late_added_user", 15, "imessage", 8,
+                                        "added after daemon start", 24, now - 500);
+    HU_ASSERT_EQ(hu_conversation_sched_save(path, strlen(path)), HU_OK);
+
+    /* Wipe memory (drain both) to prove the next pass re-reads the FILE. */
+    char contact[128], channel[32], msg[512];
+    while (hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                              sizeof(channel), msg, sizeof(msg)) > 0)
+        ;
+
+    /* The delivery-pass call: file changed since last load -> reload. */
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    size_t len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                                    sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "first_user");
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "late_added_user");
+
+    /* Unchanged file: reload must NOT resurrect the flushed entries. */
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_EQ(0, (int)len);
+
+    /* Absent file: memory stays authoritative, no error. */
+    (void)unlink(path);
+    hu_conversation_schedule_message_on("mem_only_user", 13, "imessage", 8, "in memory", 9,
+                                        now - 100);
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "mem_only_user");
+}
+
 /* ── Split boundary edge case tests ──────────────────────────────────── */
 
 static void split_into_texts_exact_boundary(void) {
@@ -5251,6 +5309,7 @@ void run_conversation_tests(void) {
 
     /* Schedule persistence */
     HU_RUN_TEST(sched_save_and_load_roundtrip);
+    HU_RUN_TEST(sched_reload_if_changed_picks_up_external_add);
 
     /* Split edge cases */
     HU_RUN_TEST(split_into_texts_exact_boundary);

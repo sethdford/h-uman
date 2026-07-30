@@ -130,6 +130,9 @@ eval_blinded_results.json
 eval_success_criteria.json
 # grounding_ab.py per-trial output contains real message text (PII) — never commit
 data/grounding_ab.json
+# ab_phrase_banks.py: replies generated against real ground-truth threads, plus
+# the two isolated gateways' logs. Same PII reasoning as grounding_ab.json.
+data/ab_phrase_banks/
 
 # Training data and model weights
 convo-training-*/

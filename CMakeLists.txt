@@ -723,6 +723,7 @@ set(HU_CORE_SOURCES
     src/persona/celebration.c
     src/persona/warm_response.c
     src/persona/narrative_self.c
+    src/persona/life_events.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
     # into the agent's persona context.
@@ -3755,6 +3756,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_taste.c
     tests/test_somatic.c
     tests/test_narrative_self.c
+    tests/test_persona_life_events.c
     tests/test_attachment.c
     tests/test_intrinsic_drive.c
     tests/test_prosocial_routine.c
