@@ -204,3 +204,84 @@ rather than inferred afterwards.
 `c4-015, c4-028, c4-071, c4-079, c4-082, c4-113, c4-129, c4-160`. That sheet is
 **unaffected** — it contains v5 outputs generated before v6 existed. But those 8 items,
 including the flagship `c4-129`, can never again serve as held-out tests for v6.
+
+---
+
+## ADDENDUM 2026-07-30 — the ORPO adapters were NO-OPS; v6.2 (SFT) is the first real one
+
+**v6 and v6.1 never trained.** Every `lora_b` is exactly 0.0 in both, and all five v6
+checkpoints (iters 50/100/150/200/final) are byte-identical (`d4b0f412…`). Since LoRA
+computes `x@W + scale·(x@A)@B`, a zero `B` makes the adapter mathematically identical to
+the base model. Working reference: prod v5 has 80/80 `lora_b` non-zero, max|B| 2.03e-02.
+
+This **supersedes the "under-trained, margin stayed negative" reading above**. That
+margin, and the bit-identical validation, were the frozen base model plus batch noise —
+one fact, not two. Both are marked `FAILED_NO_OP` in the registry.
+
+### Root cause: the package, not the objective or the base
+
+60-second repro on gemma-2-2b, no production involved:
+
+| `--train-mode` | `lora_b` non-zero | |
+|---|---|---|
+| `orpo` | 0/28 | NO-OP, exits 0 |
+| `cpo` | 0/28 | NO-OP, exits 0 |
+| `dpo` | 28/28, max 4.77e-03 | trains |
+
+`mlx-lm-lora` 3.0.0's ORPO and CPO emit no-op adapters. DPO works but
+`load_reference_model()` always loads a second full copy — 2×56 GB for GLM-4.5-Air,
+which does not fit in 128 GB; its `ref_model is None` branch merely zeroes the reference
+scores, so there is no legitimate reference-free path. **The objective that fits is
+broken; the objective that works does not fit.**
+
+### v6.2 — chosen-only SFT via mlx_lm.lora
+
+`seth-glm-air-v62-sft-20260730-054131`, 463-pair corpus, 500 iters, lr 1e-5,
+`mask_prompt: true`, scale 2.0. This is the trainer that produced the live v5 adapter.
+
+| Evidence | Value |
+|---|---|
+| `lora_b` non-zero | **80/80**, max|B| 7.529e-03 |
+| Val loss | **5.029 → 1.923** (real descent; ORPO's was inert) |
+| Train loss | 5.551 → 1.044 |
+| Base-capability smoke vs v5 | **12/16 vs 12/16 — tie** (3 regressions, 3 fixes) |
+| Served capability probe | **6/6** (persona 2/2, instruction 2/2, reasoning 2/2) |
+
+**What SFT gives up:** it rewards the chosen reply without penalising the rejected one,
+so it teaches "sound like this" but not "and not like that". The n=40 re-weighting
+survives (the 6 human-detected pairs appear 8× each).
+
+### The arm looks better on target — with two new risks
+
+16/16 generated. Median length ratio **1.38×** (cycle-4's v5 arm was 2.25×); longer than
+Seth in **10/16** (was 82%). Replies are terse and ask concrete questions
+("Scheduled to unpack what?", "What's the issue?") rather than reaching for platitudes.
+
+Two defects a length metric would not catch:
+
+- **`c5-010` volunteered a street address**: "1215 Bayshore Drive NE, unit 407. Why you
+  trying to stalk me?" The persona guidance is city-level only, never the street address.
+  Real or hallucinated, both are bad — privacy leak or confabulation. **This should block
+  promotion, and the item should not go to raters as-is.**
+- **`c5-005` fabricated an action**: "I checked with HR, they won't release anything
+  without approval from legal." The model asserts it did something it did not do.
+
+Plausible mechanism: the corpus rewards "specific over generic", and specificity without
+a boundary produces volunteered addresses and invented actions.
+
+### Confound for cycle 5
+
+The persona head changed between cycle 4 and now — the bio-dump exemplar is gone
+(now "Yeah, St Pete. Finally on the water") and the emoji rule tightened to "none";
+5287 B → 5055 B. The arm was generated under the CURRENT head, so cycle-5 vs cycle-4
+differs in **two** ways (adapter and head). Report it as "v5+old-head vs v6.2+new-head",
+not as a clean adapter A/B.
+
+### Guards added
+
+- `scripts/train-glm-adapter.sh` now asserts `lora_b` is non-zero after every run and
+  refuses to accept a no-op, refuses `--train-mode orpo|cpo` up front, and gates the
+  arena-overlap check on estimated run length rather than a flat constant.
+- `scripts/register_v6_adapter.py` repeats the no-op check at registration (a registry
+  row is what a promotion gate reads) and detects the objective from the log instead of
+  assuming it.

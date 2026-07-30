@@ -15,15 +15,50 @@
 set -uo pipefail
 
 TRAIN_PY=/Users/sethford/.human/venvs/train312/bin/python
-CONFIG=/Users/sethford/.human/training-data/glm-v6-orpo-config.yaml
-DATA_DIR=/Users/sethford/.human/training-data/glm-v6-pref
 SERVICE=gui/501/ai.human.mlx-server
-STAMP=$(date +%Y%m%d-%H%M%S)
-ADAPTER=/Users/sethford/.human/training-data/adapters/seth-glm-air-v6-orpo-${STAMP}
-LOG=/Users/sethford/.human/logs/train-glm-v6-orpo-${STAMP}.log
 
+# Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
+# forking this script, so every run keeps the same guards.
+CONFIG=/Users/sethford/.human/training-data/glm-v62-sft-config.yaml
+ORPO_BETA=0.05
+TAG=v62-sft
+TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes)
+TRAIN_MODE=""             # only meaningful for mlx_lm_lora
+EST_MINUTES=25            # estimated run length; gates the arena-overlap check
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)    DRY_RUN=1; shift ;;
+    --config)     CONFIG=$2; shift 2 ;;
+    --beta)       ORPO_BETA=$2; shift 2 ;;
+    --tag)        TAG=$2; shift 2 ;;
+    --trainer)    TRAINER=$2; shift 2 ;;
+    --train-mode) TRAIN_MODE=$2; shift 2 ;;
+    --est-minutes) EST_MINUTES=$2; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+# mlx-lm-lora's orpo and cpo modes are KNOWN BROKEN on 3.0.0: they exit 0 and
+# write an adapter whose every lora_b is 0.0, i.e. a mathematical no-op. Verified
+# with a 60s repro on gemma-2-2b (orpo 0/28, cpo 0/28, dpo 28/28 non-zero).
+# The post-run lora_b guard below catches it regardless, but refuse up front
+# rather than spend a production-dark window producing a known no-op.
+case "$TRAINER:$TRAIN_MODE" in
+  mlx_lm_lora:orpo|mlx_lm_lora:cpo)
+    echo "[train] REFUSING --train-mode $TRAIN_MODE: mlx-lm-lora 3.0.0 emits a" >&2
+    echo "        no-op adapter for it (all lora_b == 0). Use --trainer mlx_lm," >&2
+    echo "        or dpo if you have memory for a second full model copy." >&2
+    exit 2 ;;
+esac
+
+STAMP=$(date +%Y%m%d-%H%M%S)
+ADAPTER=/Users/sethford/.human/training-data/adapters/seth-glm-air-${TAG}-${STAMP}
+LOG=/Users/sethford/.human/logs/train-glm-${TAG}-${STAMP}.log
+# The data dir is whatever the config says -- read it back so preflight checks the
+# corpus this run will actually use, not a hardcoded guess.
+DATA_DIR=$(awk '/^data:/{print $2; exit}' "$CONFIG" 2>/dev/null)
 
 say() { printf '[v6-train] %s\n' "$*"; }
 die() { printf '[v6-train] FATAL: %s\n' "$*" >&2; exit 1; }
@@ -50,10 +85,16 @@ read -r NEXT_ARENA MINS_AWAY <<<"$(date '+%H %M' | awk '{
   printf "%02d:23 %d", int(best/60)%24, best-now
 }')"
 say "now $(date '+%H:%M'), next conversation-arena slot ${NEXT_ARENA} (${MINS_AWAY} min away)"
-if [ "$MINS_AWAY" -lt 45 ]; then
-  die "conversation-arena fires in ${MINS_AWAY} min and loads a model. Refusing to start:
-       a second loader beside the 56 GB base is the documented thrash condition.
-       Wait for that run to finish, then re-run this script."
+# The hazard is OVERLAP, not proximity: what matters is whether this run finishes
+# before the arena loads its own model. Gate on the estimated run length plus a
+# buffer rather than a flat constant, so a 15-minute job is not blocked by a
+# threshold sized for a 40-minute one. --est-minutes is the caller's honest
+# estimate; the buffer absorbs a slow model load.
+NEEDED=$(( EST_MINUTES + 15 ))
+if [ "$MINS_AWAY" -lt "$NEEDED" ]; then
+  die "conversation-arena fires in ${MINS_AWAY} min; this run needs ~${EST_MINUTES} min
+       plus a 15 min buffer (${NEEDED}). A second loader beside the 56 GB base is the
+       documented thrash condition. Wait for that arena run to finish, then re-run."
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -130,10 +171,16 @@ say "log      -> $LOG"
 # 0.1 respectively, so setting them in the config is a SILENT no-op. Verified on
 # 3.0.0 -- `train_mode: orpo` in YAML produced "Unsupported data format for SFT
 # training", and `beta: 0.05` would have silently trained at 0.1.
-ORPO_BETA=0.05
-"$TRAIN_PY" -m mlx_lm_lora.train -c "$CONFIG" \
-    --train-mode orpo --beta "$ORPO_BETA" \
-    --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+# ORPO_BETA comes from --beta (or its default) at the top; do NOT reassign it here.
+if [ "$TRAINER" = "mlx_lm" ]; then
+  say "trainer: mlx_lm.lora (SFT) -- the path that produced the live v5 adapter"
+  "$TRAIN_PY" -m mlx_lm.lora -c "$CONFIG" --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+else
+  say "trainer: mlx_lm_lora --train-mode ${TRAIN_MODE:-dpo} --beta $ORPO_BETA"
+  "$TRAIN_PY" -m mlx_lm_lora.train -c "$CONFIG" \
+      --train-mode "${TRAIN_MODE:-dpo}" --beta "$ORPO_BETA" \
+      --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+fi
 RC=${PIPESTATUS[0]}
 
 if [ "$RC" -ne 0 ]; then
@@ -144,9 +191,11 @@ fi
 # The banner echoes the mode the trainer actually resolved. Assert on it rather
 # than trusting the flag took -- a silently-ignored train_mode is the failure
 # that produced a full "successful" SFT run instead of the ORPO we asked for.
-grep -qiE "Training Mode:.*ORPO" "$LOG" \
-  || die "trainer did not resolve mode=ORPO (see $LOG) -- refusing to trust this run"
-say "confirmed: trainer resolved mode=ORPO, beta=$ORPO_BETA"
+if [ "$TRAINER" = "mlx_lm_lora" ]; then
+  grep -qiE "Training Mode:.*${TRAIN_MODE:-dpo}" "$LOG" \
+    || die "trainer did not resolve mode=${TRAIN_MODE:-dpo} (see $LOG)"
+  say "confirmed: trainer resolved mode=${TRAIN_MODE:-dpo}, beta=$ORPO_BETA"
+fi
 
 # --- verify the artifact BEFORE spending a smoke run on it --------------------
 CFG="$ADAPTER/adapter_config.json"
@@ -156,6 +205,38 @@ CFG="$ADAPTER/adapter_config.json"
 SCALE=$("$TRAIN_PY" -c "import json;print(json.load(open('$CFG')).get('lora_parameters',{}).get('scale'))")
 say "adapter_config.json lora_parameters.scale = $SCALE"
 [ "$SCALE" = "2.0" ] || die "scale is $SCALE, expected 2.0 -- adapter is NOT safe to serve"
+
+# --- THE NO-OP GUARD ----------------------------------------------------------
+# LoRA computes  out = x@W + scale * (x@A)@B.  B is ZERO-INITIALISED, so if every
+# lora_b is still 0.0 after training, the adapter is mathematically identical to
+# the base model -- a perfect no-op that a green exit code, a moving loss curve
+# and a saved .safetensors file all fail to reveal.
+#
+# This is not hypothetical: mlx-lm-lora 3.0.0's ORPO produced exactly that twice
+# (v6 on 2026-07-27, v6.1 on 07-28), and it cost two production-dark windows and
+# a wrong "under-trained" diagnosis before anyone checked the weights. Reference
+# point: the working v5 adapter has 80/80 lora_b non-zero, max|B| = 2.03e-02.
+say "checking the adapter actually learned something..."
+"$TRAIN_PY" - "$ADAPTER/adapters.safetensors" <<'PY' || die "adapter is a NO-OP -- refusing to register or serve it"
+import sys
+import mlx.core as mx
+w = mx.load(sys.argv[1])
+b = [k for k in w if k.endswith("lora_b")]
+if not b:
+    print("[v6-train] FATAL: no lora_b tensors at all", file=sys.stderr); sys.exit(1)
+nz = sum(1 for k in b if float(mx.abs(w[k]).max()) > 0)
+mx_abs = max(float(mx.abs(w[k]).max()) for k in b)
+print(f"[v6-train] lora_b non-zero {nz}/{len(b)}, max|B| = {mx_abs:.3e}")
+if nz == 0:
+    print("[v6-train] FATAL: every lora_b is 0.0 -> adapter == base model, "
+          "nothing was learned", file=sys.stderr)
+    sys.exit(1)
+if nz < len(b) // 2:
+    print(f"[v6-train] FATAL: only {nz}/{len(b)} lora_b are non-zero -- partial "
+          "or corrupt training", file=sys.stderr)
+    sys.exit(1)
+PY
+say "confirmed: the adapter has real weight movement"
 
 # --- base-capability smoke, in the SAME dark window ---------------------------
 # Two dark windows cost more downtime than one longer one, and the smoke test

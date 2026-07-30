@@ -18,11 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adapter_registry import record_training  # noqa: E402
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# mlx_lm_lora (preference modes) reports accuracy and margin; mlx_lm (SFT) reports
+# neither. Match both shapes rather than silently finding nothing and registering
+# an adapter with no training evidence at all.
 VAL = re.compile(
     r"Iter\s+(\d+):\s*Val loss\s+([0-9.-]+).*?Val accuracy\s+([0-9.-]+).*?"
     r"Val margin\s+([0-9.-]+)", re.I)
+VAL_SFT = re.compile(r"Iter\s+(\d+):\s*Val loss\s+([0-9.-]+)", re.I)
 TRAIN = re.compile(
     r"Iter\s+(\d+):\s*loss\s+([0-9.-]+),.*?acc\s+([0-9.-]+),\s*margin\s+([0-9.-]+)", re.I)
+TRAIN_SFT = re.compile(r"Iter\s+(\d+):\s*Train loss\s+([0-9.-]+)", re.I)
 
 
 def val_is_inert(vals):
@@ -36,7 +41,7 @@ def val_is_inert(vals):
     """
     if len(vals) < 2:
         return False
-    return len({(v[1], v[2], v[3]) for v in vals}) == 1
+    return len({v[1] for v in vals}) == 1
 
 
 def main():
@@ -59,11 +64,39 @@ def main():
         sys.exit(f"FATAL: adapter scale is {scale}, expected 2.0 -- not registering an unsafe adapter")
 
     text = ANSI.sub("", Path(a.log).read_text(errors="replace"))
-    if "Training Mode: ORPO" not in text and "Training mode: ORPO" not in text:
-        sys.exit("FATAL: log does not show mode=ORPO -- refusing to register it as an ORPO run")
+
+    # Determine the objective FROM THE LOG. Never assume it -- an adapter recorded
+    # under the wrong objective is a provenance lie a later gate would act on.
+    m = re.search(r"Training [Mm]ode:\s*(\w+)", text)
+    if m:
+        objective = m.group(1).lower()          # mlx_lm_lora path (orpo/dpo/cpo/...)
+    elif re.search(r"Iter\s+\d+:\s*Train loss", text):
+        objective = "sft"                        # mlx_lm.lora path
+    else:
+        sys.exit("FATAL: cannot determine the training objective from the log -- "
+                 "refusing to register an adapter with unknown provenance")
+
+    # The no-op check, again, at registration. The trainer guard already runs it,
+    # but a registry row is what a promotion gate reads, so it must not depend on
+    # someone having run the right script. v6 and v6.1 were both registered before
+    # anyone checked the weights, and both were no-ops.
+    import mlx.core as mx
+    w = mx.load(str(adapter / "adapters.safetensors"))
+    bkeys = [k for k in w if k.endswith("lora_b")]
+    b_nonzero = sum(1 for k in bkeys if float(mx.abs(w[k]).max()) > 0)
+    b_max = max((float(mx.abs(w[k]).max()) for k in bkeys), default=0.0)
+    if b_nonzero == 0:
+        sys.exit(f"FATAL: all {len(bkeys)} lora_b are 0.0 -- this adapter is a no-op "
+                 "(identical to base). Refusing to register it as trained.")
 
     vals = [(int(i), float(l), float(ac), float(m)) for i, l, ac, m in VAL.findall(text)]
     trains = [(int(i), float(l), float(ac), float(m)) for i, l, ac, m in TRAIN.findall(text)]
+    # SFT logs carry loss only -- pad accuracy/margin with None-equivalents so the
+    # downstream shape is uniform, but never invent values.
+    if not vals:
+        vals = [(int(i), float(l), float("nan"), float("nan")) for i, l in VAL_SFT.findall(text)]
+    if not trains:
+        trains = [(int(i), float(l), float("nan"), float("nan")) for i, l in TRAIN_SFT.findall(text)]
     manifest = json.load(open(a.corpus_manifest))
 
     # mlx_lm_lora writes a MINIMAL adapter_config.json (lora_parameters only), so
@@ -75,8 +108,10 @@ def main():
     inert = val_is_inert(vals)
 
     metrics = {
-        "objective": "orpo",
-        "beta": 0.05,
+        "objective": objective,
+        "beta": 0.05 if objective in ("orpo", "dpo", "cpo") else None,
+        "weights": {"lora_b_nonzero": f"{b_nonzero}/{len(bkeys)}",
+                    "max_abs_lora_b": b_max},
         "base_model": grab(r"Model:\s*(\S+)"),
         "iters": len(trains) and max(t[0] for t in trains) or None,
         "learning_rate": grab(r"Learning Rate:\s*(\S+)"),
@@ -142,6 +177,8 @@ def main():
           f"  {'(still NEGATIVE: rejected still scores above chosen)' if (metrics['train_margin_last'] or 0) < 0 else ''}")
     print(f"  validation   : {metrics['validation']['status']}")
     print(f"  smoke        : {metrics['smoke'].get('status', 'recorded')}")
+    print(f"  objective    : {objective}")
+    print(f"  lora_b       : {b_nonzero}/{len(bkeys)} non-zero, max|B|={b_max:.3e}")
     print(f"  lora scale   : {scale}")
     print(f"  human gate   : {metrics['human_gate']}")
 
