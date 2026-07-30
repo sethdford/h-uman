@@ -5275,9 +5275,14 @@ static void test_m3_record_chat_outcome_populates_token_estimates(void) {
     size_t got = 0;
     HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(agent.m3_adapter, buf, 8, &got), HU_OK);
     HU_ASSERT_EQ(got, 1u);
-    /* 39/4 = 9, 80/4 = 20 — exact integer division (the estimate is the
-     * point; the value just needs to be positive and proportional). */
-    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 9);
+    /* ceil(39/4) = 10, ceil(80/4) = 20. These were 9 and 20 while the
+     * fallback open-coded `len / 4`, which rounds DOWN — so a 1-3 byte reply
+     * recorded 0 tokens, i.e. a turn that happened costing nothing in the M3
+     * outcome row. The estimate now rounds up via hu_tokens_estimate_len
+     * (human/core/tokens.h), which moves any non-multiple of 4 by exactly +1
+     * and can never report zero for non-empty text. Only the FALLBACK path
+     * shifts; real provider counts still win verbatim (Case 1 below). */
+    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 10);
     HU_ASSERT_EQ((int)buf[0].completion_tokens, 20);
     /* And confirm the OTHER fields the policy depends on still flow. */
     HU_ASSERT_EQ((int)buf[0].guard_decision, (int)HU_M3_GUARD_PASS);
@@ -5330,8 +5335,8 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
                  HU_OK);
     HU_ASSERT_NOT_NULL(agent.m3_adapter);
 
-    const char *prompt = "ten bytes!";              /* 10 bytes → bytes/4 estimate = 2 */
-    const char *response = "twenty byte response!"; /* 21 bytes → estimate = 5 */
+    const char *prompt = "ten bytes!";              /* 10 bytes → ceil(10/4) = 3 */
+    const char *response = "twenty byte response!"; /* 21 bytes → ceil(21/4) = 6 */
 
     /* Case 1: both fields present → record verbatim, ignore the estimate. */
     hu_token_usage_t usage_full = {
@@ -5340,7 +5345,7 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
                                     NULL, 0, HU_M3_GUARD_PASS, 1, &usage_full);
 
     /* Case 2: only completion_tokens reported → completion uses it,
-     * prompt falls back to estimate (10/4 = 2). */
+     * prompt falls back to estimate (ceil(10/4) = 3). */
     hu_token_usage_t usage_partial = {
         .prompt_tokens = 0, .completion_tokens = 17, .total_tokens = 17};
     hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
@@ -5360,11 +5365,11 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
     HU_ASSERT_EQ((int)buf[0].prompt_tokens, 99);
     HU_ASSERT_EQ((int)buf[0].completion_tokens, 42);
     /* Case 2: partial — completion real, prompt fallback. */
-    HU_ASSERT_EQ((int)buf[1].prompt_tokens, 2); /* 10/4 estimate */
+    HU_ASSERT_EQ((int)buf[1].prompt_tokens, 3); /* ceil(10/4) estimate */
     HU_ASSERT_EQ((int)buf[1].completion_tokens, 17);
     /* Case 3: all-zero → both estimates. */
-    HU_ASSERT_EQ((int)buf[2].prompt_tokens, 2);     /* 10/4 */
-    HU_ASSERT_EQ((int)buf[2].completion_tokens, 5); /* 21/4 */
+    HU_ASSERT_EQ((int)buf[2].prompt_tokens, 3);     /* ceil(10/4) */
+    HU_ASSERT_EQ((int)buf[2].completion_tokens, 6); /* ceil(21/4) */
 
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
