@@ -1,6 +1,6 @@
 #include "human/core/allocator.h"
-#include "human/feeds/processor.h"
 #include "human/core/string.h"
+#include "human/feeds/processor.h"
 #include "test_framework.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,9 +57,7 @@ static void feeds_insert_sql_valid(void) {
 static void feeds_query_unprocessed_sql_valid(void) {
     char buf[512];
     size_t len = 0;
-    hu_error_t err =
-        hu_feeds_query_unprocessed_sql(HU_FEED_NEWS_RSS, 10, buf,
-                                        sizeof(buf), &len);
+    hu_error_t err = hu_feeds_query_unprocessed_sql(HU_FEED_NEWS_RSS, 10, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(len > 0);
     HU_ASSERT_NOT_NULL(strstr(buf, "SELECT"));
@@ -83,8 +81,7 @@ static void feeds_query_by_topic_sql_valid(void) {
     char buf[512];
     size_t len = 0;
     const char *topic = "hiking";
-    hu_error_t err = hu_feeds_query_by_topic_sql(
-        topic, 6, 5, buf, sizeof(buf), &len);
+    hu_error_t err = hu_feeds_query_by_topic_sql(topic, 6, 5, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(len > 0);
     HU_ASSERT_NOT_NULL(strstr(buf, "SELECT"));
@@ -99,8 +96,7 @@ static void feeds_should_poll_enabled_interval_elapsed(void) {
     config.poll_interval_minutes[HU_FEED_MUSIC] = 60;
     uint64_t last = 1000000;
     uint64_t now = 1000000 + (60ULL * 60 * 1000);
-    HU_ASSERT_TRUE(
-        hu_feeds_should_poll(HU_FEED_MUSIC, &config, last, now));
+    HU_ASSERT_TRUE(hu_feeds_should_poll(HU_FEED_MUSIC, &config, last, now));
 }
 
 static void feeds_should_poll_disabled_returns_false(void) {
@@ -109,8 +105,7 @@ static void feeds_should_poll_disabled_returns_false(void) {
     config.poll_interval_minutes[HU_FEED_EMAIL] = 30;
     uint64_t last = 1000000;
     uint64_t now = 1000000 + (60ULL * 60 * 1000);
-    HU_ASSERT_FALSE(
-        hu_feeds_should_poll(HU_FEED_EMAIL, &config, last, now));
+    HU_ASSERT_FALSE(hu_feeds_should_poll(HU_FEED_EMAIL, &config, last, now));
 }
 
 static void feeds_should_poll_interval_not_elapsed_returns_false(void) {
@@ -119,8 +114,7 @@ static void feeds_should_poll_interval_not_elapsed_returns_false(void) {
     config.poll_interval_minutes[HU_FEED_NEWS_RSS] = 60;
     uint64_t last = 1000000;
     uint64_t now = 1000000 + (30ULL * 60 * 1000);
-    HU_ASSERT_FALSE(
-        hu_feeds_should_poll(HU_FEED_NEWS_RSS, &config, last, now));
+    HU_ASSERT_FALSE(hu_feeds_should_poll(HU_FEED_NEWS_RSS, &config, last, now));
 }
 
 static void feeds_should_poll_interval_zero_returns_true_when_enabled(void) {
@@ -129,16 +123,13 @@ static void feeds_should_poll_interval_zero_returns_true_when_enabled(void) {
     config.poll_interval_minutes[HU_FEED_APPLE_REMINDERS] = 0;
     uint64_t last = 1000000;
     uint64_t now = 1000000;
-    HU_ASSERT_TRUE(hu_feeds_should_poll(HU_FEED_APPLE_REMINDERS, &config,
-                                         last, now));
+    HU_ASSERT_TRUE(hu_feeds_should_poll(HU_FEED_APPLE_REMINDERS, &config, last, now));
 }
 
 static void feeds_feed_type_str_all_types(void) {
     HU_ASSERT_NOT_NULL(hu_feed_type_str(HU_FEED_SOCIAL_FACEBOOK));
-    HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_SOCIAL_FACEBOOK),
-                     "social_facebook");
-    HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_SOCIAL_INSTAGRAM),
-                     "social_instagram");
+    HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_SOCIAL_FACEBOOK), "social_facebook");
+    HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_SOCIAL_INSTAGRAM), "social_instagram");
     HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_MUSIC), "music");
     HU_ASSERT_STR_EQ(hu_feed_type_str(HU_FEED_NEWS_RSS), "news_rss");
 }
@@ -146,26 +137,24 @@ static void feeds_feed_type_str_all_types(void) {
 static void feeds_score_relevance_high_overlap(void) {
     size_t content_len = strlen("hiking mountains trail");
     size_t interest_len = strlen("hiking trail");
-    double score = hu_feeds_score_relevance("hiking mountains trail",
-                                          content_len, "hiking trail",
-                                          interest_len);
+    double score = hu_feeds_score_relevance("hiking mountains trail", content_len, "hiking trail",
+                                            interest_len);
     HU_ASSERT_TRUE(score >= 0.99);
 }
 
 static void feeds_score_relevance_no_overlap(void) {
     size_t content_len = strlen("cooking pizza");
     size_t interest_len = strlen("hiking trail");
-    double score = hu_feeds_score_relevance("cooking pizza", content_len,
-                                           "hiking trail", interest_len);
+    double score =
+        hu_feeds_score_relevance("cooking pizza", content_len, "hiking trail", interest_len);
     HU_ASSERT_FLOAT_EQ(score, 0.0, 0.001);
 }
 
 static void feeds_score_relevance_partial(void) {
     size_t content_len = strlen("friend posted about hiking");
     size_t interest_len = strlen("hiking outdoors");
-    double score = hu_feeds_score_relevance("friend posted about hiking",
-                                           content_len, "hiking outdoors",
-                                           interest_len);
+    double score = hu_feeds_score_relevance("friend posted about hiking", content_len,
+                                            "hiking outdoors", interest_len);
     HU_ASSERT_TRUE(score > 0.0 && score < 1.0);
 }
 
@@ -225,8 +214,7 @@ static void feeds_build_prompt_multiple_items(void) {
     };
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err =
-        hu_feeds_build_prompt(&alloc, items, 3, &out, &out_len);
+    hu_error_t err = hu_feeds_build_prompt(&alloc, items, 3, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_NOT_NULL(strstr(out, "[EXTERNAL AWARENESS]"));
@@ -268,28 +256,25 @@ static void feed_search_fts_match(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
-    const char *fts =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS feed_items_fts USING fts5("
-        "content, source, content_type, content=feed_items, content_rowid=id)";
+    const char *fts = "CREATE VIRTUAL TABLE IF NOT EXISTS feed_items_fts USING fts5("
+                      "content, source, content_type, content=feed_items, content_rowid=id)";
     HU_ASSERT_EQ(sqlite3_exec(db, fts, NULL, NULL, NULL), SQLITE_OK);
 
-    const char *trig_ai =
-        "CREATE TRIGGER IF NOT EXISTS feed_items_ai AFTER INSERT ON feed_items "
-        "BEGIN INSERT INTO feed_items_fts(rowid, content, source, content_type) "
-        "VALUES (new.id, new.content, new.source, new.content_type); END";
+    const char *trig_ai = "CREATE TRIGGER IF NOT EXISTS feed_items_ai AFTER INSERT ON feed_items "
+                          "BEGIN INSERT INTO feed_items_fts(rowid, content, source, content_type) "
+                          "VALUES (new.id, new.content, new.source, new.content_type); END";
     HU_ASSERT_EQ(sqlite3_exec(db, trig_ai, NULL, NULL, NULL), SQLITE_OK);
 
     const char *trig_ad =
@@ -341,17 +326,16 @@ static void feed_build_daily_digest_groups_by_source(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     int64_t now = (int64_t)time(NULL);
@@ -388,17 +372,16 @@ static void feed_processor_cleanup_removes_old(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     int64_t now = (int64_t)time(NULL);
@@ -428,7 +411,8 @@ static void feed_processor_cleanup_removes_old(void) {
     HU_ASSERT_EQ(err, HU_OK);
 
     sqlite3_stmt *sel = NULL;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM feed_items", -1, &sel, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM feed_items", -1, &sel, NULL),
+                 SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(sel), SQLITE_ROW);
     HU_ASSERT_EQ(sqlite3_column_int(sel, 0), 1);
     sqlite3_finalize(sel);
@@ -440,17 +424,16 @@ static void feed_get_all_recent_returns_items(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     int64_t now = (int64_t)time(NULL);
@@ -497,17 +480,16 @@ static void feed_correlate_groups_similar(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     int64_t now = (int64_t)time(NULL);
@@ -543,7 +525,10 @@ static void feed_correlate_groups_similar(void) {
     HU_ASSERT_EQ(err, HU_OK);
 
     sqlite3_stmt *sel = NULL;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT cluster_id FROM feed_items WHERE cluster_id IS NOT NULL", -1, &sel, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT cluster_id FROM feed_items WHERE cluster_id IS NOT NULL", -1,
+                           &sel, NULL),
+        SQLITE_OK);
     int has_cluster = 0;
     while (sqlite3_step(sel) == SQLITE_ROW) {
         has_cluster = 1;
@@ -559,20 +544,20 @@ static void findings_store_and_retrieve(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT,"
-        "finding TEXT NOT NULL,"
-        "relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM',"
-        "suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending',"
-        "created_at INTEGER NOT NULL,"
-        "acted_at INTEGER)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS research_findings("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT,"
+                         "finding TEXT NOT NULL,"
+                         "relevance TEXT,"
+                         "priority TEXT DEFAULT 'MEDIUM',"
+                         "suggested_action TEXT,"
+                         "status TEXT DEFAULT 'pending',"
+                         "created_at INTEGER NOT NULL,"
+                         "acted_at INTEGER)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
-    hu_error_t err = hu_findings_store(&alloc, db, "test", "A finding", "HIGH", "HIGH", "Do something");
+    hu_error_t err =
+        hu_findings_store(&alloc, db, "test", "A finding", "HIGH", "HIGH", "Do something");
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_research_finding_t *items = NULL;
@@ -590,20 +575,20 @@ static void findings_mark_status(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT,"
-        "finding TEXT NOT NULL,"
-        "relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM',"
-        "suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending',"
-        "created_at INTEGER NOT NULL,"
-        "acted_at INTEGER)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS research_findings("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT,"
+                         "finding TEXT NOT NULL,"
+                         "relevance TEXT,"
+                         "priority TEXT DEFAULT 'MEDIUM',"
+                         "suggested_action TEXT,"
+                         "status TEXT DEFAULT 'pending',"
+                         "created_at INTEGER NOT NULL,"
+                         "acted_at INTEGER)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
-    hu_error_t err = hu_findings_store(&alloc, db, "test", "A finding", "HIGH", "HIGH", "Do something");
+    hu_error_t err =
+        hu_findings_store(&alloc, db, "test", "A finding", "HIGH", "HIGH", "Do something");
     HU_ASSERT_EQ(err, HU_OK);
 
     err = hu_findings_mark_status(db, 1, "completed");
@@ -622,17 +607,16 @@ static void feed_detect_trends_no_spikes(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL,"
-        "contact_id TEXT,"
-        "content_type TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "url TEXT,"
-        "ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0,"
-        "cluster_id INTEGER DEFAULT NULL)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS feed_items("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT NOT NULL,"
+                         "contact_id TEXT,"
+                         "content_type TEXT NOT NULL,"
+                         "content TEXT NOT NULL,"
+                         "url TEXT,"
+                         "ingested_at INTEGER NOT NULL,"
+                         "referenced INTEGER DEFAULT 0,"
+                         "cluster_id INTEGER DEFAULT NULL)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     int64_t now = (int64_t)time(NULL);
@@ -662,17 +646,16 @@ static void findings_parse_and_store_valid(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT,"
-        "finding TEXT NOT NULL,"
-        "relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM',"
-        "suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending',"
-        "created_at INTEGER NOT NULL,"
-        "acted_at INTEGER)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS research_findings("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT,"
+                         "finding TEXT NOT NULL,"
+                         "relevance TEXT,"
+                         "priority TEXT DEFAULT 'MEDIUM',"
+                         "suggested_action TEXT,"
+                         "status TEXT DEFAULT 'pending',"
+                         "created_at INTEGER NOT NULL,"
+                         "acted_at INTEGER)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     const char *agent_output =
@@ -701,8 +684,10 @@ static void findings_parse_and_store_valid(void) {
     /* Results are DESC by created_at, so order may vary — check both exist */
     int found_arxiv = 0, found_github = 0;
     for (size_t i = 0; i < count; i++) {
-        if (strstr(items[i].source, "arxiv")) found_arxiv = 1;
-        if (strstr(items[i].source, "github")) found_github = 1;
+        if (strstr(items[i].source, "arxiv"))
+            found_arxiv = 1;
+        if (strstr(items[i].source, "github"))
+            found_github = 1;
     }
     HU_ASSERT_TRUE(found_arxiv);
     HU_ASSERT_TRUE(found_github);
@@ -716,17 +701,16 @@ static void findings_parse_and_store_malformed(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT,"
-        "finding TEXT NOT NULL,"
-        "relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM',"
-        "suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending',"
-        "created_at INTEGER NOT NULL,"
-        "acted_at INTEGER)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS research_findings("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT,"
+                         "finding TEXT NOT NULL,"
+                         "relevance TEXT,"
+                         "priority TEXT DEFAULT 'MEDIUM',"
+                         "suggested_action TEXT,"
+                         "status TEXT DEFAULT 'pending',"
+                         "created_at INTEGER NOT NULL,"
+                         "acted_at INTEGER)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     /* No markers at all — should store nothing */
@@ -769,17 +753,16 @@ static void findings_get_all_with_limit(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    const char *schema =
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT,"
-        "finding TEXT NOT NULL,"
-        "relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM',"
-        "suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending',"
-        "created_at INTEGER NOT NULL,"
-        "acted_at INTEGER)";
+    const char *schema = "CREATE TABLE IF NOT EXISTS research_findings("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "source TEXT,"
+                         "finding TEXT NOT NULL,"
+                         "relevance TEXT,"
+                         "priority TEXT DEFAULT 'MEDIUM',"
+                         "suggested_action TEXT,"
+                         "status TEXT DEFAULT 'pending',"
+                         "created_at INTEGER NOT NULL,"
+                         "acted_at INTEGER)";
     HU_ASSERT_EQ(sqlite3_exec(db, schema, NULL, NULL, NULL), SQLITE_OK);
 
     /* Store 5 findings */
@@ -843,7 +826,8 @@ static void findings_get_pending_null_args(void) {
 
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
     HU_ASSERT_EQ(hu_findings_get_pending(NULL, db, 10, &items, &count), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_findings_get_pending(&alloc, NULL, 10, &items, &count), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_findings_get_pending(&alloc, NULL, 10, &items, &count),
+                 HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_findings_get_pending(&alloc, db, 10, NULL, &count), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_findings_get_pending(&alloc, db, 10, &items, NULL), HU_ERR_INVALID_ARGUMENT);
     sqlite3_close(db);
@@ -864,78 +848,78 @@ static sqlite3 *setup_cycle_db(void) {
     sqlite3 *db = NULL;
     sqlite3_open(":memory:", &db);
     sqlite3_exec(db,
-        "CREATE TABLE IF NOT EXISTS feed_items("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT NOT NULL, contact_id TEXT,"
-        "content_type TEXT NOT NULL, content TEXT NOT NULL,"
-        "url TEXT, ingested_at INTEGER NOT NULL,"
-        "referenced INTEGER DEFAULT 0, cluster_id INTEGER DEFAULT NULL);"
-        "CREATE TABLE IF NOT EXISTS research_findings("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "source TEXT, finding TEXT NOT NULL, relevance TEXT,"
-        "priority TEXT DEFAULT 'MEDIUM', suggested_action TEXT,"
-        "status TEXT DEFAULT 'pending', created_at INTEGER NOT NULL,"
-        "acted_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS current_events("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "topic TEXT, summary TEXT, source TEXT,"
-        "published_at INTEGER, relevance REAL);"
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_dedup ON current_events(summary);"
-        "CREATE TABLE IF NOT EXISTS general_lessons("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "lesson TEXT UNIQUE, confidence REAL,"
-        "source_count INTEGER, first_learned INTEGER, last_confirmed INTEGER);"
-        "CREATE TABLE IF NOT EXISTS inferred_values("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "name TEXT UNIQUE, description TEXT,"
-        "importance REAL, evidence_count INTEGER,"
-        "created_at INTEGER, updated_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS behavioral_feedback("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "behavior_type TEXT, contact_id TEXT, signal TEXT,"
-        "context TEXT, timestamp INTEGER);"
-        "CREATE TABLE IF NOT EXISTS self_evaluations("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "contact_id TEXT, week TEXT, metrics TEXT,"
-        "recommendations TEXT, created_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS growth_milestones("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "contact_id TEXT, topic TEXT, before_state TEXT,"
-        "after_state TEXT, created_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS opinions("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "topic TEXT, position TEXT, confidence REAL,"
-        "first_expressed INTEGER, last_expressed INTEGER,"
-        "superseded_by TEXT);"
-        "CREATE TABLE IF NOT EXISTS cognitive_load_log("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "capacity REAL, conversation_depth REAL,"
-        "hour_of_day INTEGER, day_of_week INTEGER,"
-        "physical_state TEXT, recorded_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS causal_observations("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "action TEXT, outcome TEXT, context TEXT,"
-        "confidence REAL, observed_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS learning_signals("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "type INTEGER, context TEXT, tool_name TEXT,"
-        "magnitude REAL, timestamp INTEGER);"
-        "CREATE TABLE IF NOT EXISTS strategy_weights("
-        "strategy TEXT PRIMARY KEY, weight REAL, updated_at INTEGER);"
-        "CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);"
-        "CREATE TABLE IF NOT EXISTS skills("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "name TEXT, type TEXT, contact_id TEXT,"
-        "trigger_conditions TEXT, strategy TEXT,"
-        "success_rate REAL DEFAULT 0, attempts INTEGER DEFAULT 0,"
-        "successes INTEGER DEFAULT 0, version INTEGER DEFAULT 1,"
-        "origin TEXT, parent_skill_id INTEGER DEFAULT 0,"
-        "created_at INTEGER, updated_at INTEGER, retired INTEGER DEFAULT 0);"
-        "CREATE TABLE IF NOT EXISTS skill_attempts("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "skill_id INTEGER, contact_id TEXT, applied_at INTEGER,"
-        "outcome_signal TEXT, outcome_evidence TEXT, context TEXT);",
-        NULL, NULL, NULL);
+                 "CREATE TABLE IF NOT EXISTS feed_items("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "source TEXT NOT NULL, contact_id TEXT,"
+                 "content_type TEXT NOT NULL, content TEXT NOT NULL,"
+                 "url TEXT, ingested_at INTEGER NOT NULL,"
+                 "referenced INTEGER DEFAULT 0, cluster_id INTEGER DEFAULT NULL);"
+                 "CREATE TABLE IF NOT EXISTS research_findings("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "source TEXT, finding TEXT NOT NULL, relevance TEXT,"
+                 "priority TEXT DEFAULT 'MEDIUM', suggested_action TEXT,"
+                 "status TEXT DEFAULT 'pending', created_at INTEGER NOT NULL,"
+                 "acted_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS current_events("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "topic TEXT, summary TEXT, source TEXT,"
+                 "published_at INTEGER, relevance REAL);"
+                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_dedup ON current_events(summary);"
+                 "CREATE TABLE IF NOT EXISTS general_lessons("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "lesson TEXT UNIQUE, confidence REAL,"
+                 "source_count INTEGER, first_learned INTEGER, last_confirmed INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS inferred_values("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "name TEXT UNIQUE, description TEXT,"
+                 "importance REAL, evidence_count INTEGER,"
+                 "created_at INTEGER, updated_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS behavioral_feedback("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "behavior_type TEXT, contact_id TEXT, signal TEXT,"
+                 "context TEXT, timestamp INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS self_evaluations("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "contact_id TEXT, week TEXT, metrics TEXT,"
+                 "recommendations TEXT, created_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS growth_milestones("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "contact_id TEXT, topic TEXT, before_state TEXT,"
+                 "after_state TEXT, created_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS opinions("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "topic TEXT, position TEXT, confidence REAL,"
+                 "first_expressed INTEGER, last_expressed INTEGER,"
+                 "superseded_by TEXT);"
+                 "CREATE TABLE IF NOT EXISTS cognitive_load_log("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "capacity REAL, conversation_depth REAL,"
+                 "hour_of_day INTEGER, day_of_week INTEGER,"
+                 "physical_state TEXT, recorded_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS causal_observations("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "action TEXT, outcome TEXT, context TEXT,"
+                 "confidence REAL, observed_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS learning_signals("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "type INTEGER, context TEXT, tool_name TEXT,"
+                 "magnitude REAL, timestamp INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS strategy_weights("
+                 "strategy TEXT PRIMARY KEY, weight REAL, updated_at INTEGER);"
+                 "CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);"
+                 "CREATE TABLE IF NOT EXISTS skills("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "name TEXT, type TEXT, contact_id TEXT,"
+                 "trigger_conditions TEXT, strategy TEXT,"
+                 "success_rate REAL DEFAULT 0, attempts INTEGER DEFAULT 0,"
+                 "successes INTEGER DEFAULT 0, version INTEGER DEFAULT 1,"
+                 "origin TEXT, parent_skill_id INTEGER DEFAULT 0,"
+                 "created_at INTEGER, updated_at INTEGER, retired INTEGER DEFAULT 0);"
+                 "CREATE TABLE IF NOT EXISTS skill_attempts("
+                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 "skill_id INTEGER, contact_id TEXT, applied_at INTEGER,"
+                 "outcome_signal TEXT, outcome_evidence TEXT, context TEXT);",
+                 NULL, NULL, NULL);
     return db;
 }
 
@@ -945,7 +929,8 @@ static void cycle_actions_high_findings(void) {
     HU_ASSERT_NOT_NULL(db);
     int64_t now = (int64_t)time(NULL);
 
-    sqlite3_exec(db,
+    sqlite3_exec(
+        db,
         "INSERT INTO research_findings(source, finding, relevance, priority, "
         "suggested_action, status, created_at) VALUES "
         "('test', 'Important finding', 'high', 'HIGH', 'Investigate this', 'pending', 1000),"
@@ -953,12 +938,14 @@ static void cycle_actions_high_findings(void) {
         NULL, NULL, NULL);
 
     sqlite3_exec(db,
-        "INSERT INTO feed_items(source, content_type, content, ingested_at) "
-        "VALUES ('rss', 'article', 'Test article about AI', ?);",
-        NULL, NULL, NULL);
+                 "INSERT INTO feed_items(source, content_type, content, ingested_at) "
+                 "VALUES ('rss', 'article', 'Test article about AI', ?);",
+                 NULL, NULL, NULL);
     sqlite3_stmt *fi = NULL;
     sqlite3_prepare_v2(db,
-        "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES ('rss', 'article', 'Test article about AI', ?)", -1, &fi, NULL);
+                       "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES "
+                       "('rss', 'article', 'Test article about AI', ?)",
+                       -1, &fi, NULL);
     sqlite3_bind_int64(fi, 1, now);
     sqlite3_step(fi);
     sqlite3_finalize(fi);
@@ -970,7 +957,8 @@ static void cycle_actions_high_findings(void) {
     HU_ASSERT_TRUE(result.causal_recorded >= 1);
 
     sqlite3_stmt *chk = NULL;
-    sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM research_findings WHERE status = 'actioned'", -1, &chk, NULL);
+    sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM research_findings WHERE status = 'actioned'", -1,
+                       &chk, NULL);
     HU_ASSERT_EQ(sqlite3_step(chk), SQLITE_ROW);
     HU_ASSERT_EQ(sqlite3_column_int(chk, 0), 1);
     sqlite3_finalize(chk);
@@ -984,8 +972,8 @@ static void cycle_populates_current_events(void) {
     int64_t now = (int64_t)time(NULL);
 
     sqlite3_stmt *ins = NULL;
-    sqlite3_prepare_v2(db,
-        "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES (?,?,?,?)",
+    sqlite3_prepare_v2(
+        db, "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES (?,?,?,?)",
         -1, &ins, NULL);
     for (int i = 0; i < 5; i++) {
         char content[64];
@@ -1017,11 +1005,19 @@ static void cycle_populates_opinions(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = setup_cycle_db();
 
+    /* Seed as 'pending' and let the cycle action it, exactly as
+     * cycle_actions_high_findings does. Pre-seeding 'actioned' with acted_at NULL
+     * is a state production never creates: Step 1 sets status and acted_at in the
+     * SAME update (cycle.c "UPDATE research_findings SET status = ?, acted_at = ?"),
+     * so an actioned row always carries a timestamp. The old fixture only passed
+     * because Step 8 was unscoped -- which is the bug that grew `opinions` to
+     * 9.5M rows by re-inserting every historical finding on every cycle. */
     sqlite3_exec(db,
-        "INSERT INTO research_findings(source, finding, relevance, priority, "
-        "suggested_action, status, created_at) VALUES "
-        "('test', 'AI safety critical', 'high', 'HIGH', 'Review safety protocols', 'actioned', 1000);",
-        NULL, NULL, NULL);
+                 "INSERT INTO research_findings(source, finding, relevance, priority, "
+                 "suggested_action, status, created_at) VALUES "
+                 "('test', 'AI safety critical', 'high', 'HIGH', 'Review safety protocols', "
+                 "'pending', 1000);",
+                 NULL, NULL, NULL);
 
     hu_intelligence_cycle_result_t result;
     hu_error_t err = hu_intelligence_run_cycle(&alloc, db, &result);
@@ -1043,8 +1039,9 @@ static void cycle_records_cognitive_load(void) {
 
     sqlite3_stmt *ins = NULL;
     sqlite3_prepare_v2(db,
-        "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES ('rss', 'article', 'AI news', ?)",
-        -1, &ins, NULL);
+                       "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES "
+                       "('rss', 'article', 'AI news', ?)",
+                       -1, &ins, NULL);
     sqlite3_bind_int64(ins, 1, now);
     sqlite3_step(ins);
     sqlite3_finalize(ins);
@@ -1076,8 +1073,8 @@ static void e2e_ingest_findings_cycle_learns(void) {
     int64_t now = (int64_t)time(NULL);
 
     sqlite3_stmt *ins = NULL;
-    sqlite3_prepare_v2(db,
-        "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES (?,?,?,?)",
+    sqlite3_prepare_v2(
+        db, "INSERT INTO feed_items(source, content_type, content, ingested_at) VALUES (?,?,?,?)",
         -1, &ins, NULL);
     const char *articles[] = {
         "New transformer architecture achieves SOTA on reasoning benchmarks",
