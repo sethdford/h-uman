@@ -552,12 +552,23 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
         }
     }
 
-    /* Step 8: Populate opinions from HIGH-priority findings */
+    /* Step 8: Populate opinions from HIGH-priority findings.
+     * Scoped to findings actioned THIS cycle, exactly as Step 9 below already is.
+     * Without the acted_at bound this re-inserted every historical HIGH finding on
+     * every cycle: research_findings keeps status='actioned' forever, and the
+     * `INSERT OR IGNORE` cannot dedup because `opinions` has NO unique constraint
+     * (only `id AUTOINCREMENT` and a non-unique idx_opinions_topic), so OR IGNORE
+     * never fires. Measured 2026-08-02: 9,533,051 rows over 2,962 distinct
+     * (topic, position) pairs -- 3,218x duplication, 4.3 GB, growing ~62k rows per
+     * cycle. The persona reads this table via the live [evolved_opinion] directive,
+     * so the duplicates were also injected into real replies. */
     {
         const char *sql = "SELECT finding, suggested_action FROM research_findings "
-                          "WHERE priority = 'HIGH' AND status = 'actioned'";
+                          "WHERE priority = 'HIGH' AND status = 'actioned' "
+                          "AND acted_at >= ?";
         sqlite3_stmt *stmt = NULL;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, now_ts);
             sqlite3_stmt *ins = NULL;
             const char *ins_sql = "INSERT OR IGNORE INTO opinions "
                                   "(topic, position, confidence, first_expressed, last_expressed) "
