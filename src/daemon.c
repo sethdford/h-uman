@@ -1657,21 +1657,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 skip = true;
                             }
                         }
+                        /* Send + bookkeeping live in daemon_proactive.c: a failed send must
+                         * not log "sent" nor charge recency/outcome/governor. */
+                        if (!skip &&
+                            !hu_daemon_proactive_send_and_record(
+                                agent, channels[c].channel, cp, ch_part, target_part, target_len,
+                                response, response_len, (int64_t)now, &gov_budget))
+                            skip = true;
                         if (!skip) {
-                            channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
-                                                              target_len, response, response_len,
-                                                              NULL, 0);
-                            /* FU-1: record proactive send so reactive deferral works. */
-                            hu_contact_send_recency_record(&agent->contact_send_recency,
-                                                           cp->contact_id, strlen(cp->contact_id),
-                                                           (int64_t)now, HU_SEND_PATH_PROACTIVE);
-                            (void)hu_daemon_proactive_outcome_record_send(agent->memory, ch_part,
-                                                                          target_part, target_len);
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "proactive check-in sent to %s: %.*s",
-                                        cp->name ? cp->name : cp->contact_id, (int)response_len,
-                                        response);
-                            hu_governor_record_sent(&gov_budget, (uint64_t)time(NULL) * 1000ULL);
                             if (had_important_date && strcmp(important_date_type, "birthday") == 0)
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "F53: birthday message — use confetti effect");
