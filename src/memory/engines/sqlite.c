@@ -233,6 +233,26 @@ static const char *const schema_parts[] = {
     "last_expressed INTEGER,"
     "superseded_by INTEGER)",
     "CREATE INDEX IF NOT EXISTS idx_opinions_topic ON opinions(topic)",
+    /* opinions had NO unique constraint, so the `INSERT OR IGNORE INTO opinions`
+     * in src/intelligence/cycle.c had nothing to violate and never ignored
+     * anything. Measured 2026-08-02: 9,533,051 rows over 2,962 distinct
+     * (topic, position) pairs -- 3,218x duplication, 4.3 GB of a 4.4 GB
+     * memory.db, and the persona reads this table via the live
+     * [evolved_opinion] directive, so the duplicates reached real replies.
+     *
+     * Scoping cycle.c's SELECT was NOT sufficient -- inserts continued at 2,967
+     * rows every ~5 minutes from a path not yet identified. This constraint is
+     * writer-agnostic: it makes OR IGNORE do what its author intended no matter
+     * who writes.
+     *
+     * COALESCE because SQLite treats NULLs as distinct in a UNIQUE index, so a
+     * plain (topic, position) index would still admit unlimited NULL-position
+     * duplicates. The DELETE must precede the index or its creation fails on the
+     * existing duplicates; once the index exists it is a cheap no-op. */
+    "DELETE FROM opinions WHERE id NOT IN "
+    "(SELECT MIN(id) FROM opinions GROUP BY topic, COALESCE(position,''))",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_opinions_topic_position "
+    "ON opinions(topic, COALESCE(position,''))",
     "CREATE TABLE IF NOT EXISTS life_chapters("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "theme TEXT,"

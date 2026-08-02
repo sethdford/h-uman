@@ -38,7 +38,19 @@ static hu_error_t ensure_schema(sqlite3 *db) {
                                 "superseded_by INTEGER)");
     if (e != HU_OK)
         return e;
-    return run_stmt(db, "CREATE INDEX IF NOT EXISTS idx_opinions_topic ON opinions(topic)");
+    e = run_stmt(db, "CREATE INDEX IF NOT EXISTS idx_opinions_topic ON opinions(topic)");
+    if (e != HU_OK)
+        return e;
+    /* Mirrors engines/sqlite.c: without a unique constraint the
+     * `INSERT OR IGNORE INTO opinions` in intelligence/cycle.c ignores nothing.
+     * Dedup first (the index cannot be created over existing duplicates), and
+     * COALESCE because SQLite treats NULLs as distinct in a UNIQUE index. */
+    e = run_stmt(db, "DELETE FROM opinions WHERE id NOT IN "
+                     "(SELECT MIN(id) FROM opinions GROUP BY topic, COALESCE(position,''))");
+    if (e != HU_OK)
+        return e;
+    return run_stmt(db, "CREATE UNIQUE INDEX IF NOT EXISTS idx_opinions_topic_position "
+                        "ON opinions(topic, COALESCE(position,''))");
 }
 
 static hu_error_t repo_find_active(void *ctx, hu_allocator_t *alloc, const char *topic,
