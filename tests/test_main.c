@@ -362,6 +362,7 @@ void run_imessage_action_facts_tests(void);
 void run_imessage_dispatcher_tests(void);
 void run_imessage_sticker_tests(void);
 void run_follow_up_tests(void);
+void run_followup_compose_tests(void);
 void run_follow_up_daemon_integration_tests(void);
 void run_daemon_aloop_smoke_tests(void);
 void run_intelligence_tests(void);
@@ -470,6 +471,7 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void);                        /* Sprint 46 R5.3 carryover */
 void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
@@ -601,6 +603,7 @@ void run_belief_update_tests(void);
 void run_taste_tests(void);
 void run_somatic_tests(void);
 void run_narrative_self_tests(void);
+void run_persona_life_events_tests(void);
 void run_attachment_tests(void);
 void run_intrinsic_drive_tests(void);
 void run_prosocial_routine_tests(void);
@@ -868,6 +871,8 @@ void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
 void run_daemon_promise_keeper_tests(void);
+void run_daemon_config_reload_tests(void);
+void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
 void run_reply_dedup_tests(void);
 void run_proactive_policy_tests(void);
@@ -1397,6 +1402,7 @@ int main(int argc, char **argv) {
     run_imessage_dispatcher_tests();
     run_imessage_sticker_tests();
     run_follow_up_tests();
+    run_followup_compose_tests();
     run_follow_up_daemon_integration_tests();
     run_daemon_aloop_smoke_tests();
     run_intelligence_tests();
@@ -1497,6 +1503,8 @@ int main(int argc, char **argv) {
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
+    run_agent_llm_latency_wall_clock_tests();
     /* G11: per-turn request override parity helper (G5 regression guard) */
     run_agent_turn_request_overrides_tests();
     run_w6_e2e_adversarial_tests();
@@ -1626,6 +1634,7 @@ int main(int argc, char **argv) {
     run_taste_tests();
     run_somatic_tests();
     run_narrative_self_tests();
+    run_persona_life_events_tests();
     run_attachment_tests();
     run_intrinsic_drive_tests();
     run_prosocial_routine_tests();
@@ -1877,6 +1886,8 @@ int main(int argc, char **argv) {
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
     run_daemon_promise_keeper_tests();
+    run_daemon_config_reload_tests();
+    run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();
     run_reply_dedup_tests();
     run_proactive_policy_tests();

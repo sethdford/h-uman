@@ -66,3 +66,4 @@ this glue would emit empty replies.
 | `score.py` | completed sheets + key -> detection rate, Wilson CI, verdict (has `--selftest`) |
 | `RATER_INSTRUCTIONS.txt` | what each rater is told |
 | `example_triples.json` | 3 synthetic items to smoke-test the pipeline |
+| `../ab_phrase_banks.py` | A/B: do the all-lowercase phrase banks + humor examples drive the product's 86%-lowercase output (Seth: 14%)? Runs two ISOLATED `human gateway --with-agent` instances; never touches the live daemon or `~/.human`. Unit tests: `../test_ab_phrase_banks.py` |

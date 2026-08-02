@@ -723,6 +723,7 @@ set(HU_CORE_SOURCES
     src/persona/celebration.c
     src/persona/warm_response.c
     src/persona/narrative_self.c
+    src/persona/life_events.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
     # into the agent's persona context.
@@ -1247,6 +1248,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/daemon_identity.c
+    src/daemon/daemon_identity_graph.c
+    src/daemon/daemon_config_reload.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
@@ -1481,6 +1484,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/replay.c
     src/persona/circadian.c
     src/agent/follow_up.c
+    src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -3410,6 +3414,8 @@ set(HU_TEST_SOURCES
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
     tests/test_daemon_promise_keeper.c
+    tests/test_daemon_config_reload.c
+    tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_proactive_policy.c
@@ -3503,6 +3509,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_dispatcher.c
     tests/test_imessage_sticker.c
     tests/test_follow_up.c
+    tests/test_followup_compose.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
@@ -3655,6 +3662,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
+    tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
@@ -3748,6 +3756,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_taste.c
     tests/test_somatic.c
     tests/test_narrative_self.c
+    tests/test_persona_life_events.c
     tests/test_attachment.c
     tests/test_intrinsic_drive.c
     tests/test_prosocial_routine.c

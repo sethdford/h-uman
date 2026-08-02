@@ -72,11 +72,36 @@ if [ -f "CMakeLists.txt" ]; then
     fi
 
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
+    # Only sync from a tree that actually contains all of origin/main.
+    #
+    # update-stats.sh stamps THIS tree's measurements into AGENTS.md,
+    # README.md, CONTRIBUTING.md, PROJECT_STATUS.md and CLAUDE.md. From a tree
+    # that is behind main those numbers are wrong by construction — it counts
+    # tests that main has since added — so the push dirtied five tracked docs
+    # with a value that had to be thrown away by hand. On 2026-07-26 that hit
+    # ten worktrees at once and was discarded six times in one session; the
+    # stamped count wandered 12,617 / 13,107 / 13,827 / 13,860 / 13,876 purely
+    # from which tree happened to push.
+    #
+    # When the tree IS current the sync is correct and still runs — that is
+    # the case that produced the accurate 13,860 -> docs update. So this
+    # narrows the sync to when it is right rather than disabling it.
+    #
+    # Skipping is always safe: stats are descriptive, and the next push from
+    # an up-to-date tree re-syncs them.
     if [ -x "scripts/update-stats.sh" ]; then
-        echo "Syncing project stats..."
-        bash scripts/update-stats.sh --apply 2>/dev/null
-        if [ $? -ne 0 ]; then
-            echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply' manually."
+        behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo unknown)
+        if [ "$behind" = "0" ]; then
+            echo "Syncing project stats..."
+            if ! bash scripts/update-stats.sh --apply 2>/dev/null; then
+                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply' manually."
+            fi
+        elif [ "$behind" = "unknown" ]; then
+            echo "Skipping stats sync (cannot compare against origin/main)."
+        else
+            echo "Skipping stats sync: $behind commit(s) behind origin/main — this"
+            echo "  tree's counts would not match main. Sync happens on a push from"
+            echo "  an up-to-date tree, or run scripts/update-stats.sh --apply."
         fi
     fi
 

@@ -21,7 +21,11 @@
     } while (0)
 
 void hu_agent_internal_generate_trace_id(char *buf);
-uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end);
+/* NOTE: there is deliberately no clock()-based duration helper here.
+ * `clock()` measures process CPU time, which is ~0 for the blocking
+ * provider/tool calls whose duration we actually care about. Use
+ * `hu_agent_internal_monotonic_ms()` below for every elapsed-time
+ * measurement; pinned by tests/test_agent_llm_latency_wall_clock.c. */
 void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *usage);
 
 /* Spec 2026-05-19 self-model-scaffold — Phase B canonical write site.

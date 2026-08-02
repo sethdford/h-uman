@@ -64,14 +64,16 @@ hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *pl
         }
 
         hu_tool_result_t result = hu_tool_result_fail("invalid arguments", 16);
-        clock_t tool_start = clock();
+        uint64_t tool_start_ms = hu_agent_internal_monotonic_ms();
         if (args) {
             hu_agent_turn_state_track_tool(agent, plan->steps[i].tool_name,
                                            strlen(plan->steps[i].tool_name));
             tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
             hu_json_free(agent->alloc, args);
         }
-        uint64_t tool_duration_ms = hu_agent_internal_clock_diff_ms(tool_start, clock());
+        /* Wall clock: a tool that waits on network/disk burns no CPU, so
+         * clock()-based timing reported ~0ms for every I/O-bound tool. */
+        uint64_t tool_duration_ms = hu_agent_internal_monotonic_ms() - tool_start_ms;
 
         bool ok = result.success;
         hu_planner_mark_step(plan, i, ok ? HU_PLAN_STEP_DONE : HU_PLAN_STEP_FAILED);

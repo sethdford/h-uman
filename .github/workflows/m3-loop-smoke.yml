@@ -19,6 +19,12 @@ on:
     branches: [main]
     paths:
       - "src/agent/agent.c"
+      # The provider round trip is TIMED in these two files; the value
+      # they compute is what m3_outcome_driver.py filters on. Omitting
+      # them meant the 2026-07-27 CPU-clock latency bug could not fire
+      # this workflow on push. See tests/test_agent_llm_latency_wall_clock.c.
+      - "src/agent/agent_turn.c"
+      - "src/agent/agent_stream.c"
       - "src/gateway/gateway.c"
       - "src/ml/m3_frontier_adapter.c"
       - "include/human/ml/m3_frontier_adapter.h"
@@ -64,6 +70,12 @@ on:
   pull_request:
     paths:
       - "src/agent/agent.c"
+      # The provider round trip is TIMED in these two files; the value
+      # they compute is what m3_outcome_driver.py filters on. Omitting
+      # them meant the 2026-07-27 CPU-clock latency bug could not fire
+      # this workflow on push. See tests/test_agent_llm_latency_wall_clock.c.
+      - "src/agent/agent_turn.c"
+      - "src/agent/agent_stream.c"
       - "src/gateway/gateway.c"
       - "src/ml/m3_frontier_adapter.c"
       - "include/human/ml/m3_frontier_adapter.h"

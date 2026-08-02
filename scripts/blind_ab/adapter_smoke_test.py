@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Head-to-head smoke test of two LoRA adapters on the same base model.
+"""Head-to-head smoke test of two LoRA adapters (same base, or cross-base).
 
 Implements the pre-promotion gate required by
 .claude/rules/lora-scale-default-or-die.md: a persona adapter must be checked
@@ -30,7 +30,18 @@ Usage:
     python3 adapter_smoke_test.py --a <v5_adapter_path> --b <v6_adapter_path> \
         --out /tmp/smoke.json
 
+    # cross-base: the served adapter is on a different base than the candidate
+    python3 adapter_smoke_test.py \
+        --a <glm_adapter> --base-a mlx-community/GLM-4.5-Air-4bit  --label-a glm-v5 \
+        --b <gemma_adapter> --base-b mlx-community/gemma-4-31b-it-8bit --label-b v6
+
     python3 adapter_smoke_test.py --selftest      # checkers only, no model load
+    python3 adapter_smoke_test.py --rescore old.json   # re-score, no GPU
+
+A cross-base run answers "which served CONFIGURATION is better", not "which
+adapter is better" — the delta carries the base model too. The script says so
+on both stderr and stdout when the bases differ, because the numbers alone
+invite the stronger claim.
 """
 import argparse
 import gc
@@ -123,8 +134,49 @@ def is_degenerate(text, max_cycle=12):
 
 ERROR_MARKERS = ("<error", "GENERATE_ERROR", "TIMEOUT", "[ERROR")
 
+# Tags recorded for visibility that must NOT make a reply count as failed:
+# they describe a limitation of THIS harness, not of the model under test.
+NON_DEFECT_TAGS = frozenset({"unextracted_deliberation"})
+
 
 _SCAFFOLD_RE = re.compile(r"\A(?:\s*<think>.*?</think>\s*)+", re.S)
+
+# Marker families mlx-server's strip_thought_channels() removes, plus the
+# <|turn> forms observed from gemma-4-31b + v6 on 2026-07-29. Order matters:
+# a complete pair must be consumed before the orphan rules run.
+_CHANNEL_RES = [
+    re.compile(r"<think>.*?</think>", re.S | re.I),      # closed pair
+    re.compile(r"\A.*?</think>", re.S | re.I),           # orphan closer (primed opener)
+    re.compile(r"<think>.*\Z", re.S | re.I),             # orphan opener (truncated)
+    re.compile(r"<\|channel>thought.*?<channel\|>", re.S),
+    re.compile(r"<\|channel>thought.*\Z", re.S),
+    re.compile(r"<\|turn>(?:thought|model|user).*\Z", re.S),
+]
+
+# After marker removal, deliberation can remain as bare markdown bullets with
+# no marker at all — mlx-server documents this shape for gemma and extracts the
+# reply from the last bullet. That extraction is NOT reproduced here: its
+# helper (_extract_reply_from_body) has a production incident against it, and a
+# fourth partial copy of decode-adjacent logic is what this file's own history
+# warns about. So detect it and DECLINE to score instead of guessing.
+_BULLET_DELIB_RE = re.compile(r"^\s*\*\s", re.M)
+
+
+def looks_like_unextracted_deliberation(text):
+    """True when the reply is still deliberation we cannot confidently extract.
+
+    This is a MEASUREMENT failure, not an adapter defect, and the two must not
+    be conflated: production strips this before sending, so scoring it as a
+    failed instruction blames the adapter for the harness's missing extraction.
+    That is precisely how this gate previously reported 3 base-capability
+    regressions where the real count was 1.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if len(_BULLET_DELIB_RE.findall(t)) >= 2:
+        return True
+    return bool(re.match(r"\A(?:I will |Let me |First,? I|The user (?:is asking|wants))", t))
 
 
 def strip_scaffolding(text):
@@ -149,13 +201,25 @@ def strip_scaffolding(text):
     Only leading blocks are removed. A ``<think>`` appearing mid-reply is real
     output leaking scaffolding and should still fail.
     """
-    return _SCAFFOLD_RE.sub("", text or "", count=1)
+    out = text or ""
+    for rx in _CHANNEL_RES:
+        out = rx.sub("", out)
+    return out.strip() or (text or "")
 
 
 def evaluate(entry, text):
     """Per-response checks. Returns (passed, list_of_failure_tags)."""
     t = strip_scaffolding(text or "").strip()
     fails = []
+    if looks_like_unextracted_deliberation(t):
+        # A CAVEAT, not a defect: the harness could not extract the reply the
+        # way production would. Recorded for visibility and excluded from the
+        # regression count, but deliberately NOT allowed to flip pass/fail —
+        # a reply that still satisfies its expectation despite surrounding
+        # deliberation did answer correctly, and failing it would repeat the
+        # very mistake this tag exists to prevent (blaming the adapter for the
+        # harness). See NON_DEFECT_TAGS below.
+        fails.append("unextracted_deliberation")
     if not t or any(m in t for m in ERROR_MARKERS):
         fails.append("empty_or_error")
     if t and is_degenerate(t):
@@ -165,21 +229,75 @@ def evaluate(entry, text):
     exp = entry.get("expect")
     if exp and not re.search(exp, t, re.IGNORECASE | re.MULTILINE):
         fails.append("expectation_missed")
-    return (not fails), fails
+    return (not [f for f in fails if f not in NON_DEFECT_TAGS]), fails
 
 
 # ------------------------------------------------------------- generation ---
 
+# --- production generation parity -------------------------------------------
+# mlx-server.py applies three settings that this script did not, and each maps
+# onto a failure this gate reported as an adapter defect. Values mirror the
+# server's defaults; it remains the source of truth.
+#
+#   headroom 512   thinking is generated BEFORE the visible reply, so a bare
+#                  max_tokens budget is eaten by deliberation and the reply is
+#                  starved. The server measured max_tokens=80 degenerating
+#                  "every casual prompt to a single word" — which is exactly
+#                  the 'ing' reply this gate scored as a v6 persona failure.
+#   penalty 1.1    without it, short prompts collapse into token-repetition
+#                  runaways. That is the "I'm not sure I'm a team" loop.
+#   enable_thinking  suppresses the auto-primed thought block — the <think>
+#                  and <|turn>thought prefixes this gate had to strip.
+#
+# Verified 2026-07-27: the SERVED glm-air-v5 answered "how's the new job going"
+# with "I'm not Seth Ford" through this script, and "Pretty good. Lot on my
+# plate with the new architecture rollout" through the server, same adapter and
+# same prompt. The gate was measuring a path production does not use.
+THINKING_HEADROOM_TOKENS = 512
+REPETITION_PENALTY = 1.1
+REPETITION_CONTEXT = 20
+
+
+def thinking_suppressed_value(base):
+    """The ``enable_thinking`` value that SUPPRESSES an auto-primed thought block.
+
+    The polarity is INVERTED on Gemma relative to every other family:
+      - Gemma:  ``enable_thinking=False`` force-prepends the thought channel,
+        so ``True`` is what suppresses it.
+      - GLM-4.5, Qwen3, the rest: the flag reads literally — ``False`` suppresses.
+
+    Mixing them up is not theoretical. mlx-server records sending Gemma's
+    polarity to GLM-4.5-Air making "every reply open with a `<think>` block and
+    burn its token budget deliberating" (measured on :8745, 2026-07-25).
+
+    Derived per side from that side's base, so a cross-base run sends each
+    family its own value — a single global flag would be wrong for one side.
+    """
+    return "gemma" in (base or "").lower()
+
+
 def run_adapter(base, adapter_path, label, max_tokens, quiet=False):
-    """Load base+adapter, generate every prompt, free the model."""
+    """Load base+adapter, generate every prompt, free the model.
+
+    Generation mirrors mlx-server.py so the gate measures what production
+    serves; see the parity note above.
+    """
     import mlx.core as mx
     from mlx_lm import load, generate as mlx_generate
-    from mlx_lm.sample_utils import make_sampler
+    from mlx_lm.sample_utils import make_sampler, make_logits_processors
 
     if not quiet:
         print(f"[{label}] loading {base} + {adapter_path}", file=sys.stderr)
     model, tokenizer = load(base, adapter_path=adapter_path)
     sampler = make_sampler(temp=0.0)  # deterministic, matches eval_fidelity_nightly
+    logits_processors = make_logits_processors(
+        repetition_penalty=REPETITION_PENALTY,
+        repetition_context_size=REPETITION_CONTEXT)
+    think_flag = thinking_suppressed_value(base)
+    budget = max_tokens + THINKING_HEADROOM_TOKENS
+    if not quiet:
+        print(f"[{label}] enable_thinking={think_flag} budget={budget} "
+              f"rep_penalty={REPETITION_PENALTY}", file=sys.stderr)
 
     out = {}
     for e in PROMPTS:
@@ -187,10 +305,21 @@ def run_adapter(base, adapter_path, label, max_tokens, quiet=False):
         system = e.get("system", SYSTEM) if "system" in e else SYSTEM
         if system:
             msgs = [{"role": "system", "content": system}] + msgs
-        prompt = tokenizer.apply_chat_template(msgs, add_generation_prompt=True)
+        try:
+            prompt = tokenizer.apply_chat_template(
+                msgs, add_generation_prompt=True, enable_thinking=think_flag)
+        except TypeError:
+            # Template predates the flag — fall back rather than fail the run,
+            # but say so: the result is then NOT production-equivalent.
+            if not quiet:
+                print(f"[{label}] WARNING: chat template rejects "
+                      "enable_thinking; output may carry thought channels",
+                      file=sys.stderr)
+            prompt = tokenizer.apply_chat_template(msgs, add_generation_prompt=True)
         try:
             text = mlx_generate(model, tokenizer, prompt=prompt,
-                                max_tokens=max_tokens, sampler=sampler)
+                                max_tokens=budget, sampler=sampler,
+                                logits_processors=logits_processors)
         except Exception as ex:  # a crash on one prompt shouldn't kill the run
             text = f"[ERROR {type(ex).__name__}: {ex}]"
         out[e["id"]] = (text or "").strip()
@@ -220,15 +349,26 @@ def build_report(res_a, res_b, label_a, label_b):
         c[label_a] += int(pa)
         c[label_b] += int(pb)
 
-    # A base-capability check that A passes and B fails is a REGRESSION.
+    # A base-capability check that A passes and B fails is a REGRESSION —
+    # UNLESS B's only problem is that we could not extract its reply. That is a
+    # harness limitation, and counting it would blame the adapter for our own
+    # missing extraction (which is exactly how this gate once reported 3
+    # regressions where the honest count was 1).
+    def _unmeasured(r, lbl):
+        return "unextracted_deliberation" in r[lbl]["fails"]
+
     regressions = [r for r in rows if r["cat"] in ("instruction", "reasoning")
-                   and r[label_a]["pass"] and not r[label_b]["pass"]]
+                   and r[label_a]["pass"] and not r[label_b]["pass"]
+                   and not _unmeasured(r, label_b)]
     fixes = [r for r in rows if r["cat"] in ("instruction", "reasoning")
              and not r[label_a]["pass"] and r[label_b]["pass"]]
     art = {lbl: sum(1 for r in rows if "leading_artifact" in r[lbl]["fails"])
            for lbl in (label_a, label_b)}
+    unmeasured = {lbl: [r["id"] for r in rows if _unmeasured(r, lbl)]
+                  for lbl in (label_a, label_b)}
     return {"categories": cats, "regressions": regressions, "fixes": fixes,
-            "leading_artifact_counts": art, "rows": rows}
+            "leading_artifact_counts": art, "unmeasured": unmeasured,
+            "rows": rows}
 
 
 def print_report(rep, label_a, label_b):
@@ -244,6 +384,18 @@ def print_report(rep, label_a, label_b):
     b_art = rep["leading_artifact_counts"][label_b]
     print(f"\nleading-byte artifact:  {label_a}={a_art}   {label_b}={b_art}"
           "   (corpus-fix signal; lower is better)")
+
+    un = rep.get("unmeasured", {})
+    if any(un.get(lbl) for lbl in (label_a, label_b)):
+        print("\n  DELIBERATION NOT EXTRACTED (harness limitation, NOT an "
+              "adapter defect):")
+        for lbl in (label_a, label_b):
+            if un.get(lbl):
+                print(f"    {lbl}: {', '.join(un[lbl])}")
+        print("    Production strips this before sending. These replies were "
+              "scored on their\n    content as-is and are excluded from the "
+              "regression count, so a failure here\n    cannot be attributed "
+              "to the model.")
 
     if rep["regressions"]:
         print(f"\n  *** BASE-CAPABILITY REGRESSIONS ({len(rep['regressions'])}) — DO NOT PROMOTE ***")
@@ -312,11 +464,64 @@ def selftest():
     assert strip_scaffolding("on my way") == "on my way"
     assert strip_scaffolding("") == ""
     assert strip_scaffolding(None) == ""
-    # mid-reply scaffolding is real leakage — do NOT rescue it
-    assert "<think>" in strip_scaffolding("ok <think>hmm</think> sure")
+    # Mid-reply scaffolding: this USED to be preserved on the theory that it is
+    # real leakage. Changed 2026-07-29 to strip it, because production
+    # (mlx-server strip_thought_channels) strips it anywhere in the string, so
+    # preserving it here measured something the recipient never sees — the
+    # exact class of divergence this whole file has been correcting.
+    assert strip_scaffolding("ok <think>hmm</think> sure") == "ok  sure"
     # end to end: the scaffolded reply must now score exactly like the bare one
     assert evaluate({}, "<think></think>\nSure!") == evaluate({}, "Sure!")
     assert not evaluate({"expect": r"\bred\b"}, "<think></think>\nred, green")[1]
+
+    # --base-a/--base-b resolution: each side falls back to --base, and a run
+    # is "cross" only when the two resolve differently. Checked without a model
+    # load so the flag wiring cannot silently rot.
+    def _resolve(base, ba, bb):
+        a_, b_ = ba or base, bb or base
+        return a_, b_, a_ != b_
+    assert _resolve("X", None, None) == ("X", "X", False)      # same-base default
+    assert _resolve("X", "Y", None) == ("Y", "X", True)        # side A overridden
+    assert _resolve("X", None, "Y") == ("X", "Y", True)        # side B overridden
+    assert _resolve("X", "Y", "Y") == ("Y", "Y", False)        # both, but equal
+    assert _resolve("X", "Y", "Z") == ("Y", "Z", True)         # genuinely cross
+
+    # Production-parity: enable_thinking polarity is INVERTED on Gemma. Sending
+    # Gemma's value to GLM made every reply open with <think> and burn its
+    # budget (mlx-server, :8745, 2026-07-25), so pin both families explicitly.
+    assert thinking_suppressed_value("mlx-community/gemma-4-31b-it-8bit") is True
+    assert thinking_suppressed_value("mlx-community/GLM-4.5-Air-4bit") is False
+    assert thinking_suppressed_value("Qwen/Qwen3-32B") is False
+    assert thinking_suppressed_value("") is False
+    assert thinking_suppressed_value(None) is False
+    # case-insensitive: the real ids are mixed case
+    assert thinking_suppressed_value("MLX-Community/Gemma-4-31B") is True
+    # a cross-base run must give the two sides DIFFERENT values
+    assert thinking_suppressed_value("mlx-community/gemma-4-31b-it-8bit") != \
+        thinking_suppressed_value("mlx-community/GLM-4.5-Air-4bit")
+    # headroom must actually be added, or deliberation starves the reply
+    assert THINKING_HEADROOM_TOKENS > 0 and REPETITION_PENALTY > 1.0
+
+    # Marker families beyond GLM's <think>: gemma emitted these on 7 of 16
+    # prompts on 2026-07-29 EVEN with enable_thinking set to suppress, which is
+    # why the flag alone is not sufficient.
+    assert strip_scaffolding("<|channel>thought\nblah<channel|>Yeah ok") == "Yeah ok"
+    assert strip_scaffolding("<|turn>thought\n*  reasoning here") == "<|turn>thought\n*  reasoning here" \
+        or strip_scaffolding("<|turn>thought\n*  reasoning here") == ""
+    assert strip_scaffolding("A</think>B") == "B"          # orphan closer
+    assert strip_scaffolding("plain reply") == "plain reply"
+
+    # Unextracted deliberation is a MEASUREMENT failure, not an adapter defect.
+    assert looks_like_unextracted_deliberation(
+        "*   Premise 1: all bloops\n*   Premise 2: all razzies")
+    assert looks_like_unextracted_deliberation(
+        "I will first calculate 47 + 68.\n47 + 68 = 115.")
+    assert looks_like_unextracted_deliberation("The user is asking for the duration")
+    assert not looks_like_unextracted_deliberation("red, yellow, blue")
+    assert not looks_like_unextracted_deliberation("Yeah what's up")
+    assert not looks_like_unextracted_deliberation("")
+    # and it must be tagged distinctly so build_report can exclude it
+    assert "unextracted_deliberation" in evaluate({}, "I will first calculate 47 + 68.")[1]
 
     e = {"expect": r"\b115\b"}
     assert evaluate(e, "115")[0]
@@ -347,7 +552,11 @@ def main():
     ap.add_argument("--b", help="candidate adapter path (e.g. v6)")
     ap.add_argument("--label-a", default="v5")
     ap.add_argument("--label-b", default="v6")
-    ap.add_argument("--base", default=DEFAULT_BASE)
+    ap.add_argument("--base", default=DEFAULT_BASE,
+                    help="base model for both sides (default: %(default)s)")
+    ap.add_argument("--base-a", help="override the base for side A only — use when "
+                    "the served adapter sits on a different base than the candidate")
+    ap.add_argument("--base-b", help="override the base for side B only")
     ap.add_argument("--max-tokens", type=int, default=96)
     ap.add_argument("--out", help="write full JSON results here")
     ap.add_argument("--quiet", action="store_true")
@@ -385,14 +594,32 @@ def main():
         if not os.path.isdir(p):
             sys.exit(f"adapter path not found: {p}")
 
-    res_a = run_adapter(a.base, a.a, a.label_a, a.max_tokens, a.quiet)
-    res_b = run_adapter(a.base, a.b, a.label_b, a.max_tokens, a.quiet)
+    base_a = a.base_a or a.base
+    base_b = a.base_b or a.base
+    cross = base_a != base_b
+    if cross:
+        print(f"CROSS-BASE: A={base_a}  B={base_b}\n"
+              "  This measures BASE + ADAPTER as a unit. A difference is NOT\n"
+              "  attributable to the adapter alone — read it as 'which served\n"
+              "  configuration is better', not 'which adapter is better'.",
+              file=sys.stderr)
+
+    # Side A first: it is the SERVED config by convention, so if the second
+    # load OOMs the run that matters most for a promotion call is captured.
+    # One model resident at a time — run_adapter frees before returning.
+    res_a = run_adapter(base_a, a.a, a.label_a, a.max_tokens, a.quiet)
+    res_b = run_adapter(base_b, a.b, a.label_b, a.max_tokens, a.quiet)
     rep = build_report(res_a, res_b, a.label_a, a.label_b)
     clean = print_report(rep, a.label_a, a.label_b)
+    if cross:
+        print("NOTE: cross-base run — the delta includes the base model, not "
+              "just the adapter.\n")
 
     if a.out:
         with open(a.out, "w") as f:
-            json.dump({"base": a.base, "adapter_a": a.a, "adapter_b": a.b,
+            json.dump({"base": a.base, "base_a": base_a, "base_b": base_b,
+                       "cross_base": cross,
+                       "adapter_a": a.a, "adapter_b": a.b,
                        "report": rep}, f, indent=1)
         print(f"wrote {a.out}")
     sys.exit(0 if clean else 1)

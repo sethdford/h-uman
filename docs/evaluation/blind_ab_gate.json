@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "commit": "1cb08aad0a2caa188ceb623c2031294b131586c7",
+  "commit": "a508fb0991c6e4733661757d6dcf89380f97eac5",
   "proxy": {
     "tool": "eval_blinded_ab.py",
-    "timestamp": "2026-07-27T03:20:55",
+    "timestamp": "2026-07-27T05:59:53",
     "verdict": "FAIL",
     "mode": "ENFORCING",
-    "fool_rate": 20.0,
-    "baseline_fool_rate": 16.3265306122449,
-    "n_trials": 45,
-    "n_real_pairs": 45,
+    "fool_rate": 44.0,
+    "baseline_fool_rate": 62.5,
+    "n_trials": 50,
+    "n_real_pairs": 50,
     "fail_under": 45.0,
     "max_regression": 5.0
   },

@@ -1430,7 +1430,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* ── Observer: turn start (matches batch path in agent_turn.c) ─────── */
     hu_agent_internal_generate_trace_id(agent->trace_id);
 
-    clock_t turn_start = clock();
+    uint64_t turn_start_ms = hu_agent_internal_monotonic_ms();
     uint64_t turn_tokens = 0;
     const char *prov_name = agent->provider.vtable->get_name
                                 ? agent->provider.vtable->get_name(agent->provider.ctx)
@@ -1637,11 +1637,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
         }
 
-        clock_t llm_start = clock();
+        /* Wall clock, NOT clock() — see the matching comment in
+         * agent_turn.c. CPU-clock timing cannot see a blocking round
+         * trip, which starved the M3 outcome filter of every sample. */
+        uint64_t llm_start_ms = hu_agent_internal_monotonic_ms();
         err = agent->provider.vtable->stream_chat(agent->provider.ctx, agent->alloc, &req,
                                                   turn_model, turn_model_len, turn_temp,
                                                   effective_cb, effective_ctx, &sresp);
-        uint64_t llm_duration_ms = hu_agent_internal_clock_diff_ms(llm_start, clock());
+        uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
 
         /* Flush any remaining partial buffer from the self-RAG filter. */
         if (srag_streaming_active) {
@@ -3151,7 +3154,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
     /* ── Observer: turn end (matches batch path in agent_turn.c) ───────── */
     {
-        uint64_t turn_duration_ms = hu_agent_internal_clock_diff_ms(turn_start, clock());
+        uint64_t turn_duration_ms = hu_agent_internal_monotonic_ms() - turn_start_ms;
         {
             hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_AGENT_END, .data = {{0}}};
             ev.data.agent_end.duration_ms = turn_duration_ms;

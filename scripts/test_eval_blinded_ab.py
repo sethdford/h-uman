@@ -92,6 +92,131 @@ def test_mlx_messages_tolerates_malformed_turn():
     assert [x["content"] for x in m] == ["SYS", "no from key", "x"]
 
 
+# ---- 3. judge thinking budget ---------------------------------------------
+# gemini-3.x shares maxOutputTokens between invisible thinking and the visible
+# reply (CLAUDE.md). Unset, a judgment that thinks hard leaves too few tokens
+# for the JSON body -> "Unterminated string" -> the trial is silently dropped.
+# 18/50 trials were lost this way on 2026-07-27, and the loss is biased: the
+# judge thinks longest on the closest calls.
+
+def test_judge_config_sets_thinking_budget_explicitly():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    assert "thinkingConfig" in cfg, "gemini-3.x needs an explicit thinking budget"
+    assert isinstance(cfg["thinkingConfig"].get("thinkingBudget"), int)
+
+
+def test_judge_config_leaves_room_for_the_json_body():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    budget = cfg["thinkingConfig"]["thinkingBudget"]
+    assert cfg["maxOutputTokens"] - budget >= 2048, (
+        "thinking must not be able to starve the response body")
+
+
+def test_judge_config_still_carries_schema_and_temperature():
+    cfg = E.judge_gen_config(0.2, E._BLINDED_AB_JUDGE_SCHEMA)
+    assert cfg["temperature"] == 0.2
+    assert cfg["responseSchema"] is E._BLINDED_AB_JUDGE_SCHEMA
+    assert cfg["responseMimeType"] == "application/json"
+
+
+def test_judge_config_without_schema_omits_schema_keys():
+    cfg = E.judge_gen_config(0.7, None)
+    assert "responseSchema" not in cfg and "responseMimeType" not in cfg
+    assert "thinkingConfig" in cfg
+
+
+# ---- 4. gateway (product) path --------------------------------------------
+# The --mlx path scores a hand-written SETH_SYSTEM_PROMPT against raw MLX, so
+# the persona pipeline is never exercised and every style claim in that prompt
+# becomes an AI tell the moment it is wrong ("Lowercase." was ~10x off, and
+# "Abbreviate (gonna, tbh...)" drove tbh 200x). The gateway path runs the real
+# agent turn, which supplies the persona itself.
+
+def test_gateway_messages_carry_no_system_prompt():
+    """The product owns the persona. A harness-authored system prompt here
+    would reintroduce exactly the artifact class --gateway exists to remove."""
+    m = E.build_gateway_messages("hey", None)
+    assert all(x["role"] != "system" for x in m), (
+        "the gateway must not be fed a harness-authored persona")
+
+
+def test_gateway_messages_minimal_is_single_user_turn():
+    assert E.build_gateway_messages("hey", None) == [
+        {"role": "user", "content": "hey"}]
+
+
+def test_gateway_messages_include_thread_in_order():
+    turns = [{"from": "them", "text": "you around?"},
+             {"from": "seth", "text": "yeah whats up"}]
+    m = E.build_gateway_messages("dinner at 7?", turns)
+    assert [x["role"] for x in m] == ["user", "assistant", "user"]
+    assert m[-1]["content"] == "dinner at 7?"
+
+
+def test_gateway_messages_skip_blank_and_malformed():
+    turns = [None, {}, {"from": "them", "text": "  "}, {"from": "them", "text": "ok"}]
+    m = E.build_gateway_messages("x", turns)
+    assert [x["content"] for x in m] == ["ok", "x"]
+
+
+def test_gateway_url_prefers_env_override():
+    assert E.gateway_url_from_config({"gateway": {"port": 3006}},
+                                     env_url="http://host:9999") == "http://host:9999"
+
+
+def test_gateway_url_reads_configured_port():
+    """Default was hardcoded :3002 while the daemon listens on the configured
+    port (3006 here) — --gateway would have failed connection-refused."""
+    assert E.gateway_url_from_config({"gateway": {"port": 3006}}) == "http://127.0.0.1:3006"
+
+
+def test_gateway_url_falls_back_when_config_unusable():
+    for bad in (None, {}, {"gateway": {}}, {"gateway": None}):
+        assert E.gateway_url_from_config(bad).endswith(":3002")
+
+
+def test_gateway_deadline_is_not_shorter_than_mlx():
+    """The gateway path does strictly MORE work than a bare MLX completion —
+    a full agent turn fans out into several :8741 generations, all queued
+    behind live service-loop traffic on the same serial server. It must not
+    have the tighter deadline. At 60s vs MLX's 120s it did, and a --gate run
+    aborted after 8/50 trials on MAX_CONSECUTIVE_FAILURES.
+
+    Per the MLX timeout's own comment, an early timeout is worse than a lost
+    trial: the request still generates server-side, then BrokenPipes, so it
+    degrades LIVE serving for the drain duration."""
+    assert E.GATEWAY_TIMEOUT_S >= E.MLX_TIMEOUT_S
+
+
+# ---- 5. a harness failure must not destroy the last real measurement -------
+# write_proxy_half() ran BEFORE the <50%-valid check, so a run that the script
+# itself declares "not a measurement" still overwrote the gate. On 2026-07-27
+# an 8/50 run and then a 0/50 run (daemon down, connection refused) replaced a
+# genuine fool_rate=44.0% n=50 verdict with ADVISORY n=0. The guard stopped a
+# false verdict; it did not stop evidence loss.
+
+def test_zero_valid_trials_is_not_a_valid_run():
+    assert E.harness_run_is_valid(0, 50) is False
+
+
+def test_far_short_run_is_not_valid():
+    assert E.harness_run_is_valid(8, 50) is False
+
+
+def test_exactly_half_is_valid():
+    """Boundary must match the existing `total < attempted / 2` predicate."""
+    assert E.harness_run_is_valid(25, 50) is True
+
+
+def test_full_run_is_valid():
+    assert E.harness_run_is_valid(50, 50) is True
+
+
+def test_nothing_attempted_is_vacuously_valid():
+    """No pairs attempted makes no claim either way; the caller writes nothing."""
+    assert E.harness_run_is_valid(0, 0) is True
+
+
 # ---- runner ----------------------------------------------------------------
 
 def _run():

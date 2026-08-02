@@ -9,6 +9,7 @@
 #include "human/core/error.h"
 #include "human/memory/personal_model.h"
 #include "human/persona/circadian.h"
+#include "human/persona/life_events.h"
 #include "human/persona/relationship.h"
 
 #include <stdbool.h>
@@ -434,6 +435,12 @@ typedef struct hu_persona {
     hu_context_modifiers_t context_modifiers;
     hu_important_date_t *important_dates;
     size_t important_dates_count;
+    /* In-flight life transitions with an explicit lifecycle state, so the
+     * prompt can say "during" and not only "before"/"after". Absent from a
+     * persona = zero events = byte-identical prompt. See
+     * include/human/persona/life_events.h for the cycle-4 evidence. */
+    hu_life_event_t *life_events;
+    size_t life_events_count;
     hu_context_awareness_t context_awareness;
     /* Phase 4 — follow-ups, bookends, timezone, location, group behavior */
     hu_follow_up_style_t follow_up_style;
