@@ -45,11 +45,21 @@ done
 # with a 60s repro on gemma-2-2b (orpo 0/28, cpo 0/28, dpo 28/28 non-zero).
 # The post-run lora_b guard below catches it regardless, but refuse up front
 # rather than spend a production-dark window producing a known no-op.
+ORPO_SRC=/Users/sethford/.human/venvs/train312/lib/python3.12/site-packages/mlx_lm_lora/trainer/orpo_trainer.py
 case "$TRAINER:$TRAIN_MODE" in
-  mlx_lm_lora:orpo|mlx_lm_lora:cpo)
-    echo "[train] REFUSING --train-mode $TRAIN_MODE: mlx-lm-lora 3.0.0 emits a" >&2
-    echo "        no-op adapter for it (all lora_b == 0). Use --trainer mlx_lm," >&2
-    echo "        or dpo if you have memory for a second full model copy." >&2
+  mlx_lm_lora:orpo)
+    # Stock 3.0.0 computes the forward pass OUTSIDE the function nn.value_and_grad
+    # differentiates, so every gradient is structurally zero and the adapter is a
+    # no-op (all lora_b == 0). Verified on gemma-2-2b: 0/28 before, 28/28 after.
+    # Allow orpo ONLY when the local patch is present.
+    if ! grep -q "PATCHED: the forward pass MUST happen inside" "$ORPO_SRC" 2>/dev/null; then
+      echo "[train] REFUSING --train-mode orpo: $ORPO_SRC is unpatched and emits a" >&2
+      echo "        no-op adapter (all lora_b == 0). Re-apply the patch first." >&2
+      exit 2
+    fi
+    echo "[train] orpo patch present in mlx_lm_lora — proceeding" ;;
+  mlx_lm_lora:cpo)
+    echo "[train] REFUSING --train-mode cpo: same no-op defect, not patched." >&2
     exit 2 ;;
 esac
 
