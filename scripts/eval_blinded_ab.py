@@ -115,12 +115,79 @@ HU_BIN = "hu"
 GT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "imessage", "ground_truth.jsonl")
 RESULTS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "eval_blinded_ab.json")
 
-SETH_SYSTEM_PROMPT = (
-    "You are Seth Ford, 45, texting on iMessage. Chief Architect at Vanguard. "
-    "Live alone with your cat in King of Prussia, PA. From Afton, Wyoming. "
-    "Three kids (Annette, Emerson, Edison) who don't live with you. "
-    "Speak Japanese, lived in Japan (lost home in 2011 tsunami). "
-    "23 years at Fidelity before this. Build AI runtimes as side projects.\n\n"
+# --------------------------------------------------------------------------
+# The system prompt comes from the PRODUCT, not from this file.
+#
+# This module used to carry its own hand-written prompt. Two things were wrong
+# with that, and both corrupted every number the gate ever produced:
+#
+#  1. STALE IDENTITY. It said "Chief Architect at Vanguard", "King of Prussia,
+#     PA" and "Seth Ford, 45" long after the persona was corrected to Raymond
+#     James / St. Petersburg FL. Cycle-4 item bab_013 asked "Are you officially
+#     50?" while this prompt insisted on 45. The gate was scoring a model that
+#     believed it lived in Pennsylvania against real replies from a man in
+#     Florida, and attributing the mismatch to "voice".
+#  2. WRONG SIZE AND SHAPE. 872 bytes of authored summary versus the 5029-byte
+#     compact per-contact head production actually builds.
+#
+# Measured 2026-08-02, same adapter and same prompt text, only the system
+# prompt differing:
+#     bare/authored -> "Hey! Not much, just hanging out here to help ... 😊"
+#     production head -> "Not much just figuring out life"
+# Opposite verdicts. A gate that certified 0.225 "indistinguishable" while the
+# principal said "nowhere near me" was measuring a configuration nobody ships.
+#
+# So: build the head through the production path. If that path is unavailable we
+# REFUSE rather than fall back to an authored string -- a number produced against
+# a different system is worse than no number
+# (.claude/rules/no-number-without-a-measurement.md).
+
+_DUMP_HEAD_CANDIDATES = (
+    os.environ.get("HU_DUMP_PROMPT_HEAD", ""),
+    os.path.expanduser("~/blind_ab_run/dump_prompt_head"),
+    os.path.join(os.path.dirname(__file__), "..", "build", "dump_prompt_head"),
+)
+
+
+def production_system_prompt(persona="seth", channel="imessage", contact="-", head_mode="live"):
+    """Return the system prompt PRODUCTION builds, via tools/dump_prompt_head.
+
+    Raises SystemExit if the production path cannot be reached. Callers must not
+    substitute an authored prompt -- that is the defect this function exists to
+    remove.
+    """
+    exe = next((p for p in _DUMP_HEAD_CANDIDATES if p and os.path.isfile(p) and os.access(p, os.X_OK)), None)
+    if not exe:
+        raise SystemExit(
+            "FATAL: dump_prompt_head not found, so the production system prompt cannot be "
+            "built. Set HU_DUMP_PROMPT_HEAD=/path/to/dump_prompt_head. Refusing to score "
+            "against an authored prompt -- that measures a system we do not ship."
+        )
+    env = dict(os.environ, HU_PERSONA_HEAD=head_mode)
+    try:
+        out = subprocess.run([exe, persona, channel, contact], capture_output=True,
+                             text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"FATAL: dump_prompt_head failed to run ({e}); refusing to score.")
+    head = (out.stdout or "").strip()
+    if out.returncode != 0 or len(head) < 500:
+        raise SystemExit(
+            f"FATAL: dump_prompt_head returned rc={out.returncode} and {len(head)} bytes "
+            f"(expected a multi-KB head). stderr: {(out.stderr or '')[:200]}. Refusing to "
+            f"score against a truncated or empty prompt."
+        )
+    return head
+
+
+def __getattr__(name):
+    """Lazy SETH_SYSTEM_PROMPT so importers (steering_ab.py) get the PRODUCTION
+    head without this module shelling out at import time."""
+    if name == "SETH_SYSTEM_PROMPT":
+        return production_system_prompt()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_REMOVED_AUTHORED_PROMPT_KEPT_FOR_REFERENCE = (
     # EVERY style claim below is MEASURED, not authored. Source: the 689 real
     # replies in data/imessage/ground_truth.jsonl (2026-07-27, post decoder fix).
     # Authored style rules here have twice been the largest AI tell in the
