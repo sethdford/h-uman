@@ -1,0 +1,141 @@
+{
+  "n_probes": 20,
+  "corpus_size": 962,
+  "embedder": "mlx-community/nomicai-modernbert-embed-base-8bit",
+  "keyword_backend": "sqlite fts5 memories_fts + bm25",
+  "measures": "paraphrase robustness only; NOT end-to-end reply quality",
+  "keyword": {
+    "recall@1": 0.1,
+    "recall@5": 0.2,
+    "mrr": 0.15
+  },
+  "semantic": {
+    "recall@1": 0.4,
+    "recall@5": 0.5,
+    "mrr": 0.4225
+  },
+  "rows": [
+    {
+      "query": "what does he think of that wood panelling style?",
+      "target": "batten boards",
+      "keyword_rank": null,
+      "semantic_rank": 1
+    },
+    {
+      "query": "who is going to arrange the fitting?",
+      "target": "find an installer",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "is he looking at new places to live?",
+      "target": "apartment tours",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "is he still trying to sell the house?",
+      "target": "keeping it listed for sale",
+      "keyword_rank": null,
+      "semantic_rank": 1
+    },
+    {
+      "query": "sending a bit of money for household stuff",
+      "target": "cleaning supplies",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "getting food ready for the party",
+      "target": "food prepping",
+      "keyword_rank": 2,
+      "semantic_rank": 1
+    },
+    {
+      "query": "does he joke about the assistant?",
+      "target": "digital intern",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "someone offered to fly out and look after him",
+      "target": "come see you",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "unpaid bills with contractors",
+      "target": "payment decisions",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "weekend plans with his partner",
+      "target": "plan for saturday",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "balancing work and home life",
+      "target": "professional responsibilities and personal life",
+      "keyword_rank": null,
+      "semantic_rank": 4
+    },
+    {
+      "query": "he was surprised by something a person said",
+      "target": "cant believe he said that",
+      "keyword_rank": null,
+      "semantic_rank": 1
+    },
+    {
+      "query": "a document was delivered",
+      "target": "sent the document",
+      "keyword_rank": 1,
+      "semantic_rank": 1
+    },
+    {
+      "query": "short polite back-and-forth",
+      "target": "cordial exchanges",
+      "keyword_rank": null,
+      "semantic_rank": 1
+    },
+    {
+      "query": "arranging a ride and building access",
+      "target": "Uber",
+      "keyword_rank": 2,
+      "semantic_rank": 1
+    },
+    {
+      "query": "apologising for a small mistake",
+      "target": "Ok sorryy",
+      "keyword_rank": null,
+      "semantic_rank": 5
+    },
+    {
+      "query": "agreeing to speak again later",
+      "target": "text me later",
+      "keyword_rank": 1,
+      "semantic_rank": null
+    },
+    {
+      "query": "juggling admin tasks and deadlines at work",
+      "target": "administrative matters and time management",
+      "keyword_rank": null,
+      "semantic_rank": 1
+    },
+    {
+      "query": "the assistant does both deep technical work and personal chat",
+      "target": "hybrid capacity",
+      "keyword_rank": null,
+      "semantic_rank": null
+    },
+    {
+      "query": "good things said about him professionally",
+      "target": "Positive professional interactions",
+      "keyword_rank": null,
+      "semantic_rank": null
+    }
+  ],
+  "recall@5_delta_points": 30.0,
+  "pass": true
+}
