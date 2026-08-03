@@ -225,6 +225,15 @@ if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
     fi
 fi
 
+# Reports-success-does-nothing: OR IGNORE with no constraint to ignore, and
+# discarded send/store returns. Both shipped this week and both looked healthy.
+staged_c=$(git diff --cached --name-only --diff-filter=ACM -- 'src/*.c' 'src/**/*.c' 2>/dev/null)
+if [ -n "$staged_c" ] && [ -x "scripts/check-silent-success.sh" ]; then
+    if ! scripts/check-silent-success.sh $staged_c; then
+        exit 1
+    fi
+fi
+
 # E0 erosion-brake gates (DDD Program v2): file-size ceiling, no-new-root-files,
 # clone-detection. Ratchets at their 2026-05-31 baselines; fail only on growth.
 # See docs/plans/2026-05-29-ddd-bounded-contexts/phase-E0-erosion-brake-gates.md.
