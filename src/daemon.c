@@ -39,6 +39,7 @@
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
+#include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
@@ -11352,32 +11353,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 memset(&de_result, 0, sizeof(de_result));
                                 if (hu_deep_extract_parse(alloc, de_response, de_response_len,
                                                           &de_result) == HU_OK) {
+                                    /* Superseding ingest: a changed fact closes
+                                     * the prior edge (graph_ingest.h). */
                                     for (size_t ri = 0; ri < de_result.relation_count; ri++) {
-                                        if (!de_result.relations[ri].entity_a ||
-                                            !de_result.relations[ri].entity_b)
+                                        const hu_extracted_relation_t *dr =
+                                            &de_result.relations[ri];
+                                        if (!dr->entity_a || !dr->entity_b)
                                             continue;
-                                        int64_t src_id = 0, tgt_id = 0;
-                                        (void)hu_graph_upsert_entity(
-                                            graph, batch_key, key_len,
-                                            de_result.relations[ri].entity_a,
-                                            strlen(de_result.relations[ri].entity_a),
-                                            HU_ENTITY_UNKNOWN, NULL, &src_id);
-                                        (void)hu_graph_upsert_entity(
-                                            graph, batch_key, key_len,
-                                            de_result.relations[ri].entity_b,
-                                            strlen(de_result.relations[ri].entity_b),
-                                            HU_ENTITY_UNKNOWN, NULL, &tgt_id);
-                                        if (src_id > 0 && tgt_id > 0) {
-                                            const char *rel_str =
-                                                de_result.relations[ri].relation
-                                                    ? de_result.relations[ri].relation
-                                                    : "";
-                                            (void)hu_graph_upsert_relation(
-                                                graph, batch_key, key_len, src_id, tgt_id,
-                                                HU_REL_RELATED_TO,
-                                                (float)de_result.relations[ri].confidence, rel_str,
-                                                strlen(rel_str));
-                                        }
+                                        (void)hu_graph_ingest_fact(
+                                            graph, batch_key, key_len, dr->entity_a,
+                                            dr->relation ? dr->relation : "related_to",
+                                            dr->entity_b, (float)dr->confidence,
+                                            (int64_t)time(NULL), "turn:deep_extract");
                                     }
                                     hu_deep_extract_result_deinit(&de_result, alloc);
                                 }

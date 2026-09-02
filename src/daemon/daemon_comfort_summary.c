@@ -29,6 +29,7 @@
 #include "human/memory.h"
 #include "human/memory/deep_extract.h"
 #include "human/memory/graph.h"
+#include "human/memory/graph_ingest.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
 #endif
@@ -36,6 +37,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
 /* F23: Extract significant topic keywords from user text and record baselines.
@@ -44,8 +46,8 @@
 #define HU_DAEMON_TOPIC_BUF          32
 
 void hu_daemon_record_topic_baselines_from_text(hu_memory_t *memory, const char *contact_id,
-                                             size_t contact_id_len, const char *text,
-                                             size_t text_len) {
+                                                size_t contact_id_len, const char *text,
+                                                size_t text_len) {
     if (!memory || !contact_id || contact_id_len == 0 || !text || text_len == 0)
         return;
     static const char *const stop[] = {
@@ -149,10 +151,10 @@ float hu_daemon_score_comfort_engagement(const char *reply, size_t reply_len) {
  * When graph is non-NULL, also upserts facts and relations into the GraphRAG knowledge graph.
  * agent may be NULL; when non-NULL and bth_metrics set, increments facts_extracted. */
 void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *memory,
-                                       hu_graph_t *graph, hu_agent_t *agent, const char *session_id,
-                                       size_t session_id_len, const char *user_msg,
-                                       size_t user_msg_len, const char *response,
-                                       size_t response_len) {
+                                          hu_graph_t *graph, hu_agent_t *agent,
+                                          const char *session_id, size_t session_id_len,
+                                          const char *user_msg, size_t user_msg_len,
+                                          const char *response, size_t response_len) {
     if (!alloc || !memory || !memory->vtable || !memory->vtable->store)
         return;
     if (!user_msg || user_msg_len == 0)
@@ -209,23 +211,15 @@ void hu_daemon_store_conversation_summary(hu_allocator_t *alloc, hu_memory_t *me
             }
 #ifdef HU_ENABLE_SQLITE
             if (graph) {
-                int64_t src_id = 0;
-                int64_t tgt_id = 0;
-                size_t subj_len = strlen(f->subject);
-                size_t obj_len = strlen(f->object);
-                hu_relation_type_t rel_type =
-                    hu_relation_type_from_string(f->predicate, strlen(f->predicate));
-                if (hu_graph_upsert_entity(graph, session_id, session_id_len, f->subject, subj_len,
-                                           HU_ENTITY_UNKNOWN, NULL, &src_id) == HU_OK &&
-                    hu_graph_upsert_entity(graph, session_id, session_id_len, f->object, obj_len,
-                                           HU_ENTITY_UNKNOWN, NULL, &tgt_id) == HU_OK) {
-                    hu_error_t rel_err =
-                        hu_graph_upsert_relation(graph, session_id, session_id_len, src_id, tgt_id,
-                                                 rel_type, 1.0f, f->object, obj_len);
-                    if (rel_err != HU_OK)
-                        hu_log_error("daemon", agent ? agent->observer : NULL,
-                                     "graph: relation upsert failed: %s", hu_error_string(rel_err));
-                }
+                /* Superseding ingest (graph_ingest.h): a changed fact closes the
+                 * prior edge instead of leaving both open forever. */
+                hu_error_t rel_err = hu_graph_ingest_fact(
+                    graph, session_id, session_id_len, f->subject, f->predicate, f->object,
+                    f->confidence > 0.0f ? f->confidence : 1.0f, (int64_t)time(NULL),
+                    "turn:comfort_summary");
+                if (rel_err != HU_OK)
+                    hu_log_error("daemon", agent ? agent->observer : NULL,
+                                 "graph: fact ingest failed: %s", hu_error_string(rel_err));
             }
 #endif
         }
