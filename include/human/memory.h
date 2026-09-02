@@ -172,6 +172,14 @@ hu_error_t hu_memory_recall_for_contact(hu_memory_t *mem, hu_allocator_t *alloc,
 
 hu_memory_t hu_none_memory_create(hu_allocator_t *alloc);
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path);
+
+/* Put libsqlite3 in SERIALIZED threading mode for this process. Call once,
+ * first thing in main(), before any connection is opened: the daemon shares
+ * connections between the gateway worker threads and the service loop, and
+ * macOS ships libsqlite3 in multi-thread mode (THREADSAFE=2) where that is a
+ * crash. Returns false only if sqlite3_config() failed for a reason other
+ * than "already initialized". */
+bool hu_sqlite_process_serialize(void);
 hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem);
 
 /* Semantic index (Phase 2, 2026-09-01). Attach an embedder + vector store to a

@@ -1558,6 +1558,17 @@ void hu_sqlite_open_sentinel_remove(const char *db_path) {
         (void)remove(p);
 }
 
+/* One connection, many threads. The daemon hands this engine's single
+ * sqlite3* to the gateway worker threads (hu_agent_turn → memory writes) AND
+ * to the service loop on the main thread (init_proposer → reflection reads).
+ * Apple's libsqlite3 is built THREADSAFE=2 (multi-thread): a connection may
+ * only be used by one thread at a time unless it is opened FULLMUTEX. Linux
+ * distros build THREADSAFE=1 (serialized), which is why the M3 live-fire
+ * crashed inside sqlite3_step() on the macOS runner only (2026-07 → 09-02,
+ * getAndInitPage on a NULL page). FULLMUTEX makes the connection serialize
+ * itself regardless of how the library was built. */
+#define HU_SQLITE_OPEN_FLAGS (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX)
+
 /* Quarantine the corrupt file at db_path and reopen a fresh DB there. On
  * success *db is the new live handle (busy timeout applied); on failure *db is
  * NULL and the refusal has been logged. */
@@ -1565,7 +1576,8 @@ static bool quarantine_and_reopen(const char *db_path, sqlite3 **db) {
     if (*db)
         sqlite3_close(*db);
     *db = NULL;
-    if (!hu_sqlite_quarantine_corrupt_file(db_path) || sqlite3_open(db_path, db) != SQLITE_OK) {
+    if (!hu_sqlite_quarantine_corrupt_file(db_path) ||
+        sqlite3_open_v2(db_path, db, HU_SQLITE_OPEN_FLAGS, NULL) != SQLITE_OK) {
         hu_log_error("memory.sqlite", NULL, "could not recover corrupt DB '%s'; refusing to open",
                      db_path);
         if (*db)
@@ -1600,9 +1612,18 @@ static bool sqlite_rc_is_corruption(int rc) {
     return base == SQLITE_CORRUPT || base == SQLITE_NOTADB;
 }
 
+bool hu_sqlite_process_serialize(void) {
+    /* SQLITE_CONFIG_SERIALIZED is process-global and must precede
+     * sqlite3_initialize(); MISUSE means the library is already up (a test
+     * runner, or a second call) — the per-connection FULLMUTEX flag above is
+     * the fallback that still holds. */
+    int rc = sqlite3_config(SQLITE_CONFIG_SERIALIZED);
+    return rc == SQLITE_OK || rc == SQLITE_MISUSE;
+}
+
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     sqlite3 *db = NULL;
-    int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
+    int rc = sqlite3_open_v2(db_path ? db_path : ":memory:", &db, HU_SQLITE_OPEN_FLAGS, NULL);
     if (rc != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
@@ -1959,6 +1980,11 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {
 }
 
 #else /* !HU_ENABLE_SQLITE */
+#include "human/memory.h"
+
+bool hu_sqlite_process_serialize(void) {
+    return true; /* nothing to serialize without SQLite */
+}
 
 #include "human/core/allocator.h"
 #include "human/memory.h"
