@@ -422,6 +422,8 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 # T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
 # advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
+# Pure replay guards: always built so their (unconditional) test links on Linux.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
