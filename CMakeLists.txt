@@ -1263,6 +1263,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/send_budget.c
@@ -1649,6 +1650,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/memories_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
+        src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -3434,6 +3436,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
@@ -3992,6 +3995,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)

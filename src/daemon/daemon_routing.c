@@ -9,6 +9,7 @@
 #include "human/daemon_routing.h"
 #include "human/config.h"
 #include "human/daemon.h"
+#include "human/daemon/reply_delay.h" /* C5 Part C: shadow delay-model measurement */
 
 #include <stdint.h>
 #include <string.h>
@@ -126,6 +127,16 @@ const char *hu_missed_message_acknowledgment_gated(int64_t delay_secs, int recei
                                                    int current_hour, uint32_t seed,
                                                    const char *contact_key, size_t contact_key_len,
                                                    int64_t now) {
+    /* Contract C5, Part C — SHADOW measurement only (default OFF via
+     * HU_REPLY_DELAY_MODEL). `delay_secs` here is a real, already-computed
+     * observation (now - the inbound message's receive time; see the
+     * caller in src/daemon.c), so this is the ONE call site in the daemon
+     * that already has both an hour bucket and a ground-truth delay to
+     * compare the fitted model against, with no new plumbing required.
+     * Never affects `phrase`, never touches the send path. */
+    hu_reply_delay_shadow_log(receive_hour, /*incoming_len=*/0, /*contact_freq=*/0.0, delay_secs,
+                              contact_key, contact_key_len, seed);
+
     const char *phrase =
         hu_missed_message_acknowledgment(delay_secs, receive_hour, current_hour, seed);
     if (!phrase)
