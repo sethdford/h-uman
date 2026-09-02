@@ -48,15 +48,15 @@ typedef struct hu_graph_relation {
     int64_t target_id;
     hu_relation_type_t type;
     float weight;
-    int64_t first_seen;       /* INGEST: first observation */
-    int64_t last_seen;        /* INGEST: most recent observation */
+    int64_t first_seen; /* INGEST: first observation */
+    int64_t last_seen;  /* INGEST: most recent observation */
     char *context;
     size_t context_len;
     /* Bitemporal fields (W1). Legacy rows get event_start = first_seen, event_end = 0,
      * confidence = 1.0, supersedes_id = 0, provenance = NULL on first read. */
-    int64_t event_start;      /* EVENT: when the relation became true in the world; 0 = unknown */
-    int64_t event_end;        /* EVENT: when it ceased; 0 = still true */
-    float confidence;         /* 0.0-1.0; default 1.0. W8 belief MEAN. */
+    int64_t event_start; /* EVENT: when the relation became true in the world; 0 = unknown */
+    int64_t event_end;   /* EVENT: when it ceased; 0 = still true */
+    float confidence;    /* 0.0-1.0; default 1.0. W8 belief MEAN. */
     /* W8 P2 — Bayesian variance over `confidence`. 0.0 = fully certain, max
      * 0.25 (uniform prior). Populated from the `confidence_variance`
      * column on every relation read so consumers can distinguish "0.8
@@ -66,8 +66,8 @@ typedef struct hu_graph_relation {
      * `hu_graph_upsert_relation_ex` derives a default from provenance
      * via `hu_belief_initial_variance_for_provenance`. */
     float confidence_variance;
-    int64_t supersedes_id;    /* prior relation this replaces; 0 = none */
-    char *provenance;         /* source URI / channel / turn-id; nullable */
+    int64_t supersedes_id; /* prior relation this replaces; 0 = none */
+    char *provenance;      /* source URI / channel / turn-id; nullable */
     size_t provenance_len;
     /* Optional endpoint names (e.g. verifier scan); hu_graph_relations_free frees when set. */
     char *source_name;
@@ -102,9 +102,8 @@ hu_error_t hu_graph_find_entity(hu_graph_t *g, const char *contact_id, size_t co
 
 /* Relation operations */
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-                                    int64_t source_id, int64_t target_id,
-                                    hu_relation_type_t type, float weight, const char *context,
-                                    size_t context_len);
+                                    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+                                    float weight, const char *context, size_t context_len);
 
 /* Bitemporal upsert (W1). Forwards to the deterministic conflict resolver before write.
  * - event_start: when the fact became true in the world. Pass 0 to default to now().
@@ -114,8 +113,8 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
  * On supersession, the prior relation's event_end is set and the new row records
  * supersedes_id = prior.id.
  */
-hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
+hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t source_id, int64_t target_id,
                                        hu_relation_type_t type, float weight, int64_t event_start,
                                        int64_t event_end, float confidence, const char *context,
                                        size_t context_len, const char *provenance,
@@ -138,13 +137,10 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
  *
  * All other arguments mirror `hu_graph_upsert_relation_ex` exactly. */
 hu_error_t hu_graph_upsert_relation_with_belief(
-    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-    int64_t source_id, int64_t target_id, hu_relation_type_t type,
-    float weight, int64_t event_start, int64_t event_end,
-    float belief_mean, float belief_variance,
-    const char *context, size_t context_len,
-    const char *provenance, size_t provenance_len,
-    int64_t *out_id);
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float belief_mean, float belief_variance, const char *context,
+    size_t context_len, const char *provenance, size_t provenance_len, int64_t *out_id);
 
 /* Window query: return relations whose event window overlaps [from_ts, to_ts]. */
 hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
@@ -193,10 +189,21 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
                                   size_t contact_id_len, size_t limit, hu_graph_entity_t **out,
                                   size_t *out_count);
 
+/* Message-driven candidate lookup: entities of `contact_id` whose name
+ * contains any word (>= 3 chars, case-insensitive) of `msg`. Complements
+ * hu_graph_list_entities, which is popularity-ordered and capped — after the
+ * 2026-09-01 backfill (571 entities) a once-mentioned "Vanguard" sat at rank
+ * 96 and could never become a grounding seed. Substring prefilter only; the
+ * caller's word-boundary scorer decides. `limit` caps the result (<= 256). */
+hu_error_t hu_graph_find_entities_matching(hu_graph_t *g, hu_allocator_t *alloc,
+                                           const char *contact_id, size_t contact_id_len,
+                                           const char *msg, size_t msg_len, size_t limit,
+                                           hu_graph_entity_t **out, size_t *out_count);
+
 /* List all relations for a contact (limited to top N by weight) */
 hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
-                                   size_t contact_id_len, size_t limit,
-                                   hu_graph_relation_t **out, size_t *out_count);
+                                   size_t contact_id_len, size_t limit, hu_graph_relation_t **out,
+                                   size_t *out_count);
 
 /* Open relations only (`event_end = 0`), ordered by `last_seen` descending.
  * Joins source/target entity names for the same `contact_id` scope. */
@@ -215,22 +222,21 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
  * so re-verification counts as recency. NO-OP and HU_OK on
  * relation_id <= 0. For full Bayesian (mean, variance) updates use
  * hu_graph_set_relation_belief instead. */
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
-                                            float confidence, int64_t last_seen_now_ms);
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
+                                            int64_t last_seen_now_ms);
 
 /* W8 P2A — write back a full Bayesian posterior (mean + variance).
  * Both `mean` and `variance` are clamped to safe ranges:
  * mean ∈ [0,1], variance ∈ [0, 0.25] (Beta posterior cap). Mirrors
  * the value into the legacy `confidence` column so existing readers
  * see the new mean. NO-OP and HU_OK on relation_id <= 0. */
-hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float mean, float variance,
-                                        int64_t last_seen_now_ms);
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id, float mean,
+                                        float variance, int64_t last_seen_now_ms);
 
 /* W8 P2A — read the (mean, variance) belief for a single relation
  * row. Returns HU_ERR_NOT_FOUND if relation_id is missing. */
-hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float *out_mean, float *out_variance);
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id, float *out_mean,
+                                        float *out_variance);
 
 /* Ebbinghaus recall tracking: record that an entity was recalled */
 hu_error_t hu_graph_record_recall(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
@@ -253,9 +259,8 @@ hu_error_t hu_graph_leiden_communities(hu_graph_t *g, hu_allocator_t *alloc, con
                                        size_t max_iterations, char **out, size_t *out_len);
 
 /* Temporal event management */
-hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t entity_id,
-                                       const char *description, size_t desc_len,
+hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t entity_id, const char *description, size_t desc_len,
                                        int64_t occurred_at, int64_t duration_sec);
 
 /* Causal link management */

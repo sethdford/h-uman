@@ -401,6 +401,7 @@ void run_graph_tests(void);
 void run_graph_ingest_tests(void);
 void run_cli_memory_import_tests(void);
 void run_store_sqlite_vec_tests(void);
+void run_semantic_index_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_w2_autodream_tests(void);
@@ -1446,6 +1447,7 @@ int main(int argc, char **argv) {
     run_graph_ingest_tests();
     run_cli_memory_import_tests();
     run_store_sqlite_vec_tests();
+    run_semantic_index_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_w2_autodream_tests();

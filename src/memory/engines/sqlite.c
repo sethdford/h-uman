@@ -19,6 +19,7 @@
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
 #include "human/memory/sql_common.h"
+#include "human/memory/vector.h"
 
 #define HU_SQLITE_BUSY_TIMEOUT_MS 5000
 
@@ -40,6 +41,10 @@ typedef struct hu_sqlite_memory {
     /* On-disk path (empty for :memory:) — deinit clears the unclean-shutdown
      * open-sentinel here so the next boot can skip the full quick_check. */
     char db_path[1100];
+    /* Semantic index (Phase 2, 2026-09-01): when set, every stored row is
+     * embedded and inserted into the vector store keyed by `key`. NULL = off. */
+    hu_embedder_t *sem_embedder;
+    hu_vector_store_t *sem_store;
 } hu_sqlite_memory_t;
 
 static const char *const schema_parts[] = {
@@ -658,6 +663,30 @@ static const char *impl_name(void *ctx) {
     return "sqlite";
 }
 
+/* Embed one stored row into the semantic index. A failure here is logged and
+ * NOT propagated: the row is stored; the vector is a derived index that the
+ * reindex path can rebuild. */
+static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                               const char *content, size_t content_len) {
+    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
+        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
+        return;
+    hu_embedding_t emb = {0};
+    hu_error_t err = self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
+                                                       content, content_len, &emb);
+    if (err != HU_OK || !emb.values || emb.dim == 0) {
+        hu_log_warn("memory.semantic", NULL, "embed failed for key %.*s: %s", (int)key_len, key,
+                    hu_error_string(err));
+        return;
+    }
+    err = self->sem_store->vtable->insert(self->sem_store->ctx, self->alloc, key, key_len, &emb,
+                                          content, content_len);
+    if (err != HU_OK)
+        hu_log_warn("memory.semantic", NULL, "vector insert failed for key %.*s: %s", (int)key_len,
+                    key, hu_error_string(err));
+    self->alloc->free(self->alloc->ctx, emb.values, emb.dim * sizeof(float));
+}
+
 static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
                              size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
@@ -733,7 +762,7 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
         if (self->graph_hierarchy_ready)
             (void)hu_graph_hierarchy_build(&self->graph_hierarchy, &self->graph_index);
     }
-
+    semantic_index_row(self, key, key_len, content, content_len);
     return HU_OK;
 }
 
@@ -787,6 +816,7 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
         if (self->graph_hierarchy_ready)
             (void)hu_graph_hierarchy_build(&self->graph_hierarchy, &self->graph_index);
     }
+    semantic_index_row(self, key, key_len, content, content_len);
     return HU_OK;
 }
 
@@ -1732,6 +1762,8 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     self->encrypt_at_rest = false;
     self->graph_initialized = (hu_graph_index_init(&self->graph_index, alloc) == HU_OK);
     self->graph_hierarchy_ready = false;
+    self->sem_embedder = NULL; /* semantic index off until attached */
+    self->sem_store = NULL;
     if (self->graph_initialized)
         self->graph_hierarchy_ready =
             (hu_graph_hierarchy_init(&self->graph_hierarchy, alloc) == HU_OK);
@@ -1784,6 +1816,117 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
         .ctx = mem->ctx,
         .vtable = &sqlite_session_vtable,
     };
+}
+
+void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
+                                         struct hu_vector_store *store) {
+    if (!mem || !mem->ctx)
+        return;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    self->sem_embedder = embedder;
+    self->sem_store = store;
+}
+
+hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
+    if (indexed_out)
+        *indexed_out = 0;
+    if (!mem || !mem->ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    if (!self->sem_embedder || !self->sem_store)
+        return HU_ERR_NOT_SUPPORTED; /* no index attached: refuse, don't pretend */
+    if (limit == 0)
+        limit = 100000;
+    /* Rows not yet in the index. memories_vec_meta is created by the store. */
+    const char *sql = "SELECT key, content FROM memories WHERE content IS NOT NULL AND "
+                      "length(content) > 0 AND key NOT IN (SELECT id FROM memories_vec_meta) "
+                      "LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)limit);
+    /* Collect first, then embed in batches: the store writes to the same DB
+     * and SQLite dislikes a write while this SELECT is stepping. */
+    enum { BATCH = 16 };
+    char **keys = NULL, **contents = NULL;
+    size_t cap = 0, n = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *k = (const char *)sqlite3_column_text(stmt, 0);
+        const char *c = (const char *)sqlite3_column_text(stmt, 1);
+        if (!k || !c)
+            continue;
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 256;
+            char **nk = self->alloc->alloc(self->alloc->ctx, ncap * sizeof(char *));
+            char **nc = self->alloc->alloc(self->alloc->ctx, ncap * sizeof(char *));
+            if (!nk || !nc) {
+                if (nk)
+                    self->alloc->free(self->alloc->ctx, nk, ncap * sizeof(char *));
+                if (nc)
+                    self->alloc->free(self->alloc->ctx, nc, ncap * sizeof(char *));
+                break;
+            }
+            if (n) {
+                memcpy(nk, keys, n * sizeof(char *));
+                memcpy(nc, contents, n * sizeof(char *));
+                self->alloc->free(self->alloc->ctx, keys, cap * sizeof(char *));
+                self->alloc->free(self->alloc->ctx, contents, cap * sizeof(char *));
+            }
+            keys = nk;
+            contents = nc;
+            cap = ncap;
+        }
+        keys[n] = hu_strndup(self->alloc, k, strlen(k));
+        contents[n] = hu_strndup(self->alloc, c, strlen(c));
+        if (!keys[n] || !contents[n]) {
+            if (keys[n])
+                hu_str_free(self->alloc, keys[n]);
+            if (contents[n])
+                hu_str_free(self->alloc, contents[n]);
+            break;
+        }
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    size_t indexed = 0;
+    for (size_t i = 0; i < n; i += BATCH) {
+        size_t bn = (n - i) < BATCH ? (n - i) : BATCH;
+        const char *texts[BATCH];
+        size_t lens[BATCH];
+        hu_embedding_t embs[BATCH];
+        memset(embs, 0, sizeof(embs));
+        for (size_t j = 0; j < bn; j++) {
+            texts[j] = contents[i + j];
+            lens[j] = strlen(contents[i + j]);
+        }
+        hu_error_t err = self->sem_embedder->vtable->embed_batch(
+            self->sem_embedder->ctx, self->alloc, texts, lens, bn, embs);
+        if (err != HU_OK) {
+            hu_log_warn("memory.semantic", NULL, "reindex batch at %zu failed: %s", i,
+                        hu_error_string(err));
+            continue; /* the next reindex picks these rows up again */
+        }
+        for (size_t j = 0; j < bn; j++) {
+            if (embs[j].values &&
+                self->sem_store->vtable->insert(self->sem_store->ctx, self->alloc, keys[i + j],
+                                                strlen(keys[i + j]), &embs[j], contents[i + j],
+                                                lens[j]) == HU_OK)
+                indexed++;
+            if (embs[j].values)
+                self->alloc->free(self->alloc->ctx, embs[j].values, embs[j].dim * sizeof(float));
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        hu_str_free(self->alloc, keys[i]);
+        hu_str_free(self->alloc, contents[i]);
+    }
+    if (cap) {
+        self->alloc->free(self->alloc->ctx, keys, cap * sizeof(char *));
+        self->alloc->free(self->alloc->ctx, contents, cap * sizeof(char *));
+    }
+    if (indexed_out)
+        *indexed_out = indexed;
+    return HU_OK;
 }
 
 sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {

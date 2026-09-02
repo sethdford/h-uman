@@ -1,5 +1,5 @@
-#include "human/core/log.h"
 #include "human/memory/graph.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory/conflict_resolver.h"
 #include "human/memory/consolidation.h"
@@ -154,10 +154,12 @@ static const char *const MIGRATION[] = {
      * keep that column in sync (UPDATE below + write paths). */
     "ALTER TABLE relations ADD COLUMN confidence_mean REAL NOT NULL DEFAULT 1.0",
     "ALTER TABLE relations ADD COLUMN confidence_variance REAL NOT NULL DEFAULT 0.0",
-    "UPDATE relations SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence != 1.0",
+    "UPDATE relations SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence "
+    "!= 1.0",
     "ALTER TABLE entities ADD COLUMN confidence_mean REAL NOT NULL DEFAULT 1.0",
     "ALTER TABLE entities ADD COLUMN confidence_variance REAL NOT NULL DEFAULT 0.0",
-    "UPDATE entities SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence != 1.0",
+    "UPDATE entities SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence "
+    "!= 1.0",
     "CREATE INDEX IF NOT EXISTS idx_entities_contact ON entities(contact_id, name)",
     "CREATE INDEX IF NOT EXISTS idx_relations_contact ON relations(contact_id)",
     "CREATE INDEX IF NOT EXISTS idx_temporal_events_contact ON temporal_events(contact_id)",
@@ -342,9 +344,8 @@ hu_error_t hu_graph_upsert_entity(hu_graph_t *g, const char *contact_id, size_t 
     }
 
     sqlite3_stmt *upd = NULL;
-    const char *upd_sql =
-        "UPDATE entities SET last_seen = ?, mention_count = mention_count + 1"
-        " WHERE contact_id = ? AND name = ?";
+    const char *upd_sql = "UPDATE entities SET last_seen = ?, mention_count = mention_count + 1"
+                          " WHERE contact_id = ? AND name = ?";
     rc = sqlite3_prepare_v2(g->db, upd_sql, -1, &upd, NULL);
     if (rc != SQLITE_OK) {
         hu_sql_txn_rollback(&txn);
@@ -471,9 +472,8 @@ hu_error_t hu_graph_find_entity(hu_graph_t *g, const char *contact_id, size_t co
 #ifdef HU_ENABLE_SQLITE
 
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-                                    int64_t source_id, int64_t target_id,
-                                    hu_relation_type_t type, float weight, const char *context,
-                                    size_t context_len) {
+                                    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+                                    float weight, const char *context, size_t context_len) {
     if (!g || !g->db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -490,15 +490,14 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
      * hu_belief_initial_variance_for_provenance). Writing 0.0 here would
      * mark the row as "absolute certainty" which is wrong for unscoped
      * legacy calls. */
-    const char *sql =
-        "INSERT INTO relations (contact_id, source_id, target_id, relation_type,"
-        " weight, first_seen, last_seen, context, event_start, event_end,"
-        " confidence, supersedes_id, provenance,"
-        " confidence_mean, confidence_variance)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL, 1.0, 0.05) "
-        "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
-        "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
-        "context = excluded.context";
+    const char *sql = "INSERT INTO relations (contact_id, source_id, target_id, relation_type,"
+                      " weight, first_seen, last_seen, context, event_start, event_end,"
+                      " confidence, supersedes_id, provenance,"
+                      " confidence_mean, confidence_variance)"
+                      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL, 1.0, 0.05) "
+                      "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
+                      "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
+                      "context = excluded.context";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -533,13 +532,10 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
  *      Instead, we INSERT-or-UPDATE based on the resolver's decision.
  */
 hu_error_t hu_graph_upsert_relation_with_belief(
-    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-    int64_t source_id, int64_t target_id, hu_relation_type_t type,
-    float weight, int64_t event_start, int64_t event_end,
-    float belief_mean, float belief_variance,
-    const char *context, size_t context_len,
-    const char *provenance, size_t provenance_len,
-    int64_t *out_id) {
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float belief_mean, float belief_variance, const char *context,
+    size_t context_len, const char *provenance, size_t provenance_len, int64_t *out_id) {
     if (!g || !g->db || source_id <= 0 || target_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -626,15 +622,14 @@ hu_error_t hu_graph_upsert_relation_with_belief(
      * "Deterministic, no LLM at write time"). The semantic classifier
      * is heuristic-only and runs in O(len_a + len_b) per pair. */
     int64_t semantic_match_id = 0;
-    if (decision == HU_CONFLICT_NONE && existing.id == 0 &&
-        proposed.context && proposed.context_len > 0) {
-        const char *cand_sql =
-            "SELECT id, source_id, target_id, relation_type, weight, "
-            "first_seen, last_seen, context, event_start, event_end, "
-            "confidence, supersedes_id, provenance "
-            "FROM relations WHERE contact_id = ? AND source_id = ? "
-            "AND event_end = 0 AND context IS NOT NULL AND context != '' "
-            "ORDER BY last_seen DESC LIMIT 8";
+    if (decision == HU_CONFLICT_NONE && existing.id == 0 && proposed.context &&
+        proposed.context_len > 0) {
+        const char *cand_sql = "SELECT id, source_id, target_id, relation_type, weight, "
+                               "first_seen, last_seen, context, event_start, event_end, "
+                               "confidence, supersedes_id, provenance "
+                               "FROM relations WHERE contact_id = ? AND source_id = ? "
+                               "AND event_end = 0 AND context IS NOT NULL AND context != '' "
+                               "ORDER BY last_seen DESC LIMIT 8";
         sqlite3_stmt *cand_st = NULL;
         if (sqlite3_prepare_v2(g->db, cand_sql, -1, &cand_st, NULL) == SQLITE_OK) {
             sqlite3_bind_text(cand_st, 1, cid, cid_len, SQLITE_STATIC);
@@ -679,8 +674,7 @@ hu_error_t hu_graph_upsert_relation_with_belief(
             sqlite3_finalize(cand_st);
             if (n_cands > 0) {
                 hu_conflict_resolution_t sem =
-                    hu_conflict_classify_semantic(&proposed, cands, n_cands,
-                                                  &semantic_match_id);
+                    hu_conflict_classify_semantic(&proposed, cands, n_cands, &semantic_match_id);
                 if (sem == HU_CONFLICT_SUPERSEDE || sem == HU_CONFLICT_FLAG)
                     decision = sem;
             }
@@ -766,16 +760,16 @@ hu_error_t hu_graph_upsert_relation_with_belief(
  * scalar confidence with variance defaulted to 0. P2G adds the
  * variance-aware variant above; this wrapper preserves the original
  * signature for one release. */
-hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
+hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t source_id, int64_t target_id,
                                        hu_relation_type_t type, float weight, int64_t event_start,
                                        int64_t event_end, float confidence, const char *context,
                                        size_t context_len, const char *provenance,
                                        size_t provenance_len) {
-    return hu_graph_upsert_relation_with_belief(
-        g, contact_id, contact_id_len, source_id, target_id, type, weight,
-        event_start, event_end, confidence, /* variance = */ 0.0f,
-        context, context_len, provenance, provenance_len, /* out_id = */ NULL);
+    return hu_graph_upsert_relation_with_belief(g, contact_id, contact_id_len, source_id, target_id,
+                                                type, weight, event_start, event_end, confidence,
+                                                /* variance = */ 0.0f, context, context_len,
+                                                provenance, provenance_len, /* out_id = */ NULL);
 }
 
 hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
@@ -894,8 +888,8 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
     if (!g || !g->db || entity_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *st = NULL;
-    int rc = sqlite3_prepare_v2(g->db, "UPDATE entities SET community_id = ? WHERE id = ?", -1,
-                                &st, NULL);
+    int rc = sqlite3_prepare_v2(g->db, "UPDATE entities SET community_id = ? WHERE id = ?", -1, &st,
+                                NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
     sqlite3_bind_int64(st, 1, community_id);
@@ -908,9 +902,8 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
 #else
 
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-                                    int64_t source_id, int64_t target_id,
-                                    hu_relation_type_t type, float weight, const char *context,
-                                    size_t context_len) {
+                                    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+                                    float weight, const char *context, size_t context_len) {
     (void)g;
     (void)contact_id;
     (void)contact_id_len;
@@ -923,8 +916,8 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
+hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t source_id, int64_t target_id,
                                        hu_relation_type_t type, float weight, int64_t event_start,
                                        int64_t event_end, float confidence, const char *context,
                                        size_t context_len, const char *provenance,
@@ -970,20 +963,27 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
 }
 
 hu_error_t hu_graph_upsert_relation_with_belief(
-    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-    int64_t source_id, int64_t target_id, hu_relation_type_t type,
-    float weight, int64_t event_start, int64_t event_end,
-    float belief_mean, float belief_variance,
-    const char *context, size_t context_len,
-    const char *provenance, size_t provenance_len,
-    int64_t *out_id) {
-    (void)g; (void)contact_id; (void)contact_id_len;
-    (void)source_id; (void)target_id; (void)type; (void)weight;
-    (void)event_start; (void)event_end;
-    (void)belief_mean; (void)belief_variance;
-    (void)context; (void)context_len;
-    (void)provenance; (void)provenance_len;
-    if (out_id) *out_id = 0;
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float belief_mean, float belief_variance, const char *context,
+    size_t context_len, const char *provenance, size_t provenance_len, int64_t *out_id) {
+    (void)g;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)source_id;
+    (void)target_id;
+    (void)type;
+    (void)weight;
+    (void)event_start;
+    (void)event_end;
+    (void)belief_mean;
+    (void)belief_variance;
+    (void)context;
+    (void)context_len;
+    (void)provenance;
+    (void)provenance_len;
+    if (out_id)
+        *out_id = 0;
     return HU_ERR_NOT_SUPPORTED;
 }
 
@@ -1195,8 +1195,7 @@ static bool is_word_char(char c) {
 
 hu_error_t hu_graph_build_context(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                                   size_t contact_id_len, const char *query, size_t query_len,
-                                  size_t max_hops, size_t max_chars, char **out,
-                                  size_t *out_len) {
+                                  size_t max_hops, size_t max_chars, char **out, size_t *out_len) {
     if (!g || !g->db || !alloc || !query || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -1284,9 +1283,8 @@ hu_error_t hu_graph_build_context(hu_graph_t *g, hu_allocator_t *alloc, const ch
             }
             const char *rel_str = hu_relation_type_to_string(relations[i].type);
             rem = max_chars - total_len + 1;
-            int w =
-                snprintf(buf + total_len, rem, "- [%.*s] (%s) -> [%.*s]\n",
-                         (int)src_len, src_name, rel_str, (int)tgt_len, tgt_name);
+            int w = snprintf(buf + total_len, rem, "- [%.*s] (%s) -> [%.*s]\n", (int)src_len,
+                             src_name, rel_str, (int)tgt_len, tgt_name);
             if (w <= 0)
                 continue;
             size_t written = ((size_t)w < rem) ? (size_t)w : rem - 1;
@@ -1461,8 +1459,7 @@ hu_error_t hu_graph_build_contact_context(hu_graph_t *g, hu_allocator_t *alloc, 
 
 hu_error_t hu_graph_build_context(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                                   size_t contact_id_len, const char *query, size_t query_len,
-                                  size_t max_hops, size_t max_chars, char **out,
-                                  size_t *out_len) {
+                                  size_t max_hops, size_t max_chars, char **out, size_t *out_len) {
     (void)g;
     (void)alloc;
     (void)contact_id;
@@ -1511,28 +1508,10 @@ hu_error_t hu_graph_build_communities(hu_graph_t *g, hu_allocator_t *alloc, cons
 
 #ifdef HU_ENABLE_SQLITE
 
-hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
-                                  size_t contact_id_len, size_t limit, hu_graph_entity_t **out,
-                                  size_t *out_count) {
-    if (!g || !g->db || !alloc || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
-    if (limit == 0)
-        limit = 100;
-
-    const char *cid = contact_id ? contact_id : "";
-    int cid_len = contact_id ? (int)contact_id_len : 0;
-
-    const char *sql = "SELECT id, name, type, first_seen, last_seen, mention_count "
-                      "FROM entities WHERE contact_id = ? ORDER BY mention_count DESC LIMIT ?";
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_IO;
-    sqlite3_bind_text(stmt, 1, cid, cid_len, SQLITE_STATIC);
-    sqlite3_bind_int64(stmt, 2, (int64_t)limit);
-
+/* Collect entity rows from a prepared statement (shared by the popularity
+ * list and the message-driven lookup). Finalizes `stmt`. */
+static hu_error_t collect_entities(sqlite3_stmt *stmt, hu_allocator_t *alloc, size_t limit,
+                                   hu_graph_entity_t **out, size_t *out_count) {
     size_t cap = limit < 64 ? limit : 64;
     hu_graph_entity_t *arr = alloc->alloc(alloc->ctx, cap * sizeof(hu_graph_entity_t));
     if (!arr) {
@@ -1590,9 +1569,92 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
     return HU_OK;
 }
 
+hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
+                                  size_t contact_id_len, size_t limit, hu_graph_entity_t **out,
+                                  size_t *out_count) {
+    if (!g || !g->db || !alloc || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    if (limit == 0)
+        limit = 100;
+
+    const char *cid = contact_id ? contact_id : "";
+    int cid_len = contact_id ? (int)contact_id_len : 0;
+
+    const char *sql = "SELECT id, name, type, first_seen, last_seen, mention_count "
+                      "FROM entities WHERE contact_id = ? ORDER BY mention_count DESC LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, cid, cid_len, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, (int64_t)limit);
+
+    return collect_entities(stmt, alloc, limit, out, out_count);
+}
+
+hu_error_t hu_graph_find_entities_matching(hu_graph_t *g, hu_allocator_t *alloc,
+                                           const char *contact_id, size_t contact_id_len,
+                                           const char *msg, size_t msg_len, size_t limit,
+                                           hu_graph_entity_t **out, size_t *out_count) {
+    if (!g || !g->db || !alloc || !out || !out_count || !msg)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    if (limit == 0 || limit > 256)
+        limit = 256;
+    /* Tokenize: lowercase words of >= 3 alnum chars, at most 16. */
+    enum { MAX_WORDS = 16, MAX_WORD = 48 };
+    char words[MAX_WORDS][MAX_WORD];
+    size_t nw = 0;
+    for (size_t i = 0; i < msg_len && nw < MAX_WORDS;) {
+        while (i < msg_len && !isalnum((unsigned char)msg[i]))
+            i++;
+        size_t start = i;
+        while (i < msg_len && isalnum((unsigned char)msg[i]))
+            i++;
+        size_t wl = i - start;
+        if (wl >= 3 && wl < MAX_WORD) {
+            for (size_t k = 0; k < wl; k++)
+                words[nw][k] = (char)tolower((unsigned char)msg[start + k]);
+            words[nw][wl] = '\0';
+            nw++;
+        }
+    }
+    if (nw == 0)
+        return HU_OK; /* nothing to match: empty result, not an error */
+    char sql[1024];
+    int n = snprintf(sql, sizeof(sql),
+                     "SELECT id, name, type, first_seen, last_seen, mention_count FROM entities "
+                     "WHERE contact_id = ? AND (");
+    if (n <= 0 || (size_t)n >= sizeof(sql))
+        return HU_ERR_INTERNAL;
+    size_t pos = (size_t)n;
+    for (size_t w = 0; w < nw; w++) {
+        int m =
+            snprintf(sql + pos, sizeof(sql) - pos, "%sinstr(lower(name), ?) > 0", w ? " OR " : "");
+        if (m <= 0 || pos + (size_t)m >= sizeof(sql))
+            return HU_ERR_INTERNAL;
+        pos += (size_t)m;
+    }
+    int m = snprintf(sql + pos, sizeof(sql) - pos, ") ORDER BY mention_count DESC LIMIT ?");
+    if (m <= 0 || pos + (size_t)m >= sizeof(sql))
+        return HU_ERR_INTERNAL;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, contact_id ? contact_id : "", contact_id ? (int)contact_id_len : 0,
+                      SQLITE_STATIC);
+    for (size_t w = 0; w < nw; w++)
+        sqlite3_bind_text(stmt, (int)(2 + w), words[w], -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, (int)(2 + nw), (int64_t)limit);
+    return collect_entities(stmt, alloc, limit, out, out_count);
+}
+
 hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
-                                   size_t contact_id_len, size_t limit,
-                                   hu_graph_relation_t **out, size_t *out_count) {
+                                   size_t contact_id_len, size_t limit, hu_graph_relation_t **out,
+                                   size_t *out_count) {
     if (!g || !g->db || !alloc || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -1695,16 +1757,15 @@ hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *
     /* W8 P2 — extra columns for endpoint names sit at indices 13/14;
      * `confidence_variance` is appended at column 15 so the existing
      * column-13/14 reads for source_name/target_name don't shift. */
-    const char *sql =
-        "SELECT r.id, r.source_id, r.target_id, r.relation_type, r.weight, "
-        "r.first_seen, r.last_seen, r.context, r.event_start, r.event_end, "
-        "r.confidence, r.supersedes_id, r.provenance, es.name, et.name, "
-        "r.confidence_variance "
-        "FROM relations r "
-        "JOIN entities es ON r.source_id = es.id AND r.contact_id = es.contact_id "
-        "JOIN entities et ON r.target_id = et.id AND r.contact_id = et.contact_id "
-        "WHERE r.contact_id = ? AND r.event_end = 0 "
-        "ORDER BY r.last_seen DESC LIMIT ?";
+    const char *sql = "SELECT r.id, r.source_id, r.target_id, r.relation_type, r.weight, "
+                      "r.first_seen, r.last_seen, r.context, r.event_start, r.event_end, "
+                      "r.confidence, r.supersedes_id, r.provenance, es.name, et.name, "
+                      "r.confidence_variance "
+                      "FROM relations r "
+                      "JOIN entities es ON r.source_id = es.id AND r.contact_id = es.contact_id "
+                      "JOIN entities et ON r.target_id = et.id AND r.contact_id = et.contact_id "
+                      "WHERE r.contact_id = ? AND r.event_end = 0 "
+                      "ORDER BY r.last_seen DESC LIMIT ?";
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
         return HU_ERR_IO;
@@ -1796,8 +1857,8 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
 }
 
 hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
-                                   size_t contact_id_len, size_t limit,
-                                   hu_graph_relation_t **out, size_t *out_count) {
+                                   size_t contact_id_len, size_t limit, hu_graph_relation_t **out,
+                                   size_t *out_count) {
     (void)g;
     (void)alloc;
     (void)contact_id;
@@ -1854,14 +1915,16 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
 }
 
 #ifdef HU_ENABLE_SQLITE
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
-                                            float confidence, int64_t last_seen_now_ms) {
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
+                                            int64_t last_seen_now_ms) {
     if (!g || !g->db)
         return HU_ERR_INVALID_ARGUMENT;
     if (relation_id <= 0)
         return HU_OK;
-    if (confidence < 0.0f) confidence = 0.0f;
-    if (confidence > 1.0f) confidence = 1.0f;
+    if (confidence < 0.0f)
+        confidence = 0.0f;
+    if (confidence > 1.0f)
+        confidence = 1.0f;
     sqlite3_stmt *stmt = NULL;
     /* W8 P2A — keep the legacy `confidence` column in sync with the
      * new `confidence_mean`. Variance is intentionally NOT touched
@@ -1869,10 +1932,9 @@ hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
      * hu_graph_set_relation_belief() (added below) to write the full
      * posterior. The scalar setter assumes "deterministic update",
      * which is variance = 0. */
-    const char *sql =
-        "UPDATE relations SET confidence = ?, confidence_mean = ?, "
-        "confidence_variance = 0.0, last_seen = "
-        "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
+    const char *sql = "UPDATE relations SET confidence = ?, confidence_mean = ?, "
+                      "confidence_variance = 0.0, last_seen = "
+                      "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
@@ -1894,22 +1956,24 @@ hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
     return HU_OK;
 }
 
-hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float mean, float variance,
-                                        int64_t last_seen_now_ms) {
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id, float mean,
+                                        float variance, int64_t last_seen_now_ms) {
     if (!g || !g->db)
         return HU_ERR_INVALID_ARGUMENT;
     if (relation_id <= 0)
         return HU_OK;
-    if (mean < 0.0f) mean = 0.0f;
-    if (mean > 1.0f) mean = 1.0f;
-    if (variance < 0.0f) variance = 0.0f;
-    if (variance > 0.25f) variance = 0.25f;
+    if (mean < 0.0f)
+        mean = 0.0f;
+    if (mean > 1.0f)
+        mean = 1.0f;
+    if (variance < 0.0f)
+        variance = 0.0f;
+    if (variance > 0.25f)
+        variance = 0.25f;
     sqlite3_stmt *stmt = NULL;
-    const char *sql =
-        "UPDATE relations SET confidence = ?, confidence_mean = ?, "
-        "confidence_variance = ?, last_seen = "
-        "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
+    const char *sql = "UPDATE relations SET confidence = ?, confidence_mean = ?, "
+                      "confidence_variance = ?, last_seen = "
+                      "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
@@ -1927,21 +1991,23 @@ hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
     return HU_OK;
 }
 
-hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float *out_mean, float *out_variance) {
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id, float *out_mean,
+                                        float *out_variance) {
     if (!g || !g->db || relation_id <= 0 || (!out_mean && !out_variance))
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(
-        g->db, "SELECT confidence_mean, confidence_variance FROM relations WHERE id = ?",
-        -1, &stmt, NULL);
+        g->db, "SELECT confidence_mean, confidence_variance FROM relations WHERE id = ?", -1, &stmt,
+        NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
     sqlite3_bind_int64(stmt, 1, relation_id);
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
-        if (out_mean)     *out_mean     = (float)sqlite3_column_double(stmt, 0);
-        if (out_variance) *out_variance = (float)sqlite3_column_double(stmt, 1);
+        if (out_mean)
+            *out_mean = (float)sqlite3_column_double(stmt, 0);
+        if (out_variance)
+            *out_variance = (float)sqlite3_column_double(stmt, 1);
         sqlite3_finalize(stmt);
         return HU_OK;
     }
@@ -1949,20 +2015,29 @@ hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
     return rc == SQLITE_DONE ? HU_ERR_NOT_FOUND : HU_ERR_IO;
 }
 #else  /* !HU_ENABLE_SQLITE: graph belief setters are no-ops without SQLite */
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
-                                            float confidence, int64_t last_seen_now_ms) {
-    (void)g; (void)relation_id; (void)confidence; (void)last_seen_now_ms;
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
+                                            int64_t last_seen_now_ms) {
+    (void)g;
+    (void)relation_id;
+    (void)confidence;
+    (void)last_seen_now_ms;
     return HU_ERR_NOT_SUPPORTED;
 }
-hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float mean, float variance,
-                                        int64_t last_seen_now_ms) {
-    (void)g; (void)relation_id; (void)mean; (void)variance; (void)last_seen_now_ms;
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id, float mean,
+                                        float variance, int64_t last_seen_now_ms) {
+    (void)g;
+    (void)relation_id;
+    (void)mean;
+    (void)variance;
+    (void)last_seen_now_ms;
     return HU_ERR_NOT_SUPPORTED;
 }
-hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
-                                        float *out_mean, float *out_variance) {
-    (void)g; (void)relation_id; (void)out_mean; (void)out_variance;
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id, float *out_mean,
+                                        float *out_variance) {
+    (void)g;
+    (void)relation_id;
+    (void)out_mean;
+    (void)out_variance;
     return HU_ERR_NOT_SUPPORTED;
 }
 #endif /* HU_ENABLE_SQLITE */
@@ -2066,9 +2141,8 @@ const char *hu_relation_type_to_string(hu_relation_type_t t) {
 /* ── Phase 3a: Temporal events ──────────────────────────────────────── */
 
 #ifdef HU_ENABLE_SQLITE
-hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t entity_id,
-                                       const char *description, size_t desc_len,
+hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t entity_id, const char *description, size_t desc_len,
                                        int64_t occurred_at, int64_t duration_sec) {
     if (!g || !g->db || !description || desc_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -2282,9 +2356,8 @@ hu_error_t hu_graph_query_causal(hu_graph_t *g, hu_allocator_t *alloc, const cha
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t entity_id,
-                                       const char *description, size_t desc_len,
+hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+                                       int64_t entity_id, const char *description, size_t desc_len,
                                        int64_t occurred_at, int64_t duration_sec) {
     (void)g;
     (void)contact_id;
@@ -2597,13 +2670,13 @@ hu_error_t hu_graph_reconsolidate(hu_graph_t *g, hu_allocator_t *alloc, const ch
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_graph_entity_t entity;
-    hu_error_t err = hu_graph_find_entity(g, contact_id, contact_id_len, entity_name, name_len,
-                                          &entity);
+    hu_error_t err =
+        hu_graph_find_entity(g, contact_id, contact_id_len, entity_name, name_len, &entity);
     if (err != HU_OK)
         return err;
 
     bool has_conflict = hu_graph_detect_conflict(g, alloc, contact_id, contact_id_len, entity_name,
-                                                  name_len, new_context, new_context_len);
+                                                 name_len, new_context, new_context_len);
     if (has_conflict) {
         const char *dup_sql = "INSERT INTO entities(name, type, first_seen, last_seen,"
                               " mention_count, supersedes_id) "
@@ -2622,7 +2695,7 @@ hu_error_t hu_graph_reconsolidate(hu_graph_t *g, hu_allocator_t *alloc, const ch
                 sqlite3_bind_int64(stmt, 5, entity.id);
                 if (sqlite3_step(stmt) != SQLITE_DONE)
                     hu_log_error("graph", NULL, "supersede entity %lld: step failed",
-                            (long long)entity.id);
+                                 (long long)entity.id);
             }
             sqlite3_finalize(stmt);
         }
@@ -2638,7 +2711,7 @@ hu_error_t hu_graph_reconsolidate(hu_graph_t *g, hu_allocator_t *alloc, const ch
         sqlite3_bind_int64(up_stmt, 4, entity.id);
         if (sqlite3_step(up_stmt) != SQLITE_DONE)
             hu_log_error("graph", NULL, "update relations for entity %lld: step failed",
-                    (long long)entity.id);
+                         (long long)entity.id);
         sqlite3_finalize(up_stmt);
     }
     if (entity.name)

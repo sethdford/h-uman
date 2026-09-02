@@ -147,8 +147,7 @@ void hu_memory_entry_free_fields(hu_allocator_t *alloc, hu_memory_entry_t *e);
 /* Export all memory entries to a JSON file at `output_path`. Streams entries
  * so arbitrarily large stores don't materialise as a single string. Returns
  * HU_ERR_IO on file-open failure, or the error from vtable->list. */
-hu_error_t hu_memory_export_json(hu_memory_t *mem, hu_allocator_t *alloc,
-                                 const char *output_path);
+hu_error_t hu_memory_export_json(hu_memory_t *mem, hu_allocator_t *alloc, const char *output_path);
 
 /* Store with source provenance: uses store_ex if available, else falls back to store. */
 hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t key_len,
@@ -162,8 +161,8 @@ hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t
 hu_error_t hu_memory_store_for_contact(hu_memory_t *mem, const char *contact_id,
                                        size_t contact_id_len, const char *key, size_t key_len,
                                        const char *content, size_t content_len,
-                                       const hu_memory_category_t *category,
-                                       const char *session_id, size_t session_id_len);
+                                       const hu_memory_category_t *category, const char *session_id,
+                                       size_t session_id_len);
 
 hu_error_t hu_memory_recall_for_contact(hu_memory_t *mem, hu_allocator_t *alloc,
                                         const char *contact_id, size_t contact_id_len,
@@ -174,6 +173,18 @@ hu_error_t hu_memory_recall_for_contact(hu_memory_t *mem, hu_allocator_t *alloc,
 hu_memory_t hu_none_memory_create(hu_allocator_t *alloc);
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path);
 hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem);
+
+/* Semantic index (Phase 2, 2026-09-01). Attach an embedder + vector store to a
+ * sqlite engine: every subsequent store() embeds the row (keyed by `key`).
+ * Both pointers are borrowed, not owned. */
+struct hu_embedder;
+struct hu_vector_store;
+void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
+                                         struct hu_vector_store *store);
+/* Embed every `memories` row missing from the index (up to `limit`, 0 = all).
+ * HU_ERR_NOT_SUPPORTED when no index is attached — never a silent 0. */
+hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out);
+
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem);
@@ -192,7 +203,7 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem);
  * is requested without a keystore. */
 struct hu_keystore;
 hu_error_t hu_sqlite_memory_attach_keystore(hu_memory_t *mem, struct hu_keystore *ks,
-                                             bool encrypt_at_rest);
+                                            bool encrypt_at_rest);
 hu_memory_t hu_markdown_memory_create(hu_allocator_t *alloc, const char *dir_path);
 
 #endif /* HU_MEMORY_H */

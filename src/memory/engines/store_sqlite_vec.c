@@ -22,16 +22,12 @@ typedef struct vec_store_ctx {
     size_t dim;
 } vec_store_ctx_t;
 
-static bool g_vec_registered = false;
-
 bool hu_sqlite_vec_register(void) {
-    if (g_vec_registered)
-        return true;
-    /* Static linking per sqlite-vec docs: register the init as an
-     * auto-extension; every later sqlite3_open() gets vec0. */
-    int rc = sqlite3_auto_extension((void (*)(void))sqlite3_vec_init);
-    g_vec_registered = (rc == SQLITE_OK);
-    return g_vec_registered;
+    /* sqlite3_auto_extension is deprecated on Apple platforms (process-global
+     * auto-extensions unsupported), so the extension is loaded PER CONNECTION
+     * in hu_vector_store_sqlite_vec_create via sqlite3_vec_init(db, ...).
+     * Kept as an idempotent no-op for callers that expect a registration step. */
+    return true;
 }
 
 static bool ensure_schema(sqlite3 *db, size_t dim) {

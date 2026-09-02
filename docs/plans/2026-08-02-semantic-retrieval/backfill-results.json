@@ -26,5 +26,17 @@
     "n": 10,
     "note": "concrete-noun objects only; plan target 8/10"
   },
-  "measures": "entity match count from the production hu_graph_ground_compose; NOT reply quality"
+  "measures": "entity match count from the production hu_graph_ground_compose; NOT reply quality",
+  "grounding_probe_v3_after_candidate_fix": {
+    "concrete_objects": {
+      "matched_ge1": 8,
+      "n": 10
+    },
+    "raw_objects": {
+      "matched_ge1": 10,
+      "n": 10
+    },
+    "fix": "hu_graph_find_entities_matching: message-driven candidates unioned with the top-64-by-mention list; before the fix a once-mentioned entity at rank 96/571 could never seed",
+    "note": "plan target 8/10 met; same probe files as v1/v2"
+  }
 }
