@@ -23,7 +23,9 @@ def sh(binp, dbp, args, env_extra=None):
     return subprocess.run([binp, "memory", *args], capture_output=True, env=env, timeout=600).stdout.decode("utf-8", "replace")
 
 def parse_keys(out):
-    return [m.group(1) for m in re.finditer(r"^\s*\[\d+\]\s+(\S+?)(?::| \()", out, re.M)]
+    # Key ends at ": " or " (" — NOT at the first ":" — LoCoMo keys are "D1:3",
+    # and the old non-greedy match truncated them to "D1" (R@10 = 0.0 on every arm).
+    return [m.group(1) for m in re.finditer(r"^\s*\[\d+\]\s+(\S+?)(?:: | \()", out, re.M)]
 
 def rrf(*lists, k=60):
     sc = collections.defaultdict(float)
