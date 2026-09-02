@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-01",
+  "source": "~/.human/backfill/facts-2026-09-01.jsonl",
+  "messages_eligible": 1734,
+  "messages_parseable": 1732,
+  "facts_extracted": 756,
+  "facts_per_message": 0.44,
+  "imported": 513,
+  "excluded_asking_about": 243,
+  "graph_before": {
+    "open_relations": 72,
+    "entities": 133
+  },
+  "graph_after": {
+    "open_relations": 480,
+    "superseded": 45,
+    "entities": 571
+  },
+  "grounding_probe_v1": {
+    "matched_ge1": 6,
+    "n": 10,
+    "note": "raw sampled objects incl. extractor junk ('it here','your vibe')"
+  },
+  "grounding_probe_v2": {
+    "matched_ge1": 2,
+    "n": 10,
+    "note": "concrete-noun objects only; plan target 8/10"
+  },
+  "measures": "entity match count from the production hu_graph_ground_compose; NOT reply quality"
+}
