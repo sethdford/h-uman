@@ -6,10 +6,12 @@
 #include "human/context/conversation.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/daemon/promise_keeper.h"
 #include "human/memory/graph_ingest.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* Env var name and provenance prefix are the wire contract other modules
  * (world-model, grounding reads, the CLI dry-run hook) key on to recognize
@@ -27,6 +29,29 @@ static void relabel_subject_assistant(hu_fact_extract_result_t *result) {
         snprintf(result->facts[i].subject, sizeof(result->facts[i].subject), "assistant");
 }
 
+/* Follow-up (2026-09-02, C3 measurement): reuses the EXISTING promise-keeper
+ * predicate (hu_promise_keeper_is_courtesy_invitation) rather than
+ * re-deriving the same "let me know..." filter -- the first
+ * eval_agent_promise_recall.py pass showed 3/20 sampled agent-promise
+ * candidates were bare courtesy invitations. Both the LIVE/SHADOW storage
+ * path and the dry-run CLI hook call this ONE helper so they always agree
+ * on what counts as a storable commitment.
+ *
+ * Returns true and fills commitment_out/who_out iff
+ * hu_conversation_detect_commitment(from_me=true) fired AND the result is
+ * NOT a courtesy invitation per hu_promise_keeper_is_courtesy_invitation. */
+static bool detect_storable_commitment(const char *reply, size_t reply_len, char *commitment_out,
+                                       size_t commitment_cap, char *who_out, size_t who_cap,
+                                       int64_t now) {
+    if (!hu_conversation_detect_commitment(reply, reply_len, commitment_out, commitment_cap,
+                                           who_out, who_cap, /*from_me=*/true))
+        return false;
+    int64_t deadline = hu_conversation_parse_deadline(reply, reply_len, now);
+    if (hu_promise_keeper_is_courtesy_invitation(commitment_out, strlen(commitment_out), deadline))
+        return false;
+    return true;
+}
+
 hu_error_t hu_agent_facts_dry_run(const char *reply, size_t reply_len,
                                   hu_fact_extract_result_t *facts_out, char *commitment_out,
                                   size_t commitment_cap, char *who_out, size_t who_cap,
@@ -42,9 +67,13 @@ hu_error_t hu_agent_facts_dry_run(const char *reply, size_t reply_len,
     relabel_subject_assistant(facts_out);
 
     if (commitment_out && commitment_cap > 0 && who_out && who_cap > 0) {
-        bool found = hu_conversation_detect_commitment(reply, reply_len, commitment_out,
-                                                       commitment_cap, who_out, who_cap,
-                                                       /*from_me=*/true);
+        /* Dry-run is a preview of what hu_agent_facts_record_reply would do
+         * "right now" -- there is no caller-supplied `now` in this read-only
+         * API, so wall-clock time is the only sensible deadline reference
+         * (matches how hu_daemon_promise_keeper_scan_outbound's live path
+         * itself uses time(NULL)). */
+        bool found = detect_storable_commitment(reply, reply_len, commitment_out, commitment_cap,
+                                                who_out, who_cap, (int64_t)time(NULL));
         if (has_commitment_out)
             *has_commitment_out = found;
     }
@@ -100,8 +129,8 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
 
     char commitment[512];
     char who[64];
-    if (hu_conversation_detect_commitment(reply, reply_len, commitment, sizeof(commitment), who,
-                                          sizeof(who), /*from_me=*/true)) {
+    if (detect_storable_commitment(reply, reply_len, commitment, sizeof(commitment), who,
+                                   sizeof(who), now)) {
         char key[192];
         snprintf(key, sizeof(key), "agent-promise:%.*s:%lld", cid_trunc, contact_id,
                  (long long)now);

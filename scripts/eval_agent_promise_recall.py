@@ -199,11 +199,14 @@ def main():
         "caveat": (
             "Candidate pool was selected via the SAME keyword vocabulary the detector "
             "scans for, so recall here is an upper bound on a keyword-matched sample, "
-            "not a general-population estimate. Precision (false-positive rate on bare "
-            "courtesy phrases like 'let me know...') is the more informative number from "
-            "this sample; hu_agent_facts_record_reply does NOT apply the promise-keeper's "
-            "courtesy filter (hu_promise_keeper_is_courtesy_invitation) — a consumer of "
-            "agent-promise:* rows should expect that filter's absence to show up here."
+            "not a general-population estimate. Precision is the more informative number "
+            "from this sample. As of 2026-09-02, hu_agent_facts_record_reply (and this "
+            "dry-run hook) reuse hu_promise_keeper_is_courtesy_invitation, so bare "
+            "'let me know...' invitations with no deadline and no first-person "
+            "deliverable are excluded before scoring; the remaining false positives are "
+            "generic filler ('I'll help you with that...') and conversational 'gonna' "
+            "that the courtesy filter's narrower prefix list does not cover — a further "
+            "precision gain would need broadening that predicate, not duplicating it here."
         ),
         "per_item": results,
     }

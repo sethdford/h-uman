@@ -255,6 +255,62 @@ static void dry_run_rejects_invalid_arguments(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ── Follow-up (2026-09-02): the promise-keeper courtesy filter is now
+ * reused on the agent-promise path — hu_conversation_detect_commitment
+ * fires on "let me" alone, so a bare "let me know..." invitation used to
+ * produce a promise row that was never a real promise (3/20 in the first
+ * eval_agent_promise_recall.py pass). ─────────────────────────────────── */
+
+static void agent_facts_courtesy_invitation_produces_no_promise_row(void) {
+    set_gate("on");
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* Bare courtesy invitation: hu_conversation_detect_commitment fires
+     * (the keyword vocabulary includes "let me"), but
+     * hu_promise_keeper_is_courtesy_invitation must reject it — no
+     * deadline, no first-person deliverable after the prefix. */
+    static const char courtesy[] = "let me know if you need anything";
+    HU_ASSERT_EQ(hu_agent_facts_record_reply(g, &mem, "contact_courtesy", 16, courtesy,
+                                             sizeof(courtesy) - 1, "msg-courtesy", 7000),
+                 HU_OK);
+    sqlite3 *mdb = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(count_rows(mdb, "SELECT COUNT(*) FROM memories WHERE key LIKE 'agent-promise:%'"),
+                 0);
+
+    /* A real commitment on the same contact still produces exactly one
+     * agent-promise row — the filter isn't over-broad. */
+    static const char real[] = "I'll send you the contractor's number tomorrow";
+    HU_ASSERT_EQ(hu_agent_facts_record_reply(g, &mem, "contact_courtesy", 16, real,
+                                             sizeof(real) - 1, "msg-courtesy-2", 7100),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(mdb, "SELECT COUNT(*) FROM memories WHERE key LIKE 'agent-promise:%'"),
+                 1);
+
+    mem.vtable->deinit(mem.ctx);
+    hu_graph_close(g, &alloc);
+    unlink(path);
+}
+
+static void dry_run_courtesy_invitation_reports_no_commitment(void) {
+    /* The CLI hook and eval_agent_promise_recall.py go through
+     * hu_agent_facts_dry_run, not hu_agent_facts_record_reply directly —
+     * this pins that the SAME filter fires there too. */
+    static const char reply[] = "let me know if you need anything";
+    hu_fact_extract_result_t facts;
+    char commitment[512];
+    char who[64];
+    bool has_commitment = true;
+    HU_ASSERT_EQ(hu_agent_facts_dry_run(reply, sizeof(reply) - 1, &facts, commitment,
+                                        sizeof(commitment), who, sizeof(who), &has_commitment),
+                 HU_OK);
+    HU_ASSERT_FALSE(has_commitment);
+}
+
 /* ── Router path: runs even with reaction collection OFF ─────────────── */
 /* Production has reaction_collection.enabled=false. The first C3 wiring sat
  * behind that early return inside hu_daemon_register_reply_for_reactions and
@@ -311,6 +367,8 @@ void run_agent_facts_tests(void) {
     HU_RUN_TEST(non_agent_provenance_still_supersedes);
     HU_RUN_TEST(dry_run_relabels_subject_and_finds_commitment);
     HU_RUN_TEST(dry_run_rejects_invalid_arguments);
+    HU_RUN_TEST(agent_facts_courtesy_invitation_produces_no_promise_row);
+    HU_RUN_TEST(dry_run_courtesy_invitation_reports_no_commitment);
     unsetenv("HU_AGENT_FACTS");
 }
 #else
