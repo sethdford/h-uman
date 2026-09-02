@@ -26,28 +26,52 @@ What it does
        via the real C retrieval path (hu_semantic_retrieve) against a COPY of
        the live memory.db, never the live db itself.
    All requests carry `X-HU-Priority: batch` — the server is PRODUCTION.
-3. Scores every reply with the real C scorers (`human eval score`, ground
-   truth: hu_shape_classify / anti-AI, hu_relationship_axis_score) AND a
-   Gemini judge (Vertex ADC, gemini-3.1-pro-preview, explicit thinkingBudget,
-   responseSchema) rating 1-5 on:
+3. Scores every reply with the real C anti-AI scorer (`human eval score`,
+   ground truth: hu_shape_classify), called PER-REPLY so every context has its
+   own recorded anti_ai value (not just an arm-wide mean), AND a Gemini judge
+   (Vertex ADC, gemini-3.1-pro-preview, explicit thinkingConfig.thinkingBudget
+   on every call, responseSchema) rating 1-5 on:
      - emotional_intelligence: does the reply respond to the FEELING behind
        the incoming message, not just its literal content?
      - reality_awareness: does the reply keep hypothetical scenarios and other
        people's facts separate from the user's own real situation?
-4. Composes a per-arm composite (humanness_compose.compute_composite, reusing
-   the project's existing weighted-axis machinery) and compares LIVE against
-   SHADOW. PROMOTE only if the composite did not drop AND neither EI nor
-   reality-awareness dropped (beyond a small noise tolerance). Otherwise HOLD.
+4. PAIRING (the part a naive per-arm comparison gets wrong): SHADOW and LIVE
+   are generated independently, and either arm can fail a given context
+   (timeout, empty completion, search failure). The two arms are compared
+   ONLY on the INTERSECTION of contexts where BOTH produced a scored reply —
+   never on "however many happened to succeed per arm". A context that
+   succeeded in one arm and not the other is recorded (shadow_only/live_only)
+   but excluded from the composite/EI/reality comparison, because comparing
+   arm-wide means computed over DIFFERENT context sets is not a measurement of
+   LIVE vs SHADOW — it is a measurement of which contexts survived, which is
+   exactly the "identical numbers because nothing was actually compared"
+   failure shape in .claude/rules/reports-success-does-nothing.md.
+5. RECALL COVERAGE: if `human memory search --semantic` returned zero results
+   for most contexts, the LIVE arm's prompt is barely different from SHADOW's,
+   and any resemblance between the two arms proves nothing about semantic
+   recall specifically. recall_coverage = fraction of PAIRED contexts where a
+   non-empty memories block was actually appended in the LIVE arm. Below
+   --min-recall-coverage (default 0.5) the verdict is forced to INCONCLUSIVE
+   regardless of the composite/EI/reality comparison.
+6. Composes a per-arm composite (humanness_compose.compute_composite) over the
+   PAIRED set and compares LIVE against SHADOW. PROMOTE only if the composite
+   did not drop AND neither EI nor reality-awareness dropped (beyond a small
+   noise tolerance), AND recall coverage was adequate. Otherwise HOLD.
 
 Per .claude/rules/no-number-without-a-measurement.md and
 reports-success-does-nothing.md, this script REFUSES (exit 2, writes nothing)
 rather than emit a number it cannot stand behind:
-  - either arm produces fewer than --min-n scored replies
-  - either arm produces fewer than --min-n judge (EI/reality) scores
+  - fewer than --min-n PAIRED scored replies (both arms succeeded)
+  - fewer than --min-n judge (EI/reality) scores in the paired set, per arm
   - the embedder preflight fails (HU_SEMANTIC_EMBED_URL unreachable)
   - the Gemini judge preflight fails (no ADC/API key, or unreachable)
   - the memory.db copy cannot be made
   - fewer than --min-n usable contexts exist in the corpus
+
+The output JSON carries a per-context row for every PAIRED context (id,
+recall_bytes, ei, reality, anti_ai for each arm) plus per-arm EI/reality score
+histograms — no reply text, no incoming-message text; every number in the
+verdict is traceable to a specific context id.
 
 Stdlib only, except pytest for the sibling test file. No writes to
 ~/.human/config.json, no service restarts, no writes to the live memory.db
@@ -87,13 +111,14 @@ DEFAULT_EMBED_URL = os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:87
 DEFAULT_MEMORY_DB = os.path.expanduser("~/.human/memory.db")
 DEFAULT_MODEL = "seth-glm-air"
 DEFAULT_N = 40           # requested contexts; kept above MIN_SCORED for headroom
-DEFAULT_MIN_N = 30       # contract floor
+DEFAULT_MIN_N = 30       # contract floor (applies to the PAIRED set)
 DEFAULT_TOP_K = 5
 DEFAULT_MAX_TOKENS = 120
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_COMPOSITE_TOLERANCE = 0.02
 DEFAULT_EI_TOLERANCE = 0.15     # on the 1-5 judge scale
 DEFAULT_REALITY_TOLERANCE = 0.15
+DEFAULT_MIN_RECALL_COVERAGE = 0.5
 PRIORITY_HEADER = {"X-HU-Priority": "batch"}
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -102,7 +127,8 @@ GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 # gemini-3.x shares maxOutputTokens between invisible thinking and the visible
 # reply (CLAUDE.md gotcha) — an unset budget can starve the JSON body. Mirrors
-# scripts/eval_blinded_ab.py's JUDGE_THINKING_BUDGET.
+# scripts/eval_blinded_ab.py's JUDGE_THINKING_BUDGET. Set unconditionally on
+# EVERY judge call (see judge_gen_config) — there is no code path that omits it.
 JUDGE_THINKING_BUDGET = 1024
 JUDGE_MAX_OUTPUT_TOKENS = 2048
 
@@ -177,6 +203,8 @@ def _gemini_url():
 
 
 def judge_gen_config(temperature, response_schema=None):
+    """thinkingConfig.thinkingBudget is set on EVERY call, schema or not —
+    there is no path through this function that omits it."""
     cfg = {
         "temperature": temperature,
         "maxOutputTokens": JUDGE_MAX_OUTPUT_TOKENS,
@@ -392,9 +420,13 @@ def build_memories_block(snippets):
 
 
 # --------------------------------------------------------------------------
-# Scoring: `human eval score` (ground-truth C scorers)
+# Scoring: `human eval score` (ground-truth C scorer), called PER-REPLY so
+# every context carries its own anti_ai value, not just an arm-wide mean.
 # --------------------------------------------------------------------------
 def score_arm(human_bin, rows, timeout=90):
+    """rows: list of {"reply":..., "channel":...}. Returns the raw
+    `human eval score` JSON doc, or None on failure. One call can score
+    any number of rows (used both for single-reply and batch scoring)."""
     if not rows:
         return None
     if not human_bin or not os.path.isfile(human_bin):
@@ -414,45 +446,158 @@ def score_arm(human_bin, rows, timeout=90):
         return None
 
 
-def summarize_arm(rows, ei_scores, reality_scores, human_bin):
-    axes_doc = score_arm(human_bin, rows)
-    if axes_doc is None:
+def score_single_reply_anti_ai(human_bin, reply, channel):
+    """The real C shape/anti-AI scorer (hu_shape_classify) for ONE reply, so
+    every context can carry its own per-reply anti_ai value. Returns None on
+    scoring failure — the caller must not fabricate a fallback score."""
+    doc = score_arm(human_bin, [{"reply": reply, "channel": channel}])
+    if doc is None:
         return None
-    axes = dict(axes_doc.get("axes", {}))
-    ei_mean = statistics.fmean(ei_scores) if ei_scores else 0.0
-    reality_mean = statistics.fmean(reality_scores) if reality_scores else 0.0
-    # Fold the EI judge into humanness_compose's canonical "judge" axis slot
-    # (normalized 1-5 -> 0-1) so the composite reuses the project's existing,
-    # already-reviewed weighting/redistribution logic rather than reinventing it.
-    axes["judge"] = {
-        "mean": (ei_mean - 1.0) / 4.0 if ei_scores else 0.0,
-        "stderr": 0.0,
-        "n": len(ei_scores),
+    return doc.get("axes", {}).get("anti_ai", {}).get("mean")
+
+
+# --------------------------------------------------------------------------
+# Arm runner — returns a dict keyed by context id (index into `contexts`),
+# containing ONLY the contexts that produced a real, non-empty, scored reply.
+# A context absent from the returned dict FAILED that arm (search failure,
+# generation exception, empty completion) — see the per-context `reasons`
+# dict for why, so failures are attributable, not silently dropped.
+# --------------------------------------------------------------------------
+def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, log=print):
+    results = {}
+    fail_reasons = {}
+    for i, ctx in enumerate(contexts):
+        sp = system_prompt
+        recall_bytes = 0
+        if arm_name == "live":
+            snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
+                                       ctx, args.top_k)
+            if snippets is None:
+                fail_reasons[i] = "semantic_search_failed"
+                log(f"  [warn][{arm_name}] semantic search failed, skipping context "
+                    f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
+                continue
+            block = build_memories_block(snippets)
+            if block:
+                sp = block + system_prompt
+                recall_bytes = len(block.encode("utf-8"))
+        try:
+            reply = generate(args.server, args.model, sp, ctx, args.max_tokens, args.temperature)
+        except Exception as e:  # noqa: BLE001 — one bad context must not kill a 40-context run
+            fail_reasons[i] = f"generation_exception: {e}"
+            log(f"  [warn][{arm_name}] generation failed for context {i}: {e}",
+               file=sys.stderr, flush=True)
+            continue
+        if not reply:
+            fail_reasons[i] = "empty_reply"
+            log(f"  [warn][{arm_name}] empty reply for context {i}", file=sys.stderr, flush=True)
+            continue
+        j = judge_ei_reality(ctx, reply)
+        anti_ai = score_single_reply_anti_ai(args.human_bin, reply, args.channel)
+        results[i] = {
+            "recall_bytes": recall_bytes,
+            "ei": (j["ei"] if j else None),
+            "reality": (j["reality"] if j else None),
+            "anti_ai": anti_ai,
+        }
+        log(f"  [{arm_name}] {i+1}/{len(contexts)}  {reply[:60]!r}", flush=True)
+    return results, fail_reasons
+
+
+# --------------------------------------------------------------------------
+# Pairing + per-arm summary over the PAIRED set only
+# --------------------------------------------------------------------------
+def paired_ids(shadow_results, live_results):
+    """The only ids eligible for the SHADOW-vs-LIVE comparison: both arms
+    produced a scored reply. Comparing arm-wide means computed over DIFFERENT
+    context sets is not a measurement of LIVE vs SHADOW."""
+    return sorted(set(shadow_results) & set(live_results))
+
+
+def _mean(vals):
+    return statistics.fmean(vals) if vals else 0.0
+
+
+def _stderr(vals):
+    if len(vals) <= 1:
+        return 0.0
+    return statistics.pstdev(vals) / (len(vals) ** 0.5)
+
+
+def _histogram_1to5(vals):
+    return {str(k): vals.count(k) for k in range(1, 6)}
+
+
+def summarize_paired_arm(results, ids):
+    """results: run_arm's per-context dict. ids: the PAIRED id list. Every
+    number here is reconstructable from the per-context rows written to the
+    output JSON (same `ids`, same per-context values)."""
+    rows = [results[i] for i in ids]
+    anti_ai_vals = [r["anti_ai"] for r in rows if r["anti_ai"] is not None]
+    ei_vals = [r["ei"] for r in rows if r["ei"] is not None]
+    reality_vals = [r["reality"] for r in rows if r["reality"] is not None]
+    anti_ai_mean = _mean(anti_ai_vals)
+    ei_mean = _mean(ei_vals)
+    reality_mean = _mean(reality_vals)
+    axes = {
+        "anti_ai": {"mean": anti_ai_mean, "stderr": _stderr(anti_ai_vals), "n": len(anti_ai_vals)},
+        "judge": {"mean": (ei_mean - 1.0) / 4.0 if ei_vals else 0.0, "stderr": 0.0, "n": len(ei_vals)},
     }
     composite, used_weights = hc.compute_composite(axes)
     return {
-        "n_replies": len(rows),
-        "n_ei": len(ei_scores),
-        "n_reality": len(reality_scores),
+        "n": len(ids),
+        "n_anti_ai": len(anti_ai_vals),
+        "n_ei": len(ei_vals),
+        "n_reality": len(reality_vals),
         "composite": composite,
         "composite_weights": used_weights,
-        "anti_ai_mean": axes.get("anti_ai", {}).get("mean"),
-        "relationship_mean": axes.get("relationship", {}).get("mean"),
+        "anti_ai_mean": anti_ai_mean,
+        "anti_ai_stderr": _stderr(anti_ai_vals),
         "ei_mean": ei_mean,
+        "ei_histogram": _histogram_1to5(ei_vals),
         "reality_mean": reality_mean,
-        "raw_axes": axes_doc,
+        "reality_histogram": _histogram_1to5(reality_vals),
     }
+
+
+def recall_coverage_of(live_results, ids):
+    if not ids:
+        return 0.0
+    hit = sum(1 for i in ids if live_results.get(i, {}).get("recall_bytes", 0) > 0)
+    return hit / len(ids)
+
+
+def build_context_rows(shadow_results, live_results, ids):
+    rows = []
+    for i in ids:
+        s, l = shadow_results[i], live_results[i]  # noqa: E741
+        rows.append({
+            "id": i,
+            "recall_bytes": l["recall_bytes"],
+            "shadow": {"ei": s["ei"], "reality": s["reality"], "anti_ai": s["anti_ai"]},
+            "live": {"ei": l["ei"], "reality": l["reality"], "anti_ai": l["anti_ai"]},
+        })
+    return rows
 
 
 # --------------------------------------------------------------------------
 # Verdict logic (pure — the target of the unit tests)
 # --------------------------------------------------------------------------
-def decide_verdict(shadow, live, composite_tolerance=DEFAULT_COMPOSITE_TOLERANCE,
+def decide_verdict(shadow, live, recall_coverage,
+                   composite_tolerance=DEFAULT_COMPOSITE_TOLERANCE,
                    ei_tolerance=DEFAULT_EI_TOLERANCE,
-                   reality_tolerance=DEFAULT_REALITY_TOLERANCE):
-    """PROMOTE only if LIVE does not regress SHADOW on composite, EI, or
-    reality-awareness (each within a small noise tolerance). Pure function:
-    no I/O, so this is what the unit tests exercise directly."""
+                   reality_tolerance=DEFAULT_REALITY_TOLERANCE,
+                   min_recall_coverage=DEFAULT_MIN_RECALL_COVERAGE):
+    """PROMOTE only if (a) recall coverage was high enough that this run
+    actually exercised LIVE's difference from SHADOW, and (b) LIVE does not
+    regress SHADOW on composite, EI, or reality-awareness (each within a
+    small noise tolerance). Pure function: no I/O, unit-tested directly."""
+    if recall_coverage < min_recall_coverage:
+        return "INCONCLUSIVE", [
+            f"recall coverage {recall_coverage:.3f} < min {min_recall_coverage:.3f} — semantic "
+            f"search returned nothing for most paired contexts, so LIVE's prompt barely "
+            f"differed from SHADOW's; this run does not test what it claims to test"]
+
     reasons = []
     ok = True
 
@@ -477,43 +622,6 @@ def decide_verdict(shadow, live, composite_tolerance=DEFAULT_COMPOSITE_TOLERANCE
             f"(AlpsBench: memory retrieval degrades real-vs-hypothetical awareness)")
 
     return ("PROMOTE" if ok else "HOLD"), reasons
-
-
-# --------------------------------------------------------------------------
-# Arm runner
-# --------------------------------------------------------------------------
-def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, log=print):
-    rows, ei_scores, reality_scores = [], [], []
-    for i, ctx in enumerate(contexts):
-        sp = system_prompt
-        if arm_name == "live":
-            snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
-                                       ctx, args.top_k)
-            if snippets is None:
-                log(f"  [warn][{arm_name}] semantic search failed, skipping context "
-                    f"{i}: {ctx[:50]!r}", file=sys.stderr)
-                continue
-            block = build_memories_block(snippets)
-            if block:
-                sp = block + system_prompt
-        try:
-            reply = generate(args.server, args.model, sp, ctx, args.max_tokens, args.temperature)
-        except Exception as e:  # noqa: BLE001 — one bad context must not kill a 40-context run
-            log(f"  [warn][{arm_name}] generation failed for context {i}: {e}", file=sys.stderr)
-            continue
-        if not reply:
-            log(f"  [warn][{arm_name}] empty reply for context {i}", file=sys.stderr)
-            continue
-        row = {"incoming": ctx, "reply": reply, "channel": args.channel}
-        j = judge_ei_reality(ctx, reply)
-        if j is not None:
-            row["ei"] = j["ei"]
-            row["reality"] = j["reality"]
-            ei_scores.append(j["ei"])
-            reality_scores.append(j["reality"])
-        rows.append(row)
-        log(f"  [{arm_name}] {i+1}/{len(contexts)}  {reply[:60]!r}", flush=True)
-    return rows, ei_scores, reality_scores
 
 
 def build_system_prompt(args):
@@ -546,8 +654,13 @@ def main(argv=None):
                     help="JSONL of real inbound contexts (field 'incoming' or 'prompt')")
     ap.add_argument("--n", type=int, default=DEFAULT_N, help="contexts to request")
     ap.add_argument("--min-n", type=int, default=DEFAULT_MIN_N,
-                    help="minimum SCORED replies per arm, and minimum judge scores per arm, "
-                         "below which the run REFUSES rather than emit a verdict")
+                    help="minimum PAIRED scored replies (both arms succeeded), and minimum "
+                         "judge scores within the paired set per arm, below which the run "
+                         "REFUSES rather than emit a verdict")
+    ap.add_argument("--min-recall-coverage", type=float, default=DEFAULT_MIN_RECALL_COVERAGE,
+                    help="fraction of paired contexts that must have gotten a non-empty "
+                         "semantic-search block in the LIVE arm; below this the verdict is "
+                         "INCONCLUSIVE (a JSON IS written) rather than PROMOTE/HOLD")
     ap.add_argument("--server", default=DEFAULT_SERVER)
     ap.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     ap.add_argument("--model", default=DEFAULT_MODEL)
@@ -593,7 +706,8 @@ def main(argv=None):
         return refuse(f"could not copy memory db from {args.memory_db} to {tmp_root}")
     print(f"      -> {memory_db_path}", flush=True)
 
-    print(f"[4/6] selecting >= {args.min_n} real inbound contexts from {args.contexts} ...", flush=True)
+    print(f"[4/6] selecting >= {args.min_n} real inbound contexts from {args.contexts} ...",
+         flush=True)
     contexts = select_contexts(args.contexts, args.n)
     if len(contexts) < args.min_n:
         return refuse(f"only {len(contexts)} usable contexts found in {args.contexts} "
@@ -607,32 +721,42 @@ def main(argv=None):
     print(f"[5/6] production system prompt: {len(system_prompt)} chars", flush=True)
 
     print("[6/6] generating + scoring both arms (SHADOW, then LIVE) ...", flush=True)
-    shadow_rows, shadow_ei, shadow_reality = run_arm("shadow", contexts, system_prompt, args,
-                                                     memory_db_path)
-    live_rows, live_ei, live_reality = run_arm("live", contexts, system_prompt, args,
-                                               memory_db_path)
+    shadow_results, shadow_fail = run_arm("shadow", contexts, system_prompt, args, memory_db_path)
+    live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path)
 
-    if len(shadow_rows) < args.min_n:
-        return refuse(f"SHADOW arm produced {len(shadow_rows)} scored replies (< {args.min_n})")
-    if len(live_rows) < args.min_n:
-        return refuse(f"LIVE arm produced {len(live_rows)} scored replies (< {args.min_n})")
-    if len(shadow_ei) < args.min_n:
-        return refuse(f"SHADOW arm produced {len(shadow_ei)} judge scores (< {args.min_n}) "
-                      f"— judge may have degraded mid-run")
-    if len(live_ei) < args.min_n:
-        return refuse(f"LIVE arm produced {len(live_ei)} judge scores (< {args.min_n}) "
-                      f"— judge may have degraded mid-run")
+    ids = paired_ids(shadow_results, live_results)
+    shadow_only = sorted(set(shadow_results) - set(live_results))
+    live_only = sorted(set(live_results) - set(shadow_results))
+    print(f"      paired={len(ids)}  shadow_only={len(shadow_only)}  live_only={len(live_only)}",
+         flush=True)
 
-    shadow_summary = summarize_arm(shadow_rows, shadow_ei, shadow_reality, args.human_bin)
-    live_summary = summarize_arm(live_rows, live_ei, live_reality, args.human_bin)
-    if shadow_summary is None:
-        return refuse("`human eval score` failed to score the SHADOW arm")
-    if live_summary is None:
-        return refuse("`human eval score` failed to score the LIVE arm")
+    if len(ids) < args.min_n:
+        return refuse(f"only {len(ids)} contexts succeeded in BOTH arms (< --min-n {args.min_n}); "
+                      f"shadow_only={shadow_only} live_only={live_only} "
+                      f"shadow_fail_reasons={shadow_fail} live_fail_reasons={live_fail}")
 
-    verdict, reasons = decide_verdict(shadow_summary, live_summary,
+    shadow_summary = summarize_paired_arm(shadow_results, ids)
+    live_summary = summarize_paired_arm(live_results, ids)
+
+    if shadow_summary["n_anti_ai"] < args.min_n:
+        return refuse(f"SHADOW arm produced {shadow_summary['n_anti_ai']} `human eval score` "
+                      f"anti_ai scores in the paired set (< {args.min_n}) — the C scorer "
+                      f"(`human eval score`) may be unavailable or failing")
+    if live_summary["n_anti_ai"] < args.min_n:
+        return refuse(f"LIVE arm produced {live_summary['n_anti_ai']} `human eval score` "
+                      f"anti_ai scores in the paired set (< {args.min_n}) — the C scorer "
+                      f"(`human eval score`) may be unavailable or failing")
+    if shadow_summary["n_ei"] < args.min_n:
+        return refuse(f"SHADOW arm produced {shadow_summary['n_ei']} judge scores in the paired "
+                      f"set (< {args.min_n}) — judge may have degraded mid-run")
+    if live_summary["n_ei"] < args.min_n:
+        return refuse(f"LIVE arm produced {live_summary['n_ei']} judge scores in the paired "
+                      f"set (< {args.min_n}) — judge may have degraded mid-run")
+
+    coverage = recall_coverage_of(live_results, ids)
+    verdict, reasons = decide_verdict(shadow_summary, live_summary, coverage,
                                       args.composite_tolerance, args.ei_tolerance,
-                                      args.reality_tolerance)
+                                      args.reality_tolerance, args.min_recall_coverage)
 
     try:
         git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True,
@@ -641,15 +765,25 @@ def main(argv=None):
         git_commit = None
 
     doc = {
-        "schema": "semantic_live_gate.v1",
+        "schema": "semantic_live_gate.v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit,
         "gate": "HU_SEMANTIC_RECALL shadow->live",
         "n_contexts": len(contexts),
+        "n_paired": len(ids),
+        "n_shadow_only": len(shadow_only),
+        "n_live_only": len(live_only),
+        "shadow_only_ids": shadow_only,
+        "live_only_ids": live_only,
+        "shadow_fail_reasons": shadow_fail,
+        "live_fail_reasons": live_fail,
+        "recall_coverage": coverage,
+        "min_recall_coverage": args.min_recall_coverage,
         "contexts_source": os.path.expanduser(args.contexts),
         "server": args.server,
         "embed_url": args.embed_url,
         "top_k": args.top_k,
+        "judge_thinking_budget": JUDGE_THINKING_BUDGET,
         "tolerances": {
             "composite": args.composite_tolerance,
             "ei": args.ei_tolerance,
@@ -657,6 +791,7 @@ def main(argv=None):
         },
         "shadow": shadow_summary,
         "live": live_summary,
+        "context_rows": build_context_rows(shadow_results, live_results, ids),
         "verdict": verdict,
         "reasons": reasons,
     }
@@ -664,7 +799,7 @@ def main(argv=None):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(doc, indent=2) + "\n")
 
-    print(json.dumps(doc, indent=2))
+    print(json.dumps({k: v for k, v in doc.items() if k != "context_rows"}, indent=2))
     print(f"\nSEMANTIC LIVE GATE VERDICT: {verdict}")
     for r in reasons:
         print(f"  - {r}")
