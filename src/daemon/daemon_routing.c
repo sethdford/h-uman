@@ -93,6 +93,67 @@ void hu_daemon_set_missed_msg_threshold(uint32_t secs) {
         g_missed_msg_threshold_sec = secs;
 }
 
+/* Rate + per-contact cooldown (Task 8, 2026-09-01). The three-string bank
+ * fired on 21/57 sends; a human says "sorry just saw this" ~0.3% of the time
+ * and not twice to the same person in a week. */
+static double g_missed_msg_ack_rate = 0.0029;
+static uint32_t g_missed_msg_ack_cooldown_sec = 7 * 24 * 60 * 60;
+enum { HU_FILLER_RING = 32 };
+static struct {
+    uint32_t contact_hash;
+    int64_t last_ts;
+} g_filler_ring[HU_FILLER_RING];
+
+void hu_daemon_set_missed_msg_ack_rate(double rate) {
+    if (rate >= 0.0 && rate <= 1.0)
+        g_missed_msg_ack_rate = rate;
+}
+void hu_daemon_set_missed_msg_ack_cooldown(uint32_t secs) {
+    if (secs >= 60)
+        g_missed_msg_ack_cooldown_sec = secs;
+}
+void hu_daemon_filler_reset_for_test(void) {
+    memset(g_filler_ring, 0, sizeof(g_filler_ring));
+}
+static uint32_t filler_hash(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ (uint32_t)(unsigned char)s[i]) * 16777619u;
+    return h ? h : 1u;
+}
+
+const char *hu_missed_message_acknowledgment_gated(int64_t delay_secs, int receive_hour,
+                                                   int current_hour, uint32_t seed,
+                                                   const char *contact_key, size_t contact_key_len,
+                                                   int64_t now) {
+    const char *phrase =
+        hu_missed_message_acknowledgment(delay_secs, receive_hour, current_hour, seed);
+    if (!phrase)
+        return NULL;
+    /* Draw: deterministic in seed so tests can pin it; seed is the send ts. */
+    if ((double)(seed % 10000u) >= g_missed_msg_ack_rate * 10000.0)
+        return NULL;
+    if (!contact_key || contact_key_len == 0)
+        return phrase; /* no identity to cool down on */
+    uint32_t h = filler_hash(contact_key, contact_key_len);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < HU_FILLER_RING; i++) {
+        if (g_filler_ring[i].contact_hash == h) {
+            if (now - g_filler_ring[i].last_ts < (int64_t)g_missed_msg_ack_cooldown_sec)
+                return NULL; /* fired for this contact within the cooldown */
+            slot = i;
+            break;
+        }
+        if (g_filler_ring[i].last_ts < g_filler_ring[oldest].last_ts)
+            oldest = i;
+    }
+    if (slot < 0)
+        slot = oldest;
+    g_filler_ring[slot].contact_hash = h;
+    g_filler_ring[slot].last_ts = now;
+    return phrase;
+}
+
 void hu_daemon_set_missed_msg_max_age(uint32_t secs) {
     /* Must sit above the threshold or the window is empty and the setting is
      * a silent no-op — reject rather than accept a configuration that can

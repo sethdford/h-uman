@@ -51,6 +51,17 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
     if (mmma > cfg->behavior.missed_msg_threshold_sec && mmma <= 7 * 86400)
         cfg->behavior.missed_msg_max_age_sec = (uint32_t)mmma;
 
+    /* Filler-bank rate + per-contact cooldown. The bank fired on 21 of 57
+     * sends in Aug 2026; Seth's measured rate for that opener class is 0.29%.
+     * Rate is a probability in [0,1]; cooldown is 1 minute .. 90 days. */
+    double mmar = hu_json_get_number(obj, "missed_msg_ack_rate", cfg->behavior.missed_msg_ack_rate);
+    if (mmar >= 0.0 && mmar <= 1.0)
+        cfg->behavior.missed_msg_ack_rate = mmar;
+    double mmac = hu_json_get_number(obj, "missed_msg_ack_cooldown_sec",
+                                     cfg->behavior.missed_msg_ack_cooldown_sec);
+    if (mmac >= 60 && mmac <= 90.0 * 86400)
+        cfg->behavior.missed_msg_ack_cooldown_sec = (uint32_t)mmac;
+
     /* Callback delay window in seconds */
     double cw = hu_json_get_number(obj, "callback_window", cfg->behavior.callback_window);
     if (cw >= 0 && cw <= 86400)

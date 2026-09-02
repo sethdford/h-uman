@@ -1404,6 +1404,15 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Guard mix:    {summary['guards']}")
 
     resolved, skipped = resolve_hashes_against_db(outcomes, db_path)
+    if outcomes and not resolved:
+        print(f"REFUSING: 0/{len(outcomes)} outcomes resolved against the messages table "
+              f"({db_path}) — the store is missing the conversations these outcomes came from "
+              f"(2026-08-08: a quarantine had wiped it). Restore the store; do not train on nothing.",
+              file=sys.stderr)
+        sys.exit(3)
+    if getattr(args, "resolve_only", False):
+        print(json.dumps({"outcomes": len(outcomes), "resolved": len(resolved), "unresolved": skipped}))
+        sys.exit(0)
     print(f"  Resolved:     {len(resolved)} prompt hashes against {db_path.name}")
     print(f"  Skipped:      {skipped} unresolved (conversation rotated out of DB?)")
 
@@ -1633,6 +1642,9 @@ def main():
     parser.add_argument("--no-dpo", action="store_true", help="Skip DPO training pass")
     parser.add_argument("--eval-only", action="store_true", help="Only run evaluation on current adapter")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without actual training/eval")
+    parser.add_argument("--resolve-only", action="store_true",
+                        help="Read-only: resolve outcome hashes against the messages table, print the "
+                             "counts and exit (3 if nothing resolves). No training, no server restart.")
     # Phase C3 — JSONL-driven entry point. When --source-jsonl is set,
     # the full cycle pipeline is bypassed and we run train_from_outcomes
     # instead. The driver (scripts/m3_outcome_driver.py) is the primary

@@ -29,6 +29,7 @@ JOBS=(
   "humanness|file|$LOGDIR/humanness-verdict-DATE.json|$HOME_DIR/.human/bin/humanness-nightly.sh|any"
   "doctor|line|$LOGDIR/doctor-nightly.log|$HOME_DIR/.human/bin/doctor-nightly.sh|any"
   "retrain|line|$LOGDIR/nightly-retrain.log|$REPO/scripts/nightly-retrain.sh|02-05"
+  "drift|file|$HOME_DIR/.human/drift/drift-DATE.json|$REPO/scripts/drift_monitor.py|any"
 )
 HOUR_NOW=${HU_WATCHDOG_HOUR:-$(date +%H)}
 in_window() {  # "any" | "HH-HH"
@@ -48,7 +49,7 @@ marker_present() {  # kind marker
   return 1
 }
 
-serving_up() { curl -s -m 5 "$MLX" >/dev/null 2>&1; }
+serving_up() { [ "${HU_WATCHDOG_SKIP_HEALTH:-0}" = 1 ] && return 0; curl -s -m 5 "$MLX" >/dev/null 2>&1; }
 trainer_running() { pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|embed_server.py --port 8741" >/dev/null 2>&1; }
 
 missing=(); ran=(); skipped=()
@@ -62,8 +63,20 @@ for spec in "${JOBS[@]}"; do
   if ! serving_up; then skipped+=("$name:mlx-down"); continue; fi
   if trainer_running; then skipped+=("$name:trainer-busy"); continue; fi
   log "running $name ($wrapper) — marker missing for $TODAY/$YDAY"
-  ( flock -w 600 9 || exit 75; bash "$wrapper" >> "$LOG" 2>&1 ) 9>"$LOCKDIR/nightly.lock"
+  # macOS has no flock(1): an atomic mkdir is the lock. A lock older than 6h
+  # whose pid is gone is stale and reclaimed.
+  LOCK="$LOCKDIR/nightly.lock.d"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    oldpid=$(cat "$LOCK/pid" 2>/dev/null || echo 0)
+    if [ "$oldpid" -gt 0 ] && kill -0 "$oldpid" 2>/dev/null; then skipped+=("$name:locked-by-$oldpid"); continue; fi
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +360 2>/dev/null)" ] || [ "$oldpid" -eq 0 ] || ! kill -0 "$oldpid" 2>/dev/null; then
+      rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null || { skipped+=("$name:lock-race"); continue; }
+    fi
+  fi
+  echo $$ > "$LOCK/pid"
+  "$wrapper" >> "$LOG" 2>&1   # executable with its own shebang (bash or python)
   rc=$?
+  rm -rf "$LOCK"
   log "$name exited rc=$rc"
   if marker_present "$kind" "$marker"; then ran+=("$name"); else skipped+=("$name:ran-but-no-artifact(rc=$rc)"); fi
 done

@@ -29,7 +29,19 @@ def embed(texts):
     v = out.text_embeds if hasattr(out, "text_embeds") else out
     v = v / mx.linalg.norm(v, axis=-1, keepdims=True)
     mx.eval(v)
-    return v.tolist(), int(ins["input_ids"].size)
+    vecs = v.tolist()
+    # NaN guard: re-embed NaN rows alone (a long row poisons a padded batch);
+    # rows still NaN are reported by index, never serialised as NaN.
+    bad = [i for i, vec in enumerate(vecs) if any(x != x for x in vec)]
+    for i in bad:
+        one = _TOK.batch_encode_plus([texts[i]], return_tensors="mlx", padding=True, truncation=True, max_length=512)
+        o1 = _MODEL(one["input_ids"], attention_mask=one.get("attention_mask"))
+        v1 = o1.text_embeds if hasattr(o1, "text_embeds") else o1
+        v1 = v1 / mx.linalg.norm(v1, axis=-1, keepdims=True); mx.eval(v1); vecs[i] = v1.tolist()[0]
+    still = [i for i in bad if any(x != x for x in vecs[i])]
+    if still:
+        raise ValueError(f"nan embedding at indices {still}")
+    return vecs, int(ins["input_ids"].size)
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -49,6 +61,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(400, {"error": "input must be a non-empty string or list of strings"})
         if len(texts) > 256: return self._json(413, {"error": "max 256 inputs"})
         try: vecs, ntok = embed(texts)
+        except ValueError as e: return self._json(422, {"error": str(e)})
         except Exception as e: return self._json(500, {"error": f"embedding failed: {type(e).__name__}: {e}"})
         self._json(200, {"object": "list", "model": MODEL_ID,
                          "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vecs)],

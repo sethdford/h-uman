@@ -11353,8 +11353,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 memset(&de_result, 0, sizeof(de_result));
                                 if (hu_deep_extract_parse(alloc, de_response, de_response_len,
                                                           &de_result) == HU_OK) {
-                                    /* Superseding ingest: a changed fact closes
-                                     * the prior edge (graph_ingest.h). */
                                     for (size_t ri = 0; ri < de_result.relation_count; ri++) {
                                         const hu_extracted_relation_t *dr =
                                             &de_result.relations[ri];
@@ -12236,8 +12234,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             struct tm *pn = localtime_r(&now_ts, &tm_now);
                             int recv_hr = pr ? pr->tm_hour : 0;
                             int curr_hr = pn ? pn->tm_hour : 0;
-                            const char *ack = hu_missed_message_acknowledgment(
-                                delay_secs, recv_hr, curr_hr, (uint32_t)now_ts);
+                            const char *ack = hu_missed_message_acknowledgment_gated(
+                                delay_secs, recv_hr, curr_hr, (uint32_t)now_ts, batch_key, key_len,
+                                now_ts);
                             if (ack) {
                                 size_t ack_len = strlen(ack);
                                 if (response_len <= SIZE_MAX - ack_len &&

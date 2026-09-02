@@ -8,7 +8,7 @@ fail=0; check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1
 
 # 1. nothing present -> all three missing
 out=$(bash "$HERE/nightly-watchdog.sh" --dry-run)
-check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain]'* ]]"
+check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain drift]'* ]]"
 
 # 2. today's humanness verdict present (non-empty) -> not missing
 echo '{"composite":0.9}' > "$T/.human/logs/humanness-verdict-$TODAY.json"
@@ -34,4 +34,11 @@ out=$(HU_REPO_DIR="$T/repo" HU_WATCHDOG_HOUR=14 bash "$HERE/nightly-watchdog.sh"
 check "retrain skipped outside its window at 14:00" "[[ \"$out\" == *'retrain:outside-window-02-05'* ]]"
 out=$(HU_REPO_DIR="$T/repo" HU_WATCHDOG_HOUR=03 bash "$HERE/nightly-watchdog.sh" --dry-run)
 check "retrain eligible inside its window at 03:00" "[[ \"$out\" == *'retrain(dry)'* ]]"
+# 7. a REAL (non-dry) run executes a missing job under the mkdir lock and the
+#    artifact it writes is what marks it done (flock does not exist on macOS)
+printf '#!/bin/bash\necho "[%s] doctor fails=0" >> "$HOME/.human/logs/doctor-nightly.log"\n' "$(date +%Y-%m-%d)" > "$T/.human/bin/doctor-nightly.sh"; chmod +x "$T/.human/bin/doctor-nightly.sh"
+rm -f "$T/.human/logs/doctor-nightly.log"
+out=$(HU_REPO_DIR="$T/repo" HU_WATCHDOG_SKIP_HEALTH=1 HU_WATCHDOG_HOUR=14 bash "$HERE/nightly-watchdog.sh")
+check "real run executes doctor and sees its artifact" "[[ \"$out\" == *'ran=[doctor]'* ]]"
+check "lock dir released after the run" "[ ! -d \"$T/.human/locks/nightly.lock.d\" ]"
 rm -rf "$T"; exit $fail

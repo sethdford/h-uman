@@ -203,6 +203,34 @@ watching it.
 - "The ORPO negative result was tuning" → it was a zero-gradient bug in the trainer.
 - "Sub-linear retrieval needs ANN" → exact KNN is sub-ms at our corpus size.
 
+### Corrections from the implementation pass (2026-09-01, later the same night)
+
+Three claims in this document were wrong or incomplete once the work was done:
+
+- **"The knowledge graph has never been fed" (TL;DR #2) was measured on the wrong table.**
+  `causal_nodes` belongs to the world model; the grounding graph is
+  `~/.human/graph.db`, which held 133 entities / 72 relations written from
+  `daemon.c:11360`. The yield problem stood — 72 relations from ~1,800 messages — and
+  the backfill took it to 480 open relations / 571 entities. The real ceiling was the
+  composer: candidates were the top 64 entities by mention count, so anything below that
+  rank (a once-mentioned "Vanguard" at rank 96) could never seed. Fixed with
+  message-driven candidates: concrete-object probes 2/10 → 8/10.
+- **"Self-measurement dark since 08-07" was the laptop, not the jobs.** Nothing under
+  `~/.human` was written 08-10 → 08-31; launchd calendar jobs cannot catch up across a
+  multi-week sleep. The fix is a 6-hour `StartInterval` watchdog keyed on artifacts.
+- **Nightly LoRA's blocker was not the `"pairs"` probe.** The C runner's probe path has no
+  production caller; the script that runs nightly failed at *resolving outcomes* because
+  the 08-04 quarantine had wiped the `messages` table (313/313 unresolved). Restoring the
+  store is the fix; the probe was made read-only anyway.
+
+Measured, this pass: memories 1,074+56 → 1,130 and messages 3,031 restored (no
+quarantine on reopen); a busy/locked store can no longer be quarantined (3 tests);
+semantic recall through the shipped binary +25.0 points recall@5 over FTS5 on 20
+paraphrase probes; humanness composite 0.891 (n=14) produced by the watchdog on a day
+the calendar job had missed; drift monitor same-day repeat at T=0 = 1.000 (at T=0.7 it
+was 0.725 — sampling noise would have tripped the alarm nightly, so drift is greedy);
+`current_events` 280k → deduped under a UNIQUE index.
+
 ## Addendum — outage found during this review (2026-09-01 20:35–20:41)
 
 While re-deriving the numbers above, production went down and was restored:

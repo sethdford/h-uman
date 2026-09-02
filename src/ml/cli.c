@@ -522,6 +522,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
      * from "user did not mention export". Without this, the default-
      * enable block below silently re-enables export after --no-export. */
     int export_disabled_explicitly = 0;
+    int count_only = 0; /* --count-only: read-only probe, prints {"pairs": N} */
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--db");
         if (v) {
@@ -544,6 +545,10 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
                 return HU_ERR_INVALID_ARGUMENT;
             }
             i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--count-only") == 0) {
+            count_only = 1;
             continue;
         }
         if (strcmp(argv[i], "--no-export") == 0) {
@@ -621,7 +626,14 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
 
     hu_dpo_mine_stats_t stats;
     memset(&stats, 0, sizeof(stats));
+    opts.count_only = count_only;
     hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (count_only && err == HU_OK) {
+        /* The C nightly runner parses exactly this shape (retrain_parse_pairs). */
+        printf("{\"pairs\": %zu}\n", stats.triples_examined);
+        sqlite3_close(db);
+        return HU_OK;
+    }
     if (err != HU_OK) {
         fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
         sqlite3_close(db);

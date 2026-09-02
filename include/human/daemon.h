@@ -109,6 +109,8 @@ hu_daemon_test_get_active_daemon_config(const struct hu_config *config, const ch
 /* Set the missed-message acknowledgment threshold in seconds (minimum 60s). Default: 1800 (30min)
  */
 void hu_daemon_set_missed_msg_threshold(uint32_t secs);
+void hu_daemon_set_missed_msg_ack_rate(double rate);
+void hu_daemon_set_missed_msg_ack_cooldown(uint32_t secs);
 
 /* Set the ceiling (seconds) above which NO missed-message acknowledgment is
  * emitted. Must exceed the threshold; otherwise rejected. Default: 86400 (24h). */

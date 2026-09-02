@@ -1,7 +1,7 @@
 {
   "n_probes": 20,
   "path": "production C binary via CLI",
-  "binary": "./build/human",
+  "binary": "/tmp/human-prev",
   "db": "/tmp/merge/proof.db",
   "embed_url": "http://127.0.0.1:8749",
   "measures": "paraphrase robustness on the LIVE retrieval path; NOT end-to-end reply quality",
@@ -12,8 +12,8 @@
   },
   "semantic": {
     "recall@1": 0.4,
-    "recall@5": 0.4,
-    "mrr": 0.4
+    "recall@5": 0.45,
+    "mrr": 0.4166666666666667
   },
   "rows": [
     {
@@ -62,7 +62,7 @@
       "query": "someone offered to fly out and look after him",
       "target": "come see you",
       "keyword_rank": null,
-      "semantic_rank": null
+      "semantic_rank": 3
     },
     {
       "query": "unpaid bills with contractors",
@@ -137,6 +137,6 @@
       "semantic_rank": 1
     }
   ],
-  "recall@5_delta_points": 20.0,
+  "recall@5_delta_points": 25.0,
   "pass": true
 }

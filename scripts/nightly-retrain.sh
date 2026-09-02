@@ -145,6 +145,18 @@ if [[ -n "$SERVING_BASE" ]]; then
     fi
 fi
 
+# Task 11 (2026-09-01): classifier-tier gate beside the human blind A/B. Runs
+# HERE because the scorer loads its own base+adapter pair and the serving
+# model is already stopped in this window (never two loaders). Best-effort:
+# a refusal (n<20, no adapter) is logged, never fabricated.
+# Default to the n=37 blind-A/B run: the rated cycle dirs carry only 12 keyed
+# trials each and the gate refuses n<20.
+CYCLE_DIR="${HU_CLASSIFIER_CYCLE_DIR:-$HOME/blind_ab_run}"
+if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
+    log "classifier gate on $CYCLE_DIR"
+    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
+    log "classifier gate exited rc=${PIPESTATUS[0]}"
+fi
 log "=== nightly retrain done ==="
 # restore_serving runs via the EXIT trap.
 

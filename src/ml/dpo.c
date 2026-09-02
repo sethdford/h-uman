@@ -439,6 +439,33 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
     return HU_OK;
 }
 
+hu_error_t hu_dpo_set_outbound_message_ref(hu_dpo_collector_t *collector, const char *channel,
+                                           size_t channel_len, const char *target,
+                                           size_t target_len, const char *message_ref,
+                                           size_t message_ref_len) {
+    if (!collector || !collector->db || !channel || channel_len == 0 || !target ||
+        target_len == 0 || !message_ref || message_ref_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    int rc =
+        sqlite3_prepare_v2(collector->db,
+                           "UPDATE production_outcomes SET message_ref = ? WHERE id = ("
+                           "SELECT id FROM production_outcomes WHERE channel = ? AND target = ? "
+                           "AND (message_ref IS NULL OR message_ref = '') "
+                           "ORDER BY id DESC LIMIT 1)",
+                           -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, message_ref, (int)message_ref_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, target, (int)target_len, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    return sqlite3_changes(collector->db) > 0 ? HU_OK : HU_ERR_NOT_FOUND;
+}
+
 hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *channel,
                                  size_t channel_len, const char *target, size_t target_len,
                                  const char *message_ref, size_t message_ref_len,

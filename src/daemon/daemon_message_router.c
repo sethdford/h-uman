@@ -442,6 +442,18 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
     hu_reaction_handler_register_assistant_message_for_production(
         ch_name, thread_key, msg_ref, prompt ? prompt : "", response,
         (agent && agent->sota.last_rejected_draft) ? agent->sota.last_rejected_draft : "");
+    /* Task 9: the reactive path recorded its production_outcomes row before
+     * the channel returned the sent message id; attach the ref now so the
+     * row joins to tapbacks and, later, to chat.db (daemon output becomes
+     * separable from the user's own typing). */
+    if (agent && agent->sota.sota_initialized && msg_ref[0] && strncmp(msg_ref, "out-", 4) != 0) {
+        hu_error_t ref_err =
+            hu_dpo_set_outbound_message_ref(&agent->sota.dpo_collector, ch_name, strlen(ch_name),
+                                            thread, strlen(thread), msg_ref, strlen(msg_ref));
+        if (ref_err != HU_OK && ref_err != HU_ERR_NOT_FOUND)
+            hu_log_warn("daemon", agent->observer, "message_ref attach failed: %s",
+                        hu_error_string(ref_err));
+    }
     if (msg_ref_out && msg_ref_cap > 0)
         snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
 #else

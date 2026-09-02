@@ -3,6 +3,7 @@
 #include "human/daemon.h"
 #include "human/daemon_routing.h"
 #include "test_framework.h"
+#include <stdio.h>
 #include <string.h>
 
 /* ── hu_daemon_is_tapback_worthy ─────────────────────────────────────── */
@@ -66,6 +67,42 @@ static void test_video_delay_with_video(void) {
     msgs[0].has_video = true;
     uint32_t delay = hu_daemon_compute_video_delay(msgs, 0, 1, 0);
     HU_ASSERT(delay >= 2000 && delay <= 10000);
+}
+
+/* Task 8 — the filler bank is drawn at the measured rate with a per-contact
+ * cooldown. 21/57 sends carried a filler in Aug 2026; Seth's rate is 0.29%. */
+static void test_filler_gated_rate_zero_never_fires(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(0.0);
+    for (uint32_t seed = 0; seed < 200; seed++)
+        HU_ASSERT_NULL(
+            hu_missed_message_acknowledgment_gated(3600, 14, 15, seed, "+1555", 5, 1000));
+}
+static void test_filler_gated_rate_one_fires_once_then_cooldown_blocks(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(1.0);
+    hu_daemon_set_missed_msg_ack_cooldown(3600);
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 7, "+1555", 5, 1000));
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 8, "+1555", 5, 2000));
+    /* a different contact is not blocked by the first one's cooldown */
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 9, "+1666", 5, 2000));
+    /* after the cooldown the first contact is eligible again */
+    HU_ASSERT_NOT_NULL(
+        hu_missed_message_acknowledgment_gated(3600, 14, 15, 10, "+1555", 5, 1000 + 3601));
+}
+static void test_filler_gated_measured_rate_over_10000_seeds(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(0.0029);
+    hu_daemon_set_missed_msg_ack_cooldown(60);
+    int fired = 0;
+    for (uint32_t seed = 0; seed < 10000; seed++) {
+        char key[24];
+        snprintf(key, sizeof(key), "c%u", seed); /* distinct contacts: no cooldown effect */
+        if (hu_missed_message_acknowledgment_gated(3600, 14, 15, seed, key, strlen(key), 1000))
+            fired++;
+    }
+    HU_ASSERT_EQ(fired, 29); /* exactly rate * 10000 by construction */
+    hu_daemon_set_missed_msg_ack_rate(0.0029);
 }
 
 /* ── hu_missed_message_acknowledgment ────────────────────────────────── */
@@ -292,6 +329,9 @@ void run_daemon_routing_tests(void) {
 
     /* missed message */
     HU_RUN_TEST(test_missed_msg_short_delay_null);
+    HU_RUN_TEST(test_filler_gated_rate_zero_never_fires);
+    HU_RUN_TEST(test_filler_gated_rate_one_fires_once_then_cooldown_blocks);
+    HU_RUN_TEST(test_filler_gated_measured_rate_over_10000_seeds);
     HU_RUN_TEST(test_missed_msg_long_delay_returns_phrase);
     HU_RUN_TEST(test_missed_msg_overnight_woke_phrase);
     HU_RUN_TEST(test_missed_msg_deterministic);

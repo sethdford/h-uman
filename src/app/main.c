@@ -1746,6 +1746,8 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         app_ctx.cfg->behavior.max_response_chars, app_ctx.cfg->behavior.min_response_chars);
     hu_daemon_set_missed_msg_threshold(app_ctx.cfg->behavior.missed_msg_threshold_sec);
     hu_daemon_set_missed_msg_max_age(app_ctx.cfg->behavior.missed_msg_max_age_sec);
+    hu_daemon_set_missed_msg_ack_rate(app_ctx.cfg->behavior.missed_msg_ack_rate);
+    hu_daemon_set_missed_msg_ack_cooldown(app_ctx.cfg->behavior.missed_msg_ack_cooldown_sec);
 
     /* Initialize conversation data (load word lists from embedded JSON) */
     hu_conversation_data_init(alloc);

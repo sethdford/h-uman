@@ -943,6 +943,17 @@ static bool compatible_supports_vision(void *ctx) {
     return true;
 }
 
+/* Task 10 (2026-09-01): the serving queue was 99.8% internal machinery. The
+ * mlx-server admits requests tagged `X-HU-Priority: live` ahead of batch
+ * work; the daemon process sets HU_LLM_PRIORITY=live in its launchd env, the
+ * judges/arena/proposer scripts do not. Unset = no header = batch. */
+__attribute__((unused)) static const char *compatible_priority_header(void) {
+    const char *p = getenv("HU_LLM_PRIORITY");
+    if (p && strcmp(p, "live") == 0)
+        return "X-HU-Priority: live\r\n";
+    return NULL;
+}
+
 static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
                                          const hu_chat_request_t *request, const char *model,
                                          size_t model_len, double temperature,
@@ -1124,8 +1135,8 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
      * held for the duration of the stream (covers SSE keep-alive); other
      * iMessages dispatched in parallel will wait their turn. */
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
-                                   compatible_stream_write_cb, &sctx);
+    err = hu_http_post_json_stream(alloc, url_buf, auth, compatible_priority_header(), body,
+                                   body_len, compatible_stream_write_cb, &sctx);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
