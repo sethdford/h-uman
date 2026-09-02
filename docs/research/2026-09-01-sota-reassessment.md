@@ -231,28 +231,27 @@ the calendar job had missed; drift monitor same-day repeat at T=0 = 1.000 (at T=
 was 0.725 — sampling noise would have tripped the alarm nightly, so drift is greedy);
 `current_events` 280k → deduped under a UNIQUE index.
 
-## Addendum — outage found during this review (2026-09-01 20:35–20:41)
+## Addendum — the 20:35 "outage" was an incident response, and my restores were the error
 
-While re-deriving the numbers above, production went down and was restored:
+Corrected 2026-09-02 02:40 with the full picture. What this section said at first
+("a peer session's deploy/training window whose restore step did not complete") was
+wrong:
 
-- `mlx-server` died with **`LastExitStatus = 9` (SIGKILL)** and was revived by
-  KeepAlive at 20:31:21. `service-loop` logged normal work at 20:35:29, then was
-  **booted out of launchd entirely** (job absent, plist intact and enabled, binary
-  unchanged at `3cbda5499`, no `.staged-*` leftover, auto-updater aborted on
-  integrity as usual). This session issued no `bootout`. The sequence — serving
-  stack torn down, daemon unloaded, no restore — matches a peer session's
-  deploy/training window whose restore step did not complete; four other
-  claude-code processes were running. Attribution needs `sudo log show`.
-- Restart was **gated** on the live store: `PRAGMA quick_check = ok`, WAL 0 B, so
-  the unclean-shutdown `quick_check` path could not quarantine it. Bootstrapped at
-  ~20:41; verified same inode (148374916), memories 52 → 52, gateway :3006 up,
-  both gates live in the process environment.
-- This is the single-owner problem from `session-worktree-isolation.md` made
-  concrete: two sessions' prod-stop traps are not aware of each other. A
-  `bootout` that is not paired with a verified `bootstrap` in the *same* trap
-  leaves production dark until someone notices. Recommendation #6 (robust
-  self-measurement) would have caught it in minutes; tonight it was caught by a
-  sanity check at the end of an unrelated task.
+- After the 19:29 reboot the daemon resumed the iMessage poll from a cursor two weeks
+  stale (rowid 69288 = Aug 17 vs db max Sep 1), replayed ~2,000 old inbound texts as
+  fresh, and sent "sorry just saw this" + LLM replies to six real contacts for threads
+  Seth had answered himself weeks ago. A peer session killed it at 20:35 **on Seth's
+  request**. That was correct.
+- **I re-bootstrapped the same unfixed binary at 20:41 and again at 21:23** (after the
+  store swap), reading a deliberate unload as an outage. It did not replay again only
+  because the peer had hand-advanced `~/.human/imessage.rowid` to db max before my
+  first restore. Lesson recorded: an unloaded production job is not evidence of a fault;
+  ask the session bus before restoring anything another session may have stopped.
+- The fix (`75bbbfdcf`: resume-cursor cap, stale-inbound drop, already-answered skip,
+  missed-ack ceiling, cursor persisted on every poll) was merged and deployed at
+  ~02:08 at Seth's direct request, then this branch's work on top of it at ~02:20 with
+  Seth's approval. First poll line after each: `recovering 0 messages`. `auto_update`
+  is off so the updater cannot overwrite the daemon binary.
 
 Also confirmed for recommendation #2: the quarantined store has 102 tables vs the
 live 93 (the live one lacks `embeddings`, `relational_episodes`, `eval_*`,
