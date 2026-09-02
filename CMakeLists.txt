@@ -1262,6 +1262,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
     src/daemon/send_budget.c
@@ -3434,6 +3435,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
