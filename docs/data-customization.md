@@ -548,6 +548,8 @@ The `behavior` config section in the runtime configuration controls seven key th
 | Deduplication threshold       | `dedup_threshold`          | 70      | 1–100    | Similarity percentage (0–100) to consider memories duplicates |
 | Missed message threshold      | `missed_msg_threshold_sec` | 1800    | 60–86400 | Seconds gap to trigger "missed message" acknowledgment        |
 | Missed message ceiling        | `missed_msg_max_age_sec`   | 86400   | >threshold–604800 | Above this gap no acknowledgment is sent at all (a "just saw this" on a days-old message is a tell) |
+| Reply budget per contact      | `reply_budget_per_contact_hourly` | 10 | 0–1000 | Max reactive replies to one contact per sliding hour; beyond it the daemon stays silent. `0` disables. Runaway brake, not a conversation shaper. |
+| Reply budget global           | `reply_budget_global_hourly` | 30   | 0–10000 | Max reactive replies to everyone per sliding hour. `0` disables. |
 
 ### iMessage replay guards
 

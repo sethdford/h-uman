@@ -77,6 +77,8 @@
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
+#include "human/daemon/reactive_gates.h"
+#include "human/daemon/send_budget.h"
 #include "human/daemon/voice_facade.h"
 
 /* Channel helpers */
@@ -4641,6 +4643,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Reply budget (2026-09-01 runaway brake): charged at the dedup mark below. */
+                uint32_t sb_used = 0, sb_cap = 0;
+                if (!hu_send_budget_check(batch_key, key_len, (int64_t)time(NULL), NULL, &sb_used,
+                                          &sb_cap)) {
+                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                "reply budget exhausted for %.*s (%u/%u in last hour) — silent",
+                                (int)(key_len > 20 ? 20 : key_len), batch_key, (unsigned)sb_used,
+                                (unsigned)sb_cap);
+                    continue;
+                }
+
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "processing batch for %.*s: \"%.*s\" (group=%d)",
                             (int)(key_len > 20 ? 20 : key_len), batch_key,
@@ -4817,8 +4830,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         break;
                     }
                 }
-                if (!llm_decides && consec_idx != SIZE_MAX &&
-                    consec_response_count[consec_idx] >= 3 && action != HU_RESPONSE_SKIP) {
+                if (hu_reactive_gate_active(HU_REACTIVE_GATE_CONSECUTIVE_LIMIT, llm_decides) &&
+                    consec_idx != SIZE_MAX && consec_response_count[consec_idx] >= 3 &&
+                    action != HU_RESPONSE_SKIP) {
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "consecutive limit (%u) reached for %.*s — staying silent",
                                 (unsigned)consec_response_count[consec_idx],
@@ -10191,6 +10205,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                               send_target_len, ar_reply,
                                                               ar_reply_len, NULL, 0);
+                                    hu_send_budget_record_send(batch_key, key_len, now_unix_ar);
                                     hu_log_info("human", agent ? agent->observer : NULL,
                                                 "autoresponder fired for %.*s (DND + allowlisted, "
                                                 "human inactive %ds+); skipped agent_turn",
@@ -10617,42 +10632,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_critique_result_free(alloc, &cr);
                     }
 
-                    /* AI-tell filter: catch known robotic phrases and force retry.
-                     * Skip retry in llm_decides mode (too expensive with local model). */
-                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
-                        static const char *ai_tells[] = {
-                            "I understand how you",
-                            "I am here to support",
-                            "I am here for you",
-                            "that must be really",
-                            "I appreciate you sharing",
-                            "feel free to",
-                            "I hear you",
-                            "I'd be happy to",
-                            "sorry to hear",
-                            "going through that",
-                            "here to support",
-                            "I can only imagine",
-                            "According to the available",
-                            "According to my",
-                            "significant negative impact",
-                            "fail to account for",
-                        };
-                        bool has_ai_tell = false;
-                        for (size_t ati = 0; ati < sizeof(ai_tells) / sizeof(ai_tells[0]); ati++) {
-                            if (hu_strcasestr(response, ai_tells[ati])) {
-                                has_ai_tell = true;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "ai-tell detected: \"%s\" in response", ai_tells[ati]);
-                                break;
-                            }
-                        }
+                    /* AI-tell filter (SAFETY gate, runs under llm_decides too — 2026-09-01):
+                     * phrase list lives in src/daemon/reactive_gates.c; one retry. */
+                    if (err == HU_OK && response && response_len > 0 && !retried &&
+                        hu_reactive_gate_active(HU_REACTIVE_GATE_AI_TELL_RETRY, llm_decides)) {
+                        const char *ai_tell = hu_reactive_response_ai_tell(response);
+                        bool has_ai_tell = ai_tell != NULL;
+                        if (has_ai_tell)
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "ai-tell detected: \"%s\" in response", ai_tell);
                         if (has_ai_tell) {
                             retried = true;
                             agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
                             response = NULL;
                             response_len = 0;
-                            if (convo_ctx) {
+                            { /* attach the hint even with no prior context (lean prompt) */
+                                size_t cl = convo_ctx ? convo_ctx_len : 0;
                                 static const char tell_hint[] =
                                     "[CRITICAL OVERRIDE: Your response was REJECTED because it "
                                     "sounded like a therapy chatbot. You MUST respond in 3-8 "
@@ -10661,14 +10656,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     "'yeah I've been there too', 'that's rough'. "
                                     "DO NOT use 'I understand', 'going through', 'sorry to hear', "
                                     "'here for you'. Be BRIEF. Be a FRIEND not a counselor.]";
-                                size_t new_len = sizeof(tell_hint) - 1 + 1 + convo_ctx_len + 1;
+                                size_t new_len = sizeof(tell_hint) - 1 + 1 + cl + 1;
                                 char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
                                 if (new_convo) {
                                     memcpy(new_convo, tell_hint, sizeof(tell_hint) - 1);
                                     new_convo[sizeof(tell_hint) - 1] = '\n';
-                                    memcpy(new_convo + sizeof(tell_hint), convo_ctx, convo_ctx_len);
+                                    if (cl > 0)
+                                        memcpy(new_convo + sizeof(tell_hint), convo_ctx, cl);
                                     new_convo[new_len - 1] = '\0';
-                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    if (convo_ctx)
+                                        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
                                     convo_ctx = new_convo;
                                     convo_ctx_len = new_len - 1;
                                     agent->conversation_context = convo_ctx;
@@ -10690,7 +10687,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * If needs_revision, retry once with hint.
                      * Skip retry in llm_decides mode (director handles quality). */
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
-                        !llm_decides) {
+                        hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
                         hu_quality_score_t qscore = hu_conversation_evaluate_quality(
                             response, response_len, history_entries, history_count, max_chars);
                         if (qscore.needs_revision && !retried) {
@@ -11451,6 +11448,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * rowid replied to" contract and the dedup check above. */
                     hu_daemon_reply_dedup_mark(batch_key, key_len,
                                                (int64_t)msgs[batch_end].message_id);
+                    hu_send_budget_record_send(batch_key, key_len, (int64_t)time(NULL));
                 }
 
                 /* Store conversation summary as long-term memory */
