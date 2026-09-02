@@ -87,6 +87,7 @@ if [[ "${HU_LOOP_SKIP_CI:-0}" != "1" ]] && command -v gh >/dev/null 2>&1; then
     case "$ci" in
         success) ok "ci: Human CI on main is green" ;;
         failure) bad "ci: Human CI on main is RED — fix before the next deploy (gh run list --workflow 'Human CI' --branch main)" ;;
+        ""|null|pending|in_progress|queued) note "ci: Human CI on main is still running (${ci:-pending})" ;;
         *)       note "ci: Human CI on main is '$ci'" ;;
     esac
 fi
