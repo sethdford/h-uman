@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11499   # measured 2026-09-02 after C5 merge
+CLONE_BASELINE=11491   # measured 2026-09-02 on 8b530a47d
                        # duplicated extras-dispatch preamble in reliable_chat and
                        # reliable_chat_with_system to one line each
 # prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read
