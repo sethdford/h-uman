@@ -60,6 +60,12 @@ static const char *const k_ai_tells[] = {
     "experiencing these feelings",
 };
 
+hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried) {
+    if (!ai_tell)
+        return HU_AI_TELL_SEND;
+    return retried ? HU_AI_TELL_DROP : HU_AI_TELL_RETRY;
+}
+
 const char *hu_reactive_response_ai_tell(const char *response) {
     if (!response || !response[0])
         return NULL;

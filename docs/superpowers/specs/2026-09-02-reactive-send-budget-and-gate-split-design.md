@@ -96,9 +96,12 @@ Trade-offs accepted after critic review:
   charges the budget at its own send site.
 - **AI-tell retry hint** now attaches even when there is no prior
   conversation context (the lean prompt under `llm_decides`), so the retry is
-  never a blind re-roll. A second miss still ships (one retry only; the
-  validator chain's phrase stripper is the last line). Tightening that is a
-  separate change.
+  never a blind re-roll.
+- **Second miss drops.** (Added later on 2026-09-02.) The filter runs on
+  every attempt; `hu_reactive_ai_tell_action(tell, retried)` returns SEND /
+  RETRY / DROP. First miss: retry once with the hint. Second miss: free the
+  reply and stay silent — silence beats sending a therapy-bot line to a
+  friend. The drop is logged with the matched phrase.
 - `"I apologize"` alone is NOT a tell: "I apologize for the mistake!" is real
   Seth text in the eval corpus. Only qualified forms are listed.
 

@@ -10632,45 +10632,44 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_critique_result_free(alloc, &cr);
                     }
 
-                    /* AI-tell filter (SAFETY gate, runs under llm_decides too — 2026-09-01):
-                     * phrase list lives in src/daemon/reactive_gates.c; one retry. */
-                    if (err == HU_OK && response && response_len > 0 && !retried &&
+                    /* AI-tell SAFETY gate: first miss retries with the hint, second miss drops. */
+                    if (err == HU_OK && response && response_len > 0 &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_AI_TELL_RETRY, llm_decides)) {
                         const char *ai_tell = hu_reactive_response_ai_tell(response);
-                        bool has_ai_tell = ai_tell != NULL;
-                        if (has_ai_tell)
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "ai-tell detected: \"%s\" in response", ai_tell);
-                        if (has_ai_tell) {
-                            retried = true;
+                        hu_ai_tell_action_t ta = hu_reactive_ai_tell_action(ai_tell, retried);
+                        if (ta != HU_AI_TELL_SEND) {
+                            hu_log_warn("human", agent ? agent->observer : NULL,
+                                        "ai-tell \"%s\" — %s", ai_tell,
+                                        ta == HU_AI_TELL_DROP ? "dropped after retry" : "retrying");
                             agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
                             response = NULL;
                             response_len = 0;
-                            { /* attach the hint even with no prior context (lean prompt) */
-                                size_t cl = convo_ctx ? convo_ctx_len : 0;
-                                static const char tell_hint[] =
-                                    "[CRITICAL OVERRIDE: Your response was REJECTED because it "
-                                    "sounded like a therapy chatbot. You MUST respond in 3-8 "
-                                    "words MAXIMUM. Pick ONE of these patterns: "
-                                    "'damn I'm sorry', 'ugh that's the worst', "
-                                    "'yeah I've been there too', 'that's rough'. "
-                                    "DO NOT use 'I understand', 'going through', 'sorry to hear', "
-                                    "'here for you'. Be BRIEF. Be a FRIEND not a counselor.]";
-                                size_t new_len = sizeof(tell_hint) - 1 + 1 + cl + 1;
-                                char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
-                                if (new_convo) {
-                                    memcpy(new_convo, tell_hint, sizeof(tell_hint) - 1);
-                                    new_convo[sizeof(tell_hint) - 1] = '\n';
-                                    if (cl > 0)
-                                        memcpy(new_convo + sizeof(tell_hint), convo_ctx, cl);
-                                    new_convo[new_len - 1] = '\0';
-                                    if (convo_ctx)
-                                        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                                    convo_ctx = new_convo;
-                                    convo_ctx_len = new_len - 1;
-                                    agent->conversation_context = convo_ctx;
-                                    agent->conversation_context_len = convo_ctx_len;
-                                }
+                        }
+                        if (ta == HU_AI_TELL_RETRY) {
+                            retried = true;
+                            size_t cl = convo_ctx ? convo_ctx_len : 0; /* hint attaches w/o ctx */
+                            static const char tell_hint[] =
+                                "[CRITICAL OVERRIDE: Your response was REJECTED because it "
+                                "sounded like a therapy chatbot. You MUST respond in 3-8 "
+                                "words MAXIMUM. Pick ONE of these patterns: "
+                                "'damn I'm sorry', 'ugh that's the worst', "
+                                "'yeah I've been there too', 'that's rough'. "
+                                "DO NOT use 'I understand', 'going through', 'sorry to hear', "
+                                "'here for you'. Be BRIEF. Be a FRIEND not a counselor.]";
+                            size_t new_len = sizeof(tell_hint) - 1 + 1 + cl + 1;
+                            char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
+                            if (new_convo) {
+                                memcpy(new_convo, tell_hint, sizeof(tell_hint) - 1);
+                                new_convo[sizeof(tell_hint) - 1] = '\n';
+                                if (cl > 0)
+                                    memcpy(new_convo + sizeof(tell_hint), convo_ctx, cl);
+                                new_convo[new_len - 1] = '\0';
+                                if (convo_ctx)
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = new_convo;
+                                convo_ctx_len = new_len - 1;
+                                agent->conversation_context = convo_ctx;
+                                agent->conversation_context_len = convo_ctx_len;
                             }
                             if (ch->channel->vtable->start_typing)
                                 ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
