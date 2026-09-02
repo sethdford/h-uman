@@ -259,6 +259,10 @@ typedef struct hu_behavior_config {
     uint32_t callback_window;             /* callback delay window in seconds (default 300) */
     uint32_t pattern_threshold;           /* conversation pattern match threshold % (default 50) */
     uint32_t tapback_skip_pct;            /* probability to skip tapback/reaction % (default 20) */
+    /* Reactive reply budget (runaway brake, 2026-09-01). Replies per sliding
+     * hour; 0 disables that scope. See include/human/daemon/send_budget.h. */
+    uint32_t reply_budget_per_contact_hourly; /* default 10 */
+    uint32_t reply_budget_global_hourly;      /* default 30 */
 } hu_behavior_config_t;
 
 typedef enum hu_dm_scope {

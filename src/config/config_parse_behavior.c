@@ -51,6 +51,17 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
     if (mmma > cfg->behavior.missed_msg_threshold_sec && mmma <= 7 * 86400)
         cfg->behavior.missed_msg_max_age_sec = (uint32_t)mmma;
 
+    /* Reactive reply budget: replies per sliding hour, 0 disables a scope.
+     * Bounded so a typo cannot silently set an absurd cap. */
+    double rbc = hu_json_get_number(obj, "reply_budget_per_contact_hourly",
+                                    cfg->behavior.reply_budget_per_contact_hourly);
+    if (rbc >= 0 && rbc <= 1000)
+        cfg->behavior.reply_budget_per_contact_hourly = (uint32_t)rbc;
+    double rbg = hu_json_get_number(obj, "reply_budget_global_hourly",
+                                    cfg->behavior.reply_budget_global_hourly);
+    if (rbg >= 0 && rbg <= 10000)
+        cfg->behavior.reply_budget_global_hourly = (uint32_t)rbg;
+
     /* Filler-bank rate + per-contact cooldown. The bank fired on 21 of 57
      * sends in Aug 2026; Seth's measured rate for that opener class is 0.29%.
      * Rate is a probability in [0,1]; cooldown is 1 minute .. 90 days. */
