@@ -729,6 +729,10 @@ def summarize_outcomes(outcomes: list[dict]) -> dict:
     }
 
 
+# --resolve-only is honoured inside train_from_outcomes, which has no args object.
+RESOLVE_ONLY = "--resolve-only" in sys.argv
+
+
 def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list[dict], int]:
     """For each outcome, look up its prompt_hash in the messages table.
     Returns (resolved, skipped) where:
@@ -1410,7 +1414,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
               f"(2026-08-08: a quarantine had wiped it). Restore the store; do not train on nothing.",
               file=sys.stderr)
         sys.exit(3)
-    if getattr(args, "resolve_only", False):
+    if RESOLVE_ONLY:
         print(json.dumps({"outcomes": len(outcomes), "resolved": len(resolved), "unresolved": skipped}))
         sys.exit(0)
     print(f"  Resolved:     {len(resolved)} prompt hashes against {db_path.name}")
