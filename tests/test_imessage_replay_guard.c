@@ -10,12 +10,10 @@
  *      same chat is skipped (the daemon's OWN later sends do not count). */
 #include "test_framework.h"
 
-/* The predicates under test live in src/channels/imessage.c, which only
- * compiles when HU_HAS_IMESSAGE (macOS). Linux CI variants link human_tests
- * too, so the whole body is gated and a stub runner keeps the symbol. */
-#if HU_HAS_IMESSAGE
-
-#include "human/channels/imessage.h"
+/* The pure predicates live in src/channels/imessage_replay_guard.c, which is
+ * built on every platform (1892d2959), so sections 1-4 run on Linux CI too.
+ * Only the chat.db-backed section needs the macOS channel + SQLite. */
+#include "human/channels/imessage_replay_guard.h"
 #include <string.h>
 
 /* ── 1. hu_imessage_resume_rowid (pure) ─────────────────────────────── */
@@ -129,6 +127,7 @@ static void test_replied_guard_null_handle_does_not_apply(void) {
 
 /* ── 3. hu_imessage_user_replied_after (chat.db fixture) ────────────── */
 #if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
+#include "human/channels/imessage.h"
 #include <sqlite3.h>
 
 static const char *guard_schema_sql =
@@ -377,10 +376,4 @@ void run_imessage_replay_guard_tests(void) {
 #endif
 }
 
-#else /* !HU_HAS_IMESSAGE */
-
-void run_imessage_replay_guard_tests(void) {
-    (void)0;
-}
-
-#endif /* HU_HAS_IMESSAGE */
+/* Sections 1-4 above are unconditional; the chat.db section is gated inline. */
