@@ -347,6 +347,7 @@ void run_imessage_reply_fallback_quote_tests(void);
 void run_imessage_private_protocol_tests(void);
 void run_imessage_private_client_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
+void run_imessage_replay_guard_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
@@ -1387,6 +1388,7 @@ int main(int argc, char **argv) {
     run_imessage_private_protocol_tests();
     run_imessage_private_client_tests();
     run_imessage_chatdb_fixture_tests();
+    run_imessage_replay_guard_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();

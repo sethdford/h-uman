@@ -110,7 +110,12 @@ hu_daemon_test_get_active_daemon_config(const struct hu_config *config, const ch
  */
 void hu_daemon_set_missed_msg_threshold(uint32_t secs);
 
-/* Missed-message acknowledgment (F10): returns phrase or NULL if none needed. */
+/* Set the ceiling (seconds) above which NO missed-message acknowledgment is
+ * emitted. Must exceed the threshold; otherwise rejected. Default: 86400 (24h). */
+void hu_daemon_set_missed_msg_max_age(uint32_t secs);
+
+/* Missed-message acknowledgment (F10): returns phrase or NULL if none needed.
+ * NULL when delay <= threshold OR delay > max_age. */
 const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hour, int current_hour,
                                              uint32_t seed);
 

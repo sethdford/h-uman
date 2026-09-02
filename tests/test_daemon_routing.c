@@ -116,6 +116,44 @@ static void test_set_threshold_rejects_too_small(void) {
     HU_ASSERT_NOT_NULL(phrase);
 }
 
+/* ── Upper bound (incident 2026-09-01: 16-day-old replayed messages got
+ *    "sorry just saw this"). Above the ceiling the ack must be silent. ── */
+
+static void test_missed_msg_sixteen_days_old_is_silent(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(16LL * 86400, 14, 14, 0));
+}
+
+static void test_missed_msg_default_ceiling_is_one_day(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(86400, 14, 14, 0));
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(86401, 14, 14, 0));
+}
+
+static void test_missed_msg_overnight_phrase_also_bounded(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    /* 2AM receive / 8AM now would normally be "just woke up"; 3 days old → silent. */
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(3LL * 86400, 2, 8, 0));
+}
+
+static void test_set_max_age_changes_behavior(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(3600);
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(7200, 14, 14, 0));
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(3000, 14, 14, 0));
+    hu_daemon_set_missed_msg_max_age(86400); /* restore default */
+}
+
+static void test_set_max_age_rejects_below_threshold(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    hu_daemon_set_missed_msg_max_age(600); /* below threshold: rejected */
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(7200, 14, 14, 0));
+}
+
 /* ── Integration: fully-populated loop_msg metadata ─────────────────── */
 
 static void test_photo_delay_group_msg_with_attachment(void) {
@@ -259,6 +297,11 @@ void run_daemon_routing_tests(void) {
     HU_RUN_TEST(test_missed_msg_deterministic);
     HU_RUN_TEST(test_set_threshold_changes_behavior);
     HU_RUN_TEST(test_set_threshold_rejects_too_small);
+    HU_RUN_TEST(test_missed_msg_sixteen_days_old_is_silent);
+    HU_RUN_TEST(test_missed_msg_default_ceiling_is_one_day);
+    HU_RUN_TEST(test_missed_msg_overnight_phrase_also_bounded);
+    HU_RUN_TEST(test_set_max_age_changes_behavior);
+    HU_RUN_TEST(test_set_max_age_rejects_below_threshold);
 
     /* integration: fully-populated metadata */
     HU_RUN_TEST(test_photo_delay_group_msg_with_attachment);

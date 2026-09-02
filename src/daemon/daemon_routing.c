@@ -81,14 +81,31 @@ uint32_t hu_daemon_video_viewing_delay_ms(const hu_channel_loop_msg_t *msgs, siz
 
 static uint32_t g_missed_msg_threshold_sec = 30 * 60;
 
+/* Ceiling above which no acknowledgment is emitted at all. A "sorry just saw
+ * this" on a days-old message is not a late reply, it is a tell: a human who
+ * genuinely missed a message for that long either does not answer it or
+ * answers it without pretending it just arrived. Incident 2026-09-01: a
+ * stale-cursor replay produced this phrase on 16-day-old threads. */
+static uint32_t g_missed_msg_max_age_sec = 24 * 60 * 60;
+
 void hu_daemon_set_missed_msg_threshold(uint32_t secs) {
     if (secs >= 60)
         g_missed_msg_threshold_sec = secs;
 }
 
+void hu_daemon_set_missed_msg_max_age(uint32_t secs) {
+    /* Must sit above the threshold or the window is empty and the setting is
+     * a silent no-op — reject rather than accept a configuration that can
+     * never fire. */
+    if (secs > g_missed_msg_threshold_sec)
+        g_missed_msg_max_age_sec = secs;
+}
+
 const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hour, int current_hour,
                                              uint32_t seed) {
     if (delay_secs <= (int64_t)g_missed_msg_threshold_sec)
+        return NULL;
+    if (delay_secs > (int64_t)g_missed_msg_max_age_sec)
         return NULL;
 
     /* Natural gap: received 2AM–6AM, responding 8AM+ → "just woke up" style */

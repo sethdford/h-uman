@@ -251,9 +251,11 @@ typedef struct hu_behavior_config {
     uint32_t dedup_threshold;    /* memory dedup similarity % (default 70) */
     uint32_t
         missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
-    uint32_t callback_window;     /* callback delay window in seconds (default 300) */
-    uint32_t pattern_threshold;   /* conversation pattern match threshold % (default 50) */
-    uint32_t tapback_skip_pct;    /* probability to skip tapback/reaction % (default 20) */
+    uint32_t
+        missed_msg_max_age_sec; /* ceiling: no acknowledgment at all above this (default 86400) */
+    uint32_t callback_window;   /* callback delay window in seconds (default 300) */
+    uint32_t pattern_threshold; /* conversation pattern match threshold % (default 50) */
+    uint32_t tapback_skip_pct;  /* probability to skip tapback/reaction % (default 20) */
 } hu_behavior_config_t;
 
 typedef enum hu_dm_scope {

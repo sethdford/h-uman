@@ -3495,6 +3495,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_private_protocol.c
     tests/test_imessage_private_client.c
     tests/test_imessage_chatdb_fixture.c
+    tests/test_imessage_replay_guard.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
