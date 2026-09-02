@@ -20,7 +20,22 @@ extern "C" {
  *            keyword hits, fingerprint) and DROPS them.
  *   LIVE   — semantic candidates are merged into recall.
  * Promotion to LIVE is gated on the Phase-1 harness re-run through this path
- * (feature-gate-requires-measurement.md); SHADOW is what deploys first. */
+ * (feature-gate-requires-measurement.md); SHADOW is what deploys first.
+ *
+ * Contract C1 (docs/plans/2026-08-02-semantic-retrieval/): SHADOW -> LIVE
+ * additionally requires a blind A/B run via scripts/eval_semantic_live_gate.py
+ * showing (a) the humanness composite is not lower under LIVE than SHADOW and
+ * (b) neither the emotional-intelligence nor the reality-awareness judge axis
+ * drops under LIVE. This is not optional test-passing: AlpsBench (arXiv
+ * 2603.26680) found that adding memory retrieval improves persona awareness
+ * but DEGRADES emotional intelligence and real-vs-hypothetical awareness via
+ * over-reliance on retrieved memories — exactly the failure mode this gate
+ * exists to catch before it reaches production replies. Do not flip this gate
+ * to default-LIVE without a PROMOTE verdict from that script (see
+ * docs/plans/2026-08-02-semantic-retrieval/semantic-live-gate-*.json for the
+ * measurement record) — a green build and passing unit tests are not this
+ * measurement (.claude/rules/feature-gate-requires-measurement.md,
+ * .claude/rules/no-number-without-a-measurement.md). */
 hu_gate_mode_t hu_semantic_recall_mode(void);
 
 /* Embedding endpoint base URL: $HU_SEMANTIC_EMBED_URL, default the production
