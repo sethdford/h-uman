@@ -30,6 +30,8 @@ JOBS=(
   "doctor|line|$LOGDIR/doctor-nightly.log|$HOME_DIR/.human/bin/doctor-nightly.sh|any"
   "retrain|line|$LOGDIR/nightly-retrain.log|$REPO/scripts/nightly-retrain.sh|02-05"
   "drift|file|$HOME_DIR/.human/drift/drift-DATE.json|$REPO/scripts/drift_monitor.py|any"
+  "authorship|file|$LOGDIR/authorship-gap-DATE.json|$REPO/scripts/blind_ab/authorship_nightly.sh|any"
+  "llm-judge|file|$LOGDIR/llm-judge-DATE.json|$REPO/scripts/blind_ab/llm_judge_tier.py|any"
 )
 HOUR_NOW=${HU_WATCHDOG_HOUR:-$(date +%H)}
 in_window() {  # "any" | "HH-HH"

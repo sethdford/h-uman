@@ -6,9 +6,9 @@ T=$(mktemp -d); export HOME="$T"; mkdir -p "$T/.human/logs" "$T/.human/bin"
 TODAY=$(date +%Y-%m-%d)
 fail=0; check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1; fi; }
 
-# 1. nothing present -> all three missing
+# 1. nothing present -> all six missing
 out=$(bash "$HERE/nightly-watchdog.sh" --dry-run)
-check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain drift]'* ]]"
+check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain drift authorship llm-judge]'* ]]"
 
 # 2. today's humanness verdict present (non-empty) -> not missing
 echo '{"composite":0.9}' > "$T/.human/logs/humanness-verdict-$TODAY.json"
