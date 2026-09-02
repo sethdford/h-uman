@@ -285,3 +285,156 @@ not as a clean adapter A/B.
 - `scripts/register_v6_adapter.py` repeats the no-op check at registration (a registry
   row is what a promotion gate reads) and detects the objective from the log instead of
   assuming it.
+
+## mlx-tune path (contract C6, 2026-09-02)
+
+Added an [mlx-tune](https://github.com/ARahim3/mlx-tune) (v0.6, reference-free
+SimPO/KTO/ORPO, per-expert LoRA for MoE) trainer path as `--trainer mlx_tune
+--train-mode simpo|kto|orpo` in `scripts/train-glm-adapter.sh`, driven by the new
+`scripts/mlx_tune_train.py`. **Not run against the base model** — this section
+documents the dry-run validation and the exact command for the real run, which
+needs Seth's prod-stop window (same 56 GB-can't-coexist-with-:8741 constraint as
+every other trainer in this file).
+
+### Environment
+
+New, separate venv — `~/.human/venvs/mlxtune312` — NOT `train312` (which stays
+mlx_lm/mlx_lm_lora only). `mlx` and `mlx-lm` are pinned to the exact versions
+already verified against GLM-4.5-Air-4bit in `train312` (`mlx==0.32.0`,
+`mlx-lm==0.31.3`), so `mlx-tune` sits on top of the identical MLX/mlx_lm behavior
+the v5/v6/v6.1/v6.2 adapters were trained and served against. Full freeze +
+provenance in `scripts/mlx_tune_env.txt`.
+
+### Architecture-support finding
+
+The task assumed mlx-tune exposes an importable "supported architectures
+registry" naming `glm4_moe`. **It does not** — grepping `mlx_tune/*.py` for
+`SUPPORTED`/`ARCH_REGISTRY`/`registry`/`ARCHITECTURES` finds nothing LLM-related
+(only small per-feature allowlists in the OCR/embeddings/audio submodules).
+Text-model architecture support is inherited entirely from `mlx_lm`: mlx-tune
+loads via `mlx_lm.load()`, which dispatches on `config.json`'s `model_type` to
+`mlx_lm.models.<model_type>` via `mlx_lm.utils._get_classes()` (an **import**,
+not a weight load), and applies LoRA — including per-expert MoE LoRA — via
+dynamic introspection over the model's actual live module types
+(`mlx_tune.model._resolve_target_modules` scans for
+`nn.Linear`/`nn.QuantizedLinear`/`SwitchLinear`/`QuantizedSwitchLinear`), not a
+name-keyed table.
+
+Given that, `scripts/mlx_tune_train.py::resolve_architecture_support()` answers
+the real question — "will mlx-tune's per-expert LoRA correctly reach every GLM
+MoE expert" — with zero weight loading: read the cached `config.json`
+(`model_type=glm4_moe`, `architectures=[Glm4MoeForCausalLM]`), confirm
+`mlx_lm.models.glm4_moe` imports (it does, in the pinned 0.31.3), and confirm
+that module builds MoE experts on `mlx_lm.models.switch_layers.SwitchLinear`
+(it does: `Glm4MoeMoE.switch_mlp = SwitchGLU(...)` for routed experts, plus a
+dense `shared_experts` MLP and dense early layers before
+`first_k_dense_replace` — the exact mixed dense+MoE shape mlx-tune's resolver
+documents handling). **Conclusion: glm4_moe is supported end-to-end** — via
+mlx_lm's `model_type` dispatch, not a literal name in an mlx-tune registry.
+
+### KTO dataset-shape mismatch (found, handled)
+
+mlx-tune's `KTOTrainer.train()` only recognizes TRL format
+`{prompt, completion, label}` or legacy `{text, label}` — **not**
+`{prompt, chosen, rejected}`. Passing our preference-pair jsonl straight
+through would hit its `continue` branch for every sample (empty
+`tokenized_data`, then a `ZeroDivisionError` — a loud crash, not a silent
+no-op, but still the wrong shape). `scripts/mlx_tune_train.py::to_kto_examples()`
+translates each `(prompt, chosen, rejected)` pair into two labeled TRL-format
+examples (chosen → `label=True`, rejected → `label=False`) before handing the
+dataset to `KTOTrainer`. ORPO and SimPO both accept `{prompt, chosen,
+rejected}` directly (confirmed by reading `ORPOTrainer._tokenize_preference_pair`
+and `SimPOTrainer._tokenize_pair`) — no translation needed for those two modes.
+
+### num_layers is NOT honored by mlx-tune's trainers unless applied first
+
+mlx-tune's RL trainers call `self.model._apply_lora()` (no `num_layers` arg)
+internally at the start of `train()`, which would apply LoRA to **every**
+transformer layer regardless of the config's `num_layers: 8`. The driver
+calls `model._apply_lora(num_layers=cfg["num_layers"])` itself before
+constructing the trainer; `_apply_lora()`'s own `_lora_applied` guard then
+makes the trainer's internal call a no-op, so the config's `num_layers` is
+what actually takes effect.
+
+### Dry-run output (verbatim, zero weights loaded)
+
+```
+$ ~/.human/venvs/mlxtune312/bin/python scripts/mlx_tune_train.py --dry-run \
+    --config ~/.human/training-data/glm-v61-orpo-config.yaml --train-mode kto
+
+======================================================================
+mlx_tune_train.py --dry-run
+======================================================================
+[dry-run] config: /Users/sethford/.human/training-data/glm-v61-orpo-config.yaml
+[dry-run] model: mlx-community/GLM-4.5-Air-4bit
+[dry-run] lora_parameters: rank=8 scale=2.0 dropout=0.0 -> mlx-tune lora_alpha=16.0 (alpha = rank * scale, inverting mlx-tune's scale = alpha / rank)
+[dry-run] data dir: /Users/sethford/.human/training-data/glm-v61-pref
+[dry-run]   train.jsonl: 426 pairs (0 malformed)
+[dry-run]   valid.jsonl: 37 pairs (0 malformed)
+[dry-run] --train-mode kto: translating 426 (prompt, chosen, rejected) pairs -> 852 TRL-format (prompt, completion, label) examples -- mlx-tune's KTOTrainer does not accept the chosen/rejected shape directly
+[dry-run] architecture support for 'mlx-community/GLM-4.5-Air-4bit' (ZERO weights loaded):
+[dry-run]   config source:            HF hub cache: /Users/sethford/.cache/huggingface/hub/models--mlx-community--GLM-4.5-Air-4bit/snapshots/60837794f3caafc4682dd1a9188a82c55a9100ef/config.json
+[dry-run]   model_type:                glm4_moe
+[dry-run]   mlx_lm module importable:  True
+[dry-run]   mlx_lm module file:        mlx_lm.models.glm4_moe
+[dry-run]   has SwitchLinear/MoE:      True
+[dry-run]   SUPPORTED:                 True
+[dry-run]   note: model_type='glm4_moe' resolves to mlx_lm.models.glm4_moe.Model, which builds MoE experts on mlx_lm.models.switch_layers.SwitchLinear -- mlx-tune's dynamic target-module resolver (mlx_tune.model._resolve_target_modules) will target every routed-expert gate/up/down projection plus any dense shared-expert / early-layer projections in the same pass.
+----------------------------------------------------------------------
+[dry-run] PASS -- config, data, and architecture support all validated
+[dry-run] NOTE: no model weights were loaded during this dry-run
+```
+
+Pair count: 426 train / 37 valid (the same `glm-v61-pref` corpus v6.1's ORPO
+round used), 852 KTO-translated examples.
+
+The `train-glm-adapter.sh --dry-run --trainer mlx_tune --train-mode <mode>`
+path delegates to the same driver after its own prod-stop-independent
+preflight (config exists, corpus non-empty, `lora_parameters` nested +
+`scale: 2.0`) — verified end to end with `--train-mode orpo`, same output
+shape.
+
+### Exact command for the real run (NOT executed — needs Seth's prod-stop window)
+
+```
+scripts/train-glm-adapter.sh \
+    --trainer mlx_tune --train-mode simpo \
+    --config ~/.human/training-data/glm-v61-orpo-config.yaml \
+    --beta 2.0 --gamma 0.5 \
+    --tag v63-simpo --est-minutes 30
+```
+
+(swap `--train-mode kto` or `--train-mode orpo` for the other two objectives;
+`--beta`/`--gamma` are SimPO's own defaults from `mlx_tune.rl_trainers.SimPOConfig`
+— re-tune once a first run's margin/loss curve is in hand, the same way v6→v6.1
+re-tuned ORPO's `beta`/`iters`). This goes through the exact same prod-stop /
+full-reap / memory-headroom / arena-overlap guards as the `mlx_lm` and
+`mlx_lm_lora` paths, plus the same post-training `lora_b` non-zero guard and
+`adapter_config.json` scale=2.0 verification — nothing about those guards
+changed for this trainer.
+
+### Test coverage
+
+`scripts/test_mlx_tune_train.py` (29 tests, pytest, run inside
+`mlxtune312` — no model weights loaded by any test): config translation
+(`require_lora_parameters` scale=2.0 enforcement, `lora_alpha_from_scale`
+inversion), data-dir validation (happy path + missing keys + empty + missing
+file), the KTO dataset-shape translation, the `adapter_config.json`
+writer/verifier (create / rewrite-wrong-scale / preserve-resolved-keys /
+no-op-when-correct), the `lora_b` non-zero guard (pass / all-zero / majority-zero
+/ missing-file, using a real tiny `mlx.core.save_safetensors` fixture — not a
+mock, since this is the exact function `assert_lora_b_nonzero` reads), and
+`resolve_architecture_support` with the `mlx_lm`/`huggingface_hub` boundary
+mocked (uncached model, MoE architecture, non-MoE architecture).
+
+### What is NOT done
+
+- The real training run — gated on Seth's prod-stop window, per the NO-GO.
+- A registered/scored adapter from any of simpo/kto/orpo — none exists yet.
+- Tuning `--beta`/`--gamma` against an actual loss/margin curve — the values
+  above are mlx-tune's own library defaults, unvalidated against this corpus.
+- `scripts/register_v6_adapter.py` was not touched — it will need a
+  `mlx_tune` case if/when one of these adapters is promoted (it currently
+  detects the objective from the `mlx_lm_lora` log banner format; the
+  `mlx_tune` driver prints the same `Training Mode: <mode>` banner, so this
+  is likely a small addition, not investigated further here).
