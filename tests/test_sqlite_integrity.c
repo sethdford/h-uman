@@ -257,6 +257,68 @@ static void test_create_full_checks_and_quarantines_after_unclean_shutdown(void)
     remove_db_and_siblings(path);
 }
 
+/* ── Tri-state quick_check (2026-09-01) ──────────────────────────────────
+ * On 08-04 the daemon quarantined a healthy 290 MB store: sqlite3_step() on
+ * PRAGMA quick_check returned SQLITE_BUSY (a WAL checkpoint / another writer),
+ * which the bool predicate read as "not ok" and treated as corruption. BUSY is
+ * "I could not measure", not "the file is bad". These pin the distinction. */
+static void test_quick_check_busy_is_indeterminate_not_corrupt(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_sqlite_integrity_busy_%d.db", (int)getpid());
+    remove_db_and_siblings(path);
+    sqlite3 *w = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &w), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(w, "CREATE TABLE t(x); BEGIN EXCLUSIVE;", NULL, NULL, NULL),
+                 SQLITE_OK);
+    sqlite3 *r = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &r), SQLITE_OK); /* no busy timeout: BUSY at once */
+    HU_ASSERT_EQ((int)hu_sqlite_quick_check(r), (int)HU_QC_INDETERMINATE);
+    HU_ASSERT_FALSE(hu_sqlite_quick_check_ok(r)); /* bool wrapper: only OK is true */
+    sqlite3_close(r);
+    sqlite3_exec(w, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(w);
+    remove_db_and_siblings(path);
+}
+
+static void test_quick_check_reports_corrupt_and_ok_distinctly(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_sqlite_integrity_tri_%d.db", (int)getpid());
+    HU_ASSERT_TRUE(make_interior_corrupt_db(path));
+    sqlite3 *raw = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &raw), SQLITE_OK);
+    HU_ASSERT_EQ((int)hu_sqlite_quick_check(raw), (int)HU_QC_CORRUPT);
+    sqlite3_close(raw);
+    remove_db_and_siblings(path);
+    HU_ASSERT_EQ(sqlite3_open(path, &raw), SQLITE_OK);
+    sqlite3_exec(raw, "CREATE TABLE t(x); INSERT INTO t VALUES(1);", NULL, NULL, NULL);
+    HU_ASSERT_EQ((int)hu_sqlite_quick_check(raw), (int)HU_QC_OK);
+    sqlite3_close(raw);
+    remove_db_and_siblings(path);
+}
+
+static void test_create_does_not_quarantine_busy_db_after_unclean_shutdown(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_sqlite_integrity_busyq_%d.db", (int)getpid());
+    remove_db_and_siblings(path);
+    {
+        hu_memory_t m = hu_sqlite_memory_create(&alloc, path);
+        HU_ASSERT_NOT_NULL(m.vtable);
+        m.vtable->deinit(m.ctx);
+    }
+    HU_ASSERT_TRUE(hu_sqlite_open_sentinel_write(path)); /* "prior run died" */
+    sqlite3 *w = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &w), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(w, "BEGIN EXCLUSIVE;", NULL, NULL, NULL), SQLITE_OK);
+    hu_memory_t m2 = hu_sqlite_memory_create(&alloc, path); /* must NOT quarantine */
+    sqlite3_exec(w, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(w);
+    HU_ASSERT_EQ(count_quarantine_files(path), 0);
+    if (m2.vtable)
+        m2.vtable->deinit(m2.ctx);
+    remove_db_and_siblings(path);
+}
+
 void run_sqlite_integrity_tests(void) {
     HU_TEST_SUITE("sqlite_integrity");
     HU_RUN_TEST(test_quick_check_ok_on_valid_db);
@@ -267,6 +329,9 @@ void run_sqlite_integrity_tests(void) {
     HU_RUN_TEST(test_create_writes_sentinel_and_deinit_removes_it);
     HU_RUN_TEST(test_create_skips_full_check_after_clean_shutdown);
     HU_RUN_TEST(test_create_full_checks_and_quarantines_after_unclean_shutdown);
+    HU_RUN_TEST(test_quick_check_busy_is_indeterminate_not_corrupt);
+    HU_RUN_TEST(test_quick_check_reports_corrupt_and_ok_distinctly);
+    HU_RUN_TEST(test_create_does_not_quarantine_busy_db_after_unclean_shutdown);
 }
 
 #else

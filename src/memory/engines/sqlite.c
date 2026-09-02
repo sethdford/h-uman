@@ -1433,19 +1433,34 @@ static const hu_session_store_vtable_t sqlite_session_vtable = {
 };
 
 /* Corruption self-heal helpers — contract in include/human/memory/sql_common.h. */
-bool hu_sqlite_quick_check_ok(struct sqlite3 *db) {
+hu_sqlite_qc_t hu_sqlite_quick_check(struct sqlite3 *db) {
     if (!db)
-        return false;
+        return HU_QC_INDETERMINATE;
+    /* A WAL with a pending checkpoint is not corruption; fold it in first so
+     * quick_check sees committed state. rc is ignored on purpose: BUSY here
+     * just means another connection is active, which the step below reports. */
+    sqlite3_wal_checkpoint_v2(db, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
     sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL) != SQLITE_OK)
-        return false; /* e.g. SQLITE_NOTADB — a bad header fails to prepare */
-    bool ok = false;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
+    int prc = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL);
+    if (prc == SQLITE_NOTADB || prc == SQLITE_CORRUPT)
+        return HU_QC_CORRUPT; /* a bad header fails to prepare */
+    if (prc != SQLITE_OK)
+        return HU_QC_INDETERMINATE;
+    hu_sqlite_qc_t r = HU_QC_INDETERMINATE;
+    int src = sqlite3_step(stmt);
+    if (src == SQLITE_ROW) {
         const unsigned char *row = sqlite3_column_text(stmt, 0);
-        ok = (row != NULL && strcmp((const char *)row, "ok") == 0);
+        r = (row && strcmp((const char *)row, "ok") == 0) ? HU_QC_OK : HU_QC_CORRUPT;
+    } else if (src == SQLITE_CORRUPT || src == SQLITE_NOTADB) {
+        r = HU_QC_CORRUPT;
     }
+    /* SQLITE_BUSY / SQLITE_LOCKED / anything else: could not measure. */
     sqlite3_finalize(stmt);
-    return ok;
+    return r;
+}
+
+bool hu_sqlite_quick_check_ok(struct sqlite3 *db) {
+    return hu_sqlite_quick_check(db) == HU_QC_OK;
 }
 
 bool hu_sqlite_quarantine_corrupt_file(const char *db_path) {
@@ -1527,16 +1542,25 @@ static bool quarantine_and_reopen(const char *db_path, sqlite3 **db) {
 
 /* Run the base DDL. False on any failure (freeing the error string) — on a
  * fresh handle that is the structural-corruption signal create() heals on. */
-static bool init_schema_parts(sqlite3 *db) {
+/* Returns the first failing sqlite rc, or SQLITE_OK. The rc matters: BUSY /
+ * LOCKED means another connection holds the file and must never be read as
+ * corruption (the 2026-08-04 quarantine), CORRUPT / NOTADB is the real thing. */
+static int init_schema_parts(sqlite3 *db) {
     for (const char *const *part = schema_parts; *part; part++) {
         char *err = NULL;
-        if (sqlite3_exec(db, *part, NULL, NULL, &err) != SQLITE_OK) {
+        int rc = sqlite3_exec(db, *part, NULL, NULL, &err);
+        if (rc != SQLITE_OK) {
             if (err)
                 sqlite3_free(err);
-            return false;
+            return rc;
         }
     }
-    return true;
+    return SQLITE_OK;
+}
+
+static bool sqlite_rc_is_corruption(int rc) {
+    int base = rc & 0xff;
+    return base == SQLITE_CORRUPT || base == SQLITE_NOTADB;
 }
 
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
@@ -1562,23 +1586,43 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
      * open-sentinel behind (unclean shutdown). On the clean-shutdown fast path,
      * gross corruption is still healed cheaply by the schema-init fallback
      * below. */
-    if (on_disk && hu_sqlite_open_sentinel_present(db_path) && !hu_sqlite_quick_check_ok(db)) {
-        hu_log_error("memory.sqlite", NULL,
-                     "memory DB failed PRAGMA quick_check — quarantining '%s' and "
-                     "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
-                     db_path);
-        if (!quarantine_and_reopen(db_path, &db))
-            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
-        healed = true;
+    if (on_disk && hu_sqlite_open_sentinel_present(db_path)) {
+        hu_sqlite_qc_t qc = hu_sqlite_quick_check(db);
+        if (qc == HU_QC_CORRUPT) {
+            hu_log_error("memory.sqlite", NULL,
+                         "memory DB failed PRAGMA quick_check — quarantining '%s' and "
+                         "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
+                         db_path);
+            if (!quarantine_and_reopen(db_path, &db))
+                return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+            healed = true;
+        } else if (qc == HU_QC_INDETERMINATE) {
+            /* Busy/locked is not corruption. Keep the file, keep the sentinel
+             * so the next clean boot re-checks; never discard a store because
+             * someone else had it open (the 2026-08-04 quarantine). */
+            hu_log_warn("memory.sqlite", NULL,
+                        "quick_check indeterminate (busy/locked) on '%s' — NOT "
+                        "quarantining; will re-check on next boot",
+                        db_path);
+        }
     }
 
     sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
 
-    if (!init_schema_parts(db)) {
+    int schema_rc = init_schema_parts(db);
+    if (schema_rc != SQLITE_OK) {
         /* Cheap corruption net for the clean-shutdown fast path: a DB with a
          * bad header or broken master btree fails schema init without any
-         * full-page scan. Quarantine and retry once on a fresh file. */
-        if (!on_disk || healed) {
+         * full-page scan. Quarantine and retry once on a fresh file — but ONLY
+         * for a corruption rc. BUSY/LOCKED (another writer, a checkpoint in
+         * flight) is refused loudly and left intact; a store that someone else
+         * has open is not a store to throw away. */
+        if (!on_disk || healed || !sqlite_rc_is_corruption(schema_rc)) {
+            hu_log_error("memory.sqlite", NULL,
+                         "memory DB schema init failed (sqlite rc=%d%s) on '%s' — refusing "
+                         "to open, NOT quarantining",
+                         schema_rc, sqlite_rc_is_corruption(schema_rc) ? "" : ", not corruption",
+                         db_path ? db_path : ":memory:");
             sqlite3_close(db);
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
@@ -1590,7 +1634,7 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         healed = true;
         sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
-        if (!init_schema_parts(db)) {
+        if (init_schema_parts(db) != SQLITE_OK) {
             sqlite3_close(db);
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
