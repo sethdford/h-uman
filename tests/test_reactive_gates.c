@@ -87,8 +87,30 @@ static void test_ai_tell_does_not_flag_human_sorry(void) {
     HU_ASSERT_NULL(hu_reactive_response_ai_tell("I apologize, my bad"));
 }
 
+/* ── AI-tell action: send / retry once / drop on second miss ────────── */
+
+static void test_ai_tell_action_clean_reply_sends(void) {
+    HU_ASSERT_EQ((int)hu_reactive_ai_tell_action(NULL, false), (int)HU_AI_TELL_SEND);
+    HU_ASSERT_EQ((int)hu_reactive_ai_tell_action(NULL, true), (int)HU_AI_TELL_SEND);
+}
+
+static void test_ai_tell_action_first_miss_retries(void) {
+    HU_ASSERT_EQ((int)hu_reactive_ai_tell_action("I apologize for the delay", false),
+                 (int)HU_AI_TELL_RETRY);
+}
+
+static void test_ai_tell_action_second_miss_drops(void) {
+    /* The retry hint already fired and the model still produced a tell:
+     * silence beats sending a therapy-bot line to a friend. */
+    HU_ASSERT_EQ((int)hu_reactive_ai_tell_action("I apologize for the delay", true),
+                 (int)HU_AI_TELL_DROP);
+}
+
 void run_reactive_gates_tests(void) {
     HU_TEST_SUITE("Reactive Gate Split");
+    HU_RUN_TEST(test_ai_tell_action_clean_reply_sends);
+    HU_RUN_TEST(test_ai_tell_action_first_miss_retries);
+    HU_RUN_TEST(test_ai_tell_action_second_miss_drops);
     HU_RUN_TEST(test_heuristic_gates_off_when_llm_decides);
     HU_RUN_TEST(test_heuristic_gates_on_when_not_llm_decides);
     HU_RUN_TEST(test_safety_gates_on_regardless_of_llm_decides);
