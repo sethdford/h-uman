@@ -41,7 +41,7 @@ gate number exists.
 ## Gaps ranked by leverage, each with its gate
 
 1. **Authorship gap measurement (LUAR) → the new north star.** Run `LUAR-MUD` on real-Seth vs adapter replies (5v5 profile embeddings per PersonalBench), report Seth-self / AI-Seth / cross-author floor on *our* corpus, per register. Gate: number exists; promotion of any adapter requires AI-Seth similarity to move toward the same-author ceiling. (Probe started 2026-09-02; result appended below when it lands.)
-2. **Standard memory benchmarks on our retrieval.** Run LongMemEval-S and LoCoMo through `human memory search` (keyword / `--semantic` / hybrid). Gate: numbers; target ≥ MemPalace's 96.6% R@5 on LongMemEval with no LLM in the loop, since our store is the same shape (verbatim + temporal graph + vectors).
+2. **Standard memory benchmarks on our retrieval.** Run LongMemEval-S and LoCoMo through `human memory search` (keyword / `--semantic` / hybrid). Gate: numbers; target ≥ MemPalace's 96.6% R@5 on LongMemEval with no LLM in the loop, since our store is the same shape (verbatim + temporal graph + vectors). **Measured 2026-09-02 (Appendix D): LongMemEval-S R@5 keyword 0.883 → semantic 0.983; LoCoMo-10 R@10 keyword 0.650 → semantic 0.767 → hybrid 0.783.** The LongMemEval target is met by the semantic arm alone; the gate now moves to #3.
 3. **Over-reliance check before semantic recall goes LIVE.** AlpsBench's finding is the exact risk: memory makes EI and hypothetical-vs-real worse. Gate: a blind A/B on the corrected harness with SHADOW vs LIVE, scored on the humanness composite *and* an EI axis; LIVE only if EI does not drop.
 4. **Reconstructive recollection.** Replace one-shot top-k with scene-select → retrieve+rerank → time-bounded filter → sufficiency check (EverMemOS). We already have the pieces (`insight:*` rows, bi-temporal edges, reranker). Gate: LongMemEval temporal category and the AlpsBench "update" task improve; no regression on #3.
 5. **Agent-generated facts as first-class, with provenance.** Now that reactive `message_ref` lands, store what *h-uman* said as facts with `source=agent` and a confidence discount, so the graph stops treating its own output as Seth's and can also recall its own commitments. Gate: `promised_to`/commitment recall on a held-out set of daemon promises.
@@ -100,3 +100,19 @@ script staged it. The steering extractor then loaded the base (rc=137, killed) a
 machine rebooted four minutes later. Fixed: bootout/bootstrap instead of kill/kickstart with
 a wait-until-port-free, refusal exits 3 with no placeholder, and `scripts/adapter_is_real.py`
 (size > 1 MB, lora_b non-zero, scale ≤ 4) gates staging. Proof pending: the next window.
+
+### Appendix D — standard memory benchmarks through `human memory search` (2026-09-02)
+
+Harness `scripts/eval_memory_benchmarks.py`, binary at `aa2a1a79b`, embedder `nomic-embed-text` (8-bit) on :8749, datasets under `~/.human/eval-data/`. Each conversation is loaded into a fresh SQLite store and queried three ways; no LLM answers anything, so this is retrieval only. Results file: `docs/plans/2026-08-02-semantic-retrieval/memory-benchmarks-2026-09-02.json`.
+
+| Benchmark | n | keyword (FTS5) | semantic (`--semantic`) | hybrid (harness-side RRF k=60) |
+|---|---|---|---|---|
+| LongMemEval-S, session-level R@5 | 60 (10 per type) | 0.883 | **0.983** | 0.983 |
+| LoCoMo-10, turn-level R@10 | 60 | 0.650 | 0.767 | **0.783** |
+
+LongMemEval by type: keyword loses only on `single-session-preference` (0.60 → 1.00) and `temporal-reasoning` (0.80 → 1.00); `multi-session` sits at 0.90 on every arm. LoCoMo by category: semantic is 1.00 on category 1 (n=8) where keyword is 0.38; category 3 (n=3) is the one place keyword beats semantic. The hybrid here is fused in the harness; the in-binary `hybrid.c` fusion is what C2 is rebuilding.
+
+**Caveat that cost a run:** the first pass reported LoCoMo 0.000 on every arm. That was the harness, not the store — the key parser stopped at the first colon, so `D1:3` became `D1` and no evidence ever joined (fixed in the same commit as this appendix). A zero on every arm of a benchmark is a join failure until proven otherwise, exactly the shape `.claude/rules/reports-success-does-nothing.md` warns about.
+
+Same night, C4's nightly tiers produced their first numbers on freshly regenerated trials (n=35): LUAR ceiling 0.709, twin 0.633, floor 0.621 (gap closed 0.136); Gemini inverse-Turing judge n=36 accuracy 0.667, AUC 0.651. Both are now `nightly-watchdog.sh` jobs.
+
