@@ -139,7 +139,10 @@ def load_message_lengths(chat_db, since_unix):
 
 def build_delay_samples(chat_db, since_unix, max_delay_secs):
     """Returns (samples, contact_msg_counts). Each sample is
-    {hour, len_chars, contact, delay_secs}."""
+    {hour, len_chars, contact, delay_secs, ts} — `ts` (the inbound
+    message's unix timestamp) is carried for callers that need a
+    time-ordered split (e.g. scripts/eval_reply_delay_model.py's
+    held-out evaluation); fit() below ignores it."""
     messages = load_dm_messages(chat_db, since_unix)
     lengths = load_message_lengths(chat_db, since_unix)
 
@@ -163,7 +166,7 @@ def build_delay_samples(chat_db, since_unix, max_delay_secs):
             tlen = lengths.get((chat_id, ts), 0)
             hour = time.localtime(ts).tm_hour
             samples.append(
-                {"hour": hour, "len_chars": tlen, "contact": contact, "delay_secs": delay}
+                {"hour": hour, "len_chars": tlen, "contact": contact, "delay_secs": delay, "ts": ts}
             )
     return samples, contact_msg_counts
 
