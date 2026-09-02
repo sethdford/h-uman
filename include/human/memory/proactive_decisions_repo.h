@@ -25,19 +25,22 @@
 #include "human/core/error.h"
 #include <stdint.h>
 
+/* Valid `decision` values. Storage is TEXT (for easy ad-hoc SQL from
+ * scripts/eval_when_to_speak.py), but production code should use these
+ * constants rather than hand-typing the strings. Defined unconditionally
+ * (not gated on HU_ENABLE_SQLITE) so callers can reference them from code
+ * that compiles either way — the repo functions below are the part that's
+ * SQLite-specific, not the vocabulary of decision values. */
+#define HU_PROACTIVE_DECISION_SEND    "send"
+#define HU_PROACTIVE_DECISION_DECLINE "decline"
+#define HU_PROACTIVE_DECISION_DEFER   "defer"
+
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Valid `decision` values. Storage is TEXT (for easy ad-hoc SQL from
- * scripts/eval_when_to_speak.py), but production code should use these
- * constants rather than hand-typing the strings. */
-#define HU_PROACTIVE_DECISION_SEND    "send"
-#define HU_PROACTIVE_DECISION_DECLINE "decline"
-#define HU_PROACTIVE_DECISION_DEFER   "defer"
 
 /* Idempotent — creates the proactive_decisions table + its indices if they
  * don't already exist. Safe to call on every write (cheap no-op after the
