@@ -8,8 +8,14 @@
  *   2. stale inbound rows are dropped at poll time;
  *   3. an inbound row that already has a later human-authored outbound in the
  *      same chat is skipped (the daemon's OWN later sends do not count). */
-#include "human/channels/imessage.h"
 #include "test_framework.h"
+
+/* The predicates under test live in src/channels/imessage.c, which only
+ * compiles when HU_HAS_IMESSAGE (macOS). Linux CI variants link human_tests
+ * too, so the whole body is gated and a stub runner keeps the symbol. */
+#if HU_HAS_IMESSAGE
+
+#include "human/channels/imessage.h"
 #include <string.h>
 
 /* ── 1. hu_imessage_resume_rowid (pure) ─────────────────────────────── */
@@ -370,3 +376,11 @@ void run_imessage_replay_guard_tests(void) {
     HU_RUN_TEST(test_unreadable_outbound_still_counts_as_human);
 #endif
 }
+
+#else /* !HU_HAS_IMESSAGE */
+
+void run_imessage_replay_guard_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_HAS_IMESSAGE */
