@@ -42,4 +42,15 @@ bool hu_reactive_gate_active(hu_reactive_gate_t gate, bool llm_decides);
  * Case-insensitive substring match. NULL/empty response → NULL. */
 const char *hu_reactive_response_ai_tell(const char *response);
 
+/* What to do with a reply given the AI-tell verdict and whether the one
+ * corrective retry has already been spent. A second miss is DROPPED: silence
+ * beats sending a therapy-bot line to a friend. */
+typedef enum hu_ai_tell_action {
+    HU_AI_TELL_SEND = 0, /* no tell: send as-is */
+    HU_AI_TELL_RETRY,    /* tell on the first attempt: retry with the hint */
+    HU_AI_TELL_DROP,     /* tell after the retry: stay silent */
+} hu_ai_tell_action_t;
+
+hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried);
+
 #endif /* HU_DAEMON_REACTIVE_GATES_H */
