@@ -3,9 +3,14 @@
 
 No LLM in the loop (the MemPalace-style number): for each question the haystack is loaded
 into a fresh memory.db, the shipped binary indexes it (FTS5 + sqlite-vec via the
-embeddings endpoint), and `human memory search` / `--semantic` rank rows. Hybrid is
-reciprocal-rank fusion of the two lists computed HERE (the C hybrid path is not exposed
-on the CLI yet) and is labelled as such.
+embeddings endpoint), and `human memory search` / `--semantic` / `--hybrid` rank rows.
+
+Two distinct "hybrid" columns are measured, on purpose:
+  hybrid      : reciprocal-rank fusion of the kw + sem lists computed HERE in Python
+                (the harness-side baseline — no scene-select/rerank/temporal-filter).
+  hybrid_cli  : `human memory search --hybrid <q>` — Contract C2's reconstructive
+                path (scene-select -> neighbour expansion -> rerank -> time-bounded
+                filter -> sufficiency check), measured through the actual C binary.
 
   LongMemEval-S : session-level R@5 — answer_session_ids vs the first 5 distinct sessions
                   among the top-10 retrieved turns (the benchmark's own recall protocol).
@@ -23,7 +28,9 @@ def sh(binp, dbp, args, env_extra=None):
     return subprocess.run([binp, "memory", *args], capture_output=True, env=env, timeout=600).stdout.decode("utf-8", "replace")
 
 def parse_keys(out):
-    return [m.group(1) for m in re.finditer(r"^\s*\[\d+\]\s+(\S+?)(?::| \()", out, re.M)]
+    # Key ends at ": " or " (" -- NOT at the first ":" -- LoCoMo keys are "D1:3",
+    # and a bare-":" non-greedy match truncates them to "D1" (R@10 = 0.0 on every arm).
+    return [m.group(1) for m in re.finditer(r"^\s*\[\d+\]\s+(\S+?)(?:: | \()", out, re.M)]
 
 def rrf(*lists, k=60):
     sc = collections.defaultdict(float)
@@ -76,8 +83,10 @@ def longmemeval(binp, limit, seed, tmp):
                 skipped.append({"question_id": q["question_id"], "type": q["question_type"], "indexed": idx, "rows": len(rows)})
                 print(f"  [{n}/{len(qs)}] SKIPPED {q['question_id']}: indexed {idx}/{len(rows)}", flush=True)
                 continue
+        env = {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}
         kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))
-        sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}))
+        sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))
+        hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))
         ans = set(str(s) for s in q["answer_session_ids"])
         def sess_r5(keys):
             seen = []
@@ -86,8 +95,9 @@ def longmemeval(binp, limit, seed, tmp):
                 if sid not in seen: seen.append(sid)
                 if len(seen) == 5: break
             return int(bool(ans & set(seen)))
-        r = {"type": q["question_type"], "kw": sess_r5(kw), "sem": sess_r5(sem), "hybrid": sess_r5(rrf(kw, sem)), "rows": len(rows)}
-        res.append(r); print(f"  [{n}/{len(qs)}] {q['question_type'][:22]:22} kw={r['kw']} sem={r['sem']} hyb={r['hybrid']} rows={len(rows)}", flush=True)
+        r = {"type": q["question_type"], "kw": sess_r5(kw), "sem": sess_r5(sem), "hybrid": sess_r5(rrf(kw, sem)),
+             "hybrid_cli": sess_r5(hyb_cli), "rows": len(rows)}
+        res.append(r); print(f"  [{n}/{len(qs)}] {q['question_type'][:22]:22} kw={r['kw']} sem={r['sem']} hyb={r['hybrid']} hyb_cli={r['hybrid_cli']} rows={len(rows)}", flush=True)
     if len(skipped) > max(2, len(qs) // 10): sys.exit(f"REFUSING: {len(skipped)} questions skipped for embedder crashes: {skipped}")
     longmemeval.skipped = skipped
     return res
@@ -108,21 +118,26 @@ def locomo(binp, limit, seed, tmp):
         qa = [q for q in conv["qa"] if q.get("evidence")]
         rng.shuffle(qa); qa = qa[:max(1, limit // len(data))]
         for q in qa:
+            env = {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}
             kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))[:10]
-            sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}))[:10]
+            sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))[:10]
+            hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))[:10]
             ev = set(q["evidence"])
-            r = {"category": q.get("category"), "kw": int(bool(ev & set(kw))), "sem": int(bool(ev & set(sem))), "hybrid": int(bool(ev & set(rrf(kw, sem)[:10])))}
+            r = {"category": q.get("category"), "kw": int(bool(ev & set(kw))), "sem": int(bool(ev & set(sem))),
+                 "hybrid": int(bool(ev & set(rrf(kw, sem)[:10]))), "hybrid_cli": int(bool(ev & set(hyb_cli)))}
             res.append(r)
         print(f"  conv {ci}: {len(rows)} turns, {len(qa)} questions, running kw={sum(r['kw'] for r in res)}/{len(res)}", flush=True)
     return res
 
+METRICS = ("kw", "sem", "hybrid", "hybrid_cli")
+
 def summarize(res, key_field):
     out = {"n": len(res)}
-    for m in ("kw", "sem", "hybrid"):
+    for m in METRICS:
         out[m] = round(sum(r[m] for r in res) / len(res), 3)
     by = collections.defaultdict(list)
     for r in res: by[str(r[key_field])].append(r)
-    out["by_" + key_field] = {k: {m: round(sum(r[m] for r in v) / len(v), 3) for m in ("kw", "sem", "hybrid")} | {"n": len(v)} for k, v in sorted(by.items())}
+    out["by_" + key_field] = {k: {m: round(sum(r[m] for r in v) / len(v), 3) for m in METRICS} | {"n": len(v)} for k, v in sorted(by.items())}
     return out
 
 def main():
@@ -137,7 +152,12 @@ def main():
     try: urllib.request.urlopen(os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749") + "/health", timeout=5)
     except Exception as e: sys.exit(f"REFUSING: embedder down ({e}); nothing written")
     tmp = "/tmp/hu_membench"; os.makedirs(tmp, exist_ok=True)
-    out = {"date": time.strftime("%Y-%m-%d"), "binary": a.bin, "protocol": {"longmemeval": "session-level R@5 from top-10 turns", "locomo": "turn-level R@10", "hybrid": "harness-side RRF(k=60) of kw+sem lists"}}
+    out = {"date": time.strftime("%Y-%m-%d"), "binary": a.bin, "protocol": {
+        "longmemeval": "session-level R@5 from top-10 turns", "locomo": "turn-level R@10",
+        "hybrid": "harness-side RRF(k=60) of kw+sem lists (Python, no C hybrid path)",
+        "hybrid_cli": "human memory search --hybrid <q> -- Contract C2 reconstructive retrieval "
+                      "(scene-select -> neighbour expansion -> rerank -> time-bounded filter -> "
+                      "sufficiency check) measured through the C binary"}}
     if a.bench in ("longmemeval", "both"):
         r = longmemeval(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LongMemEval questions < {a.min_q}")
