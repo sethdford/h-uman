@@ -18,6 +18,7 @@
 #include "human/memory/engines.h"
 #include "human/memory/factory.h"
 #include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/vector.h"
 #include "human/memory/vector/embedder_gemini_adapter.h"
 #include "human/memory/vector/embeddings_gemini.h"
@@ -890,10 +891,33 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (gem_provider.ctx) {
             bi->embedder = hu_embedder_gemini_adapter_create(alloc, gem_provider);
         }
+        /* Semantic recall (Phase 2): under HU_SEMANTIC_RECALL=shadow|live the
+         * real HTTP embedder + persistent sqlite-vec store replace the hash
+         * embedder + empty in-memory store, and the engine indexes writes.
+         * OFF (default) keeps the legacy pair: zero behaviour change. Gated on
+         * the Phase-1 harness re-run through this path before LIVE. */
+        if (hu_semantic_recall_mode() != HU_GATE_OFF) {
+            hu_embedder_t sem_emb = {0};
+            hu_vector_store_t sem_vs = {0};
+            if (hu_semantic_recall_attach(alloc, &bi->memory, &sem_emb, &sem_vs) == HU_OK) {
+                if (bi->embedder.ctx && bi->embedder.vtable && bi->embedder.vtable->deinit)
+                    bi->embedder.vtable->deinit(bi->embedder.ctx, alloc);
+                bi->embedder = sem_emb;
+                bi->vector_store = sem_vs;
+                hu_log_info("bootstrap", NULL, "semantic recall %s: embedder=%s store=sqlite-vec",
+                            hu_semantic_recall_mode() == HU_GATE_LIVE ? "LIVE" : "SHADOW",
+                            hu_semantic_recall_embed_url());
+            } else {
+                hu_log_warn("bootstrap", NULL,
+                            "semantic recall requested but could not attach (non-sqlite backend?)"
+                            " — staying on the legacy embedder");
+            }
+        }
         if (!bi->embedder.ctx) {
             bi->embedder = hu_embedder_local_create(alloc);
         }
-        bi->vector_store = hu_vector_store_mem_create(alloc);
+        if (!bi->vector_store.ctx)
+            bi->vector_store = hu_vector_store_mem_create(alloc);
         bi->retrieval_engine =
             hu_retrieval_create_with_vector(alloc, &bi->memory, &bi->embedder, &bi->vector_store);
         ctx->embedder = &bi->embedder;

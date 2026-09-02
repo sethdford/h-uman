@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11514   # locked 2026-07-27: reliable.c extras_model() collapsed the
+CLONE_BASELINE=11512   # measured 2026-09-01 after the graph_ingest reroute
                        # duplicated extras-dispatch preamble in reliable_chat and
                        # reliable_chat_with_system to one line each
 # prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read

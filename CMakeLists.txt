@@ -996,6 +996,7 @@ set(HU_CORE_SOURCES
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
     src/memory/graph_ingest.c
+    src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
@@ -3614,6 +3615,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_cli_memory_import.c
     tests/test_store_sqlite_vec.c
     tests/test_semantic_index.c
+    tests/test_semantic_recall.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c

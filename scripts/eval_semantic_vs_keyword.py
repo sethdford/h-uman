@@ -98,13 +98,79 @@ def semantic_rank(embed_fn, corpus_vecs, corpus, query, target_sub, k=5):
     return None
 
 
+def _cli_ranks(bin_path, args, target_sub, k):
+    """Run `human memory search ...` and return the 1-based rank of the first
+    line whose content contains target_sub, else None. Output lines look like
+    `  [3] key (0.812): content...` (semantic) or `  [3] key: content` (keyword)."""
+    import subprocess
+    try:
+        out = subprocess.run([bin_path, "memory", "search", *args], capture_output=True, text=True,
+                             timeout=120).stdout
+    except subprocess.TimeoutExpired:
+        sys.exit("FATAL: CLI search timed out — refusing to score a hung path")
+    rank = 0
+    for line in out.splitlines():
+        m = re.match(r"\s*\[(\d+)\]\s+(.*)$", line)
+        if not m:
+            continue
+        rank += 1
+        if rank > k:
+            break
+        if target_sub.lower() in m.group(2).lower():
+            return rank
+    return None
+
+
+def main_via_cli(a):
+    """Phase-2 proof: the same probes, but every rank comes from the shipped
+    binary's own retrieval — keyword through the engine's FTS5 recall, semantic
+    through the HTTP embedder + sqlite-vec store. Refuses if the semantic path
+    errors on the first probe (an unreachable embedder must not score as 0)."""
+    import subprocess
+    probe = subprocess.run([a.via_cli, "memory", "search", "--semantic", PROBES[0][0]],
+                           capture_output=True, text=True, timeout=120)
+    if probe.returncode != 0 or "cannot attach" in probe.stderr or "search --semantic:" in probe.stderr:
+        sys.exit(f"FATAL: semantic CLI path unavailable: {probe.stderr.strip()[:200]} — refusing to score")
+    rows = []
+    for q, target in PROBES:
+        kw = _cli_ranks(a.via_cli, [q], target, a.k)
+        sem = _cli_ranks(a.via_cli, ["--semantic", q], target, a.k)
+        rows.append({"query": q, "target": target, "keyword_rank": kw, "semantic_rank": sem})
+        print(f"  kw={kw or '-':<3} sem={sem or '-':<3}  {q[:56]}")
+    n = len(rows)
+    rec = lambda key, at: sum(1 for r in rows if r[key] and r[key] <= at) / n
+    mrr = lambda key: sum(1.0 / r[key] for r in rows if r[key]) / n
+    res = {"n_probes": n, "path": "production C binary via CLI", "binary": a.via_cli,
+           "db": os.environ.get("HU_MEMORY_SQLITE_PATH", a.db),
+           "embed_url": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8741"),
+           "measures": "paraphrase robustness on the LIVE retrieval path; NOT end-to-end reply quality",
+           "keyword": {"recall@1": rec("keyword_rank", 1), "recall@5": rec("keyword_rank", a.k), "mrr": mrr("keyword_rank")},
+           "semantic": {"recall@1": rec("semantic_rank", 1), "recall@5": rec("semantic_rank", a.k), "mrr": mrr("semantic_rank")},
+           "rows": rows}
+    delta = (res["semantic"]["recall@5"] - res["keyword"]["recall@5"]) * 100
+    res["recall@5_delta_points"] = round(delta, 1)
+    res["pass"] = delta >= 20.0
+    os.makedirs(os.path.dirname(a.out), exist_ok=True)
+    json.dump(res, open(a.out, "w"), indent=2)
+    print(f"\n[phase2-cli] n={n}  keyword recall@5 {res['keyword']['recall@5']:.2f}  semantic recall@5 "
+          f"{res['semantic']['recall@5']:.2f}  delta {delta:+.1f} (pass >= +20) -> {'PASS' if res['pass'] else 'FAIL'}")
+    print(f"  wrote {a.out}")
+    return 0 if res["pass"] else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DB)
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--out", default="docs/plans/2026-08-02-semantic-retrieval/phase1-results.json")
     ap.add_argument("--k", type=int, default=5)
+    ap.add_argument("--via-cli", metavar="HUMAN_BIN", default=None,
+                    help="Phase 2: rank through the PRODUCTION C path instead of in-process — "
+                         "`<bin> memory search <q>` (engine FTS5) vs `<bin> memory search --semantic <q>` "
+                         "(HTTP embedder + sqlite-vec). Honours HU_MEMORY_SQLITE_PATH / HU_SEMANTIC_EMBED_URL.")
     a = ap.parse_args()
+    if a.via_cli:
+        return main_via_cli(a)
 
     # --- the embedder must be REAL. Never score the hash-projection stub. ---
     try:

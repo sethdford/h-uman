@@ -35,6 +35,8 @@
 #include "human/memory/graph.h"
 #include "human/memory/graph_ingest.h"
 #include "human/memory/personal_model.h"
+#include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
 typedef struct hu_memory_facade hu_memory_facade_t;
@@ -485,7 +487,7 @@ static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, c
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
         printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki|"
-               "import-facts|ground>\n");
+               "import-facts|ground|reindex>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
@@ -550,9 +552,61 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             }
             alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
         }
+    } else if (strcmp(sub, "reindex") == 0) {
+        /* human memory reindex [--limit N] — embed every memories row missing
+         * from the semantic index via the configured endpoint. */
+        size_t lim = 0;
+        for (int i = 3; i + 1 < argc; i++)
+            if (strcmp(argv[i], "--limit") == 0)
+                lim = (size_t)strtoul(argv[i + 1], NULL, 10);
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
+        if (err != HU_OK) {
+            fprintf(stderr, "reindex: cannot attach semantic index: %s\n", hu_error_string(err));
+            goto done;
+        }
+        size_t indexed = 0;
+        err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+        printf("{\"indexed\": %zu, \"index_size\": %zu, \"endpoint\": \"%s\"}\n", indexed,
+               svs.vtable->count(svs.ctx), hu_semantic_recall_embed_url());
+        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        svs.vtable->deinit(svs.ctx, alloc);
+        semb.vtable->deinit(semb.ctx, alloc);
+    } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--semantic") == 0) {
+        /* human memory search --semantic <query> — the semantic retriever alone
+         * (embed query -> sqlite-vec KNN), for the Phase-1 harness on the live
+         * C path. Prints rank, key, score, content. */
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --semantic: cannot attach: %s\n", hu_error_string(err));
+            goto done;
+        }
+        hu_retrieval_options_t opts = {0};
+        opts.limit = 10;
+        hu_retrieval_result_t res = {0};
+        err = hu_semantic_retrieve(alloc, &semb, &svs, argv[4], strlen(argv[4]), &opts, &res);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --semantic: %s\n", hu_error_string(err));
+        } else if (res.count == 0) {
+            printf("No results for: %s\n", argv[4]);
+        } else {
+            for (size_t i = 0; i < res.count; i++)
+                printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res.entries[i].key_len,
+                       res.entries[i].key ? res.entries[i].key : "",
+                       res.scores ? res.scores[i] : 0.0,
+                       (int)(res.entries[i].content_len > 100 ? 100 : res.entries[i].content_len),
+                       res.entries[i].content ? res.entries[i].content : "");
+            hu_retrieval_result_free(alloc, &res);
+        }
+        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        svs.vtable->deinit(svs.ctx, alloc);
+        semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "Usage: human memory search <query>\n");
+            fprintf(stderr, "Usage: human memory search [--semantic] <query>\n");
             err = HU_ERR_INVALID_ARGUMENT;
             goto done;
         }

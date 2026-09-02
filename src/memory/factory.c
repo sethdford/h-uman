@@ -16,6 +16,11 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
     if (strcmp(backend, "sqlite") == 0) {
         const char *path = cfg->memory.sqlite_path;
         char buf[HU_MEM_PATH_MAX];
+        /* $HU_MEMORY_SQLITE_PATH wins: lets tools and proofs run the real
+         * engine against a COPY of the store without touching production. */
+        const char *env_path = getenv("HU_MEMORY_SQLITE_PATH");
+        if (env_path && env_path[0])
+            path = env_path;
         if (!path) {
             const char *home = getenv("HOME");
             if (home) {

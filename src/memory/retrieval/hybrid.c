@@ -1,12 +1,15 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/memory/graph.h"
 #include "human/memory/rerank.h"
 #include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/vector.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -186,6 +189,33 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         return err;
     }
 
+    /* Semantic recall gate (Phase 2). SHADOW: report what semantic WOULD have
+     * added — count, overlap with keyword hits, content fingerprint — then drop
+     * it so the reply is unchanged. LIVE merges. OFF never reaches here with a
+     * real store (bootstrap keeps the empty in-memory one). */
+    if (hu_semantic_recall_mode() == HU_GATE_SHADOW && semantic_result.count > 0) {
+        size_t overlap = 0;
+        uint32_t fp = 2166136261u;
+        for (size_t i = 0; i < semantic_result.count; i++) {
+            const hu_memory_entry_t *e = &semantic_result.entries[i];
+            for (size_t k = 0; k < e->key_len; k++)
+                fp = (fp ^ (uint32_t)(unsigned char)e->key[k]) * 16777619u;
+            for (size_t j = 0; j < keyword_result.count; j++) {
+                const hu_memory_entry_t *kw = &keyword_result.entries[j];
+                if (kw->key_len == e->key_len && kw->key && e->key &&
+                    memcmp(kw->key, e->key, e->key_len) == 0) {
+                    overlap++;
+                    break;
+                }
+            }
+        }
+        hu_log_info("semantic_recall", NULL, "shadow: kw=%zu sem=%zu overlap=%zu fp=%08x (dropped)",
+                    keyword_result.count, semantic_result.count, overlap, (unsigned)fp);
+        hu_retrieval_result_free(alloc, &semantic_result);
+        semantic_result.entries = NULL;
+        semantic_result.count = 0;
+        semantic_result.scores = NULL;
+    }
     /* Keyword, semantic, and optionally graph: merge with RRF, rerank with cross-encoder */
     size_t kw_count = keyword_result.count;
     size_t sem_count = semantic_result.count;
