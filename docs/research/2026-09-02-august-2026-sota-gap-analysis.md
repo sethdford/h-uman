@@ -44,10 +44,10 @@ gate number exists.
 2. **Standard memory benchmarks on our retrieval.** Run LongMemEval-S and LoCoMo through `human memory search` (keyword / `--semantic` / hybrid). Gate: numbers; target ≥ MemPalace's 96.6% R@5 on LongMemEval with no LLM in the loop, since our store is the same shape (verbatim + temporal graph + vectors). **Measured 2026-09-02 (Appendix D): LongMemEval-S R@5 keyword 0.883 → semantic 0.983; LoCoMo-10 R@10 keyword 0.650 → semantic 0.767 → hybrid 0.783.** The LongMemEval target is met by the semantic arm alone; the gate now moves to #3.
 3. **Over-reliance check before semantic recall goes LIVE.** AlpsBench's finding is the exact risk: memory makes EI and hypothetical-vs-real worse. Gate: a blind A/B on the corrected harness with SHADOW vs LIVE, scored on the humanness composite *and* an EI axis; LIVE only if EI does not drop.
 4. **Reconstructive recollection.** Replace one-shot top-k with scene-select → retrieve+rerank → time-bounded filter → sufficiency check (EverMemOS). We already have the pieces (`insight:*` rows, bi-temporal edges, reranker). Gate: LongMemEval temporal category and the AlpsBench "update" task improve; no regression on #3.
-5. **Agent-generated facts as first-class, with provenance.** Now that reactive `message_ref` lands, store what *h-uman* said as facts with `source=agent` and a confidence discount, so the graph stops treating its own output as Seth's and can also recall its own commitments. Gate: `promised_to`/commitment recall on a held-out set of daemon promises.
-6. **Classifier + LLM-judge tiers beside the human gate.** Binoculars AUC (script exists, needs the window) plus an Inverse-Turing-style judge (Opus 4.6-class) over the same trials. Gate: three numbers per cycle; disagreement between tiers is the signal to investigate.
-7. **When-to-speak as a measured policy.** Log every proactive *proposal* with the decision and outcome; compute MIR/FIR against Seth's own reply-back behaviour; train the timing/delay predictor (TIMER-style) on chat.db inter-message gaps. Gate: MIR and FIR both reported; delay model beats the heuristic on held-out gaps.
-8. **Trainer upgrade: mlx-tune with SimPO/KTO and per-expert LoRA on GLM-4.5-Air.** Gate: an adapter trained by mlx-tune passes the lora_b≠0 guard, the capability smoke, and improves LUAR (#1) over v6.
+5. **Agent-generated facts as first-class, with provenance.** Now that reactive `message_ref` lands, store what *h-uman* said as facts with `source=agent` and a confidence discount, so the graph stops treating its own output as Seth's and can also recall its own commitments. Gate: `promised_to`/commitment recall on a held-out set of daemon promises. **Shipped 2026-09-02 (C3): `HU_AGENT_FACTS` off|shadow|on, provenance `agent:<ref>`, supersession guard; recall 12/12 (upper bound, self-selected), precision 0.71 after the courtesy filter. Note the first wiring sat behind `reaction_collection.enabled` (prod OFF) and never ran; fixed with a router-path test.**
+6. **Classifier + LLM-judge tiers beside the human gate.** Binoculars AUC (script exists, needs the window) plus an Inverse-Turing-style judge (Opus 4.6-class) over the same trials. Gate: three numbers per cycle; disagreement between tiers is the signal to investigate. **Shipped 2026-09-02 (C4): both tiers are nightly-watchdog jobs; first numbers in Appendix D.**
+7. **When-to-speak as a measured policy.** Log every proactive *proposal* with the decision and outcome; compute MIR/FIR against Seth's own reply-back behaviour; train the timing/delay predictor (TIMER-style) on chat.db inter-message gaps. Gate: MIR and FIR both reported; delay model beats the heuristic on held-out gaps. **Measured 2026-09-02 (Appendix E): MIR 0.613 / FIR 0.670 on the fallback source; the delay model LOST to a global median on held-out gaps (MAE +155 s, CI [72, 249]). Gate FAILED — model stays off.**
+8. **Trainer upgrade: mlx-tune with SimPO/KTO and per-expert LoRA on GLM-4.5-Air.** Gate: an adapter trained by mlx-tune passes the lora_b≠0 guard, the capability smoke, and improves LUAR (#1) over v6. **Path shipped 2026-09-02 (C6): `scripts/mlx_tune_train.py`, dry-run PASS on glm4_moe, scale pinned 2.0, registry accepts `trainer=mlx_tune`. No training run yet — needs the serving-down window.**
 9. **Persona evolution.** Model event-induced register shifts (move, job change) with BFI-Adapt as the check. Gate: directional fidelity on the events that actually happened to Seth this summer.
 
 ## Where we are already at the frontier (don't spend here)
@@ -115,4 +115,19 @@ LongMemEval by type: keyword loses only on `single-session-preference` (0.60 →
 **Caveat that cost a run:** the first pass reported LoCoMo 0.000 on every arm. That was the harness, not the store — the key parser stopped at the first colon, so `D1:3` became `D1` and no evidence ever joined (fixed in the same commit as this appendix). A zero on every arm of a benchmark is a join failure until proven otherwise, exactly the shape `.claude/rules/reports-success-does-nothing.md` warns about.
 
 Same night, C4's nightly tiers produced their first numbers on freshly regenerated trials (n=35): LUAR ceiling 0.709, twin 0.633, floor 0.621 (gap closed 0.136); Gemini inverse-Turing judge n=36 accuracy 0.667, AUC 0.651. Both are now `nightly-watchdog.sh` jobs.
+
+### Appendix E — when-to-speak and the reply-delay model (2026-09-02, C5)
+
+`scripts/eval_when_to_speak.py` on the last 90 days: **MIR 0.613** (1,089 of 1,777 positive moments with no send nearby), **FIR 0.670** (61 of 91 sends judged unwanted). Source was the `production_outcomes`/`proactive_sends` fallback because the new `proactive_decisions` log had no rows yet; that fallback structurally inflates MIR (a correct decline reads as a miss). Re-run once the daemon has logged real decline/defer rows.
+
+`scripts/fit_reply_delay_model.py` fitted per-(hour, length, contact-frequency) reply-gap quantiles on 1,915 of Seth's own reply gaps. The held-out gate (`scripts/eval_reply_delay_model.py`, earliest 80% train / latest 20% test, n=383):
+
+| predictor | MAE (s) | median abs log-error |
+|---|---|---|
+| fitted model | 4,533 | 1.851 |
+| single global median (119.7 s) | 4,378 | 1.769 |
+
+Bootstrap 95% CI of model minus global: MAE +155 s [72, 249]; log-error +0.088 [−0.025, 0.194]. **The model is worse than the trivial baseline.** It stays `HU_REPLY_DELAY_MODEL=off`; the shadow-log call site in `daemon_routing.c` remains so a future model can be compared in production without new plumbing. The daemon's existing sub-8-second typing pause is a different quantity and was not scored against it.
+
+Also this pass: the daemon.c carve-out (C7) was measured, not attempted — every contiguous ≥1,200-LOC slice of the batch-reply body shares ≥27 locals with its surroundings (best: lines 5700-7100, 12 in / 15 out). It needs a context struct first; filed as a two-slice plan.
 
