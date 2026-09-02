@@ -422,6 +422,8 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 # T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
 # advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
+# Pure replay guards: always built so their (unconditional) test links on Linux.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
@@ -627,6 +629,15 @@ set(HU_CORE_SOURCES
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
+    src/doctor/check_ops_common.c
+    src/doctor/check_eval_freshness.c
+    src/doctor/check_serving_stability.c
+    src/doctor/check_log_hygiene.c
+    src/doctor/check_imessage_cursor.c
+    src/doctor/check_blind_ab_gate.c
+    # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
+    # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
+    src/memory/repos/chatdb_cursor_repo_sqlite.c
     src/doctor/check_provider.c
     src/doctor/check_local_voice.c
     src/doctor/check_outbound_stats.c
@@ -3358,6 +3369,7 @@ set(HU_TEST_SOURCES
     tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
+    tests/test_log_format.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
     tests/test_init_proposer_compose.c
@@ -3561,6 +3573,11 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_eval_freshness.c
+    tests/test_check_serving_stability.c
+    tests/test_check_log_hygiene.c
+    tests/test_check_imessage_cursor.c
+    tests/test_check_blind_ab_gate.c
     tests/test_outbound_sanitize.c
     tests/test_daemon_follow_up_watcher.c
     tests/test_cli_ctl.c

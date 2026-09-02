@@ -295,6 +295,20 @@ fi
 
 launchctl kickstart -k -p "gui/$UID/$SERVICE_LABEL"
 
+# `human` (the interactive CLI) and `human-daemon` are the SAME binary under
+# two names. Before 2026-09-02 ~/.local/bin/human was a May-17 build that no
+# install step ever refreshed, so anything that shelled out to bare `human`
+# (nightly LoRA probe, crontab, humans at a prompt) ran a 3.5-month-old
+# schema. A symlink keeps the two names on one verified, code-signed file.
+CLI_LINK="$PREFIX/bin/human"
+if [[ -L "$CLI_LINK" && "$(readlink "$CLI_LINK")" == "$INSTALL_BIN" ]]; then
+    echo "==> cli    $CLI_LINK already -> $INSTALL_BIN"
+else
+    [[ -e "$CLI_LINK" && ! -L "$CLI_LINK" ]] && mv -f "$CLI_LINK" "$CLI_LINK.pre-symlink-$(date +%s)"
+    ln -sfn "$INSTALL_BIN" "$CLI_LINK"
+    echo "==> cli    $CLI_LINK -> $INSTALL_BIN"
+fi
+
 # Give it a beat to do its first poll, then tell the truth about state.
 sleep 4
 STATUS_FILE="$HOME/.human/imessage.poll_status"

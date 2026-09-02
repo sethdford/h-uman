@@ -3261,6 +3261,11 @@ static void load_dotenv(const char *path) {
 
 int main(int argc, char *argv[]) {
     hu_allocator_t alloc = hu_system_allocator();
+#ifdef HU_ENABLE_SQLITE
+    /* Before ANY sqlite3_open: the daemon shares memory connections across
+     * threads (gateway workers + service loop). See hu_sqlite_process_serialize. */
+    (void)hu_sqlite_process_serialize();
+#endif
 
     /* Load .env files: project-local, ~/.human/.env */
     load_dotenv(".env");
