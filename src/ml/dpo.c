@@ -443,8 +443,15 @@ hu_error_t hu_dpo_set_outbound_message_ref(hu_dpo_collector_t *collector, const 
                                            size_t channel_len, const char *target,
                                            size_t target_len, const char *message_ref,
                                            size_t message_ref_len) {
-    if (!collector || !collector->db || !channel || channel_len == 0 || !target ||
-        target_len == 0 || !message_ref || message_ref_len == 0)
+    if (!collector || !channel || channel_len == 0 || !target || target_len == 0 || !message_ref ||
+        message_ref_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_ENABLE_SQLITE
+    /* No store to attach the ref to. Say so rather than report success —
+     * a message_ref that was never written must not read as written. */
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!collector->db)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
     int rc =
@@ -464,6 +471,7 @@ hu_error_t hu_dpo_set_outbound_message_ref(hu_dpo_collector_t *collector, const 
     if (rc != SQLITE_DONE)
         return HU_ERR_IO;
     return sqlite3_changes(collector->db) > 0 ? HU_OK : HU_ERR_NOT_FOUND;
+#endif
 }
 
 hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *channel,
