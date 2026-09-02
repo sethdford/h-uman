@@ -26,7 +26,16 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/process_util.h"
 #include "human/ml/lora_ema.h"
+
+const char *hu_lora_retrain_miner_argv0(const char *ctx_argv0, const char *self_exe) {
+    if (ctx_argv0 && ctx_argv0[0])
+        return ctx_argv0;
+    if (self_exe && self_exe[0])
+        return self_exe;
+    return "human";
+}
 
 #include <dirent.h>
 #include <errno.h>
@@ -664,7 +673,12 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
     char payload[2048];
 
     /* ── STEP 1: pair-count probe ────────────────────────────────────── */
-    const char *miner_argv0 = ctx->miner_argv0 ? ctx->miner_argv0 : "human";
+    /* Exec the SAME binary this daemon runs as, never a PATH-resolved "human"
+     * (2026-09-02: that was a May-17 CLI; the probe was dead for weeks). */
+    char self_exe[1024];
+    if (!hu_process_self_exe_path(self_exe, sizeof(self_exe)))
+        self_exe[0] = '\0';
+    const char *miner_argv0 = hu_lora_retrain_miner_argv0(ctx->miner_argv0, self_exe);
     const char *miner_sub0 = ctx->miner_subcmd[0] ? ctx->miner_subcmd[0] : "ml";
     const char *miner_sub1 = ctx->miner_subcmd[1] ? ctx->miner_subcmd[1] : "mine-corrections";
     const char *probe_argv[] = {miner_argv0, miner_sub0, miner_sub1, "--count-only", NULL};
