@@ -37,6 +37,17 @@ extern "C" {
  * default-on without a measurement showing the daemon can actually recall
  * its own commitments from the rows this records. See hu_agent_facts_record_reply
  * in src/memory/agent_facts.c for the gate comment at the call site.
+ *
+ * Follow-up (2026-09-02): the first measurement pass showed 8/20 sampled
+ * agent-promise candidates were courtesy filler, not real promises -- the
+ * commitment keyword scan alone fires on bare "let me know..." invitations.
+ * Both the storage path and hu_agent_facts_dry_run now reuse the EXISTING
+ * daemon_promise_keeper predicate, hu_promise_keeper_is_courtesy_invitation
+ * (human/daemon/promise_keeper.h), rather than re-deriving the same
+ * filter -- a courtesy invitation produces zero agent-promise rows and is
+ * reported as "no commitment" by the dry-run hook. The graph-fact half
+ * (hu_graph_ingest_fact) is unaffected; this filter only gates the
+ * agent-promise memory row.
  */
 
 /* Runs the regex fact extractor (fact_extract.h) against `reply`, relabels
@@ -46,7 +57,11 @@ extern "C" {
  * weaker signal than an observation of the user). Also runs
  * hu_conversation_detect_commitment(from_me=true) against `reply`; a
  * detected commitment is stored as a memory row keyed
- * "agent-promise:<contact>:<now>" (category CORE) via `mem`'s vtable.
+ * "agent-promise:<contact>:<now>" (category CORE) via `mem`'s vtable --
+ * UNLESS hu_promise_keeper_is_courtesy_invitation says the detected text
+ * is a bare invitation ("let me know...") with no deadline and no
+ * first-person deliverable, in which case nothing is stored (or logged as
+ * "would store" in SHADOW).
  *
  * Mode is read from HU_AGENT_FACTS at call time:
  *   OFF (default)  — no-op, returns HU_OK immediately.
@@ -73,9 +88,13 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
  * `facts_out` receives the extracted facts (subject == "assistant").
  * `commitment_out`/`who_out` receive the commitment description/who per
  * hu_conversation_detect_commitment's contract; `*has_commitment_out` is
- * set to whether a commitment was found. Any of commitment_out/who_out/
- * has_commitment_out may be NULL to skip commitment detection entirely.
- * Returns HU_ERR_INVALID_ARGUMENT for NULL/empty reply or NULL facts_out. */
+ * set to whether a commitment was found AND it survived the courtesy
+ * filter (hu_promise_keeper_is_courtesy_invitation) -- a bare "let me
+ * know..." invitation reports *has_commitment_out = false, mirroring
+ * exactly what hu_agent_facts_record_reply would (not) store. Any of
+ * commitment_out/who_out/has_commitment_out may be NULL to skip commitment
+ * detection entirely. Returns HU_ERR_INVALID_ARGUMENT for NULL/empty reply
+ * or NULL facts_out. */
 hu_error_t hu_agent_facts_dry_run(const char *reply, size_t reply_len,
                                   hu_fact_extract_result_t *facts_out, char *commitment_out,
                                   size_t commitment_cap, char *who_out, size_t who_cap,

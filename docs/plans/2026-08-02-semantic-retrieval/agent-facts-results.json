@@ -1,22 +1,22 @@
 {
-  "measured_at": "2026-09-02T10:53:15Z",
+  "measured_at": "2026-09-02T11:12:29Z",
   "source": "production_outcomes.chosen (~/.human/memory.db), read-only, raw text never written to this file",
   "n_candidates": 20,
   "n_genuine_commitments_hand_labelled": 12,
-  "n_detector_says_commitment": 20,
+  "n_detector_says_commitment": 17,
   "true_positives": 12,
   "false_negatives": 0,
-  "false_positives": 8,
+  "false_positives": 5,
   "recall": 1.0,
-  "precision": 0.6,
-  "caveat": "Candidate pool was selected via the SAME keyword vocabulary the detector scans for, so recall here is an upper bound on a keyword-matched sample, not a general-population estimate. Precision (false-positive rate on bare courtesy phrases like 'let me know...') is the more informative number from this sample; hu_agent_facts_record_reply does NOT apply the promise-keeper's courtesy filter (hu_promise_keeper_is_courtesy_invitation) \u2014 a consumer of agent-promise:* rows should expect that filter's absence to show up here.",
+  "precision": 0.7059,
+  "caveat": "Candidate pool was selected via the SAME keyword vocabulary the detector scans for, so recall here is an upper bound on a keyword-matched sample, not a general-population estimate. Precision is the more informative number from this sample. As of 2026-09-02, hu_agent_facts_record_reply (and this dry-run hook) reuse hu_promise_keeper_is_courtesy_invitation, so bare 'let me know...' invitations with no deadline and no first-person deliverable are excluded before scoring; the remaining false positives are generic filler ('I'll help you with that...') and conversational 'gonna' that the courtesy filter's narrower prefix list does not cover \u2014 a further precision gain would need broadening that predicate, not duplicating it here.",
   "per_item": [
     {
       "id": 426,
       "reply_len": 40,
       "hand_label_is_commitment": false,
       "hand_label_note": "courtesy invitation (let-me-know)",
-      "detector_says_commitment": true,
+      "detector_says_commitment": false,
       "fact_count": 0
     },
     {
@@ -24,7 +24,7 @@
       "reply_len": 47,
       "hand_label_is_commitment": false,
       "hand_label_note": "courtesy invitation (let-me-know)",
-      "detector_says_commitment": true,
+      "detector_says_commitment": false,
       "fact_count": 0
     },
     {
@@ -144,7 +144,7 @@
       "reply_len": 30,
       "hand_label_is_commitment": false,
       "hand_label_note": "courtesy invitation (let-me-know)",
-      "detector_says_commitment": true,
+      "detector_says_commitment": false,
       "fact_count": 0
     },
     {
