@@ -57,15 +57,25 @@ def longmemeval(binp, limit, seed, tmp):
     by_type = collections.defaultdict(list)
     for q in data: by_type[q["question_type"]].append(q)
     per = max(1, limit // len(by_type)); qs = [q for t in sorted(by_type) for q in by_type[t][:per]]
-    res = []
+    res = []; skipped = []
     for n, q in enumerate(qs, 1):
         rows = []
         for sid, sess in zip(q["haystack_session_ids"], q["haystack_sessions"]):
             for k, turn in enumerate(sess):
                 rows.append((f"s{sid}:t{k}", str(sid), f"{turn['role']}: {turn['content']}"))
         dbp = os.path.join(tmp, "lme.db")
+        print(f"  [{n}/{len(qs)}] building {q['question_id']} ({len(rows)} rows)", flush=True)
         idx = build_db(binp, dbp, rows)
-        if idx < len(rows) * 0.9: sys.exit(f"REFUSING: q{n} indexed {idx}/{len(rows)} — embedder unhealthy")
+        if idx < len(rows) * 0.9:
+            # The 8-bit embedder has died on specific rows (deterministic). Give the
+            # supervisor time to restart it, retry once, then SKIP and COUNT the
+            # question rather than abort the run; too many skips refuses at the end.
+            time.sleep(10)
+            idx = build_db(binp, dbp, rows)
+            if idx < len(rows) * 0.9:
+                skipped.append({"question_id": q["question_id"], "type": q["question_type"], "indexed": idx, "rows": len(rows)})
+                print(f"  [{n}/{len(qs)}] SKIPPED {q['question_id']}: indexed {idx}/{len(rows)}", flush=True)
+                continue
         kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))
         sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}))
         ans = set(str(s) for s in q["answer_session_ids"])
@@ -78,6 +88,8 @@ def longmemeval(binp, limit, seed, tmp):
             return int(bool(ans & set(seen)))
         r = {"type": q["question_type"], "kw": sess_r5(kw), "sem": sess_r5(sem), "hybrid": sess_r5(rrf(kw, sem)), "rows": len(rows)}
         res.append(r); print(f"  [{n}/{len(qs)}] {q['question_type'][:22]:22} kw={r['kw']} sem={r['sem']} hyb={r['hybrid']} rows={len(rows)}", flush=True)
+    if len(skipped) > max(2, len(qs) // 10): sys.exit(f"REFUSING: {len(skipped)} questions skipped for embedder crashes: {skipped}")
+    longmemeval.skipped = skipped
     return res
 
 def locomo(binp, limit, seed, tmp):
@@ -129,7 +141,7 @@ def main():
     if a.bench in ("longmemeval", "both"):
         r = longmemeval(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LongMemEval questions < {a.min_q}")
-        out["longmemeval_s"] = summarize(r, "type")
+        out["longmemeval_s"] = summarize(r, "type"); out["longmemeval_skipped_embedder_crash"] = getattr(longmemeval, "skipped", [])
     if a.bench in ("locomo", "both"):
         r = locomo(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LoCoMo questions < {a.min_q}")

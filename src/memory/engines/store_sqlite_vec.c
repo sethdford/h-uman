@@ -11,10 +11,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_SQLITE_VEC)
 #include <sqlite3.h>
 
-#include "sqlite-vec.h"
+/* Do NOT include "sqlite-vec.h": without SQLITE_CORE it pulls in sqlite3ext.h,
+ * which rewrites every sqlite3_* call in THIS file into `sqlite3_api->...`
+ * shims (undeclared on the Linux CI runner). sqlite-vec.c is compiled with
+ * -DSQLITE_CORE (static linking) so its init takes the real API directly. */
+int sqlite3_vec_init(sqlite3 *db, char **pzErrMsg, const void *pApi);
 
 typedef struct vec_store_ctx {
     hu_allocator_t *alloc;
@@ -257,7 +261,7 @@ hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struc
     return vs;
 }
 
-#else /* !HU_ENABLE_SQLITE */
+#else /* !HU_ENABLE_SQLITE || !HU_ENABLE_SQLITE_VEC: stub, attach refuses */
 
 bool hu_sqlite_vec_register(void) {
     return false;

@@ -515,14 +515,20 @@ if(HU_ENABLE_MEMORY_LRU_ENGINE)
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/memory_lru.c)
 endif()
 list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/sqlite.c)
-if(HU_ENABLE_SQLITE)
+option(HU_ENABLE_SQLITE_VEC "Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off)" ON)
+if(HU_ENABLE_SQLITE AND HU_ENABLE_SQLITE_VEC)
     # Vendored sqlite-vec (third_party, pure C, exact KNN) + the store over it.
     # Third-party code is compiled warning-silent; it is not ours to lint.
+    # SQLITE_CORE = static linking: the extension calls the real sqlite3 API,
+    # and our store declares sqlite3_vec_init itself (no sqlite3ext.h shims).
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
          third_party/sqlite-vec/sqlite-vec.c)
-    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w")
-    set_source_files_properties(src/memory/engines/store_sqlite_vec.c PROPERTIES
-                                INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/sqlite-vec")
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w"
+                                COMPILE_DEFINITIONS "SQLITE_CORE=1")
+    add_compile_definitions(HU_ENABLE_SQLITE_VEC=1)
+elseif(HU_ENABLE_SQLITE)
+    # Store compiled as the NOT_SUPPORTED stub so semantic_recall attach refuses.
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c)
 endif()
 # postgres, redis, api: always built (mock in HU_IS_TEST; real when HU_ENABLE_*)
 list(APPEND MEMORY_ENGINE_SOURCES
