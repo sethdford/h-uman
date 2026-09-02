@@ -1,0 +1,88 @@
+{
+  "schema": "semantic_live_gate.v1",
+  "generated_at": "2026-09-02T11:11:56.928394+00:00",
+  "git_commit": "24b11432c2aca2ba2bf6eda0d0629647bd812daf",
+  "gate": "HU_SEMANTIC_RECALL shadow->live",
+  "n_contexts": 40,
+  "contexts_source": "/Users/sethford/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl",
+  "server": "http://127.0.0.1:8741",
+  "embed_url": "http://127.0.0.1:8749",
+  "top_k": 5,
+  "tolerances": {
+    "composite": 0.02,
+    "ei": 0.15,
+    "reality": 0.15
+  },
+  "shadow": {
+    "n_replies": 40,
+    "n_ei": 40,
+    "n_reality": 40,
+    "composite": 0.9166666666666667,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 1.0,
+    "relationship_mean": 0.0,
+    "ei_mean": 4.25,
+    "reality_mean": 5.0,
+    "raw_axes": {
+      "n": 40,
+      "axes": {
+        "anti_ai": {
+          "mean": 1.0,
+          "stderr": 0.0,
+          "n": 40
+        },
+        "relationship": {
+          "mean": 0.0,
+          "stderr": 0.0,
+          "n": 0
+        },
+        "fidelity": {
+          "mean": 0.0,
+          "stderr": 0.0,
+          "n": 0,
+          "available": false
+        }
+      }
+    }
+  },
+  "live": {
+    "n_replies": 32,
+    "n_ei": 32,
+    "n_reality": 32,
+    "composite": 0.9166666666666667,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 1.0,
+    "relationship_mean": 0.0,
+    "ei_mean": 4.25,
+    "reality_mean": 4.9375,
+    "raw_axes": {
+      "n": 32,
+      "axes": {
+        "anti_ai": {
+          "mean": 1.0,
+          "stderr": 0.0,
+          "n": 32
+        },
+        "relationship": {
+          "mean": 0.0,
+          "stderr": 0.0,
+          "n": 0
+        },
+        "fidelity": {
+          "mean": 0.0,
+          "stderr": 0.0,
+          "n": 0,
+          "available": false
+        }
+      }
+    }
+  },
+  "verdict": "PROMOTE",
+  "reasons": []
+}
