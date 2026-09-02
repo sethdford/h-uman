@@ -681,6 +681,19 @@ hu_error_t hu_graph_upsert_relation_with_belief(
         }
     }
 
+    /* C3 — an agent-authored fact (recorded from the daemon's OWN outbound
+     * text, provenance "agent:<message_ref>" from hu_agent_facts_record_reply)
+     * must never supersede an existing edge. The daemon's reply is evidence
+     * of what it SAID, not a fresh observation of the user's state changing
+     * — closing a real "lives_in st pete" edge because the daemon happened
+     * to repeat it back would let a low-confidence self-referential
+     * paraphrase overwrite ground truth. Downgrade to BRANCH so the agent
+     * fact is still stored (and recallable) without touching the open edge. */
+    if (decision == HU_CONFLICT_SUPERSEDE && provenance && provenance_len >= 6 &&
+        strncmp(provenance, "agent:", 6) == 0) {
+        decision = HU_CONFLICT_BRANCH;
+    }
+
     /* INSERT the proposed row. Always a fresh row — the resolver may close
      * the prior afterwards. We don't use ON CONFLICT here: bitemporal
      * history requires multiple rows, so we want a new id even if
