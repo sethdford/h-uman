@@ -547,6 +547,20 @@ The `behavior` config section in the runtime configuration controls seven key th
 | Memory decay window           | `decay_days`               | 30      | 1–365    | Days before memories fade in consolidation                    |
 | Deduplication threshold       | `dedup_threshold`          | 70      | 1–100    | Similarity percentage (0–100) to consider memories duplicates |
 | Missed message threshold      | `missed_msg_threshold_sec` | 1800    | 60–86400 | Seconds gap to trigger "missed message" acknowledgment        |
+| Missed message ceiling        | `missed_msg_max_age_sec`   | 86400   | >threshold–604800 | Above this gap no acknowledgment is sent at all (a "just saw this" on a days-old message is a tell) |
+
+### iMessage replay guards
+
+Three guards keep a stale poll cursor from replaying old inbound messages as
+if they were new (incident 2026-09-01: a reboot resumed from a two-week-old
+cursor and re-answered threads the human had already closed). They are
+environment overrides in the daemon's launchd plist, not `config.json` keys:
+
+| Guard | Env var | Default | Behavior |
+| ----- | ------- | ------- | -------- |
+| Resume cap | `HU_IMESSAGE_MAX_REPLAY` | 50 rows | If the persisted cursor is more than this many rows behind chat.db, the backlog is skipped and the daemon resumes from the current max (logged as a warning). |
+| Stale inbound | `HU_IMESSAGE_MAX_INBOUND_AGE_SEC` | 86400 | Inbound rows older than this are dropped at poll time (`0` disables). |
+| Already answered | (always on) | — | An inbound row with a later human-authored text bubble in the same conversation is skipped; the daemon's own sends do not count. |
 
 ## How to Customize
 

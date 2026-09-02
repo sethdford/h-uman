@@ -73,6 +73,123 @@ bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix) {
     return false;
 }
 
+/* ── Replay guards (incident 2026-09-01) — pure, unconditionally compiled ── */
+
+int64_t hu_imessage_resume_rowid(int64_t persisted, int64_t db_max, int64_t max_replay,
+                                 int64_t *out_skipped) {
+    if (out_skipped)
+        *out_skipped = 0;
+    if (persisted <= 0 || persisted > db_max)
+        return db_max;
+    int64_t gap = db_max - persisted;
+    if (max_replay >= 0 && gap > max_replay) {
+        if (out_skipped)
+            *out_skipped = gap;
+        return db_max;
+    }
+    return persisted;
+}
+
+bool hu_imessage_inbound_is_stale(int64_t msg_unix_ts, int64_t now_unix, int64_t max_age_sec) {
+    if (msg_unix_ts <= HU_IMESSAGE_APPLE_EPOCH_UNIX || max_age_sec <= 0)
+        return false; /* unknown date (m.date == 0 → 2001-01-01) is never stale */
+    return (now_unix - msg_unix_ts) > max_age_sec;
+}
+
+int64_t hu_imessage_parse_env_int64(const char *s, int64_t dflt) {
+    if (!s || s[0] < '0' || s[0] > '9')
+        return dflt; /* strtoll would skip leading whitespace / accept a sign; we don't */
+    char *end = NULL;
+    errno = 0;
+    long long v = strtoll(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0' || v < 0)
+        return dflt; /* partial parse, trailing junk, sign, or overflow → keep the default */
+    return (int64_t)v;
+}
+
+bool hu_imessage_replied_guard_applies(const char *handle, const char *loopback_handle) {
+    if (!handle || !handle[0])
+        return false;
+    if (!loopback_handle || !loopback_handle[0])
+        return true;
+    return strcasecmp(handle, loopback_handle) != 0;
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* Scope the "any later outbound?" question to one conversation. Prefer the
+ * chat (covers group chats and handles that share a chat); fall back to the
+ * handle when the poll row carried no chat guid. Only real text bubbles
+ * count — tapbacks (associated_message_type != 0) are reactions, not
+ * replies. Bounded to 8 rows: one human bubble is enough to decide, and the
+ * daemon's own burst never exceeds a handful. */
+#define IMSG_REPLIED_AFTER_SQL_BY_CHAT                          \
+    "SELECT m.text, m.attributedBody FROM message m "           \
+    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "   \
+    "JOIN chat ch ON ch.ROWID = cmj.chat_id "                   \
+    "WHERE ch.guid = ?1 AND m.ROWID > ?2 AND m.is_from_me = 1 " \
+    "AND m.associated_message_type = 0 ORDER BY m.ROWID ASC LIMIT 8"
+#define IMSG_REPLIED_AFTER_SQL_BY_HANDLE                     \
+    "SELECT m.text, m.attributedBody FROM message m "        \
+    "JOIN handle h ON h.ROWID = m.handle_id "                \
+    "WHERE h.id = ?1 AND m.ROWID > ?2 AND m.is_from_me = 1 " \
+    "AND m.associated_message_type = 0 ORDER BY m.ROWID ASC LIMIT 8"
+
+bool hu_imessage_user_replied_after(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t rowid,
+                                    bool (*is_ours)(void *ctx, const char *text, size_t len),
+                                    void *ctx) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    if (!db || rowid <= 0)
+        return false;
+    bool by_chat = chat_guid && chat_guid[0];
+    const char *key = by_chat ? chat_guid : handle;
+    if (!key || !key[0])
+        return false;
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = by_chat ? IMSG_REPLIED_AFTER_SQL_BY_CHAT : IMSG_REPLIED_AFTER_SQL_BY_HANDLE;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return false; /* fail open: never suppress a live reply on a query error */
+    sqlite3_bind_text(stmt, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, rowid);
+
+    bool human_replied = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *text = (const char *)sqlite3_column_text(stmt, 0);
+        char attr_buf[1024];
+        if (!text || !text[0]) {
+            const unsigned char *blob = sqlite3_column_blob(stmt, 1);
+            int blen = sqlite3_column_bytes(stmt, 1);
+            if (blob && blen > 0 &&
+                hu_imessage_extract_attributed_body(blob, (size_t)blen, attr_buf,
+                                                    sizeof(attr_buf)) > 0)
+                text = attr_buf;
+        }
+        /* An outbound we cannot read is still an outbound; only a positive
+         * "that was ours" match excludes it. */
+        if (!text || !text[0] || !is_ours || !is_ours(ctx, text, strlen(text))) {
+            human_replied = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return human_replied;
+}
+#else
+bool hu_imessage_user_replied_after(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t rowid,
+                                    bool (*is_ours)(void *ctx, const char *text, size_t len),
+                                    void *ctx) {
+    (void)sqlite_db;
+    (void)chat_guid;
+    (void)handle;
+    (void)rowid;
+    (void)is_ours;
+    (void)ctx;
+    return false;
+}
+#endif
+
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 #include <ApplicationServices/ApplicationServices.h>
 #include <dlfcn.h>
@@ -81,9 +198,12 @@ bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix) {
 #include <objc/runtime.h>
 #include <signal.h>
 #include <sys/wait.h>
+#endif
+/* sqlite is needed outside the Apple/non-test block too: the replay guard
+ * hu_imessage_user_replied_after is exercised by tests against an in-memory
+ * chat.db fixture. */
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-#endif
 #endif
 
 #define HU_IMESSAGE_SENT_RING_SIZE  32
@@ -896,6 +1016,14 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
 }
 
 #ifdef HU_ENABLE_SQLITE
+static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len);
+
+/* Adapter so hu_imessage_user_replied_after can consult the outbound echo
+ * ring without knowing the ctx type. */
+static bool imessage_is_ours_cb(void *ctx, const char *text, size_t len) {
+    return imessage_was_sent_by_us((hu_imessage_ctx_t *)ctx, text, len);
+}
+
 static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len) {
     uint32_t h = imessage_hash(text, text_len);
     for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++) {
@@ -1503,6 +1631,12 @@ static void imessage_stop(void *ctx) {
         c->running = false;
         atomic_store(&c->typing_active, false);
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#ifdef HU_ENABLE_SQLITE
+        /* Flush the cursor on orderly shutdown so a restart resumes from
+         * where we actually were, not from the last delivering poll. */
+        if (c->last_rowid > 0)
+            imessage_save_rowid(c->last_rowid);
+#endif
         imsg_watch_stop(c);
         if (c->imcore_handle) {
             dlclose(c->imcore_handle);
@@ -5039,12 +5173,31 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
                         sqlite3_finalize(stmt);
                     }
                     if (persisted > 0 && persisted <= db_max) {
-                        c->last_rowid = persisted;
-                        hu_log_info("imessage", NULL,
-                                    "resuming from persisted rowid=%lld (db max=%lld, "
-                                    "recovering %lld messages)",
-                                    (long long)persisted, (long long)db_max,
-                                    (long long)(db_max - persisted));
+                        /* Cap the replay. A persisted cursor far behind db max
+                         * is a stale cursor (daemon down, deaf watch, crash
+                         * mid-write), not a backlog the human wants answered:
+                         * those messages were seen and handled on the phone.
+                         * Incident 2026-09-01: 893-row gap replayed as fresh. */
+                        int64_t max_replay = hu_imessage_parse_env_int64(
+                            getenv("HU_IMESSAGE_MAX_REPLAY"), HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT);
+                        int64_t skipped = 0;
+                        c->last_rowid =
+                            hu_imessage_resume_rowid(persisted, db_max, max_replay, &skipped);
+                        if (skipped > 0) {
+                            hu_log_warn("imessage", NULL,
+                                        "persisted rowid=%lld is %lld rows behind db max=%lld "
+                                        "(cap %lld); SKIPPING the backlog and resuming from "
+                                        "db max — stale cursor, not a backlog to answer",
+                                        (long long)persisted, (long long)skipped, (long long)db_max,
+                                        (long long)max_replay);
+                            imessage_save_rowid(c->last_rowid);
+                        } else {
+                            hu_log_info("imessage", NULL,
+                                        "resuming from persisted rowid=%lld (db max=%lld, "
+                                        "recovering %lld messages)",
+                                        (long long)persisted, (long long)db_max,
+                                        (long long)(db_max - persisted));
+                        }
                     } else {
                         c->last_rowid = db_max;
                         const char *lookback_env = getenv("HU_IMESSAGE_LOOKBACK");
@@ -5458,6 +5611,10 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         hu_log_info("imessage", NULL,
                     "late-seeded last_rowid=%lld (only new messages will be processed)",
                     (long long)c->last_rowid);
+        /* Persist immediately: otherwise the stale on-disk cursor survives
+         * this whole process lifetime and arms the next restart to replay. */
+        if (c->last_rowid > 0)
+            imessage_save_rowid(c->last_rowid);
         sqlite3_close(db);
         imessage_record_poll_success(c, (int64_t)time(NULL));
         imessage_save_poll_status(c);
@@ -5573,6 +5730,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         return HU_ERR_IO;
     }
 
+    const int64_t rowid_at_poll_entry = c->last_rowid;
     sqlite3_bind_int64(stmt, 1, c->last_rowid);
     sqlite3_bind_int(stmt, 2, (int)max_msgs);
     sqlite3_bind_text(stmt, 3, c->loopback_handle ? c->loopback_handle : "", -1, SQLITE_STATIC);
@@ -5697,6 +5855,44 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 continue;
             }
         }
+
+        /* Replay guards (incident 2026-09-01). Both drop the row silently
+         * and consume it; neither is a reply decision the LLM should see.
+         *
+         * 1. Age: an inbound older than the ceiling is not "new" no matter
+         *    what the cursor says. The human saw it on their phone. */
+        {
+            int64_t max_age = hu_imessage_parse_env_int64(getenv("HU_IMESSAGE_MAX_INBOUND_AGE_SEC"),
+                                                          HU_IMESSAGE_MAX_INBOUND_AGE_SEC_DEFAULT);
+            if (hu_imessage_inbound_is_stale(msg_unix_ts, (int64_t)time(NULL), max_age)) {
+                hu_log_warn("imessage", NULL,
+                            "dropping stale inbound rowid=%lld from %s (age=%llds > cap=%llds)",
+                            (long long)rowid, handle,
+                            (long long)((int64_t)time(NULL) - msg_unix_ts), (long long)max_age);
+                c->last_rowid = rowid;
+                continue;
+            }
+        }
+        /* 2. Already answered: a human-authored outbound landed in this
+         *    conversation after the row. The daemon's own sends (echo ring)
+         *    do not count, so a live burst is unaffected. Never applied to
+         *    the self-chat: every row there is is_from_me=1.
+         *    Caveat: the echo ring is global (32 entries, all chats), so a
+         *    burst of >32 daemon sends elsewhere can evict this chat's entry
+         *    and make a daemon reply look human. That only ever biases toward
+         *    silence on an ALREADY-answered row, never suppresses a later
+         *    live message, which is the safe direction for this guard. */
+        if (hu_imessage_replied_guard_applies(handle, c->loopback_handle)) {
+            const char *guard_chat_guid = (const char *)sqlite3_column_text(stmt, col_chat_guid);
+            if (hu_imessage_user_replied_after(db, guard_chat_guid, handle, rowid,
+                                               imessage_is_ours_cb, c)) {
+                hu_log_info("imessage", NULL,
+                            "skipping inbound rowid=%lld from %s: human already replied after it",
+                            (long long)rowid, handle);
+                c->last_rowid = rowid;
+                continue;
+            }
+        }
         size_t text_len = strlen(text);
         if (handle_len >= sizeof(msgs[count].session_key))
             handle_len = sizeof(msgs[count].session_key) - 1;
@@ -5758,7 +5954,11 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 
-    if (count > 0)
+    /* Persist whenever the cursor MOVED, not only when a message was
+     * delivered. Filtered rows (null text, echo, excluded, non-allowlisted,
+     * stale, already-answered) advance the cursor too; saving only on
+     * count > 0 let the on-disk cursor lag two weeks behind (2026-09-01). */
+    if (c->last_rowid != rowid_at_poll_entry)
         imessage_save_rowid(c->last_rowid);
 
     if (count == 0 && getenv("HU_DEBUG"))

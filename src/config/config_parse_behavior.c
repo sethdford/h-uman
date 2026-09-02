@@ -39,9 +39,17 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
         cfg->behavior.dedup_threshold = (uint32_t)dt;
 
     /* Missed message acknowledgment threshold in seconds */
-    double mmts = hu_json_get_number(obj, "missed_msg_threshold_sec", cfg->behavior.missed_msg_threshold_sec);
+    double mmts =
+        hu_json_get_number(obj, "missed_msg_threshold_sec", cfg->behavior.missed_msg_threshold_sec);
     if (mmts >= 60 && mmts <= 86400)
         cfg->behavior.missed_msg_threshold_sec = (uint32_t)mmts;
+
+    /* Ceiling above which no missed-message acknowledgment is sent at all.
+     * Must exceed the threshold; capped at 7 days. */
+    double mmma =
+        hu_json_get_number(obj, "missed_msg_max_age_sec", cfg->behavior.missed_msg_max_age_sec);
+    if (mmma > cfg->behavior.missed_msg_threshold_sec && mmma <= 7 * 86400)
+        cfg->behavior.missed_msg_max_age_sec = (uint32_t)mmma;
 
     /* Callback delay window in seconds */
     double cw = hu_json_get_number(obj, "callback_window", cfg->behavior.callback_window);

@@ -341,6 +341,64 @@ bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_alr
                                        bool courtesy_replies_enabled,
                                        uint32_t aggregate_today_count);
 
+/* ── Replay guards (incident 2026-09-01) ─────────────────────────────────
+ *
+ * After a reboot the daemon resumed from a persisted rowid two weeks behind
+ * chat.db and replayed ~2,000 old inbound messages as if fresh. These three
+ * pure/testable helpers are the guards the poll path now applies. */
+
+/* Default caps; each can be overridden at runtime by the env var named in
+ * the comment (same convention as HU_IMESSAGE_LOOKBACK). */
+#define HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT     50    /* HU_IMESSAGE_MAX_REPLAY */
+#define HU_IMESSAGE_MAX_INBOUND_AGE_SEC_DEFAULT 86400 /* HU_IMESSAGE_MAX_INBOUND_AGE_SEC */
+
+/* Pure: decide where the poll cursor resumes on startup.
+ *
+ * Returns `persisted` when it is a sane cursor no more than `max_replay` rows
+ * behind `db_max`; otherwise returns `db_max` (skip the backlog). When the
+ * backlog is skipped because it exceeded the cap, *out_skipped receives the
+ * number of rows skipped so the caller can log it loudly; it is 0 in every
+ * other case. `out_skipped` may be NULL. */
+int64_t hu_imessage_resume_rowid(int64_t persisted, int64_t db_max, int64_t max_replay,
+                                 int64_t *out_skipped);
+
+/* Pure: true when an inbound message is too old to answer as if it just
+ * arrived. An unknown timestamp is never stale: `msg_unix_ts <= 0`, or
+ * `<= HU_IMESSAGE_APPLE_EPOCH_UNIX` (chat.db `m.date == 0` converts to exactly
+ * 2001-01-01, a missing date, not a 25-year-old message). `max_age_sec == 0`
+ * disables the guard. Boundary is inclusive: exactly max_age is NOT stale. */
+#define HU_IMESSAGE_APPLE_EPOCH_UNIX 978307200LL
+bool hu_imessage_inbound_is_stale(int64_t msg_unix_ts, int64_t now_unix, int64_t max_age_sec);
+
+/* Pure: parse an env override for a guard limit. Returns `dflt` unless `s`
+ * is a complete, non-negative decimal integer — garbage must never
+ * silently become 0, because 0 disables the guard. */
+int64_t hu_imessage_parse_env_int64(const char *s, int64_t dflt);
+
+/* Pure: whether the already-answered guard applies to a polled row. It never
+ * applies to the self-chat/loopback handle: every row there is is_from_me=1,
+ * so the next self-typed command would look like "human already replied"
+ * and swallow the one before it. Case-insensitive (handles may be emails). */
+bool hu_imessage_replied_guard_applies(const char *handle, const char *loopback_handle);
+
+/* chat.db query: has a human-authored outbound (is_from_me=1, a real text
+ * bubble, not a tapback) landed in the same conversation AFTER `rowid`?
+ *
+ * Conversation is the chat with `chat_guid` when non-empty, else every
+ * message to `handle`. Outbound rows for which `is_ours(ctx, text, len)`
+ * returns true are the daemon's own sends and do NOT count — so a fresh
+ * process (empty echo ring) treats every later outbound as the human's,
+ * which is exactly right for a replay after restart.
+ *
+ * `sqlite_db` is a `sqlite3 *` (typed void* to keep sqlite out of this
+ * header). Returns false on NULL db or any query error (fail open: an
+ * unanswerable question must not suppress a live reply). Stub returns false
+ * when built without SQLite. */
+bool hu_imessage_user_replied_after(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t rowid,
+                                    bool (*is_ours)(void *ctx, const char *text, size_t len),
+                                    void *ctx);
+
 /* Pure text builder: format a courtesy reply into a caller-provided buffer.
  *
  *   persona_name        — display name to identify the assistant ("Atlas").
