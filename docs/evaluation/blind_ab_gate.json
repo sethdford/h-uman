@@ -1,26 +1,29 @@
 {
   "schema_version": 1,
-  "commit": "a508fb0991c6e4733661757d6dcf89380f97eac5",
+  "commit": "a4ac57f142bf99e1dfd6539056722d55d54ffb22",
   "proxy": {
     "tool": "eval_blinded_ab.py",
-    "timestamp": "2026-07-27T05:59:53",
-    "verdict": "FAIL",
+    "timestamp": "2026-08-03T05:31:22",
+    "verdict": "PASS",
     "mode": "ENFORCING",
-    "fool_rate": 44.0,
-    "baseline_fool_rate": 62.5,
-    "n_trials": 50,
-    "n_real_pairs": 50,
+    "fool_rate": 51.162790697674424,
+    "baseline_fool_rate": 44.89795918367347,
+    "n_trials": 43,
+    "n_real_pairs": 43,
     "fail_under": 45.0,
     "max_regression": 5.0
   },
   "human": {
     "tool": "blind_ab/score.py",
-    "timestamp": "2026-07-26T04:38:02",
-    "detection": 0.5,
-    "ci_lo": 0.2538,
-    "ci_hi": 0.7462,
-    "n": 12,
-    "verdict": "PASS"
+    "timestamp": "2026-07-29T06:36:49",
+    "verdict": "PASS",
+    "detection": 0.225,
+    "ci_lo": 0.1232,
+    "n": 40,
+    "arm": {
+      "adapter": "seth-glm-air-v5-20260725-093742",
+      "note": "cycle-4 n=40 sheet 2026-07-27: AI replies from ~/blind_ab_run/triples_glm_v5.json = GLM-4.5-Air-4bit + seth-glm-air-v5 under the generic 3621B prompt (not the compact production head); annotated 2026-09-02 from provenance, the sheet itself did not record its arm"
+    }
   },
-  "effective_verdict": "FAIL"
+  "effective_verdict": "PASS"
 }
