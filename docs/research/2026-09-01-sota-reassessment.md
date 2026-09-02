@@ -203,6 +203,35 @@ watching it.
 - "The ORPO negative result was tuning" → it was a zero-gradient bug in the trainer.
 - "Sub-linear retrieval needs ANN" → exact KNN is sub-ms at our corpus size.
 
+## Addendum — outage found during this review (2026-09-01 20:35–20:41)
+
+While re-deriving the numbers above, production went down and was restored:
+
+- `mlx-server` died with **`LastExitStatus = 9` (SIGKILL)** and was revived by
+  KeepAlive at 20:31:21. `service-loop` logged normal work at 20:35:29, then was
+  **booted out of launchd entirely** (job absent, plist intact and enabled, binary
+  unchanged at `3cbda5499`, no `.staged-*` leftover, auto-updater aborted on
+  integrity as usual). This session issued no `bootout`. The sequence — serving
+  stack torn down, daemon unloaded, no restore — matches a peer session's
+  deploy/training window whose restore step did not complete; four other
+  claude-code processes were running. Attribution needs `sudo log show`.
+- Restart was **gated** on the live store: `PRAGMA quick_check = ok`, WAL 0 B, so
+  the unclean-shutdown `quick_check` path could not quarantine it. Bootstrapped at
+  ~20:41; verified same inode (148374916), memories 52 → 52, gateway :3006 up,
+  both gates live in the process environment.
+- This is the single-owner problem from `session-worktree-isolation.md` made
+  concrete: two sessions' prod-stop traps are not aware of each other. A
+  `bootout` that is not paired with a verified `bootstrap` in the *same* trap
+  leaves production dark until someone notices. Recommendation #6 (robust
+  self-measurement) would have caught it in minutes; tonight it was caught by a
+  sanity check at the end of an unrelated task.
+
+Also confirmed for recommendation #2: the quarantined store has 102 tables vs the
+live 93 (the live one lacks `embeddings`, `relational_episodes`, `eval_*`,
+`hula_tasks`, `ab_tests`, `celebrations` — created lazily by subsystems that have
+not run since). A straight swap-back would lose the 52 memories written since
+08-04, so the restore is a **merge** (old ← new deltas), not a swap.
+
 ## Sources
 
 arXiv 2501.13956 (Zep/Graphiti) · 2604.17283 (HorizonBench) · 2601.02845 (TiMem) ·
