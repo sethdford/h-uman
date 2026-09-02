@@ -56,3 +56,7 @@ double hu_temporal_decay_score(double base_score, double decay_factor, const cha
     double decayed = base_score * exp(-decay_factor * age_hours / 24.0);
     return decayed;
 }
+
+double hu_retrieval_parse_timestamp_hours(const char *timestamp, size_t timestamp_len) {
+    return parse_iso8601_hours(timestamp, timestamp_len);
+}

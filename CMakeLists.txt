@@ -3630,6 +3630,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_cli_memory_import.c
     tests/test_store_sqlite_vec.c
     tests/test_semantic_index.c
+    tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
