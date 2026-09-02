@@ -13,28 +13,23 @@
 
 #if HU_IS_TEST
 
-hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc,
-    const char *feed_url, size_t url_len,
-    hu_rss_article_t *articles, size_t cap, size_t *out_count) {
+hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc, const char *feed_url, size_t url_len,
+                             hu_rss_article_t *articles, size_t cap, size_t *out_count) {
     (void)alloc;
     (void)feed_url;
     (void)url_len;
     if (!articles || !out_count || cap < 2)
         return HU_ERR_INVALID_ARGUMENT;
     memset(articles, 0, sizeof(hu_rss_article_t) * 2);
-    (void)strncpy(articles[0].title, "Tech News: AI Advances",
-        sizeof(articles[0].title) - 1);
-    (void)strncpy(articles[0].link, "https://example.com/article/1",
-        sizeof(articles[0].link) - 1);
+    (void)strncpy(articles[0].title, "Tech News: AI Advances", sizeof(articles[0].title) - 1);
+    (void)strncpy(articles[0].link, "https://example.com/article/1", sizeof(articles[0].link) - 1);
     (void)strncpy(articles[0].description, "Latest in AI research",
-        sizeof(articles[0].description) - 1);
+                  sizeof(articles[0].description) - 1);
     articles[0].pub_date = (int64_t)time(NULL);
-    (void)strncpy(articles[1].title, "Tech News: AI Advances",
-        sizeof(articles[1].title) - 1);
-    (void)strncpy(articles[1].link, "https://example.com/article/2",
-        sizeof(articles[1].link) - 1);
+    (void)strncpy(articles[1].title, "Tech News: AI Advances", sizeof(articles[1].title) - 1);
+    (void)strncpy(articles[1].link, "https://example.com/article/2", sizeof(articles[1].link) - 1);
     (void)strncpy(articles[1].description, "Latest in AI research",
-        sizeof(articles[1].description) - 1);
+                  sizeof(articles[1].description) - 1);
     articles[1].pub_date = (int64_t)time(NULL);
     *out_count = 2;
     return HU_OK;
@@ -54,8 +49,8 @@ static const char *bounded_strstr(const char *hay, size_t hay_len, const char *n
 }
 
 /* Simple substring extraction: find content between <tag> and </tag>. */
-static const char *find_tag_content(const char *xml, size_t xml_len,
-    const char *tag, size_t *out_len) {
+static const char *find_tag_content(const char *xml, size_t xml_len, const char *tag,
+                                    size_t *out_len) {
     char open[64], close[64];
     size_t tag_len = strlen(tag);
     if (tag_len >= sizeof(open) - 2)
@@ -76,8 +71,7 @@ static const char *find_tag_content(const char *xml, size_t xml_len,
 }
 
 /* Find next <item> or <entry> start. */
-static const char *find_next_item(const char *xml, size_t xml_len,
-    const char *pos, int *is_atom) {
+static const char *find_next_item(const char *xml, size_t xml_len, const char *pos, int *is_atom) {
     (void)xml;
     (void)xml_len;
     const char *item = strstr(pos, "<item>");
@@ -94,8 +88,7 @@ static const char *find_next_item(const char *xml, size_t xml_len,
 }
 
 /* Find end of current item/entry. */
-static const char *find_item_end(const char *xml, size_t xml_len,
-    const char *pos, int is_atom) {
+static const char *find_item_end(const char *xml, size_t xml_len, const char *pos, int is_atom) {
     const char *end_tag = is_atom ? "</entry>" : "</item>";
     const char *e = strstr(pos, end_tag);
     return e ? e : xml + xml_len;
@@ -137,8 +130,8 @@ static int64_t parse_pub_date(const char *s, size_t len) {
 }
 
 /* Extract link from Atom <link href="..."/> */
-static void extract_atom_link(const char *item_start, const char *item_end,
-    char *out_link, size_t link_cap) {
+static void extract_atom_link(const char *item_start, const char *item_end, char *out_link,
+                              size_t link_cap) {
     out_link[0] = '\0';
     const char *p = item_start;
     while (p < item_end) {
@@ -162,9 +155,8 @@ static void extract_atom_link(const char *item_start, const char *item_end,
     }
 }
 
-hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc,
-    const char *feed_url, size_t url_len,
-    hu_rss_article_t *articles, size_t cap, size_t *out_count) {
+hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc, const char *feed_url, size_t url_len,
+                             hu_rss_article_t *articles, size_t cap, size_t *out_count) {
     if (!alloc || !feed_url || !articles || !out_count || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
@@ -176,7 +168,10 @@ hu_error_t hu_news_fetch_rss(hu_allocator_t *alloc,
     url_buf[url_len] = '\0';
 
     hu_http_response_t resp = {0};
-    hu_error_t err = hu_http_get(alloc, url_buf, NULL, &resp);
+    /* Publishers relocate feeds behind 301/307 and leave the old URL
+     * redirecting for years; follow a few HTTPS hops instead of logging
+     * "HTTP 307" on every poll (openai.com/blog/rss.xml did, 2026-09). */
+    hu_error_t err = hu_http_get_follow(alloc, url_buf, NULL, 3, &resp);
     if (err != HU_OK)
         return err;
     if (!resp.body || resp.status_code != 200) {
