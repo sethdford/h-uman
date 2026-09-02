@@ -1378,6 +1378,29 @@ static hu_error_t parse_feeds(hu_allocator_t *a, hu_config_t *cfg, const hu_json
                     strlen(cfg->feeds.gmail_refresh_token) + 1);
         cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
     }
+    s = hu_json_get_string(obj, "gmail_quota_project");
+    if (s) {
+        if (cfg->feeds.gmail_quota_project)
+            a->free(a->ctx, cfg->feeds.gmail_quota_project,
+                    strlen(cfg->feeds.gmail_quota_project) + 1);
+        cfg->feeds.gmail_quota_project = hu_strdup(a, s);
+    }
+    /* Nested form — "gmail": {client_id, client_secret, refresh_token,
+     * quota_project}. The live config carries both spellings (2026-09); the
+     * flat keys above win, the nested block only fills what is still unset.
+     * Before this the nested quota_project was silently ignored and every
+     * Gmail poll was a 403. */
+    const hu_json_value_t *gobj = hu_json_object_get(obj, "gmail");
+    if (gobj && gobj->type == HU_JSON_OBJECT) {
+        if (!cfg->feeds.gmail_client_id && (s = hu_json_get_string(gobj, "client_id")))
+            cfg->feeds.gmail_client_id = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_client_secret && (s = hu_json_get_string(gobj, "client_secret")))
+            cfg->feeds.gmail_client_secret = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_refresh_token && (s = hu_json_get_string(gobj, "refresh_token")))
+            cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_quota_project && (s = hu_json_get_string(gobj, "quota_project")))
+            cfg->feeds.gmail_quota_project = hu_strdup(a, s);
+    }
     s = hu_json_get_string(obj, "twitter_bearer_token");
     if (s) {
         if (cfg->feeds.twitter_bearer_token)

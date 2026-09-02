@@ -2212,8 +2212,10 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
 /* Consecutive successful turns that produced zero-length assistant text
- * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
+ * (e.g. MLX HTTP 52 after response_guard retry). Only the non-test loop uses it. */
+#ifndef HU_IS_TEST
 static unsigned g_empty_agent_response_streak;
+#endif
 
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                           hu_service_channel_t *channels, size_t channel_count, hu_agent_t *agent,
@@ -3506,25 +3508,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 fp.relevance_threshold = config->feeds.relevance_threshold;
                             }
                             if (config) {
-                                if (config->feeds.gmail_client_id) {
-                                    fp.gmail_client_id = config->feeds.gmail_client_id;
-                                    fp.gmail_client_id_len = strlen(config->feeds.gmail_client_id);
-                                }
-                                if (config->feeds.gmail_client_secret) {
-                                    fp.gmail_client_secret = config->feeds.gmail_client_secret;
-                                    fp.gmail_client_secret_len =
-                                        strlen(config->feeds.gmail_client_secret);
-                                }
-                                if (config->feeds.gmail_refresh_token) {
-                                    fp.gmail_refresh_token = config->feeds.gmail_refresh_token;
-                                    fp.gmail_refresh_token_len =
-                                        strlen(config->feeds.gmail_refresh_token);
-                                }
-                                if (config->feeds.twitter_bearer_token) {
-                                    fp.twitter_bearer_token = config->feeds.twitter_bearer_token;
-                                    fp.twitter_bearer_token_len =
-                                        strlen(config->feeds.twitter_bearer_token);
-                                }
+/* Borrow a config credential string + length into the processor. */
+#define HU_FEED_CRED(field)                               \
+    do {                                                  \
+        if (config->feeds.field) {                        \
+            fp.field = config->feeds.field;               \
+            fp.field##_len = strlen(config->feeds.field); \
+        }                                                 \
+    } while (0)
+                                HU_FEED_CRED(gmail_client_id);
+                                HU_FEED_CRED(gmail_client_secret);
+                                HU_FEED_CRED(gmail_refresh_token);
+                                HU_FEED_CRED(gmail_quota_project);
+                                HU_FEED_CRED(twitter_bearer_token);
+#undef HU_FEED_CRED
                             }
                             hu_feed_config_t fconf;
                             memset(&fconf, 0, sizeof(fconf));

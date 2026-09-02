@@ -3040,6 +3040,10 @@ hu_error_t cmd_feed(hu_allocator_t *alloc, int argc, char **argv) {
             fp.gmail_refresh_token = cfg.feeds.gmail_refresh_token;
             fp.gmail_refresh_token_len = strlen(cfg.feeds.gmail_refresh_token);
         }
+        if (cfg.feeds.gmail_quota_project) {
+            fp.gmail_quota_project = cfg.feeds.gmail_quota_project;
+            fp.gmail_quota_project_len = strlen(cfg.feeds.gmail_quota_project);
+        }
         if (cfg.feeds.twitter_bearer_token) {
             fp.twitter_bearer_token = cfg.feeds.twitter_bearer_token;
             fp.twitter_bearer_token_len = strlen(cfg.feeds.twitter_bearer_token);
