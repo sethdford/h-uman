@@ -4,10 +4,9 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14058   # src/daemon.c, measured 2026-09-02 (AI-tell drop-on-second-miss)
-                     # took daemon.c to 14085; 5 lines of headroom are reserved for the SIGHUP
-                     # config-reload call site the carve was made to pay for. Net: -42.
-                     # Lower as god-files are carved.
+MAX_BASELINE=13664   # src/daemon.c, measured 2026-09-02 after slice A of the batch-reply
+                     # carve-out (history + context loading -> src/daemon/
+                     # daemon_reactive_context.c; was 14058). Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
