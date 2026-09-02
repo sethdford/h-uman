@@ -259,6 +259,20 @@ live 93 (the live one lacks `embeddings`, `relational_episodes`, `eval_*`,
 not run since). A straight swap-back would lose the 52 memories written since
 08-04, so the restore is a **merge** (old ← new deltas), not a swap.
 
+### Incident 2026-09-02 02:20–02:58 — my Task-10 threading change crash-looped `:8741`
+
+`MLXHTTPServer(ThreadingMixIn, HTTPServer)` let a second request's pre-lock MLX work
+(tokenizer / prompt cache / steering) overlap a running generation; the process died with
+SIGSEGV after almost every completed reply — **36 restart banners in ~35 minutes**, each
+right after a `-> N tokens` line, `LastExitStatus = 11`. Caught by a 6 ms empty reply
+to a live probe, not by any alarm. Reverted to the single-threaded server
+(gemma-realtime-1 `891e1b0`), `/v1/embeddings` and the lock kept; restarted once;
+sequential + overlapping load produced 0 new banners. Consequence: the
+`X-HU-Priority: live` header is accepted but has **no effect** until admission control is
+rebuilt as a queue in front of one worker — Task 10 is reopened, not done. Lesson: a
+server whose model calls were written single-threaded cannot be made concurrent by
+changing the socket server class; the invariant lives in the handlers.
+
 ## Sources
 
 arXiv 2501.13956 (Zep/Graphiti) · 2604.17283 (HorizonBench) · 2601.02845 (TiMem) ·
