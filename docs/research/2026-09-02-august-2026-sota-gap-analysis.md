@@ -57,3 +57,23 @@ Reference-free preference training on-device with a working objective (ORPO patc
 ## Sequence
 
 #1 and #2 are measurements and run first (days, no product change). #3 gates the only pending activation (semantic recall LIVE). #4/#5 are the architecture work (weeks). #6/#7 are instruments. #8 is the training upgrade that #1 will score. #9 last. The allowlist stays closed until #1–#3 have numbers.
+
+## Appendix — the first authorship measurement (2026-09-02, LUAR-MUD, n=37 blind-A/B trials)
+
+| Pair | LUAR cosine |
+|---|---|
+| Seth ↔ Seth (different texts, same author) | **0.396** |
+| adapter reply ↔ real Seth | **0.344** |
+| adapter ↔ adapter | **0.462** |
+
+AUC of "is this real Seth?" by LUAR similarity: **0.782**. In 13/37 trials the adapter reply
+sits closer to its real counterpart than Seth's own self-similarity.
+
+Reading: the same shape PersonalBench reports on blogs, reproduced on texting-length inputs.
+The adapter's replies resemble *each other* more than Seth's replies resemble each other —
+the model's fingerprint and compressed dispersion dominate — and they sit below Seth's
+self-similarity. Absolute values are not comparable to the Blog-corpus floor/ceiling (64-token
+windows vs 200-word posts); the ordering and the AUC are. This is the north-star baseline:
+an adapter is better when AI↔Seth rises toward Seth↔Seth **and** AI↔AI falls toward it.
+Artifact: `~/.human/logs/luar-authorship-2026-09-02.json`; probe: `/tmp/luar_probe.py` (to be
+promoted into `scripts/blind_ab/authorship_gap.py` with 5v5 profile embeddings per PersonalBench).
