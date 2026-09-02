@@ -56,8 +56,14 @@ BLIND_AB="${REPO}/scripts/eval_blinded_ab.py"
 BLIND_AB_GATE="${REPO}/docs/evaluation/blind_ab_gate.json"
 GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
 
-# Auto-commit refreshed blind_ab_gate.json after stage 3 (env-overridable)
-HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-1}
+# Auto-commit refreshed blind_ab_gate.json after stage 3 (env-overridable).
+# Default OFF since 2026-09-02: committing from a launchd job into the shared
+# checkout's local `main` collides with interactive sessions (that branch is
+# routinely dozens of commits behind origin, so the push silently fails and
+# the commits strand — five did between 07-30 and 08-03). The gate JSON
+# itself is still written; a human lands it. Set HU_NIGHTLY_AUTOPUSH=1 only
+# from a dedicated clone that nothing else uses.
+HU_NIGHTLY_AUTOPUSH=${HU_NIGHTLY_AUTOPUSH:-0}
 
 # Advisory Binoculars AI-tell metric after stage 3 (~12 min GPU, serial,
 # results-JSON only — never feeds the gate). Disable with HU_NIGHTLY_BINOCULARS=0.
