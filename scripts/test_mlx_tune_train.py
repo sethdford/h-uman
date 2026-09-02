@@ -222,12 +222,37 @@ def test_write_or_verify_adapter_config_preserves_resolved_keys(tmp_path):
 
 
 def test_write_or_verify_adapter_config_noop_when_already_correct(tmp_path):
-    cfg = {"fine_tune_type": "lora", "lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0}}
+    cfg = {
+        "fine_tune_type": "lora",
+        "num_layers": 8,
+        "lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0},
+    }
     cfg_path = tmp_path / "adapter_config.json"
     cfg_path.write_text(json.dumps(cfg))
     mtime_before = cfg_path.stat().st_mtime_ns
     mt.write_or_verify_adapter_config(tmp_path, rank=8, scale=2.0, dropout=0.0, num_layers=8)
     assert cfg_path.stat().st_mtime_ns == mtime_before  # untouched, no rewrite
+
+
+def test_write_or_verify_adapter_config_corrects_wrong_num_layers(tmp_path):
+    """mlx-tune's own _save_adapters_and_config() (mlx_tune/rl_trainers.py)
+    auto-detects num_layers as the model's TOTAL layer count, not the
+    LoRA-targeted subset passed to model._apply_lora(num_layers=...). Even
+    when rank/scale/dropout are already correct (so no rewrite would
+    otherwise fire), a wrong num_layers must still be corrected -- a
+    downstream mlx_lm loader would otherwise try to LoRA-convert more
+    layers than the safetensors file has weights for."""
+    cfg = {
+        "fine_tune_type": "lora",
+        "num_layers": 46,  # e.g. GLM-4.5-Air's total transformer block count
+        "lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0},
+    }
+    cfg_path = tmp_path / "adapter_config.json"
+    cfg_path.write_text(json.dumps(cfg))
+    mt.write_or_verify_adapter_config(tmp_path, rank=8, scale=2.0, dropout=0.0, num_layers=8)
+    on_disk = json.loads(cfg_path.read_text())
+    assert on_disk["num_layers"] == 8
+    assert on_disk["lora_parameters"]["scale"] == 2.0
 
 
 # --------------------------------------------------------------------------

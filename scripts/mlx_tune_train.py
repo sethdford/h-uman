@@ -355,6 +355,19 @@ def write_or_verify_adapter_config(
     if the two ever disagree, prefer the value this contract requires
     (train-glm-adapter.sh's post-training check reads exactly this field --
     see .claude/rules/lora-scale-default-or-die.md).
+
+    ALSO corrects num_layers unconditionally (not just when lora_parameters
+    needed a rewrite, and not via setdefault): mlx-tune's own
+    _save_adapters_and_config() (mlx_tune/rl_trainers.py) auto-detects
+    num_layers as `len(actual_model.layers)` -- i.e. the model's TOTAL layer
+    count -- with no awareness of the num_layers we actually passed to
+    model._apply_lora(num_layers=...) to LoRA-target only the last N layers.
+    Left uncorrected, a downstream mlx_lm loader reading this file would try
+    to convert more layers to LoRA than the safetensors file has weights
+    for. Since rank/scale/dropout are usually already correct (this driver
+    computes the exact alpha needed), needs_rewrite alone would almost never
+    fire, and setdefault() would refuse to overwrite an already-wrong value
+    -- both are why this is a SEPARATE, unconditional check.
     """
     cfg_path = adapter_dir / "adapter_config.json"
     if cfg_path.is_file():
@@ -369,16 +382,24 @@ def write_or_verify_adapter_config(
         or lp.get("rank") != rank
         or float(lp.get("scale", -1)) != float(scale)
         or float(lp.get("dropout", -1)) != float(dropout)
+        or cfg.get("num_layers") != num_layers
     )
     if needs_rewrite:
         existing_keys = lp.get("keys") if isinstance(lp, dict) else None
         cfg["lora_parameters"] = {"rank": rank, "scale": scale, "dropout": dropout}
         if existing_keys:
             cfg["lora_parameters"]["keys"] = existing_keys
-        cfg.setdefault("num_layers", num_layers)
+        old_num_layers = cfg.get("num_layers")
+        cfg["num_layers"] = num_layers
         cfg.setdefault("fine_tune_type", "lora")
         with open(cfg_path, "w") as f:
             json.dump(cfg, f, indent=2)
+        if old_num_layers != num_layers:
+            print(
+                f"[mlx_tune_train] corrected {cfg_path} num_layers "
+                f"(mlx-tune wrote {old_num_layers!r} -- total model layers, "
+                f"not the LoRA-targeted count -- now {num_layers})"
+            )
         print(
             f"[mlx_tune_train] rewrote {cfg_path} lora_parameters "
             f"(was {lp!r}, now rank={rank} scale={scale} dropout={dropout})"
