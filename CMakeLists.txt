@@ -986,6 +986,7 @@ set(HU_CORE_SOURCES
     # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
+    src/memory/graph_ingest.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
@@ -3598,6 +3599,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
+    tests/test_graph_ingest.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
