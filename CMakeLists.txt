@@ -515,6 +515,15 @@ if(HU_ENABLE_MEMORY_LRU_ENGINE)
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/memory_lru.c)
 endif()
 list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/sqlite.c)
+if(HU_ENABLE_SQLITE)
+    # Vendored sqlite-vec (third_party, pure C, exact KNN) + the store over it.
+    # Third-party code is compiled warning-silent; it is not ours to lint.
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
+         third_party/sqlite-vec/sqlite-vec.c)
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(src/memory/engines/store_sqlite_vec.c PROPERTIES
+                                INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/sqlite-vec")
+endif()
 # postgres, redis, api: always built (mock in HU_IS_TEST; real when HU_ENABLE_*)
 list(APPEND MEMORY_ENGINE_SOURCES
     src/memory/engines/postgres.c
@@ -1277,6 +1286,7 @@ set(HU_CORE_SOURCES
     src/memory/vector/chunker.c
     src/memory/vector/store_mem.c
     src/memory/vector/embedder_local.c
+    src/memory/vector/embedder_http.c
     src/memory/vector/embedder_gemini_adapter.c
     src/memory/vector/embeddings.c
     src/memory/vector/embeddings_gemini.c
@@ -3602,6 +3612,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph.c
     tests/test_graph_ingest.c
     tests/test_cli_memory_import.c
+    tests/test_store_sqlite_vec.c
+    tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
