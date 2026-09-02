@@ -7,6 +7,7 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
+#include "human/core/process_util.h"
 #include "human/memory/graph.h"
 #include "human/ml/lora_retrain_runner.h"
 #include "test_framework.h"
@@ -16,6 +17,43 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* ── miner argv0 resolution (2026-09-02) ──────────────────────────────
+ * The pair-count probe exec'd a bare "human", which PATH-resolved to a
+ * May-17 CLI in ~/.local/bin — its old config schema made the probe's
+ * stdout unparseable and the retrain loop was silently dead for weeks
+ * (1,558 'lora_retrain_probe_failed' lines, doctor 0 errors). The probe
+ * must exec the SAME binary the daemon is running. */
+
+static void test_miner_argv0_prefers_explicit_ctx_value(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0("/opt/custom/human", "/usr/local/bin/human"),
+                     "/opt/custom/human");
+}
+
+static void test_miner_argv0_uses_self_exe_when_ctx_unset(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, "/Users/x/.local/bin/human-daemon"),
+                     "/Users/x/.local/bin/human-daemon");
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0("", "/Users/x/.local/bin/human-daemon"),
+                     "/Users/x/.local/bin/human-daemon");
+}
+
+static void test_miner_argv0_falls_back_to_bare_human_last(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, NULL), "human");
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, ""), "human");
+}
+
+static void test_self_exe_path_resolves_to_a_real_file(void) {
+    char buf[1024];
+    HU_ASSERT_TRUE(hu_process_self_exe_path(buf, sizeof(buf)));
+    HU_ASSERT_TRUE(buf[0] == '/');
+    HU_ASSERT_EQ(access(buf, X_OK), 0);
+}
+
+static void test_self_exe_path_rejects_tiny_buffer(void) {
+    char tiny[4];
+    HU_ASSERT_FALSE(hu_process_self_exe_path(tiny, sizeof(tiny)));
+    HU_ASSERT_FALSE(hu_process_self_exe_path(NULL, 0));
+}
 
 /* ── Subprocess hook capture machinery ────────────────────────────────── */
 
@@ -603,4 +641,9 @@ void run_w14_lora_retrain_tests(void) {
     HU_RUN_TEST(test_retrain_probe_malformed_routes_to_failed);
     HU_RUN_TEST(test_retrain_gate_exit_nonzero_routes_to_failed);
     HU_RUN_TEST(test_enqueue_helper_sets_correct_spec);
+    HU_RUN_TEST(test_miner_argv0_prefers_explicit_ctx_value);
+    HU_RUN_TEST(test_miner_argv0_uses_self_exe_when_ctx_unset);
+    HU_RUN_TEST(test_miner_argv0_falls_back_to_bare_human_last);
+    HU_RUN_TEST(test_self_exe_path_resolves_to_a_real_file);
+    HU_RUN_TEST(test_self_exe_path_rejects_tiny_buffer);
 }

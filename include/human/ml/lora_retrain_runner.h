@@ -75,12 +75,20 @@ typedef hu_error_t (*hu_lora_retrain_subprocess_fn)(const char *const argv[],
 typedef void (*hu_lora_retrain_event_fn)(const char *event_name, const char *payload_json,
                                          void *user_data);
 
+/* Pure: which argv[0] the pair-count probe execs. Explicit ctx value wins;
+ * else the running executable's own path (`self_exe`, from
+ * hu_process_self_exe_path); else the bare "human" as a last resort.
+ * A bare "human" is PATH-resolved and on 2026-09-02 that was a May-17 CLI
+ * whose config schema made the probe unparseable — retrain silently dead. */
+const char *hu_lora_retrain_miner_argv0(const char *ctx_argv0, const char *self_exe);
+
 typedef struct hu_lora_retrain_ctx {
     struct hu_allocator *alloc; /* optional; system allocator if NULL */
 
     /* Subprocess command pieces — all NUL-terminated. NULL falls back to the
      * documented defaults; that's the normal production path. */
-    const char *miner_argv0;     /* default: "human" */
+    const char *miner_argv0;     /* default: the running executable (see
+                                    hu_lora_retrain_miner_argv0), last resort "human" */
     const char *miner_subcmd[3]; /* default: {"ml", "mine-corrections", NULL} */
     const char *finetune_script; /* default: "scripts/finetune-gemma.py" */
     const char *gate_script;     /* default: "scripts/check-lora-ab.sh" */
