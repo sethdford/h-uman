@@ -4,7 +4,10 @@
  * reply, so the graph stops treating h-uman's output as Seth's and the
  * daemon can recall its own commitments later. */
 #ifdef HU_ENABLE_SQLITE
+#include "human/agent.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
+#include "human/daemon/message_router.h"
 #include "human/memory.h"
 #include "human/memory/agent_facts.h"
 #include "human/memory/graph.h"
@@ -252,12 +255,58 @@ static void dry_run_rejects_invalid_arguments(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ── Router path: runs even with reaction collection OFF ─────────────── */
+/* Production has reaction_collection.enabled=false. The first C3 wiring sat
+ * behind that early return inside hu_daemon_register_reply_for_reactions and
+ * never ran on a real reply. This drives the ROUTER entry point, not the
+ * agent_facts function directly, with reaction collection off. */
+static void agent_facts_router_path_runs_with_reaction_collection_off(void) {
+    set_gate("on");
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    hu_config_t *cfg = calloc(1, sizeof(*cfg));
+    hu_agent_t *agent = calloc(1, sizeof(*agent));
+    HU_ASSERT_NOT_NULL(cfg);
+    HU_ASSERT_NOT_NULL(agent);
+    HU_ASSERT_FALSE(cfg->reaction_collection.enabled); /* the production state */
+    agent->verifier_graph = g;
+    agent->memory = &mem;
+
+    sqlite3 *gdb = hu_graph_sqlite_connection(g);
+    HU_ASSERT_EQ(count_rows(gdb, "SELECT COUNT(*) FROM relations WHERE provenance LIKE 'agent:%'"),
+                 0); /* precondition */
+
+    static const char reply[] = "I work at Acme. I'll send you the contractor's number tomorrow.";
+    char ref[96];
+    hu_daemon_register_reply_for_reactions(cfg, agent, "imessage", "contact_router", "prompt",
+                                           reply, sizeof(reply) - 1, ref, sizeof(ref));
+
+    HU_ASSERT_TRUE(
+        count_rows(gdb, "SELECT COUNT(*) FROM relations WHERE provenance LIKE 'agent:%'") > 0);
+    sqlite3 *mdb = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(count_rows(mdb, "SELECT COUNT(*) FROM memories WHERE key LIKE 'agent-promise:%'"),
+                 1);
+
+    free(agent);
+    free(cfg);
+    mem.vtable->deinit(mem.ctx);
+    hu_graph_close(g, &alloc);
+    unlink(path);
+    set_gate(NULL);
+}
+
 void run_agent_facts_tests(void) {
     HU_TEST_SUITE("agent_facts");
     HU_RUN_TEST(agent_facts_off_mode_stores_nothing);
     HU_RUN_TEST(agent_facts_off_mode_tolerates_null_stores);
     HU_RUN_TEST(agent_facts_live_stores_promise_and_agent_provenance_fact);
     HU_RUN_TEST(agent_facts_shadow_mode_writes_nothing);
+    HU_RUN_TEST(agent_facts_router_path_runs_with_reaction_collection_off);
     HU_RUN_TEST(agent_provenance_does_not_supersede_seth_sourced_edge);
     HU_RUN_TEST(non_agent_provenance_still_supersedes);
     HU_RUN_TEST(dry_run_relabels_subject_and_finds_commitment);

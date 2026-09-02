@@ -83,9 +83,10 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
         float scaled_conf = f->confidence * HU_AGENT_FACTS_CONFIDENCE_SCALE;
         if (mode == HU_GATE_SHADOW) {
             hu_log_info("human", NULL,
-                        "[agent-facts SHADOW] would ingest %s %s %s (conf=%.2f, prov=%s) for %.*s",
-                        f->subject, f->predicate, f->object, (double)scaled_conf, provenance,
-                        cid_trunc, contact_id);
+                        "[agent-facts SHADOW] would ingest pred=%s subj_len=%zu obj_len=%zu "
+                        "(conf=%.2f, prov=%s) for %.*s",
+                        f->predicate, strlen(f->subject), strlen(f->object), (double)scaled_conf,
+                        provenance, cid_trunc, contact_id);
             continue;
         }
         if (!g)
@@ -105,8 +106,11 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
         snprintf(key, sizeof(key), "agent-promise:%.*s:%lld", cid_trunc, contact_id,
                  (long long)now);
         if (mode == HU_GATE_SHADOW) {
-            hu_log_info("human", NULL, "[agent-facts SHADOW] would store '%s' key=%s", commitment,
-                        key);
+            /* Redacted on purpose: the commitment text is the daemon's own reply
+             * to a real contact; the log carries its size, never its words. */
+            hu_log_info("human", NULL,
+                        "[agent-facts SHADOW] would store commitment (%zu bytes) key=%s",
+                        strlen(commitment), key);
         } else if (mem && mem->vtable && mem->vtable->store) {
             hu_memory_category_t cat;
             memset(&cat, 0, sizeof(cat));
