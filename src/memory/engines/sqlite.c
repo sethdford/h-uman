@@ -1909,9 +1909,22 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
         hu_error_t err = self->sem_embedder->vtable->embed_batch(
             self->sem_embedder->ctx, self->alloc, texts, lens, bn, embs);
         if (err != HU_OK) {
-            hu_log_warn("memory.semantic", NULL, "reindex batch at %zu failed: %s", i,
-                        hu_error_string(err));
-            continue; /* the next reindex picks these rows up again */
+            /* One pathological row poisons a padded batch (2026-09-01: the
+             * 8-bit embedder emitted NaN for 15/16 rows once a 7.7 KB row was
+             * in the batch). Retry each row alone; rows that still fail are
+             * counted and skipped, never silently dropped. */
+            memset(embs, 0, sizeof(embs));
+            size_t solo_ok = 0;
+            for (size_t j = 0; j < bn; j++) {
+                if (self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
+                                                      texts[j], lens[j], &embs[j]) == HU_OK)
+                    solo_ok++;
+                else
+                    embs[j].values = NULL;
+            }
+            hu_log_warn("memory.semantic", NULL,
+                        "reindex batch at %zu failed (%s); per-row retry embedded %zu/%zu", i,
+                        hu_error_string(err), solo_ok, bn);
         }
         for (size_t j = 0; j < bn; j++) {
             if (embs[j].values &&
