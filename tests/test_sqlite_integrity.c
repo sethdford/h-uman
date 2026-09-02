@@ -340,8 +340,31 @@ static void test_current_events_or_ignore_dedupes(void) {
     m.vtable->deinit(m.ctx);
 }
 
+/* The M3 live-fire segfault (macOS only, 2026-07 → 09-02): one engine
+ * connection used by a gateway worker thread and the service loop at once on
+ * a THREADSAFE=2 libsqlite3. A FULLMUTEX connection owns a mutex; a plain
+ * sqlite3_open() one does not on multi-thread builds. Pin the flag. */
+static void test_engine_connection_is_fullmutex(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, NULL);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_NOT_NULL(sqlite3_db_mutex(db));
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_process_serialize_is_idempotent(void) {
+    /* The test runner initialised sqlite long ago; the helper must report
+     * success (MISUSE means "already up", not failure) every time. */
+    HU_ASSERT_TRUE(hu_sqlite_process_serialize());
+    HU_ASSERT_TRUE(hu_sqlite_process_serialize());
+}
+
 void run_sqlite_integrity_tests(void) {
     HU_TEST_SUITE("sqlite_integrity");
+    HU_RUN_TEST(test_engine_connection_is_fullmutex);
+    HU_RUN_TEST(test_process_serialize_is_idempotent);
     HU_RUN_TEST(test_quick_check_ok_on_valid_db);
     HU_RUN_TEST(test_quick_check_false_on_null);
     HU_RUN_TEST(test_quarantine_moves_corrupt_file_aside);

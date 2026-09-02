@@ -32,6 +32,15 @@ JOBS=(
   "drift|file|$HOME_DIR/.human/drift/drift-DATE.json|$REPO/scripts/drift_monitor.py|any"
   "authorship|file|$LOGDIR/authorship-gap-DATE.json|$REPO/scripts/blind_ab/authorship_nightly.sh|any"
   "llm-judge|file|$LOGDIR/llm-judge-DATE.json|$REPO/scripts/blind_ab/llm_judge_tier.py|any"
+  # Product gate (multiturn + fidelity + REAL blind-A/B refresh). Its launchd
+  # job is calendar-only (04:05) and was dark 08-08 -> 09-02 while the laptop
+  # slept; the watchdog is the only thing that notices. Marker = a dated line
+  # in nightly-eval.log (the script logs "[YYYY-MM-DDTHH:MM:SS] ...").
+  "eval|line|$LOGDIR/nightly-eval.log|$REPO/scripts/nightly_eval.sh|any"
+  # Log hygiene: service-loop-error.log is launchd-appended forever (41 MB,
+  # 530k lines, no rotation on 2026-09-02). rotate-logs.sh copy-truncates
+  # oversized logs once a day and writes its own dated marker line.
+  "logrotate|line|$LOGDIR/logrotate.log|$REPO/scripts/rotate-logs.sh|any"
 )
 HOUR_NOW=${HU_WATCHDOG_HOUR:-$(date +%H)}
 in_window() {  # "any" | "HH-HH"
