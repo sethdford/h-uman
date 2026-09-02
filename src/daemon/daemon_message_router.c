@@ -31,6 +31,7 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -454,6 +455,16 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
             hu_log_warn("daemon", agent->observer, "message_ref attach failed: %s",
                         hu_error_string(ref_err));
     }
+    /* Contract C3 — the daemon's own reply becomes a first-class fact with
+     * provenance ("agent:<msg_ref>") instead of vanishing once sent. Env
+     * gated OFF by default (hu_gate_mode_from_env inside), so this is a
+     * no-op unless HU_AGENT_FACTS=shadow|on. `thread` is the same contact
+     * key the deep-extract writer uses (daemon.c's batch_key), so agent
+     * facts land in the same graph bucket as user facts for that contact. */
+    if (agent && thread && thread[0] && response && response_len > 0)
+        (void)hu_agent_facts_record_reply(agent->verifier_graph, agent->memory, thread,
+                                          strlen(thread), response, response_len, msg_ref,
+                                          (int64_t)time(NULL));
     if (msg_ref_out && msg_ref_cap > 0)
         snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
 #else

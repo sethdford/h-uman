@@ -31,6 +31,8 @@
 #include "human/eval_dashboard.h"
 #include "human/evaluation/evaluation.h"
 #include "human/memory.h"
+#include "human/memory/agent_facts.h"
+#include "human/memory/fact_extract.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
 #include "human/memory/graph_ingest.h"
@@ -484,15 +486,54 @@ static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, c
     return err;
 }
 
+/* human memory agent-facts-dry <reply text> — Contract C3 measurement hook.
+ * Runs the identical extraction hu_agent_facts_record_reply would run
+ * (subject relabelled "assistant", commitment detection with from_me=true),
+ * but never touches a graph or memory store. Used by
+ * scripts/eval_agent_promise_recall.py to score recall against a
+ * hand-labelled set without needing HU_AGENT_FACTS live or a running
+ * daemon. Prints one JSON object to stdout. */
+static hu_error_t memory_agent_facts_dry(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: human memory agent-facts-dry <reply text>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *reply = argv[3];
+    size_t reply_len = strlen(reply);
+    hu_fact_extract_result_t facts;
+    char commitment[512];
+    char who[64];
+    bool has_commitment = false;
+    hu_error_t err = hu_agent_facts_dry_run(reply, reply_len, &facts, commitment,
+                                            sizeof(commitment), who, sizeof(who), &has_commitment);
+    if (err != HU_OK) {
+        fprintf(stderr, "agent-facts-dry: %s\n", hu_error_string(err));
+        return err;
+    }
+    printf("{\"facts\": [");
+    for (size_t i = 0; i < facts.fact_count; i++) {
+        const hu_heuristic_fact_t *f = &facts.facts[i];
+        printf("%s{\"subject\": \"%s\", \"predicate\": \"%s\", \"object\": \"%s\", "
+               "\"confidence\": %.2f}",
+               i ? ", " : "", f->subject, f->predicate, f->object, (double)f->confidence);
+    }
+    printf("], \"commitment\": %s, \"commitment_text\": \"%s\", \"who\": \"%s\"}\n",
+           has_commitment ? "true" : "false", has_commitment ? commitment : "",
+           has_commitment ? who : "");
+    return HU_OK;
+}
+
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
         printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki|"
-               "import-facts|ground|reindex>\n");
+               "import-facts|ground|reindex|agent-facts-dry>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
     if (strcmp(sub, "import-facts") == 0)
         return memory_import_facts(alloc, argc, argv); /* needs graph.db only, no config */
+    if (strcmp(sub, "agent-facts-dry") == 0)
+        return memory_agent_facts_dry(argc, argv); /* pure extraction, no graph/memory/config */
     if (strcmp(sub, "ground") == 0 && argc < 5) {
         fprintf(stderr, "Usage: human memory ground <contact> <message>\n");
         return HU_ERR_INVALID_ARGUMENT;
