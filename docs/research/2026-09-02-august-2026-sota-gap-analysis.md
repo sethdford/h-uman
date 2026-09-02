@@ -89,3 +89,14 @@ v6 moved from well below the stranger floor to *at* it; it is not yet inside the
 Floor built from 60 other senders in chat.db (5 texts each), 200 bootstrap splits, 64-token
 episodes. Script: `scripts/blind_ab/authorship_gap.py`; artifacts
 `~/.human/logs/authorship-gap-2026-09-02.json`, `authorship-gap-v6-2026-09-02.json`.
+
+### Appendix C — nightly LoRA has not trained since at least 08-08; why (2026-09-02)
+
+The 03:07 run "succeeded" (rc=0) with a **349-byte adapter**. Chain: the retrain script
+stopped serving with `launchctl kill SIGTERM`; the plist's `KeepAlive={Crashed,SuccessfulExit}`
+relaunched the server within seconds; `training_loop.py`'s preflight saw a live server and
+refused; its failure path then wrote an *empty-tensors safetensors and returned 0*; the
+script staged it. The steering extractor then loaded the base (rc=137, killed) and the
+machine rebooted four minutes later. Fixed: bootout/bootstrap instead of kill/kickstart with
+a wait-until-port-free, refusal exits 3 with no placeholder, and `scripts/adapter_is_real.py`
+(size > 1 MB, lora_b non-zero, scale ≤ 4) gates staging. Proof pending: the next window.

@@ -733,6 +733,14 @@ def summarize_outcomes(outcomes: list[dict]) -> dict:
 RESOLVE_ONLY = "--resolve-only" in sys.argv
 
 
+def training_outcome_rc(train_rc: int, adapter_exists: bool) -> int:
+    """Exit code for a training attempt. 0 only when the trainer succeeded AND an
+    adapter file exists. 3 = refused/failed (nothing to stage). Pure; tested."""
+    if train_rc == 0 and adapter_exists:
+        return 0
+    return 3
+
+
 def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list[dict], int]:
     """For each outcome, look up its prompt_hash in the messages table.
     Returns (resolved, skipped) where:
@@ -1170,7 +1178,7 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             print(f"  [preflight] model={_model_for_check}")
             print(f"  [preflight] set HU_TRAIN_WINDOW / learning.training_window to allow a "
                   f"nightly slot, or HU_TRAIN_SKIP_PREFLIGHT=1 to override")
-            return 0, None, None
+            return 3, None, None  # refusal is a FAILURE, never a 'trained nothing' success
 
     try:
         return _run_mlx_lora_training_inner(resolved, adapter_out, iters, scale, model)
@@ -1513,12 +1521,14 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
-    if rc != 0 or not adapters_file.exists():
-        print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
-        print(f"  Falling back to empty-tensors safetensors.")
-        write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
-        # Still record the failed training attempt with whatever metrics we have
-        return 0
+    verdict = training_outcome_rc(rc, adapters_file.exists())
+    if verdict != 0:
+        # 2026-09-02: this path used to write an EMPTY-TENSORS safetensors and
+        # return 0. The nightly staged a 349-byte "adapter" as a success. A
+        # failed or refused run must leave NO adapter file and exit non-zero.
+        print(f"  FAILED: mlx_lm.lora training rc={rc}, adapter present={adapters_file.exists()} "
+              f"-> exiting {verdict}; no adapter written (no placeholder, ever).")
+        return verdict
 
     # Get the size of the safetensors file
     size = adapters_file.stat().st_size
