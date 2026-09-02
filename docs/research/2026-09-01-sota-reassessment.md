@@ -259,19 +259,29 @@ live 93 (the live one lacks `embeddings`, `relational_episodes`, `eval_*`,
 not run since). A straight swap-back would lose the 52 memories written since
 08-04, so the restore is a **merge** (old ← new deltas), not a swap.
 
-### Incident 2026-09-02 02:20–02:58 — my Task-10 threading change crash-looped `:8741`
+### Incident 2026-09-02 — `:8741` crash loop; what is established and what is not
 
-`MLXHTTPServer(ThreadingMixIn, HTTPServer)` let a second request's pre-lock MLX work
-(tokenizer / prompt cache / steering) overlap a running generation; the process died with
-SIGSEGV after almost every completed reply — **36 restart banners in ~35 minutes**, each
-right after a `-> N tokens` line, `LastExitStatus = 11`. Caught by a 6 ms empty reply
-to a live probe, not by any alarm. Reverted to the single-threaded server
-(gemma-realtime-1 `891e1b0`), `/v1/embeddings` and the lock kept; restarted once;
-sequential + overlapping load produced 0 new banners. Consequence: the
-`X-HU-Priority: live` header is accepted but has **no effect** until admission control is
-rebuilt as a queue in front of one worker — Task 10 is reopened, not done. Lesson: a
-server whose model calls were written single-threaded cannot be made concurrent by
-changing the socket server class; the invariant lives in the handlers.
+Established (dated evidence only — the mlx log has no dates and a `[00:29]` line recurs
+every day, so any "timeline since 00:29" read from it is invalid):
+
+- macOS crash reports for the launchd-owned `:8741` process: SIGSEGV in `libmlx.dylib` at
+  00:40, 01:37, 02:17, 02:19, 02:23, 02:24; `LastExitStatus = 11` at 02:55.
+- 02:17–02:56: the server died right after **every** completed reply — the same six-token
+  research-tick request every five minutes (`No actionable findings today.`) — while
+  running my `ThreadingMixIn` change (live from whichever restart first loaded the
+  modified file after ~22:00). Caught by a 6 ms empty reply to a live probe, not an alarm.
+- Reverted to the single-threaded server (gemma-realtime-1 `891e1b0`; `/v1/embeddings`
+  and the lock kept), restarted at 02:56. Since then: the same research ticks
+  (02:59:54, 03:04:59), two adapter swaps (03:00:15, 03:00:24), overlapping load — **zero
+  restarts** (20-minute watch running).
+
+Not established: the cause of the 00:40 and 01:37 crashes, which happened on the
+unmodified server (the process that started 20:31 loaded the file before my edits).
+That is a pre-existing instability, recorded as unknown.
+
+Consequence: `X-HU-Priority: live` is accepted but inert; Task 10 is reopened — admission
+control must be a queue in front of one worker, never concurrent handlers, because the
+handlers' MLX calls assume one request at a time.
 
 ## Sources
 

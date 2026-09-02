@@ -77,3 +77,15 @@ windows vs 200-word posts); the ordering and the AUC are. This is the north-star
 an adapter is better when AI↔Seth rises toward Seth↔Seth **and** AI↔AI falls toward it.
 Artifact: `~/.human/logs/luar-authorship-2026-09-02.json`; probe: `/tmp/luar_probe.py` (to be
 promoted into `scripts/blind_ab/authorship_gap.py` with 5v5 profile embeddings per PersonalBench).
+
+### Appendix B — 5v5 PersonalBench protocol on our corpus (2026-09-02)
+
+| Adapter (replies) | ceiling Seth↔Seth | floor Seth↔other humans | twin Seth↔adapter | gap closed |
+|---|---|---|---|---|
+| June `seth-voice-l4` (n=37 trials) | 0.707 | 0.615 | **0.576** (casual 0.569 / substantive 0.627) | −0.42 |
+| **v6 ORPO, production head (n=36, regenerated live)** | 0.715 | 0.633 | **0.626** (casual 0.629 / substantive 0.627) | −0.09 |
+
+v6 moved from well below the stranger floor to *at* it; it is not yet inside the human band.
+Floor built from 60 other senders in chat.db (5 texts each), 200 bootstrap splits, 64-token
+episodes. Script: `scripts/blind_ab/authorship_gap.py`; artifacts
+`~/.human/logs/authorship-gap-2026-09-02.json`, `authorship-gap-v6-2026-09-02.json`.
