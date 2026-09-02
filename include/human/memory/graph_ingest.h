@@ -1,6 +1,7 @@
 #ifndef HUMAN_MEMORY_GRAPH_INGEST_H
 #define HUMAN_MEMORY_GRAPH_INGEST_H
 
+#include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
 
@@ -29,6 +30,17 @@ extern "C" {
 hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                 const char *subject, const char *predicate, const char *object,
                                 float confidence, int64_t now, const char *provenance);
+
+/* Import facts from a JSONL file (one object per line: contact, subject,
+ * predicate, object, confidence, ts, source) into `g` via hu_graph_ingest_fact,
+ * in ascending `ts` order so supersession is chronological. `exclude` is an
+ * optional comma-separated predicate list to skip (e.g. "asking_about" —
+ * a question is not a fact about the user). Counts are always written.
+ * Returns HU_ERR_NOT_FOUND when the file is unreadable OR nothing was
+ * imported: an empty import must never look like a finished one. */
+hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, const char *path,
+                                       const char *exclude, size_t *imported_out,
+                                       size_t *skipped_out);
 
 #ifdef __cplusplus
 }

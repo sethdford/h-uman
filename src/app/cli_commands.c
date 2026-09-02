@@ -22,6 +22,9 @@
  * alongside the RL_FULL-gated competitive/leaderboard/gate handlers. The gated
  * handlers are only *called* under HU_ENABLE_RL_FULL, so an unconditional
  * declaration is safe and keeps `human eval score` available in every build. */
+#include "human/agent/graph_grounding.h"
+#include "human/agent/memory_loader.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/eval/cli_eval.h"
 #include "human/eval/turing_adversarial.h"
 #include "human/eval_benchmarks.h"
@@ -30,6 +33,7 @@
 #include "human/memory.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
+#include "human/memory/graph_ingest.h"
 #include "human/memory/personal_model.h"
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
@@ -392,12 +396,105 @@ hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv) {
 
 /* ── memory ─────────────────────────────────────────────────────────────── */
 
+/* ── memory import-facts / ground (Task 4, 2026-09-01) ─────────────────── */
+
+/* Resolve the grounding graph path: $HU_GRAPH_DB overrides (tests), else
+ * $HOME/.human/graph.db — the same file daemon.c:2435 opens. */
+static int memory_graph_path(char *buf, size_t cap) {
+    const char *env = getenv("HU_GRAPH_DB");
+    if (env && env[0])
+        return snprintf(buf, cap, "%s", env);
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    return snprintf(buf, cap, "%s/.human/graph.db", home);
+}
+
+/* human memory import-facts <jsonl> [--exclude pred1,pred2] — thin wrapper over
+ * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db. */
+static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: human memory import-facts <facts.jsonl> [--exclude p1,p2]\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *exclude = NULL;
+    for (int i = 4; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--exclude") == 0)
+            exclude = argv[i + 1];
+    char graph_path[1024];
+    int np = memory_graph_path(graph_path, sizeof(graph_path));
+    hu_graph_t *g = NULL;
+    hu_error_t err = HU_ERR_INVALID_ARGUMENT;
+    if (np > 0 && (size_t)np < sizeof(graph_path))
+        err = hu_graph_open(alloc, graph_path, (size_t)np, &g);
+    if (err != HU_OK || !g) {
+        fprintf(stderr, "import-facts: cannot open graph %s: %s\n", graph_path,
+                hu_error_string(err));
+        return err == HU_OK ? HU_ERR_INTERNAL : err;
+    }
+    size_t imported = 0, skipped = 0;
+    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &skipped);
+    hu_graph_close(g, alloc);
+    printf("{\"imported\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n", imported, skipped,
+           graph_path);
+    if (err == HU_ERR_NOT_FOUND && imported == 0)
+        fprintf(stderr, "import-facts: nothing imported from %s\n", argv[3]);
+    return err;
+}
+
+/* human memory ground <contact> <message> — run the production grounding
+ * composer against the graph and report matched entities + context bytes.
+ * This is the proof probe for the backfill: matched > 0 on a message about a
+ * known fact means the graph can reach it. */
+static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, const char *contact,
+                                      const char *msg) {
+    char graph_path[1024];
+    int np = memory_graph_path(graph_path, sizeof(graph_path));
+    hu_graph_t *g = NULL;
+    if (np <= 0 || (size_t)np >= sizeof(graph_path) ||
+        hu_graph_open(alloc, graph_path, (size_t)np, &g) != HU_OK || !g) {
+        fprintf(stderr, "ground: cannot open graph %s\n", graph_path);
+        return HU_ERR_NOT_FOUND;
+    }
+    hu_w7_facade_t *facade = NULL;
+    hu_error_t err = hu_w7_facade_open(g, alloc, &facade);
+    if (err != HU_OK) {
+        hu_graph_close(g, alloc);
+        return err;
+    }
+    hu_memory_loader_t loader;
+    memset(&loader, 0, sizeof(loader));
+    err = hu_memory_loader_init(&loader, alloc, mem, NULL, 8, 4000);
+    if (err == HU_OK) {
+        hu_memory_loader_set_facade(&loader, facade);
+        char *ctx = NULL;
+        size_t ctx_len = 0, matched = 0;
+        err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0, &ctx,
+                                      &ctx_len, &matched);
+        printf("matched=%zu bytes=%zu\n", matched, ctx_len);
+        if (ctx && ctx_len)
+            printf("%.*s\n", (int)ctx_len, ctx);
+        if (ctx)
+            alloc->free(alloc->ctx, ctx, ctx_len + 1);
+    }
+    hu_w7_facade_close(facade, alloc);
+    hu_graph_close(g, alloc);
+    return err;
+}
+
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki>\n");
+        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki|"
+               "import-facts|ground>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
+    if (strcmp(sub, "import-facts") == 0)
+        return memory_import_facts(alloc, argc, argv); /* needs graph.db only, no config */
+    if (strcmp(sub, "ground") == 0 && argc < 5) {
+        fprintf(stderr, "Usage: human memory ground <contact> <message>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
     if ((strcmp(sub, "search") == 0 || strcmp(sub, "get") == 0) && argc < 4) {
         fprintf(stderr, "Usage: human memory %s <query>\n", sub);
         return HU_ERR_INVALID_ARGUMENT;
@@ -585,6 +682,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                 hu_audit_logger_destroy(logger, alloc);
             }
         }
+    } else if (strcmp(sub, "ground") == 0) {
+        err = memory_ground_probe(alloc, &mem, argv[3], argv[4]);
     } else if (strcmp(sub, "wiki") == 0) {
         /* Wave C thin LLM-wiki surface: personal-model facts/topics as markdown. */
         const char *contact = NULL;

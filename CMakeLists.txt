@@ -3601,6 +3601,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_graph_ingest.c
+    tests/test_cli_memory_import.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
