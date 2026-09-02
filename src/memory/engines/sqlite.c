@@ -509,6 +509,13 @@ static const char *const schema_parts[] = {
     "source TEXT,"
     "published_at INTEGER NOT NULL,"
     "relevance REAL DEFAULT 0.5)",
+    /* current_events: 280k rows over 121k distinct (topic, summary) because
+     * INSERT OR IGNORE had no UNIQUE constraint to fire on — the same shape
+     * that grew opinions to 9.5M rows. Dedupe, then constrain. */
+    "DELETE FROM current_events WHERE id NOT IN "
+    "(SELECT MIN(id) FROM current_events GROUP BY topic, summary)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_current_events_topic_summary "
+    "ON current_events(topic, summary)",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {

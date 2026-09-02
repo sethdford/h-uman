@@ -319,6 +319,27 @@ static void test_create_does_not_quarantine_busy_db_after_unclean_shutdown(void)
     remove_db_and_siblings(path);
 }
 
+/* Task 13 (2026-09-01): INSERT OR IGNORE INTO current_events finally has a
+ * UNIQUE constraint to ignore against. 280k rows / 121k distinct before. */
+static void test_current_events_or_ignore_dedupes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t m = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(m.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&m);
+    HU_ASSERT_NOT_NULL(db);
+    const char *ins = "INSERT OR IGNORE INTO current_events(topic, summary, source, published_at, "
+                      "relevance) VALUES('ai','a thing happened','x',1,0.5)";
+    HU_ASSERT_EQ(sqlite3_exec(db, ins, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, ins, NULL, NULL, NULL), SQLITE_OK);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM current_events", -1, &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 0), 1);
+    sqlite3_finalize(st);
+    m.vtable->deinit(m.ctx);
+}
+
 void run_sqlite_integrity_tests(void) {
     HU_TEST_SUITE("sqlite_integrity");
     HU_RUN_TEST(test_quick_check_ok_on_valid_db);
@@ -332,6 +353,7 @@ void run_sqlite_integrity_tests(void) {
     HU_RUN_TEST(test_quick_check_busy_is_indeterminate_not_corrupt);
     HU_RUN_TEST(test_quick_check_reports_corrupt_and_ok_distinctly);
     HU_RUN_TEST(test_create_does_not_quarantine_busy_db_after_unclean_shutdown);
+    HU_RUN_TEST(test_current_events_or_ignore_dedupes);
 }
 
 #else

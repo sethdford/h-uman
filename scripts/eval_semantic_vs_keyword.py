@@ -104,8 +104,10 @@ def _cli_ranks(bin_path, args, target_sub, k):
     `  [3] key (0.812): content...` (semantic) or `  [3] key: content` (keyword)."""
     import subprocess
     try:
-        out = subprocess.run([bin_path, "memory", "search", *args], capture_output=True, text=True,
-                             timeout=120).stdout
+        # bytes, not text: memory content carries invalid UTF-8 (mangled smart
+        # quotes); a decode error must not abort the measurement.
+        out = subprocess.run([bin_path, "memory", "search", *args], capture_output=True,
+                             timeout=120).stdout.decode("utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         sys.exit("FATAL: CLI search timed out — refusing to score a hung path")
     rank = 0
@@ -128,9 +130,10 @@ def main_via_cli(a):
     errors on the first probe (an unreachable embedder must not score as 0)."""
     import subprocess
     probe = subprocess.run([a.via_cli, "memory", "search", "--semantic", PROBES[0][0]],
-                           capture_output=True, text=True, timeout=120)
-    if probe.returncode != 0 or "cannot attach" in probe.stderr or "search --semantic:" in probe.stderr:
-        sys.exit(f"FATAL: semantic CLI path unavailable: {probe.stderr.strip()[:200]} — refusing to score")
+                           capture_output=True, timeout=120)
+    perr = probe.stderr.decode("utf-8", errors="replace")
+    if probe.returncode != 0 or "cannot attach" in perr or "search --semantic:" in perr:
+        sys.exit(f"FATAL: semantic CLI path unavailable: {perr.strip()[:200]} — refusing to score")
     rows = []
     for q, target in PROBES:
         kw = _cli_ranks(a.via_cli, [q], target, a.k)

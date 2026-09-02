@@ -546,7 +546,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             for (size_t i = 0; i < count; i++) {
                 printf("  [%zu] %.*s: %.*s\n", i + 1, (int)entries[i].key_len,
                        entries[i].key ? entries[i].key : "",
-                       (int)(entries[i].content_len > 80 ? 80 : entries[i].content_len),
+                       (int)(entries[i].content_len > 2000 ? 2000 : entries[i].content_len),
                        entries[i].content ? entries[i].content : "");
                 hu_memory_entry_free_fields(alloc, &entries[i]);
             }
@@ -597,7 +597,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                 printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res.entries[i].key_len,
                        res.entries[i].key ? res.entries[i].key : "",
                        res.scores ? res.scores[i] : 0.0,
-                       (int)(res.entries[i].content_len > 100 ? 100 : res.entries[i].content_len),
+                       (int)(res.entries[i].content_len > 2000 ? 2000 : res.entries[i].content_len),
                        res.entries[i].content ? res.entries[i].content : "");
             hu_retrieval_result_free(alloc, &res);
         }
