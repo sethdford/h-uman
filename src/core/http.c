@@ -232,7 +232,10 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     if (max_redirs > 0) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, max_redirs);
-#ifdef CURLOPT_REDIR_PROTOCOLS_STR
+        /* CURLOPT_REDIR_PROTOCOLS_STR is an enum, not a macro, so #ifdef
+         * cannot detect it; on libcurl ≥ 7.85 the old option is deprecated
+         * and -Werror fails the Linux build (main CI 2026-09-02). */
+#if LIBCURL_VERSION_NUM >= 0x075500
         curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
 #else
         curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, (long)CURLPROTO_HTTPS);
