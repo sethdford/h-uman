@@ -118,29 +118,48 @@ sleep 5
 free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
 log "serving stopped; ${free_gb} GB free"
 
+# MLX training must use the PINNED 3.12 venv, the same interpreter human-serve.sh
+# picks for the server. Bare `python3` is /opt/homebrew/bin/python3 = 3.14, which
+# the project has ruled out for MLX (loky/semaphore crash). mlx imports under
+# 3.14, so this fails late and oddly rather than loudly — pin it.
+TRAIN_PY="$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12"
+[ -x "$TRAIN_PY" ] || TRAIN_PY="python3"
+
 # ── Train ──────────────────────────────────────────────────────────────────
 # Preflight still runs (it is the authority, not this script): with serving down
 # the co-residency check passes and the memory check sees real headroom. If it
 # refuses anyway, that refusal is correct and we restart serving untouched.
 if [[ -f "$SOURCE_JSONL" ]]; then
-    log "training from $SOURCE_JSONL"
-    train_stamp=$(mktemp "${TMPDIR:-/tmp}/hu-retrain-stamp.XXXXXX")
-    python3 "$REPO/scripts/training_loop.py" --source-jsonl "$SOURCE_JSONL" 2>&1 | tee -a "$LOG"
+    # --adapter-out is REQUIRED by training_loop.py's C3 fast path; without it the
+    # script prints "ERROR: --adapter-out is required when --source-jsonl is set"
+    # and exits 2 in under a second. Every scheduled run through 2026-09-03 hit
+    # either that or the KeepAlive relaunch above; this window had never trained.
+    # The adapter is STAGED only; promotion stays a separate, gated decision.
+    ADAPTER_OUT="${HU_RETRAIN_ADAPTER_OUT:-$HOME/.human/training-data/adapters/seth-m3-outcomes-$(date +%Y%m%d-%H%M%S)}"
+    log "training from $SOURCE_JSONL -> $ADAPTER_OUT (staged, not promoted)"
+    "$TRAIN_PY" "$REPO/scripts/training_loop.py" \
+        --source-jsonl "$SOURCE_JSONL" \
+        --adapter-out "$ADAPTER_OUT" 2>&1 | tee -a "$LOG"
     train_rc=${PIPESTATUS[0]}
     log "training exited rc=${train_rc}"
     # Belt and braces beside training_loop's own guard: never let a placeholder
     # or a zero-weight adapter sit in the staging dir looking like a success.
-    # training_loop stages to a FIXED path; only judge it if this run wrote it
-    # (newer than the stamp), so a stale-but-real adapter is never quarantined.
-    staged="$HOME/.human/training-data/adapters/seth-lora"
-    if [[ "$train_rc" == "0" && -d "$staged" && "$staged" -nt "$train_stamp" ]]; then
-        if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
-            log "  adapter real: $staged — $why"
-        else
-            log "  adapter FAILED the real-adapter guard: $why"
-            log "  quarantining $staged -> $staged.rejected-$(date +%s)"
-            mv "$staged" "$staged.rejected-$(date +%s)" 2>&1 | tee -a "$LOG" || true
-        fi
+    # training_loop may rename the dir with a base tag (…-glm); judge whichever
+    # exists. A run that exits 0 without a real adapter is the bug this guards.
+    staged="$ADAPTER_OUT"
+    [[ -d "$staged" ]] || staged=$(ls -d "${ADAPTER_OUT}"-* 2>/dev/null | head -1)
+    if [[ "$train_rc" != "0" ]]; then
+        log "  training FAILED rc=$train_rc — see the lines above; NO adapter was produced tonight"
+    elif [[ -z "$staged" || ! -d "$staged" ]]; then
+        log "  WARNING: rc=0 but no adapter dir at $ADAPTER_OUT — treating as failure"
+        train_rc=3
+    elif why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
+        log "  adapter real: $staged — $why"
+    else
+        log "  adapter FAILED the real-adapter guard: $why"
+        log "  quarantining $staged -> $staged.rejected-$(date +%s)"
+        mv "$staged" "$staged.rejected-$(date +%s)" 2>&1 | tee -a "$LOG" || true
+        train_rc=3
     fi
 else
     log "no source jsonl at $SOURCE_JSONL — skipping training"
