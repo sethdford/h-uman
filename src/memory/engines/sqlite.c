@@ -1976,7 +1976,7 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
      * the only path that ever revisits existing rows. Page by id cursor so
      * the policy lives only in hu_semantic_recall_key_is_indexable; each
      * page is finalized before remove() writes the same connection. */
-    size_t purged = 0;
+    size_t purged = 0, purge_failed = 0;
     if (self->sem_store->vtable->remove) {
         const char *psql = "SELECT id FROM memories_vec_meta WHERE id > ? ORDER BY id LIMIT ?";
         char *cursor = hu_strndup(self->alloc, "", 0);
@@ -2007,6 +2007,8 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
                 if (self->sem_store->vtable->remove(self->sem_store->ctx, ids[i], strlen(ids[i])) ==
                     HU_OK)
                     purged++;
+                else
+                    purge_failed++;
                 hu_str_free(self->alloc, ids[i]);
             }
             hu_str_free(self->alloc, cursor);
@@ -2018,6 +2020,9 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
     }
     if (purged)
         hu_log_info("memory.semantic", NULL, "reindex purged %zu excluded index rows", purged);
+    if (purge_failed)
+        hu_log_warn("memory.semantic", NULL, "reindex could not purge %zu excluded index rows",
+                    purge_failed);
     if (indexed_out)
         *indexed_out = indexed;
     return HU_OK;

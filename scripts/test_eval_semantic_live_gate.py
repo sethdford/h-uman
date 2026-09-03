@@ -690,6 +690,10 @@ def test_hit_is_excluded_for_scaffold_and_confrontation_word_boundary():
     assert G.hit_is_excluded("Is this Seth")
     assert G.hit_is_excluded("questioning if the recipient is an AI")
     assert G.hit_is_excluded("lol you're an AI aren't you")
+    assert G.hit_is_excluded("who is this?")
+    assert G.hit_is_excluded("who am I texting right now")
+    assert G.hit_is_excluded("wait is that really you")
+    assert not G.hit_is_excluded("it was actually you who left the note")
     # Word boundary: "ai" inside said / wait / maid must not fire.
     assert not G.hit_is_excluded("he said to wait, the maid is coming")
     # Bare "AI" as a topic, or "Task" as a word, is a memory not a confrontation.
@@ -715,3 +719,14 @@ def test_build_memories_block_drops_excluded_hits_and_reports_count():
     assert block is None and dropped == 2
     block, dropped = G.build_memories_block([])
     assert block is None and dropped == 0
+
+
+def test_cue_list_is_byte_identical_to_the_c_source():
+    """The C filter and this mirror must never drift: parse AI_IDENTITY_CUES
+    out of src/memory/semantic_recall.c and compare as ordered lists."""
+    import re as _re
+    src = (Path(__file__).resolve().parent.parent / "src" / "memory" / "semantic_recall.c").read_text()
+    m = _re.search(r"AI_IDENTITY_CUES\[\] = \{(.*?)\};", src, _re.DOTALL)
+    assert m, "AI_IDENTITY_CUES array not found in semantic_recall.c"
+    c_cues = _re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+    assert c_cues == G.AI_IDENTITY_CUES

@@ -140,9 +140,13 @@ static bool content_is_experience_scaffold(const char *c, size_t n) {
 }
 
 /* Word-boundary, case-insensitive cues. Every entry is a PHRASE anchored on
- * the sender's identity ("is an ai", "your ai", "are you real"); bare
- * determiner forms ("an ai", "the ai") and single words ("ai", "bot") are
- * not listed on purpose — "started an AI research job" is a memory.
+ * the sender's identity ("is an ai", "your ai", "are you real", "who is
+ * this"); bare determiner forms ("an ai", "the ai"), bare attribution
+ * ("actually you") and single words ("ai", "bot") are not listed on purpose
+ * — "started an AI research job" is a memory. The bot/robot/automated
+ * phrases stay standalone: in a persona texting corpus they read as
+ * identity talk far more often than as a topic, and the cost asymmetry
+ * favours a dropped hit (keyword recall still runs) over an empty reply.
  * MIRROR: scripts/eval_semantic_live_gate.py AI_IDENTITY_CUES. */
 static const char *const AI_IDENTITY_CUES[] = {
     "your ai",
@@ -170,13 +174,19 @@ static const char *const AI_IDENTITY_CUES[] = {
     "auto-reply",
     "is this really",
     "is this actually",
+    "is that really",
+    "is that actually",
     "is this you",
     "is that you",
     "is it really you",
+    "is it actually you",
     "are you real",
     "are you human",
-    "actually you",
-    "really you",
+    "who is this",
+    "who's this",
+    "whos this",
+    "who am i texting",
+    "am i texting",
     "who am i talking to",
     "am i talking to",
     "talking to a machine",

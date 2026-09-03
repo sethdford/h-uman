@@ -207,11 +207,18 @@ static void test_hit_excluded_for_ai_identity_confrontation_word_boundary(void) 
     HU_ASSERT(excluded("fact:c", "questioning if the recipient is an AI"));
     HU_ASSERT(excluded("fact:d", "are you a bot or is this really you"));
     HU_ASSERT(excluded("fact:d2", "lol you're an AI aren't you"));
+    /* Critic 2026-09-03: common phrasings the first cue list missed. */
+    HU_ASSERT(excluded("fact:d3", "who is this?"));
+    HU_ASSERT(excluded("fact:d4", "who am I texting right now"));
+    HU_ASSERT(excluded("fact:d5", "wait is that really you"));
     /* Word boundary: "ai" inside said / wait / maid / Mai must not fire. */
     HU_ASSERT(!excluded("fact:e", "he said to wait, the maid is coming with Mai"));
     /* Bare "AI" as a topic is a memory, not a confrontation. */
     HU_ASSERT(!excluded("fact:f", "Mel started an AI research job in Tampa"));
     HU_ASSERT(!excluded("fact:g", "sent an email about the flight on thursday"));
+    /* Bare "actually you" / "really you" are attribution, not confrontation. */
+    HU_ASSERT(!excluded("fact:g2", "it was actually you who left the note"));
+    HU_ASSERT(!excluded("fact:g3", "glad it was really you at the door"));
     /* Degenerate content is not excluded by the content rules. */
     HU_ASSERT(!excluded("fact:h", NULL));
     HU_ASSERT(!excluded("fact:i", ""));
