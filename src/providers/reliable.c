@@ -82,6 +82,21 @@ static bool error_code_is_terminal(hu_error_t err) {
     }
 }
 
+/* After a failed attempt: true when the retry loop should stop hammering
+ * this provider and hand the turn to the next configured one. Rate limits
+ * were always routed this way; HU_ERR_TIMEOUT joined them after 2026-09-03,
+ * when a half-open loopback socket (mlx-server died as a zombie) would have
+ * been re-POSTed the same body `max_retries` more times — 3 x the cap —
+ * before the cloud fallback was consulted. With no extras there is nothing
+ * to break to, so the caller keeps retrying as before. */
+static bool should_break_to_extras(const hu_reliable_ctx_t *r, hu_error_t err) {
+    if (r->extras_count == 0)
+        return false;
+    if (err == HU_ERR_TIMEOUT)
+        return true;
+    return hu_error_is_rate_limited(r->last_error_msg, r->last_error_len);
+}
+
 static void store_error(hu_reliable_ctx_t *r, hu_error_t err) {
     const char *name = hu_error_string(err);
     if (name) {
@@ -216,7 +231,7 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
 
         if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
-        if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
+        if (should_break_to_extras(r, err))
             break; /* try next provider */
 
         if (attempt < r->max_retries) {
@@ -266,7 +281,7 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
 
         if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
-        if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
+        if (should_break_to_extras(r, err))
             break;
 
         if (attempt < r->max_retries) {
