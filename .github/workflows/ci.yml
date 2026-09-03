@@ -283,6 +283,10 @@ jobs:
           build-type: MinSizeRel
           enable-lto: "true"
           enable-all-channels: "true"
+          # sqlite-vec (af2c7d7da) adds ~300 KB; the size budget measures the
+          # binary without it, as the HU_ENABLE_SQLITE_VEC option documents.
+          # 2679 KB vs a 2600 KB budget with it on (2026-09-02).
+          extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
       - run: ls -lh build/human
       - name: Enforce binary size budget (2600KB)
         run: |
