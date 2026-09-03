@@ -966,5 +966,7 @@ jobs:
         run: |
           python3 scripts/test_fidelity_family_guard.py
           python3 scripts/test_fidelity_differentiation.py
+      - name: Style-card measurement pins (hermetic, stdlib-only)
+        run: python3 scripts/test_measure_style_card.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py
