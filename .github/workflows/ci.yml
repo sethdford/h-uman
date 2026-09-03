@@ -299,25 +299,22 @@ jobs:
           # 2679 KB vs a 2600 KB budget with it on (2026-09-02).
           extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
       - run: ls -lh build/human
-      - name: Enforce binary size budget (2750KB)
+      - name: Enforce binary size budget (2600KB)
         run: |
           SIZE=$(stat -f%z build/human)
-          # Bumped 2026-09-03: 2600 KB was crossed by C2/C3/C5 memory + proactive
-          # features (main measured 2611 KB without sqlite-vec, 2614 KB before it
-          # was vendored). 2750 KB keeps the ~5% headroom the 2026-05-29 bump set.
-          BUDGET=2816000
+          BUDGET=2662400
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2750KB budget)"
+          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2600KB budget)"
           if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 2750KB budget"
+            echo "::error::Binary size ${KB}KB exceeds 2600KB budget"
             exit 1
           fi
       - name: Doc binary-size drift gate
         # Phase 5 self-healing: the build-free metrics-drift gate (doc-fleet +
         # pre-push) cannot measure binary size, so the docs' "~NNNNN KB" claims
         # drifted to a stale debug-build number (~23209 KB) while the real
-        # release binary is ~2611 KB — a 9x overstatement that undercut the
+        # release binary is ~2565 KB — a 9x overstatement that undercut the
         # "impossibly small" headline. This is the ONLY job with a MinSizeRel
         # binary, so the binary-size claims are gated here (15% tolerance).
         run: bash scripts/check-metrics-drift.sh --binary build/human

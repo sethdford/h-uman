@@ -25,6 +25,11 @@ jobs:
           build-type: MinSizeRel
           enable-lto: "true"
           enable-curl: "true"
+          # Measure the same configuration as ci.yml's release-size job:
+          # sqlite-vec (af2c7d7da) is excluded from size-budget builds, as the
+          # HU_ENABLE_SQLITE_VEC option documents. With it on, every PR failed
+          # this gate at 2,924,856 B vs the 2,773,377 B threshold (2026-09-03).
+          extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
 
       - name: Measure binary size
         run: |

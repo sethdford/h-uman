@@ -19,7 +19,7 @@ DRIFT_COUNT=0
 #                        the only place a MinSizeRel binary exists. Build-free callers can't
 #                        measure binary size, so it stays ungated there — which is exactly
 #                        how the docs drifted to a stale ~23209 KB (a debug-build number)
-#                        while the real release binary is ~2611 KB (budget 2750 KB).
+#                        while the real release binary is ~2565 KB (budget 2600 KB).
 MODE="${1:-}"
 BINARY_PATH="${2:-}"
 
