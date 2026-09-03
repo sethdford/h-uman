@@ -48,7 +48,7 @@ gate number exists.
 6. **Classifier + LLM-judge tiers beside the human gate.** Binoculars AUC (script exists, needs the window) plus an Inverse-Turing-style judge (Opus 4.6-class) over the same trials. Gate: three numbers per cycle; disagreement between tiers is the signal to investigate. **Shipped 2026-09-02 (C4): both tiers are nightly-watchdog jobs; first numbers in Appendix D.**
 7. **When-to-speak as a measured policy.** Log every proactive *proposal* with the decision and outcome; compute MIR/FIR against Seth's own reply-back behaviour; train the timing/delay predictor (TIMER-style) on chat.db inter-message gaps. Gate: MIR and FIR both reported; delay model beats the heuristic on held-out gaps. **Measured 2026-09-02 (Appendix E): MIR 0.613 / FIR 0.670 on the fallback source; the delay model LOST to a global median on held-out gaps (MAE +155 s, CI [72, 249]). Gate FAILED — model stays off.**
 8. **Trainer upgrade: mlx-tune with SimPO/KTO and per-expert LoRA on GLM-4.5-Air.** Gate: an adapter trained by mlx-tune passes the lora_b≠0 guard, the capability smoke, and improves LUAR (#1) over v6. **Path shipped 2026-09-02 (C6): `scripts/mlx_tune_train.py`, dry-run PASS on glm4_moe, scale pinned 2.0, registry accepts `trainer=mlx_tune`. No training run yet — needs the serving-down window.**
-9. **Persona evolution.** Model event-induced register shifts (move, job change) with BFI-Adapt as the check. Gate: directional fidelity on the events that actually happened to Seth this summer.
+9. **Persona evolution.** Model event-induced register shifts (move, job change) with BFI-Adapt as the check. Gate: directional fidelity on the events that actually happened to Seth this summer. **Measured 2026-09-03 (Appendix G): NOT MEASURABLE from chat.db — outbound history starts 2026-08-03 (30-day retention), so both pre-event windows are n=0; the script refused rather than report. Full-range comparison found the persona's baked-in style numbers disagree with each other (lowercase-start 4% vs 17.3%) and with measured Seth (8.6%).**
 
 ## Where we are already at the frontier (don't spend here)
 
@@ -143,4 +143,20 @@ Also this pass: the daemon.c carve-out (C7) was measured, not attempted — ever
 Recall coverage in the LIVE arm was 1.0 (every paired context carried a real memories block). **Verdict HOLD:** composite dropped past the 0.02 tolerance and EI dropped past the 0.15 tolerance — the AlpsBench finding (memory makes emotional-intelligence replies worse) reproduced on our own corpus on the first paired run. A second finding: LIVE returned an **empty completion on 9 of 40** contexts (SHADOW: 0), most likely the memories block pushing the prompt past the reply's token budget; those nine are excluded from the paired score, so the table understates LIVE's cost. The anti-AI axis is saturated (1.00, stderr 0) and carries no signal here.
 
 Consequence: semantic recall stays `HU_SEMANTIC_RECALL=shadow`. The next lever is not "more recall" but a smaller, register-conditioned block (see the RAG register finding: substantive +, casual −) plus a budget reservation so recall can never blank the reply. Record: `docs/plans/2026-08-02-semantic-retrieval/semantic-live-gate-2026-09-02.json` (aggregates and ids only).
+
+### Appendix G — persona evolution (2026-09-03, gap #9)
+
+`scripts/eval_persona_evolution.py` (47 hermetic tests) measures register before/after a life event from Seth's own outbound texts, read-only against chat.db. Both events this summer (the move, the employer change) predate the oldest outbound row the database still holds (2026-08-03; the Messages app keeps 30 days), so every pre-event window is n=0 and the script exited non-zero and wrote nothing — the gate cannot be measured from this source. Event dates themselves are only pinned to "summer 2026" by the persona's own record.
+
+The full-range comparison (n=977, 2026-08-03 → 09-02) against the numbers baked into the persona/prompt:
+
+| axis | persona says | measured, 95% CI | agrees? |
+|---|---|---|---|
+| no terminal punctuation | 79% / 78.7% | 81.7% [79.2, 84.0] | just below |
+| lowercase start | **4%** (persona.c) vs **17.3%** (style-card.json) | 8.6% [6.9, 10.4] | neither |
+| question rate | 8.3% / 9% / 9.9% | 9.9% [8.1, 11.9] | yes |
+| emoji rate | 12.5% (seth.json) vs 9% (style-card) | 12.6% [10.5, 14.6] | seth.json only |
+| exclamation rate | 6.4% | 3.9% [2.8, 5.1] | no |
+
+Two follow-ups filed: reconcile the contradictory style numbers to one measured source that is re-derived by window; and recover pre-August outbound history (memory.db `messages`, the eval-archive exports) so the before/after gate has data. Record: `docs/plans/2026-09-02-persona-evolution/`.
 

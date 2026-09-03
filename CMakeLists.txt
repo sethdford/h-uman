@@ -605,6 +605,7 @@ set(HU_CORE_SOURCES
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
+    src/core/log.c
     src/sse/sse_client.c
     src/websocket/websocket.c
     src/security/net_security.c
