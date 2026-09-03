@@ -28,6 +28,20 @@ VAL_SFT = re.compile(r"Iter\s+(\d+):\s*Val loss\s+([0-9.-]+)", re.I)
 TRAIN = re.compile(
     r"Iter\s+(\d+):\s*loss\s+([0-9.-]+),.*?acc\s+([0-9.-]+),\s*margin\s+([0-9.-]+)", re.I)
 TRAIN_SFT = re.compile(r"Iter\s+(\d+):\s*Train loss\s+([0-9.-]+)", re.I)
+# mlx-tune's SimPO/KTO/ORPO trainers (contract C6, scripts/mlx_tune_train.py)
+# report neither Iter-shaped line -- they print "  Step N/M | Loss: X.XXXX |
+# batch_size: B" (mlx_tune/rl_trainers.py). No per-step accuracy/margin.
+TRAIN_MLXTUNE = re.compile(r"Step\s+(\d+)/\d+\s*\|\s*Loss:\s*([0-9.eE+-]+)", re.I)
+# mlx-tune's trainer __init__ prints these unconditionally (rl_trainers.py);
+# SimPO's line is "Beta: X, Gamma: Y", the other two just "Beta: X".
+BETA_MLXTUNE = re.compile(r"Beta:\s*([0-9.eE+-]+)", re.I)
+GAMMA_MLXTUNE = re.compile(r"Beta:\s*[0-9.eE+-]+,\s*Gamma:\s*([0-9.eE+-]+)", re.I)
+# Every line scripts/mlx_tune_train.py prints itself is prefixed with this --
+# the one unambiguous way to tell trainer=mlx_tune apart from
+# trainer=mlx_lm_lora, since both print an identical "Training Mode: X"
+# banner (mlx_lm_lora/train.py:1265) and mlx-tune has its own "orpo" mode
+# distinct from mlx_lm_lora's patched one -- objective alone is ambiguous.
+MLXTUNE_MARKER = "[mlx_tune_train]"
 
 
 def val_is_inert(vals):
@@ -67,14 +81,28 @@ def main():
 
     # Determine the objective FROM THE LOG. Never assume it -- an adapter recorded
     # under the wrong objective is a provenance lie a later gate would act on.
+    is_mlx_tune = MLXTUNE_MARKER in text
     m = re.search(r"Training [Mm]ode:\s*(\w+)", text)
     if m:
-        objective = m.group(1).lower()          # mlx_lm_lora path (orpo/dpo/cpo/...)
+        objective = m.group(1).lower()          # mlx_lm_lora OR mlx_tune path
     elif re.search(r"Iter\s+\d+:\s*Train loss", text):
         objective = "sft"                        # mlx_lm.lora path
     else:
         sys.exit("FATAL: cannot determine the training objective from the log -- "
                  "refusing to register an adapter with unknown provenance")
+
+    # trainer is NOT the same question as objective: mlx-tune has its own
+    # reference-free "orpo" (per-expert MoE LoRA), distinct from
+    # mlx_lm_lora's patched "orpo" -- both print an identical "Training
+    # Mode: orpo" banner, so objective alone cannot disambiguate them. The
+    # [mlx_tune_train] prefix is what scripts/mlx_tune_train.py stamps on
+    # (almost) every line it prints, so its presence is unambiguous.
+    if is_mlx_tune:
+        trainer = "mlx_tune"
+    elif m:
+        trainer = "mlx_lm_lora"
+    else:
+        trainer = "mlx_lm"
 
     # The no-op check, again, at registration. The trainer guard already runs it,
     # but a registry row is what a promotion gate reads, so it must not depend on
@@ -97,6 +125,8 @@ def main():
         vals = [(int(i), float(l), float("nan"), float("nan")) for i, l in VAL_SFT.findall(text)]
     if not trains:
         trains = [(int(i), float(l), float("nan"), float("nan")) for i, l in TRAIN_SFT.findall(text)]
+    if not trains and is_mlx_tune:
+        trains = [(int(i), float(l), float("nan"), float("nan")) for i, l in TRAIN_MLXTUNE.findall(text)]
     manifest = json.load(open(a.corpus_manifest))
 
     # mlx_lm_lora writes a MINIMAL adapter_config.json (lora_parameters only), so
@@ -107,9 +137,22 @@ def main():
 
     inert = val_is_inert(vals)
 
+    # mlx-tune prints its own real Beta/Gamma at trainer-init -- read the
+    # measured value instead of guessing the mlx_lm_lora hardcoded default.
+    beta_mlxtune = None
+    gamma_mlxtune = None
+    if is_mlx_tune:
+        bm = BETA_MLXTUNE.search(text)
+        beta_mlxtune = float(bm.group(1)) if bm else None
+        gm = GAMMA_MLXTUNE.search(text)
+        gamma_mlxtune = float(gm.group(1)) if gm else None
+
     metrics = {
         "objective": objective,
-        "beta": 0.05 if objective in ("orpo", "dpo", "cpo") else None,
+        "trainer": trainer,
+        "train_mode": objective if is_mlx_tune else None,
+        "beta": beta_mlxtune if is_mlx_tune else (0.05 if objective in ("orpo", "dpo", "cpo") else None),
+        "gamma": gamma_mlxtune,
         "weights": {"lora_b_nonzero": f"{b_nonzero}/{len(bkeys)}",
                     "max_abs_lora_b": b_max},
         "base_model": grab(r"Model:\s*(\S+)"),
@@ -177,6 +220,7 @@ def main():
           f"  {'(still NEGATIVE: rejected still scores above chosen)' if (metrics['train_margin_last'] or 0) < 0 else ''}")
     print(f"  validation   : {metrics['validation']['status']}")
     print(f"  smoke        : {metrics['smoke'].get('status', 'recorded')}")
+    print(f"  trainer      : {trainer}" + (f" (train_mode={metrics['train_mode']})" if is_mlx_tune else ""))
     print(f"  objective    : {objective}")
     print(f"  lora_b       : {b_nonzero}/{len(bkeys)} non-zero, max|B|={b_max:.3e}")
     print(f"  lora scale   : {scale}")

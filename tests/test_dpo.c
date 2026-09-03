@@ -892,6 +892,44 @@ static void dpo_export_paired_passes_through_two_sided(void) {
 #endif
 }
 
+/* Task 9 — reactive sends get their message_ref after the fact. */
+#ifdef HU_ENABLE_SQLITE
+static void test_set_outbound_message_ref_updates_newest_unref_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *tdb = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &tdb), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, tdb, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    HU_ASSERT_NOT_NULL(col.db);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+1555", 5, NULL, 0, "hi", 2, "yo", 2,
+                                        0.5, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+1555", 5, NULL, 0, "hi2", 3, "yo2",
+                                        3, 0.5, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:ABC", 5),
+                 HU_OK);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(col.db,
+                                    "SELECT message_ref FROM production_outcomes ORDER BY id", -1,
+                                    &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_TRUE(sqlite3_column_text(st, 0) == NULL); /* older row untouched */
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 0), "p:ABC"); /* newest got it */
+    sqlite3_finalize(st);
+    /* Second attach for the same target hits the older unref row; a third has none. */
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:DEF", 5),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:GHI", 5),
+                 HU_ERR_NOT_FOUND);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(tdb);
+}
+#endif /* HU_ENABLE_SQLITE — sqlite3_stmt/SQLITE_* in the body; minimal-build has none */
+
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
     HU_RUN_TEST(judge_parse_extracts_number);
@@ -943,4 +981,7 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_export_paired_unequal_counts_drops_remainder);
     HU_RUN_TEST(dpo_export_paired_different_prompts_not_paired);
     HU_RUN_TEST(dpo_export_paired_passes_through_two_sided);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_set_outbound_message_ref_updates_newest_unref_row);
+#endif
 }

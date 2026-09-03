@@ -18,14 +18,49 @@
 # structure, maps each src/.../X.c and tests/test_X.c to its condition
 # stack, and reports mismatches where the test is less gated than the source.
 #
+# PLATFORM MACROS (commit 012ced741): a source can also be excluded by a
+# platform-only macro such as HU_HAS_IMESSAGE — either `if(HU_HAS_IMESSAGE)`
+# around its CMake registration, or its whole C body wrapped in
+# `#if HU_HAS_IMESSAGE` with no stub. Both are treated exactly like an
+# HU_ENABLE_* gate; the macro list is PLATFORM_GATE_MACROS below.
+# Fixtures: tests/fixtures/check-gate-symmetry/run-smoke-test.sh
+#
 # EXIT CODES:
 #   0 — all source-test pairs have symmetric gating
 #   1 — at least one test is less gated than its source (link-error class)
 #   2 — script failed (CMakeLists.txt unparseable, Python missing, etc.)
 #
-# USAGE: bash scripts/check-test-source-gate-symmetry.sh
+# USAGE: bash scripts/check-test-source-gate-symmetry.sh [--root DIR] [--strict]
+#   --root DIR  parse DIR/CMakeLists.txt and DIR/tests, DIR/src instead of the
+#               git toplevel (used by tests/fixtures/check-gate-symmetry/)
+#   --strict    ignore BASELINE_ALLOWLIST — every mismatch is a failure
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+
+# Platform macros that gate a source the same way an HU_ENABLE_* option does.
+# HU_HAS_IMESSAGE is a CMake option that is ON only on APPLE (CMakeLists.txt
+# `if(APPLE) option(HU_HAS_IMESSAGE ...)`), wraps `src/channels/imessage.c` in
+# `if(HU_HAS_IMESSAGE)`, and is forwarded to C as `HU_HAS_IMESSAGE=1`. A test
+# that calls hu_imessage_* without the same gate links on macOS and fails on
+# every Linux CI job (commit 012ced741). Space-separated; add new Darwin-only
+# / platform-only macros here and the checker treats them like HU_ENABLE_*.
+PLATFORM_GATE_MACROS="HU_HAS_IMESSAGE"
+export PLATFORM_GATE_MACROS
+
+ROOT=""
+STRICT=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --root)   ROOT="$2"; shift 2 ;;
+        --strict) STRICT=1; shift ;;
+        -h|--help) sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
+        *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+if [[ -z "$ROOT" ]]; then
+    ROOT="$(git rev-parse --show-toplevel)"
+fi
+cd "$ROOT"
+export GATE_STRICT="$STRICT"
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: python3 required" >&2
@@ -39,9 +74,105 @@ import re
 import sys
 
 
+# Platform macros (see PLATFORM_GATE_MACROS at the top of the bash wrapper).
+# They are gate tokens in their own right: `if(HU_HAS_IMESSAGE)` in CMake and
+# `#if HU_HAS_IMESSAGE` in C both mean "only when the platform provides it",
+# so they must NOT be normalized to HU_ENABLE_* (no such option exists).
+PLATFORM_GATE_MACROS: set[str] = set(
+    os.environ.get("PLATFORM_GATE_MACROS", "").split())
+
+# One regex for every gate token the checker understands: HU_ENABLE_* CMake
+# options plus the platform macros. Built once so CMake parsing and C
+# preprocessor parsing agree on what counts as a gate.
+GATE_TOKEN_RE = re.compile(
+    "|".join([r"\bHU_ENABLE_[A-Z_]+\b"]
+             + [rf"\b{re.escape(m)}\b" for m in sorted(PLATFORM_GATE_MACROS)]))
+
+
 def extract_flags(cond: str) -> set[str]:
-    """Pull HU_ENABLE_* tokens from an if() condition string."""
-    return set(re.findall(r"HU_ENABLE_[A-Z_]+", cond))
+    """Pull HU_ENABLE_* and platform-macro tokens from an if() condition."""
+    return set(GATE_TOKEN_RE.findall(cond))
+
+
+def source_body_gates(src_path: str) -> set[str]:
+    """Platform macros that guard EVERY code line of a source file.
+
+    A source registered unconditionally in CMake whose whole body sits in
+    `#if HU_HAS_X ... #endif` with no #else stub exports nothing when X is
+    off — the same link hazard as a CMake gate, just moved into the C file.
+    Preprocessor lines (#include, #define, the gate itself) and comments do
+    not count as code. A stub in the #else branch is a code line outside the
+    gate, so a file that provides non-platform fallbacks correctly yields the
+    empty set. Only PLATFORM_GATE_MACROS are considered — an HU_ENABLE_* gate
+    inside a .c body is not a CMake exclusion and is out of scope here.
+    """
+    if not PLATFORM_GATE_MACROS:
+        return set()
+    try:
+        with open(src_path) as f:
+            lines = f.readlines()
+    except OSError:
+        return set()
+
+    if_re = re.compile(r"^\s*#\s*(if|ifdef|ifndef)\b\s*(.*)")
+    branch_re = re.compile(r"^\s*#\s*(else|elif)\b")
+    endif_re = re.compile(r"^\s*#\s*endif\b")
+    directive_re = re.compile(r"^\s*#")
+    not_re = re.compile(r"!\s*defined\b")
+
+    def strip_comments(line: str, in_block: bool) -> tuple[str, bool]:
+        out = ""
+        while line:
+            if in_block:
+                end = line.find("*/")
+                if end < 0:
+                    return out, True
+                line = line[end + 2:]
+                in_block = False
+                continue
+            lc, bc = line.find("//"), line.find("/*")
+            if lc >= 0 and (bc < 0 or lc < bc):
+                return out + line[:lc], False
+            if bc >= 0:
+                out += line[:bc]
+                line = line[bc + 2:]
+                in_block = True
+                continue
+            return out + line, False
+        return out, in_block
+
+    stack: list[set[str]] = []
+    common: set[str] | None = None
+    in_block = False
+    for raw in lines:
+        # Directives only count outside a block comment — a commented-out
+        # `#if` must not push a frame and unbalance the stack.
+        if not in_block:
+            if m := if_re.match(raw):
+                kind, expr = m.group(1), m.group(2)
+                if kind == "ifndef" or not_re.search(expr):
+                    stack.append(set())
+                else:
+                    stack.append(set(GATE_TOKEN_RE.findall(expr)) & PLATFORM_GATE_MACROS)
+                continue
+            if branch_re.match(raw):
+                if stack:
+                    stack[-1] = set()
+                continue
+            if endif_re.match(raw):
+                if stack:
+                    stack.pop()
+                continue
+            if directive_re.match(raw):
+                continue
+        text, in_block = strip_comments(raw, in_block)
+        if not text.strip():
+            continue
+        active = set().union(*stack) if stack else set()
+        common = active if common is None else common & active
+        if not common:
+            return set()
+    return common or set()
 
 
 def parse_cmake(path: str) -> dict[str, set[str]]:
@@ -187,8 +318,11 @@ def has_internal_guard(test_path: str, flags: set[str],
 
     def _norm(tokens: list[str]) -> set[str]:
         """Normalize HU_HAS_X → HU_ENABLE_X so guard flags match the
-        HU_ENABLE_* required-flag set parsed from CMakeLists.txt."""
-        return {t.replace("HU_HAS_", "HU_ENABLE_", 1) for t in tokens}
+        HU_ENABLE_* required-flag set parsed from CMakeLists.txt.
+        Platform macros (HU_HAS_IMESSAGE) are gates in their own right —
+        CMake uses the same spelling — so they pass through unchanged."""
+        return {t if t in PLATFORM_GATE_MACROS
+                else t.replace("HU_HAS_", "HU_ENABLE_", 1) for t in tokens}
 
     # Compute, per line, the set of active HU_ENABLE_* flags.
     stack: list[set[str]] = []
@@ -417,25 +551,18 @@ BASELINE_ALLOWLIST = {
     # Tolerable today because Linux default + minimal-build don't
     # enable IMESSAGE/PWA but the test binaries skip them at runtime
     # via HU_HAVE_CHATDB / channel registry checks.
+    #
+    # Platform-macro note (2026-09-02): the checker now treats
+    # HU_HAS_IMESSAGE (see PLATFORM_GATE_MACROS) as a gate, so every
+    # tests/test_imessage_*.c that used to sit here was re-checked with
+    # --strict and none fires — they all carry the `#if HU_HAS_IMESSAGE`
+    # wrap + stub runner (or are registered under the CMake gate). Their
+    # entries were removed so a future unguarded hu_imessage_* call in
+    # one of them fails the commit instead of being waved through.
     "tests/test_channel.c",
     "tests/test_channel_all.c",
     "tests/test_channel_integration.c",
     "tests/test_channel_overlay_apply.c",
-    "tests/test_imessage_adversarial.c",
-    "tests/test_imessage_chatdb_fixture.c",
-    "tests/test_imessage_extended.c",
-    "tests/test_imessage_non_allowlisted.c",
-    "tests/test_imessage_react_contract.c",
-    "tests/test_imessage_reactions.c",
-    "tests/test_imessage_rich_link.c",
-    # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: chat.db schema
-    # probe + drift canary tests. Body is fully wrapped in
-    # `#if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)` with a stub
-    # runner in the #else branch. The script's heuristic looks for
-    # `HU_ENABLE_IMESSAGE` literally and doesn't recognize the
-    # `HU_HAS_IMESSAGE` CMake-defined macro that all the existing
-    # iMessage tests use (matches the peer convention here).
-    "tests/test_imessage_schema.c",
     "tests/test_media_gen.c",
     "tests/test_pwa.c",
     "tests/test_sota_humanness.c",
@@ -484,6 +611,13 @@ BASELINE_ALLOWLIST = {
 
 def main() -> int:
     file_gates = parse_cmake("CMakeLists.txt")
+
+    # A source can be excluded from a platform by its CMake registration OR
+    # by wrapping its whole body in a platform macro (see source_body_gates).
+    # Both leave the same undefined-reference hole, so union them.
+    for fp in list(file_gates):
+        if fp.startswith("src/"):
+            file_gates[fp] = file_gates[fp] | source_body_gates(fp)
 
     # Build maps: src basename -> list of (path, flags); test files keyed by path.
     src_by_base: dict[str, list[tuple[str, set[str]]]] = {}
@@ -680,10 +814,11 @@ def main() -> int:
     # Split into NEW (fail) vs GRANDFATHERED (warn).
     new_violations: list[str] = []
     grandfathered: list[str] = []
+    strict = os.environ.get("GATE_STRICT") == "1"
     for m in mismatches:
         # Extract the test path from the message — it's the second token.
         path_match = re.search(r"\b(tests/test_[^\s]+\.c)", m)
-        if path_match and path_match.group(1) in BASELINE_ALLOWLIST:
+        if not strict and path_match and path_match.group(1) in BASELINE_ALLOWLIST:
             grandfathered.append(m)
         else:
             new_violations.append(m)
@@ -706,6 +841,9 @@ def main() -> int:
         print("FIX: move the test into the same if(HU_ENABLE_*) block as the source")
         print("in CMakeLists.txt, and gate the forward-decl + call-site in")
         print("tests/test_main.c with `#ifdef HU_ENABLE_*` matching the source.")
+        print("For a platform macro (e.g. HU_HAS_IMESSAGE), either register the test")
+        print("under the same if(<macro>) block, or wrap the whole test body in")
+        print("`#if <macro>` with a stub `void run_X_tests(void) { (void)0; }` in #else.")
         print()
         print("If the failure is a known latent issue you don't want to fix in this")
         print("PR, add the test path to BASELINE_ALLOWLIST in this script with a")
@@ -714,11 +852,12 @@ def main() -> int:
         print("See .claude/rules/test-source-gate-symmetry.md for the rationale.")
         return 1
 
+    gate_kinds = "HU_ENABLE_* / platform-macro"
     if grandfathered:
-        print(f"All NEW test/source pairs have symmetric HU_ENABLE_* gating "
+        print(f"All NEW test/source pairs have symmetric {gate_kinds} gating "
               f"({len(grandfathered)} grandfathered).")
     else:
-        print("All test/source pairs have symmetric HU_ENABLE_* gating.")
+        print(f"All test/source pairs have symmetric {gate_kinds} gating.")
     return 0
 
 

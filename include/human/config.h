@@ -228,6 +228,10 @@ typedef struct hu_feeds_config {
     char *gmail_client_id;
     char *gmail_client_secret;
     char *gmail_refresh_token;
+    /* GCP project billed for Gmail API calls. Required when the OAuth client
+     * is gcloud's own (ADC-style credentials): Google answers 403 "requires a
+     * quota project" otherwise. Sent as x-goog-user-project. */
+    char *gmail_quota_project;
     char *twitter_bearer_token;
     char *interests;
     double relevance_threshold;

@@ -39,6 +39,7 @@
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/memory/celebration_repo.h"
+#include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
 #include "human/persona/celebration.h"
 #include "human/persona/warm_response.h"
@@ -76,6 +77,8 @@
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
+#include "human/daemon/reactive_gates.h"
+#include "human/daemon/send_budget.h"
 #include "human/daemon/voice_facade.h"
 
 /* Channel helpers */
@@ -2209,8 +2212,10 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
 /* Consecutive successful turns that produced zero-length assistant text
- * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
+ * (e.g. MLX HTTP 52 after response_guard retry). Only the non-test loop uses it. */
+#ifndef HU_IS_TEST
 static unsigned g_empty_agent_response_streak;
+#endif
 
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                           hu_service_channel_t *channels, size_t channel_count, hu_agent_t *agent,
@@ -3503,25 +3508,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 fp.relevance_threshold = config->feeds.relevance_threshold;
                             }
                             if (config) {
-                                if (config->feeds.gmail_client_id) {
-                                    fp.gmail_client_id = config->feeds.gmail_client_id;
-                                    fp.gmail_client_id_len = strlen(config->feeds.gmail_client_id);
-                                }
-                                if (config->feeds.gmail_client_secret) {
-                                    fp.gmail_client_secret = config->feeds.gmail_client_secret;
-                                    fp.gmail_client_secret_len =
-                                        strlen(config->feeds.gmail_client_secret);
-                                }
-                                if (config->feeds.gmail_refresh_token) {
-                                    fp.gmail_refresh_token = config->feeds.gmail_refresh_token;
-                                    fp.gmail_refresh_token_len =
-                                        strlen(config->feeds.gmail_refresh_token);
-                                }
-                                if (config->feeds.twitter_bearer_token) {
-                                    fp.twitter_bearer_token = config->feeds.twitter_bearer_token;
-                                    fp.twitter_bearer_token_len =
-                                        strlen(config->feeds.twitter_bearer_token);
-                                }
+/* Borrow a config credential string + length into the processor. */
+#define HU_FEED_CRED(field)                               \
+    do {                                                  \
+        if (config->feeds.field) {                        \
+            fp.field = config->feeds.field;               \
+            fp.field##_len = strlen(config->feeds.field); \
+        }                                                 \
+    } while (0)
+                                HU_FEED_CRED(gmail_client_id);
+                                HU_FEED_CRED(gmail_client_secret);
+                                HU_FEED_CRED(gmail_refresh_token);
+                                HU_FEED_CRED(gmail_quota_project);
+                                HU_FEED_CRED(twitter_bearer_token);
+#undef HU_FEED_CRED
                             }
                             hu_feed_config_t fconf;
                             memset(&fconf, 0, sizeof(fconf));
@@ -4640,6 +4640,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Reply budget (2026-09-01 runaway brake): charged at the dedup mark below. */
+                uint32_t sb_used = 0, sb_cap = 0;
+                if (!hu_send_budget_check(batch_key, key_len, (int64_t)time(NULL), NULL, &sb_used,
+                                          &sb_cap)) {
+                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                "reply budget exhausted for %.*s (%u/%u in last hour) — silent",
+                                (int)(key_len > 20 ? 20 : key_len), batch_key, (unsigned)sb_used,
+                                (unsigned)sb_cap);
+                    continue;
+                }
+
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "processing batch for %.*s: \"%.*s\" (group=%d)",
                             (int)(key_len > 20 ? 20 : key_len), batch_key,
@@ -4816,8 +4827,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         break;
                     }
                 }
-                if (!llm_decides && consec_idx != SIZE_MAX &&
-                    consec_response_count[consec_idx] >= 3 && action != HU_RESPONSE_SKIP) {
+                if (hu_reactive_gate_active(HU_REACTIVE_GATE_CONSECUTIVE_LIMIT, llm_decides) &&
+                    consec_idx != SIZE_MAX && consec_response_count[consec_idx] >= 3 &&
+                    action != HU_RESPONSE_SKIP) {
                     hu_log_info("human", agent ? agent->observer : NULL,
                                 "consecutive limit (%u) reached for %.*s — staying silent",
                                 (unsigned)consec_response_count[consec_idx],
@@ -10190,6 +10202,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                               send_target_len, ar_reply,
                                                               ar_reply_len, NULL, 0);
+                                    hu_send_budget_record_send(batch_key, key_len, now_unix_ar);
                                     hu_log_info("human", agent ? agent->observer : NULL,
                                                 "autoresponder fired for %.*s (DND + allowlisted, "
                                                 "human inactive %ds+); skipped agent_turn",
@@ -10616,63 +10629,44 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_critique_result_free(alloc, &cr);
                     }
 
-                    /* AI-tell filter: catch known robotic phrases and force retry.
-                     * Skip retry in llm_decides mode (too expensive with local model). */
-                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
-                        static const char *ai_tells[] = {
-                            "I understand how you",
-                            "I am here to support",
-                            "I am here for you",
-                            "that must be really",
-                            "I appreciate you sharing",
-                            "feel free to",
-                            "I hear you",
-                            "I'd be happy to",
-                            "sorry to hear",
-                            "going through that",
-                            "here to support",
-                            "I can only imagine",
-                            "According to the available",
-                            "According to my",
-                            "significant negative impact",
-                            "fail to account for",
-                        };
-                        bool has_ai_tell = false;
-                        for (size_t ati = 0; ati < sizeof(ai_tells) / sizeof(ai_tells[0]); ati++) {
-                            if (hu_strcasestr(response, ai_tells[ati])) {
-                                has_ai_tell = true;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "ai-tell detected: \"%s\" in response", ai_tells[ati]);
-                                break;
-                            }
-                        }
-                        if (has_ai_tell) {
-                            retried = true;
+                    /* AI-tell SAFETY gate: first miss retries with the hint, second miss drops. */
+                    if (err == HU_OK && response && response_len > 0 &&
+                        hu_reactive_gate_active(HU_REACTIVE_GATE_AI_TELL_RETRY, llm_decides)) {
+                        const char *ai_tell = hu_reactive_response_ai_tell(response);
+                        hu_ai_tell_action_t ta = hu_reactive_ai_tell_action(ai_tell, retried);
+                        if (ta != HU_AI_TELL_SEND) {
+                            hu_log_warn("human", agent ? agent->observer : NULL,
+                                        "ai-tell \"%s\" — %s", ai_tell,
+                                        ta == HU_AI_TELL_DROP ? "dropped after retry" : "retrying");
                             agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
                             response = NULL;
                             response_len = 0;
-                            if (convo_ctx) {
-                                static const char tell_hint[] =
-                                    "[CRITICAL OVERRIDE: Your response was REJECTED because it "
-                                    "sounded like a therapy chatbot. You MUST respond in 3-8 "
-                                    "words MAXIMUM. Pick ONE of these patterns: "
-                                    "'damn I'm sorry', 'ugh that's the worst', "
-                                    "'yeah I've been there too', 'that's rough'. "
-                                    "DO NOT use 'I understand', 'going through', 'sorry to hear', "
-                                    "'here for you'. Be BRIEF. Be a FRIEND not a counselor.]";
-                                size_t new_len = sizeof(tell_hint) - 1 + 1 + convo_ctx_len + 1;
-                                char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
-                                if (new_convo) {
-                                    memcpy(new_convo, tell_hint, sizeof(tell_hint) - 1);
-                                    new_convo[sizeof(tell_hint) - 1] = '\n';
-                                    memcpy(new_convo + sizeof(tell_hint), convo_ctx, convo_ctx_len);
-                                    new_convo[new_len - 1] = '\0';
+                        }
+                        if (ta == HU_AI_TELL_RETRY) {
+                            retried = true;
+                            size_t cl = convo_ctx ? convo_ctx_len : 0; /* hint attaches w/o ctx */
+                            static const char tell_hint[] =
+                                "[CRITICAL OVERRIDE: Your response was REJECTED because it "
+                                "sounded like a therapy chatbot. You MUST respond in 3-8 "
+                                "words MAXIMUM. Pick ONE of these patterns: "
+                                "'damn I'm sorry', 'ugh that's the worst', "
+                                "'yeah I've been there too', 'that's rough'. "
+                                "DO NOT use 'I understand', 'going through', 'sorry to hear', "
+                                "'here for you'. Be BRIEF. Be a FRIEND not a counselor.]";
+                            size_t new_len = sizeof(tell_hint) - 1 + 1 + cl + 1;
+                            char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
+                            if (new_convo) {
+                                memcpy(new_convo, tell_hint, sizeof(tell_hint) - 1);
+                                new_convo[sizeof(tell_hint) - 1] = '\n';
+                                if (cl > 0)
+                                    memcpy(new_convo + sizeof(tell_hint), convo_ctx, cl);
+                                new_convo[new_len - 1] = '\0';
+                                if (convo_ctx)
                                     alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                                    convo_ctx = new_convo;
-                                    convo_ctx_len = new_len - 1;
-                                    agent->conversation_context = convo_ctx;
-                                    agent->conversation_context_len = convo_ctx_len;
-                                }
+                                convo_ctx = new_convo;
+                                convo_ctx_len = new_len - 1;
+                                agent->conversation_context = convo_ctx;
+                                agent->conversation_context_len = convo_ctx_len;
                             }
                             if (ch->channel->vtable->start_typing)
                                 ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
@@ -10689,7 +10683,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * If needs_revision, retry once with hint.
                      * Skip retry in llm_decides mode (director handles quality). */
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
-                        !llm_decides) {
+                        hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
                         hu_quality_score_t qscore = hu_conversation_evaluate_quality(
                             response, response_len, history_entries, history_count, max_chars);
                         if (qscore.needs_revision && !retried) {
@@ -11353,31 +11347,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (hu_deep_extract_parse(alloc, de_response, de_response_len,
                                                           &de_result) == HU_OK) {
                                     for (size_t ri = 0; ri < de_result.relation_count; ri++) {
-                                        if (!de_result.relations[ri].entity_a ||
-                                            !de_result.relations[ri].entity_b)
+                                        const hu_extracted_relation_t *dr =
+                                            &de_result.relations[ri];
+                                        if (!dr->entity_a || !dr->entity_b)
                                             continue;
-                                        int64_t src_id = 0, tgt_id = 0;
-                                        (void)hu_graph_upsert_entity(
-                                            graph, batch_key, key_len,
-                                            de_result.relations[ri].entity_a,
-                                            strlen(de_result.relations[ri].entity_a),
-                                            HU_ENTITY_UNKNOWN, NULL, &src_id);
-                                        (void)hu_graph_upsert_entity(
-                                            graph, batch_key, key_len,
-                                            de_result.relations[ri].entity_b,
-                                            strlen(de_result.relations[ri].entity_b),
-                                            HU_ENTITY_UNKNOWN, NULL, &tgt_id);
-                                        if (src_id > 0 && tgt_id > 0) {
-                                            const char *rel_str =
-                                                de_result.relations[ri].relation
-                                                    ? de_result.relations[ri].relation
-                                                    : "";
-                                            (void)hu_graph_upsert_relation(
-                                                graph, batch_key, key_len, src_id, tgt_id,
-                                                HU_REL_RELATED_TO,
-                                                (float)de_result.relations[ri].confidence, rel_str,
-                                                strlen(rel_str));
-                                        }
+                                        (void)hu_graph_ingest_fact(
+                                            graph, batch_key, key_len, dr->entity_a,
+                                            dr->relation ? dr->relation : "related_to",
+                                            dr->entity_b, (float)dr->confidence,
+                                            (int64_t)time(NULL), "turn:deep_extract");
                                     }
                                     hu_deep_extract_result_deinit(&de_result, alloc);
                                 }
@@ -11466,6 +11444,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * rowid replied to" contract and the dedup check above. */
                     hu_daemon_reply_dedup_mark(batch_key, key_len,
                                                (int64_t)msgs[batch_end].message_id);
+                    hu_send_budget_record_send(batch_key, key_len, (int64_t)time(NULL));
                 }
 
                 /* Store conversation summary as long-term memory */
@@ -12249,8 +12228,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             struct tm *pn = localtime_r(&now_ts, &tm_now);
                             int recv_hr = pr ? pr->tm_hour : 0;
                             int curr_hr = pn ? pn->tm_hour : 0;
-                            const char *ack = hu_missed_message_acknowledgment(
-                                delay_secs, recv_hr, curr_hr, (uint32_t)now_ts);
+                            const char *ack = hu_missed_message_acknowledgment_gated(
+                                delay_secs, recv_hr, curr_hr, (uint32_t)now_ts, batch_key, key_len,
+                                now_ts);
                             if (ack) {
                                 size_t ack_len = strlen(ack);
                                 if (response_len <= SIZE_MAX - ack_len &&

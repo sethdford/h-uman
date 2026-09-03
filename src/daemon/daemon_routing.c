@@ -9,6 +9,7 @@
 #include "human/daemon_routing.h"
 #include "human/config.h"
 #include "human/daemon.h"
+#include "human/daemon/reply_delay.h" /* C5 Part C: shadow delay-model measurement */
 
 #include <stdint.h>
 #include <string.h>
@@ -81,14 +82,102 @@ uint32_t hu_daemon_video_viewing_delay_ms(const hu_channel_loop_msg_t *msgs, siz
 
 static uint32_t g_missed_msg_threshold_sec = 30 * 60;
 
+/* Ceiling above which no acknowledgment is emitted at all. A "sorry just saw
+ * this" on a days-old message is not a late reply, it is a tell: a human who
+ * genuinely missed a message for that long either does not answer it or
+ * answers it without pretending it just arrived. Incident 2026-09-01: a
+ * stale-cursor replay produced this phrase on 16-day-old threads. */
+static uint32_t g_missed_msg_max_age_sec = 24 * 60 * 60;
+
 void hu_daemon_set_missed_msg_threshold(uint32_t secs) {
     if (secs >= 60)
         g_missed_msg_threshold_sec = secs;
 }
 
+/* Rate + per-contact cooldown (Task 8, 2026-09-01). The three-string bank
+ * fired on 21/57 sends; a human says "sorry just saw this" ~0.3% of the time
+ * and not twice to the same person in a week. */
+static double g_missed_msg_ack_rate = 0.0029;
+static uint32_t g_missed_msg_ack_cooldown_sec = 7 * 24 * 60 * 60;
+enum { HU_FILLER_RING = 32 };
+static struct {
+    uint32_t contact_hash;
+    int64_t last_ts;
+} g_filler_ring[HU_FILLER_RING];
+
+void hu_daemon_set_missed_msg_ack_rate(double rate) {
+    if (rate >= 0.0 && rate <= 1.0)
+        g_missed_msg_ack_rate = rate;
+}
+void hu_daemon_set_missed_msg_ack_cooldown(uint32_t secs) {
+    if (secs >= 60)
+        g_missed_msg_ack_cooldown_sec = secs;
+}
+void hu_daemon_filler_reset_for_test(void) {
+    memset(g_filler_ring, 0, sizeof(g_filler_ring));
+}
+static uint32_t filler_hash(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ (uint32_t)(unsigned char)s[i]) * 16777619u;
+    return h ? h : 1u;
+}
+
+const char *hu_missed_message_acknowledgment_gated(int64_t delay_secs, int receive_hour,
+                                                   int current_hour, uint32_t seed,
+                                                   const char *contact_key, size_t contact_key_len,
+                                                   int64_t now) {
+    /* Contract C5, Part C — SHADOW measurement only (default OFF via
+     * HU_REPLY_DELAY_MODEL). `delay_secs` here is a real, already-computed
+     * observation (now - the inbound message's receive time; see the
+     * caller in src/daemon.c), so this is the ONE call site in the daemon
+     * that already has both an hour bucket and a ground-truth delay to
+     * compare the fitted model against, with no new plumbing required.
+     * Never affects `phrase`, never touches the send path. */
+    hu_reply_delay_shadow_log(receive_hour, /*incoming_len=*/0, /*contact_freq=*/0.0, delay_secs,
+                              contact_key, contact_key_len, seed);
+
+    const char *phrase =
+        hu_missed_message_acknowledgment(delay_secs, receive_hour, current_hour, seed);
+    if (!phrase)
+        return NULL;
+    /* Draw: deterministic in seed so tests can pin it; seed is the send ts. */
+    if ((double)(seed % 10000u) >= g_missed_msg_ack_rate * 10000.0)
+        return NULL;
+    if (!contact_key || contact_key_len == 0)
+        return phrase; /* no identity to cool down on */
+    uint32_t h = filler_hash(contact_key, contact_key_len);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < HU_FILLER_RING; i++) {
+        if (g_filler_ring[i].contact_hash == h) {
+            if (now - g_filler_ring[i].last_ts < (int64_t)g_missed_msg_ack_cooldown_sec)
+                return NULL; /* fired for this contact within the cooldown */
+            slot = i;
+            break;
+        }
+        if (g_filler_ring[i].last_ts < g_filler_ring[oldest].last_ts)
+            oldest = i;
+    }
+    if (slot < 0)
+        slot = oldest;
+    g_filler_ring[slot].contact_hash = h;
+    g_filler_ring[slot].last_ts = now;
+    return phrase;
+}
+
+void hu_daemon_set_missed_msg_max_age(uint32_t secs) {
+    /* Must sit above the threshold or the window is empty and the setting is
+     * a silent no-op — reject rather than accept a configuration that can
+     * never fire. */
+    if (secs > g_missed_msg_threshold_sec)
+        g_missed_msg_max_age_sec = secs;
+}
+
 const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hour, int current_hour,
                                              uint32_t seed) {
     if (delay_secs <= (int64_t)g_missed_msg_threshold_sec)
+        return NULL;
+    if (delay_secs > (int64_t)g_missed_msg_max_age_sec)
         return NULL;
 
     /* Natural gap: received 2AM–6AM, responding 8AM+ → "just woke up" style */

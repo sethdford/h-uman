@@ -19,6 +19,7 @@
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
 #include "human/memory/sql_common.h"
+#include "human/memory/vector.h"
 
 #define HU_SQLITE_BUSY_TIMEOUT_MS 5000
 
@@ -40,6 +41,10 @@ typedef struct hu_sqlite_memory {
     /* On-disk path (empty for :memory:) — deinit clears the unclean-shutdown
      * open-sentinel here so the next boot can skip the full quick_check. */
     char db_path[1100];
+    /* Semantic index (Phase 2, 2026-09-01): when set, every stored row is
+     * embedded and inserted into the vector store keyed by `key`. NULL = off. */
+    hu_embedder_t *sem_embedder;
+    hu_vector_store_t *sem_store;
 } hu_sqlite_memory_t;
 
 static const char *const schema_parts[] = {
@@ -504,6 +509,13 @@ static const char *const schema_parts[] = {
     "source TEXT,"
     "published_at INTEGER NOT NULL,"
     "relevance REAL DEFAULT 0.5)",
+    /* current_events: 280k rows over 121k distinct (topic, summary) because
+     * INSERT OR IGNORE had no UNIQUE constraint to fire on — the same shape
+     * that grew opinions to 9.5M rows. Dedupe, then constrain. */
+    "DELETE FROM current_events WHERE id NOT IN "
+    "(SELECT MIN(id) FROM current_events GROUP BY topic, summary)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_current_events_topic_summary "
+    "ON current_events(topic, summary)",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {
@@ -658,6 +670,30 @@ static const char *impl_name(void *ctx) {
     return "sqlite";
 }
 
+/* Embed one stored row into the semantic index. A failure here is logged and
+ * NOT propagated: the row is stored; the vector is a derived index that the
+ * reindex path can rebuild. */
+static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                               const char *content, size_t content_len) {
+    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
+        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
+        return;
+    hu_embedding_t emb = {0};
+    hu_error_t err = self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
+                                                       content, content_len, &emb);
+    if (err != HU_OK || !emb.values || emb.dim == 0) {
+        hu_log_warn("memory.semantic", NULL, "embed failed for key %.*s: %s", (int)key_len, key,
+                    hu_error_string(err));
+        return;
+    }
+    err = self->sem_store->vtable->insert(self->sem_store->ctx, self->alloc, key, key_len, &emb,
+                                          content, content_len);
+    if (err != HU_OK)
+        hu_log_warn("memory.semantic", NULL, "vector insert failed for key %.*s: %s", (int)key_len,
+                    key, hu_error_string(err));
+    self->alloc->free(self->alloc->ctx, emb.values, emb.dim * sizeof(float));
+}
+
 static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
                              size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
@@ -733,7 +769,7 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
         if (self->graph_hierarchy_ready)
             (void)hu_graph_hierarchy_build(&self->graph_hierarchy, &self->graph_index);
     }
-
+    semantic_index_row(self, key, key_len, content, content_len);
     return HU_OK;
 }
 
@@ -787,6 +823,7 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
         if (self->graph_hierarchy_ready)
             (void)hu_graph_hierarchy_build(&self->graph_hierarchy, &self->graph_index);
     }
+    semantic_index_row(self, key, key_len, content, content_len);
     return HU_OK;
 }
 
@@ -1433,19 +1470,34 @@ static const hu_session_store_vtable_t sqlite_session_vtable = {
 };
 
 /* Corruption self-heal helpers — contract in include/human/memory/sql_common.h. */
-bool hu_sqlite_quick_check_ok(struct sqlite3 *db) {
+hu_sqlite_qc_t hu_sqlite_quick_check(struct sqlite3 *db) {
     if (!db)
-        return false;
+        return HU_QC_INDETERMINATE;
+    /* A WAL with a pending checkpoint is not corruption; fold it in first so
+     * quick_check sees committed state. rc is ignored on purpose: BUSY here
+     * just means another connection is active, which the step below reports. */
+    sqlite3_wal_checkpoint_v2(db, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
     sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL) != SQLITE_OK)
-        return false; /* e.g. SQLITE_NOTADB — a bad header fails to prepare */
-    bool ok = false;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
+    int prc = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL);
+    if (prc == SQLITE_NOTADB || prc == SQLITE_CORRUPT)
+        return HU_QC_CORRUPT; /* a bad header fails to prepare */
+    if (prc != SQLITE_OK)
+        return HU_QC_INDETERMINATE;
+    hu_sqlite_qc_t r = HU_QC_INDETERMINATE;
+    int src = sqlite3_step(stmt);
+    if (src == SQLITE_ROW) {
         const unsigned char *row = sqlite3_column_text(stmt, 0);
-        ok = (row != NULL && strcmp((const char *)row, "ok") == 0);
+        r = (row && strcmp((const char *)row, "ok") == 0) ? HU_QC_OK : HU_QC_CORRUPT;
+    } else if (src == SQLITE_CORRUPT || src == SQLITE_NOTADB) {
+        r = HU_QC_CORRUPT;
     }
+    /* SQLITE_BUSY / SQLITE_LOCKED / anything else: could not measure. */
     sqlite3_finalize(stmt);
-    return ok;
+    return r;
+}
+
+bool hu_sqlite_quick_check_ok(struct sqlite3 *db) {
+    return hu_sqlite_quick_check(db) == HU_QC_OK;
 }
 
 bool hu_sqlite_quarantine_corrupt_file(const char *db_path) {
@@ -1506,6 +1558,17 @@ void hu_sqlite_open_sentinel_remove(const char *db_path) {
         (void)remove(p);
 }
 
+/* One connection, many threads. The daemon hands this engine's single
+ * sqlite3* to the gateway worker threads (hu_agent_turn → memory writes) AND
+ * to the service loop on the main thread (init_proposer → reflection reads).
+ * Apple's libsqlite3 is built THREADSAFE=2 (multi-thread): a connection may
+ * only be used by one thread at a time unless it is opened FULLMUTEX. Linux
+ * distros build THREADSAFE=1 (serialized), which is why the M3 live-fire
+ * crashed inside sqlite3_step() on the macOS runner only (2026-07 → 09-02,
+ * getAndInitPage on a NULL page). FULLMUTEX makes the connection serialize
+ * itself regardless of how the library was built. */
+#define HU_SQLITE_OPEN_FLAGS (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX)
+
 /* Quarantine the corrupt file at db_path and reopen a fresh DB there. On
  * success *db is the new live handle (busy timeout applied); on failure *db is
  * NULL and the refusal has been logged. */
@@ -1513,7 +1576,8 @@ static bool quarantine_and_reopen(const char *db_path, sqlite3 **db) {
     if (*db)
         sqlite3_close(*db);
     *db = NULL;
-    if (!hu_sqlite_quarantine_corrupt_file(db_path) || sqlite3_open(db_path, db) != SQLITE_OK) {
+    if (!hu_sqlite_quarantine_corrupt_file(db_path) ||
+        sqlite3_open_v2(db_path, db, HU_SQLITE_OPEN_FLAGS, NULL) != SQLITE_OK) {
         hu_log_error("memory.sqlite", NULL, "could not recover corrupt DB '%s'; refusing to open",
                      db_path);
         if (*db)
@@ -1527,21 +1591,39 @@ static bool quarantine_and_reopen(const char *db_path, sqlite3 **db) {
 
 /* Run the base DDL. False on any failure (freeing the error string) — on a
  * fresh handle that is the structural-corruption signal create() heals on. */
-static bool init_schema_parts(sqlite3 *db) {
+/* Returns the first failing sqlite rc, or SQLITE_OK. The rc matters: BUSY /
+ * LOCKED means another connection holds the file and must never be read as
+ * corruption (the 2026-08-04 quarantine), CORRUPT / NOTADB is the real thing. */
+static int init_schema_parts(sqlite3 *db) {
     for (const char *const *part = schema_parts; *part; part++) {
         char *err = NULL;
-        if (sqlite3_exec(db, *part, NULL, NULL, &err) != SQLITE_OK) {
+        int rc = sqlite3_exec(db, *part, NULL, NULL, &err);
+        if (rc != SQLITE_OK) {
             if (err)
                 sqlite3_free(err);
-            return false;
+            return rc;
         }
     }
-    return true;
+    return SQLITE_OK;
+}
+
+static bool sqlite_rc_is_corruption(int rc) {
+    int base = rc & 0xff;
+    return base == SQLITE_CORRUPT || base == SQLITE_NOTADB;
+}
+
+bool hu_sqlite_process_serialize(void) {
+    /* SQLITE_CONFIG_SERIALIZED is process-global and must precede
+     * sqlite3_initialize(); MISUSE means the library is already up (a test
+     * runner, or a second call) — the per-connection FULLMUTEX flag above is
+     * the fallback that still holds. */
+    int rc = sqlite3_config(SQLITE_CONFIG_SERIALIZED);
+    return rc == SQLITE_OK || rc == SQLITE_MISUSE;
 }
 
 hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     sqlite3 *db = NULL;
-    int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
+    int rc = sqlite3_open_v2(db_path ? db_path : ":memory:", &db, HU_SQLITE_OPEN_FLAGS, NULL);
     if (rc != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
@@ -1562,23 +1644,43 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
      * open-sentinel behind (unclean shutdown). On the clean-shutdown fast path,
      * gross corruption is still healed cheaply by the schema-init fallback
      * below. */
-    if (on_disk && hu_sqlite_open_sentinel_present(db_path) && !hu_sqlite_quick_check_ok(db)) {
-        hu_log_error("memory.sqlite", NULL,
-                     "memory DB failed PRAGMA quick_check — quarantining '%s' and "
-                     "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
-                     db_path);
-        if (!quarantine_and_reopen(db_path, &db))
-            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
-        healed = true;
+    if (on_disk && hu_sqlite_open_sentinel_present(db_path)) {
+        hu_sqlite_qc_t qc = hu_sqlite_quick_check(db);
+        if (qc == HU_QC_CORRUPT) {
+            hu_log_error("memory.sqlite", NULL,
+                         "memory DB failed PRAGMA quick_check — quarantining '%s' and "
+                         "starting fresh; prior bytes preserved as <path>.corrupt-<ts>",
+                         db_path);
+            if (!quarantine_and_reopen(db_path, &db))
+                return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+            healed = true;
+        } else if (qc == HU_QC_INDETERMINATE) {
+            /* Busy/locked is not corruption. Keep the file, keep the sentinel
+             * so the next clean boot re-checks; never discard a store because
+             * someone else had it open (the 2026-08-04 quarantine). */
+            hu_log_warn("memory.sqlite", NULL,
+                        "quick_check indeterminate (busy/locked) on '%s' — NOT "
+                        "quarantining; will re-check on next boot",
+                        db_path);
+        }
     }
 
     sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
 
-    if (!init_schema_parts(db)) {
+    int schema_rc = init_schema_parts(db);
+    if (schema_rc != SQLITE_OK) {
         /* Cheap corruption net for the clean-shutdown fast path: a DB with a
          * bad header or broken master btree fails schema init without any
-         * full-page scan. Quarantine and retry once on a fresh file. */
-        if (!on_disk || healed) {
+         * full-page scan. Quarantine and retry once on a fresh file — but ONLY
+         * for a corruption rc. BUSY/LOCKED (another writer, a checkpoint in
+         * flight) is refused loudly and left intact; a store that someone else
+         * has open is not a store to throw away. */
+        if (!on_disk || healed || !sqlite_rc_is_corruption(schema_rc)) {
+            hu_log_error("memory.sqlite", NULL,
+                         "memory DB schema init failed (sqlite rc=%d%s) on '%s' — refusing "
+                         "to open, NOT quarantining",
+                         schema_rc, sqlite_rc_is_corruption(schema_rc) ? "" : ", not corruption",
+                         db_path ? db_path : ":memory:");
             sqlite3_close(db);
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
@@ -1590,7 +1692,7 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         healed = true;
         sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
-        if (!init_schema_parts(db)) {
+        if (init_schema_parts(db) != SQLITE_OK) {
             sqlite3_close(db);
             return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
@@ -1688,6 +1790,8 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     self->encrypt_at_rest = false;
     self->graph_initialized = (hu_graph_index_init(&self->graph_index, alloc) == HU_OK);
     self->graph_hierarchy_ready = false;
+    self->sem_embedder = NULL; /* semantic index off until attached */
+    self->sem_store = NULL;
     if (self->graph_initialized)
         self->graph_hierarchy_ready =
             (hu_graph_hierarchy_init(&self->graph_hierarchy, alloc) == HU_OK);
@@ -1742,6 +1846,130 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     };
 }
 
+void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
+                                         struct hu_vector_store *store) {
+    if (!mem || !mem->ctx)
+        return;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    self->sem_embedder = embedder;
+    self->sem_store = store;
+}
+
+hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
+    if (indexed_out)
+        *indexed_out = 0;
+    if (!mem || !mem->ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    if (!self->sem_embedder || !self->sem_store)
+        return HU_ERR_NOT_SUPPORTED; /* no index attached: refuse, don't pretend */
+    if (limit == 0)
+        limit = 100000;
+    /* Rows not yet in the index. memories_vec_meta is created by the store. */
+    const char *sql = "SELECT key, content FROM memories WHERE content IS NOT NULL AND "
+                      "length(content) > 0 AND key NOT IN (SELECT id FROM memories_vec_meta) "
+                      "LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)limit);
+    /* Collect first, then embed in batches: the store writes to the same DB
+     * and SQLite dislikes a write while this SELECT is stepping. */
+    enum { BATCH = 16 };
+    char **keys = NULL, **contents = NULL;
+    size_t cap = 0, n = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *k = (const char *)sqlite3_column_text(stmt, 0);
+        const char *c = (const char *)sqlite3_column_text(stmt, 1);
+        if (!k || !c)
+            continue;
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 256;
+            char **nk = self->alloc->alloc(self->alloc->ctx, ncap * sizeof(char *));
+            char **nc = self->alloc->alloc(self->alloc->ctx, ncap * sizeof(char *));
+            if (!nk || !nc) {
+                if (nk)
+                    self->alloc->free(self->alloc->ctx, nk, ncap * sizeof(char *));
+                if (nc)
+                    self->alloc->free(self->alloc->ctx, nc, ncap * sizeof(char *));
+                break;
+            }
+            if (n) {
+                memcpy(nk, keys, n * sizeof(char *));
+                memcpy(nc, contents, n * sizeof(char *));
+                self->alloc->free(self->alloc->ctx, keys, cap * sizeof(char *));
+                self->alloc->free(self->alloc->ctx, contents, cap * sizeof(char *));
+            }
+            keys = nk;
+            contents = nc;
+            cap = ncap;
+        }
+        keys[n] = hu_strndup(self->alloc, k, strlen(k));
+        contents[n] = hu_strndup(self->alloc, c, strlen(c));
+        if (!keys[n] || !contents[n]) {
+            if (keys[n])
+                hu_str_free(self->alloc, keys[n]);
+            if (contents[n])
+                hu_str_free(self->alloc, contents[n]);
+            break;
+        }
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    size_t indexed = 0;
+    for (size_t i = 0; i < n; i += BATCH) {
+        size_t bn = (n - i) < BATCH ? (n - i) : BATCH;
+        const char *texts[BATCH];
+        size_t lens[BATCH];
+        hu_embedding_t embs[BATCH];
+        memset(embs, 0, sizeof(embs));
+        for (size_t j = 0; j < bn; j++) {
+            texts[j] = contents[i + j];
+            lens[j] = strlen(contents[i + j]);
+        }
+        hu_error_t err = self->sem_embedder->vtable->embed_batch(
+            self->sem_embedder->ctx, self->alloc, texts, lens, bn, embs);
+        if (err != HU_OK) {
+            /* One pathological row poisons a padded batch (2026-09-01: the
+             * 8-bit embedder emitted NaN for 15/16 rows once a 7.7 KB row was
+             * in the batch). Retry each row alone; rows that still fail are
+             * counted and skipped, never silently dropped. */
+            memset(embs, 0, sizeof(embs));
+            size_t solo_ok = 0;
+            for (size_t j = 0; j < bn; j++) {
+                if (self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
+                                                      texts[j], lens[j], &embs[j]) == HU_OK)
+                    solo_ok++;
+                else
+                    embs[j].values = NULL;
+            }
+            hu_log_warn("memory.semantic", NULL,
+                        "reindex batch at %zu failed (%s); per-row retry embedded %zu/%zu", i,
+                        hu_error_string(err), solo_ok, bn);
+        }
+        for (size_t j = 0; j < bn; j++) {
+            if (embs[j].values &&
+                self->sem_store->vtable->insert(self->sem_store->ctx, self->alloc, keys[i + j],
+                                                strlen(keys[i + j]), &embs[j], contents[i + j],
+                                                lens[j]) == HU_OK)
+                indexed++;
+            if (embs[j].values)
+                self->alloc->free(self->alloc->ctx, embs[j].values, embs[j].dim * sizeof(float));
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        hu_str_free(self->alloc, keys[i]);
+        hu_str_free(self->alloc, contents[i]);
+    }
+    if (cap) {
+        self->alloc->free(self->alloc->ctx, keys, cap * sizeof(char *));
+        self->alloc->free(self->alloc->ctx, contents, cap * sizeof(char *));
+    }
+    if (indexed_out)
+        *indexed_out = indexed;
+    return HU_OK;
+}
+
 sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {
     if (!mem || !mem->ctx || !mem->vtable)
         return NULL;
@@ -1752,6 +1980,11 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {
 }
 
 #else /* !HU_ENABLE_SQLITE */
+#include "human/memory.h"
+
+bool hu_sqlite_process_serialize(void) {
+    return true; /* nothing to serialize without SQLite */
+}
 
 #include "human/core/allocator.h"
 #include "human/memory.h"

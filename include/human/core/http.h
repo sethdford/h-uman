@@ -45,6 +45,16 @@ hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url,
                        const char *auth_header, /* e.g. "Bearer sk-xxx", or NULL */
                        hu_http_response_t *out);
 
+/* GET that follows up to max_redirects HTTPS→HTTPS redirects (301/302/307/308).
+ * hu_http_get never follows: an API that answers 3xx is a misconfiguration
+ * worth surfacing. Feeds are the exception — publishers move RSS URLs and
+ * the old one answers 307 forever (openai.com/blog/rss.xml, 2026-09). The
+ * Authorization header is not re-sent to a different host. */
+hu_error_t hu_http_get_follow(hu_allocator_t *alloc, const char *url,
+                              const char *auth_header, /* or NULL */
+                              int max_redirects,       /* clamped to [0, 10] */
+                              hu_http_response_t *out);
+
 /* GET with custom headers (newline-separated: "X-Key: val\nAccept: application/json") */
 hu_error_t hu_http_get_ex(hu_allocator_t *alloc, const char *url,
                           const char *extra_headers, /* NULL or "Key: value\n..." */

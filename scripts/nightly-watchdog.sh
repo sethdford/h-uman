@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# nightly-watchdog.sh — run any nightly whose marker for today/yesterday is missing.
+#
+# Why: launchd StartCalendarInterval jobs do not catch up across a multi-week
+# sleep (nothing under ~/.human was written 2026-08-10 -> 08-31). A StartInterval
+# job DOES fire on wake, so this runs every 6h, checks each nightly's artifact,
+# and runs the missing ones serially under one lock — never while :8741 is down
+# or a trainer is loading a model (never two model loaders).
+#
+# Markers are ARTIFACTS (a verdict file, a dated log line), never a launchd
+# "runs" counter: a job that ran and produced nothing counts as not run.
+#
+# Usage: nightly-watchdog.sh [--dry-run]   (exit 0; prints one summary line)
+set -uo pipefail
+DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
+HOME_DIR="${HOME}"
+LOGDIR="$HOME_DIR/.human/logs"; LOCKDIR="$HOME_DIR/.human/locks"; mkdir -p "$LOGDIR" "$LOCKDIR"
+LOG="$LOGDIR/nightly-watchdog.log"
+REPO="${HU_REPO_DIR:-$HOME_DIR/Projects/h-uman}"
+TODAY=$(date +%Y-%m-%d); YDAY=$(date -v-1d +%Y-%m-%d 2>/dev/null || date -d yesterday +%Y-%m-%d)
+MLX="${HU_MLX_HEALTH:-http://127.0.0.1:8741/health}"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
+
+# name|marker-kind|marker|wrapper|allowed-hours (HH-HH local, or "any")
+# retrain STOPS the production server for its run; it may only be started in
+# its contract window so a wake at 14:00 never takes :8741 down.
+JOBS=(
+  "humanness|file|$LOGDIR/humanness-verdict-DATE.json|$HOME_DIR/.human/bin/humanness-nightly.sh|any"
+  "doctor|line|$LOGDIR/doctor-nightly.log|$HOME_DIR/.human/bin/doctor-nightly.sh|any"
+  "retrain|line|$LOGDIR/nightly-retrain.log|$REPO/scripts/nightly-retrain.sh|02-05"
+  "drift|file|$HOME_DIR/.human/drift/drift-DATE.json|$REPO/scripts/drift_monitor.py|any"
+  "authorship|file|$LOGDIR/authorship-gap-DATE.json|$REPO/scripts/blind_ab/authorship_nightly.sh|any"
+  "llm-judge|file|$LOGDIR/llm-judge-DATE.json|$REPO/scripts/blind_ab/llm_judge_tier.py|any"
+  # Product gate (multiturn + fidelity + REAL blind-A/B refresh). Its launchd
+  # job is calendar-only (04:05) and was dark 08-08 -> 09-02 while the laptop
+  # slept; the watchdog is the only thing that notices. Marker = a dated line
+  # in nightly-eval.log (the script logs "[YYYY-MM-DDTHH:MM:SS] ...").
+  "eval|line|$LOGDIR/nightly-eval.log|$REPO/scripts/nightly_eval.sh|any"
+  # Log hygiene: service-loop-error.log is launchd-appended forever (41 MB,
+  # 530k lines, no rotation on 2026-09-02). rotate-logs.sh copy-truncates
+  # oversized logs once a day and writes its own dated marker line.
+  "logrotate|line|$LOGDIR/logrotate.log|$REPO/scripts/rotate-logs.sh|any"
+)
+HOUR_NOW=${HU_WATCHDOG_HOUR:-$(date +%H)}
+in_window() {  # "any" | "HH-HH"
+  [ "$1" = "any" ] && return 0
+  local lo=${1%-*} hi=${1#*-}
+  [ "$((10#$HOUR_NOW))" -ge "$((10#$lo))" ] && [ "$((10#$HOUR_NOW))" -lt "$((10#$hi))" ]
+}
+
+marker_present() {  # kind marker
+  local kind="$1" m="$2" d
+  for d in "$TODAY" "$YDAY"; do
+    case "$kind" in
+      file) [ -s "${m//DATE/$d}" ] && return 0 ;;
+      line) [ -f "$m" ] && grep -q "^\[$d" "$m" && return 0 ;;
+    esac
+  done
+  return 1
+}
+
+serving_up() { [ "${HU_WATCHDOG_SKIP_HEALTH:-0}" = 1 ] && return 0; curl -s -m 5 "$MLX" >/dev/null 2>&1; }
+trainer_running() { pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|embed_server.py --port 8741" >/dev/null 2>&1; }
+
+missing=(); ran=(); skipped=()
+for spec in "${JOBS[@]}"; do
+  IFS='|' read -r name kind marker wrapper window <<<"$spec"
+  if marker_present "$kind" "$marker"; then continue; fi
+  missing+=("$name")
+  [ -x "$wrapper" ] || { skipped+=("$name:no-wrapper"); continue; }
+  if ! in_window "$window"; then skipped+=("$name:outside-window-$window"); continue; fi
+  if [ "$DRY" = 1 ]; then ran+=("$name(dry)"); continue; fi
+  if ! serving_up; then skipped+=("$name:mlx-down"); continue; fi
+  if trainer_running; then skipped+=("$name:trainer-busy"); continue; fi
+  log "running $name ($wrapper) — marker missing for $TODAY/$YDAY"
+  # macOS has no flock(1): an atomic mkdir is the lock. A lock older than 6h
+  # whose pid is gone is stale and reclaimed.
+  LOCK="$LOCKDIR/nightly.lock.d"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    oldpid=$(cat "$LOCK/pid" 2>/dev/null || echo 0)
+    if [ "$oldpid" -gt 0 ] && kill -0 "$oldpid" 2>/dev/null; then skipped+=("$name:locked-by-$oldpid"); continue; fi
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +360 2>/dev/null)" ] || [ "$oldpid" -eq 0 ] || ! kill -0 "$oldpid" 2>/dev/null; then
+      rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null || { skipped+=("$name:lock-race"); continue; }
+    fi
+  fi
+  echo $$ > "$LOCK/pid"
+  "$wrapper" >> "$LOG" 2>&1   # executable with its own shebang (bash or python)
+  rc=$?
+  rm -rf "$LOCK"
+  log "$name exited rc=$rc"
+  if marker_present "$kind" "$marker"; then ran+=("$name"); else skipped+=("$name:ran-but-no-artifact(rc=$rc)"); fi
+done
+summary="watchdog $TODAY missing=[${missing[*]:-}] ran=[${ran[*]:-}] skipped=[${skipped[*]:-}]"
+[ "$DRY" = 1 ] || log "$summary"
+echo "$summary"
+exit 0

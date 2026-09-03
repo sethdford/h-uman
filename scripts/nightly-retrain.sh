@@ -78,8 +78,11 @@ serving_stopped=0
 restore_serving() {
     if [[ "$serving_stopped" == "1" ]]; then
         log "restarting mlx-server"
-        launchctl kickstart -k "$SERVER_LABEL" 2>&1 | tee -a "$LOG" || \
-            log "WARNING: kickstart failed — run 'launchctl kickstart -k $SERVER_LABEL' by hand"
+        # Booted OUT below (not just killed), so bootstrap it back; kickstart is
+        # the fallback for a plist that is somehow still loaded.
+        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/ai.human.mlx-server.plist" 2>&1 | tee -a "$LOG" || \
+            launchctl kickstart -k "$SERVER_LABEL" 2>&1 | tee -a "$LOG" || \
+            log "WARNING: bootstrap and kickstart failed — bootstrap ~/Library/LaunchAgents/ai.human.mlx-server.plist by hand"
         for _ in $(seq 1 40); do
             code=$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' \
                    "http://127.0.0.1:$PORT/health" 2>/dev/null || true)
@@ -92,16 +95,25 @@ restore_serving() {
 trap restore_serving EXIT INT TERM
 
 log "stopping mlx-server to free the base weights"
-launchctl kill SIGTERM "$SERVER_LABEL" 2>&1 | tee -a "$LOG" || true
+# 2026-09-02: `launchctl kill SIGTERM` is NOT a stop — KeepAlive={Crashed,
+# SuccessfulExit} relaunched the server within seconds, the preflight then
+# refused (two loaders), and training_loop wrote an empty adapter and exited 0.
+# bootout UNLOADS the job so nothing relaunches it until restore_serving.
+launchctl bootout "gui/$(id -u)/$SERVER_LABEL" 2>&1 | tee -a "$LOG" || true
 serving_stopped=1
 
 # Wait for the 56 GB to actually come back — the process closing its socket does
 # NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that motivated
 # the barrier in human-serve.sh.
 for _ in $(seq 1 60); do
-    pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 || break
+    if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
+       ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
     sleep 2
 done
+if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
+    log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
+    exit 1
+fi
 sleep 5
 free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
 log "serving stopped; ${free_gb} GB free"
@@ -112,8 +124,24 @@ log "serving stopped; ${free_gb} GB free"
 # refuses anyway, that refusal is correct and we restart serving untouched.
 if [[ -f "$SOURCE_JSONL" ]]; then
     log "training from $SOURCE_JSONL"
+    train_stamp=$(mktemp "${TMPDIR:-/tmp}/hu-retrain-stamp.XXXXXX")
     python3 "$REPO/scripts/training_loop.py" --source-jsonl "$SOURCE_JSONL" 2>&1 | tee -a "$LOG"
-    log "training exited rc=${PIPESTATUS[0]}"
+    train_rc=${PIPESTATUS[0]}
+    log "training exited rc=${train_rc}"
+    # Belt and braces beside training_loop's own guard: never let a placeholder
+    # or a zero-weight adapter sit in the staging dir looking like a success.
+    # training_loop stages to a FIXED path; only judge it if this run wrote it
+    # (newer than the stamp), so a stale-but-real adapter is never quarantined.
+    staged="$HOME/.human/training-data/adapters/seth-lora"
+    if [[ "$train_rc" == "0" && -d "$staged" && "$staged" -nt "$train_stamp" ]]; then
+        if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
+            log "  adapter real: $staged — $why"
+        else
+            log "  adapter FAILED the real-adapter guard: $why"
+            log "  quarantining $staged -> $staged.rejected-$(date +%s)"
+            mv "$staged" "$staged.rejected-$(date +%s)" 2>&1 | tee -a "$LOG" || true
+        fi
+    fi
 else
     log "no source jsonl at $SOURCE_JSONL — skipping training"
 fi
@@ -145,6 +173,18 @@ if [[ -n "$SERVING_BASE" ]]; then
     fi
 fi
 
+# Task 11 (2026-09-01): classifier-tier gate beside the human blind A/B. Runs
+# HERE because the scorer loads its own base+adapter pair and the serving
+# model is already stopped in this window (never two loaders). Best-effort:
+# a refusal (n<20, no adapter) is logged, never fabricated.
+# Default to the n=37 blind-A/B run: the rated cycle dirs carry only 12 keyed
+# trials each and the gate refuses n<20.
+CYCLE_DIR="${HU_CLASSIFIER_CYCLE_DIR:-$HOME/blind_ab_run}"
+if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
+    log "classifier gate on $CYCLE_DIR"
+    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
+    log "classifier gate exited rc=${PIPESTATUS[0]}"
+fi
 log "=== nightly retrain done ==="
 # restore_serving runs via the EXIT trap.
 

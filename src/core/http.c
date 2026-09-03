@@ -45,7 +45,8 @@ static bool hu_http_body_within_cap(const char *url, size_t body_len) {
 #if HU_IS_TEST
 /* In test mode, skip real HTTP and return mock response */
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
+    (void)max_redirs;
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
     (void)auth_header;
@@ -183,7 +184,7 @@ static void curl_setup_common(CURL *curl) {
 }
 
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -223,6 +224,23 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
     curl_setup_common(curl);
+    /* Opt-in redirect following (feeds: publishers move RSS URLs behind
+     * 301/307 and never come back). HTTPS-only on the hop, so a redirect
+     * cannot downgrade the transport; credentials are not re-sent to a
+     * different host (CURLOPT_UNRESTRICTED_AUTH stays 0). Pool handles are
+     * curl_easy_reset() on acquire, so this never leaks into POST paths. */
+    if (max_redirs > 0) {
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, max_redirs);
+        /* CURLOPT_REDIR_PROTOCOLS_STR is an enum, not a macro, so #ifdef
+         * cannot detect it; on libcurl ≥ 7.85 the old option is deprecated
+         * and -Werror fails the Linux build (main CI 2026-09-02). */
+#if LIBCURL_VERSION_NUM >= 0x075500
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, (long)CURLPROTO_HTTPS);
+#endif
+    }
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
@@ -518,10 +536,11 @@ static hu_error_t hu_http_post_json_stream_impl(hu_allocator_t *alloc, const cha
 }
 #else
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)auth_header;
+    (void)max_redirs;
     (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
@@ -566,7 +585,16 @@ hu_error_t hu_http_post_json_ex(hu_allocator_t *alloc, const char *url, const ch
 
 hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url, const char *auth_header,
                        hu_http_response_t *out) {
-    return hu_http_get_impl(alloc, url, auth_header, out);
+    return hu_http_get_impl(alloc, url, auth_header, 0L, out);
+}
+
+hu_error_t hu_http_get_follow(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                              int max_redirects, hu_http_response_t *out) {
+    if (max_redirects < 0)
+        max_redirects = 0;
+    if (max_redirects > 10)
+        max_redirects = 10;
+    return hu_http_get_impl(alloc, url, auth_header, (long)max_redirects, out);
 }
 
 #if defined(HU_HTTP_CURL) && !HU_IS_TEST

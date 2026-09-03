@@ -15,15 +15,19 @@
 set -uo pipefail
 
 TRAIN_PY=/Users/sethford/.human/venvs/train312/bin/python
+# Contract C6: mlx-tune (SimPO/KTO/ORPO, reference-free, per-expert MoE LoRA)
+# lives in its OWN venv, never train312 -- see scripts/mlx_tune_env.txt.
+MLXTUNE_PY=/Users/sethford/.human/venvs/mlxtune312/bin/python
 SERVICE=gui/501/ai.human.mlx-server
 
 # Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
 # forking this script, so every run keeps the same guards.
 CONFIG=/Users/sethford/.human/training-data/glm-v62-sft-config.yaml
 ORPO_BETA=0.05
+GAMMA=0.5                 # mlx_tune SimPO's target reward margin only
 TAG=v62-sft
-TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes)
-TRAIN_MODE=""             # only meaningful for mlx_lm_lora
+TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes) | mlx_tune (SimPO/KTO/ORPO, per-expert MoE LoRA)
+TRAIN_MODE=""             # mlx_lm_lora: dpo|orpo|cpo. mlx_tune: simpo|kto|orpo.
 EST_MINUTES=25            # estimated run length; gates the arena-overlap check
 DRY_RUN=0
 
@@ -35,6 +39,7 @@ while [ $# -gt 0 ]; do
     --tag)        TAG=$2; shift 2 ;;
     --trainer)    TRAINER=$2; shift 2 ;;
     --train-mode) TRAIN_MODE=$2; shift 2 ;;
+    --gamma)      GAMMA=$2; shift 2 ;;
     --est-minutes) EST_MINUTES=$2; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -62,6 +67,20 @@ case "$TRAINER:$TRAIN_MODE" in
     echo "[train] REFUSING --train-mode cpo: same no-op defect, not patched." >&2
     exit 2 ;;
 esac
+
+# Contract C6: --trainer mlx_tune only understands simpo/kto/orpo (its
+# reference-free objectives -- no dpo, since that needs a second resident
+# copy of the 56 GB base as the frozen reference, which is why this repo
+# uses ORPO/mlx_lm_lora at all). Refuse anything else up front.
+if [ "$TRAINER" = "mlx_tune" ]; then
+  case "$TRAIN_MODE" in
+    simpo|kto|orpo) : ;;
+    *) echo "[train] REFUSING --trainer mlx_tune --train-mode ${TRAIN_MODE:-<unset>}:" >&2
+       echo "        mlx_tune only supports simpo|kto|orpo (see scripts/mlx_tune_train.py)." >&2
+       exit 2 ;;
+  esac
+  [ -x "$MLXTUNE_PY" ] || { echo "[train] FATAL: mlx-tune venv missing: $MLXTUNE_PY (see scripts/mlx_tune_env.txt)" >&2; exit 1; }
+fi
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 ADAPTER=/Users/sethford/.human/training-data/adapters/seth-glm-air-${TAG}-${STAMP}
@@ -110,6 +129,11 @@ fi
 if [ "$DRY_RUN" = "1" ]; then
   say "DRY RUN -- would train into $ADAPTER"
   say "corpus: $(wc -l < "$DATA_DIR/train.jsonl") train / $(wc -l < "$DATA_DIR/valid.jsonl") valid"
+  if [ "$TRAINER" = "mlx_tune" ]; then
+    say "delegating to mlx_tune_train.py --dry-run (config + data + architecture support, zero weight loading)"
+    "$MLXTUNE_PY" "$(dirname "$0")/mlx_tune_train.py" --dry-run --config "$CONFIG" --train-mode "$TRAIN_MODE"
+    exit $?
+  fi
   exit 0
 fi
 
@@ -185,6 +209,15 @@ say "log      -> $LOG"
 if [ "$TRAINER" = "mlx_lm" ]; then
   say "trainer: mlx_lm.lora (SFT) -- the path that produced the live v5 adapter"
   "$TRAIN_PY" -m mlx_lm.lora -c "$CONFIG" --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+elif [ "$TRAINER" = "mlx_tune" ]; then
+  say "trainer: mlx_tune --train-mode $TRAIN_MODE --beta $ORPO_BETA (own venv: $MLXTUNE_PY)"
+  # HU_MLX_TUNE_ALLOW_LOAD=1 is the driver's own belt-and-suspenders gate
+  # (scripts/mlx_tune_train.py::cmd_train) -- it refuses to load the base
+  # unless this env var is set, so only THIS guarded sequence (prod already
+  # stopped + reaped + headroom-checked above) can trigger a load.
+  HU_MLX_TUNE_ALLOW_LOAD=1 "$MLXTUNE_PY" "$(dirname "$0")/mlx_tune_train.py" \
+      --config "$CONFIG" --train-mode "$TRAIN_MODE" --beta "$ORPO_BETA" --gamma "$GAMMA" \
+      --adapter-out "$ADAPTER" 2>&1 | tee "$LOG"
 else
   say "trainer: mlx_lm_lora --train-mode ${TRAIN_MODE:-dpo} --beta $ORPO_BETA"
   "$TRAIN_PY" -m mlx_lm_lora.train -c "$CONFIG" \
@@ -201,7 +234,7 @@ fi
 # The banner echoes the mode the trainer actually resolved. Assert on it rather
 # than trusting the flag took -- a silently-ignored train_mode is the failure
 # that produced a full "successful" SFT run instead of the ORPO we asked for.
-if [ "$TRAINER" = "mlx_lm_lora" ]; then
+if [ "$TRAINER" = "mlx_lm_lora" ] || [ "$TRAINER" = "mlx_tune" ]; then
   grep -qiE "Training Mode:.*${TRAIN_MODE:-dpo}" "$LOG" \
     || die "trainer did not resolve mode=${TRAIN_MODE:-dpo} (see $LOG)"
   say "confirmed: trainer resolved mode=${TRAIN_MODE:-dpo}, beta=$ORPO_BETA"
