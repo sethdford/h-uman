@@ -15,13 +15,16 @@
  * unpacks from this struct right after the call; migrating those use sites to
  * rt.* is a later mechanical pass. */
 
-#include "human/channel.h"          /* hu_channel_history_entry_t */
-#include "human/daemon.h"           /* hu_service_channel_t */
-#include "human/daemon_proactive.h" /* hu_proactive_context_t */
-#include "human/persona.h"          /* hu_contact_profile_t */
+#include "human/agent/inner_thoughts.h" /* hu_inner_thought_store_t */
+#include "human/channel.h"              /* hu_channel_history_entry_t */
+#include "human/context/repair.h"       /* hu_repair_signal_t */
+#include "human/daemon.h"               /* hu_service_channel_t */
+#include "human/daemon_proactive.h"     /* hu_proactive_context_t */
+#include "human/persona.h"              /* hu_contact_profile_t */
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 struct hu_agent;
 struct hu_config;
@@ -48,8 +51,12 @@ typedef struct hu_reactive_turn_ctx {
     bool llm_decides; /* channels.<ch>.daemon.llm_decides */
 
     /* ── Loop-lifetime state the slices read/write in place ───────────── */
-    hu_daemon_comfort_pending_t *comfort_pending; /* HU_COMFORT_PENDING_MAX slots */
-    hu_proactive_context_t *proactive_ctx;        /* contact activity recording */
+    hu_daemon_comfort_pending_t *comfort_pending;  /* HU_COMFORT_PENDING_MAX slots */
+    hu_proactive_context_t *proactive_ctx;         /* contact activity recording */
+    hu_inner_thought_store_t *inner_thought_store; /* Phase 3 inner-thought store */
+    bool inner_thought_store_ok;                   /* store initialised? */
+    uint32_t daemon_turn_counter;                  /* anti-sycophancy contrarian budget */
+    hu_repair_signal_t *repair_signal;             /* Phase 4 repair signal (consumed here) */
 
     /* ── Outputs of hu_daemon_reactive_context_load ───────────────────── */
     char *contact_ctx; /* persona contact profile (+ inner world, + style notes) */
@@ -74,5 +81,15 @@ typedef struct hu_reactive_turn_ctx {
 void hu_daemon_reactive_context_load(hu_allocator_t *alloc, struct hu_agent *agent,
                                      const struct hu_config *config, hu_service_channel_t *channels,
                                      size_t channel_count, hu_reactive_turn_ctx_t *rt);
+
+/* Slice B: build the prompt context for this turn — the Phase 6 prefix
+ * (life sim, mood, ToM, anticipatory, self-awareness, life chapter, social
+ * graph, timezone, humor, inner thoughts, anti-sycophancy, repair, evolved
+ * opinions, feeds, visual, relationship dynamics), then the awareness merge
+ * that produces convo_ctx, then F21 topic-switch consolidation. Reads the
+ * slice A outputs, writes convo_ctx/convo_ctx_len, consumes repair_signal.
+ * Compiled out under HU_IS_TEST exactly as the daemon.c body was. */
+void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, struct hu_agent *agent,
+                                     const struct hu_config *config, hu_reactive_turn_ctx_t *rt);
 
 #endif /* HU_DAEMON_REACTIVE_TURN_H */

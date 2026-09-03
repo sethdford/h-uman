@@ -195,6 +195,27 @@ static void test_missing_store_leaves_history_empty(void) {
     fixture_free(&f);
 }
 
+/* Slice B under HU_IS_TEST: the whole prompt-build body is compiled out (the
+ * same #ifndef HU_IS_TEST that wrapped it in hu_service_run), so the contract
+ * here is that the call is a no-op on the turn context: convo_ctx passes
+ * through untouched and nothing else is written. */
+static void test_prompt_build_is_compiled_out_under_test(void) {
+    fixture_t f;
+    fixture_init(&f, false);
+    char sentinel[] = "existing convo ctx";
+    f.rt.convo_ctx = sentinel;
+    f.rt.convo_ctx_len = sizeof(sentinel) - 1;
+    f.rt.ctx_count = 7;
+
+    hu_daemon_reactive_prompt_build(&f.alloc, &f.agent, NULL, &f.rt);
+
+    HU_ASSERT_TRUE(f.rt.convo_ctx == sentinel);
+    HU_ASSERT_EQ(f.rt.convo_ctx_len, sizeof(sentinel) - 1);
+    HU_ASSERT_EQ(f.rt.ctx_count, 7u);
+    HU_ASSERT_EQ(f.agent.history_count, 0u);
+    fixture_free(&f);
+}
+
 void run_daemon_reactive_context_tests(void) {
     HU_TEST_SUITE("Daemon Reactive Context (slice A)");
     HU_RUN_TEST(test_restores_session_history_with_roles);
@@ -202,4 +223,5 @@ void run_daemon_reactive_context_tests(void) {
     HU_RUN_TEST(test_clears_prior_history_before_restore);
     HU_RUN_TEST(test_outputs_start_empty);
     HU_RUN_TEST(test_missing_store_leaves_history_empty);
+    HU_RUN_TEST(test_prompt_build_is_compiled_out_under_test);
 }

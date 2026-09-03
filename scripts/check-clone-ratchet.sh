@@ -21,7 +21,12 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11499   # measured 2026-09-02 after C5 merge
+CLONE_BASELINE=11497   # locked 2026-09-02 after the daemon batch-reply carve-out: the moved
+                       # prompt slice re-wrapped two blocks into byte-copies of humanness.c /
+                       # daemon_maintenance.c; both now share a helper (life_sim_build_context_now,
+                       # daemon_consolidation_config). Measured on the INDEX (git ls-files), which
+                       # is what the hook sees — an untracked new file is invisible to this count.
+# prior: 11499         # measured 2026-09-02 after C5 merge
                        # duplicated extras-dispatch preamble in reliable_chat and
                        # reliable_chat_with_system to one line each
 # prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read

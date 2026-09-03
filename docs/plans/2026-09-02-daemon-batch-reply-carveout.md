@@ -1,7 +1,7 @@
 ---
 title: daemon.c batch-reply carve-out — reactive turn context + prompt build
 date: 2026-09-02
-status: slice-A-landed
+status: slices-A+B-landed
 ---
 
 # daemon.c batch-reply carve-out
@@ -141,7 +141,7 @@ Steps (each a build+suite cycle):
 Result: daemon.c 14058 → 13664 LOC (−394 net: 431 moved, 37 for the call,
 unpack and re-declarations); see the slice A commit for the suite line.
 
-## Slice B — `src/daemon/daemon_reactive_prompt.c` (NEXT)
+## Slice B — `src/daemon/daemon_reactive_prompt.c` (LANDED)
 
 Moves daemon.c 6038-7370 (post-slice-A numbering shifts by -412): the Phase 6
 prefix builder (`PHASE6_APPEND` macro + `#undef`, life sim, mood, ToM,
@@ -167,7 +167,29 @@ Checklist before moving: `grep` proves `ep_hdr`, `error_seed`,
 of `convo_ctx`/`convo_ctx_len` moves below the B call and the A-time unpack of
 `history_entries`/`ctx_entries` stays where it is (B reads them from `rt`).
 
-Expected: daemon.c ≈ 12,310 LOC; `MAX_BASELINE` lowered again.
+Landed as measured: region 5644-6974 post-slice-A (1,331 LOC, 15 in, 0 out, no
+batch-depth exits, entirely inside `#ifndef HU_IS_TEST`). The four
+`hu_service_run` statics ride in the struct (`inner_thought_store` and
+`repair_signal` by pointer, `inner_thought_store_ok` and `daemon_turn_counter`
+by value since the region only reads them), which cost five one-token edits
+inside the moved body (`&inner_thought_store` → the pointer, `repair_signal.` →
+`repair_signal->`, `memset(&repair_signal…)` → `memset(repair_signal…)`).
+The build, not the measurement, caught two more: `drift_check_counter` is a
+function-scope static declared as bare `unsigned` (the type whitelist required
+a base type after `unsigned`), used only in the region, so it moved with its
+gate; and daemon.c's `ctx_entries`/`ctx_count` unpack became dead once their
+only readers moved, so it was removed (`-Werror=unused-variable`).
+`convo_ctx` stays declared ungated in daemon.c and is re-read from `rt` after
+the call. Result: daemon.c 13664 → 12336 LOC; the new file is 1,352 lines.
+
+Clone ratchet: the hook measured 11505 (+6) on the staged tree — losing 12
+columns of indent let clang-format re-wrap a life-sim block and a
+consolidation-config literal into byte-copies of `src/agent/humanness.c` and
+`src/daemon/daemon_maintenance.c`. Both pairs now share a helper
+(`hu_life_sim_build_context_now`, `hu_daemon_consolidation_config`), landing
+at 11497 with `CLONE_BASELINE` lowered to match. Measure clones with the new
+file STAGED: `check-clone-ratchet.sh` enumerates `git ls-files`, so an
+untracked file is invisible and the pre-stage number (11494) was an artifact.
 
 ## Verification (per slice)
 

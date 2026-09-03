@@ -1269,6 +1269,7 @@ set(HU_CORE_SOURCES
     src/daemon/send_budget.c
     src/daemon/reactive_gates.c
     src/daemon/daemon_reactive_context.c
+    src/daemon/daemon_reactive_prompt.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_identity_graph.c
     src/daemon/daemon_config_reload.c
