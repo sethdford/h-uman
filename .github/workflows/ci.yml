@@ -135,6 +135,17 @@ jobs:
         # gates without being themselves gated. See
         # .claude/rules/test-source-gate-symmetry.md.
         run: bash scripts/check-test-source-gate-symmetry.sh
+      - name: Checker self-tests (fixtures)
+        # The two pre-commit checkers above and in .githooks/pre-commit are
+        # themselves guarded by fixture smoke tests: each points the checker
+        # at a known-bad and a known-good input and asserts the exact exit
+        # code. Without this step a regression in a checker (e.g. the
+        # platform-macro blind spot fixed in 38401cea4) stays green forever.
+        # Pure bash + python3, no build dependency.
+        run: |
+          set -euo pipefail
+          bash tests/fixtures/check-test-refs/run-smoke-test.sh
+          bash tests/fixtures/check-gate-symmetry/run-smoke-test.sh
 
   integration-tests:
     runs-on: ubuntu-latest
