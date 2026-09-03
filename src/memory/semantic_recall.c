@@ -1,7 +1,6 @@
 /* semantic_recall.c — gate + wiring for the real semantic retriever. */
 #include "human/memory/semantic_recall.h"
 
-#include "human/core/string.h"
 #include "human/memory/vector/embedder_http.h"
 #include "human/memory/vector/store_sqlite_vec.h"
 
@@ -56,9 +55,15 @@ size_t hu_semantic_recall_clamp_result(hu_allocator_t *alloc, hu_retrieval_resul
         if (used + cut > budget_bytes)
             break; /* this hit and every lower-ranked one are dropped */
         if (cut < clen) {
-            char *nc = hu_strndup(alloc, e->content, cut);
+            /* Binary-safe copy: content may carry embedded NULs (the
+             * 2026-07-13 memory-loader overflow), so hu_strndup — which stops
+             * at the first NUL — would allocate fewer than cut+1 bytes while
+             * content_len still claims cut. Copy exactly cut bytes. */
+            char *nc = (char *)alloc->alloc(alloc->ctx, cut + 1);
             if (!nc)
                 break;
+            memcpy(nc, e->content, cut);
+            nc[cut] = '\0';
             alloc->free(alloc->ctx, (void *)e->content, clen + 1);
             e->content = nc;
             e->content_len = cut;
@@ -68,8 +73,10 @@ size_t hu_semantic_recall_clamp_result(hu_allocator_t *alloc, hu_retrieval_resul
     }
     if (keep == res->count)
         return used;
-    for (size_t i = keep; i < res->count; i++)
+    for (size_t i = keep; i < res->count; i++) {
         hu_memory_entry_free_fields(alloc, &res->entries[i]);
+        memset(&res->entries[i], 0, sizeof(res->entries[i])); /* no dangling pointers */
+    }
     size_t old = res->count;
     if (keep == 0) {
         alloc->free(alloc->ctx, res->entries, old * sizeof(hu_memory_entry_t));
@@ -80,6 +87,9 @@ size_t hu_semantic_recall_clamp_result(hu_allocator_t *alloc, hu_retrieval_resul
         res->count = 0;
         return 0;
     }
+    /* Shrink so hu_retrieval_result_free's sized frees stay exact. Both
+     * shipped allocators ignore old_size on free, so a failed shrink (kept
+     * larger buffer, smaller count) is tolerated rather than fatal. */
     hu_memory_entry_t *ne = (hu_memory_entry_t *)alloc->realloc(alloc->ctx, res->entries,
                                                                 old * sizeof(hu_memory_entry_t),
                                                                 keep * sizeof(hu_memory_entry_t));

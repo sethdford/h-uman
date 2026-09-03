@@ -139,6 +139,29 @@ static void test_clamp_result_under_budget_is_untouched(void) {
     hu_retrieval_result_free(&alloc, &r);
 }
 
+static void test_clamp_result_preserves_embedded_nul_binary_safe(void) {
+    /* Recalled content is binary-safe by contract (content_len, never strlen).
+     * A NUL before the cut must not shrink the copy while content_len still
+     * claims the full cut — that is the 2026-07-13 memory-loader overflow
+     * shape. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_retrieval_result_t r = {0};
+    fill_result(&alloc, &r, 1, 500);
+    char *c = (char *)r.entries[0].content;
+    c[5] = '\0'; /* embedded NUL well before any 240-byte cut */
+    char expect[240];
+    memcpy(expect, c, sizeof(expect));
+    size_t kept = hu_semantic_recall_clamp_result(&alloc, &r, 1200, 240);
+    HU_ASSERT_EQ((long)r.count, 1L);
+    HU_ASSERT_LE((long)r.entries[0].content_len, 240L);
+    HU_ASSERT_EQ((long)kept, (long)r.entries[0].content_len);
+    /* Every byte up to content_len is readable and identical to the source
+     * (ASan flags a short allocation here). */
+    HU_ASSERT(memcmp(r.entries[0].content, expect, r.entries[0].content_len) == 0);
+    HU_ASSERT_EQ((int)r.entries[0].content[r.entries[0].content_len], 0);
+    hu_retrieval_result_free(&alloc, &r);
+}
+
 void run_semantic_recall_tests(void) {
     HU_TEST_SUITE("semantic_recall");
     HU_RUN_TEST(test_gate_defaults_off_and_parses);
@@ -146,6 +169,7 @@ void run_semantic_recall_tests(void) {
     HU_RUN_TEST(test_truncate_hit_cuts_at_word_boundary);
     HU_RUN_TEST(test_clamp_result_over_budget_is_deterministic);
     HU_RUN_TEST(test_clamp_result_under_budget_is_untouched);
+    HU_RUN_TEST(test_clamp_result_preserves_embedded_nul_binary_safe);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_attach_to_sqlite_engine_creates_index_tables);
 #endif
