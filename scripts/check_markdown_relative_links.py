@@ -146,8 +146,25 @@ def check_path(raw: str, parent: Path) -> str | None:
     return None
 
 
+FENCED_CODE_RE = re.compile(r"^(\s*)(`{3,}|~{3,}).*?^\1\2[ \t]*$", re.MULTILINE | re.DOTALL)
+INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
+
+
+def strip_code(text: str) -> str:
+    """Blank out fenced blocks and inline code spans before link extraction.
+
+    Code is not prose: a regex such as `['’](t\\|re\\|ve)` in a spec table
+    (docs/plans/2026-09-02-persona-evolution/spec.md, 2026-09-03) is exactly
+    the shape of a Markdown link and was reported as a missing file
+    "t\\|re\\|ve\\|ll\\|d\\|s\\|m". Replacing the spans with spaces keeps
+    offsets stable for any caller that reports positions."""
+    text = FENCED_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+    return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def extract_urls_from_file(text: str) -> list[str]:
     urls: list[str] = []
+    text = strip_code(text)
     for m in INLINE_LINK_RE.finditer(text):
         urls.append(m.group(1).strip())
     for m in REF_DEF_RE.finditer(text):
