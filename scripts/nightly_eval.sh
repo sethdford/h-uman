@@ -9,7 +9,10 @@
 #        - drives the local mlx-server on :8741 (model already resident)
 #        - cloud judge via Vertex ADC (degrades to latency-only if ADC absent)
 #   2. persona-fidelity SOTA gate             (scripts/eval_fidelity_nightly.py)
-#        - spins up its OWN mlx_lm.generate subprocess (loads the model)
+#        - generates THROUGH :8741 (--gen served): PRE arm = zero-delta twin
+#          of the serving adapter via /v1/adapters/swap, POST = serving adapter
+#        - loads a model in-process ONLY when :8741 is down and no trainer
+#          holds the weights (never two loaders — 2026-09-03 outage)
 #        - runs only AFTER the multi-turn pass has fully exited
 #
 # Why a single serial wrapper instead of two launchd agents:
@@ -134,6 +137,57 @@ gateway_up() {
   [ "$code" = "200" ]
 }
 
+# ---- Stage 2 (fidelity) helpers ------------------------------------------------
+# Never two loaders: the fidelity harness generates THROUGH :8741 when it is
+# up. In-process generation (a second 56 GB copy) is only allowed when :8741 is
+# DOWN and no trainer is holding the weights. 2026-09-03 04:31: an in-process
+# load beside the live server reached 94.8 GB wired and killed production.
+trainer_running() {
+  pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|mlx_tune_train|dpo_mlx_train|kto_mlx_train|grpo_mlx_train" >/dev/null 2>&1
+}
+fidelity_mode() {  # served | inprocess | skip-trainer
+  if server_up; then echo served
+  elif trainer_running; then echo skip-trainer
+  else echo inprocess
+  fi
+}
+wired_gb() { vm_stat | awk '/Pages wired down/ {gsub("\\.","",$4); printf "%.1f", $4*16384/1073741824}'; }
+loader_count() { pgrep -f "mlx-server.py|python.*-m mlx_lm|mlx_lm.lora|mlx_tune_train|dpo_mlx_train" | wc -l | tr -d ' '; }
+# Background sampler: peak wired GB + max concurrent model loaders during a
+# step, written to a file every 5 s. The artifact the acceptance reads
+# (< 75 GB wired, exactly one loader) — not the harness's own report.
+SAMPLER_PID=""; SAMPLER_FILE=""
+start_resource_sampler() {
+  SAMPLER_FILE=$(mktemp "${LOG_DIR}/.nightly-sampler.XXXXXX")
+  (
+    peak=0; loaders=0
+    while :; do
+      w=$(wired_gb); l=$(loader_count)
+      if awk -v w="$w" -v p="$peak" 'BEGIN{exit !(w>p)}'; then peak=$w; fi
+      [ "${l:-0}" -gt "$loaders" ] && loaders=$l
+      printf 'peak_wired_gb=%s max_loaders=%s\n' "$peak" "$loaders" > "$SAMPLER_FILE"
+      sleep 5
+    done
+  ) &
+  SAMPLER_PID=$!
+}
+stop_resource_sampler() {  # prints the sampler's last line
+  [ -n "$SAMPLER_PID" ] && { kill "$SAMPLER_PID" 2>/dev/null || true; wait "$SAMPLER_PID" 2>/dev/null || true; }
+  [ -n "$SAMPLER_FILE" ] && { cat "$SAMPLER_FILE" 2>/dev/null; rm -f "$SAMPLER_FILE"; }
+  SAMPLER_PID=""; SAMPLER_FILE=""
+}
+# Safety net: if the harness could not put the serving adapter back after the
+# PRE arm, production is on the zero adapter. One more swap + verify from here.
+restore_serving_adapter() {  # adapter_path
+  local want="$1" got
+  [ -n "$want" ] || return 1
+  curl -s -m 600 -X POST -H 'Content-Type: application/json' \
+    -d "{\"adapter_path\": \"$want\"}" "${SERVER_URL}/v1/adapters/swap" >/dev/null 2>&1 || true
+  got=$(curl -s -m 15 "${SERVER_URL}/v1/adapters/current" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("adapter_path") or "")' 2>/dev/null || true)
+  [ -n "$got" ] && [ "$(cd "$got" 2>/dev/null && pwd -P)" = "$(cd "$want" 2>/dev/null && pwd -P)" ]
+}
+
 # ---- Stage 3 precondition checks ------------------------------------------------
 # Sufficiency, not existence: the gate stamps ENFORCING only at >= 30 real pairs
 # (ENFORCE_MIN_PAIRS in blind_ab_gate.py); below that a run wastes GPU on an
@@ -189,14 +243,23 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  autopush:      HU_NIGHTLY_AUTOPUSH=$HU_NIGHTLY_AUTOPUSH"
   log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
   log "  binoc-dpo:     HU_NIGHTLY_BINOCULARS_DPO=$HU_NIGHTLY_BINOCULARS_DPO (0=off, 1=shadow, 2=live)"
-  log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (loads own model), [3/3] blind-ab gate refresh (REAL measurement), serial"
+  log "  fidelity mode: $(fidelity_mode)"
+  log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (served via :8741; in-process only if DOWN), [3/3] blind-ab gate refresh (REAL measurement), serial"
   exit 0
 fi
 
 # ---- Acquire single-instance lock (atomic mkdir) ----------------------------
+# A lock whose pid is gone is stale (the 2026-09-03 04:31 crash + reboot left
+# one behind, and every later run would have exited here forever). Reclaim it.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  log "another nightly_eval run holds the lock ($LOCK_DIR) — exiting without stacking"
-  exit 0
+  lock_pid=$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    log "another nightly_eval run holds the lock ($LOCK_DIR, pid $lock_pid) — exiting without stacking"
+    exit 0
+  fi
+  log "reclaiming stale lock $LOCK_DIR (pid ${lock_pid:-unknown} is gone)"
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR" 2>/dev/null || { log "could not reclaim lock — exiting"; exit 0; }
 fi
 echo "$$" > "${LOCK_DIR}/pid"
 cleanup() { rm -rf "$LOCK_DIR"; }
@@ -222,31 +285,54 @@ else
   log "[1/3] multi-turn: :8741 DOWN — deferring (mlx-server not running)"
 fi
 
-# ---- 2) persona-fidelity SOTA gate (loads its own model; serial after #1) ---
+# ---- 2) persona-fidelity SOTA gate (served through :8741; serial after #1) --
 # No --adapter-path: the harness resolves the SERVING adapter itself and
 # exits 3 + FIDELITY_SKIP when it can't (grep the log for FIDELITY_SKIP).
+# --gen served: generation goes through the production server; the PRE arm
+# swaps a zero-delta twin of the serving adapter in (the serving build's
+# /v1/adapters/swap has no unload), the adapter is restored + verified, then
+# POST runs on the serving adapter. The harness itself DEFERs rather than load
+# in-process beside a live server; this wrapper adds the trainer check for the
+# server-DOWN case, a resource sampler, and a restore safety net.
 if [ "$SMOKE" -eq 1 ]; then
   log "[2/3] fidelity: skipped (--smoke)"
-elif lsof -nP -iTCP:8741 -sTCP:LISTEN >/dev/null 2>&1 && [ "${HU_EVAL_FIDELITY_FORCE:-0}" != "1" ]; then
-  # eval_fidelity_nightly.py loads the base model IN-PROCESS. On 2026-09-03 04:31
-  # it did so beside the live mlx-server: wired peaked 94.8 GB, the server died
-  # "[METAL] Insufficient Memory" as a ?E zombie launchd could not relaunch, and
-  # production was dark until a reboot. Never two loaders: skip while :8741 is
-  # serving. The right home for this step is the nightly-retrain window, which
-  # boots serving out first. HU_EVAL_FIDELITY_FORCE=1 overrides for a manual
-  # run with serving already stopped.
-  fid_rc=3
-  log "[2/3] fidelity: SKIPPED FIDELITY_SKIP — :8741 is serving; a second in-process model load took production down on 2026-09-03 (never two loaders). Run inside the nightly-retrain window or set HU_EVAL_FIDELITY_FORCE=1 with serving stopped."
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
-  log "[2/3] fidelity: serving-adapter=${ADAPTER:-'(unresolved)'} — running"
-  set +e
-  "$PY" "$FIDELITY" \
-    --output-json "$FID_OUT" \
-    --log-dir "$LOG_DIR"; fid_rc=$?
-  set -e
-  log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
-  archive_verdict fidelity "$FID_OUT"
+  fid_mode=$(fidelity_mode)
+  if [ "$fid_mode" = "skip-trainer" ]; then
+    fid_rc=3
+    log "[2/3] fidelity: SKIPPED FIDELITY_SKIP — :8741 is down but a trainer holds the model (never two loaders)"
+  else
+    fid_base_url=""
+    [ "$fid_mode" = "served" ] && fid_base_url="$SERVER_URL"
+    log "[2/3] fidelity: mode=$fid_mode serving-adapter=${ADAPTER:-'(unresolved)'} — running"
+    start_resource_sampler
+    set +e
+    HU_MLX_BASE_URL="$fid_base_url" "$PY" "$FIDELITY" \
+      --gen "$fid_mode" \
+      --output-json "$FID_OUT" \
+      --log-dir "$LOG_DIR"; fid_rc=$?
+    set -e
+    fid_resources=$(stop_resource_sampler)
+    log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
+    log "[2/3] fidelity resources: ${fid_resources:-'(no samples)'}"
+    peak=${fid_resources#peak_wired_gb=}; peak=${peak%% *}
+    loaders=${fid_resources##*max_loaders=}
+    if [ -n "$fid_resources" ] && { awk -v p="${peak:-0}" 'BEGIN{exit !(p>=75)}' || [ "${loaders:-0}" -gt 1 ]; }; then
+      log "[2/3] fidelity: RESOURCE_BREACH peak_wired_gb=$peak max_loaders=$loaders (limit: <75 GB, 1 loader)"
+    fi
+    # Restore safety net — read the ARTIFACT (verdict JSON), not the log.
+    if [ "$fid_mode" = "served" ] && [ -f "$FID_OUT" ] && \
+       python3 -c 'import json,sys; g=json.load(open(sys.argv[1])).get("generation") or {}; sys.exit(0 if g.get("adapter_restored") is False else 1)' "$FID_OUT" 2>/dev/null; then
+      log "[2/3] fidelity: FIDELITY_RESTORE_FAILED reported by the harness — retrying restore of $ADAPTER from the wrapper"
+      if restore_serving_adapter "$ADAPTER"; then
+        log "[2/3] fidelity: serving adapter restored + verified by wrapper"
+      else
+        log "[2/3] fidelity: RESTORE STILL FAILED — :8741 may be serving the zero adapter; restore by hand: curl -X POST ${SERVER_URL}/v1/adapters/swap -d '{\"adapter_path\": \"$ADAPTER\"}'"
+      fi
+    fi
+    archive_verdict fidelity "$FID_OUT"
+  fi
 fi
 
 # ---- 3) REAL blind-A/B gate refresh (product via daemon gateway + Gemini judge) ---
