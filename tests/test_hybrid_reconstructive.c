@@ -6,6 +6,7 @@
  * SQLite-gated; a stub keeps run_hybrid_reconstructive_tests() resolvable
  * when SQLite is off (mirrors tests/test_semantic_index.c's pattern). */
 #ifdef HU_ENABLE_SQLITE
+#include "human/cli_commands.h"
 #include "human/core/allocator.h"
 #include "human/memory.h"
 #include "human/memory/retrieval.h"
@@ -198,6 +199,128 @@ static void test_sufficiency_fallback_returns_plain_result_for_one_scene(void) {
     /* Only one scene (session "S") exists -- reconstruction must decline and
      * the plain hybrid merge must still answer. */
     HU_ASSERT_TRUE(res.count > 0);
+
+    hu_retrieval_result_free(&alloc, &res);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* 2026-09-03 C2-ablation bug: every row reaching the caller through the plain
+ * RRF+cross-encoder merge (the reconstructive path's fallback AND the plain
+ * hybrid path) had entry.key = entry.content because hu_search_result_t
+ * carried no key. The eval harnesses parse the session id out of the printed
+ * key, so those rows scored as misses. Each entry's key must be the
+ * memories.key of the row it came from, never its content. */
+static void assert_entries_carry_stored_keys(const hu_retrieval_result_t *res) {
+    HU_ASSERT_TRUE(res->count > 0);
+    for (size_t i = 0; i < res->count; i++) {
+        const hu_memory_entry_t *e = &res->entries[i];
+        HU_ASSERT_NOT_NULL(e->key);
+        HU_ASSERT_NOT_NULL(e->content);
+        HU_ASSERT_EQ(e->key_len, 2u);
+        HU_ASSERT_TRUE(strcmp(e->key, "s1") == 0 || strcmp(e->key, "s2") == 0);
+        HU_ASSERT_TRUE(strcmp(e->key, e->content) != 0);
+        HU_ASSERT_TRUE(e->content_len > e->key_len);
+    }
+}
+
+static void store_one_scene_two_rows(hu_memory_t *mem) {
+    HU_ASSERT_EQ(store_row(mem, "s1", "budget meeting notes for the project", "S"), HU_OK);
+    HU_ASSERT_EQ(store_row(mem, "s2", "budget meeting followup action items", "S"), HU_OK);
+}
+
+static void test_fallback_path_entries_carry_memories_key_not_content(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    store_one_scene_two_rows(&mem);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true; /* one scene -> insufficient -> plain merge fallback */
+    hu_retrieval_result_t res = {0};
+    const char *q = "budget meeting";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
+                 HU_OK);
+    assert_entries_carry_stored_keys(&res);
+
+    hu_retrieval_result_free(&alloc, &res);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_plain_hybrid_entries_carry_memories_key_not_content(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    store_one_scene_two_rows(&mem);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = false; /* plain keyword+semantic RRF merge, no C2 */
+    hu_retrieval_result_t res = {0};
+    const char *q = "budget meeting";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
+                 HU_OK);
+    assert_entries_carry_stored_keys(&res);
+
+    hu_retrieval_result_free(&alloc, &res);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The CLI line the benchmark harness parses: "  [n] <key> (<score>): <content>".
+ * Driven by a real fallback-path retrieval so a content-in-key regression shows
+ * up as the wrong token before " (". */
+static void test_cli_hybrid_line_prints_key_then_content(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    store_one_scene_two_rows(&mem);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true;
+    hu_retrieval_result_t res = {0};
+    const char *q = "budget meeting";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
+                 HU_OK);
+    HU_ASSERT_TRUE(res.count >= 2);
+
+    FILE *f = tmpfile();
+    HU_ASSERT_NOT_NULL(f);
+    hu_cli_memory_search_emit(f, &res);
+    rewind(f);
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+
+    /* Line 1 is "  [1] sN (x.xxx): budget meeting ..." -- key first, then score. */
+    HU_ASSERT_TRUE(strncmp(buf, "  [1] s", 7) == 0);
+    HU_ASSERT_TRUE(buf[7] == '1' || buf[7] == '2');
+    HU_ASSERT_TRUE(strncmp(buf + 8, " (", 2) == 0);
+    HU_ASSERT_STR_CONTAINS(buf, "): budget meeting ");
+    HU_ASSERT_STR_CONTAINS(buf, "\n  [2] s");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "[1] budget meeting");
 
     hu_retrieval_result_free(&alloc, &res);
     hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
@@ -542,6 +665,9 @@ void run_hybrid_reconstructive_tests(void) {
     HU_RUN_TEST(test_scene_select_prefers_two_hit_session_over_one_hit);
     HU_RUN_TEST(test_temporal_cue_prefers_newer_same_prefix_row);
     HU_RUN_TEST(test_sufficiency_fallback_returns_plain_result_for_one_scene);
+    HU_RUN_TEST(test_fallback_path_entries_carry_memories_key_not_content);
+    HU_RUN_TEST(test_plain_hybrid_entries_carry_memories_key_not_content);
+    HU_RUN_TEST(test_cli_hybrid_line_prints_key_then_content);
     HU_RUN_TEST(test_ablate_no_scene_admits_low_scoring_session);
     HU_RUN_TEST(test_ablate_no_neighbors_drops_session_adjacent_rows);
     HU_RUN_TEST(test_ablate_no_rerank_starves_sufficiency_floor);

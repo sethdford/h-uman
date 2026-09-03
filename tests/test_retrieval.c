@@ -8,6 +8,15 @@
 #include <math.h>
 #include <string.h>
 
+/* Fixture store that asserts success: a silently failed store would make every
+ * retrieval assertion below vacuous (scripts/check-silent-success.sh). `mem`
+ * is the enclosing test's hu_memory_t. */
+#define STORE_OK(...)                                           \
+    do {                                                        \
+        hu_error_t store_err_ = mem.vtable->store(__VA_ARGS__); \
+        HU_ASSERT_EQ(store_err_, HU_OK);                        \
+    } while (0)
+
 static void test_keyword_basic_match(void) {
 #ifdef HU_ENABLE_SQLITE
     hu_allocator_t alloc = hu_system_allocator();
@@ -15,8 +24,8 @@ static void test_keyword_basic_match(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "user_pref", 9, "likes dark mode", 15, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "pet", 3, "dog named Spot", 14, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "user_pref", 9, "likes dark mode", 15, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "pet", 3, "dog named Spot", 14, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_KEYWORD,
@@ -46,7 +55,7 @@ static void test_keyword_case_insensitive(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "k1", 2, "Hello World", 11, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "k1", 2, "Hello World", 11, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_KEYWORD,
@@ -75,7 +84,7 @@ static void test_keyword_no_match_returns_empty(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "k1", 2, "apple banana", 12, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "k1", 2, "apple banana", 12, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_KEYWORD,
@@ -118,8 +127,8 @@ static void test_rrf_combines_rankings(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "a", 1, "alpha", 5, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "b", 1, "beta", 4, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "a", 1, "alpha", 5, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "b", 1, "beta", 4, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_HYBRID,
@@ -146,9 +155,9 @@ static void test_mmr_diversifies_results(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "dup1", 4, "cat dog cat", 11, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "dup2", 4, "cat dog cat", 11, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "diff", 4, "bird fish", 9, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "dup1", 4, "cat dog cat", 11, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "dup2", 4, "cat dog cat", 11, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "diff", 4, "bird fish", 9, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_KEYWORD,
@@ -197,9 +206,9 @@ static void test_keyword_limit_respected(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "a", 1, "alpha", 5, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "b", 1, "alpha", 5, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "c", 1, "alpha", 5, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "a", 1, "alpha", 5, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "b", 1, "alpha", 5, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "c", 1, "alpha", 5, &cat, NULL, 0);
 
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_KEYWORD,
@@ -304,7 +313,7 @@ static void test_retrieval_engine_with_sqlite_backend(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "fav", 3, "coffee and tea", 14, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "fav", 3, "coffee and tea", 14, &cat, NULL, 0);
 
     hu_retrieval_engine_t eng = hu_retrieval_create(&alloc, &mem);
     HU_ASSERT_NOT_NULL(eng.ctx);
@@ -334,7 +343,7 @@ static void test_semantic_retrieve_with_local_embedder(void) {
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.ctx);
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "doc1", 4, "machine learning basics", 23, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "doc1", 4, "machine learning basics", 23, &cat, NULL, 0);
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_SEMANTIC,
         .limit = 5,
@@ -392,6 +401,50 @@ static void test_rerank_rrf_overlapping_merges_correctly(void) {
     hu_rerank_free_results(merged, count);
     hu_rerank_free_results(kw, 3);
     hu_rerank_free_results(vec, 3);
+}
+
+/* hu_search_result_t.key must survive the RRF merge: consumers rebuild
+ * hu_memory_entry_t from merged rows, and without the key travelling through
+ * they had to copy CONTENT into the key column (2026-09-03 C2-ablation bug). */
+static void test_rerank_rrf_merged_rows_carry_source_key(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_search_result_t kw[2] = {
+        {.content = hu_strdup(&alloc, "doc A"),
+         .key = hu_strdup(&alloc, "s1:t1"),
+         .key_len = 5,
+         .score = 0.9f},
+        {.content = hu_strdup(&alloc, "doc B"),
+         .key = hu_strdup(&alloc, "s1:t2"),
+         .key_len = 5,
+         .score = 0.8f},
+    };
+    hu_search_result_t vec[2] = {
+        {.content = hu_strdup(&alloc, "doc B"),
+         .key = hu_strdup(&alloc, "s1:t2"),
+         .key_len = 5,
+         .score = 0.95f},
+        {.content = hu_strdup(&alloc, "doc C"),
+         .key = hu_strdup(&alloc, "s2:t7"),
+         .key_len = 5,
+         .score = 0.7f},
+    };
+    hu_search_result_t merged[8];
+    memset(merged, 0, sizeof(merged));
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_rerank_rrf(kw, 2, vec, 2, merged, 8, &count, 60.0f), HU_OK);
+    HU_ASSERT_EQ(count, 3u);
+    for (size_t i = 0; i < count; i++) {
+        HU_ASSERT_NOT_NULL(merged[i].content);
+        HU_ASSERT_NOT_NULL(merged[i].key);
+        HU_ASSERT_EQ(merged[i].key_len, 5u);
+        const char *want = strcmp(merged[i].content, "doc A") == 0   ? "s1:t1"
+                           : strcmp(merged[i].content, "doc B") == 0 ? "s1:t2"
+                                                                     : "s2:t7";
+        HU_ASSERT_STR_EQ(merged[i].key, want);
+    }
+    hu_rerank_free_results(merged, count);
+    hu_rerank_free_results(kw, 2);
+    hu_rerank_free_results(vec, 2);
 }
 
 static void test_rerank_rrf_disjoint_combines_both(void) {
@@ -509,7 +562,7 @@ static void test_hybrid_retrieve_with_vector(void) {
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.ctx);
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "v1", 2, "neural network training", 23, &cat, NULL, 0);
+    STORE_OK(mem.ctx, "v1", 2, "neural network training", 23, &cat, NULL, 0);
     hu_retrieval_options_t opts = {
         .mode = HU_RETRIEVAL_HYBRID,
         .limit = 5,
@@ -549,6 +602,7 @@ void run_retrieval_tests(void) {
     HU_RUN_TEST(test_retrieval_engine_with_sqlite_backend);
     HU_RUN_TEST(test_rerank_rrf_overlapping_merges_correctly);
     HU_RUN_TEST(test_rerank_rrf_disjoint_combines_both);
+    HU_RUN_TEST(test_rerank_rrf_merged_rows_carry_source_key);
     HU_RUN_TEST(test_rerank_cross_encoder_scores_term_overlap);
     HU_RUN_TEST(test_rerank_empty_results_handled_gracefully);
     HU_RUN_TEST(test_rerank_k_parameter_affects_ranking);

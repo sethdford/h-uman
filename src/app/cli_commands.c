@@ -457,14 +457,21 @@ static void memory_semantic_detach(hu_memory_t *mem) {
 }
 
 /* Shared printer for `memory search --semantic|--hybrid`: rank, key, score,
- * content (truncated to 2000 bytes), then frees `res`. Both callers report
+ * content (truncated to 2000 bytes). Public so tests can drive it against a
+ * real retrieval result; the wrapper below adds the free. Both callers report
  * "No results" the same way, so leave that to the caller. */
-static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+void hu_cli_memory_search_emit(FILE *out, const hu_retrieval_result_t *res) {
+    if (!out || !res)
+        return;
     for (size_t i = 0; i < res->count; i++)
-        printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res->entries[i].key_len,
-               res->entries[i].key ? res->entries[i].key : "", res->scores ? res->scores[i] : 0.0,
-               (int)(res->entries[i].content_len > 2000 ? 2000 : res->entries[i].content_len),
-               res->entries[i].content ? res->entries[i].content : "");
+        fprintf(out, "  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res->entries[i].key_len,
+                res->entries[i].key ? res->entries[i].key : "", res->scores ? res->scores[i] : 0.0,
+                (int)(res->entries[i].content_len > 2000 ? 2000 : res->entries[i].content_len),
+                res->entries[i].content ? res->entries[i].content : "");
+}
+
+static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+    hu_cli_memory_search_emit(stdout, res);
     hu_retrieval_result_free(alloc, res);
 }
 

@@ -44,6 +44,12 @@ static hu_error_t entries_to_search_results(hu_allocator_t *alloc, const hu_memo
                                                                         : entries[i].key_len)
                     : 0;
         out[i].content = content && len > 0 ? hu_strndup(alloc, content, len) : NULL;
+        /* Carry the memories.key so the merge can hand it back (see
+         * search_results_to_entries); NULL stays NULL. */
+        out[i].key = entries[i].key && entries[i].key_len > 0
+                         ? hu_strndup(alloc, entries[i].key, entries[i].key_len)
+                         : NULL;
+        out[i].key_len = out[i].key ? entries[i].key_len : 0;
         out[i].score = (float)(scores && i < count ? scores[i] : 0.0);
         out[i].rerank_score = 0.0f;
         out[i].original_rank = i;
@@ -77,10 +83,18 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
             size_t len = strlen(results[i].content);
             entries[i].content = hu_strndup(alloc, results[i].content, len);
             entries[i].content_len = len;
-            entries[i].key = hu_strndup(alloc, results[i].content, len);
-            entries[i].key_len = len;
+            /* Restore the row's real key. A producer that had no key (e.g. a
+             * hand-built hu_search_result_t) still gets the content-as-key
+             * fallback so the entry is never keyless. */
+            if (results[i].key && results[i].key_len > 0) {
+                entries[i].key = hu_strndup(alloc, results[i].key, results[i].key_len);
+                entries[i].key_len = results[i].key_len;
+            } else {
+                entries[i].key = hu_strndup(alloc, results[i].content, len);
+                entries[i].key_len = len;
+            }
             entries[i].id = entries[i].key;
-            entries[i].id_len = len;
+            entries[i].id_len = entries[i].key_len;
         }
         entries[i].score = (double)results[i].rerank_score;
         scores[i] = (double)results[i].rerank_score;
