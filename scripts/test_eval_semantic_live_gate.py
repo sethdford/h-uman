@@ -730,3 +730,17 @@ def test_cue_list_is_byte_identical_to_the_c_source():
     assert m, "AI_IDENTITY_CUES array not found in semantic_recall.c"
     c_cues = _re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
     assert c_cues == G.AI_IDENTITY_CUES
+
+
+def test_semantic_search_tolerates_invalid_utf8_from_the_cli(tmp_path):
+    """`human memory search --semantic` cuts each hit at 2000 bytes with %.*s,
+    which can split a multi-byte UTF-8 sequence. The 2026-09-03 gate rerun
+    died at LIVE 11/40 with UnicodeDecodeError inside subprocess.run; a
+    mangled byte must degrade to U+FFFD, never kill a 40-context run."""
+    fake = tmp_path / "human"
+    fake.write_bytes(b"#!/bin/sh\nprintf '  [1] k1 (0.900): caf\\xc3 cut here\\n  [2] k2 (0.800): ok\\n'\n")
+    fake.chmod(0o755)
+    out = G.semantic_search(str(fake), "/dev/null", "http://127.0.0.1:1", "q", 5)
+    assert out is not None and len(out) == 2
+    assert out[1] == "ok"
+    assert "caf" in out[0]

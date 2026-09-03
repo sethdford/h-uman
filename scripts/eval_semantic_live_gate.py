@@ -404,8 +404,12 @@ def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
     env["HU_MEMORY_SQLITE_PATH"] = memory_db
     env["HU_SEMANTIC_EMBED_URL"] = embed_url
     try:
+        # errors="replace": the CLI cuts each hit at 2000 bytes (%.*s) and can
+        # split a multi-byte UTF-8 sequence; strict decoding killed the
+        # 2026-09-03 rerun at LIVE 11/40. A mangled byte becomes U+FFFD.
         proc = subprocess.run([human_bin, "memory", "search", "--semantic", query],
-                              capture_output=True, text=True, timeout=timeout, env=env)
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=timeout, env=env)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if proc.returncode != 0:
