@@ -227,6 +227,16 @@ fi
 # exits 3 + FIDELITY_SKIP when it can't (grep the log for FIDELITY_SKIP).
 if [ "$SMOKE" -eq 1 ]; then
   log "[2/3] fidelity: skipped (--smoke)"
+elif lsof -nP -iTCP:8741 -sTCP:LISTEN >/dev/null 2>&1 && [ "${HU_EVAL_FIDELITY_FORCE:-0}" != "1" ]; then
+  # eval_fidelity_nightly.py loads the base model IN-PROCESS. On 2026-09-03 04:31
+  # it did so beside the live mlx-server: wired peaked 94.8 GB, the server died
+  # "[METAL] Insufficient Memory" as a ?E zombie launchd could not relaunch, and
+  # production was dark until a reboot. Never two loaders: skip while :8741 is
+  # serving. The right home for this step is the nightly-retrain window, which
+  # boots serving out first. HU_EVAL_FIDELITY_FORCE=1 overrides for a manual
+  # run with serving already stopped.
+  fid_rc=3
+  log "[2/3] fidelity: SKIPPED FIDELITY_SKIP — :8741 is serving; a second in-process model load took production down on 2026-09-03 (never two loaders). Run inside the nightly-retrain window or set HU_EVAL_FIDELITY_FORCE=1 with serving stopped."
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
   log "[2/3] fidelity: serving-adapter=${ADAPTER:-'(unresolved)'} — running"
