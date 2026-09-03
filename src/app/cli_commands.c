@@ -446,6 +446,16 @@ static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **ar
     return err;
 }
 
+/* The semantic index lives in the SQLite engine; every other build has no
+ * index to detach, and hu_semantic_recall_attach() already refused above. */
+static void memory_semantic_detach(hu_memory_t *mem) {
+#ifdef HU_ENABLE_SQLITE
+    hu_sqlite_memory_set_semantic_index(mem, NULL, NULL);
+#else
+    (void)mem;
+#endif
+}
+
 /* Shared printer for `memory search --semantic|--hybrid`: rank, key, score,
  * content (truncated to 2000 bytes), then frees `res`. Both callers report
  * "No results" the same way, so leave that to the caller. */
@@ -620,10 +630,15 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             goto done;
         }
         size_t indexed = 0;
+#ifdef HU_ENABLE_SQLITE
         err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+#else
+        (void)lim;
+        err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */
+#endif
         printf("{\"indexed\": %zu, \"index_size\": %zu, \"endpoint\": \"%s\"}\n", indexed,
                svs.vtable->count(svs.ctx), hu_semantic_recall_embed_url());
-        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        memory_semantic_detach(&mem);
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--semantic") == 0) {
@@ -648,7 +663,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         } else {
             memory_search_print_and_free(alloc, &res);
         }
-        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        memory_semantic_detach(&mem);
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--hybrid") == 0) {
@@ -677,7 +692,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             memory_search_print_and_free(alloc, &res);
         }
         if (have_vec) {
-            hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+            memory_semantic_detach(&mem);
             svs.vtable->deinit(svs.ctx, alloc);
             semb.vtable->deinit(semb.ctx, alloc);
         }
