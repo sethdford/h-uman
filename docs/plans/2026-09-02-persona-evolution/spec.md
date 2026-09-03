@@ -46,7 +46,7 @@ Nine per-message axes, each a pure function of one message string
 | `question_rate` | `terminal_punctuation` | fraction ending in `?` |
 | `exclamation_rate` | `terminal_punctuation` | fraction ending in `!` |
 | `emoji_rate` | `has_emoji` | fraction containing ≥1 emoji (Unicode category `So` or U+1F000–U+1FAFF, matching `scripts/persona_style_card.py`'s heuristic) |
-| `formality_contractions_per_100_words` | `contractions_per_100_words` | count of `\w+['’](t\|re\|ve\|ll\|d\|s\|m)` tokens per 100 words (matches both the ASCII apostrophe and the U+2019 curly apostrophe iOS autocorrect actually emits — a real 977-message sample was 142 curly vs. 18 straight; the ASCII-only regex undercounted contractions ~8x during development, see the script's `_APOS_CHARS` comment and `test_contractions_per_100_words_curly_apostrophe`) |
+| `formality_contractions_per_100_words` | `contractions_per_100_words` | count of `\w+['’]` immediately followed by `(t\|re\|ve\|ll\|d\|s\|m)` tokens per 100 words (matches both the ASCII apostrophe and the U+2019 curly apostrophe iOS autocorrect actually emits — a real 977-message sample was 142 curly vs. 18 straight; the ASCII-only regex undercounted contractions ~8x during development, see the script's `_APOS_CHARS` comment and `test_contractions_per_100_words_curly_apostrophe`) |
 | `formality_first_person_plural_per_100_words` | `first_person_plural_per_100_words` | count of `we/us/our/ours/ourselves` tokens per 100 words |
 | `warmth_hits_per_100_words` | `warmth_hits_per_100_words` | count of hits against a fixed 14-word lexicon (`WARMTH_LEXICON` in the script: love, miss, thank, thanks, appreciate, proud, glad, sweet, dear, hug, xoxo, grateful, care, sorry) per 100 words |
 
