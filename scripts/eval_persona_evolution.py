@@ -43,14 +43,45 @@ If ANY window (pre or post, for ANY event being analyzed) has fewer than
 
 A number this script did not measure is worse than no number.
 
+Second store: --source (added 2026-09-03)
+---------------------------------------------
+chat.db on this machine keeps 30 days, so pre-event windows for the two
+summer-2026 events are empty there. --source PATH (repeatable) merges a
+JSONL export that carries Seth-authorship provenance from chat.db's
+is_from_me=1 column through to the record. Two shapes are accepted, both
+produced by scripts/extract_imessage_pairs.py:
+  - training_pairs.jsonl: {"messages": [..., {"role": "assistant", ...}],
+    "metadata": {"timestamp": <local ISO>}} -- the final assistant turn is
+    the is_from_me=1 message (extract_imessage_pairs.py:256-267).
+  - ground_truth.jsonl: {"seth_reply": ..., "timestamp": <local ISO>}
+    (extract_imessage_pairs.py:297-315).
+Anything else (DPO prompt/chosen/rejected, memory.db dumps) is REJECTED:
+those rows are the daemon's output or a contact's text, not Seth's.
+Export timestamps are LOCAL naive (datetime.fromtimestamp); chat.db rows
+here are UTC naive, so export rows are converted to UTC before windowing
+and before de-dup. De-dup key = (timestamp to the second, sha256 of the
+stripped text); chat.db rows win, export rows are dropped on collision.
+When any --source is given, chat.db rows are also passed through the
+export's own sampling frame (len >= 2, MIN_REPLY_LENGTH) so both windows
+are drawn with the same length floor; the export's other exclusion (a
+Seth message that opens a conversation window with no prior context is
+not exported) cannot be reproduced from chat.db and is reported as a
+caveat, not silently ignored. Every window also reports its actual
+coverage (first/last timestamp, covered_days) so a window that is
+"n=123 over 5 days" is never read as a 30-day window.
+
 Usage
 -----
     python3 scripts/eval_persona_evolution.py --event both
+    python3 scripts/eval_persona_evolution.py --event both \
+        --source data/imessage/training_pairs.jsonl \
+        --source ~/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl
     python3 scripts/eval_persona_evolution.py --event job --out results.json
     python3 scripts/eval_persona_evolution.py --explain-dates
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import random
@@ -376,6 +407,116 @@ def delta_report(pre_agg: dict, post_agg: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# --source: second-store reader, de-dup, sampling-frame filter, coverage
+# ---------------------------------------------------------------------------
+
+# Timezone the export's naive timestamps were written in. None = this
+# machine's current local zone (what datetime.fromtimestamp used when
+# scripts/extract_imessage_pairs.py ran). Tests pin a fixed offset.
+EXPORT_TZ = None
+
+# scripts/extract_imessage_pairs.py MIN_REPLY_LENGTH -- the export drops
+# Seth messages shorter than this, so chat.db rows get the same floor when
+# the two stores are mixed.
+EXPORT_MIN_REPLY_LENGTH = 2
+
+
+def local_naive_to_utc_naive(dt: datetime.datetime, tz=None) -> datetime.datetime:
+    """Reinterpret a naive local-time datetime as UTC naive, matching the
+    chat.db path (_apple_ns_to_dt is UTC naive)."""
+    if tz is None:
+        aware = dt.astimezone()  # naive -> system local
+    else:
+        aware = dt.replace(tzinfo=tz)
+    return aware.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _export_record_seth_text(rec: dict):
+    """(local_iso_timestamp, text) for one export record, or raise
+    ValueError if the record has no Seth-authorship provenance."""
+    if "messages" in rec and isinstance(rec.get("metadata"), dict) and "timestamp" in rec["metadata"]:
+        last = rec["messages"][-1] if rec["messages"] else None
+        if not isinstance(last, dict) or last.get("role") != "assistant":
+            raise ValueError("training_pairs record whose last turn is not the assistant (is_from_me=1) turn")
+        return rec["metadata"]["timestamp"], last.get("content")
+    if "seth_reply" in rec and "timestamp" in rec:
+        return rec["timestamp"], rec["seth_reply"]
+    raise ValueError(
+        "unrecognized export shape (need training_pairs messages/metadata.timestamp "
+        "or ground_truth seth_reply/timestamp); DPO/memory.db rows carry no Seth provenance"
+    )
+
+
+def read_export_jsonl(path: str, tz=None):
+    """Read a Seth-authored export. Returns list[(utc_naive_datetime, str)],
+    tapback echoes and blank texts dropped, sorted by time."""
+    out = []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            ts_local, text = _export_record_seth_text(json.loads(line))
+            if not text or not text.strip():
+                continue
+            text = text.strip()
+            if text.startswith(TAPBACK_PREFIXES):
+                continue
+            ts = local_naive_to_utc_naive(datetime.datetime.fromisoformat(ts_local), tz=tz)
+            out.append((ts, text))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def dedup_key(ts: datetime.datetime, text: str):
+    """(timestamp truncated to the second, sha256 of stripped text). Second
+    precision because the export carries microseconds only sometimes."""
+    return (ts.replace(microsecond=0).isoformat(),
+            hashlib.sha256(text.strip().encode("utf-8")).hexdigest())
+
+
+def merge_sources(primary, extras):
+    """primary: list[(dt, str)] kept wholesale. extras: list[(label,
+    list[(dt, str)])]; a row is added only if its dedup_key is unseen.
+    Returns (merged sorted by time, per-extra stats)."""
+    seen = {dedup_key(ts, t) for ts, t in primary}
+    merged = list(primary)
+    stats = []
+    for label, rows in extras:
+        added = 0
+        for ts, t in rows:
+            k = dedup_key(ts, t)
+            if k in seen:
+                continue
+            seen.add(k)
+            merged.append((ts, t))
+            added += 1
+        stats.append({"path": label, "rows": len(rows), "added": added, "duplicates": len(rows) - added})
+    merged.sort(key=lambda r: r[0])
+    return merged, stats
+
+
+def export_frame_filter(messages, min_len: int = EXPORT_MIN_REPLY_LENGTH):
+    """Apply the export's length floor to chat.db rows. Returns (kept, n_dropped)."""
+    kept = [(ts, t) for ts, t in messages if len(t) >= min_len]
+    return kept, len(messages) - len(kept)
+
+
+def window_coverage(messages, lo: datetime.datetime, hi: datetime.datetime) -> dict:
+    """First/last timestamp actually present in [lo, hi) and the span in
+    days, so a short-coverage window is never mistaken for a full one."""
+    ts = [t for t, _ in messages if lo <= t < hi]
+    if not ts:
+        return {"first": None, "last": None, "covered_days": 0.0}
+    first, last = min(ts), max(ts)
+    return {
+        "first": first.isoformat(),
+        "last": last.isoformat(),
+        "covered_days": round((last - first).total_seconds() / 86400.0, 1),
+    }
+
+
+# ---------------------------------------------------------------------------
 # chat.db access -- read-only, no content leaves this process
 # ---------------------------------------------------------------------------
 
@@ -455,20 +596,45 @@ def run(args) -> int:
         return 0
 
     messages = fetch_outbound_messages(args.db, start_dt, end_dt)
+    primary_n = len(messages)
+
+    sources = list(getattr(args, "source", None) or [])
+    source_stats = []
+    frame_dropped = 0
+    if sources:
+        messages, frame_dropped = export_frame_filter(messages)
+        extras = []
+        for path in sources:
+            rows = [(ts, t) for ts, t in read_export_jsonl(path, tz=EXPORT_TZ) if start_dt <= ts < end_dt]
+            extras.append((path, rows))
+        messages, source_stats = merge_sources(messages, extras)
 
     report = {
         "db": args.db,
         "range": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
         "window_days": args.window_days,
         "min_n": args.min_n,
+        "primary_outbound_messages_in_range": primary_n,
         "total_outbound_messages_in_range": len(messages),
         "events": {},
     }
+    if sources:
+        report["sources"] = source_stats
+        report["primary_rows_dropped_by_export_frame"] = frame_dropped
+        report["source_caveats"] = [
+            "export rows are Seth-authored via chat.db is_from_me=1 "
+            "(scripts/extract_imessage_pairs.py); DPO/memory.db stores were rejected",
+            "export timestamps converted local->UTC before windowing and de-dup",
+            f"chat.db rows filtered to the export's len>={EXPORT_MIN_REPLY_LENGTH} floor",
+            "export omits Seth messages that open a conversation window with no prior "
+            "context; that exclusion cannot be reproduced on the chat.db side",
+        ]
 
     insufficient = False
     for name in event_names:
         ev = EVENTS[name]
         event_date = _parse_date(ev["date"])
+        event_dt = datetime.datetime.combine(event_date, datetime.time.min)
         pre_texts, post_texts = bucket_by_window(messages, event_date, args.window_days)
         pre_n, post_n = len(pre_texts), len(post_texts)
 
@@ -482,11 +648,13 @@ def run(args) -> int:
                 "start": (event_date - datetime.timedelta(days=args.window_days)).isoformat(),
                 "end": event_date.isoformat(),
                 "n": pre_n,
+                "coverage": window_coverage(messages, event_dt - datetime.timedelta(days=args.window_days), event_dt),
             },
             "post_window": {
                 "start": event_date.isoformat(),
                 "end": (event_date + datetime.timedelta(days=args.window_days)).isoformat(),
                 "n": post_n,
+                "coverage": window_coverage(messages, event_dt, event_dt + datetime.timedelta(days=args.window_days)),
             },
         }
 
@@ -550,6 +718,10 @@ def main(argv=None) -> int:
     p.add_argument("--n-resamples", type=int, default=2000, help="bootstrap resamples (default: %(default)s)")
     p.add_argument("--seed", type=int, default=42, help="bootstrap RNG seed (default: %(default)s)")
     p.add_argument("--out", default=None, help="write the JSON report here on success ONLY (never on refusal)")
+    p.add_argument("--source", action="append", default=None, metavar="JSONL",
+                   help="second store of Seth-authored texts (training_pairs.jsonl or ground_truth.jsonl "
+                        "from scripts/extract_imessage_pairs.py); repeatable; de-duplicated against chat.db "
+                        "by (timestamp, text hash)")
     p.add_argument("--explain-dates", action="store_true", help="print the event-date citations and exit, no DB access")
     args = p.parse_args(argv)
     return run(args)

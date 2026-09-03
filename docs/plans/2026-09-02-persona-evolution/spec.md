@@ -116,6 +116,127 @@ machine does not have).
   next event" tool, not a retroactive one, until a longer-retention data
   source is found.
 
+## 3b. Second store: inventory and the re-measurement (2026-09-03)
+
+Follow-up to §3. Every local store that might hold older Seth-authored
+outbound text with timestamps was inventoried **read-only** (`mode=ro&immutable=1`
+for SQLite; plain reads for JSONL; counts, key names and dates only — no
+message text, handles or names were copied). Verdict per store:
+
+| Store | Rows | Seth-authored outbound | Earliest..latest | How authorship is known (cite) | Verdict |
+|---|---|---|---|---|---|
+| `~/Library/Messages/chat.db` `message` | — | 977 (921 after the len≥2 frame) | 2026-08-03..2026-09-02 | `is_from_me=1`, `associated_message_type=0` | primary (§3) |
+| `~/.human/memory.db` `messages` | 3,039 (user 2,384 / assistant 655) | **0** | 2026-03-11..2026-09-02 | writer is `src/daemon.c:11408-11421`: inbound batch saved as `"user"`, the daemon's generated `response` saved as `"assistant"`. Seth's own typed texts are never inserted (only writer: `src/memory/engines/sqlite.c:1358`). | rejected — daemon output |
+| `memory.db` `dpo_pairs` | 1,141 (7 `source` tags) | **0** | 2026-05-10..2026-09-03 | `outbound_edit`: chosen = the *contact's* follow-up user(N+2) from `messages` (`include/human/ml/dpo_miner.h:4-6`); `auto_correction`: chosen = user correction (`src/ml/training_data_extractor.c:486-489`); `implicit_feedback`/`arena`/`generated_v2`: daemon or simulated output | rejected |
+| `memory.db` `production_outcomes` | 453 | **0** | 2026-05-24..2026-09-02 | `chosen` = text the daemon sent (`message_ref` is the daemon's send) | rejected |
+| `memory.db` `training_data` | 22 | unknown | 2026-04-03 | no provenance column | rejected |
+| `~/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl` | 690 | 690 | 2026-06-25..2026-07-24 | `seth_reply` = `reply["is_from_me"]` (`scripts/extract_imessage_pairs.py:297-315`) | usable; strict subset of `training_pairs` (0 rows not in it) |
+| `eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl` | 1,302 | 1,302 | 2026-06-25..2026-07-24 | final `assistant` turn = `msg["is_from_me"]` (`extract_imessage_pairs.py:256-267`) | **used** (59 rows not in the repo copy) |
+| same dir, `voice_training_pairs.jsonl` | 1,266 | 1,266 | same | same script, extra len≤280 / no-URL filter (`:354-358`) | redundant subset |
+| `eval-archive/finetune-backup-20260725-114042/{train,test,valid}.jsonl` | 1,963 / 134 / 134 | assistant turns | no per-record timestamp | chat-format from `prepare-finetune.py`; timestamps stripped | rejected — cannot window |
+| `data/imessage/training_pairs.jsonl` (repo, gitignored `.gitignore:141`) | 1,303 | 1,303 | 2026-06-26..2026-07-26 | as above (`:256-267`); mtime 2026-07-26 10:52 | **best — used** |
+| `data/imessage/ground_truth.jsonl` / `voice_training_pairs.jsonl` | 689 / 1,264 | same | 2026-06-26..2026-07-26 | subsets of `training_pairs` | redundant |
+| `~/.human/training-data/m3-corpus.jsonl` | 4,910 | 2,016 (`channel=imessage`, `role=assistant`) | 2026-04-19..2026-05-19 | `role = "assistant" if is_from_me` (`scripts/m3_extract_corpus.py:208`). **Caveat:** 203 further `role=assistant` rows have `channel=memory_db` — those are the daemon's replies (`:259`), mislabelled as Seth by the file's own docstring (`:13`) | rejected — predates both windows; mixed provenance |
+| `m3-corpus-train.jsonl` / `m3-holdout-prompts.jsonl` | 2,016 / 100 | `reference` field | ≤2026-05-19 | derived from the above | rejected — date |
+| `training-data/m3-alpaca-dpo-*`, `m3-counterfactuals`, `m3-rewrite-pairs`, `m3-combined-dpo`, `m3-dpo-rejections-*`, `m3-outcomes`, `dpo_finetune/`, `glm-v6-pref/`, `glm-v61-pref/`, `glm-v62-sft/`, `orpo_deliberation/`, `eval-archive/binoc-dpo-candidates.jsonl` | 2–535 each | **0** | no timestamps (or `ts` of the judge run) | `prompt/chosen/rejected`: chosen is a model output or a judged variant | rejected |
+| `training-data/finetune/`, `mlx-chat/`, `glm-v5-data/`, `voice-ideal/` (`{train,valid,test}.jsonl`) | 2,220 / 22,557 / 1,202 / 1,421 train rows | assistant turns are Seth (`prepare-finetune.py`, `prepare-texting-data.py:56` from `is_from_me`) | none per record | timestamps stripped at export | rejected — cannot window |
+| `~/.human/voice_corpus.jsonl` | 2,257 | 2,257 | none | `WHERE is_from_me=1` (`scripts/harvest_imessage_voice.py:93`) but only `{"text"}` is written | rejected — no timestamps |
+| `~/blind_ab_run/seth_voice_corpus.json`, `seth_triples*.json`, `triples_*.json` | 1,068 / 40 / 400 / 160 | `seth_reply` | none | export_seth_triples.py from chat.db | rejected — no timestamps. (`~/.human/blind_ab_run/` does not exist.) |
+
+**Chosen second store:** `data/imessage/training_pairs.jsonl` (the repo's
+gitignored 2026-07-26 export) plus the 2026-07-25 backup of the same export
+under `~/.human/logs/eval-archive/`. Both were cut from a 30-day-retention
+chat.db on different days, so they overlap on 1,243 `(timestamp, sha256)`
+keys and each holds rows the other lacks.
+
+### What `--source` does (`scripts/eval_persona_evolution.py`)
+
+- Accepts the two `extract_imessage_pairs.py` shapes only; any record
+  without Seth provenance (DPO `prompt/chosen/rejected`, memory.db dumps,
+  a training pair whose last turn is not the `assistant` turn) raises.
+- Converts the export's **local-naive** timestamps (it used
+  `datetime.fromtimestamp`) to the **UTC-naive** frame the chat.db path
+  already uses, *before* windowing and de-dup. Without this the same
+  message would carry two timestamps 4 h apart and never de-duplicate.
+- De-dup key = `(timestamp to the second, sha256(stripped text))`; chat.db
+  rows win, export rows are dropped on collision, and per-source
+  `rows/added/duplicates` are reported.
+- Applies the export's own `MIN_REPLY_LENGTH=2` floor to chat.db rows so
+  both windows share one sampling frame (56 one-character chat.db rows
+  dropped). The export's *other* exclusion — a Seth message that opens a
+  conversation window with no prior context is not exported
+  (`extract_imessage_pairs.py:259-260`) — cannot be reproduced from
+  chat.db and is carried as a caveat in the report.
+- Every window now reports `coverage` (`first`, `last`, `covered_days`)
+  so `n` is never read as "a full 30-day window".
+- `--min-n` unchanged at 100.
+
+Tests: 15 hermetic tests added to `scripts/test_eval_persona_evolution.py`
+(synthetic JSONL fixtures under `tmp_path`, a fixed −4 h offset pinned via
+`EXPORT_TZ`; 62 pass).
+
+### Re-measurement (`results-2026-09-03.json`, `--event both`, two `--source`s)
+
+Merge: chat.db 977 → 921 after frame; repo export 1,303 added; backup
+1,302 → 59 added / 1,243 duplicates; **2,283** merged rows. Baseline
+without `--source` still refuses (exit 1, n=0 pre-windows) — unchanged.
+
+| Event | Pre window | Pre n | Pre coverage | Post window | Post n | Post coverage | Status |
+|---|---|---|---|---|---|---|---|
+| Move (2026-07-01) | 06-01..07-01 | **180** | 2026-06-25 13:27 → 06-30 16:44, **5.1 days** | 07-01..07-31 | 1,182 | 07-01 → 07-26, 25.6 days | OK by contract (n≥100) — **but read the coverage** |
+| Job (2026-07-26) | 06-26..07-26 | **1,324** | 30.0 days | 07-26..08-25 | 555 | 07-26 → 08-24, 29.5 days, with a **hole 07-27..08-02** (13 export rows on 07-26, chat.db resumes 08-03) | OK |
+
+Per-axis (`mean [95% CI]`, `moved_beyond_ci`):
+
+| Axis | Move pre (n=180) | Move post (n=1,182) | Δ | moved | Job pre (n=1,324) | Job post (n=555) | Δ | moved |
+|---|---|---|---|---|---|---|---|---|
+| `length_chars` | 29.0 [25.2, 33.7] | 40.2 [37.6, 43.0] | +11.3 | yes | 38.8 [36.6, 41.4] | 35.6 [31.8, 39.9] | −3.2 | yes |
+| `lowercase_start_rate` | 0.011 [0.000, 0.028] | 0.169 [0.148, 0.191] | +0.158 | yes | 0.152 [0.134, 0.172] | 0.064 [0.044, 0.086] | −0.088 | yes |
+| `no_terminal_punct_rate` | 0.789 [0.728, 0.850] | 0.786 [0.762, 0.809] | −0.003 | no | 0.789 [0.767, 0.810] | 0.800 [0.766, 0.831] | +0.011 | no |
+| `question_rate` | 0.117 [0.072, 0.167] | 0.090 [0.074, 0.107] | −0.027 | yes | 0.091 [0.076, 0.106] | 0.101 [0.076, 0.126] | +0.010 | no |
+| `exclamation_rate` | 0.044 [0.017, 0.078] | 0.047 [0.035, 0.058] | +0.002 | no | 0.047 [0.035, 0.059] | 0.056 [0.038, 0.076] | +0.009 | no |
+| `emoji_rate` | 0.106 [0.067, 0.156] | 0.045 [0.033, 0.057] | −0.061 | yes | 0.051 [0.040, 0.063] | 0.086 [0.063, 0.108] | +0.035 | yes |
+| `formality_contractions_per_100_words` | 3.77 [2.45, 5.29] | 2.61 [2.20, 3.03] | −1.16 | yes | 2.75 [2.35, 3.17] | 2.98 [2.27, 3.83] | +0.23 | no |
+| `formality_first_person_plural_per_100_words` | 0.74 [0.31, 1.29] | 0.55 [0.39, 0.72] | −0.19 | yes | 0.57 [0.42, 0.73] | 0.46 [0.24, 0.71] | −0.11 | no |
+| `warmth_hits_per_100_words` | 1.29 [0.32, 2.75] | 0.85 [0.61, 1.15] | −0.43 | yes | 0.91 [0.63, 1.24] | 1.28 [0.81, 1.88] | +0.37 | yes |
+
+### How much of this to believe
+
+1. **The move "pre" window is 5 days, not 30.** n=180 satisfies the
+   contract, but every one of those rows is from 2026-06-25..06-30 (the
+   export's own retention floor). Six of nine axes "moved", which is what
+   a 5-day sample compared with a 25-day sample looks like when one axis
+   is bursty (next point). Treat the move row as *not measured to the
+   spec's intent*; the contract passed on `n`, not on coverage. The job
+   row is the one that meets the design (30.0 vs 29.5 covered days).
+2. **`lowercase_start_rate` is bursty week to week inside a single store**,
+   so its between-window deltas are not event signal. Weekly rate (n) from
+   the merged export, then chat.db, same length frame:
+   06-22: 0.000 (133) · 06-29: 0.040 (104) · 07-06: 0.090 (340) ·
+   07-13: **0.256** (520) · 07-20: 0.129 (265) ‖ 08-03: 0.038 (215) ·
+   08-10: 0.042 (144) · 08-17: 0.122 (152) · 08-24: 0.021 (297) ·
+   08-31: **0.357** (113). A 0.00→0.26→0.02→0.36 series is a
+   device/autocapitalisation effect (the persona.c comment already notes
+   "the phone autocapitalizes"), not a register shift; any gate on this
+   axis must first condition on sending device, which chat.db does not
+   record. This also explains §4's 4%-vs-17.3% persona contradiction: both
+   numbers are "true" for whichever weeks they sampled.
+3. **Store confound is bounded but not zero.** The pre windows are
+   export-sampled (drops window-opening Seth messages) and the job post
+   window is 98% chat.db-sampled. `no_terminal_punct_rate` (0.789 / 0.789
+   / 0.800) and `exclamation_rate` agree across the seam, which argues the
+   two stores measure the same thing on the stable axes; the axes that
+   "moved" are the volatile ones.
+4. **Dates are still LOW confidence** (§1). A ±7-day error on the job date
+   moves ~200 rows between windows.
+
+**Net for gap #9:** the job event now has a real before/after pair
+(1,324 / 555, both ~30 days covered). Three axes moved beyond CI there —
+`length_chars` (−3.2), `emoji_rate` (+0.035), `warmth_hits` (+0.37) — and
+`lowercase_start_rate` moved but is disqualified by point 2. The
+directional-fidelity gate (§5) can now be run against those three axes
+for the job event; it should not be run for the move event on this data.
+
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
 The persona carries measured-style numbers in three places. File:line
@@ -233,9 +354,12 @@ by-window view instead of an all-time one.
 - No change was made to `scripts/persona_style_card.py`, `seth.json`, or
   any persona artifact. The `lowercase_start_rate` 4%-vs-17.3% contradiction
   found in §4 is flagged, not fixed, here.
-- No attempt was made to extend the measurement window past what
-  `~/Library/Messages/chat.db` holds locally (no other backup or export was
-  read; the hard no-go scoped this to the one file).
-- `--min-n` was left at the task's specified 100; it was never an active
-  design choice here since both events failed the gate by orders of
-  magnitude (n=0), not marginally.
+- ~~No attempt was made to extend the measurement window past what
+  `~/Library/Messages/chat.db` holds locally.~~ Done 2026-09-03 (§3b):
+  every local store was inventoried read-only and the two
+  `extract_imessage_pairs.py` snapshots were merged via `--source`.
+- `--min-n` was left at 100 both times. On 2026-09-03 both events pass it,
+  but the move event passes on a 5.1-day pre window (§3b point 1); the
+  contract should gain a `covered_days` floor before that row is used.
+- The directional-fidelity gate itself (generate on matched prompts, score
+  the same three axes, compare sign) is still not run.
