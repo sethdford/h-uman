@@ -55,7 +55,10 @@ fi
 
 # ── 2. W14 retrain probe: the scheduler must be able to count pairs ──────
 if [[ -f "$LOG" ]]; then
-    probe_fail="$(tail -c 3000000 "$LOG" | grep -ac 'lora_retrain_probe_failed' || true)"
+    # Count only the CURRENT daemon run: everything after the last startup
+    # marker. Otherwise the 1,500 pre-fix failures keep the check red for
+    # days after the fix ships (seen 2026-09-02).
+    probe_fail="$(tail -c 3000000 "$LOG" | awk '/resuming from persisted rowid/{n=0; next} /lora_retrain_probe_failed/{n++} END{print n+0}' || true)"
     if (( probe_fail > 0 )); then
         bad "retrain-probe: ${probe_fail} 'lora_retrain_probe_failed' in the recent log — the pair-count exec is broken (stale binary on PATH? see src/ml/lora_retrain_runner.c miner_argv0)"
     else

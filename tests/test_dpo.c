@@ -893,6 +893,7 @@ static void dpo_export_paired_passes_through_two_sided(void) {
 }
 
 /* Task 9 — reactive sends get their message_ref after the fact. */
+#ifdef HU_ENABLE_SQLITE
 static void test_set_outbound_message_ref_updates_newest_unref_row(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *tdb = NULL;
@@ -927,6 +928,7 @@ static void test_set_outbound_message_ref_updates_newest_unref_row(void) {
     hu_dpo_collector_deinit(&col);
     sqlite3_close(tdb);
 }
+#endif /* HU_ENABLE_SQLITE — sqlite3_stmt/SQLITE_* in the body; minimal-build has none */
 
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
@@ -979,5 +981,7 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_export_paired_unequal_counts_drops_remainder);
     HU_RUN_TEST(dpo_export_paired_different_prompts_not_paired);
     HU_RUN_TEST(dpo_export_paired_passes_through_two_sided);
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_set_outbound_message_ref_updates_newest_unref_row);
+#endif
 }
