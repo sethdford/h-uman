@@ -299,7 +299,7 @@ def test_build_context_rows_carries_no_reply_text():
     live_results = {0: {"ei": 3, "reality": 4, "anti_ai": 1.0, "recall_bytes": 88}}
     rows = G.build_context_rows(shadow_results, live_results, ids=[0])
     assert rows == [{
-        "id": 0, "recall_bytes": 88,
+        "id": 0, "recall_bytes": 88, "recall_dropped": 0,
         "shadow": {"ei": 4, "reality": 5, "anti_ai": 1.0},
         "live": {"ei": 3, "reality": 4, "anti_ai": 1.0},
     }]
@@ -526,7 +526,7 @@ def test_main_happy_path_writes_promote_or_hold_with_context_rows(monkeypatch, f
     assert doc["recall_coverage"] == 1.0
     assert len(doc["context_rows"]) == doc["n_paired"]
     row = doc["context_rows"][0]
-    assert set(row) == {"id", "recall_bytes", "shadow", "live"}
+    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow", "live"}
     dumped = json.dumps(doc)
     assert "real inbound message" not in dumped  # no context/reply text leaked
 
@@ -744,3 +744,13 @@ def test_semantic_search_tolerates_invalid_utf8_from_the_cli(tmp_path):
     assert out is not None and len(out) == 2
     assert out[1] == "ok"
     assert "caf" in out[0]
+
+
+def test_context_rows_carry_recall_dropped():
+    """The record must show how many hits the content filter removed per
+    context, not only the surviving bytes — otherwise a 0-empties verdict
+    cannot be attributed to the filter."""
+    shadow = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0}}
+    live = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0, "recall_bytes": 120, "recall_dropped": 2}}
+    rows = G.build_context_rows(shadow, live, [0])
+    assert rows[0]["recall_dropped"] == 2

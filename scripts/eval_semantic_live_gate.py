@@ -677,6 +677,7 @@ def build_context_rows(shadow_results, live_results, ids):
         rows.append({
             "id": i,
             "recall_bytes": l["recall_bytes"],
+            "recall_dropped": l.get("recall_dropped", 0),
             "shadow": {"ei": s["ei"], "reality": s["reality"], "anti_ai": s["anti_ai"]},
             "live": {"ei": l["ei"], "reality": l["reality"], "anti_ai": l["anti_ai"]},
         })
