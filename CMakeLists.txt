@@ -525,7 +525,7 @@ if(HU_ENABLE_SQLITE AND HU_ENABLE_SQLITE_VEC)
     # and our store declares sqlite3_vec_init itself (no sqlite3ext.h shims).
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
          third_party/sqlite-vec/sqlite-vec.c)
-    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w;-D_GNU_SOURCE"
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w;-D_GNU_SOURCE;-include;sys/types.h"
                                 COMPILE_DEFINITIONS "SQLITE_CORE=1")
     add_compile_definitions(HU_ENABLE_SQLITE_VEC=1)
 elseif(HU_ENABLE_SQLITE)

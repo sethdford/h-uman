@@ -552,20 +552,16 @@ BASELINE_ALLOWLIST = {
     # enable IMESSAGE/PWA but the test binaries skip them at runtime
     # via HU_HAVE_CHATDB / channel registry checks.
     #
-    # Platform-macro note (2026-09-02): the checker now treats
-    # HU_HAS_IMESSAGE (see PLATFORM_GATE_MACROS) as a gate, so every
-    # tests/test_imessage_*.c that used to sit here was re-checked with
-    # --strict and none fires — they all carry the `#if HU_HAS_IMESSAGE`
-    # wrap + stub runner (or are registered under the CMake gate). Their
-    # entries were removed so a future unguarded hu_imessage_* call in
-    # one of them fails the commit instead of being waved through.
+    # Retirement policy: an entry earns its slot only while `--strict`
+    # still reports it. Entries that stop firing (the tests/test_imessage_*.c
+    # set once HU_HAS_IMESSAGE became a recognised gate on 2026-09-02, and
+    # 13 more silent entries on 2026-09-03) are removed so a future
+    # unguarded call in one of those tests fails the commit instead of
+    # being waved through.
     "tests/test_channel.c",
     "tests/test_channel_all.c",
-    "tests/test_channel_integration.c",
     "tests/test_channel_overlay_apply.c",
-    "tests/test_media_gen.c",
     "tests/test_pwa.c",
-    "tests/test_sota_humanness.c",
     "tests/test_vtables.c",
     # RL_FULL-gated tests that call hu_learner_* (HU_ENABLE_LEARNING).
     # RL_FULL and LEARNING are typically enabled together in the same
@@ -582,30 +578,18 @@ BASELINE_ALLOWLIST = {
     # asserted at the inner SQLITE level — same ML+SQLITE limitation as
     # test_training_data_extractor.c above.
     "tests/test_e2e_learning_loop.c",
-    # test_main.c is the dispatcher; its #ifdef gating happens inline
-    # per-call and per-decl, and the script can't model that well.
-    "tests/test_main.c",
     # Exposed by the Bugbot cc9039d3 fix (tighter has_internal_guard).
     # These tests gate their #includes + bodies with #ifdef HU_ENABLE_SQLITE
-    # but use function-name conventions (hu_forgetting_*, hu_goal_*,
-    # hu_value_*) that don't match the file-basename heuristic
-    # (hu_forgetting_curve_*, hu_goal_engine_*, hu_value_learning_*).
-    # All real-link-safe today because the bodies ARE properly guarded;
-    # the script can't yet verify the call-pattern matches the basename.
+    # but use function-name conventions (hu_forgetting_*, hu_value_*) that
+    # don't match the file-basename heuristic (hu_forgetting_curve_*,
+    # hu_value_learning_*). All real-link-safe today because the bodies
+    # ARE properly guarded; the script can't yet verify the call-pattern
+    # matches the basename.
     "tests/test_agi_frontiers.c",
     "tests/test_e2e_conversation.c",
     "tests/test_forgetting_curve.c",
     "tests/test_sql_transaction.c",
     "tests/test_value_learning.c",
-    "tests/test_goal_engine.c",
-    "tests/test_emotional_residue.c",
-    "tests/test_episodic.c",
-    "tests/test_prospective.c",
-    "tests/test_prospective_memory.c",
-    "tests/test_memory_graph.c",
-    "tests/test_self_improve.c",
-    "tests/test_oauth.c",
-    "tests/test_coreml_provider.c",
 }
 
 
