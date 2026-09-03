@@ -1,7 +1,7 @@
 /* outbound/style_governor.c — measured-shape enforcement stage.
  *
  * Enforces the persona's MEASURED texting shape at egress (style card
- * 2026-07-12, n=1488: 79% no-terminal-punct, 9% ?-endings — vs model
+ * 2026-07-12; the live numbers are in the persona style card — vs model
  * baseline 10% / 31%). Prompt rules ask for a distribution; this stage
  * enforces it deterministically.
  *
@@ -126,7 +126,7 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
     unsigned acts = 0;
 
     /* Action B — strip a trailing reciprocal-question boilerplate sentence
-     * when real content precedes it (measured ?-ending rate is 9%; the
+     * when real content precedes it (the card's ?-ending rate is ~1 in 10; the
      * model's 31% is mostly this assistant reciprocity reflex). */
     if (cur > 1 && text[cur - 1] == '?') {
         size_t s = cur - 1;
@@ -159,7 +159,7 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
 
     /* Action A — strip a single terminal '.' (never "..", "...", "…", '?',
      * '!'), hash-gated to ~90% of period-ending messages so the corpus
-     * no-terminal-punct rate (~79%) is approached, not overshot to 100%. */
+     * no-terminal-punct rate (~4 in 5 per the card) is approached, not overshot to 100%. */
     if (cur >= 2 && text[cur - 1] == '.' && text[cur - 2] != '.' &&
         period_roll < HU_STYLE_GOV_PERIOD_STRIP_PCT) {
         cur--;
@@ -225,7 +225,7 @@ static hu_outbound_verdict_t style_governor_run(hu_outbound_pipeline_stage_t *se
         static const char *const names[] = {"off", "shadow", "live"};
         hu_log_info("style_governor", NULL,
                     "style governor mode=%s (HU_STYLE_GOVERNOR; measured card "
-                    "targets: 79%% no-terminal-punct, 9%% ?-endings)",
+                    "targets from the persona style card: mostly no terminal punct, few ?-endings)",
                     names[mode]);
     }
     if (mode == HU_STYLE_GOVERNOR_OFF || !msg || !msg->content || msg->content_len == 0 || !ctx ||

@@ -14,6 +14,7 @@
 #include "test_framework.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -204,11 +205,349 @@ static void test_sufficiency_fallback_returns_plain_result_for_one_scene(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* ── HU_RECON_ABLATE stage ablation tests (Contract C2 ablation study,
+ * docs/plans/2026-08-02-semantic-retrieval/memory-benchmarks-c2-ablation.json)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Each test unsets HU_RECON_ABLATE immediately after the ablated call and
+ * before any assertion on its result, so a failing HU_ASSERT (which
+ * longjmp()s out of the test body) can never leave the env var set for a
+ * later test. */
+
+/* AC-4 (no_scene): with scene-select disabled, a low-scoring session's row
+ * enters the shared rerank pool and can outrank a WEAKER row from the
+ * top session -- proving scene-select, not just the final `limit` trim, is
+ * what excludes it by default. */
+static void test_ablate_no_scene_admits_low_scoring_session(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    /* hu_keyword_retrieve (and hu_semantic_retrieve) each truncate to
+     * opts->limit BEFORE hybrid_reconstruct ever sees the candidates -- with
+     * limit=2 and a single (keyword-only) source, the pool can never exceed
+     * 2 rows, so scene-select would have nothing to exclude. A second,
+     * independently-truncated source (semantic, via the stub embedder) is
+     * what lets the pool exceed `limit` -- the same apparatus
+     * test_scene_select_prefers_two_hit_session_over_one_hit above uses. */
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+
+    /* Same fixture as test_scene_select_prefers_two_hit_session_over_one_hit
+     * above (all three rows are FULL term-overlap hits, deliberately tied,
+     * so keyword/semantic retrieval's own top-`limit` truncation admits a1+a2
+     * -- not a1+b1 -- into the pool ahead of scene-select ever running; a
+     * partial-overlap a2 was tried first and instead got truncated upstream
+     * of scene-select entirely, which would have measured the wrong stage). */
+    HU_ASSERT_EQ(store_row(&mem, "a1", "regatta sailing schedule saturday morning race", "A"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a2", "regatta sailing schedule friday committee meeting", "A"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "b1", "regatta sailing schedule postponed announcement", "B"),
+                 HU_OK);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 2;
+    opts.reconstructive = true;
+    const char *q = "regatta sailing schedule";
+
+    hu_retrieval_result_t res_default = {0};
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res_default),
+        HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a2"));
+    HU_ASSERT_TRUE(!result_has_key(&res_default, "b1"));
+    hu_retrieval_result_free(&alloc, &res_default);
+
+    setenv("HU_RECON_ABLATE", "no_scene", 1);
+    hu_retrieval_result_t res_ablated = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res_ablated);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "b1"));
+    HU_ASSERT_TRUE(!result_has_key(&res_ablated, "a2"));
+
+    hu_retrieval_result_free(&alloc, &res_ablated);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* AC-5 (no_neighbors): a non-matching row adjacent (by timestamp) to a
+ * keyword-hit anchor is normally pulled in by neighbour expansion; disabling
+ * it must leave the anchor's neighbourhood out of the result. A second
+ * session (b1) keeps distinct_scenes_in_pool >= HU_RECON_MIN_SCENES in both
+ * runs, isolating the neighbour-expansion effect from the sufficiency gate. */
+static void test_ablate_no_neighbors_drops_session_adjacent_rows(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    HU_ASSERT_EQ(store_row(&mem, "a0", "javelin throwing practice notes", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a1", "regatta sailing schedule saturday race", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a2", "javelin throwing recap results", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "b1", "regatta sailing schedule committee notice", "B"), HU_OK);
+    set_created_at(&mem, "a0", "2026-01-01T00:00:00Z");
+    set_created_at(&mem, "a1", "2026-01-02T00:00:00Z");
+    set_created_at(&mem, "a2", "2026-01-03T00:00:00Z");
+    set_created_at(&mem, "b1", "2026-01-02T00:00:00Z");
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true;
+    const char *q = "regatta sailing schedule";
+
+    hu_retrieval_result_t res_default = {0};
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_default),
+        HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a0"));
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a2"));
+    hu_retrieval_result_free(&alloc, &res_default);
+
+    setenv("HU_RECON_ABLATE", "no_neighbors", 1);
+    hu_retrieval_result_t res_ablated = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_ablated);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result_has_key(&res_ablated, "a0"));
+    HU_ASSERT_TRUE(!result_has_key(&res_ablated, "a2"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "b1"));
+
+    hu_retrieval_result_free(&alloc, &res_ablated);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* AC-6 (no_rerank): the sufficiency floor is checked against work_scores[0],
+ * which the rerank stage overwrites with a term-overlap FRACTION (0..1).
+ * Skip rerank and that slot keeps the raw RRF pool score instead (~1/61 for
+ * a single-source pool) -- always below HU_RECON_SCORE_FLOOR, so a query
+ * that would otherwise reconstruct successfully (full term overlap) instead
+ * falls back, losing the neighbour-expanded row that only the reconstructive
+ * commit path returns. */
+static void test_ablate_no_rerank_starves_sufficiency_floor(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    HU_ASSERT_EQ(store_row(&mem, "a0", "unrelated context note", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a1", "alpha beta content here", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "b1", "alpha beta similar content", "B"), HU_OK);
+    set_created_at(&mem, "a0", "2026-01-01T00:00:00Z");
+    set_created_at(&mem, "a1", "2026-01-02T00:00:00Z");
+    set_created_at(&mem, "b1", "2026-01-02T00:00:00Z");
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true;
+    const char *q = "alpha beta";
+
+    hu_retrieval_result_t res_default = {0};
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_default),
+        HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a0"));
+    hu_retrieval_result_free(&alloc, &res_default);
+
+    setenv("HU_RECON_ABLATE", "no_rerank", 1);
+    hu_retrieval_result_t res_ablated = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_ablated);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result_has_key(&res_ablated, "a0"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "b1"));
+
+    hu_retrieval_result_free(&alloc, &res_ablated);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* AC-7 (no_temporal): with the time-bounded filter disabled, a temporal-cue
+ * query no longer drops the superseded (older) same-key-prefix row -- the
+ * mirror image of test_temporal_cue_prefers_newer_same_prefix_row above. */
+static void test_ablate_no_temporal_keeps_superseded_row(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    HU_ASSERT_EQ(store_row(&mem, "profile:city:2026-01-01", "I live in Springfield", NULL), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "profile:city:2026-06-01", "I live in Shelbyville now", NULL),
+                 HU_OK);
+    time_t now = time(NULL);
+    char old_ts[64], new_ts[64];
+    fmt_iso(now - (time_t)(180 * 86400), old_ts, sizeof(old_ts));
+    fmt_iso(now, new_ts, sizeof(new_ts));
+    set_created_at(&mem, "profile:city:2026-01-01", old_ts);
+    set_created_at(&mem, "profile:city:2026-06-01", new_ts);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true;
+    const char *q = "do I still live in shelbyville";
+
+    setenv("HU_RECON_ABLATE", "no_temporal", 1);
+    hu_retrieval_result_t res = {0};
+    hu_error_t err = hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((long)res.count, 2L);
+    HU_ASSERT_TRUE(result_has_content_word(&res, "Shelbyville"));
+    HU_ASSERT_TRUE(result_has_content_word(&res, "Springfield"));
+
+    hu_retrieval_result_free(&alloc, &res);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* AC-8 (force_sufficient): mirrors AC-6's fixture and floor-starvation logic,
+ * but with rerank left ON and force_sufficient overriding the floor instead
+ * -- proving the flag routes through the reconstructive commit (returning
+ * the neighbour-expanded a0) instead of AC-3's plain-hybrid fallback, on a
+ * fixture that would otherwise fall back for the OPPOSITE reason (score
+ * floor, not the MIN_SCENES case AC-3 covers). */
+static void test_ablate_force_sufficient_returns_reconstruction(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    HU_ASSERT_EQ(store_row(&mem, "a0", "unrelated context note", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a1", "alpha only content here", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "b1", "beta only content here", "B"), HU_OK);
+    set_created_at(&mem, "a0", "2026-01-01T00:00:00Z");
+    set_created_at(&mem, "a1", "2026-01-02T00:00:00Z");
+    set_created_at(&mem, "b1", "2026-01-02T00:00:00Z");
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    opts.reconstructive = true;
+    /* 3-word query; a1 matches only "alpha" (1/3) and b1 only "beta" (1/3) --
+     * both below HU_RECON_SCORE_FLOOR (0.34) even after rerank, so the
+     * default run falls back to plain keyword results (no neighbours). */
+    const char *q = "alpha beta gamma";
+
+    hu_retrieval_result_t res_default = {0};
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_default),
+        HU_OK);
+    HU_ASSERT_TRUE(!result_has_key(&res_default, "a0"));
+    hu_retrieval_result_free(&alloc, &res_default);
+
+    setenv("HU_RECON_ABLATE", "force_sufficient", 1);
+    hu_retrieval_result_t res_ablated = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, NULL, q, strlen(q), &opts, &res_ablated);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "a0"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "b1"));
+
+    hu_retrieval_result_free(&alloc, &res_ablated);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* AC-9 (scene_coverage_first): session A spans two day-buckets (two scenes),
+ * both outscoring session B's single scene; with limit=2 the default picks
+ * BOTH of A's scenes and drops B entirely. scene_coverage_first reorders
+ * scene-select to take each session's best scene first, so B survives at
+ * the cost of A's second (lower) scene -- the coverage/precision trade the
+ * ablation study is measuring (memory-benchmarks-c2.json: multi-session
+ * 0.8 vs plain-hybrid 1.0). */
+static void test_ablate_scene_coverage_first_admits_second_session(void) {
+    unsetenv("HU_RECON_ABLATE");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    /* Needs a second (semantic) source, same as test_ablate_no_scene above --
+     * a single keyword-only source is truncated to opts->limit upstream, so
+     * the pool could never exceed `limit` and scene-select would have
+     * nothing to reorder. */
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+
+    /* Insertion order is deliberately a2, b1, a1 (not the a1/a2/b1 reading
+     * order): every same-first-letter row ties at cosine 1.0 under the stub
+     * embedder, and this vector store resolves an exact KNN tie in favor of
+     * the MOST RECENTLY inserted rows -- inserting a1 last is what gives it
+     * a semantic hit too (double-sourced: keyword AND semantic), clearly
+     * outscoring the single-sourced a2 and b1 instead of leaving a three-way
+     * near-tie for the scene sort to resolve unpredictably. a1/a2 are both
+     * full 3/3 keyword hits; b1 matches only "alpha" (1/3) but shares their
+     * semantic class, so it still enters the pool as its own (session-less,
+     * since hu_semantic_retrieve never sets session_id) scene -- the same
+     * mechanism test_ablate_no_scene above relies on. */
+    HU_ASSERT_EQ(store_row(&mem, "a2", "alpha beta gamma notes two", "A"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "b1", "alpha only mention here", "B"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "a1", "alpha beta gamma notes one", "A"), HU_OK);
+    set_created_at(&mem, "a1", "2026-01-01T00:00:00Z");
+    set_created_at(&mem, "a2", "2026-02-01T00:00:00Z");
+    set_created_at(&mem, "b1", "2026-01-15T00:00:00Z");
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 2;
+    opts.reconstructive = true;
+    const char *q = "alpha beta gamma";
+
+    /* Default: a1 (day1) and a2 (day2) -- both session A -- are the two
+     * highest-scoring scenes and together already cover `limit`, so B never
+     * gets a look-in. */
+    hu_retrieval_result_t res_default = {0};
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res_default),
+        HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_default, "a2"));
+    HU_ASSERT_TRUE(!result_has_key(&res_default, "b1"));
+    hu_retrieval_result_free(&alloc, &res_default);
+
+    /* Ablated: scene_coverage_first takes a1's scene (session A's best) and
+     * B's scene first, dropping a2's scene instead of B's -- session
+     * coverage over within-session precision. no_neighbors is stacked on
+     * purpose: neighbour expansion (stage 2) pulls session-adjacent rows by
+     * RAW session_id, not by the day-scene scene-select chose, so without
+     * it a1's neighbour lookup on session "A" would silently re-admit a2
+     * and erase the very trade-off this ablation is measuring -- a real
+     * cross-stage interaction this study surfaced. */
+    setenv("HU_RECON_ABLATE", "scene_coverage_first,no_neighbors", 1);
+    hu_retrieval_result_t res_ablated = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res_ablated);
+    unsetenv("HU_RECON_ABLATE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "a1"));
+    HU_ASSERT_TRUE(result_has_key(&res_ablated, "b1"));
+    HU_ASSERT_TRUE(!result_has_key(&res_ablated, "a2"));
+
+    hu_retrieval_result_free(&alloc, &res_ablated);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_hybrid_reconstructive_tests(void) {
     HU_TEST_SUITE("hybrid_reconstructive");
     HU_RUN_TEST(test_scene_select_prefers_two_hit_session_over_one_hit);
     HU_RUN_TEST(test_temporal_cue_prefers_newer_same_prefix_row);
     HU_RUN_TEST(test_sufficiency_fallback_returns_plain_result_for_one_scene);
+    HU_RUN_TEST(test_ablate_no_scene_admits_low_scoring_session);
+    HU_RUN_TEST(test_ablate_no_neighbors_drops_session_adjacent_rows);
+    HU_RUN_TEST(test_ablate_no_rerank_starves_sufficiency_floor);
+    HU_RUN_TEST(test_ablate_no_temporal_keeps_superseded_row);
+    HU_RUN_TEST(test_ablate_force_sufficient_returns_reconstruction);
+    HU_RUN_TEST(test_ablate_scene_coverage_first_admits_second_session);
 }
 #else
 void run_hybrid_reconstructive_tests(void) {

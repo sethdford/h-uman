@@ -239,3 +239,41 @@ by-window view instead of an all-time one.
 - `--min-n` was left at the task's specified 100; it was never an active
   design choice here since both events failed the gate by orders of
   magnitude (n=0), not marginally.
+
+## 7. Resolution (2026-09-03): the style card is now the single source
+
+The §4 contradiction was wider than one axis. Every style number the prompt
+could see was hard-coded in at least one place, and no two places agreed:
+
+| axis | `src/persona/persona.c` comment (07-12) | v1 card (07-26) | `seth.json` rule | measured 60d (n=977, 07-05..09-03) |
+|---|---|---|---|---|
+| lowercase_start | 4% | 17.3% | "All lowercase … Use normal capitalization" | **8.6%** [6.9, 10.4] |
+| no_terminal_punct | 79% | 78.7% | 81% | **81.7%** [79.2, 84.0] |
+| question_rate | 9% | 9.9% | "1 in 12" | **9.9%** [8.1, 11.9] |
+| emoji_rate | — | 9% | "1 in 8" | **12.6%** [10.5, 14.6] |
+| exclamation_rate | — | 6.4% | — | **3.9%** [2.8, 5.1] |
+
+Nothing in C ever read the v1 card; the prompt's casual rule 2 was a
+string literal. What changed:
+
+- `scripts/measure_style_card.py` derives the card (`style-card/v2`) from a
+  configurable window of the user's own outbound texts (default 60 days,
+  refuses below n=300, writes nothing on refusal) using the same per-message
+  axis functions as this script, and writes
+  `~/.human/personas/<persona>.style-card.json` with value + 95% CI + n +
+  window per axis. Hermetic tests: `scripts/test_measure_style_card.py`.
+- `src/persona/style_card.c` (`include/human/persona/style_card.h`) loads
+  and validates the card; `hu_persona_build_absolute_rules_fmt` now renders
+  the casual rule 2 from it. The compiled default (`hu_style_card_default`,
+  pinned to the 2026-09-03 measurement) is used only when the card is
+  missing or invalid, and logs once naming the script that fixes it.
+  Tests: `tests/test_style_card.c` (card beats default; fallback pinned).
+- `scripts/persona_style_card.py` (v1 shape) now writes
+  `seth.style-report.json` so it can no longer overwrite the v2 card.
+- Comments in the style governor that restated the frozen 79%/9% now point
+  at the card; `HU_STYLE_GOV_PERIOD_STRIP_PCT` itself is unchanged.
+
+Still authored, not derived: the numeric claims inside
+`~/.human/personas/seth.json` ("1 in 8", "81%", "1 in 12") — a private
+persona file, left for the owner to trim now that rule 2 carries the
+measured values.
