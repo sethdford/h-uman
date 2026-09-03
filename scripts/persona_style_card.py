@@ -18,10 +18,15 @@ its own style signal.
 
 Usage:
     python3 scripts/persona_style_card.py [--db ~/Library/Messages/chat.db]
-        [--days 180] [--out ~/.human/personas/seth.style-card.json]
+        [--days 180] [--out ~/.human/personas/seth.style-report.json]
         [--persona ~/.human/personas/seth.json] [--selftest]
 
 The card lands OUTSIDE the repo by default (it derives from private texts).
+
+SUPERSEDED for the card itself (2026-09-03): the daemon reads the
+style-card/v2 file written by scripts/measure_style_card.py. This script
+keeps the rule-diff report and now writes to seth.style-report.json so it
+cannot overwrite the v2 card the prompt renders from.
 """
 import argparse
 import json
@@ -282,7 +287,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="~/Library/Messages/chat.db")
     ap.add_argument("--days", type=int, default=180)
-    ap.add_argument("--out", default="~/.human/personas/seth.style-card.json")
+    ap.add_argument("--out", default="~/.human/personas/seth.style-report.json")
     ap.add_argument("--persona", default="~/.human/personas/seth.json")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
