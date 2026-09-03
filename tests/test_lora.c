@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/ml/lora.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +14,8 @@
 
 static void lora_create_basic(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     hu_error_t err = hu_lora_create(&alloc, &cfg, 8, 8, 2, &adapter);
@@ -25,7 +27,8 @@ static void lora_create_basic(void) {
 
 static void lora_param_count(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 8, 8, 2, &adapter), HU_OK);
@@ -38,7 +41,8 @@ static void lora_param_count(void) {
 
 static void lora_invalid_config(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 0, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 0, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     hu_error_t err = hu_lora_create(&alloc, &cfg, 8, 8, 2, &adapter);
@@ -53,7 +57,8 @@ static void lora_destroy_null(void) {
 
 static void lora_apply_adds_delta(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 1, &adapter), HU_OK);
@@ -83,7 +88,8 @@ static void lora_apply_adds_delta(void) {
 
 static void lora_backward_accumulates(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 1.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 1.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 1, &adapter), HU_OK);
@@ -104,7 +110,8 @@ static void lora_target_flags(void) {
 
 static void lora_backward_grad_input(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 1, &adapter), HU_OK);
 
@@ -133,7 +140,8 @@ static void lora_backward_grad_input(void) {
 
 static void lora_backward_grad_input_finite_diff(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 3, 1, &adapter), HU_OK);
 
@@ -152,8 +160,8 @@ static void lora_backward_grad_input_finite_diff(void) {
      * then compute grad_input = sum_j grad_output[j] * d(output[j])/d(input[k]) */
     float grad_input_analytical[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float grad_output_full[3] = {1.0f, 1.0f, 1.0f};
-    HU_ASSERT_EQ(hu_lora_backward(adapter, 0, input, grad_output_full, 1,
-                                   grad_input_analytical), HU_OK);
+    HU_ASSERT_EQ(hu_lora_backward(adapter, 0, input, grad_output_full, 1, grad_input_analytical),
+                 HU_OK);
 
     /* Numerical gradient via finite differences */
     const float eps = 1e-3f;
@@ -182,7 +190,8 @@ static void lora_backward_grad_input_finite_diff(void) {
 
 static void lora_partial_set_weights(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 1, &adapter), HU_OK);
 
@@ -203,7 +212,8 @@ static void lora_partial_set_weights(void) {
 
 static void lora_save_load_roundtrip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 2, &adapter), HU_OK);
 
@@ -214,7 +224,8 @@ static void lora_save_load_roundtrip(void) {
     HU_ASSERT_EQ(hu_lora_set_layer_weights(adapter, 0, A0, B0), HU_OK);
     HU_ASSERT_EQ(hu_lora_set_layer_weights(adapter, 1, A1, B1), HU_OK);
 
-    const char *path = "/tmp/hu_lora_roundtrip.bin";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_lora_roundtrip.bin"));
     HU_ASSERT_EQ(hu_lora_save(adapter, path), HU_OK);
 
     /* Verify file was actually written */
@@ -252,7 +263,8 @@ static void lora_save_load_roundtrip(void) {
 
 static void lora_load_bad_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *path = "/tmp/hu_lora_bad.bin";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_lora_bad.bin"));
 
     /* Write garbage */
     FILE *f = fopen(path, "wb");
@@ -272,13 +284,14 @@ static void lora_load_bad_file(void) {
 
 static void lora_invalid_layer_idx(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, 4, 4, 2, &adapter), HU_OK);
 
-    float input[4] = {1,2,3,4};
+    float input[4] = {1, 2, 3, 4};
     float output[4] = {0};
-    float grad_out[4] = {1,1,1,1};
+    float grad_out[4] = {1, 1, 1, 1};
 
     /* Valid indices: 0 and 1 */
     HU_ASSERT_EQ(hu_lora_apply(adapter, 0, input, 1, output), HU_OK);
@@ -306,27 +319,32 @@ static void *oom_alloc(void *ctx, size_t size) {
 }
 
 static void oom_free(void *ctx, void *ptr, size_t size) {
-    (void)ctx; (void)size;
+    (void)ctx;
+    (void)size;
     free(ptr);
 }
 
 static void lora_oom_create(void) {
-    hu_lora_config_t cfg = {.rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
+    hu_lora_config_t cfg = {
+        .rank = 2, .alpha = 2.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_ALL};
     hu_lora_adapter_t *adapter = NULL;
 
     /* Fail on first alloc (adapter struct) */
-    hu_allocator_t bad = { .alloc = oom_alloc, .free = oom_free, .ctx = NULL };
-    oom_alloc_count = 0; oom_fail_at = 0;
+    hu_allocator_t bad = {.alloc = oom_alloc, .free = oom_free, .ctx = NULL};
+    oom_alloc_count = 0;
+    oom_fail_at = 0;
     HU_ASSERT_EQ(hu_lora_create(&bad, &cfg, 4, 4, 1, &adapter), HU_ERR_OUT_OF_MEMORY);
     HU_ASSERT_NULL(adapter);
 
     /* Fail on second alloc (layers array) */
-    oom_alloc_count = 0; oom_fail_at = 1;
+    oom_alloc_count = 0;
+    oom_fail_at = 1;
     HU_ASSERT_EQ(hu_lora_create(&bad, &cfg, 4, 4, 1, &adapter), HU_ERR_OUT_OF_MEMORY);
     HU_ASSERT_NULL(adapter);
 
     /* Fail partway through layer allocation */
-    oom_alloc_count = 0; oom_fail_at = 4;
+    oom_alloc_count = 0;
+    oom_fail_at = 4;
     HU_ASSERT_EQ(hu_lora_create(&bad, &cfg, 4, 4, 1, &adapter), HU_ERR_OUT_OF_MEMORY);
     HU_ASSERT_NULL(adapter);
 }

@@ -20,6 +20,7 @@
 #include "human/ml/lora_ema.h"
 #include "human/ml/lora_retrain_runner.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <dirent.h>
 #include <stdint.h>
@@ -229,9 +230,8 @@ static void dual_queue_promote_path(dual_capture_t *cap, double kl_nats, double 
 /* ── AC-11.8.1: dual artifacts created on cold start ─────────────────── */
 
 static void test_dual_adapter_artifacts_created(void) {
-    const char *root = "/tmp/test_dual_lora_ac1";
-    dual_rmrf(root);
-    mkdir(root, 0755);
+    char root[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(root, sizeof(root), "dual_lora_ac1"));
 
     dual_capture_t cap;
     memset(&cap, 0, sizeof(cap));
@@ -269,9 +269,8 @@ static void test_dual_adapter_artifacts_created(void) {
 /* ── AC-11.8.2: EMA update on PROMOTE, symlink advances ──────────────── */
 
 static void test_ema_update_on_promote(void) {
-    const char *root = "/tmp/test_dual_lora_ac2";
-    dual_rmrf(root);
-    mkdir(root, 0755);
+    char root[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(root, sizeof(root), "dual_lora_ac2"));
 
     /* Pre-create slow/v0 so this is the WARM EMA path, not cold-start. */
     char slow_dir[256];
@@ -338,9 +337,8 @@ static void test_ema_update_on_promote(void) {
 /* ── AC-11.8.3: REJECT verdict → fast quarantined, slow unchanged ────── */
 
 static void test_quarantine_on_reject(void) {
-    const char *root = "/tmp/test_dual_lora_ac3";
-    dual_rmrf(root);
-    mkdir(root, 0755);
+    char root[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(root, sizeof(root), "dual_lora_ac3"));
 
     /* Pre-seed slow/v0 + a current symlink pointing at it. */
     char slow_dir[256];
@@ -410,9 +408,8 @@ static void test_quarantine_on_reject(void) {
 /* ── AC-11.8.4: adapter rollback CLI ─────────────────────────────────── */
 
 static void test_adapter_rollback_cli(void) {
-    const char *root = "/tmp/test_dual_lora_ac4";
-    dual_rmrf(root);
-    mkdir(root, 0755);
+    char root[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(root, sizeof(root), "dual_lora_ac4"));
 
     char slow_dir[256], q_dir[256], current[256];
     snprintf(slow_dir, sizeof(slow_dir), "%s/slow", root);
@@ -528,9 +525,8 @@ static void test_scheduler_status_has_dual_lora_fields(void) {
 /* ── Bonus: KL drift trips reject path ───────────────────────────────── */
 
 static void test_kl_drift_trips_reject(void) {
-    const char *root = "/tmp/test_dual_lora_kl";
-    dual_rmrf(root);
-    mkdir(root, 0755);
+    char root[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(root, sizeof(root), "dual_lora_kl"));
 
     dual_capture_t cap;
     memset(&cap, 0, sizeof(cap));

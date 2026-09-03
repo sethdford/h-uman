@@ -2,6 +2,7 @@
 #include "human/core/allocator.h"
 #include "human/session.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -345,7 +346,8 @@ static void test_session_save_load_roundtrip(void) {
     HU_ASSERT_NOT_NULL(s2);
     hu_session_append_message(s2, &alloc, "user", "second session");
 
-    const char *path = "/tmp/human_test_sessions.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "human_test_sessions.json"));
     hu_error_t err = hu_session_save(&mgr, path);
     HU_ASSERT_EQ(err, HU_OK);
     hu_session_manager_deinit(&mgr);
@@ -407,7 +409,8 @@ static void test_session_save_empty_manager(void) {
     hu_session_manager_t mgr;
     hu_session_manager_init(&mgr, &alloc);
 
-    const char *path = "/tmp/human_test_empty.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "human_test_empty.json"));
     hu_error_t err = hu_session_save(&mgr, path);
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -431,7 +434,8 @@ static void test_session_save_special_chars(void) {
     HU_ASSERT_NOT_NULL(s);
     hu_session_append_message(s, &alloc, "user", "line1\nline2\ttab\"quote\"");
 
-    const char *path = "/tmp/human_test_special.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "human_test_special.json"));
     hu_error_t err = hu_session_save(&mgr, path);
     HU_ASSERT_EQ(err, HU_OK);
     hu_session_manager_deinit(&mgr);
