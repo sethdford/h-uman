@@ -69,6 +69,10 @@ fi
 
 python3 - <<'PYEOF'
 """Parse CMakeLists.txt, extract per-file condition stacks, report mismatches."""
+# Keep `list[str] | None`-style annotations from being evaluated at def time so
+# the script still runs on python 3.9 (macOS system /usr/bin/python3).
+from __future__ import annotations
+
 import os
 import re
 import sys
