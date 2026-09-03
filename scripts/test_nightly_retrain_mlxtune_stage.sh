@@ -124,4 +124,189 @@ check "below-floor corpus: skips with the pair count named" \
     "[[ \"\$out5\" == *'5 pairs < floor 200'* ]]" "$out5"
 rm -rf "$T5"
 
+
+# ── Case 7: full real-run path with a FAKE train-glm-adapter.sh -- proves the
+#    caller-managed-serving ordering fix: (a) the fake wrapper is told to skip
+#    its own stop/restore, (b) the stage does NOT skip offline scoring just
+#    because :8741 "looks" up (it is confirmed down for real, on a throwaway
+#    port so this is independent of whatever the REAL machine's :8741 is doing
+#    right now), and (c) the scoring step is actually reached and invoked.
+#
+#    HU_RETRAIN_PORT is pinned to an unused high port so this check never
+#    depends on -- or interferes with -- the real production mlx-server.
+T6=$(mktemp -d)
+FAKE_REPO="$T6/fake-repo"
+mkdir -p "$FAKE_REPO/scripts/blind_ab"
+cp "$HERE/adapter_is_real.py" "$FAKE_REPO/scripts/adapter_is_real.py"
+
+cat > "$FAKE_REPO/scripts/train-glm-adapter.sh" <<'FAKE_TRAIN'
+#!/usr/bin/env bash
+# FAKE train-glm-adapter.sh for the hermetic nightly-retrain stage test.
+# Records whether it was told to manage its own serving stop/restore, then
+# writes a real-shaped (non-zero lora_b, scale 2.0) adapter -- deliberately
+# NEVER touches launchctl or :8741, matching the caller-managed contract.
+set -u
+TAG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tag) TAG=$2; shift 2 ;;
+    --config|--trainer|--train-mode|--beta|--gamma|--est-minutes) shift 2 ;;
+    *) shift ;;
+  esac
+done
+{
+  echo "MANAGED_BY_CALLER=${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-unset}"
+  echo "TAG=$TAG"
+} > "$HOME/.fake-train-glm-adapter.record"
+
+STAMP="$(date +%Y%m%d%H%M%S)fake"
+OUT="$HOME/.human/training-data/adapters/seth-glm-air-${TAG}-${STAMP}"
+mkdir -p "$OUT"
+python3 - "$OUT" <<'PY'
+import json, struct, sys
+d = sys.argv[1]
+def f32(x):
+    return struct.pack("<f", x)
+a_bytes = f32(0.0) * 300000
+b_bytes = f32(1.0) * 16
+hdr = {
+    "l.lora_a": {"dtype": "F32", "shape": [300000], "data_offsets": [0, len(a_bytes)]},
+    "l.lora_b": {"dtype": "F32", "shape": [16], "data_offsets": [len(a_bytes), len(a_bytes) + len(b_bytes)]},
+}
+h = json.dumps(hdr).encode()
+with open(d + "/adapters.safetensors", "wb") as f:
+    f.write(struct.pack("<Q", len(h)))
+    f.write(h)
+    f.write(a_bytes)
+    f.write(b_bytes)
+json.dump({"lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0}},
+          open(d + "/adapter_config.json", "w"))
+PY
+echo "[fake-train-glm-adapter] wrote $OUT (managed_by_caller=${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-unset})"
+exit 0
+FAKE_TRAIN
+chmod +x "$FAKE_REPO/scripts/train-glm-adapter.sh"
+
+cat > "$FAKE_REPO/scripts/blind_ab/score_candidate_offline.py" <<'FAKE_SCORE'
+#!/usr/bin/env python3
+# FAKE score_candidate_offline.py -- records invocation, loads nothing.
+import os
+import sys
+
+record = os.path.join(os.environ["HOME"], ".fake-score.record")
+with open(record, "a") as f:
+    f.write("ARGS:" + " ".join(sys.argv[1:]) + "\n")
+print("[fake score_candidate_offline] invoked")
+sys.exit(0)
+FAKE_SCORE
+
+mkdir -p "$T6/.human/training-data/glm-v61-pref" "$T6/.human/venvs/eval312/bin"
+for i in $(seq 1 200); do
+    printf '{"prompt":"p%d","chosen":"c%d","rejected":"r%d"}\n' "$i" "$i" "$i"
+done > "$T6/.human/training-data/glm-v61-pref/train.jsonl"
+# eval-python only needs to be AN executable -- score_candidate_offline.py is
+# the fake stub above, so this never runs real torch/mlx.
+ln -s "$(command -v python3)" "$T6/.human/venvs/eval312/bin/python"
+
+out6=$(HOME="$T6" HU_REPO_DIR="$FAKE_REPO" HU_RETRAIN_PORT=19741 \
+       HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_MLXTUNE=1 bash -c '
+    source "'"$SCRIPT"'"
+    serving_stopped=1
+    run_mlxtune_candidate_stage
+')
+
+check "real-run: fake wrapper was told to manage-by-caller" \
+    "[ -f \"$T6/.fake-train-glm-adapter.record\" ] && grep -q '^MANAGED_BY_CALLER=1$' \"$T6/.fake-train-glm-adapter.record\"" \
+    "$(cat "$T6/.fake-train-glm-adapter.record" 2>/dev/null)"
+check "real-run: fake wrapper exited 0 and adapter guard passed" \
+    "[[ \"\$out6\" == *'adapter real:'* ]]" "$out6"
+check "real-run: NEVER logs the port-already-up skip (the bug being fixed)" \
+    "[[ \"\$out6\" != *'is unexpectedly back up already'* && \"\$out6\" != *'skipping offline authorship scoring to avoid a second loader'* ]]" "$out6"
+check "real-run: reaches and announces the scoring step" \
+    "[[ \"\$out6\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out6"
+check "real-run: score_candidate_offline.py (fake) was actually invoked" \
+    "[ -f \"$T6/.fake-score.record\" ] && grep -q -- '--candidate' \"$T6/.fake-score.record\"" \
+    "$(cat "$T6/.fake-score.record" 2>/dev/null)"
+check "real-run: never promotes -- logs the register command instead" \
+    "[[ \"\$out6\" == *'candidate staged at'*'(NOT promoted)'* && \"\$out6\" == *'register_v6_adapter.py --adapter'* ]]" "$out6"
+rm -rf "$T6"
+
+# ── Case 8: same fake wrapper, but simulate it MISBEHAVING (bringing a real
+#    listener up on the test port) -- the stage must still refuse to score,
+#    proving the defensive fallback still fires when serving genuinely is up.
+T7=$(mktemp -d)
+FAKE_REPO2="$T7/fake-repo"
+mkdir -p "$FAKE_REPO2/scripts"
+cp "$FAKE_REPO/scripts/adapter_is_real.py" "$FAKE_REPO2/scripts/adapter_is_real.py" 2>/dev/null || cp "$HERE/adapter_is_real.py" "$FAKE_REPO2/scripts/adapter_is_real.py"
+PORT2=19742
+cat > "$FAKE_REPO2/scripts/train-glm-adapter.sh" <<FAKE_TRAIN2
+#!/usr/bin/env bash
+set -u
+TAG=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --tag) TAG=\$2; shift 2 ;;
+    --config|--trainer|--train-mode|--beta|--gamma|--est-minutes) shift 2 ;;
+    *) shift ;;
+  esac
+done
+STAMP="\$(date +%Y%m%d%H%M%S)fake"
+OUT="\$HOME/.human/training-data/adapters/seth-glm-air-\${TAG}-\${STAMP}"
+mkdir -p "\$OUT"
+python3 - "\$OUT" <<'PY'
+import json, struct, sys
+d = sys.argv[1]
+def f32(x):
+    return struct.pack("<f", x)
+a_bytes = f32(0.0) * 300000
+b_bytes = f32(1.0) * 16
+hdr = {
+    "l.lora_a": {"dtype": "F32", "shape": [300000], "data_offsets": [0, len(a_bytes)]},
+    "l.lora_b": {"dtype": "F32", "shape": [16], "data_offsets": [len(a_bytes), len(a_bytes) + len(b_bytes)]},
+}
+h = json.dumps(hdr).encode()
+with open(d + "/adapters.safetensors", "wb") as f:
+    f.write(struct.pack("<Q", len(h)))
+    f.write(h)
+    f.write(a_bytes)
+    f.write(b_bytes)
+json.dump({"lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0}},
+          open(d + "/adapter_config.json", "w"))
+PY
+# Misbehave: bring a real listener up on the test port, simulating serving
+# having come back despite the caller-managed contract.
+python3 -c "
+import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('127.0.0.1', $PORT2))
+s.listen(1)
+time.sleep(6)
+" &
+echo \$! > "\$HOME/.fake-listener.pid"
+sleep 1
+exit 0
+FAKE_TRAIN2
+chmod +x "$FAKE_REPO2/scripts/train-glm-adapter.sh"
+
+mkdir -p "$T7/.human/training-data/glm-v61-pref" "$T7/.human/venvs/eval312/bin"
+for i in $(seq 1 200); do
+    printf '{"prompt":"p%d","chosen":"c%d","rejected":"r%d"}\n' "$i" "$i" "$i"
+done > "$T7/.human/training-data/glm-v61-pref/train.jsonl"
+ln -s "$(command -v python3)" "$T7/.human/venvs/eval312/bin/python"
+
+out7=$(HOME="$T7" HU_REPO_DIR="$FAKE_REPO2" HU_RETRAIN_PORT="$PORT2" \
+       HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_MLXTUNE=1 bash -c '
+    source "'"$SCRIPT"'"
+    serving_stopped=1
+    run_mlxtune_candidate_stage
+')
+check "misbehaving-wrapper: refuses to score when the port really is back up" \
+    "[[ \"\$out7\" == *'is unexpectedly back up already'* ]]" "$out7"
+check "misbehaving-wrapper: never reaches the scoring-invocation line" \
+    "[[ \"\$out7\" != *'scoring candidate vs serving (offline LUAR)'* ]]" "$out7"
+[ -f "$T7/.fake-listener.pid" ] && kill "$(cat "$T7/.fake-listener.pid")" 2>/dev/null
+wait 2>/dev/null
+rm -rf "$T7"
+
 exit $fail

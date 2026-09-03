@@ -71,14 +71,18 @@ run_mlxtune_candidate_stage() {
     local max_min="${HU_RETRAIN_MLXTUNE_MAX_MIN:-90}"
     local stamp; stamp="$(date +%Y%m%d-%H%M)"
     local mlxtune_tag="mlxtune-simpo-${stamp}"
-    local candidate_dir="$HOME/.human/training-data/adapters/seth-glm-air-${mlxtune_tag}"
-    local mlxtune_train_log="$HOME/.human/logs/train-glm-${mlxtune_tag}.log"
+    # train-glm-adapter.sh appends its OWN "-<TAG>-<its own STAMP>" naming
+    # (ADAPTER=.../seth-glm-air-${TAG}-${STAMP}), so the real output directory
+    # is this prefix PLUS a suffix we do not know in advance. Resolve the
+    # actual directory via glob AFTER training completes (below) — do not
+    # assume this prefix IS the directory.
+    local candidate_dir_prefix="$HOME/.human/training-data/adapters/seth-glm-air-${mlxtune_tag}"
     local data_dir="${HU_RETRAIN_MLXTUNE_DATA_DIR:-$HOME/.human/training-data/glm-v61-pref}"
     local config="${HU_RETRAIN_MLXTUNE_CONFIG:-$HOME/.human/training-data/glm-v61-orpo-config.yaml}"
     local mlxtune_py="$HOME/.human/venvs/mlxtune312/bin/python"
     local eval_py="$HOME/.human/venvs/eval312/bin/python"
 
-    log "mlx-tune candidate stage: config=$config data=$data_dir out=$candidate_dir cap=${max_min}min"
+    log "mlx-tune candidate stage: config=$config data=$data_dir out=${candidate_dir_prefix}-* cap=${max_min}min"
 
     if [[ "${HU_RETRAIN_DRY_RUN:-0}" == "1" ]]; then
         log "mlx-tune candidate stage: DRY RUN (HU_RETRAIN_DRY_RUN=1) — loading nothing"
@@ -90,7 +94,7 @@ run_mlxtune_candidate_stage() {
         fi
         if [[ -x "$eval_py" ]]; then
             "$eval_py" "$REPO/scripts/blind_ab/score_candidate_offline.py" --dry-run \
-                --candidate "$candidate_dir" 2>&1 | tee -a "$LOG"
+                --candidate "${candidate_dir_prefix}-placeholder" 2>&1 | tee -a "$LOG"
             log "mlx-tune candidate stage: dry-run score check exited rc=${PIPESTATUS[0]}"
         else
             log "mlx-tune candidate stage: eval venv missing ($eval_py) — skipping dry-run score check"
@@ -110,14 +114,39 @@ run_mlxtune_candidate_stage() {
     fi
     log "mlx-tune candidate stage: $pair_count preference pairs at $data_dir — proceeding"
 
-    log "mlx-tune candidate stage: training -> $candidate_dir (timeboxed ${max_min} min)"
+    log "mlx-tune candidate stage: training -> ${candidate_dir_prefix}-* (timeboxed ${max_min} min)"
+    # HU_TRAIN_SERVING_MANAGED_BY_CALLER=1: WE already stopped :8741 above (or
+    # this function would have refused at the serving_stopped check). Tell
+    # train-glm-adapter.sh not to bootout again and NOT to restore when it
+    # finishes — restoring is OUR job, exactly once, via the EXIT trap below,
+    # AFTER the offline scoring step further down. This is the fix for the
+    # bug where every real run silently skipped scoring: train-glm-adapter.sh
+    # used to restore prod itself before returning, so by the time we reached
+    # the scoring step :8741 was already back up and we refused to load a
+    # second model.
+    #
     # No `timeout` binary on macOS: background the job, race a watchdog
     # subshell against it, and kill on overrun. restore_serving (the caller's
-    # trap) still runs afterward regardless of how this exits.
-    ( bash "$REPO/scripts/train-glm-adapter.sh" \
+    # trap) still runs afterward regardless of how this exits — including if
+    # the watchdog SIGKILLs train-glm-adapter.sh mid-run: a killed process
+    # cannot run its OWN traps either way, so serving stays down until OUR
+    # trap restores it, same as any other failure path here.
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 bash "$REPO/scripts/train-glm-adapter.sh" \
         --config "$config" --trainer mlx_tune --train-mode simpo \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
     local job_pid=$!
+    # Explicit >/dev/null redirect is load-bearing, not cosmetic: without it
+    # this subshell inherits whatever fd stdout/stderr currently are. When the
+    # CALLER captured this function's output via command substitution
+    # ($(...)) -- as the test harness does -- that fd is a pipe, and bash's
+    # $(...) blocks until EVERY process holding the pipe's write end exits.
+    # `kill "$watchdog_pid"` below only reaps the SUBSHELL; if it were still
+    # asleep, its `sleep N` CHILD would be orphaned holding that pipe open for
+    # the remaining duration (up to max_min minutes) even though the function
+    # has already returned -- a caller capturing output via $(...) would hang
+    # for the full timebox on every single invocation. log() still reaches
+    # $LOG unaffected -- it opens $LOG explicitly via `tee -a`, independent of
+    # this subshell's own stdout target.
     ( sleep $(( max_min * 60 ))
       if kill -0 "$job_pid" 2>/dev/null; then
           log "mlx-tune candidate stage: exceeded ${max_min} min cap — terminating (pid $job_pid)"
@@ -125,19 +154,25 @@ run_mlxtune_candidate_stage() {
           sleep 5
           kill -KILL "$job_pid" 2>/dev/null
       fi
-    ) &
+    ) >/dev/null 2>&1 &
     local watchdog_pid=$!
     wait "$job_pid"
     local train_rc=$?
     kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
     log "mlx-tune candidate stage: train-glm-adapter.sh exited rc=$train_rc"
 
+    # Resolve the REAL output directory now that training has run — see the
+    # comment on candidate_dir_prefix above. Newest match wins if more than
+    # one somehow exists (there should be exactly zero or one).
+    local candidate_dir
+    candidate_dir=$(ls -d "${candidate_dir_prefix}-"* 2>/dev/null | sort | tail -1)
+
     if [[ "$train_rc" != "0" ]]; then
-        log "mlx-tune candidate stage: training FAILED rc=$train_rc — see $mlxtune_train_log"
+        log "mlx-tune candidate stage: training FAILED rc=$train_rc — see $LOG"
         return 0
     fi
-    if [[ ! -d "$candidate_dir" ]]; then
-        log "mlx-tune candidate stage: WARNING rc=0 but no adapter at $candidate_dir — treating as failure"
+    if [[ -z "$candidate_dir" || ! -d "$candidate_dir" ]]; then
+        log "mlx-tune candidate stage: WARNING rc=0 but no adapter dir matching ${candidate_dir_prefix}-* — treating as failure"
         return 0
     fi
 
@@ -151,14 +186,21 @@ run_mlxtune_candidate_stage() {
         return 0
     fi
 
-    # train-glm-adapter.sh restores production itself at the end of ITS OWN
-    # run (it manages its own stop/restart around the training call). If
-    # :8741 is already back up by the time we get here, a direct mlx_lm load
-    # for offline scoring would be a second loader beside the resident base —
-    # skip rather than risk it. This is a real, expected race with the
-    # nested script, not a bug: refuse loudly instead of half-running.
+    # Same TAG-STAMP suffix train-glm-adapter.sh used for both the adapter dir
+    # and its own log file — derive the log path from the adapter dir's
+    # basename rather than guessing it (see the STAMP-mismatch note above).
+    local mlxtune_train_log="$HOME/.human/logs/train-glm-${candidate_dir##*/seth-glm-air-}.log"
+
+    # :8741 should still be DOWN here — train-glm-adapter.sh was told
+    # (HU_TRAIN_SERVING_MANAGED_BY_CALLER=1) not to restore it, so restoring
+    # is exclusively OUR job via the EXIT trap, after this scoring step. The
+    # check below is now a defensive fallback, not the routine case it used
+    # to be: if something ELSE brought serving back up (a stray launchd
+    # restart, another session), refuse the load rather than risk a second
+    # 56 GB model resident — never fabricate a score off a load we shouldn't
+    # have made.
     if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-        log "mlx-tune candidate stage: :8741 already back up (train-glm-adapter.sh restored it) — skipping offline authorship scoring to avoid a second loader"
+        log "mlx-tune candidate stage: :$PORT is unexpectedly back up already (not by train-glm-adapter.sh, which was told to leave it stopped) — skipping offline authorship scoring to avoid a second loader"
     elif [[ ! -x "$eval_py" ]]; then
         log "mlx-tune candidate stage: eval venv missing ($eval_py) — refusing to score, nothing written"
     else
