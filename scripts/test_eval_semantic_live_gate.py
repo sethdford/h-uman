@@ -397,12 +397,13 @@ def test_parse_semantic_results_multiline_content_with_colons():
 
 
 def test_build_memories_block_empty_is_none():
-    assert G.build_memories_block([]) is None
-    assert G.build_memories_block(None) is None
+    assert G.build_memories_block([]) == (None, 0)
+    assert G.build_memories_block(None) == (None, 0)
 
 
 def test_build_memories_block_formats_bullets():
-    block = G.build_memories_block(["a", "b"])
+    block, dropped = G.build_memories_block(["a", "b"])
+    assert dropped == 0
     assert block.startswith("Relevant memories:\n")
     assert "- a" in block and "- b" in block
     assert block.endswith("\n\n")
@@ -411,7 +412,8 @@ def test_build_memories_block_formats_bullets():
 def test_build_memories_block_caps_per_hit_at_word_boundary(monkeypatch):
     monkeypatch.delenv("HU_SEMANTIC_RECALL_MAX_BYTES", raising=False)
     long_hit = " ".join(["word"] * 200)  # ~1000 chars
-    block = G.build_memories_block([long_hit])
+    block, dropped = G.build_memories_block([long_hit])
+    assert dropped == 0
     line = block.split("\n")[1]
     assert line.startswith("- ")
     body = line[2:]
@@ -422,13 +424,13 @@ def test_build_memories_block_caps_per_hit_at_word_boundary(monkeypatch):
 def test_build_memories_block_respects_total_byte_budget(monkeypatch):
     monkeypatch.setenv("HU_SEMANTIC_RECALL_MAX_BYTES", "500")
     hits = [("x" * 7 + " ") * 40] * 5  # 320 chars each, 5 hits
-    block = G.build_memories_block(hits)
+    block, _ = G.build_memories_block(hits)
     bullets = [l for l in block.split("\n") if l.startswith("- ")]
     total = sum(len(b[2:].encode("utf-8")) for b in bullets)
     assert total <= 500
     assert 1 <= len(bullets) < 5
     # Deterministic: same input, same bytes.
-    assert G.build_memories_block(hits) == block
+    assert G.build_memories_block(hits)[0] == block
 
 
 # ---------------------------------------------------------------------------
@@ -675,3 +677,41 @@ def test_main_never_writes_partial_output_on_refuse(monkeypatch, fake_server, co
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# Content filter — mirrors hu_semantic_recall_hit_is_excluded (2026-09-02
+# finding: episodic scaffold + AI-identity confrontation hits drive the
+# adapter into think-only output that reaches the daemon as "").
+# ---------------------------------------------------------------------------
+def test_hit_is_excluded_for_scaffold_and_confrontation_word_boundary():
+    assert G.hit_is_excluded("Task: hi\nActions: agent_turn\nOutcome: ok\nScore: 1.0000")
+    assert G.hit_is_excluded("are you texting or your ai?? Can you just call?")
+    assert G.hit_is_excluded("Is this Seth")
+    assert G.hit_is_excluded("questioning if the recipient is an AI")
+    assert G.hit_is_excluded("lol you're an AI aren't you")
+    # Word boundary: "ai" inside said / wait / maid must not fire.
+    assert not G.hit_is_excluded("he said to wait, the maid is coming")
+    # Bare "AI" as a topic, or "Task" as a word, is a memory not a confrontation.
+    assert not G.hit_is_excluded("Mel started an AI research job in Tampa")
+    assert not G.hit_is_excluded("Task force meeting moved to friday")
+    assert not G.hit_is_excluded("")
+
+
+def test_build_memories_block_drops_excluded_hits_and_reports_count():
+    snippets = [
+        "Task: x\nActions: agent_turn\nOutcome: ok\nScore: 1.0000",
+        "Mel has been applying for jobs in Tampa",
+        "Is this Seth",
+        "dinner at the waterfront place friday",
+    ]
+    block, dropped = G.build_memories_block(snippets)
+    assert dropped == 2
+    assert "Task:" not in block and "Is this Seth" not in block
+    assert "- Mel has been applying" in block
+    assert "- dinner at the waterfront" in block
+    # All excluded -> no block at all, and the count says why.
+    block, dropped = G.build_memories_block(["Is this Seth", "are you a bot"])
+    assert block is None and dropped == 2
+    block, dropped = G.build_memories_block([])
+    assert block is None and dropped == 0
