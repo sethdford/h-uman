@@ -10,7 +10,7 @@ Last updated: 2026-08-02
 | Lines of C/H/ASM code          | **~426K**              |
 | Test files                     | ~308                   |
 | Tests passing                  | **14,011/14,011 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~2468 KB**           |
+| Binary size (MinSizeRel+LTO)   | **~2611 KB**           |
 | Peak RSS (test suite)          | **~6.0 MB**            |
 
 ## Channels — Honest Status
