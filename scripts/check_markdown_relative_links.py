@@ -7,7 +7,11 @@ Skips http(s)://, mailto:, javascript:, data:, vscode:, and pure #anchors.
 
 Environment:
   MARKDOWN_LINK_ROOTS — space-separated top-level dirs under repo root (default below).
-  MARKDOWN_LINK_SCAN_ALL=1 — scan every *.md under repo except known junk dirs.
+  MARKDOWN_LINK_SCAN_ALL=1 — scan every *.md under repo except known junk dirs
+    and this checker's own fixtures (tests/fixtures/check-markdown-links/).
+
+Inline code spans and fenced code blocks are blanked before extraction, so a
+`](` inside code is never treated as a link.
 """
 from __future__ import annotations
 
@@ -48,6 +52,8 @@ def junk_path(path: Path) -> bool:
     try:
         rel = path.relative_to(ROOT)
     except ValueError:
+        return True
+    if rel.as_posix().startswith(FIXTURE_DIR + "/"):
         return True
     parts = rel.parts
     for i, part in enumerate(parts):
@@ -146,8 +152,39 @@ def check_path(raw: str, parent: Path) -> str | None:
     return None
 
 
-FENCED_CODE_RE = re.compile(r"^(\s*)(`{3,}|~{3,}).*?^\1\2[ \t]*$", re.MULTILINE | re.DOTALL)
-INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
+# Fenced code block delimiters (CommonMark §4.5): up to 3 spaces of indent,
+# a run of 3+ backticks or tildes, optional info string. A backtick fence's
+# info string may not itself contain a backtick.
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# Inline code span (CommonMark §6.1): the closing backtick run must be exactly
+# as long as the opening run and neither may be flanked by another backtick.
+INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+FIXTURE_DIR = "tests/fixtures/check-markdown-links"
+
+
+def _blank(s: str) -> str:
+    """Replace every non-newline character with a space (keeps line count)."""
+    return re.sub(r"[^\n]", " ", s)
+
+
+def strip_fenced_blocks(text: str) -> str:
+    lines = text.split("\n")
+    open_char = ""
+    open_len = 0
+    for i, line in enumerate(lines):
+        if not open_char:
+            m = FENCE_OPEN_RE.match(line)
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                open_char, open_len = m.group(1)[0], len(m.group(1))
+                lines[i] = _blank(line)
+            continue
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        run = len(stripped) - len(stripped.lstrip(open_char))
+        if indent <= 3 and run >= open_len and stripped[run:].strip() == "":
+            open_char = ""
+        lines[i] = _blank(line)  # an unclosed fence runs to end of document
+    return "\n".join(lines)
 
 
 def strip_code(text: str) -> str:
@@ -156,10 +193,12 @@ def strip_code(text: str) -> str:
     Code is not prose: a regex such as `['’](t\\|re\\|ve)` in a spec table
     (docs/plans/2026-09-02-persona-evolution/spec.md, 2026-09-03) is exactly
     the shape of a Markdown link and was reported as a missing file
-    "t\\|re\\|ve\\|ll\\|d\\|s\\|m". Replacing the spans with spaces keeps
-    offsets stable for any caller that reports positions."""
-    text = FENCED_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
-    return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+    "t\\|re\\|ve\\|ll\\|d\\|s\\|m". Stripped text is replaced with whitespace
+    of the same line count, so REF_DEF_RE's ^-anchored matching and any
+    line-number reporting stay correct. Fixtures:
+    tests/fixtures/check-markdown-links/run-smoke-test.sh."""
+    text = strip_fenced_blocks(text)
+    return INLINE_CODE_RE.sub(lambda m: _blank(m.group(0)), text)
 
 
 def extract_urls_from_file(text: str) -> list[str]:
