@@ -207,8 +207,78 @@ static void test_positional_cap_falls_back_to_hard_budget_without_newline(void) 
     HU_ASSERT_EQ(hu_prompt_positional_cap_point(no_nl, sizeof(no_nl) - 1, 20), (size_t)20);
 }
 
+/* ── Reserve-aware positional cap ──────────────────────────────────────
+ * The plain positional cap cuts the TAIL, which on the immersive path is
+ * the guard (shape rules, CRITICAL REMINDER, ABSOLUTE RULES). A recall
+ * block that arrives before the tail therefore displaces the rules.
+ * hu_prompt_positional_cap_apply keeps the trailing `reserved` bytes and
+ * cuts the middle instead, so recall can never push the rules out. */
+
+#define K_RULES     "\nABSOLUTE RULES:\n- never say certainly\n- one message\n"
+#define K_RULES_LEN (sizeof(K_RULES) - 1)
+
+static char *build_over_budget_prompt(size_t head_bytes, size_t recall_bytes, size_t *len_out) {
+    size_t total = head_bytes + recall_bytes + K_RULES_LEN;
+    char *buf = (char *)malloc(total + 1);
+    size_t pos = 0;
+    for (; pos < head_bytes; pos++)
+        buf[pos] = (pos % 40 == 39) ? '\n' : 'H';
+    for (size_t i = 0; i < recall_bytes; i++, pos++)
+        buf[pos] = (i % 60 == 59) ? '\n' : 'R';
+    memcpy(buf + pos, K_RULES, K_RULES_LEN);
+    pos += K_RULES_LEN;
+    buf[pos] = '\0';
+    *len_out = pos;
+    return buf;
+}
+
+static void test_cap_apply_keeps_reserved_rules_tail_and_fits_budget(void) {
+    size_t len = 0;
+    /* 15,500 B head + 1,200 B recall + rules > 16,384 B budget. */
+    char *buf = build_over_budget_prompt(15500, 1200, &len);
+    HU_ASSERT_GT((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    size_t new_len =
+        hu_prompt_positional_cap_apply(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
+    HU_ASSERT_LE((long)new_len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_EQ((long)strlen(buf), (long)new_len);
+    /* Rules block survives verbatim at the very end. */
+    HU_ASSERT(new_len >= K_RULES_LEN);
+    HU_ASSERT(memcmp(buf + new_len - K_RULES_LEN, K_RULES, K_RULES_LEN) == 0);
+    /* Head start survives; the cut lands on a line boundary. */
+    HU_ASSERT_EQ((int)buf[0], (int)'H');
+    HU_ASSERT_EQ((int)buf[new_len - K_RULES_LEN - 1], (int)'\n');
+    free(buf);
+}
+
+static void test_cap_apply_under_budget_is_noop(void) {
+    size_t len = 0;
+    char *buf = build_over_budget_prompt(1000, 200, &len);
+    char *copy = strdup(buf);
+    size_t new_len =
+        hu_prompt_positional_cap_apply(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
+    HU_ASSERT_EQ((long)new_len, (long)len);
+    HU_ASSERT_STR_EQ(buf, copy);
+    free(copy);
+    free(buf);
+}
+
+static void test_cap_apply_reserved_too_large_falls_back_to_plain_cap(void) {
+    size_t len = 0;
+    char *buf = build_over_budget_prompt(200, 100, &len);
+    /* Budget 64 with a reservation >= budget: cannot honour it, so behave
+     * exactly like the plain positional cap (never return more than budget). */
+    size_t plain = hu_prompt_positional_cap_point(buf, len, 64);
+    size_t new_len = hu_prompt_positional_cap_apply(buf, len, 64, 64);
+    HU_ASSERT_EQ((long)new_len, (long)plain);
+    HU_ASSERT_EQ((long)strlen(buf), (long)new_len);
+    free(buf);
+}
+
 void run_prompt_trim_tests(void) {
     HU_TEST_SUITE("Prompt trim");
+    HU_RUN_TEST(test_cap_apply_keeps_reserved_rules_tail_and_fits_budget);
+    HU_RUN_TEST(test_cap_apply_under_budget_is_noop);
+    HU_RUN_TEST(test_cap_apply_reserved_too_large_falls_back_to_plain_cap);
     HU_RUN_TEST(test_trim_mode_parse_unknown_and_empty_default_off);
     HU_RUN_TEST(test_trim_mode_parse_shadow);
     HU_RUN_TEST(test_trim_mode_parse_live_aliases);
