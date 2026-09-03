@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
 #include "human/memory.h"
+#include "human/memory/retrieval.h"
 #include "human/memory/vector.h"
 
 #ifdef __cplusplus
@@ -51,6 +52,37 @@ const char *hu_semantic_recall_embed_url(void);
  * out_store and must deinit them AFTER the memory engine. */
 hu_error_t hu_semantic_recall_attach(hu_allocator_t *alloc, hu_memory_t *mem,
                                      hu_embedder_t *out_embedder, hu_vector_store_t *out_store);
+
+/* Recall byte budget (2026-09-02 live-gate finding, docs/plans/
+ * 2026-08-02-semantic-retrieval/semantic-live-gate-2026-09-02.json): 9 of 40
+ * LIVE contexts returned an EMPTY completion where SHADOW returned none. The
+ * LIVE arm differs from SHADOW only by the recall block — up to 5 hits of up
+ * to 2000 chars each — which crowds the 16 KB prompt cap and the reply's
+ * token budget. The block is therefore bounded at the SOURCE: each semantic
+ * hit is cut at a word boundary to HU_SEMANTIC_RECALL_HIT_MAX_BYTES and the
+ * whole semantic leg is capped at hu_semantic_recall_max_bytes(). The prompt
+ * cap reserves the guard tail separately (hu_prompt_positional_cap_apply). */
+#define HU_SEMANTIC_RECALL_DEFAULT_MAX_BYTES 1200u
+#define HU_SEMANTIC_RECALL_HIT_MAX_BYTES     240u
+
+/* $HU_SEMANTIC_RECALL_MAX_BYTES, default HU_SEMANTIC_RECALL_DEFAULT_MAX_BYTES.
+ * Unparsable or non-positive values fail closed to the default. */
+size_t hu_semantic_recall_max_bytes(void);
+
+/* Pure: byte length to keep from s[0, len) so the result is <= max_bytes and
+ * ends on a word boundary when one lies in the upper half of the window
+ * (otherwise a hard cut at max_bytes, backed off any UTF-8 continuation
+ * bytes). Returns len when len <= max_bytes; 0 on NULL / max_bytes == 0. */
+size_t hu_semantic_recall_truncate_len(const char *s, size_t len, size_t max_bytes);
+
+/* Clamp a semantic retrieval result in place: every entry's content is cut
+ * to per_hit_bytes (word boundary), and entries are kept in rank order only
+ * while the cumulative kept content stays within budget_bytes — the first
+ * entry that would exceed it and every entry after it are dropped and freed.
+ * entries/scores are shrunk so hu_retrieval_result_free stays exact.
+ * Returns the total content bytes kept. Deterministic for identical input. */
+size_t hu_semantic_recall_clamp_result(hu_allocator_t *alloc, hu_retrieval_result_t *res,
+                                       size_t budget_bytes, size_t per_hit_bytes);
 
 #ifdef __cplusplus
 }

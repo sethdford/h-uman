@@ -408,6 +408,29 @@ def test_build_memories_block_formats_bullets():
     assert block.endswith("\n\n")
 
 
+def test_build_memories_block_caps_per_hit_at_word_boundary(monkeypatch):
+    monkeypatch.delenv("HU_SEMANTIC_RECALL_MAX_BYTES", raising=False)
+    long_hit = " ".join(["word"] * 200)  # ~1000 chars
+    block = G.build_memories_block([long_hit])
+    line = block.split("\n")[1]
+    assert line.startswith("- ")
+    body = line[2:]
+    assert len(body.encode("utf-8")) <= G.RECALL_HIT_MAX_BYTES
+    assert not body.endswith(" ") and body.endswith("word")
+
+
+def test_build_memories_block_respects_total_byte_budget(monkeypatch):
+    monkeypatch.setenv("HU_SEMANTIC_RECALL_MAX_BYTES", "500")
+    hits = [("x" * 7 + " ") * 40] * 5  # 320 chars each, 5 hits
+    block = G.build_memories_block(hits)
+    bullets = [l for l in block.split("\n") if l.startswith("- ")]
+    total = sum(len(b[2:].encode("utf-8")) for b in bullets)
+    assert total <= 500
+    assert 1 <= len(bullets) < 5
+    # Deterministic: same input, same bytes.
+    assert G.build_memories_block(hits) == block
+
+
 # ---------------------------------------------------------------------------
 # 5. judge (fake mode) — deterministic, in-range, network-free, budgeted
 # ---------------------------------------------------------------------------

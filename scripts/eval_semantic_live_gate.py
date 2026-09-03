@@ -412,10 +412,58 @@ def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
     return _parse_semantic_results(proc.stdout)[:k]
 
 
+# Byte budget for the recall block — MIRRORS the in-binary clamp
+# (hu_semantic_recall_clamp_result, src/memory/semantic_recall.c): per-hit
+# content cut at a word boundary to RECALL_HIT_MAX_BYTES, hits kept in rank
+# order only while the cumulative content stays within the budget. Without
+# this the LIVE arm injected up to 5 x 2000-char hits (the CLI prints up to
+# 2000 bytes per hit) and 9/40 contexts returned EMPTY completions on
+# 2026-09-02. Keep these two constants in sync with semantic_recall.h.
+RECALL_HIT_MAX_BYTES = 240
+DEFAULT_RECALL_MAX_BYTES = 1200
+
+
+def recall_max_bytes():
+    v = os.environ.get("HU_SEMANTIC_RECALL_MAX_BYTES", "")
+    try:
+        n = int(v)
+    except ValueError:
+        return DEFAULT_RECALL_MAX_BYTES
+    return n if n > 0 else DEFAULT_RECALL_MAX_BYTES
+
+
+def truncate_hit_bytes(s, max_bytes):
+    """Word-boundary byte truncation, same rule as hu_semantic_recall_truncate_len:
+    the last whitespace in the upper half of the window, else a hard cut that
+    never splits a UTF-8 sequence."""
+    b = s.encode("utf-8")
+    if len(b) <= max_bytes:
+        return s
+    for i in range(max_bytes, max_bytes // 2, -1):
+        if b[i] in b" \n\t":
+            cut = i
+            while cut > 0 and b[cut - 1] in b" \n\t":
+                cut -= 1
+            return b[:cut].decode("utf-8", errors="ignore")
+    return b[:max_bytes].decode("utf-8", errors="ignore")
+
+
 def build_memories_block(snippets):
     if not snippets:
         return None
-    lines = "\n".join(f"- {s}" for s in snippets)
+    budget = recall_max_bytes()
+    used = 0
+    kept = []
+    for s in snippets:
+        t = truncate_hit_bytes(s, RECALL_HIT_MAX_BYTES)
+        n = len(t.encode("utf-8"))
+        if used + n > budget:
+            break
+        used += n
+        kept.append(t)
+    if not kept:
+        return None
+    lines = "\n".join(f"- {s}" for s in kept)
     return f"Relevant memories:\n{lines}\n\n"
 
 
