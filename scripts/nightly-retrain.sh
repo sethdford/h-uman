@@ -38,6 +38,151 @@ PORT="${HU_RETRAIN_PORT:-8741}"
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
 
+# ── mlx-tune candidate-training stage (gated, OFF by default) ───────────────
+#
+# Trains a SimPO candidate via scripts/train-glm-adapter.sh's mlx-tune path
+# (contract C6), guards it with adapter_is_real.py, and — if serving has not
+# already come back up — scores it offline against the SERVING adapter with
+# the LUAR authorship tier (contract C4). Never promotes: the candidate is
+# staged only; promotion stays scripts/register_v6_adapter.py + a human call.
+#
+# Defined as its own function (rather than inlined below) so it can be
+# sourced and invoked directly by a hermetic test without running the rest
+# of this script (window check, launchctl bootout, real training). Sourcing
+# with HU_RETRAIN_STAGE_TEST=1 defines this function (and log() above) then
+# returns before anything else executes — see the guard right after this
+# function definition.
+run_mlxtune_candidate_stage() {
+    if [[ "${HU_RETRAIN_MLXTUNE:-0}" != "1" ]]; then
+        log "mlx-tune candidate stage disabled (HU_RETRAIN_MLXTUNE=0)"
+        return 0
+    fi
+
+    log "mlx-tune candidate stage: starting (HU_RETRAIN_MLXTUNE=1)"
+
+    # serving_stopped is the caller's global (set once mlx-server is actually
+    # bootout'd, below). Refuse rather than risk a second loader if somehow
+    # invoked while serving is still up.
+    if [[ "${serving_stopped:-0}" != "1" ]]; then
+        log "mlx-tune candidate stage: serving is not stopped — refusing (never two loaders)"
+        return 0
+    fi
+
+    local max_min="${HU_RETRAIN_MLXTUNE_MAX_MIN:-90}"
+    local stamp; stamp="$(date +%Y%m%d-%H%M)"
+    local mlxtune_tag="mlxtune-simpo-${stamp}"
+    local candidate_dir="$HOME/.human/training-data/adapters/seth-glm-air-${mlxtune_tag}"
+    local mlxtune_train_log="$HOME/.human/logs/train-glm-${mlxtune_tag}.log"
+    local data_dir="${HU_RETRAIN_MLXTUNE_DATA_DIR:-$HOME/.human/training-data/glm-v61-pref}"
+    local config="${HU_RETRAIN_MLXTUNE_CONFIG:-$HOME/.human/training-data/glm-v61-orpo-config.yaml}"
+    local mlxtune_py="$HOME/.human/venvs/mlxtune312/bin/python"
+    local eval_py="$HOME/.human/venvs/eval312/bin/python"
+
+    log "mlx-tune candidate stage: config=$config data=$data_dir out=$candidate_dir cap=${max_min}min"
+
+    if [[ "${HU_RETRAIN_DRY_RUN:-0}" == "1" ]]; then
+        log "mlx-tune candidate stage: DRY RUN (HU_RETRAIN_DRY_RUN=1) — loading nothing"
+        if [[ -x "$mlxtune_py" ]]; then
+            "$mlxtune_py" "$REPO/scripts/mlx_tune_train.py" --dry-run --config "$config" --train-mode simpo 2>&1 | tee -a "$LOG"
+            log "mlx-tune candidate stage: dry-run train check exited rc=${PIPESTATUS[0]}"
+        else
+            log "mlx-tune candidate stage: mlxtune venv missing ($mlxtune_py) — skipping dry-run train check"
+        fi
+        if [[ -x "$eval_py" ]]; then
+            "$eval_py" "$REPO/scripts/blind_ab/score_candidate_offline.py" --dry-run \
+                --candidate "$candidate_dir" 2>&1 | tee -a "$LOG"
+            log "mlx-tune candidate stage: dry-run score check exited rc=${PIPESTATUS[0]}"
+        else
+            log "mlx-tune candidate stage: eval venv missing ($eval_py) — skipping dry-run score check"
+        fi
+        log "mlx-tune candidate stage: DRY RUN done"
+        return 0
+    fi
+
+    if [[ ! -s "$data_dir/train.jsonl" ]]; then
+        log "mlx-tune candidate stage: no preference corpus at $data_dir/train.jsonl — skipping (not failing the window)"
+        return 0
+    fi
+    local pair_count; pair_count=$(wc -l < "$data_dir/train.jsonl" | tr -d ' ')
+    if [[ "$pair_count" -lt 200 ]]; then
+        log "mlx-tune candidate stage: $pair_count pairs < floor 200 — skipping (see build_v6_preference_corpus.py --floor)"
+        return 0
+    fi
+    log "mlx-tune candidate stage: $pair_count preference pairs at $data_dir — proceeding"
+
+    log "mlx-tune candidate stage: training -> $candidate_dir (timeboxed ${max_min} min)"
+    # No `timeout` binary on macOS: background the job, race a watchdog
+    # subshell against it, and kill on overrun. restore_serving (the caller's
+    # trap) still runs afterward regardless of how this exits.
+    ( bash "$REPO/scripts/train-glm-adapter.sh" \
+        --config "$config" --trainer mlx_tune --train-mode simpo \
+        --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
+    local job_pid=$!
+    ( sleep $(( max_min * 60 ))
+      if kill -0 "$job_pid" 2>/dev/null; then
+          log "mlx-tune candidate stage: exceeded ${max_min} min cap — terminating (pid $job_pid)"
+          kill -TERM "$job_pid" 2>/dev/null
+          sleep 5
+          kill -KILL "$job_pid" 2>/dev/null
+      fi
+    ) &
+    local watchdog_pid=$!
+    wait "$job_pid"
+    local train_rc=$?
+    kill "$watchdog_pid" 2>/dev/null; wait "$watchdog_pid" 2>/dev/null || true
+    log "mlx-tune candidate stage: train-glm-adapter.sh exited rc=$train_rc"
+
+    if [[ "$train_rc" != "0" ]]; then
+        log "mlx-tune candidate stage: training FAILED rc=$train_rc — see $mlxtune_train_log"
+        return 0
+    fi
+    if [[ ! -d "$candidate_dir" ]]; then
+        log "mlx-tune candidate stage: WARNING rc=0 but no adapter at $candidate_dir — treating as failure"
+        return 0
+    fi
+
+    local why
+    if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
+        log "mlx-tune candidate stage: adapter real: $candidate_dir — $why"
+    else
+        log "mlx-tune candidate stage: adapter FAILED the real-adapter guard: $why"
+        log "mlx-tune candidate stage: quarantining $candidate_dir -> $candidate_dir.rejected-$(date +%s)"
+        mv "$candidate_dir" "$candidate_dir.rejected-$(date +%s)" 2>&1 | tee -a "$LOG" || true
+        return 0
+    fi
+
+    # train-glm-adapter.sh restores production itself at the end of ITS OWN
+    # run (it manages its own stop/restart around the training call). If
+    # :8741 is already back up by the time we get here, a direct mlx_lm load
+    # for offline scoring would be a second loader beside the resident base —
+    # skip rather than risk it. This is a real, expected race with the
+    # nested script, not a bug: refuse loudly instead of half-running.
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        log "mlx-tune candidate stage: :8741 already back up (train-glm-adapter.sh restored it) — skipping offline authorship scoring to avoid a second loader"
+    elif [[ ! -x "$eval_py" ]]; then
+        log "mlx-tune candidate stage: eval venv missing ($eval_py) — refusing to score, nothing written"
+    else
+        local score_out="$HOME/.human/logs/candidate-authorship-$(date +%Y-%m-%d).json"
+        log "mlx-tune candidate stage: scoring candidate vs serving (offline LUAR) -> $score_out"
+        "$eval_py" "$REPO/scripts/blind_ab/score_candidate_offline.py" \
+            --candidate "$candidate_dir" --out "$score_out" 2>&1 | tee -a "$LOG"
+        log "mlx-tune candidate stage: score_candidate_offline.py exited rc=${PIPESTATUS[0]}"
+    fi
+
+    log "mlx-tune candidate stage: candidate staged at $candidate_dir (NOT promoted)"
+    log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
+}
+
+# Testability hook: `HU_RETRAIN_STAGE_TEST=1 bash -c 'source scripts/nightly-retrain.sh; run_mlxtune_candidate_stage'`
+# (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()
+# above and stops here — the window check, mlx-server bootout, and real
+# training below never execute. `return` works when sourced; `|| exit 0`
+# covers the (unsupported, but harmless) case of executing this file
+# directly with the flag set.
+if [[ "${HU_RETRAIN_STAGE_TEST:-0}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 # ── Window check ────────────────────────────────────────────────────────────
 # Delegated to training_loop.py so the window semantics (inclusive start,
 # exclusive end, midnight-crossing) have exactly ONE implementation, pinned by
@@ -204,6 +349,13 @@ if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
     python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
     log "classifier gate exited rc=${PIPESTATUS[0]}"
 fi
+
+# mlx-tune candidate-training stage — gated OFF by default (HU_RETRAIN_MLXTUNE=1
+# to enable). Runs AFTER training_loop above and BEFORE restore_serving (the
+# EXIT trap below), i.e. still inside the dark window. See the function
+# definition near the top of this file for the full contract.
+run_mlxtune_candidate_stage
+
 log "=== nightly retrain done ==="
 # restore_serving runs via the EXIT trap.
 
