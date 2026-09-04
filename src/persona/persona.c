@@ -5434,6 +5434,14 @@ static hu_error_t persona_compact_append_str(hu_allocator_t *alloc, char **buf, 
                                              size_t *cap, const char *s) {
     return append_prompt(alloc, buf, len, cap, s, strlen(s));
 }
+/* Append `s` followed by a newline. */
+static hu_error_t persona_compact_append_line(hu_allocator_t *alloc, char **buf, size_t *len,
+                                              size_t *cap, const char *s, size_t s_len) {
+    hu_error_t err = append_prompt(alloc, buf, len, cap, s, s_len);
+    if (err != HU_OK)
+        return err;
+    return append_prompt(alloc, buf, len, cap, "\n", 1);
+}
 
 static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
                                                   const hu_persona_t *persona, const char *channel,
@@ -5698,6 +5706,27 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
             if (err != HU_OK)
                 goto fail;
         }
+    }
+
+    /* 6b. Env-gated directives that the full builder carries and this head
+     * silently dropped (2026-09-04 audit): with HU_PERSONA_HEAD=live the
+     * daemon never enters hu_persona_build_prompt, so HU_TERSENESS=live and
+     * HU_HUMOR_DIRECTIVE=live were no-ops in production. Same gates, same
+     * directive text; LIVE appends, SHADOW/OFF leave the prompt unchanged. */
+    if (hu_terse_mode_from_env() == HU_TERSE_LIVE) {
+        const char *td = hu_terse_directive();
+        err = persona_compact_append_line(alloc, &buf, &len, &cap, td, strlen(td));
+        if (err != HU_OK)
+            goto fail;
+    }
+    if (hu_gate_mode_from_env("HU_HUMOR_DIRECTIVE", HU_GATE_OFF) == HU_GATE_LIVE) {
+        char hum_dir[768];
+        size_t hum_len = 0;
+        if (hu_persona_build_humor_directive(persona, hum_dir, sizeof(hum_dir), &hum_len) ==
+                HU_OK &&
+            hum_len > 0 &&
+            (err = persona_compact_append_line(alloc, &buf, &len, &cap, hum_dir, hum_len)) != HU_OK)
+            goto fail;
     }
 
     /* 7. Closing imperative: shape constraints + anti-pattern guards. */
