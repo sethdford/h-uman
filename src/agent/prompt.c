@@ -564,6 +564,11 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 HU_PROMPT_TRACK_AFTER(sections[i].field);
             }
         }
+        /* Everything appended from here to the early return is the guard
+         * tail the positional cap must keep (hu_prompt_positional_cap_apply).
+         * Its LENGTH is unaffected by the span trim below, which only
+         * removes middle sections. */
+        size_t guard_tail_start = len;
         if (config->max_response_chars > 0) {
             char lbuf[192];
             int ln;
@@ -664,6 +669,12 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * delete the anti-AI-tell guard appended above. The positional cut
          * downstream remains the safety net when the spans can't cover the
          * overage. */
+        if (stats) {
+            stats[HU_PROMPT_FIELD_GUARD_TAIL].name =
+                hu_prompt_field_name(HU_PROMPT_FIELD_GUARD_TAIL);
+            stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed +=
+                (len >= guard_tail_start) ? (len - guard_tail_start) : 0;
+        }
         if (trim_mode != HU_PROMPT_TRIM_OFF && len > HU_PROMPT_TRIM_BUDGET_BYTES) {
             size_t cuts[HU_TRIM_SLOT_COUNT] = {0};
             /* Floors (2026-07-25 Dermot audit): the un-floored trim deleted
