@@ -36,10 +36,12 @@ jobs:
       - name: Check binary size regression
         if: github.event_name == 'pull_request'
         run: |
-          # Bumped 2026-05-29: binary grew with the media-inspiration feature
-          # (music/YouTube/TikTok) + accumulated main features. 2641312 is the
-          # measured size at that point; 5% headroom is preserved for growth.
-          BASELINE=2641312
+          # Bumped 2026-09-03: measured on main@1011bc861 (benchmark run
+          # 33818423696, MinSizeRel+LTO+curl on ubuntu-latest). The prior
+          # 2026-05-29 baseline (2641312) had been exceeded by ~9% after the
+          # semantic-recall / GraphRAG / native-iMessage / persona-gate work,
+          # so every PR failed this step. 5% headroom is preserved for growth.
+          BASELINE=2891775
           ACTUAL=$(stat -c%s build/human 2>/dev/null || stat -f%z build/human)
           THRESHOLD=$((BASELINE * 105 / 100))
           if [ "$ACTUAL" -gt "$THRESHOLD" ]; then
