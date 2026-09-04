@@ -897,17 +897,31 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
          * OFF (default) keeps the legacy pair: zero behaviour change. Gated on
          * the Phase-1 harness re-run through this path before LIVE. */
         if (hu_semantic_recall_mode() != HU_GATE_OFF) {
-            hu_embedder_t sem_emb = {0};
-            hu_vector_store_t sem_vs = {0};
-            if (hu_semantic_recall_attach(alloc, &bi->memory, &sem_emb, &sem_vs) == HU_OK) {
-                if (bi->embedder.ctx && bi->embedder.vtable && bi->embedder.vtable->deinit)
-                    bi->embedder.vtable->deinit(bi->embedder.ctx, alloc);
-                bi->embedder = sem_emb;
-                bi->vector_store = sem_vs;
+            /* Attach straight into bi->embedder / bi->vector_store. The sqlite
+             * engine keeps the ADDRESSES it is handed
+             * (hu_sqlite_memory_set_semantic_index) and dereferences them on
+             * every indexed store, so they must outlive this block. From
+             * 2026-09-02 to 09-04 they were block-scoped temporaries copied
+             * into bi afterwards: the engine kept pointing at the dead stack
+             * slot and ASan aborted the daemon in semantic_index_row 21 times
+             * (one per restart, on the first indexed store). bi is heap-owned
+             * for the app's lifetime; these addresses stay valid. Pinned by
+             * test_bootstrap_semantic_index_points_at_app_lifetime_embedder. */
+            hu_embedder_t prev_emb = bi->embedder;
+            hu_vector_store_t prev_vs = bi->vector_store;
+            if (hu_semantic_recall_attach(alloc, &bi->memory, &bi->embedder, &bi->vector_store) ==
+                HU_OK) {
+                if (prev_emb.ctx && prev_emb.vtable && prev_emb.vtable->deinit)
+                    prev_emb.vtable->deinit(prev_emb.ctx, alloc);
+                if (prev_vs.ctx && prev_vs.vtable && prev_vs.vtable->deinit)
+                    prev_vs.vtable->deinit(prev_vs.ctx, alloc);
                 hu_log_info("bootstrap", NULL, "semantic recall %s: embedder=%s store=sqlite-vec",
                             hu_semantic_recall_mode() == HU_GATE_LIVE ? "LIVE" : "SHADOW",
                             hu_semantic_recall_embed_url());
             } else {
+                /* attach clears/overwrites its outputs on failure — restore. */
+                bi->embedder = prev_emb;
+                bi->vector_store = prev_vs;
                 hu_log_warn("bootstrap", NULL,
                             "semantic recall requested but could not attach (non-sqlite backend?)"
                             " — staying on the legacy embedder");

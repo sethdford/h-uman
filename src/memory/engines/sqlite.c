@@ -1861,6 +1861,21 @@ void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *e
     self->sem_store = store;
 }
 
+void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embedder **embedder_out,
+                                         struct hu_vector_store **store_out) {
+    if (embedder_out)
+        *embedder_out = NULL;
+    if (store_out)
+        *store_out = NULL;
+    if (!mem || !mem->ctx)
+        return;
+    const hu_sqlite_memory_t *self = (const hu_sqlite_memory_t *)mem->ctx;
+    if (embedder_out)
+        *embedder_out = self->sem_embedder;
+    if (store_out)
+        *store_out = self->sem_store;
+}
+
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
     if (indexed_out)
         *indexed_out = 0;
