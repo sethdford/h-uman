@@ -519,7 +519,7 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
     if (!alloc || !items || !count || !cap)
         return HU_ERR_INVALID_ARGUMENT;
 
-#ifdef HU_ENABLE_SKILLS
+#ifdef HU_HAS_SKILLS /* the macro CMake defines for -DHU_ENABLE_SKILLS=ON */
     doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                      "[doctor] Skills subsystem: compiled in");
 #else
