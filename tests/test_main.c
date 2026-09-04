@@ -355,6 +355,7 @@ void run_imessage_private_client_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
 void run_imessage_replay_guard_tests(void);
 void run_chatdb_cursor_repo_sqlite_tests(void);
+void run_reliable_circuit_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
@@ -975,6 +976,7 @@ void run_persona_encryption_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
+void run_style_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
 #endif
@@ -1414,6 +1416,7 @@ int main(int argc, char **argv) {
     run_imessage_chatdb_fixture_tests();
     run_imessage_replay_guard_tests();
     run_chatdb_cursor_repo_sqlite_tests();
+    run_reliable_circuit_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
@@ -2000,6 +2003,7 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
+    run_style_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();
 #endif

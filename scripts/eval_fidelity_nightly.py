@@ -9,11 +9,15 @@ response using the deterministic shape classifier, computes bootstrap CI,
 and gates on both statistical (one-sided t-test α=0.025) and practical
 (delta ≥ 5%) significance.
 
-Generation loads the model ONCE per pass via the mlx_lm Python API (PRE
-without adapter, POST with, memory freed in between) and generates all
-prompts on the warm model — minutes per pass instead of the ~3h the old
-one-subprocess-per-prompt shape took (58 cold loads of the 31B model per
-night). That legacy path survives behind --subprocess-gen as a fallback.
+Generation runs THROUGH the production mlx-server when one is up (--gen
+served, the auto default): PRE swaps a zero-delta twin of the serving adapter
+in via POST /v1/adapters/swap (LoRA is additive, so all-zero A/B is the base
+model exactly), POST runs on the serving adapter after it is restored and
+verified via /v1/adapters/current. Never two loaders: on 2026-09-03 the
+in-process path loaded a second 56 GB copy beside :8741, wired memory hit
+94.8 GB and the server died ("[METAL] Insufficient Memory"). In-process
+generation (mlx_lm.load once per pass) is only allowed when no server is up;
+the per-prompt subprocess shape survives behind --subprocess-gen.
 
 Verdict logged to stdout and JSON, suitable for launchd scheduling.
 
@@ -46,12 +50,17 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import socket
 import statistics
+import struct
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -562,6 +571,217 @@ def run_eval_pass(model_id: str, prompts: list[dict], adapter_path: str | None =
                         "load_sec": load_sec, "count": len(responses)})
 
 
+# ── Served-endpoint generation (never two loaders) ──────────────────────────
+#
+# 2026-09-03 04:31: the in-process path above loaded a SECOND copy of the
+# 56 GB serving base beside the live :8741 mlx-server. Wired memory reached
+# 94.8 GB, the server died with "[METAL] Insufficient Memory", became a ?E
+# zombie holding its wired pages, and production was dark until a reboot.
+#
+# The served path generates THROUGH the production endpoint instead. The
+# adapter delta still needs two arms, and the serving build's
+# POST /v1/adapters/swap has no "unload", so the PRE arm swaps in a ZERO
+# adapter: a twin of the serving adapter with every tensor zeroed. LoRA is
+# additive (W·x + scale·(x·A)·B), so an all-zero A/B is the base model exactly
+# — on any build that binds LoRA at all. Sequence: swap→zero, PRE, restore
+# (verified via /v1/adapters/current), POST on the serving adapter.
+
+DEFAULT_ZERO_ADAPTER_ROOT = Path.home() / ".human" / "eval" / "fidelity-zero-adapter"
+
+
+def production_server_url(env: dict | None = None) -> str:
+    """Base URL of the production mlx-server: HU_MLX_BASE_URL (any trailing /v1
+    stripped), else http://127.0.0.1:<production_mlx_port>."""
+    env = os.environ if env is None else env
+    url = env.get("HU_MLX_BASE_URL", "").strip().rstrip("/")
+    if url:
+        return re.sub(r"/v1$", "", url)
+    return f"http://127.0.0.1:{production_mlx_port(env)}"
+
+
+def _http_json(method: str, url: str, body: dict | None = None, timeout: float = 30,
+               headers: dict | None = None) -> tuple[int, dict | None]:
+    """One JSON round-trip. Thin seam: tests patch THIS symbol. HTTP error
+    statuses are returned, not raised; transport errors propagate."""
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    hdrs = {"Content-Type": "application/json", **(headers or {})}
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return resp.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as e:
+        try:
+            payload = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            payload = None
+        return e.code, payload
+
+
+def served_endpoint_available(url: str, timeout: float = 5.0) -> bool:
+    """True when a mlx-server with the adapter admin surface answers at url."""
+    try:
+        status, _ = _http_json("GET", f"{url}/v1/adapters/current", timeout=timeout)
+    except (OSError, ValueError):
+        return False
+    return status == 200
+
+
+def served_current_adapter(url: str) -> str | None:
+    """GET /v1/adapters/current → adapter_path, or None when unanswerable."""
+    try:
+        status, body = _http_json("GET", f"{url}/v1/adapters/current", timeout=15)
+    except (OSError, ValueError):
+        return None
+    if status != 200 or not isinstance(body, dict):
+        return None
+    return body.get("adapter_path")
+
+
+def served_swap_adapter(url: str, adapter_path) -> tuple[bool, str]:
+    """POST /v1/adapters/swap. Returns (ok, detail)."""
+    try:
+        status, body = _http_json("POST", f"{url}/v1/adapters/swap",
+                                  body={"adapter_path": str(adapter_path)}, timeout=600)
+    except (OSError, ValueError) as e:
+        return False, f"swap transport error: {e}"
+    if status != 200:
+        return False, f"swap HTTP {status}: {str(body)[:200]}"
+    return True, "ok"
+
+
+def _same_path(a, b) -> bool:
+    if not a or not b:
+        return False
+    try:
+        return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return False
+
+
+def served_restore_adapter(url: str, expected, attempts: int = 3,
+                           backoff_sec: float = 5.0) -> bool:
+    """Swap `expected` back in and VERIFY /v1/adapters/current reports it.
+    A swap that returns 200 but leaves a different adapter active counts as a
+    failure — the artifact, not the report, decides."""
+    for attempt in range(1, attempts + 1):
+        ok, detail = served_swap_adapter(url, expected)
+        if ok and _same_path(served_current_adapter(url), expected):
+            return True
+        print(f"[WARN] restore attempt {attempt}/{attempts} did not take: {detail}",
+              flush=True)
+        if attempt < attempts:
+            time.sleep(backoff_sec * attempt)
+    return False
+
+
+def _read_safetensors_header(path: Path) -> tuple[dict, int]:
+    with open(path, "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        return json.loads(f.read(n)), 8 + n
+
+
+def ensure_zero_adapter(serving_dir, root=DEFAULT_ZERO_ADAPTER_ROOT) -> Path:
+    """Build (or reuse) the zero-delta twin of `serving_dir` under `root`.
+
+    Same tensor names, dtypes, shapes and offsets as the serving adapter's
+    adapters.safetensors; every data byte zero (a sparse file — APFS stores
+    the ~550 MB of zeros as nothing). adapter_config.json is copied so the
+    directory passes the same shape checks the real adapter does. Reused
+    when the cached twin's header matches; rewritten when it doesn't.
+    """
+    serving_dir = Path(serving_dir).expanduser()
+    src_file = serving_dir / "adapters.safetensors"
+    hdr, _ = _read_safetensors_header(src_file)
+    shape_of = {k: (v.get("dtype"), v.get("shape"), v.get("data_offsets"))
+                for k, v in hdr.items() if k != "__metadata__"}
+    out_dir = Path(root).expanduser() / serving_dir.name
+    out_file = out_dir / "adapters.safetensors"
+    cfg_src, cfg_dst = serving_dir / "adapter_config.json", out_dir / "adapter_config.json"
+
+    if out_file.exists():
+        try:
+            cached, _ = _read_safetensors_header(out_file)
+            cached_shape = {k: (v.get("dtype"), v.get("shape"), v.get("data_offsets"))
+                            for k, v in cached.items() if k != "__metadata__"}
+        except (OSError, ValueError, struct.error):
+            cached_shape = None
+        if cached_shape == shape_of:
+            if cfg_src.exists() and not cfg_dst.exists():
+                shutil.copyfile(cfg_src, cfg_dst)
+            return out_dir
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    data_len = max((v["data_offsets"][1] for v in hdr.values()
+                    if isinstance(v, dict) and "data_offsets" in v), default=0)
+    header = json.dumps(hdr).encode("utf-8")
+    tmp = out_dir / f".adapters.safetensors.tmp-{os.getpid()}"
+    with open(tmp, "wb") as f:
+        f.write(struct.pack("<Q", len(header)))
+        f.write(header)
+        f.truncate(8 + len(header) + data_len)  # sparse zeros
+    os.replace(tmp, out_file)
+    if cfg_src.exists():
+        shutil.copyfile(cfg_src, cfg_dst)
+    return out_dir
+
+
+def generate_served(url: str, prompt: str, max_tokens: int = 80,
+                    timeout_sec: int = 600, retries: int = 3) -> str:
+    """One generation through POST /v1/chat/completions on the served model.
+
+    Same return contract as generate_inprocess(): model text or a
+    SENTINEL_PREFIXES marker that is_sentinel() filters. Submitted at batch
+    priority so a nightly never cuts ahead of a real conversation; a 503
+    (admission queue full) is retried, anything else is a sentinel.
+    """
+    body = {"messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
+    headers = {"X-HU-Priority": "batch"}
+    last = "no attempt"
+    for attempt in range(1, retries + 1):
+        try:
+            status, payload = _http_json("POST", f"{url}/v1/chat/completions",
+                                         body=body, timeout=timeout_sec, headers=headers)
+        except (TimeoutError, socket.timeout):
+            return "[timeout]"
+        except urllib.error.URLError as e:
+            if isinstance(e.reason, (TimeoutError, socket.timeout)):
+                return "[timeout]"
+            return f"[gen_err: {str(e)[:100]}]"
+        except Exception as e:  # noqa: BLE001 — per-prompt failures never raise
+            return f"[gen_err: {str(e)[:100]}]"
+        if status == 503:
+            last = f"HTTP 503 {str(payload)[:60]}"
+            time.sleep(5.0 * attempt)
+            continue
+        if status != 200:
+            return f"[gen_err: HTTP {status} {str(payload)[:80]}]"
+        try:
+            text = payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return "[gen_err: malformed completion payload]"
+        text = (text or "").strip()
+        return text[-300:].strip() if text else "[empty]"
+    return f"[gen_err: {last[:100]}]"
+
+
+def run_served_pass(url: str, prompts: list[dict], pass_label: str,
+                    gen_timeout: int = 600) -> tuple[list[str], dict]:
+    """One arm of the comparison, generated through the served endpoint. The
+    caller has already put the right adapter (zero twin, or serving) on the
+    server; this function only generates."""
+    start = time.time()
+    responses = []
+    for i, p in enumerate(prompts):
+        prompt_text = p["prompt"] if isinstance(p, dict) else p
+        print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
+        responses.append(generate_served(url, prompt_text, timeout_sec=gen_timeout))
+    return (responses, {"pass": pass_label, "elapsed_sec": time.time() - start,
+                        "count": len(responses), "server_url": url})
+
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Nightly fidelity eval harness + SOTA gate",
@@ -634,6 +854,24 @@ def main():
              "prompt (58 cold loads of the 31B model per night, ~3h wall). "
              "Fallback only — the default loads the model once per pass "
              "in-process via the mlx_lm Python API.",
+    )
+    ap.add_argument(
+        "--gen",
+        choices=("auto", "served", "inprocess"),
+        default=os.environ.get("HU_FIDELITY_GEN", "auto"),
+        help="Where generation runs. served: through the production mlx-server "
+             "(HU_MLX_BASE_URL, else :8741) with the PRE arm on a zero-delta "
+             "adapter swapped in via /v1/adapters/swap. inprocess: mlx_lm.load "
+             "in this process — REFUSED while a server is up (never two "
+             "loaders; 2026-09-03 incident). auto (default, env "
+             "HU_FIDELITY_GEN): served when a server answers, else inprocess.",
+    )
+    ap.add_argument(
+        "--zero-adapter-root",
+        type=Path,
+        default=DEFAULT_ZERO_ADAPTER_ROOT,
+        help="Where the zero-delta twin of the serving adapter is cached for "
+             f"the served PRE arm (default: {DEFAULT_ZERO_ADAPTER_ROOT})",
     )
     ap.add_argument(
         "--held-out-fixture",
@@ -727,50 +965,127 @@ def main():
     if not args.adapter_path.exists():
         return emit_skip(f"Adapter not found: {args.adapter_path}", args.output_json)
 
-    # PRE pass (base model only).
-    # adapter_path=None is passed EXPLICITLY rather than left to the default:
-    # this is the contract that makes the run a comparison at all, and it should
-    # be legible at the call site. Nothing downstream can re-introduce an
-    # adapter — load_model() forwards this straight to mlx_lm.load() and never
-    # consults config.json, so the config-inheritance path that bit mlx-server.py
-    # (a gemma adapter silently applied to GLM) has no equivalent here.
-    print(f"\n=== PRE PASS (base model) ===", flush=True)
-    try:
-        pre_responses, pre_stats = run_eval_pass(
-            args.model_id, prompts, adapter_path=None, gen_timeout=args.gen_timeout,
-            use_subprocess=args.subprocess_gen,
+    # ── Where does generation run? ──────────────────────────────────────────
+    # A server on the production port means the 56 GB base is ALREADY wired in
+    # memory; loading it again here is the 2026-09-03 outage. HU_MLX_BASE_URL
+    # pins the served path outright; otherwise auto probes the port.
+    server_url = production_server_url()
+    base_url_pinned = bool(os.environ.get("HU_MLX_BASE_URL", "").strip())
+    server_up = served_endpoint_available(server_url)
+    mode = args.gen
+    if mode == "auto":
+        mode = "served" if (server_up or base_url_pinned) else "inprocess"
+    if mode == "inprocess" and args.subprocess_gen:
+        mode = "subprocess"
+    if mode != "served" and (server_up or base_url_pinned):
+        return emit_deferred(
+            f"refusing to start a second model loader ({mode}) beside the live "
+            f"mlx-server at {server_url} — never two loaders (2026-09-03: the "
+            f"in-process load took production down); run with --gen served, or "
+            f"stop the server first",
+            args.output_json, generation={"mode": mode, "server_url": server_url},
         )
-    except Exception as e:
-        verdict = {
-            "timestamp": datetime.now().isoformat(),
-            "verdict": "DEFERRED",
-            "reason": f"PRE pass failed: {str(e)[:200]}",
-            "exit_code": 2,
-        }
-        print(f"[DEFERRED] {verdict['reason']}")
-        if args.output_json:
-            args.output_json.write_text(json.dumps(verdict, indent=2))
-        return 2
+    if mode == "served" and not server_up:
+        return emit_deferred(
+            f"served generation requested but no mlx-server answers "
+            f"/v1/adapters/current at {server_url}",
+            args.output_json, generation={"mode": mode, "server_url": server_url},
+        )
+    gen_info = {"mode": mode, "server_url": server_url if mode == "served" else None,
+                "pre_arm_adapter": None, "adapter_restored": None}
+    print(f"[INFO] generation mode: {mode}"
+          + (f" via {server_url}" if mode == "served" else ""), flush=True)
 
-    # POST pass (base + adapter)
-    print(f"\n=== POST PASS (base + adapter) ===", flush=True)
-    try:
-        post_responses, post_stats = run_eval_pass(
-            args.model_id, prompts, adapter_path=str(args.adapter_path),
-            gen_timeout=args.gen_timeout,
-            use_subprocess=args.subprocess_gen,
-        )
-    except Exception as e:
-        verdict = {
-            "timestamp": datetime.now().isoformat(),
-            "verdict": "DEFERRED",
-            "reason": f"POST pass failed: {str(e)[:200]}",
-            "exit_code": 2,
-        }
-        print(f"[DEFERRED] {verdict['reason']}")
-        if args.output_json:
-            args.output_json.write_text(json.dumps(verdict, indent=2))
-        return 2
+    if mode == "served":
+        # The server must be serving the adapter under test: "restore" below
+        # puts args.adapter_path back, so if something else is active we would
+        # be measuring one adapter and installing another. DEFER before any swap.
+        current = served_current_adapter(server_url)
+        if not _same_path(current, args.adapter_path):
+            return emit_deferred(
+                f"served mlx-server at {server_url} reports adapter "
+                f"{current!r}, not the adapter under test {args.adapter_path} — "
+                f"not swapping",
+                args.output_json, generation=gen_info,
+            )
+        try:
+            zero_dir = ensure_zero_adapter(args.adapter_path, args.zero_adapter_root)
+        except (OSError, ValueError, KeyError, struct.error) as e:
+            return emit_deferred(f"could not build zero adapter for PRE arm: {e}",
+                                 args.output_json, generation=gen_info)
+        gen_info["pre_arm_adapter"] = str(zero_dir)
+
+        print(f"\n=== PRE PASS (served; zero-delta adapter = base) ===", flush=True)
+        ok, detail = served_swap_adapter(server_url, zero_dir)
+        if not ok or not _same_path(served_current_adapter(server_url), zero_dir):
+            # The server reverts itself on a failed swap; confirm, then defer.
+            gen_info["adapter_restored"] = _same_path(
+                served_current_adapter(server_url), args.adapter_path)
+            if not gen_info["adapter_restored"]:
+                print("[ERROR] FIDELITY_RESTORE_FAILED serving adapter is not active "
+                      "after a failed PRE swap", flush=True)
+            return emit_deferred(f"PRE swap to zero adapter did not take: {detail}",
+                                 args.output_json, generation=gen_info)
+        pre_error = None
+        try:
+            pre_responses, pre_stats = run_served_pass(
+                server_url, prompts, "PRE (base)", gen_timeout=args.gen_timeout)
+        except Exception as e:  # noqa: BLE001 — restore first, report second
+            pre_error = e
+        finally:
+            gen_info["adapter_restored"] = served_restore_adapter(
+                server_url, args.adapter_path)
+        if not gen_info["adapter_restored"]:
+            msg = (f"FIDELITY_RESTORE_FAILED serving adapter {args.adapter_path} could "
+                   f"not be restored on {server_url} after the PRE arm — production "
+                   f"may be running on the zero adapter {zero_dir}; restore by hand: "
+                   f"POST {server_url}/v1/adapters/swap "
+                   f'{{"adapter_path": "{args.adapter_path}"}}')
+            print(f"[ERROR] {msg}", flush=True)
+            print(f"[ERROR] {msg}", file=sys.stderr, flush=True)
+            return emit_deferred(msg, args.output_json, generation=gen_info)
+        if pre_error is not None:
+            return emit_deferred(f"PRE pass failed: {str(pre_error)[:200]}",
+                                 args.output_json, generation=gen_info)
+        print(f"[INFO] serving adapter restored and verified: {args.adapter_path}",
+              flush=True)
+
+        print(f"\n=== POST PASS (served; serving adapter) ===", flush=True)
+        try:
+            post_responses, post_stats = run_served_pass(
+                server_url, prompts, "POST (adapter)", gen_timeout=args.gen_timeout)
+        except Exception as e:  # noqa: BLE001
+            return emit_deferred(f"POST pass failed: {str(e)[:200]}",
+                                 args.output_json, generation=gen_info)
+    else:
+        # PRE pass (base model only).
+        # adapter_path=None is passed EXPLICITLY rather than left to the default:
+        # this is the contract that makes the run a comparison at all, and it should
+        # be legible at the call site. Nothing downstream can re-introduce an
+        # adapter — load_model() forwards this straight to mlx_lm.load() and never
+        # consults config.json, so the config-inheritance path that bit mlx-server.py
+        # (a gemma adapter silently applied to GLM) has no equivalent here.
+        print(f"\n=== PRE PASS (base model) ===", flush=True)
+        try:
+            pre_responses, pre_stats = run_eval_pass(
+                args.model_id, prompts, adapter_path=None, gen_timeout=args.gen_timeout,
+                use_subprocess=args.subprocess_gen,
+            )
+        except Exception as e:
+            return emit_deferred(f"PRE pass failed: {str(e)[:200]}",
+                                 args.output_json, generation=gen_info)
+
+        # POST pass (base + adapter)
+        print(f"\n=== POST PASS (base + adapter) ===", flush=True)
+        try:
+            post_responses, post_stats = run_eval_pass(
+                args.model_id, prompts, adapter_path=str(args.adapter_path),
+                gen_timeout=args.gen_timeout,
+                use_subprocess=args.subprocess_gen,
+            )
+        except Exception as e:
+            return emit_deferred(f"POST pass failed: {str(e)[:200]}",
+                                 args.output_json, generation=gen_info)
 
     # Drop pairs where either response is an error sentinel — sentinels like
     # '[timeout]' score 1.0 on the shape classifier and poisoned 10 nights of
@@ -826,8 +1141,14 @@ def main():
             f"no comparison was measured. Most likely the adapter did not bind "
             f"to this base (mlx_lm loads adapter weights with strict=False and "
             f"fails silently). base={args.model_id} "
-            f"adapter={args.adapter_path} adapter_declared_base={declared_base}",
+            f"adapter={args.adapter_path} adapter_declared_base={declared_base}"
+            + (f". SERVED MODE: the mlx-server at {server_url} applies adapters "
+               f"with model.load_weights(strict=False) and never injects LoRA "
+               f"layers, so lora_* tensors are dropped silently and BOTH arms "
+               f"are the base model — the serving adapter is not active"
+               if mode == "served" else ""),
             args.output_json,
+            generation=gen_info,
             model_id=args.model_id,
             adapter_path=str(args.adapter_path),
             adapter_declared_base=declared_base,
@@ -931,6 +1252,7 @@ def main():
             "speaker_model_path": str(args.speaker_model) if scorer_mode == "blended" else None,
         },
         "gen_timeout_sec": args.gen_timeout,
+        "generation": gen_info,
         "model_id": args.model_id,
         "adapter_path": str(args.adapter_path),
         # Positive evidence that the two passes were actually different runs.

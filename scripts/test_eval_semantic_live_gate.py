@@ -299,7 +299,7 @@ def test_build_context_rows_carries_no_reply_text():
     live_results = {0: {"ei": 3, "reality": 4, "anti_ai": 1.0, "recall_bytes": 88}}
     rows = G.build_context_rows(shadow_results, live_results, ids=[0])
     assert rows == [{
-        "id": 0, "recall_bytes": 88,
+        "id": 0, "recall_bytes": 88, "recall_dropped": 0,
         "shadow": {"ei": 4, "reality": 5, "anti_ai": 1.0},
         "live": {"ei": 3, "reality": 4, "anti_ai": 1.0},
     }]
@@ -397,15 +397,40 @@ def test_parse_semantic_results_multiline_content_with_colons():
 
 
 def test_build_memories_block_empty_is_none():
-    assert G.build_memories_block([]) is None
-    assert G.build_memories_block(None) is None
+    assert G.build_memories_block([]) == (None, 0)
+    assert G.build_memories_block(None) == (None, 0)
 
 
 def test_build_memories_block_formats_bullets():
-    block = G.build_memories_block(["a", "b"])
+    block, dropped = G.build_memories_block(["a", "b"])
+    assert dropped == 0
     assert block.startswith("Relevant memories:\n")
     assert "- a" in block and "- b" in block
     assert block.endswith("\n\n")
+
+
+def test_build_memories_block_caps_per_hit_at_word_boundary(monkeypatch):
+    monkeypatch.delenv("HU_SEMANTIC_RECALL_MAX_BYTES", raising=False)
+    long_hit = " ".join(["word"] * 200)  # ~1000 chars
+    block, dropped = G.build_memories_block([long_hit])
+    assert dropped == 0
+    line = block.split("\n")[1]
+    assert line.startswith("- ")
+    body = line[2:]
+    assert len(body.encode("utf-8")) <= G.RECALL_HIT_MAX_BYTES
+    assert not body.endswith(" ") and body.endswith("word")
+
+
+def test_build_memories_block_respects_total_byte_budget(monkeypatch):
+    monkeypatch.setenv("HU_SEMANTIC_RECALL_MAX_BYTES", "500")
+    hits = [("x" * 7 + " ") * 40] * 5  # 320 chars each, 5 hits
+    block, _ = G.build_memories_block(hits)
+    bullets = [l for l in block.split("\n") if l.startswith("- ")]
+    total = sum(len(b[2:].encode("utf-8")) for b in bullets)
+    assert total <= 500
+    assert 1 <= len(bullets) < 5
+    # Deterministic: same input, same bytes.
+    assert G.build_memories_block(hits)[0] == block
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +526,7 @@ def test_main_happy_path_writes_promote_or_hold_with_context_rows(monkeypatch, f
     assert doc["recall_coverage"] == 1.0
     assert len(doc["context_rows"]) == doc["n_paired"]
     row = doc["context_rows"][0]
-    assert set(row) == {"id", "recall_bytes", "shadow", "live"}
+    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow", "live"}
     dumped = json.dumps(doc)
     assert "real inbound message" not in dumped  # no context/reply text leaked
 
@@ -652,3 +677,80 @@ def test_main_never_writes_partial_output_on_refuse(monkeypatch, fake_server, co
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# Content filter — mirrors hu_semantic_recall_hit_is_excluded (2026-09-02
+# finding: episodic scaffold + AI-identity confrontation hits drive the
+# adapter into think-only output that reaches the daemon as "").
+# ---------------------------------------------------------------------------
+def test_hit_is_excluded_for_scaffold_and_confrontation_word_boundary():
+    assert G.hit_is_excluded("Task: hi\nActions: agent_turn\nOutcome: ok\nScore: 1.0000")
+    assert G.hit_is_excluded("are you texting or your ai?? Can you just call?")
+    assert G.hit_is_excluded("Is this Seth")
+    assert G.hit_is_excluded("questioning if the recipient is an AI")
+    assert G.hit_is_excluded("lol you're an AI aren't you")
+    assert G.hit_is_excluded("who is this?")
+    assert G.hit_is_excluded("who am I texting right now")
+    assert G.hit_is_excluded("wait is that really you")
+    assert not G.hit_is_excluded("it was actually you who left the note")
+    # Word boundary: "ai" inside said / wait / maid must not fire.
+    assert not G.hit_is_excluded("he said to wait, the maid is coming")
+    # Bare "AI" as a topic, or "Task" as a word, is a memory not a confrontation.
+    assert not G.hit_is_excluded("Mel started an AI research job in Tampa")
+    assert not G.hit_is_excluded("Task force meeting moved to friday")
+    assert not G.hit_is_excluded("")
+
+
+def test_build_memories_block_drops_excluded_hits_and_reports_count():
+    snippets = [
+        "Task: x\nActions: agent_turn\nOutcome: ok\nScore: 1.0000",
+        "Mel has been applying for jobs in Tampa",
+        "Is this Seth",
+        "dinner at the waterfront place friday",
+    ]
+    block, dropped = G.build_memories_block(snippets)
+    assert dropped == 2
+    assert "Task:" not in block and "Is this Seth" not in block
+    assert "- Mel has been applying" in block
+    assert "- dinner at the waterfront" in block
+    # All excluded -> no block at all, and the count says why.
+    block, dropped = G.build_memories_block(["Is this Seth", "are you a bot"])
+    assert block is None and dropped == 2
+    block, dropped = G.build_memories_block([])
+    assert block is None and dropped == 0
+
+
+def test_cue_list_is_byte_identical_to_the_c_source():
+    """The C filter and this mirror must never drift: parse AI_IDENTITY_CUES
+    out of src/memory/semantic_recall.c and compare as ordered lists."""
+    import re as _re
+    src = (Path(__file__).resolve().parent.parent / "src" / "memory" / "semantic_recall.c").read_text()
+    m = _re.search(r"AI_IDENTITY_CUES\[\] = \{(.*?)\};", src, _re.DOTALL)
+    assert m, "AI_IDENTITY_CUES array not found in semantic_recall.c"
+    c_cues = _re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+    assert c_cues == G.AI_IDENTITY_CUES
+
+
+def test_semantic_search_tolerates_invalid_utf8_from_the_cli(tmp_path):
+    """`human memory search --semantic` cuts each hit at 2000 bytes with %.*s,
+    which can split a multi-byte UTF-8 sequence. The 2026-09-03 gate rerun
+    died at LIVE 11/40 with UnicodeDecodeError inside subprocess.run; a
+    mangled byte must degrade to U+FFFD, never kill a 40-context run."""
+    fake = tmp_path / "human"
+    fake.write_bytes(b"#!/bin/sh\nprintf '  [1] k1 (0.900): caf\\xc3 cut here\\n  [2] k2 (0.800): ok\\n'\n")
+    fake.chmod(0o755)
+    out = G.semantic_search(str(fake), "/dev/null", "http://127.0.0.1:1", "q", 5)
+    assert out is not None and len(out) == 2
+    assert out[1] == "ok"
+    assert "caf" in out[0]
+
+
+def test_context_rows_carry_recall_dropped():
+    """The record must show how many hits the content filter removed per
+    context, not only the surviving bytes — otherwise a 0-empties verdict
+    cannot be attributed to the filter."""
+    shadow = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0}}
+    live = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0, "recall_bytes": 120, "recall_dropped": 2}}
+    rows = G.build_context_rows(shadow, live, [0])
+    assert rows[0]["recall_dropped"] == 2
