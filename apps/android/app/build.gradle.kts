@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "ai.human.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.human.app"
