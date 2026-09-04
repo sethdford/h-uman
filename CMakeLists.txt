@@ -602,6 +602,9 @@ set(HU_CORE_SOURCES
     # `<|channel>thought` markers without buffering the full response.
     # See docs/plans/2026-05-26-m3-b4-mlx-local-sse/tasks.md::T4.
     src/util/harmony_filter.c
+    # 2026-09-04: one shared locator for JSON inside LLM replies (think
+    # blocks, code fences, prose) — replaces per-caller re-derivations.
+    src/util/llm_json.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
@@ -3958,6 +3961,7 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_schema.c)
 list(APPEND HU_TEST_SOURCES tests/test_typedstream.c)
 # M3 Bridge B Phase B4 T4: streaming-safe harmony filter tests.
 list(APPEND HU_TEST_SOURCES tests/test_harmony_filter.c)
+list(APPEND HU_TEST_SOURCES tests/test_llm_json.c)
 # Phase 5: per-balloon payload decoder tests. Pinned privacy contracts
 # (no money / no coordinates).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)
