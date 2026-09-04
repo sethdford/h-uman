@@ -18,6 +18,15 @@ PLIST="$T/service-loop.plist"; export HU_SERVICE_PLIST="$PLIST"
 printf '<dict><key>HU_SEMANTIC_RECALL</key>\n<string>live</string></dict>\n' > "$PLIST"
 CHK="$HERE/check-learning-loops.sh"
 
+# 0. adapters: a quarantined `.rejected-*` dir (nightly-retrain.sh's own convention
+#    for a fabricated adapter) must never be picked as the "newest adapter", even
+#    when its mtime is newer than the real one.
+mkdir -p "$T/.human/training-data/adapters/fake-noop-glm.rejected-1788515667"
+head -c 349 /dev/zero > "$T/.human/training-data/adapters/fake-noop-glm.rejected-1788515667/adapters.safetensors"
+touch -t 203001010000 "$T/.human/training-data/adapters/fake-noop-glm.rejected-1788515667"
+out=$(bash "$CHK" 2>&1)
+check "quarantined .rejected adapter dir is ignored" "[[ \"$out\" == *'OK   adapters: fake '* ]] && [[ \"$out\" != *'rejected'* ]]"
+
 # 1. no record at all while LIVE -> DEAD
 out=$(bash "$CHK" 2>&1); rc=$?
 check "no record while live is DEAD" "[[ \"$out\" == *'DEAD semantic-gate: no semantic-gate-'* ]] && [ $rc -eq 1 ]"
