@@ -34,6 +34,12 @@ typedef struct hu_retrieval_options {
     const char *session_id;
     size_t session_id_len;
     bool require_contact_namespace;
+    /* Contract C2 (2026-09): EverMemOS-shape reconstructive hybrid retrieval —
+     * scene-select (group by session_id + day) -> neighbour expansion -> rerank
+     * -> time-bounded filter -> sufficiency check. Default false: hu_hybrid_retrieve
+     * behaves exactly as before for every existing caller. Only `human memory
+     * search --hybrid` sets this so far; no daemon behavior change. */
+    bool reconstructive;
 } hu_retrieval_options_t;
 
 typedef struct hu_retrieval_result {
@@ -95,6 +101,12 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
 /* Temporal decay: apply to base_score; entries without timestamp unchanged */
 double hu_temporal_decay_score(double base_score, double decay_factor, const char *timestamp,
                                size_t timestamp_len);
+
+/* Parse an ISO-8601 timestamp ("YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS") into
+ * hours-since-epoch (UTC). Returns -1.0 when the timestamp is missing or
+ * unparseable. Exposed (Contract C2) so reconstructive retrieval's temporal
+ * filter can compare two entries' recency without re-deriving the parser. */
+double hu_retrieval_parse_timestamp_hours(const char *timestamp, size_t timestamp_len);
 
 /* Namespace helpers (Wave B contact/session isolation). */
 hu_error_t hu_retrieval_check_namespace(const hu_retrieval_options_t *opts);

@@ -38,6 +38,13 @@ typedef hu_error_t (*hu_child_setup_fn)(void *ctx);
  * @param max_output_bytes Max bytes to capture per stream (default 1MB)
  * @param out Result; caller must free with hu_run_result_free
  */
+/* Absolute path of the running executable (realpath'd on macOS). Returns
+ * false when it cannot be resolved or `cap` is too small; `buf` is then
+ * empty. Use this — never a bare "human" on PATH — when a daemon re-execs
+ * itself for a subcommand: on 2026-09-02 a stale ~/.local/bin/human from
+ * May silently ran the LoRA pair-count probe for weeks. */
+bool hu_process_self_exe_path(char *buf, size_t cap);
+
 hu_error_t hu_process_run(hu_allocator_t *alloc, const char *const *argv, const char *cwd,
                           size_t max_output_bytes, hu_run_result_t *out);
 
@@ -78,7 +85,8 @@ bool hu_exe_on_path(const char *name);
 /** True if Ollama HTTP API responds on 127.0.0.1:11434 (best-effort; no network in HU_IS_TEST). */
 bool hu_ollama_api_tags_reachable(void);
 
-/** True if `python3 -c "import mlx_lm"` succeeds (macOS/Linux POSIX builds; false in HU_IS_TEST). */
+/** True if `python3 -c "import mlx_lm"` succeeds (macOS/Linux POSIX builds; false in HU_IS_TEST).
+ */
 bool hu_mlx_lm_module_available(void);
 
 #endif /* HU_PROCESS_UTIL_H */

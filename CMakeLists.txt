@@ -422,6 +422,8 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 # T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
 # advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
+# Pure replay guards: always built so their (unconditional) test links on Linux.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
@@ -515,6 +517,21 @@ if(HU_ENABLE_MEMORY_LRU_ENGINE)
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/memory_lru.c)
 endif()
 list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/sqlite.c)
+option(HU_ENABLE_SQLITE_VEC "Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off)" ON)
+if(HU_ENABLE_SQLITE AND HU_ENABLE_SQLITE_VEC)
+    # Vendored sqlite-vec (third_party, pure C, exact KNN) + the store over it.
+    # Third-party code is compiled warning-silent; it is not ours to lint.
+    # SQLITE_CORE = static linking: the extension calls the real sqlite3 API,
+    # and our store declares sqlite3_vec_init itself (no sqlite3ext.h shims).
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
+         third_party/sqlite-vec/sqlite-vec.c)
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w;-D_GNU_SOURCE;-include;sys/types.h"
+                                COMPILE_DEFINITIONS "SQLITE_CORE=1")
+    add_compile_definitions(HU_ENABLE_SQLITE_VEC=1)
+elseif(HU_ENABLE_SQLITE)
+    # Store compiled as the NOT_SUPPORTED stub so semantic_recall attach refuses.
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c)
+endif()
 # postgres, redis, api: always built (mock in HU_IS_TEST; real when HU_ENABLE_*)
 list(APPEND MEMORY_ENGINE_SOURCES
     src/memory/engines/postgres.c
@@ -588,6 +605,7 @@ set(HU_CORE_SOURCES
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
+    src/core/log.c
     src/sse/sse_client.c
     src/websocket/websocket.c
     src/security/net_security.c
@@ -612,6 +630,15 @@ set(HU_CORE_SOURCES
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
+    src/doctor/check_ops_common.c
+    src/doctor/check_eval_freshness.c
+    src/doctor/check_serving_stability.c
+    src/doctor/check_log_hygiene.c
+    src/doctor/check_imessage_cursor.c
+    src/doctor/check_blind_ab_gate.c
+    # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
+    # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
+    src/memory/repos/chatdb_cursor_repo_sqlite.c
     src/doctor/check_provider.c
     src/doctor/check_local_voice.c
     src/doctor/check_outbound_stats.c
@@ -986,6 +1013,9 @@ set(HU_CORE_SOURCES
     # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
+    src/memory/graph_ingest.c
+    src/memory/agent_facts.c
+    src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
@@ -1245,8 +1275,11 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
+    src/daemon/send_budget.c
+    src/daemon/reactive_gates.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_identity_graph.c
     src/daemon/daemon_config_reload.c
@@ -1276,6 +1309,7 @@ set(HU_CORE_SOURCES
     src/memory/vector/chunker.c
     src/memory/vector/store_mem.c
     src/memory/vector/embedder_local.c
+    src/memory/vector/embedder_http.c
     src/memory/vector/embedder_gemini_adapter.c
     src/memory/vector/embeddings.c
     src/memory/vector/embeddings_gemini.c
@@ -1469,6 +1503,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/style_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -1628,6 +1663,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/memories_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
+        src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -3295,6 +3331,7 @@ set(HU_TEST_SOURCES
     tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
+    tests/test_style_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3335,6 +3372,7 @@ set(HU_TEST_SOURCES
     tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
+    tests/test_log_format.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
     tests/test_init_proposer_compose.c
@@ -3413,11 +3451,14 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
+    tests/test_send_budget.c
+    tests/test_reactive_gates.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
@@ -3494,6 +3535,9 @@ set(HU_TEST_SOURCES
     tests/test_imessage_private_protocol.c
     tests/test_imessage_private_client.c
     tests/test_imessage_chatdb_fixture.c
+    tests/test_imessage_replay_guard.c
+    tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
@@ -3534,6 +3578,11 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_eval_freshness.c
+    tests/test_check_serving_stability.c
+    tests/test_check_log_hygiene.c
+    tests/test_check_imessage_cursor.c
+    tests/test_check_blind_ab_gate.c
     tests/test_outbound_sanitize.c
     tests/test_daemon_follow_up_watcher.c
     tests/test_cli_ctl.c
@@ -3598,6 +3647,14 @@ tests/test_imessage_action_telemetry.c
     tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
+    tests/test_graph_ingest.c
+    tests/test_agent_facts.c
+    tests/test_cli_memory_import.c
+    tests/test_store_sqlite_vec.c
+    tests/test_semantic_index.c
+    tests/test_hybrid_reconstructive.c
+    tests/test_semantic_recall.c
+    tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
@@ -3961,6 +4018,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)

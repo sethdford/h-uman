@@ -1,8 +1,10 @@
 /* Tests for the style-governor outbound stage.
  *
  * Targets come from the MEASURED style card (scripts/persona_style_card.py,
- * 2026-07-12, n=1488 typed messages): 79% of the persona's real texts end
- * with no terminal punctuation, only 9% end with '?'. The model baseline is
+ * 2026-07-12, n=1488 typed messages; superseded by scripts/measure_style_card.py
+ * and ~/.human/personas/<persona>.style-card.json, the single source of style
+ * numbers): ~4 in 5 real texts end with no terminal punctuation, ~1 in 10 with
+ * '?'. The model baseline is
  * 10% / 31% — terminal punctuation and the reciprocal trailing question are
  * the two strongest "this is AI" tells. */
 #include "human/agent/outbound_pipeline.h"

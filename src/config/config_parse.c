@@ -1050,6 +1050,15 @@ static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
         hu_json_get_number(obj, "provider_backoff_ms", cfg->reliability.provider_backoff_ms);
     if (pbm >= 0)
         cfg->reliability.provider_backoff_ms = (uint64_t)pbm;
+    /* Circuit breaker: 0/absent = defaults, negative = disabled (see config.h). */
+    double cft = hu_json_get_number(obj, "circuit_failure_threshold",
+                                    cfg->reliability.circuit_failure_threshold);
+    if (cft >= -1 && cft <= 100)
+        cfg->reliability.circuit_failure_threshold = (int)cft;
+    double crs =
+        hu_json_get_number(obj, "circuit_recovery_secs", cfg->reliability.circuit_recovery_secs);
+    if (crs >= -1 && crs <= 86400)
+        cfg->reliability.circuit_recovery_secs = (int)crs;
     double cibs = hu_json_get_number(obj, "channel_initial_backoff_secs",
                                      cfg->reliability.channel_initial_backoff_secs);
     if (cibs >= 0)
@@ -1377,6 +1386,29 @@ static hu_error_t parse_feeds(hu_allocator_t *a, hu_config_t *cfg, const hu_json
             a->free(a->ctx, cfg->feeds.gmail_refresh_token,
                     strlen(cfg->feeds.gmail_refresh_token) + 1);
         cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
+    }
+    s = hu_json_get_string(obj, "gmail_quota_project");
+    if (s) {
+        if (cfg->feeds.gmail_quota_project)
+            a->free(a->ctx, cfg->feeds.gmail_quota_project,
+                    strlen(cfg->feeds.gmail_quota_project) + 1);
+        cfg->feeds.gmail_quota_project = hu_strdup(a, s);
+    }
+    /* Nested form — "gmail": {client_id, client_secret, refresh_token,
+     * quota_project}. The live config carries both spellings (2026-09); the
+     * flat keys above win, the nested block only fills what is still unset.
+     * Before this the nested quota_project was silently ignored and every
+     * Gmail poll was a 403. */
+    const hu_json_value_t *gobj = hu_json_object_get(obj, "gmail");
+    if (gobj && gobj->type == HU_JSON_OBJECT) {
+        if (!cfg->feeds.gmail_client_id && (s = hu_json_get_string(gobj, "client_id")))
+            cfg->feeds.gmail_client_id = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_client_secret && (s = hu_json_get_string(gobj, "client_secret")))
+            cfg->feeds.gmail_client_secret = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_refresh_token && (s = hu_json_get_string(gobj, "refresh_token")))
+            cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_quota_project && (s = hu_json_get_string(gobj, "quota_project")))
+            cfg->feeds.gmail_quota_project = hu_strdup(a, s);
     }
     s = hu_json_get_string(obj, "twitter_bearer_token");
     if (s) {
