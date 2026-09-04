@@ -53,6 +53,7 @@ import shlex
 import shutil
 import signal
 import socket
+import sqlite3
 import statistics
 import struct
 import subprocess
@@ -726,6 +727,110 @@ def ensure_zero_adapter(serving_dir, root=DEFAULT_ZERO_ADAPTER_ROOT) -> Path:
     return out_dir
 
 
+# ── Quiet-window guard for the PRE arm ───────────────────────────────────────
+#
+# While the zero adapter is in, every reply the daemon sends is the raw base.
+# So: never swap while a conversation is active, and abort the PRE arm at the
+# next prompt boundary if a message lands after the swap. Exposure is then
+# bounded by one generation. Activity is read from the ARTIFACTS a turn leaves
+# behind — chat.db (iMessage in+out, Apple epoch ns) and the daemon's
+# memory.db messages table (UTC text, lags iMessage) — newest wins.
+
+APPLE_EPOCH_OFFSET = 978307200  # 2001-01-01 UTC, chat.db's date origin
+CHAT_DB_PATH = Path.home() / "Library" / "Messages" / "chat.db"
+MEMORY_DB_PATH = Path.home() / ".human" / "memory.db"
+DEFAULT_ACTIVITY_SOURCES = (CHAT_DB_PATH, MEMORY_DB_PATH)
+DEFAULT_QUIET_SEC = 300
+DEFAULT_QUIET_MAX_WAIT_SEC = 900
+QUIET_POLL_SEC = 30
+
+
+def _sqlite_scalar(path: Path, sql: str):
+    uri = f"file:{path}?mode=ro"
+    con = sqlite3.connect(uri, uri=True, timeout=5)
+    try:
+        return con.execute(sql).fetchone()[0]
+    finally:
+        con.close()
+
+
+def _activity_ts_from_db(path: Path) -> float | None:
+    """Newest message timestamp (epoch seconds) in one db, or None when the
+    table is readable but empty. Raises sqlite3.Error when unreadable."""
+    tables = {r[0] for r in sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+              .execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "message" in tables:  # chat.db
+        raw = _sqlite_scalar(path, "SELECT max(date) FROM message")
+        if raw is None:
+            return None
+        raw = float(raw)
+        if raw > 1e12:  # nanoseconds since 2001 (macOS >= 10.13)
+            raw /= 1e9
+        return raw + APPLE_EPOCH_OFFSET
+    if "messages" in tables:  # ~/.human/memory.db, created_at = datetime('now') UTC
+        raw = _sqlite_scalar(path, "SELECT max(created_at) FROM messages")
+        if not raw:
+            return None
+        from datetime import timezone  # noqa: PLC0415
+        return datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S") \
+            .replace(tzinfo=timezone.utc).timestamp()
+    raise sqlite3.Error(f"{path}: no message table")
+
+
+def conversation_last_activity(sources=None) -> tuple[float | None, list[str]]:
+    """(newest message epoch across readable sources or None, [sources read]).
+    An unreadable source (missing, no FDA, wrong schema) is skipped, never
+    counted; a readable-but-empty one is read with no activity."""
+    newest = None
+    read = []
+    for src in (DEFAULT_ACTIVITY_SOURCES if sources is None else sources):
+        src = Path(src)
+        if not src.exists():
+            continue
+        try:
+            ts = _activity_ts_from_db(src)
+        except (sqlite3.Error, ValueError, OSError):
+            continue
+        read.append(str(src))
+        if ts is not None and (newest is None or ts > newest):
+            newest = ts
+    return newest, read
+
+
+def wait_for_quiet(quiet_sec: float, max_wait_sec: float, probe=None,
+                   now=time.time, sleep=time.sleep,
+                   poll_sec: float = QUIET_POLL_SEC) -> tuple[bool, str]:
+    """Block until no message for quiet_sec, or give up after max_wait_sec.
+    Refuses (False) when no activity source is readable: a quiet window we
+    cannot measure is not a quiet window."""
+    probe = conversation_last_activity if probe is None else probe
+    start = now()
+    while True:
+        ts, sources = probe()
+        if not sources:
+            return False, "no readable activity source (chat.db / memory.db) — cannot prove quiet"
+        idle = float("inf") if ts is None else now() - ts
+        if idle >= quiet_sec:
+            return True, (f"quiet for {'ever' if ts is None else f'{idle:.0f}s'} "
+                          f"(sources: {', '.join(Path(s).name for s in sources)})")
+        elapsed = now() - start
+        if elapsed >= max_wait_sec:
+            return False, (f"conversation active: last message {idle:.0f}s ago, still under "
+                           f"{quiet_sec:.0f}s quiet after waiting {elapsed:.0f}s")
+        nap = max(1.0, min(poll_sec, quiet_sec - idle, max_wait_sec - elapsed))
+        print(f"  [quiet-guard] last message {idle:.0f}s ago; waiting {nap:.0f}s", flush=True)
+        sleep(nap)
+
+
+def activity_since(ts_floor: float, probe=None) -> str | None:
+    """Reason string when a message newer than ts_floor exists, else None."""
+    probe = conversation_last_activity if probe is None else probe
+    ts, sources = probe()
+    if ts is not None and ts >= ts_floor:
+        return f"message activity {time.time() - ts:.0f}s ago (after the swap)"
+    return None
+
+
 def generate_served(url: str, prompt: str, max_tokens: int = 80,
                     timeout_sec: int = 600, retries: int = 3) -> str:
     """One generation through POST /v1/chat/completions on the served model.
@@ -767,18 +872,27 @@ def generate_served(url: str, prompt: str, max_tokens: int = 80,
 
 
 def run_served_pass(url: str, prompts: list[dict], pass_label: str,
-                    gen_timeout: int = 600) -> tuple[list[str], dict]:
+                    gen_timeout: int = 600, abort_if=None) -> tuple[list[str], dict]:
     """One arm of the comparison, generated through the served endpoint. The
     caller has already put the right adapter (zero twin, or serving) on the
-    server; this function only generates."""
+    server; this function only generates. `abort_if()` is consulted before
+    every prompt; a non-empty reason stops the arm (stats["aborted"])."""
     start = time.time()
     responses = []
+    stats = {"pass": pass_label, "server_url": url}
     for i, p in enumerate(prompts):
+        if abort_if is not None:
+            reason = abort_if()
+            if reason:
+                print(f"  [{pass_label}] ABORT before {i+1}/{len(prompts)}: {reason}", flush=True)
+                stats["aborted"] = reason
+                stats["aborted_after"] = i
+                break
         prompt_text = p["prompt"] if isinstance(p, dict) else p
         print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
         responses.append(generate_served(url, prompt_text, timeout_sec=gen_timeout))
-    return (responses, {"pass": pass_label, "elapsed_sec": time.time() - start,
-                        "count": len(responses), "server_url": url})
+    stats.update({"elapsed_sec": time.time() - start, "count": len(responses)})
+    return (responses, stats)
 
 
 
@@ -872,6 +986,26 @@ def main():
         default=DEFAULT_ZERO_ADAPTER_ROOT,
         help="Where the zero-delta twin of the serving adapter is cached for "
              f"the served PRE arm (default: {DEFAULT_ZERO_ADAPTER_ROOT})",
+    )
+    ap.add_argument(
+        "--quiet-sec",
+        type=float,
+        default=DEFAULT_QUIET_SEC,
+        help="Served mode: do not swap the zero adapter in until no message "
+             f"(chat.db / memory.db) for this many seconds (default {DEFAULT_QUIET_SEC})",
+    )
+    ap.add_argument(
+        "--quiet-max-wait-sec",
+        type=float,
+        default=DEFAULT_QUIET_MAX_WAIT_SEC,
+        help="Served mode: give up (DEFERRED) if the conversation is still active "
+             f"after waiting this long (default {DEFAULT_QUIET_MAX_WAIT_SEC})",
+    )
+    ap.add_argument(
+        "--no-quiet-guard",
+        action="store_true",
+        help="Served mode: swap without the quiet-window check and the mid-PRE "
+             "abort (manual runs only — a live reply during PRE comes from base)",
     )
     ap.add_argument(
         "--held-out-fixture",
@@ -1015,7 +1149,22 @@ def main():
                                  args.output_json, generation=gen_info)
         gen_info["pre_arm_adapter"] = str(zero_dir)
 
+        # Quiet window: while the zero adapter is in, a daemon reply is base.
+        if args.no_quiet_guard:
+            gen_info["quiet_guard"] = "disabled (--no-quiet-guard)"
+        else:
+            quiet_ok, quiet_why = wait_for_quiet(args.quiet_sec, args.quiet_max_wait_sec)
+            gen_info["quiet_guard"] = quiet_why
+            print(f"[INFO] quiet guard: {quiet_why}", flush=True)
+            if not quiet_ok:
+                return emit_deferred(
+                    f"not swapping the zero adapter in while the conversation is "
+                    f"active — {quiet_why}",
+                    args.output_json, generation=gen_info,
+                )
+
         print(f"\n=== PRE PASS (served; zero-delta adapter = base) ===", flush=True)
+        swap_ts = time.time()
         ok, detail = served_swap_adapter(server_url, zero_dir)
         if not ok or not _same_path(served_current_adapter(server_url), zero_dir):
             # The server reverts itself on a failed swap; confirm, then defer.
@@ -1027,9 +1176,12 @@ def main():
             return emit_deferred(f"PRE swap to zero adapter did not take: {detail}",
                                  args.output_json, generation=gen_info)
         pre_error = None
+        abort_if = None if args.no_quiet_guard else \
+            (lambda: activity_since(swap_ts - 1.0))  # memory.db has 1 s resolution
         try:
             pre_responses, pre_stats = run_served_pass(
-                server_url, prompts, "PRE (base)", gen_timeout=args.gen_timeout)
+                server_url, prompts, "PRE (base)", gen_timeout=args.gen_timeout,
+                abort_if=abort_if)
         except Exception as e:  # noqa: BLE001 — restore first, report second
             pre_error = e
         finally:
@@ -1047,6 +1199,14 @@ def main():
         if pre_error is not None:
             return emit_deferred(f"PRE pass failed: {str(pre_error)[:200]}",
                                  args.output_json, generation=gen_info)
+        if pre_stats.get("aborted"):
+            gen_info["pre_arm_aborted_after"] = pre_stats["aborted_after"]
+            return emit_deferred(
+                f"conversation became active during the PRE arm — aborted after "
+                f"{pre_stats['aborted_after']} generation(s) and restored the serving "
+                f"adapter ({pre_stats['aborted']}); no comparison measured",
+                args.output_json, generation=gen_info,
+            )
         print(f"[INFO] serving adapter restored and verified: {args.adapter_path}",
               flush=True)
 

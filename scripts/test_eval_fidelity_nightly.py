@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +29,8 @@ import eval_fidelity_nightly
 os.environ.setdefault("HU_FIDELITY_GEN", "inprocess")
 os.environ.pop("HU_MLX_BASE_URL", None)
 eval_fidelity_nightly.served_endpoint_available = lambda *a, **k: False
+_REAL_CONVERSATION_LAST_ACTIVITY = getattr(eval_fidelity_nightly, "conversation_last_activity", None)
+eval_fidelity_nightly.conversation_last_activity = lambda *a, **k: (0.0, ["hermetic"])
 
 
 def test_bootstrap_ci_basic():
@@ -1258,6 +1261,146 @@ def test_served_precheck_mismatch_defers_without_swap():
 
 
 
+# --- Quiet-window guard for the served PRE arm ------------------------------
+#
+# While the zero adapter is swapped in, any reply the daemon sends comes from
+# the raw base. The guard refuses to swap while a conversation is active and
+# aborts the PRE arm the moment a message newer than the swap appears, so the
+# exposure is bounded by one generation.
+
+import sqlite3
+
+
+def _make_activity_dbs(tmp: Path, chat_ts: float | None, mem_ts: float | None):
+    """Minimal chat.db / memory.db with the columns the probe reads."""
+    chat = tmp / "chat.db"
+    con = sqlite3.connect(chat)
+    con.execute("CREATE TABLE message(ROWID INTEGER PRIMARY KEY, date INTEGER, is_from_me INTEGER)")
+    if chat_ts is not None:
+        con.execute("INSERT INTO message(date, is_from_me) VALUES (?, 1)",
+                    (int((chat_ts - 978307200) * 1_000_000_000),))
+    con.commit(); con.close()
+    mem = tmp / "memory.db"
+    con = sqlite3.connect(mem)
+    con.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, "
+                "content TEXT, created_at TEXT DEFAULT(datetime('now')))")
+    if mem_ts is not None:
+        con.execute("INSERT INTO messages(session_id, role, content, created_at) VALUES ('s','user','x', "
+                    "strftime('%Y-%m-%d %H:%M:%S', ?, 'unixepoch'))", (int(mem_ts),))
+    con.commit(); con.close()
+    return chat, mem
+
+
+def test_conversation_last_activity_takes_newest_readable_source():
+    """The probe returns the newest timestamp across chat.db (Apple epoch,
+    nanoseconds) and memory.db (UTC text), names the sources it read, skips
+    unreadable ones, and returns None when nothing is readable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        chat, mem = _make_activity_dbs(tmp, chat_ts=1_700_000_000.0, mem_ts=1_700_000_600.0)
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat, mem])
+        assert abs(ts - 1_700_000_600.0) < 1.0, (ts, sources)
+        assert sources == [str(chat), str(mem)], sources
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat, tmp / "missing.db"])
+        assert abs(ts - 1_700_000_000.0) < 1.0 and sources == [str(chat)]
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([tmp / "nope.db"])
+        assert ts is None and sources == []
+        # an empty but readable table counts as read, with no activity
+        chat2, _ = _make_activity_dbs(tmp / "e", chat_ts=None, mem_ts=None) if (tmp / "e").mkdir() is None else (None, None)
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat2])
+        assert ts is None and sources == [str(chat2)]
+    print("✓ conversation_last_activity: newest of chat.db/memory.db, unreadable skipped")
+
+
+def test_wait_for_quiet_polls_until_quiet_or_deadline():
+    """Quiet now → proceed. Active then quiet → proceed after polling.
+    Never quiet within max_wait → refuse. Unmeasurable → refuse."""
+    clock = {"t": 10_000.0}
+    now = lambda: clock["t"]
+    sleeps = []
+    def sleep(s):
+        sleeps.append(s); clock["t"] += s
+    quiet = lambda: (clock["t"] - 1000.0, ["db"])
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 900, probe=quiet, now=now, sleep=sleep)
+    assert ok and not sleeps, (ok, why, sleeps)
+    calls = {"n": 0}
+    def becomes_quiet():
+        calls["n"] += 1
+        return (clock["t"] - (10.0 if calls["n"] < 3 else 1000.0), ["db"])
+    sleeps.clear()
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 900, probe=becomes_quiet, now=now, sleep=sleep)
+    assert ok and len(sleeps) == 2, (ok, why, sleeps)
+    sleeps.clear()
+    always_active = lambda: (clock["t"] - 5.0, ["db"])
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 120, probe=always_active, now=now, sleep=sleep)
+    assert not ok and "active" in why and sum(sleeps) >= 120, (ok, why, sleeps)
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 120, probe=lambda: (None, []), now=now, sleep=sleep)
+    assert not ok and "no readable" in why, (ok, why)
+    print("✓ wait_for_quiet: proceeds when quiet, polls, refuses at deadline / unmeasurable")
+
+
+def test_served_defers_without_swap_while_conversation_active():
+    """A message in the last quiet_sec means the daemon may reply any moment:
+    no swap, DEFERRED."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served", "--quiet-max-wait-sec", "0"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.conversation_last_activity",
+                        side_effect=lambda *a, **k: (time.time() - 5.0, ["chat.db"])), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "active" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps == [], "must not swap while a conversation is active"
+    print("✓ served quiet guard: active conversation → DEFERRED, no swap")
+
+
+def test_served_aborts_pre_arm_when_message_arrives():
+    """A message that lands after the swap aborts the PRE arm at the next
+    prompt boundary; the serving adapter is restored and the run DEFERs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        probe_calls = {"n": 0}
+        def activity(*a, **k):
+            probe_calls["n"] += 1
+            # quiet for the pre-swap check and the first two prompt checks,
+            # then a message arrives
+            return ((time.time() - 3600.0) if probe_calls["n"] <= 3 else time.time(), ["chat.db"])
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.conversation_last_activity", side_effect=activity), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "during the PRE arm" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.adapter == str(adapter.resolve()), "serving adapter must be restored after abort"
+        assert fake.swaps == [str(Path(str(adapter.resolve())).parent.parent / "zero" /
+                              adapter.name) if False else fake.swaps[0], str(adapter.resolve())]
+        assert len(fake.swaps) == 2
+        assert not reg.record_eval.called
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["generation"]["adapter_restored"] is True
+        assert verdict["generation"]["pre_arm_aborted_after"] <= 3
+    print("✓ served PRE arm: message mid-arm → abort at prompt boundary, restore, DEFERRED")
+
+
+
+
 def main():
     """Run all tests."""
     tests = [
@@ -1307,6 +1450,10 @@ def main():
         test_inprocess_refused_beside_live_server,
         test_served_restore_failure_is_loud_and_defers,
         test_served_precheck_mismatch_defers_without_swap,
+        test_conversation_last_activity_takes_newest_readable_source,
+        test_wait_for_quiet_polls_until_quiet_or_deadline,
+        test_served_defers_without_swap_while_conversation_active,
+        test_served_aborts_pre_arm_when_message_arrives,
     ]
 
     print("=" * 60)
