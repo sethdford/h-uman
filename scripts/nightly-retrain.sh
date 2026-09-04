@@ -272,6 +272,18 @@ stop_serving() {
         log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
         return 1
     fi
+    # Belt and braces (PR #391): the shared guard answers "is it safe to load a
+    # model in-process right now?" — no server answering :8741/health, no trainer
+    # process, wired memory under 70 GB. Refuse rather than become the second loader.
+    if [[ -f "$REPO/scripts/check-no-resident-model.sh" ]]; then
+        bash "$REPO/scripts/check-no-resident-model.sh" >>"$LOG" 2>&1
+        local guard_rc=$?
+        if [[ "$guard_rc" -ne 0 ]]; then
+            log "FATAL: check-no-resident-model.sh refused (rc=$guard_rc: 1=server answering, 2=trainer running, 3=wired over limit) — not training"
+            return 1
+        fi
+        log "check-no-resident-model.sh: clear to train"
+    fi
     # Nothing is serving and we are about to train: whatever stopped it, the
     # trap must bring serving back afterwards.
     serving_stopped=1
