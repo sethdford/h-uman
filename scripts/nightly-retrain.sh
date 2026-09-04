@@ -215,8 +215,67 @@ run_mlxtune_candidate_stage() {
     log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
 }
 
+# ── Stop serving (a function so scripts/test_nightly_retrain_stop_serving.sh
+#    can drive it hermetically with fake launchctl/pgrep/lsof/sleep on PATH) ──
+#
+# Sets serving_stopped=1 once the job is booted out (so the EXIT trap in the
+# main flow puts it back) and returns 0 when :PORT is free. Returns 1 — refuse
+# to train — when the server is still alive after the wait; serving_stopped
+# then reflects only whether WE booted it out, so a server this script never
+# stopped is left alone rather than kickstarted by the trap.
+#
+# 2026-09-02: `launchctl kill SIGTERM` is NOT a stop — KeepAlive={Crashed,
+# SuccessfulExit} relaunched the server within seconds, the preflight then
+# refused (two loaders), and training_loop wrote an empty adapter and exited 0.
+# bootout UNLOADS the job so nothing relaunches it until restore_serving.
+#
+# 2026-09-04: the bootout passed "gui/$(id -u)/$SERVER_LABEL" — the domain
+# prefixed TWICE, since SERVER_LABEL already carries it — so launchctl answered
+# "No such process", the server never stopped, and every nightly run since
+# aa2a1a79b was refused by the still-alive check. The test pins the label.
+stop_serving() {
+    log "stopping mlx-server to free the base weights"
+    local out rc
+    out=$(launchctl bootout "$SERVER_LABEL" 2>&1); rc=$?
+    [[ -n "$out" ]] && log "$out"
+    if [[ "$rc" -eq 0 ]]; then
+        serving_stopped=1
+    else
+        log "WARNING: launchctl bootout $SERVER_LABEL failed (rc=$rc) — job not loaded?"
+    fi
+
+    # Wait for the 56 GB to actually come back — the process closing its socket
+    # does NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that
+    # motivated the barrier in human-serve.sh. 3f12aca97: a 54 GB server can
+    # take well over 120 s to exit, so wait up to HU_RETRAIN_STOP_WAIT_SECS
+    # (default 900) polling every 5 s, and log pid/stat/rss once a minute so a
+    # truly stuck server is distinguishable from a slow exit.
+    local stop_wait_secs="${HU_RETRAIN_STOP_WAIT_SECS:-900}" waited=0
+    while :; do
+        if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
+           ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+        if (( waited >= stop_wait_secs )); then break; fi
+        if (( waited % 60 == 0 )); then
+            log "  waiting for mlx-server to exit (${waited}s): $(ps -o pid=,stat=,rss= -p "$(pgrep -f "mlx-server\.py .*--port ${PORT}" | head -1)" 2>/dev/null | tr -s ' ')"
+        fi
+        sleep 5; waited=$((waited + 5))
+    done
+    if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
+        log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
+        return 1
+    fi
+    # Nothing is serving and we are about to train: whatever stopped it, the
+    # trap must bring serving back afterwards.
+    serving_stopped=1
+    sleep 5
+    local free_gb
+    free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
+    log "serving stopped; ${free_gb} GB free"
+    return 0
+}
+
 # Testability hook: `HU_RETRAIN_STAGE_TEST=1 bash -c 'source scripts/nightly-retrain.sh; run_mlxtune_candidate_stage'`
-# (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()
+# (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()/stop_serving()
 # above and stops here — the window check, mlx-server bootout, and real
 # training below never execute. `return` works when sourced; `|| exit 0`
 # covers the (unsupported, but harmless) case of executing this file
@@ -281,40 +340,8 @@ restore_serving() {
 }
 trap restore_serving EXIT INT TERM
 
-log "stopping mlx-server to free the base weights"
-# 2026-09-02: `launchctl kill SIGTERM` is NOT a stop — KeepAlive={Crashed,
-# SuccessfulExit} relaunched the server within seconds, the preflight then
-# refused (two loaders), and training_loop wrote an empty adapter and exited 0.
-# bootout UNLOADS the job so nothing relaunches it until restore_serving.
-launchctl bootout "gui/$(id -u)/$SERVER_LABEL" 2>&1 | tee -a "$LOG" || true
-serving_stopped=1
-
-# Wait for the 56 GB to actually come back — the process closing its socket does
-# NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that motivated
-# the barrier in human-serve.sh.
-# 2026-09-04: a 120 s cap was too short — the 54 GB server took longer than
-# that to exit after bootout, the script declared it "still alive", refused,
-# and restored serving without training. Wait up to STOP_WAIT_SECS (default
-# 900) polling every 5 s, and log the process state once a minute so the
-# next reader can see whether it is exiting (E) or truly stuck.
-STOP_WAIT_SECS="${HU_RETRAIN_STOP_WAIT_SECS:-900}"
-waited=0
-while :; do
-    if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
-       ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
-    if (( waited >= STOP_WAIT_SECS )); then break; fi
-    if (( waited % 60 == 0 )); then
-        log "  waiting for mlx-server to exit (${waited}s): $(ps -o pid=,stat=,rss= -p "$(pgrep -f "mlx-server\.py .*--port ${PORT}" | head -1)" 2>/dev/null | tr -s ' ')"
-    fi
-    sleep 5; waited=$((waited + 5))
-done
-if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
-    log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
-    exit 1
-fi
-sleep 5
-free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
-log "serving stopped; ${free_gb} GB free"
+# The EXIT trap above only restores what stop_serving reports as stopped.
+stop_serving || exit 1
 
 # MLX training must use the PINNED 3.12 venv, the same interpreter human-serve.sh
 # picks for the server. Bare `python3` is /opt/homebrew/bin/python3 = 3.14, which
