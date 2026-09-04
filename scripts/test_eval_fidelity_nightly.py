@@ -1482,3 +1482,23 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_registry_record_carries_n_reason_adapter_base_and_provenance():
+    """The registry row is what a promotion reader sees. 14 v4-repair rows
+    (2026-07-12..25) carried {score 1.0, verdict SKIP} and nothing else; a
+    reader could not tell a saturated classifier from a perfect eval. Every
+    row must now say how many pairs it measured, why it concluded what it
+    did, which adapter and base, and how generation was produced."""
+    rc, record_eval = _run_main_with_argv(["--adapter-path", "__ADAPTER__"])
+    assert rc == eval_fidelity_nightly.EXIT_SKIP == 3, rc
+    kwargs = record_eval.call_args.kwargs
+    assert isinstance(kwargs["n"], int) and kwargs["n"] >= 1, kwargs
+    assert isinstance(kwargs["reason"], str) and kwargs["reason"].strip(), kwargs
+    assert kwargs["adapter_path"].endswith("seth-lora-v9-test"), kwargs
+    assert isinstance(kwargs["base"], str) and kwargs["base"], kwargs
+    prov = kwargs["provenance"]
+    assert isinstance(prov, dict)
+    for key in ("generation", "differentiation", "scorer", "n_valid_pairs"):
+        assert key in prov, key
+    print("✓ registry row carries n, reason, adapter_path, base, provenance")
