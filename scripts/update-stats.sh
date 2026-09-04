@@ -1,26 +1,47 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
 # Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human-skills/STUBS.md, CLAUDE.md
-# Usage: ./scripts/update-stats.sh [--apply] [--binary-size <KB>]
+# Usage: ./scripts/update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
+#   --test-count <N>: trust this count (from a suite the caller just ran)
+#       instead of executing a local test binary. The pre-push hook passes
+#       the N it parsed from its own Results: line; without it the script
+#       re-ran whichever build*/human_tests sorted first — on 2026-09-03 a
+#       two-day-old build/ binary — and stamped a count the hook never
+#       verified (13,995 written, 14,125 measured). A count that was not
+#       measured in this run is exactly what
+#       .claude/rules/no-number-without-a-measurement.md forbids.
 #   --binary-size <KB>: trust this size instead of measuring a local binary.
+#   --keep-binary-size: measure nothing; leave the committed KB untouched.
+#       For callers that cannot vouch for any release binary's age (the hook
+#       builds Debug only; a 5-week-old build-release/ stamped ~2952 KB).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+USAGE="usage: update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]"
 APPLY=false
+TEST_COUNT_OVERRIDE=""
 BINARY_KB_OVERRIDE=""
+KEEP_BINARY_SIZE=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --apply) APPLY=true ;;
+        --test-count)
+            TEST_COUNT_OVERRIDE="${2:-}"
+            case "$TEST_COUNT_OVERRIDE" in
+                ''|*[!0-9]*) echo "error: --test-count requires a numeric value" >&2; exit 2 ;;
+            esac
+            shift ;;
         --binary-size)
             BINARY_KB_OVERRIDE="${2:-}"
             case "$BINARY_KB_OVERRIDE" in
                 ''|*[!0-9]*) echo "error: --binary-size requires a numeric KB value" >&2; exit 2 ;;
             esac
             shift ;;
-        *) echo "error: unknown argument '$1' (usage: update-stats.sh [--apply] [--binary-size <KB>])" >&2; exit 2 ;;
+        --keep-binary-size) KEEP_BINARY_SIZE=true ;;
+        *) echo "error: unknown argument '$1' ($USAGE)" >&2; exit 2 ;;
     esac
     shift
 done
@@ -53,14 +74,26 @@ CHANNEL_ENUM=$(grep -cE '^[[:space:]]+HU_CHANNEL_[A-Z_]+,' include/human/channel
 # Count tools (exclude factory)
 TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l | tr -d ' ')
 
-# Get test count from binary (try multiple build dirs)
+# Get test count: the caller's measurement if given, else re-run a binary.
+# build-check/ comes first — it is what the pre-push hook built from THIS tree
+# moments ago; build/ is a developer's dev build of whatever tree state it was
+# last configured against. Say which one ran, and how old it is, so a stale
+# count is at least visible in the hook output.
 TEST_COUNT="unknown"
-for test_bin in build/human_tests build2/human_tests build-check/human_tests build-release/human_tests; do
-    if [ -f "$test_bin" ]; then
-        TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
-        break
-    fi
-done
+if [ -n "$TEST_COUNT_OVERRIDE" ]; then
+    TEST_COUNT="$TEST_COUNT_OVERRIDE"
+    echo "Test count: ${TEST_COUNT} (from --test-count; no binary executed)"
+else
+    for test_bin in build-check/human_tests build/human_tests build2/human_tests build-release/human_tests; do
+        if [ -f "$test_bin" ]; then
+            bin_mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$test_bin" 2>/dev/null \
+                || stat -c '%y' "$test_bin" 2>/dev/null | cut -c1-16 || echo "?")
+            echo "Test count: running ${test_bin} (mtime ${bin_mtime}) — pass --test-count to use a count you already measured"
+            TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
+            break
+        fi
+    done
+fi
 
 # Treat an empty extraction (binary ran but no Results: line) as unknown too
 [ -n "$TEST_COUNT" ] || TEST_COUNT="unknown"
@@ -89,6 +122,8 @@ is_release_build_dir() {
 BINARY_KB="unknown"
 if [ -n "$BINARY_KB_OVERRIDE" ]; then
     BINARY_KB="$BINARY_KB_OVERRIDE"
+elif $KEEP_BINARY_SIZE; then
+    echo "Binary size: --keep-binary-size — keeping committed value"
 else
     SKIPPED_BIN=""
     for bin in build-size/human build2/human build-release/human build/human; do
