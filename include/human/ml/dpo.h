@@ -63,9 +63,9 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector, const char
  * reserved for true preference pairs; single-sided rows there poison ORPO
  * training (2026-05-19 audit). A reward-model / KTO trainer consumes these.
  * Responses <4 bytes are labels, not signal, and are refused. */
-hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt, size_t prompt_len,
-                                const char *response, size_t response_len, bool positive,
-                                const char *source, size_t source_len);
+hu_error_t hu_dpo_record_signal(hu_dpo_collector_t *collector, const char *prompt,
+                                size_t prompt_len, const char *response, size_t response_len,
+                                bool positive, const char *source, size_t source_len);
 
 /* Count rows in feedback_signals. */
 hu_error_t hu_dpo_signal_count(hu_dpo_collector_t *collector, size_t *out);
@@ -123,6 +123,16 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
  * Either polarity OR reply_latency_s should be non-default (not both
  * required — different signal sources resolve different ways). The
  * outcome is "resolved" once any of the columns is filled. */
+/* Task 9 (2026-09-01): reactive sends record message_ref like proactive ones.
+ * Sets message_ref on the NEWEST production_outcomes row for (channel, target)
+ * that still has none — the row hu_dpo_record_outbound wrote moments earlier
+ * before the channel returned the sent message id. HU_ERR_NOT_FOUND when no
+ * such row exists (never updates a row that already has a ref). */
+hu_error_t hu_dpo_set_outbound_message_ref(hu_dpo_collector_t *collector, const char *channel,
+                                           size_t channel_len, const char *target,
+                                           size_t target_len, const char *message_ref,
+                                           size_t message_ref_len);
+
 hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *channel,
                                  size_t channel_len, const char *target, size_t target_len,
                                  const char *message_ref, size_t message_ref_len,

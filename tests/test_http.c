@@ -167,7 +167,43 @@ static void test_http_rejects_oversized_body_before_post(void) {
     unsetenv("HU_HTTP_MAX_BODY_BYTES");
 }
 
+/* ── Per-request timeout options (2026-09-03 half-open :8741 incident) ──
+ * A NULL opts pointer must resolve to the historical 600 s cap so cloud
+ * providers see no behavior change; an explicit timeout_secs must win. */
+static void test_http_request_opts_null_resolves_to_600s_default(void) {
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(NULL), 600L);
+    HU_ASSERT_EQ(hu_http_effective_connect_timeout_secs(NULL), 5L);
+}
+
+static void test_http_request_opts_zero_fields_resolve_to_defaults(void) {
+    hu_http_request_opts_t opts = {0};
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(&opts), 600L);
+    HU_ASSERT_EQ(hu_http_effective_connect_timeout_secs(&opts), 5L);
+}
+
+static void test_http_request_opts_explicit_timeout_wins(void) {
+    hu_http_request_opts_t opts = {.timeout_secs = 120, .connect_timeout_secs = 2};
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(&opts), 120L);
+    HU_ASSERT_EQ(hu_http_effective_connect_timeout_secs(&opts), 2L);
+}
+
+static void test_http_post_json_opts_rejects_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_http_response_t resp = {0};
+    hu_http_request_opts_t opts = {.timeout_secs = 1};
+    const char *body = "{}";
+    HU_ASSERT_NEQ(hu_http_post_json_opts(NULL, "https://x.com", NULL, NULL, body, 2, &opts, &resp),
+                  HU_OK);
+    HU_ASSERT_NEQ(hu_http_post_json_opts(&alloc, NULL, NULL, NULL, body, 2, &opts, &resp), HU_OK);
+    HU_ASSERT_NEQ(hu_http_post_json_opts(&alloc, "https://x.com", NULL, NULL, body, 2, &opts, NULL),
+                  HU_OK);
+}
+
 void run_http_tests(void) {
+    HU_RUN_TEST(test_http_request_opts_null_resolves_to_600s_default);
+    HU_RUN_TEST(test_http_request_opts_zero_fields_resolve_to_defaults);
+    HU_RUN_TEST(test_http_request_opts_explicit_timeout_wins);
+    HU_RUN_TEST(test_http_post_json_opts_rejects_null_args);
     HU_TEST_SUITE("HTTP GET");
     HU_RUN_TEST(test_http_get_mock);
     HU_RUN_TEST(test_http_get_null_args);

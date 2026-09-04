@@ -55,10 +55,21 @@
 #include <stdbool.h>
 struct sqlite3;
 
-/* Pure predicate: runs `PRAGMA quick_check` and returns true IFF the first
- * result row is exactly "ok". Cheaper than integrity_check; catches the
- * page/btree corruption and not-a-database classes that matter. NULL handle, a
- * prepare failure (e.g. SQLITE_NOTADB), or any non-"ok" row → false. */
+/* Tri-state integrity probe. OK: `PRAGMA quick_check` returned exactly "ok".
+ * CORRUPT: the row said otherwise, or prepare/step returned SQLITE_CORRUPT /
+ * SQLITE_NOTADB. INDETERMINATE: the check could not run — NULL handle, or
+ * SQLITE_BUSY / SQLITE_LOCKED because another connection holds the file (a
+ * pending WAL checkpoint, a concurrent writer). INDETERMINATE is "could not
+ * measure", never "bad": on 2026-08-04 a healthy 290 MB store was quarantined
+ * because BUSY was read as not-ok. Callers must quarantine on CORRUPT only. */
+typedef enum hu_sqlite_qc {
+    HU_QC_OK = 0,
+    HU_QC_CORRUPT,
+    HU_QC_INDETERMINATE,
+} hu_sqlite_qc_t;
+hu_sqlite_qc_t hu_sqlite_quick_check(struct sqlite3 *db);
+
+/* Convenience: true IFF hu_sqlite_quick_check() == HU_QC_OK. */
 bool hu_sqlite_quick_check_ok(struct sqlite3 *db);
 
 /* Move a corrupt DB file aside: rename <path> (and its -wal/-shm siblings, best

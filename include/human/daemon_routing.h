@@ -39,3 +39,14 @@ struct hu_config; /* human/config.h */
 const char *hu_daemon_fallback_model(const struct hu_config *config, size_t *len_out);
 
 #endif /* HU_DAEMON_ROUTING_H */
+/* Task 8: rate + per-contact cooldown around hu_missed_message_acknowledgment.
+ * Returns the phrase only when the legacy predicate fires AND the seed draw is
+ * below the configured rate AND no filler went to `contact_key` within the
+ * cooldown. Records the emission when it returns non-NULL. */
+const char *hu_missed_message_acknowledgment_gated(int64_t delay_secs, int receive_hour,
+                                                   int current_hour, uint32_t seed,
+                                                   const char *contact_key, size_t contact_key_len,
+                                                   int64_t now);
+void hu_daemon_set_missed_msg_ack_rate(double rate);
+void hu_daemon_set_missed_msg_ack_cooldown(uint32_t secs);
+void hu_daemon_filler_reset_for_test(void);

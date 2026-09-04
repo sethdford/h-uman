@@ -1,0 +1,175 @@
+{
+  "measured_at": "2026-09-02T11:12:29Z",
+  "source": "production_outcomes.chosen (~/.human/memory.db), read-only, raw text never written to this file",
+  "n_candidates": 20,
+  "n_genuine_commitments_hand_labelled": 12,
+  "n_detector_says_commitment": 17,
+  "true_positives": 12,
+  "false_negatives": 0,
+  "false_positives": 5,
+  "recall": 1.0,
+  "precision": 0.7059,
+  "caveat": "Candidate pool was selected via the SAME keyword vocabulary the detector scans for, so recall here is an upper bound on a keyword-matched sample, not a general-population estimate. Precision is the more informative number from this sample. As of 2026-09-02, hu_agent_facts_record_reply (and this dry-run hook) reuse hu_promise_keeper_is_courtesy_invitation, so bare 'let me know...' invitations with no deadline and no first-person deliverable are excluded before scoring; the remaining false positives are generic filler ('I'll help you with that...') and conversational 'gonna' that the courtesy filter's narrower prefix list does not cover \u2014 a further precision gain would need broadening that predicate, not duplicating it here.",
+  "per_item": [
+    {
+      "id": 426,
+      "reply_len": 40,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "courtesy invitation (let-me-know)",
+      "detector_says_commitment": false,
+      "fact_count": 0
+    },
+    {
+      "id": 411,
+      "reply_len": 47,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "courtesy invitation (let-me-know)",
+      "detector_says_commitment": false,
+      "fact_count": 0
+    },
+    {
+      "id": 410,
+      "reply_len": 63,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 391,
+      "reply_len": 26,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete promised state",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 390,
+      "reply_len": 270,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "boilerplate refusal tail, no deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 378,
+      "reply_len": 84,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "generic 'I'll help', no specific action",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 377,
+      "reply_len": 69,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 372,
+      "reply_len": 29,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "'gonna' used conversationally, not 1st-person future action",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 370,
+      "reply_len": 59,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "generic 'I'll help', no specific action",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 358,
+      "reply_len": 14,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 314,
+      "reply_len": 38,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete promised state",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 309,
+      "reply_len": 78,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 305,
+      "reply_len": 63,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 304,
+      "reply_len": 35,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "self-directed action ('let me' + verb, not let-me-know)",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 297,
+      "reply_len": 23,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "'gonna' used conversationally, not 1st-person future action",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 292,
+      "reply_len": 107,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 277,
+      "reply_len": 30,
+      "hand_label_is_commitment": false,
+      "hand_label_note": "courtesy invitation (let-me-know)",
+      "detector_says_commitment": false,
+      "fact_count": 0
+    },
+    {
+      "id": 267,
+      "reply_len": 35,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "leads with deliverable marker 'I will', not a courtesy prefix",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 262,
+      "reply_len": 77,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    },
+    {
+      "id": 226,
+      "reply_len": 123,
+      "hand_label_is_commitment": true,
+      "hand_label_note": "concrete deliverable",
+      "detector_says_commitment": true,
+      "fact_count": 0
+    }
+  ]
+}

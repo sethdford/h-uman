@@ -6,6 +6,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
+bool hu_process_self_exe_path(char *buf, size_t cap) {
+    if (!buf || cap < 2)
+        return false;
+    buf[0] = '\0';
+#if defined(__APPLE__)
+    char tmp[4096];
+    uint32_t size = (uint32_t)sizeof(tmp);
+    if (_NSGetExecutablePath(tmp, &size) != 0)
+        return false;
+    char *resolved = realpath(tmp, NULL);
+    const char *src = resolved ? resolved : tmp;
+    size_t n = strlen(src);
+    bool ok = n > 0 && n < cap;
+    if (ok)
+        memcpy(buf, src, n + 1);
+    free(resolved);
+    return ok;
+#elif defined(__linux__)
+    ssize_t n = readlink("/proc/self/exe", buf, cap - 1);
+    if (n <= 0) {
+        buf[0] = '\0';
+        return false;
+    }
+    buf[n] = '\0';
+    return true;
+#else
+    return false;
+#endif
+}
 
 #ifdef HU_GATEWAY_POSIX
 #include <errno.h>
@@ -416,7 +451,8 @@ bool hu_ollama_api_tags_reachable(void) {
         close(fd);
         return false;
     }
-    static const char req[] = "GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    static const char req[] =
+        "GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
     if (send(fd, req, sizeof(req) - 1, 0) < 0) {
         close(fd);
         return false;

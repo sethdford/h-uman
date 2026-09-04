@@ -21,6 +21,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from eval_fidelity_helpers import bootstrap_ci, compute_persona_fidelity_scores
 import eval_fidelity_nightly
 
+# Hermetic defaults for the main()-level tests below: on the dev box a real
+# mlx-server answers on :8741, and the harness would (correctly) pick the
+# served path and refuse to run in-process. Tests that exercise served mode
+# re-patch both with mock.patch, which restores these on exit.
+os.environ.setdefault("HU_FIDELITY_GEN", "inprocess")
+os.environ.pop("HU_MLX_BASE_URL", None)
+eval_fidelity_nightly.served_endpoint_available = lambda *a, **k: False
+
 
 def test_bootstrap_ci_basic():
     """Test bootstrap CI returns sensible bounds."""
@@ -1007,6 +1015,249 @@ def test_nightly_missing_speaker_model_degrades_loudly():
     print(f"✓ missing speaker model: FIDELITY_SCORER_DEGRADED marker, shape-only SKIP")
 
 
+# --- Served-endpoint generation (2026-09-03 incident) ----------------------
+#
+# The in-process path loaded a SECOND copy of the 56 GB serving model beside
+# the live :8741 mlx-server; wired memory hit 94.8 GB, the server died with
+# "[METAL] Insufficient Memory" and production was dark until a reboot. These
+# pins make the harness generate THROUGH the served endpoint and refuse to
+# load in-process while a server is up.
+
+import io
+import struct
+from contextlib import redirect_stdout
+
+
+def _write_safetensors(path, tensors):
+    """Stdlib safetensors writer: tensors = {name: (dtype, shape, bytes)}."""
+    hdr, blobs, off = {}, [], 0
+    for name, (dtype, shape, blob) in tensors.items():
+        hdr[name] = {"dtype": dtype, "shape": list(shape),
+                     "data_offsets": [off, off + len(blob)]}
+        blobs.append(blob)
+        off += len(blob)
+    h = json.dumps(hdr).encode()
+    with open(path, "wb") as f:
+        f.write(struct.pack("<Q", len(h)))
+        f.write(h)
+        f.write(b"".join(blobs))
+
+
+def _read_safetensors_header(path):
+    with open(path, "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        return json.loads(f.read(n)), 8 + n
+
+
+def _make_fake_adapter(root: Path, name="seth-glm-air-v9-test") -> Path:
+    d = root / name
+    d.mkdir(parents=True)
+    ones = struct.pack("<8f", *([1.0] * 8))
+    _write_safetensors(d / "adapters.safetensors", {
+        "model.layers.0.mlp.down_proj.lora_a": ("F32", (2, 4), ones),
+        "model.layers.0.mlp.down_proj.lora_b": ("F32", (4, 2), ones),
+    })
+    (d / "adapter_config.json").write_text(json.dumps(
+        {"model": "mlx-community/GLM-4.5-Air-4bit", "lora_parameters": {"scale": 2.0}}))
+    return d
+
+
+def test_zero_adapter_mirrors_keys_and_is_all_zero():
+    """The PRE arm on the served endpoint is a zero-delta twin of the serving
+    adapter: same tensor names/shapes/dtypes, every byte zero, config copied.
+    A second call reuses the cached dir instead of rewriting 500 MB."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        src = _make_fake_adapter(tmp)
+        zero = eval_fidelity_nightly.ensure_zero_adapter(src, tmp / "zero-root")
+        assert zero != src and zero.is_dir(), zero
+        src_hdr, _ = _read_safetensors_header(src / "adapters.safetensors")
+        zero_hdr, base = _read_safetensors_header(zero / "adapters.safetensors")
+        assert {k: (v["dtype"], v["shape"]) for k, v in src_hdr.items()} == \
+               {k: (v["dtype"], v["shape"]) for k, v in zero_hdr.items()}, zero_hdr
+        data = (zero / "adapters.safetensors").read_bytes()[base:]
+        assert len(data) == 2 * 8 * 4 and not any(data), "zero adapter must be all zero bytes"
+        assert json.loads((zero / "adapter_config.json").read_text())["lora_parameters"]["scale"] == 2.0
+        mtime = (zero / "adapters.safetensors").stat().st_mtime_ns
+        again = eval_fidelity_nightly.ensure_zero_adapter(src, tmp / "zero-root")
+        assert again == zero and (zero / "adapters.safetensors").stat().st_mtime_ns == mtime, \
+            "second call must reuse the cached zero adapter"
+    print("✓ zero adapter: same keys/shapes/dtypes, all-zero bytes, cached")
+
+
+def test_generate_served_content_and_sentinels():
+    """Served generation returns the reply text, or the SAME sentinels the
+    in-process path uses so is_sentinel() filtering keeps working."""
+    url = "http://127.0.0.1:8743"
+    with mock.patch("eval_fidelity_nightly._http_json",
+                    return_value=(200, {"choices": [{"message": {"content": "  hey whatup \n"}}]})) as m:
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "hey whatup"
+        body = m.call_args.kwargs.get("body") or m.call_args.args[2]
+        assert body["messages"] == [{"role": "user", "content": "yo"}]
+        assert body["temperature"] == 0.0 and body["stream"] is False
+        headers = m.call_args.kwargs.get("headers") or {}
+        assert headers.get("X-HU-Priority") == "batch", "evals must never cut ahead of live traffic"
+    with mock.patch("eval_fidelity_nightly._http_json", side_effect=TimeoutError("read timed out")):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "[timeout]"
+    with mock.patch("eval_fidelity_nightly._http_json", return_value=(503, {"error": "queue full"})), \
+         mock.patch("eval_fidelity_nightly.time.sleep"):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5).startswith("[gen_err:")
+    with mock.patch("eval_fidelity_nightly._http_json",
+                    return_value=(200, {"choices": [{"message": {"content": ""}}]})):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "[empty]"
+    print("✓ generate_served: content, [timeout], [gen_err:], [empty]")
+
+
+class _FakeMlxServer:
+    """Stateful stand-in for the :8741 admin + chat surface, driven through the
+    _http_json seam. Replies differ by active adapter so the two arms differ."""
+
+    def __init__(self, serving: Path, fail_swap_to: Path | None = None):
+        self.adapter = str(serving.resolve())
+        self.serving = str(serving.resolve())
+        self.fail_swap_to = str(fail_swap_to.resolve()) if fail_swap_to else None
+        self.swaps: list[str] = []
+
+    def __call__(self, method, url, body=None, timeout=30, headers=None):
+        if url.endswith("/v1/adapters/current"):
+            return 200, {"adapter_path": self.adapter, "tensors_loaded": 2}
+        if url.endswith("/v1/adapters/swap"):
+            target = str(Path(body["adapter_path"]).resolve())
+            self.swaps.append(target)
+            if target == self.fail_swap_to:
+                return 500, {"error": "adapter load failed"}
+            self.adapter = target
+            return 200, {"status": "ok", "adapter_path": target, "tensors_loaded": 2}
+        if url.endswith("/v1/chat/completions"):
+            reply = "hey whatsup" if self.adapter == self.serving else "hey whatup"
+            return 200, {"choices": [{"message": {"content": reply}}]}
+        raise AssertionError(f"unexpected {method} {url}")
+
+
+def _served_argv(tmp: Path, adapter: Path, extra=()):
+    fixture = tmp / "prompts.jsonl"
+    fixture.write_text("\n".join(
+        json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)))
+    return ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+            "--held-out-fixture", str(fixture), "--log-dir", str(tmp),
+            "--output-json", str(tmp / "verdict.json"),
+            "--zero-adapter-root", str(tmp / "zero"), *extra]
+
+
+def _flat_scores(responses, channel="imessage", speaker_model=None):
+    return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
+
+
+def test_served_mode_never_loads_in_process_when_base_url_set():
+    """With HU_MLX_BASE_URL set the harness must generate through the served
+    endpoint — PRE on the zero adapter, POST on the serving adapter — and never
+    touch mlx_lm.load. The serving adapter is restored and verified afterwards."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        argv = _served_argv(tmp, adapter)
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743",
+                                          "HU_FIDELITY_GEN": "auto"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.load_model",
+                        side_effect=AssertionError("in-process mlx_lm.load taken beside a live server")) as m_load, \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores", side_effect=_flat_scores), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert not m_load.called, "in-process load must never run in served mode"
+        assert rc == 3, f"flat scores → SKIP (exit 3), got {rc}\n{out[-800:]}"
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["generation"]["mode"] == "served", verdict.get("generation")
+        assert verdict["generation"]["server_url"] == "http://127.0.0.1:8743"
+        assert verdict["generation"]["adapter_restored"] is True
+        zero = str(Path(verdict["generation"]["pre_arm_adapter"]).resolve())
+        assert fake.swaps == [zero, str(adapter.resolve())], fake.swaps
+        assert fake.adapter == str(adapter.resolve()), "serving adapter must be restored"
+        assert verdict["differentiation"]["n_differing_pairs"] == 25
+    print("✓ served mode: no in-process load, PRE=zero adapter, POST=serving, restored")
+
+
+def test_inprocess_refused_beside_live_server():
+    """--gen inprocess with HU_MLX_BASE_URL set (or a live production server) is
+    the exact 2026-09-03 incident shape. It must DEFER before any load."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "inprocess"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.load_model",
+                        side_effect=AssertionError("second loader started")) as m_load, \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out, f"rc={rc}\n{out[-600:]}"
+        assert "second loader" in out or "never two" in out.lower(), out[-600:]
+        assert not m_load.called and not reg.record_eval.called
+    print("✓ --gen inprocess beside a live server: DEFERRED, no load, no registry write")
+
+
+def test_served_restore_failure_is_loud_and_defers():
+    """If the serving adapter cannot be put back after the PRE arm, production is
+    running on a zero adapter. That must be unmissable: marker + exit 2, and no
+    verdict recorded."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter, fail_swap_to=adapter)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.time.sleep"), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_RESTORE_FAILED" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps.count(str(adapter.resolve())) >= 3, "restore must retry"
+        assert not reg.record_eval.called
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["verdict"] == "DEFERRED" and verdict["generation"]["adapter_restored"] is False
+    print("✓ served restore failure: FIDELITY_RESTORE_FAILED, exit 2, retried, unrecorded")
+
+
+def test_served_precheck_mismatch_defers_without_swap():
+    """If the server is not currently serving the adapter under test, swapping
+    'back' would install the wrong adapter. DEFER before touching it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        other = _make_fake_adapter(tmp, name="seth-glm-air-v8-other")
+        fake = _FakeMlxServer(other)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps == [], "must not swap when the server serves a different adapter"
+    print("✓ served precheck: server on another adapter → DEFERRED, no swap")
+
+
+
+
 def main():
     """Run all tests."""
     tests = [
@@ -1050,6 +1301,12 @@ def main():
         test_shape_only_backward_compatible,
         test_nightly_blended_pass_records_scorer_provenance,
         test_nightly_missing_speaker_model_degrades_loudly,
+        test_zero_adapter_mirrors_keys_and_is_all_zero,
+        test_generate_served_content_and_sentinels,
+        test_served_mode_never_loads_in_process_when_base_url_set,
+        test_inprocess_refused_beside_live_server,
+        test_served_restore_failure_is_loud_and_defers,
+        test_served_precheck_mismatch_defers_without_swap,
     ]
 
     print("=" * 60)

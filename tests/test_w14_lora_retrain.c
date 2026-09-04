@@ -7,6 +7,7 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
+#include "human/core/process_util.h"
 #include "human/memory/graph.h"
 #include "human/ml/lora_retrain_runner.h"
 #include "test_framework.h"
@@ -16,6 +17,43 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* ── miner argv0 resolution (2026-09-02) ──────────────────────────────
+ * The pair-count probe exec'd a bare "human", which PATH-resolved to a
+ * May-17 CLI in ~/.local/bin — its old config schema made the probe's
+ * stdout unparseable and the retrain loop was silently dead for weeks
+ * (1,558 'lora_retrain_probe_failed' lines, doctor 0 errors). The probe
+ * must exec the SAME binary the daemon is running. */
+
+static void test_miner_argv0_prefers_explicit_ctx_value(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0("/opt/custom/human", "/usr/local/bin/human"),
+                     "/opt/custom/human");
+}
+
+static void test_miner_argv0_uses_self_exe_when_ctx_unset(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, "/Users/x/.local/bin/human-daemon"),
+                     "/Users/x/.local/bin/human-daemon");
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0("", "/Users/x/.local/bin/human-daemon"),
+                     "/Users/x/.local/bin/human-daemon");
+}
+
+static void test_miner_argv0_falls_back_to_bare_human_last(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, NULL), "human");
+    HU_ASSERT_STR_EQ(hu_lora_retrain_miner_argv0(NULL, ""), "human");
+}
+
+static void test_self_exe_path_resolves_to_a_real_file(void) {
+    char buf[1024];
+    HU_ASSERT_TRUE(hu_process_self_exe_path(buf, sizeof(buf)));
+    HU_ASSERT_TRUE(buf[0] == '/');
+    HU_ASSERT_EQ(access(buf, X_OK), 0);
+}
+
+static void test_self_exe_path_rejects_tiny_buffer(void) {
+    char tiny[4];
+    HU_ASSERT_FALSE(hu_process_self_exe_path(tiny, sizeof(tiny)));
+    HU_ASSERT_FALSE(hu_process_self_exe_path(NULL, 0));
+}
 
 /* ── Subprocess hook capture machinery ────────────────────────────────── */
 
@@ -110,6 +148,9 @@ static void setup_ctx(hu_lora_retrain_ctx_t *ctx, subprocess_capture_t *cap, eve
     memset(ctx, 0, sizeof(*ctx));
     ctx->candidate_dir = candidate_dir;
     ctx->current_symlink = current_symlink;
+    /* The trainer is opt-in (NULL → skipped_no_trainer); the exec-path tests
+     * below want the full chain, so give them an explicit absolute script. */
+    ctx->finetune_script = "/tmp/test_finetune_gemma.py";
     ctx->test_run_subprocess = capture_subprocess;
     ctx->test_subprocess_ud = cap;
     ctx->emit_event = capture_event;
@@ -121,6 +162,59 @@ static void setup_ctx(hu_lora_retrain_ctx_t *ctx, subprocess_capture_t *cap, eve
 static void make_spec(hu_job_spec_t *spec) {
     memset(spec, 0, sizeof(*spec));
     spec->kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
+}
+
+/* ── 2026-09-02: no configured trainer → probe only, then skip loudly ── */
+
+static void test_retrain_without_finetune_script_skips_after_probe(void) {
+    subprocess_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    event_capture_t ec;
+    memset(&ec, 0, sizeof(ec));
+    hu_lora_retrain_ctx_t ctx;
+    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
+    ctx.finetune_script = NULL; /* the daemon's real configuration */
+
+    queue_response(&cap, 0, "{\"pairs\":163}");
+    /* If the runner wrongly proceeds, this would be consumed as "finetune". */
+    queue_response(&cap, 0, "");
+
+    hu_job_spec_t spec;
+    make_spec(&spec);
+    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
+
+    /* Exactly one exec: the pair-count probe. No trainer was spawned. */
+    HU_ASSERT_EQ(cap.n_calls, 1);
+    HU_ASSERT(argv_contains(&cap, 0, "mine-corrections"));
+    HU_ASSERT(event_seen(&ec, "lora_retrain_scheduled"));
+    HU_ASSERT(event_seen(&ec, "lora_retrain_skipped_no_trainer"));
+    HU_ASSERT(!event_seen(&ec, "lora_retrain_failed"));
+    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER);
+    HU_ASSERT_EQ((long long)ctx.last_pairs_consumed, 163LL);
+}
+
+static void test_retrain_empty_finetune_script_also_skips(void) {
+    subprocess_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    event_capture_t ec;
+    memset(&ec, 0, sizeof(ec));
+    hu_lora_retrain_ctx_t ctx;
+    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
+    ctx.finetune_script = "";
+
+    queue_response(&cap, 0, "{\"pairs\":3}");
+    hu_job_spec_t spec;
+    make_spec(&spec);
+    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
+    HU_ASSERT_EQ(cap.n_calls, 1);
+    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER);
+}
+
+static void test_retrain_skipped_no_trainer_outcome_roundtrips(void) {
+    HU_ASSERT_STR_EQ(hu_lora_retrain_outcome_str(HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER),
+                     "skipped_no_trainer");
+    HU_ASSERT_EQ(hu_lora_retrain_outcome_from_str("skipped_no_trainer"),
+                 HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER);
 }
 
 /* ── AC-7.5.1: enqueue + finetune argv shape ─────────────────────────── */
@@ -603,4 +697,12 @@ void run_w14_lora_retrain_tests(void) {
     HU_RUN_TEST(test_retrain_probe_malformed_routes_to_failed);
     HU_RUN_TEST(test_retrain_gate_exit_nonzero_routes_to_failed);
     HU_RUN_TEST(test_enqueue_helper_sets_correct_spec);
+    HU_RUN_TEST(test_retrain_without_finetune_script_skips_after_probe);
+    HU_RUN_TEST(test_retrain_empty_finetune_script_also_skips);
+    HU_RUN_TEST(test_retrain_skipped_no_trainer_outcome_roundtrips);
+    HU_RUN_TEST(test_miner_argv0_prefers_explicit_ctx_value);
+    HU_RUN_TEST(test_miner_argv0_uses_self_exe_when_ctx_unset);
+    HU_RUN_TEST(test_miner_argv0_falls_back_to_bare_human_last);
+    HU_RUN_TEST(test_self_exe_path_resolves_to_a_real_file);
+    HU_RUN_TEST(test_self_exe_path_rejects_tiny_buffer);
 }

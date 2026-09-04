@@ -963,6 +963,50 @@ static void test_config_parse_feeds_section(void) {
     hu_arena_destroy(arena);
 }
 
+/* 2026-09-02 — Gmail feed credentials: flat keys win, the nested "gmail"
+ * block fills what is unset, and quota_project reaches the config either way
+ * (it was silently dropped before, so every Gmail poll was a 403). */
+static void test_config_parse_feeds_gmail_nested_block_and_quota_project(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"feeds\":{\"gmail_client_id\":\"flat-id\","
+                       "\"gmail\":{\"client_id\":\"nested-id\",\"client_secret\":\"nested-secret\","
+                       "\"refresh_token\":\"nested-token\",\"quota_project\":\"test-project\"}}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(cfg_local.feeds.gmail_client_id);
+    HU_ASSERT_STR_EQ(cfg_local.feeds.gmail_client_id, "flat-id"); /* flat wins */
+    HU_ASSERT_NOT_NULL(cfg_local.feeds.gmail_client_secret);
+    HU_ASSERT_STR_EQ(cfg_local.feeds.gmail_client_secret, "nested-secret");
+    HU_ASSERT_NOT_NULL(cfg_local.feeds.gmail_refresh_token);
+    HU_ASSERT_STR_EQ(cfg_local.feeds.gmail_refresh_token, "nested-token");
+    HU_ASSERT_NOT_NULL(cfg_local.feeds.gmail_quota_project);
+    HU_ASSERT_STR_EQ(cfg_local.feeds.gmail_quota_project, "test-project");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_feeds_gmail_flat_quota_project(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"feeds\":{\"gmail_quota_project\":\"flat-project\"}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(cfg_local.feeds.gmail_quota_project);
+    HU_ASSERT_STR_EQ(cfg_local.feeds.gmail_quota_project, "flat-project");
+    HU_ASSERT_NULL(cfg_local.feeds.gmail_client_id);
+    hu_arena_destroy(arena);
+}
+
 /* W13 Phase 4.1 — personalization config plumbing */
 
 static void test_config_parses_personalization_block(void) {
@@ -1695,6 +1739,8 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_behavior_defaults);
     HU_TEST_SUITE("Feeds config");
     HU_RUN_TEST(test_config_parse_feeds_section);
+    HU_RUN_TEST(test_config_parse_feeds_gmail_nested_block_and_quota_project);
+    HU_RUN_TEST(test_config_parse_feeds_gmail_flat_quota_project);
     HU_TEST_SUITE("Voice config");
     HU_RUN_TEST(test_config_parse_voice_section);
     HU_RUN_TEST(test_config_parse_voice_realtime_mode_fields);

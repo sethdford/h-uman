@@ -4591,15 +4591,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
         if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
-                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
+            /* Reserve the immersive guard tail (shape rules, CRITICAL
+             * REMINDER, absolute rules) so a grown middle section — recall,
+             * exemplars — displaces context, never the rules. */
+            size_t reserved = prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed;
+            size_t before_cap = system_prompt_len;
+            system_prompt_len = hu_prompt_positional_cap_apply(
+                system_prompt, system_prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES, reserved);
             static atomic_bool warned_prompt_budget = false;
             hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
                              "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap); some context dropped",
-                             system_prompt_len, cut);
-            system_prompt[cut] = '\0';
-            system_prompt_len = cut;
+                             "(MLX backend cap; %zu-byte guard tail reserved); some context "
+                             "dropped",
+                             before_cap, system_prompt_len, reserved);
         }
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
