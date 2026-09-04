@@ -1,7 +1,9 @@
 #include "human/providers/reliable.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/error_classify.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,12 +32,19 @@ typedef struct hu_reliable_ctx {
     uint64_t max_backoff_ms;
     char last_error_msg[HU_LAST_ERROR_MAX];
     size_t last_error_len;
-    /* Circuit breaker (0 = disabled) */
+    /* Circuit breaker (threshold <= 0 = disabled); see reliable.h. */
     int cb_failure_threshold;
     int cb_recovery_seconds;
     int cb_failures;
     time_t cb_open_until;
+    bool cb_open_logged; /* one WARN per open, one INFO per close */
+    time_t (*now_fn)(void *);
+    void *now_ud;
 } hu_reliable_ctx_t;
+
+static time_t circuit_now(hu_reliable_ctx_t *r) {
+    return r->now_fn ? r->now_fn(r->now_ud) : time(NULL);
+}
 
 /* Circuit breaker: true if primary should be skipped (circuit open) */
 static bool circuit_skip_primary(hu_reliable_ctx_t *r) {
@@ -43,9 +52,8 @@ static bool circuit_skip_primary(hu_reliable_ctx_t *r) {
         return false;
     if (r->cb_failures < r->cb_failure_threshold)
         return false;
-    time_t now = time(NULL);
-    if (now >= r->cb_open_until)
-        return false; /* half-open: try primary */
+    if (circuit_now(r) >= r->cb_open_until)
+        return false; /* half-open: one trial request goes to the primary */
     return true;
 }
 
@@ -53,14 +61,30 @@ static void circuit_record_failure(hu_reliable_ctx_t *r) {
     if (r->cb_failure_threshold <= 0)
         return;
     r->cb_failures++;
-    if (r->cb_failures >= r->cb_failure_threshold)
-        r->cb_open_until = time(NULL) + (time_t)r->cb_recovery_seconds;
+    if (r->cb_failures >= r->cb_failure_threshold) {
+        r->cb_open_until = circuit_now(r) + (time_t)r->cb_recovery_seconds;
+        if (!r->cb_open_logged) {
+            hu_log_warn("provider", NULL,
+                        "reliable: circuit OPEN on primary after %d consecutive failures — "
+                        "routing to fallbacks for %ds, then one trial request",
+                        r->cb_failures, r->cb_recovery_seconds);
+            r->cb_open_logged = true;
+        }
+    }
 }
 
 static void circuit_record_success(hu_reliable_ctx_t *r) {
     if (r->cb_failure_threshold <= 0)
         return;
+    if (r->cb_open_logged)
+        hu_log_info("provider", NULL, "reliable: circuit CLOSED — primary answered again");
     r->cb_failures = 0;
+    r->cb_open_until = 0;
+    r->cb_open_logged = false;
+}
+
+bool hu_reliable_error_ends_provider_attempts(hu_error_t err) {
+    return err == HU_ERR_TIMEOUT;
 }
 
 /* Store error for retry-after / classification */
@@ -80,6 +104,21 @@ static bool error_code_is_terminal(hu_error_t err) {
     default:
         return false;
     }
+}
+
+/* After a failed attempt: true when the retry loop should stop hammering
+ * this provider and hand the turn to the next configured one. Rate limits
+ * were always routed this way; HU_ERR_TIMEOUT joined them after 2026-09-03,
+ * when a half-open loopback socket (mlx-server died as a zombie) would have
+ * been re-POSTed the same body `max_retries` more times — 3 x the cap —
+ * before the cloud fallback was consulted. With no extras there is nothing
+ * to break to, so the caller keeps retrying as before. */
+static bool should_break_to_extras(const hu_reliable_ctx_t *r, hu_error_t err) {
+    if (r->extras_count == 0)
+        return false;
+    if (hu_reliable_error_ends_provider_attempts(err))
+        return true;
+    return hu_error_is_rate_limited(r->last_error_msg, r->last_error_len);
 }
 
 static void store_error(hu_reliable_ctx_t *r, hu_error_t err) {
@@ -216,7 +255,7 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
 
         if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
-        if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
+        if (should_break_to_extras(r, err))
             break; /* try next provider */
 
         if (attempt < r->max_retries) {
@@ -266,7 +305,7 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
 
         if (error_code_is_terminal(err) || hu_error_is_non_retryable(msg, len))
             return err;
-        if (hu_error_is_rate_limited(msg, len) && r->extras_count > 0)
+        if (should_break_to_extras(r, err))
             break;
 
         if (attempt < r->max_retries) {
@@ -534,6 +573,35 @@ hu_error_t hu_reliable_provider_create(hu_allocator_t *alloc, const hu_reliable_
     return HU_OK;
 }
 
+void hu_reliable_set_circuit(hu_provider_t *reliable, int failure_threshold, int recovery_seconds) {
+    if (!reliable || !reliable->ctx)
+        return;
+    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)reliable->ctx;
+    if (failure_threshold < 0)
+        r->cb_failure_threshold = 0; /* disabled */
+    else if (failure_threshold > 0)
+        r->cb_failure_threshold = failure_threshold;
+    if (recovery_seconds > 0)
+        r->cb_recovery_seconds = recovery_seconds;
+}
+
+void hu_reliable_circuit_state(const hu_provider_t *reliable, int *out_failures,
+                               time_t *out_open_until) {
+    const hu_reliable_ctx_t *r = reliable ? (const hu_reliable_ctx_t *)reliable->ctx : NULL;
+    if (out_failures)
+        *out_failures = r ? r->cb_failures : 0;
+    if (out_open_until)
+        *out_open_until = r ? r->cb_open_until : 0;
+}
+
+void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), void *now_ud) {
+    if (!reliable || !reliable->ctx)
+        return;
+    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)reliable->ctx;
+    r->now_fn = now_fn;
+    r->now_ud = now_ud;
+}
+
 hu_error_t hu_reliable_create(hu_allocator_t *alloc, hu_provider_t inner, uint32_t max_retries,
                               uint64_t backoff_ms, hu_provider_t *out) {
     return hu_reliable_create_ex(alloc, inner, max_retries, backoff_ms, NULL, 0, NULL, 0, out);
@@ -587,6 +655,9 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
     r->inner = inner;
     r->max_retries = max_retries;
     r->base_backoff_ms = (backoff_ms >= 50) ? backoff_ms : 50;
+    /* Circuit on by default (2026-09-03); hu_reliable_set_circuit overrides. */
+    r->cb_failure_threshold = HU_RELIABLE_CIRCUIT_DEFAULT_THRESHOLD;
+    r->cb_recovery_seconds = HU_RELIABLE_CIRCUIT_DEFAULT_RECOVERY_SECS;
 
     if (extras_count > 0 && extras) {
         r->extras = (hu_reliable_provider_entry_t *)((char *)r + sizeof(hu_reliable_ctx_t));

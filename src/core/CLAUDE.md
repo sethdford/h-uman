@@ -13,6 +13,7 @@ json.c               JSON parser and builder (zero-dependency, streaming)
 string.c             String utilities (hu_string_t, split, join, trim, format)
 http.c               HTTP client abstraction (wraps libcurl when available)
 process_util.c       Process utilities (spawn, wait, signal handling)
+log.c                Log level filter + timestamped line formatter (one compiled copy; log.h keeps only macros)
 ```
 
 ## Key Types

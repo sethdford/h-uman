@@ -3537,6 +3537,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_replay_guard.c
     tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
