@@ -1,13 +1,14 @@
+#include <stdio.h>
 /*
  * Shared bootstrap logic for service-loop and gateway commands.
  * Extracts config loading, provider creation, tools setup, security init,
  * channel creation, and agent creation into a single module.
  */
 
-#include "human/bootstrap.h"
 #include "human/agent/agent_comm.h"
 #include "human/agent/mailbox.h"
 #include "human/agent/spawn.h"
+#include "human/bootstrap.h"
 #include "human/cognition/metacognition.h"
 #include "human/config.h"
 #include "human/context_engine.h"
@@ -904,6 +905,14 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                     bi->embedder.vtable->deinit(bi->embedder.ctx, alloc);
                 bi->embedder = sem_emb;
                 bi->vector_store = sem_vs;
+                /* attach() handed the engine the ADDRESSES of sem_emb/sem_vs —
+                 * block locals that die a few lines down. Re-point it at the
+                 * copies that live as long as the app context (2026-09-04:
+                 * every store() after bootstrap read reused stack in
+                 * semantic_index_row and aborted the daemon under ASan). */
+#ifdef HU_ENABLE_SQLITE
+                hu_sqlite_memory_set_semantic_index(&bi->memory, &bi->embedder, &bi->vector_store);
+#endif
                 hu_log_info("bootstrap", NULL, "semantic recall %s: embedder=%s store=sqlite-vec",
                             hu_semantic_recall_mode() == HU_GATE_LIVE ? "LIVE" : "SHADOW",
                             hu_semantic_recall_embed_url());
@@ -1962,6 +1971,12 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         fclose(bi->log_fp);
     if (bi->retrieval_engine.vtable && bi->retrieval_engine.vtable->deinit)
         bi->retrieval_engine.vtable->deinit(bi->retrieval_engine.ctx, alloc);
+    /* The engine borrows the pair below; drop the borrow before either side
+     * is freed so a late store() cannot dereference freed memory. */
+#ifdef HU_ENABLE_SQLITE
+    if (bi->memory.vtable)
+        hu_sqlite_memory_set_semantic_index(&bi->memory, NULL, NULL);
+#endif
     if (bi->vector_store.vtable && bi->vector_store.vtable->deinit)
         bi->vector_store.vtable->deinit(bi->vector_store.ctx, alloc);
     if (bi->embedder.vtable && bi->embedder.vtable->deinit)

@@ -1854,11 +1854,35 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
 
 void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
                                          struct hu_vector_store *store) {
-    if (!mem || !mem->ctx)
+    if (!mem || !mem->ctx || !mem->vtable)
+        return;
+    /* Only the sqlite engine carries the index fields: on any other engine
+     * (markdown fallback when the sqlite path is unavailable) this cast would
+     * write two pointers past a small foreign ctx (2026-09-04 teardown UAF). */
+    const char *n = mem->vtable->name(mem->ctx);
+    if (!n || strcmp(n, "sqlite") != 0)
         return;
     hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
     self->sem_embedder = embedder;
     self->sem_store = store;
+}
+
+void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embedder **embedder,
+                                         struct hu_vector_store **store) {
+    if (embedder)
+        *embedder = NULL;
+    if (store)
+        *store = NULL;
+    if (!mem || !mem->ctx || !mem->vtable)
+        return;
+    const char *n = mem->vtable->name(mem->ctx);
+    if (!n || strcmp(n, "sqlite") != 0)
+        return;
+    const hu_sqlite_memory_t *self = (const hu_sqlite_memory_t *)mem->ctx;
+    if (embedder)
+        *embedder = self->sem_embedder;
+    if (store)
+        *store = self->sem_store;
 }
 
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
