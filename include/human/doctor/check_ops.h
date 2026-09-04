@@ -51,6 +51,13 @@ typedef struct hu_doctor_serving_stability_ctx {
     int64_t now_unix;    /* 0 → time(NULL) */
     int window_hours;    /* 0 → 24 */
     int max_crashes;     /* 0 → 2 */
+    /* 2026-09-04: the DAEMON crash-looped 8× in 20 h (ASan stack-use-after-scope
+     * on every memory store) while this check said "0 crash reports" — it only
+     * counted the model server's Python-*.ips. The daemon's own reports
+     * (human-daemon-*.ips) and its launchd run count are a second, independent
+     * artifact; NULL prefix → "human-daemon-", NULL text → unavailable. */
+    const char *daemon_crash_prefix;   /* "human-daemon-" */
+    const char *daemon_launchctl_text; /* `launchctl print gui/$UID/ai.human.service-loop` */
 } hu_doctor_serving_stability_ctx_t;
 extern const hu_doctor_check_t hu_doctor_check_serving_stability;
 /* Pure parsers, exposed for tests and for the registry wrapper. */
