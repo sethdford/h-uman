@@ -1503,6 +1503,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/style_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -3330,6 +3331,7 @@ set(HU_TEST_SOURCES
     tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
+    tests/test_style_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3535,6 +3537,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_replay_guard.c
     tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c

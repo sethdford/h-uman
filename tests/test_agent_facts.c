@@ -113,6 +113,11 @@ static void agent_facts_live_stores_promise_and_agent_provenance_fact(void) {
     memset(&assistant_ent, 0, sizeof(assistant_ent));
     HU_ASSERT_EQ(hu_graph_find_entity(g, "contact_live", 12, "assistant", 9, &assistant_ent),
                  HU_OK);
+    /* find_entity hands back heap-owned name/metadata_json; release them. */
+    if (assistant_ent.name)
+        alloc.free(alloc.ctx, assistant_ent.name, assistant_ent.name_len + 1);
+    if (assistant_ent.metadata_json)
+        alloc.free(alloc.ctx, assistant_ent.metadata_json, strlen(assistant_ent.metadata_json) + 1);
 
     sqlite3 *mdb = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_EQ(count_rows(mdb, "SELECT COUNT(*) FROM memories WHERE key LIKE "

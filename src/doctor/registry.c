@@ -493,11 +493,11 @@ static hu_doctor_check_result_t run_eval_freshness_check(hu_doctor_check_t *self
 
 static hu_doctor_check_result_t run_serving_stability_check(hu_doctor_check_t *self, void *ctx) {
     (void)ctx;
-    static char launchctl_buf[4096];
     const char *text = NULL;
 #if !HU_IS_TEST
     /* `launchctl print` is the only source of the run count and last exit
      * code. Never spawned under HU_IS_TEST (tests inject the text). */
+    static char launchctl_buf[4096];
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "launchctl print gui/%u/ai.human.mlx-server 2>/dev/null",
              (unsigned)getuid());

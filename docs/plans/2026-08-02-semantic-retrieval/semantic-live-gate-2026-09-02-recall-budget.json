@@ -1,0 +1,581 @@
+{
+  "schema": "semantic_live_gate.v2",
+  "generated_at": "2026-09-03T00:48:13.443970+00:00",
+  "git_commit": "fb88700af2e9f7c25162915f9245f6133703e5d5",
+  "gate": "HU_SEMANTIC_RECALL shadow->live",
+  "n_contexts": 40,
+  "n_paired": 34,
+  "n_shadow_only": 6,
+  "n_live_only": 0,
+  "shadow_only_ids": [
+    8,
+    9,
+    16,
+    19,
+    32,
+    38
+  ],
+  "live_only_ids": [],
+  "shadow_fail_reasons": {},
+  "live_fail_reasons": {
+    "8": "empty_reply",
+    "9": "empty_reply",
+    "16": "empty_reply",
+    "19": "empty_reply",
+    "32": "empty_reply",
+    "38": "empty_reply"
+  },
+  "recall_coverage": 1.0,
+  "min_recall_coverage": 0.5,
+  "contexts_source": "/Users/sethford/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl",
+  "server": "http://127.0.0.1:8741",
+  "embed_url": "http://127.0.0.1:8749",
+  "top_k": 5,
+  "judge_thinking_budget": 1024,
+  "tolerances": {
+    "composite": 0.02,
+    "ei": 0.15,
+    "reality": 0.15
+  },
+  "shadow": {
+    "n": 34,
+    "n_anti_ai": 34,
+    "n_ei": 34,
+    "n_reality": 34,
+    "composite": 0.9215686274509804,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 1.0,
+    "anti_ai_stderr": 0.0,
+    "ei_mean": 4.294117647058823,
+    "ei_histogram": {
+      "1": 0,
+      "2": 3,
+      "3": 1,
+      "4": 13,
+      "5": 17
+    },
+    "reality_mean": 4.794117647058823,
+    "reality_histogram": {
+      "1": 1,
+      "2": 1,
+      "3": 0,
+      "4": 0,
+      "5": 32
+    }
+  },
+  "live": {
+    "n": 34,
+    "n_anti_ai": 34,
+    "n_ei": 34,
+    "n_reality": 34,
+    "composite": 0.8921568627450981,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 1.0,
+    "anti_ai_stderr": 0.0,
+    "ei_mean": 4.029411764705882,
+    "ei_histogram": {
+      "1": 1,
+      "2": 2,
+      "3": 9,
+      "4": 5,
+      "5": 17
+    },
+    "reality_mean": 5.0,
+    "reality_histogram": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 34
+    }
+  },
+  "context_rows": [
+    {
+      "id": 0,
+      "recall_bytes": 770,
+      "shadow": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 1,
+      "recall_bytes": 550,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 2,
+      "recall_bytes": 1047,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 3,
+      "recall_bytes": 623,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 4,
+      "recall_bytes": 841,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 5,
+      "recall_bytes": 504,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 6,
+      "recall_bytes": 966,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 7,
+      "recall_bytes": 547,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 10,
+      "recall_bytes": 1139,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 11,
+      "recall_bytes": 841,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 12,
+      "recall_bytes": 679,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 13,
+      "recall_bytes": 695,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 14,
+      "recall_bytes": 868,
+      "shadow": {
+        "ei": 4,
+        "reality": 2,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 15,
+      "recall_bytes": 612,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 17,
+      "recall_bytes": 607,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 18,
+      "recall_bytes": 713,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 20,
+      "recall_bytes": 769,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 21,
+      "recall_bytes": 951,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 22,
+      "recall_bytes": 708,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 23,
+      "recall_bytes": 1157,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 24,
+      "recall_bytes": 850,
+      "shadow": {
+        "ei": 2,
+        "reality": 1,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 25,
+      "recall_bytes": 289,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 26,
+      "recall_bytes": 923,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 27,
+      "recall_bytes": 537,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 28,
+      "recall_bytes": 831,
+      "shadow": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 29,
+      "recall_bytes": 405,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 30,
+      "recall_bytes": 282,
+      "shadow": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 31,
+      "recall_bytes": 273,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 33,
+      "recall_bytes": 933,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 34,
+      "recall_bytes": 642,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 35,
+      "recall_bytes": 263,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 36,
+      "recall_bytes": 890,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 37,
+      "recall_bytes": 929,
+      "shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 1,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    },
+    {
+      "id": 39,
+      "recall_bytes": 603,
+      "shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0
+      },
+      "live": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0
+      }
+    }
+  ],
+  "verdict": "HOLD",
+  "reasons": [
+    "composite dropped: live=0.8922 < shadow=0.9216 - tol=0.0200",
+    "emotional_intelligence dropped: live=4.029 < shadow=4.294 - tol=0.150 (AlpsBench: memory retrieval degrades EI)"
+  ]
+}

@@ -8,6 +8,7 @@
 #include "human/persona/circadian.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
+#include "human/persona/style_card.h"
 #include "human/persona/terseness.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,17 +53,17 @@ static const char hu_rules_head[] =
 
 /* Register: CASUAL (default) — friend-texting voice.
  *
- * Rule 2 is MEASURED, not authored (scripts/persona_style_card.py,
- * n=1488 typed msgs, 2026-07-12): starts_lowercase=4% (the phone
- * autocapitalizes), no-terminal-punct=79%, ?-endings=9%. The old
- * "All lowercase unless SHOUTING" directive contradicted both the
- * corpus and the persona JSON's own "Normal capitalization" rule —
- * the model's per-turn agonizing over that conflict is what leaked
- * to real contacts on 2026-07-11. */
-static const char hu_rules_casual[] =
-    "2. Normal capitalization (your phone capitalizes for you); CAPS only when "
-    "SHOUTING. Most texts have no period at the end — stop like a real text. "
-    "Question marks only when actually asking.\n"
+ * Rule 2 is MEASURED, not authored, and is RENDERED from the persona's
+ * style card (~/.human/personas/<name>.style-card.json, written by
+ * scripts/measure_style_card.py) via hu_style_card_render_casual_rules —
+ * no style number is hard-coded here. The old "All lowercase unless
+ * SHOUTING" directive contradicted both the corpus and the persona JSON's
+ * own "Normal capitalization" rule; the model's per-turn agonizing over
+ * that conflict is what leaked to real contacts on 2026-07-11, and on
+ * 2026-09-03 this comment, the card and seth.json still carried three
+ * different numbers for the same axis. The card is now the only source;
+ * hu_style_card_default is the fallback when it is missing. */
+static const char hu_rules_casual_tail[] =
     "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
     "7. Text like you're on your phone texting a friend.\n";
@@ -100,11 +101,27 @@ static bool formality_is_formal(const char *formality) {
 
 hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, const char *formality,
                                                char *buf, size_t cap, size_t *out_len) {
-    (void)persona;
     if (!buf || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *reg = formality_is_formal(formality) ? hu_rules_formal : hu_rules_casual;
-    int n = snprintf(buf, cap, "%s%s%s", hu_rules_head, reg, hu_rules_tail);
+    int n;
+    if (formality_is_formal(formality)) {
+        n = snprintf(buf, cap, "%s%s%s", hu_rules_head, hu_rules_formal, hu_rules_tail);
+    } else {
+        /* Casual rule 2 comes from the measured style card (or the compiled
+         * default, logged once, when the persona has no card). */
+        hu_style_card_t card;
+        const char *pname = persona ? persona->name : NULL;
+        size_t pname_len = 0;
+        if (pname)
+            pname_len = persona->name_len ? persona->name_len : strlen(pname);
+        hu_style_card_resolve(pname, pname_len, &card);
+        char rule2[512];
+        hu_error_t rerr = hu_style_card_render_casual_rules(&card, rule2, sizeof(rule2), NULL);
+        if (rerr != HU_OK)
+            return rerr;
+        n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail);
+    }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)

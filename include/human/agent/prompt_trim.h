@@ -98,4 +98,16 @@ size_t hu_prompt_trim_apply(char *buf, size_t len, const hu_prompt_trim_span_t *
  * no mutation — callers NUL-terminate and log. */
 size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget);
 
+/* Reserve-aware positional cap. The plain cap cuts the TAIL, which on the
+ * immersive path is the guard (texting shape rules, CRITICAL REMINDER,
+ * ABSOLUTE RULES) — so any middle section that grows (recall, exemplars)
+ * displaces the rules. This variant keeps the trailing `reserved_tail`
+ * bytes verbatim and removes a middle window [cut, len - reserved_tail)
+ * instead, with `cut` chosen by hu_prompt_positional_cap_point over the
+ * remaining budget (line-boundary preferred). When reserved_tail == 0 or
+ * reserved_tail >= budget the reservation cannot be honoured and the
+ * behaviour is exactly the plain cap. Mutates buf in place, NUL-terminates,
+ * returns the new length (== len when len <= budget). */
+size_t hu_prompt_positional_cap_apply(char *buf, size_t len, size_t budget, size_t reserved_tail);
+
 #endif /* HU_AGENT_PROMPT_TRIM_H */
