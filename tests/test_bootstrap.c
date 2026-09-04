@@ -1,4 +1,5 @@
 #include "human/bootstrap.h"
+#include "human/channels/pwa.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory.h"
@@ -57,6 +58,37 @@ static void bootstrap_with_agent(void) {
         hu_app_teardown(&ctx);
     }
 }
+
+#if HU_HAS_PWA
+/* 2026-09-04 audit: bootstrap registered the PWA poll fn but never called
+ * the channel's start(), so hu_pwa_channel_poll returned on every tick and
+ * ten configured apps produced nothing. The registered channel must be the
+ * started one. */
+static void bootstrap_starts_the_pwa_channel_it_registers(void) {
+    char dir[] = "/tmp/hu_bootstrap_pwa_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    char cfg_path[256];
+    snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
+    FILE *f = fopen(cfg_path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"default_provider\":\"ollama\",\"channels\":{\"pwa\":{\"apps\":[\"slack\"]}}}", f);
+    fclose(f);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    HU_ASSERT_EQ(hu_app_bootstrap(&ctx, &alloc, cfg_path, false, true), HU_OK);
+    const hu_channel_t *pwa = NULL;
+    for (size_t i = 0; i < ctx.channel_count; i++)
+        if (ctx.channels[i].poll_fn == hu_pwa_channel_poll)
+            pwa = ctx.channels[i].channel;
+    HU_ASSERT_NOT_NULL(pwa);
+    HU_ASSERT_TRUE(hu_pwa_channel_is_running(pwa));
+    hu_app_teardown(&ctx);
+    unlink(cfg_path);
+    rmdir(dir);
+}
+#endif
 
 #ifdef HU_ENABLE_SQLITE
 /* 2026-09-02..04: with HU_SEMANTIC_RECALL on, bootstrap attached the sqlite
@@ -130,5 +162,8 @@ void run_bootstrap_tests(void) {
     HU_RUN_TEST(bootstrap_with_agent);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(bootstrap_semantic_index_points_at_app_lifetime_embedder);
+#if HU_HAS_PWA
+    HU_RUN_TEST(bootstrap_starts_the_pwa_channel_it_registers);
+#endif
 #endif
 }

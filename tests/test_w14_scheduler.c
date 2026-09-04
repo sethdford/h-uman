@@ -386,6 +386,37 @@ static void test_w14_status_returns_pending_count(void) {
     close_stack_(g, m, s);
 }
 
+/* 2026-09-04: the nightly retrain enqueuer stacked 576 pending rows because
+ * nothing counted what was already queued. The count is per kind. */
+static void test_w14_pending_count_for_kind_counts_only_that_kind(void) {
+    clear_w14_env();
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_scheduler_t *s = NULL;
+    open_stack_(&g, &m, &s);
+
+    int64_t future = (int64_t)time(NULL) * 1000 + 10LL * 365 * 24 * 3600 * 1000;
+    hu_job_spec_t job = {0};
+    job.budget_ms = 100;
+    job.earliest_at = future;
+    job.kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
+    job.kind = HU_JOB_KV_CACHE_EVICTION;
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
+
+    size_t n = 99;
+    HU_ASSERT_EQ(hu_scheduler_pending_count_for_kind(s, HU_JOB_LORA_RETRAIN_NIGHTLY, &n), HU_OK);
+    HU_ASSERT_EQ((int)n, 2);
+    HU_ASSERT_EQ(hu_scheduler_pending_count_for_kind(s, HU_JOB_KV_CACHE_EVICTION, &n), HU_OK);
+    HU_ASSERT_EQ((int)n, 1);
+    HU_ASSERT_EQ(hu_scheduler_pending_count_for_kind(s, HU_JOB_PERSONA_EVOLVER, &n), HU_OK);
+    HU_ASSERT_EQ((int)n, 0);
+    HU_ASSERT_EQ(hu_scheduler_pending_count_for_kind(NULL, HU_JOB_KV_CACHE_EVICTION, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    close_stack_(g, m, s);
+}
+
 static void test_w14_adversarial_job_flood_respects_total_budget(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
@@ -565,8 +596,7 @@ static void test_w14_requires_idle_job_defers_under_high_load(void) {
     open_stack_(&g, &m, &s);
 
     int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              increment_runner, &counter),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, increment_runner, &counter),
                  HU_OK);
 
     hu_job_spec_t job = {0};
@@ -809,6 +839,7 @@ void run_w14_scheduler_tests(void) {
     HU_RUN_TEST(test_w14_autodream_runner_registered_by_default);
     HU_RUN_TEST(test_w14_register_custom_runner_dispatches_correctly);
     HU_RUN_TEST(test_w14_status_returns_pending_count);
+    HU_RUN_TEST(test_w14_pending_count_for_kind_counts_only_that_kind);
     HU_RUN_TEST(test_w14_adversarial_job_flood_respects_total_budget);
     HU_RUN_TEST(test_w14_adversarial_runner_returns_error_does_not_crash_scheduler);
     HU_RUN_TEST(test_w14_counterfactual_rehearsal_caps_at_five_per_tick);

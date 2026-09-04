@@ -21,6 +21,7 @@
 #include "human/core/error.h"
 #include "human/doctor/check.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -39,8 +40,20 @@ typedef struct hu_doctor_eval_freshness_ctx {
 } hu_doctor_eval_freshness_ctx_t;
 extern const hu_doctor_check_t hu_doctor_check_eval_freshness;
 /* Newest non-empty artifact (unix mtime) among archive_dir *.json files and nightly_log; 0 if none.
- */
+ * This proves the job RAN. It does not prove it measured anything: nightly_eval.sh
+ * appends to the log and re-archives on every invocation, including crashes. */
 int64_t hu_doctor_eval_newest_artifact_unix(const char *archive_dir, const char *nightly_log);
+
+/* Pure: does this verdict JSON carry a real measurement? True for a
+ * fidelity-style `verdict` that is not DEFERRED/SKIP/SKIPPED/ERROR, and for a
+ * multiturn-style file that reports `run_passed` (a completed FAIL is a
+ * verdict; a crash that never wrote one is not). Unparseable → false. */
+bool hu_doctor_eval_verdict_is_real(const char *json, size_t len);
+
+/* Newest mtime among archive_dir/eval-<harness>-<date>.json files whose content
+ * is a real verdict. Files with "-smoke-" in the name are ignored: smoke runs
+ * archive to their own slot and must never certify the product gate. 0 if none. */
+int64_t hu_doctor_eval_newest_verdict_unix(const char *archive_dir);
 
 /* ── serving_stability: is the local model server crash-looping? ────── */
 typedef struct hu_doctor_serving_stability_ctx {

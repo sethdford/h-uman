@@ -27,6 +27,7 @@
 #include "human/agent.h"
 #include "human/core/string.h"
 #include "human/persona.h"
+#include "human/persona/terseness.h"
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,46 @@ static void ph_agent_fixture(hu_agent_t *agent, hu_allocator_t *alloc, hu_person
     agent->persona = persona;
     agent->active_channel = "imessage";
     agent->active_channel_len = 8;
+}
+
+/* 2026-09-04 audit: prod runs HU_PERSONA_HEAD=live, HU_TERSENESS=live and
+ * HU_HUMOR_DIRECTIVE=live — and the compact head carried neither directive
+ * because both gates lived only in hu_persona_build_prompt. The served
+ * prompt is the compact immersive one, so the gates must act there. */
+static void test_compact_head_honors_terseness_and_humor_gates(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    hu_persona_overlay_t ov;
+    hu_persona_example_bank_t bank;
+    ph_persona_fixture(&p, &ov, &bank);
+    snprintf(p.humor.style[0], sizeof(p.humor.style[0]), "dry and deadpan");
+    p.humor.style_count = 1;
+
+    unsetenv("HU_TERSENESS");
+    unsetenv("HU_HUMOR_DIRECTIVE");
+    char *off = NULL;
+    size_t off_len = 0;
+    HU_ASSERT_EQ(
+        hu_persona_build_prompt_compact_immersive(&alloc, &p, "imessage", 8, &off, &off_len),
+        HU_OK);
+    HU_ASSERT_TRUE(strstr(off, hu_terse_directive()) == NULL);
+
+    setenv("HU_TERSENESS", "live", 1);
+    setenv("HU_HUMOR_DIRECTIVE", "live", 1);
+    char *live = NULL;
+    size_t live_len = 0;
+    hu_error_t err =
+        hu_persona_build_prompt_compact_immersive(&alloc, &p, "imessage", 8, &live, &live_len);
+    unsetenv("HU_TERSENESS");
+    unsetenv("HU_HUMOR_DIRECTIVE");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(live, hu_terse_directive()) != NULL);
+    HU_ASSERT_TRUE(strstr(live, "dry and deadpan") != NULL);
+    HU_ASSERT_TRUE(live_len > off_len);
+    /* The closing shape guard still comes last. */
+    HU_ASSERT_TRUE(strstr(live, "No markdown") > strstr(live, hu_terse_directive()));
+    alloc.free(alloc.ctx, off, off_len + 1);
+    alloc.free(alloc.ctx, live, live_len + 1);
 }
 
 /* ── hu_persona_build_prompt_compact_immersive ─────────────────────────── */
@@ -284,4 +325,5 @@ void run_persona_head_gate_tests(void) {
     HU_RUN_TEST(test_agent_head_live_swaps_to_compact_immersive);
     HU_RUN_TEST(test_agent_head_unknown_gate_value_fails_closed);
     HU_RUN_TEST(test_agent_head_invalid_args_rejected);
+    HU_RUN_TEST(test_compact_head_honors_terseness_and_humor_gates);
 }

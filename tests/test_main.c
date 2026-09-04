@@ -111,6 +111,7 @@ void run_imessage_schema_tests(void);
 void run_typedstream_tests(void);
 /* M3 B4 T4: streaming-safe harmony channel-marker filter. */
 void run_harmony_filter_tests(void);
+void run_llm_json_tests(void);
 /* Phase 5: per-balloon payload decoder tests + privacy contracts. */
 void run_imessage_balloon_decode_tests(void);
 /* Cross-channel reaction emit: WhatsApp + Matrix. */
@@ -1192,6 +1193,7 @@ int main(int argc, char **argv) {
     run_imessage_schema_tests();
     run_typedstream_tests();
     run_harmony_filter_tests();
+    run_llm_json_tests();
     run_imessage_balloon_decode_tests();
     run_whatsapp_reactions_tests();
     run_matrix_reactions_tests();

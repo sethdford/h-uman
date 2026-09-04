@@ -24,6 +24,7 @@ typedef struct fake_provider {
     int calls;        /* every chat_with_system call, failing or not */
     int fail_first_n; /* calls 1..n fail with fail_err; later calls succeed */
     hu_error_t fail_err;
+    char seen_model[64]; /* model id of the most recent call */
 } fake_provider_t;
 
 static hu_error_t fake_chat_with_system(void *ctx, hu_allocator_t *alloc, const char *system_prompt,
@@ -34,11 +35,12 @@ static hu_error_t fake_chat_with_system(void *ctx, hu_allocator_t *alloc, const 
     (void)system_prompt_len;
     (void)message;
     (void)message_len;
-    (void)model;
-    (void)model_len;
     (void)temperature;
     fake_provider_t *f = (fake_provider_t *)ctx;
     f->calls++;
+    size_t mn = model_len < sizeof(f->seen_model) - 1 ? model_len : sizeof(f->seen_model) - 1;
+    memcpy(f->seen_model, model, mn);
+    f->seen_model[mn] = '\0';
     if (f->calls <= f->fail_first_n)
         return f->fail_err;
     size_t n = strlen(f->name);
@@ -321,8 +323,49 @@ static void test_config_parses_circuit_keys_with_absent_as_zero(void) {
     hu_arena_destroy(arena);
 }
 
+/* 2026-09-04: a caller that names a model matching NO model_fallbacks entry
+ * (the reflection loop passed the provider name "mlx_local") still has to
+ * reach the cloud extra with the DECLARED fallback model, not its own
+ * string. Pre-fix the single-element chain handed extras "mlx_local" and
+ * Vertex answered 400 "Invalid Endpoint name" — 652 times in one night,
+ * which meant no cloud path existed during any local outage. */
+static void test_unmatched_model_still_offers_declared_fallback_to_extras(void) {
+    rig_t g;
+    memset(&g, 0, sizeof(g));
+    g.alloc = hu_system_allocator();
+    g.prim.name = "primary";
+    g.prim.fail_first_n = 100;
+    g.prim.fail_err = HU_ERR_IO;
+    g.fb.name = "fallback";
+    hu_provider_t prim = {.ctx = &g.prim, .vtable = &fake_vtable};
+    hu_provider_t fb = {.ctx = &g.fb, .vtable = &fake_vtable};
+    g.extras[0].name = "fallback";
+    g.extras[0].name_len = 8;
+    g.extras[0].provider = fb;
+    hu_reliable_fallback_model_t fbm[1] = {{"gemini-3.5-flash", strlen("gemini-3.5-flash")}};
+    hu_reliable_model_fallback_entry_t mf[1] = {
+        {"GLM-4.5-Air-4bit", strlen("GLM-4.5-Air-4bit"), fbm, 1}};
+    HU_ASSERT_EQ(hu_reliable_create_ex(&g.alloc, prim, 0, 50, g.extras, 1, mf, 1, &g.reliable),
+                 HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = g.reliable.vtable->chat_with_system(g.reliable.ctx, &g.alloc, "sys", 3, "hi",
+                                                         2, "mlx_local", 9, 0.5, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT(out != NULL);
+    HU_ASSERT_STR_EQ(out, "fallback");
+    /* The primary was asked for the caller's model; the extra got the
+     * operator's declared fallback, never the caller's string. */
+    HU_ASSERT_STR_EQ(g.prim.seen_model, "mlx_local");
+    HU_ASSERT_STR_EQ(g.fb.seen_model, "gemini-3.5-flash");
+    g.alloc.free(g.alloc.ctx, out, out_len);
+    g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
+}
+
 void run_reliable_circuit_tests(void) {
     HU_TEST_SUITE("Reliable Circuit Breaker");
+    HU_RUN_TEST(test_unmatched_model_still_offers_declared_fallback_to_extras);
     HU_RUN_TEST(test_predicate_only_timeout_ends_provider_attempts);
     HU_RUN_TEST(test_timeout_is_not_retried_and_falls_to_fallback);
     HU_RUN_TEST(test_non_timeout_error_still_retries_same_provider);
