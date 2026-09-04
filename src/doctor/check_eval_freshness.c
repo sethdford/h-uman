@@ -12,11 +12,13 @@
 #include "human/core/json.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Default: the gate is nightly; three missed nights is a dark instrument. */
 #define HU_DOCTOR_EVAL_MAX_AGE_DAYS 3
@@ -85,13 +87,23 @@ bool hu_doctor_eval_verdict_is_real(const char *json, size_t len) {
     return real;
 }
 
-/* Read up to HU_DOCTOR_EVAL_VERDICT_MAX_BYTES of `path`; -1 when unreadable. */
-static long read_small_file(const char *path, char *buf, size_t cap) {
-    FILE *f = fopen(path, "rb");
-    if (!f)
+/* Read up to `cap - 1` bytes of the REGULAR file at `dirfd/name`; -1 when it
+ * is absent, a symlink, not a regular file, or unreadable. Opening relative
+ * to the directory handle with O_NOFOLLOW means a planted link inside the
+ * archive dir cannot redirect the doctor to another file. */
+static long read_small_file(int dirfd, const char *name, char *buf, size_t cap) {
+    int fd = openat(dirfd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
         return -1;
-    size_t n = fread(buf, 1, cap - 1, f);
-    fclose(f);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return -1;
+    }
+    ssize_t n = read(fd, buf, cap - 1);
+    close(fd);
+    if (n < 0)
+        return -1;
     buf[n] = '\0';
     return (long)n;
 }
@@ -106,18 +118,17 @@ int64_t hu_doctor_eval_newest_verdict_unix(const char *archive_dir) {
         closedir(d);
         return 0;
     }
+    int dfd = dirfd(d);
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (strncmp(e->d_name, "eval-", 5) != 0 || !has_suffix(e->d_name, ".json") ||
-            strstr(e->d_name, "-smoke-"))
-            continue;
-        char path[1024];
-        if (snprintf(path, sizeof(path), "%s/%s", archive_dir, e->d_name) >= (int)sizeof(path))
+            strstr(e->d_name, "-smoke-") || strchr(e->d_name, '/'))
             continue;
         struct stat st;
-        if (stat(path, &st) != 0 || st.st_size <= 0 || (int64_t)st.st_mtime <= best)
+        if (fstatat(dfd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(st.st_mode) ||
+            st.st_size <= 0 || (int64_t)st.st_mtime <= best)
             continue;
-        long n = read_small_file(path, buf, HU_DOCTOR_EVAL_VERDICT_MAX_BYTES);
+        long n = read_small_file(dfd, e->d_name, buf, HU_DOCTOR_EVAL_VERDICT_MAX_BYTES);
         if (n > 0 && hu_doctor_eval_verdict_is_real(buf, (size_t)n))
             best = (int64_t)st.st_mtime;
     }
