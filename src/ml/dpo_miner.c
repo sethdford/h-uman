@@ -279,6 +279,9 @@ hu_error_t hu_dpo_mine_corrections(hu_allocator_t *alloc, sqlite3 *db,
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         local_stats.triples_examined++;
+        if (opts && opts->count_only)
+            continue; /* probe: the nightly runner asks "is there anything to train on?"
+                       * and must never write while asking */
 
         const char *prompt = (const char *)sqlite3_column_text(stmt, 0);
         const char *rejected = (const char *)sqlite3_column_text(stmt, 1);

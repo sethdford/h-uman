@@ -1,0 +1,93 @@
+{
+  "date": "2026-09-02",
+  "binary": "./build/human",
+  "protocol": {
+    "longmemeval": "session-level R@5 from top-10 turns",
+    "locomo": "turn-level R@10",
+    "hybrid": "harness-side RRF(k=60) of kw+sem lists"
+  },
+  "longmemeval_s": {
+    "n": 60,
+    "kw": 0.883,
+    "sem": 0.983,
+    "hybrid": 0.983,
+    "by_type": {
+      "knowledge-update": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "n": 10
+      },
+      "multi-session": {
+        "kw": 0.9,
+        "sem": 0.9,
+        "hybrid": 0.9,
+        "n": 10
+      },
+      "single-session-assistant": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "n": 10
+      },
+      "single-session-preference": {
+        "kw": 0.6,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "n": 10
+      },
+      "single-session-user": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "n": 10
+      },
+      "temporal-reasoning": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "n": 10
+      }
+    }
+  },
+  "longmemeval_skipped_embedder_crash": [],
+  "locomo10": {
+    "n": 60,
+    "kw": 0.65,
+    "sem": 0.767,
+    "hybrid": 0.783,
+    "by_category": {
+      "1": {
+        "kw": 0.375,
+        "sem": 1.0,
+        "hybrid": 0.625,
+        "n": 8
+      },
+      "2": {
+        "kw": 0.833,
+        "sem": 0.833,
+        "hybrid": 0.833,
+        "n": 12
+      },
+      "3": {
+        "kw": 0.667,
+        "sem": 0.333,
+        "hybrid": 0.667,
+        "n": 3
+      },
+      "4": {
+        "kw": 0.667,
+        "sem": 0.81,
+        "hybrid": 0.857,
+        "n": 21
+      },
+      "5": {
+        "kw": 0.625,
+        "sem": 0.625,
+        "hybrid": 0.75,
+        "n": 16
+      }
+    }
+  },
+  "note": "locomo10 re-run after the key-parser fix (keys like 'D1:3' were truncated to 'D1' in the first run, reading 0.0 on every arm); longmemeval_s unchanged from the first run"
+}

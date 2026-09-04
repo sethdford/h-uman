@@ -145,6 +145,31 @@ static int read_first_pair(sqlite3 *db, char *prompt_out, size_t prompt_cap, cha
 }
 
 /* AC-7.2.1 */
+/* Task 7 (2026-09-01): `--count-only` is a READ-ONLY probe. The nightly runner
+ * used the real miner (a writer) as its pair-count probe and parsed a JSON key
+ * the miner never printed, so it failed every night. */
+static void test_count_only_counts_without_recording(void) {
+    const fixture_msg_t rows[] = {
+        {"sess-A", "user", "what time is the meeting", "2026-05-10 09:00:00"},
+        {"sess-A", "assistant", "the meeting is at 3pm", "2026-05-10 09:00:05"},
+        {"sess-A", "user", "no it is at 4pm please update", "2026-05-10 09:00:30"},
+    };
+    sqlite3 *db = open_messages_fixture(rows, sizeof(rows) / sizeof(rows[0]));
+    HU_ASSERT_NOT_NULL(db);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_mine_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.correction_window_sec = 300;
+    opts.count_only = 1;
+    hu_dpo_mine_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    HU_ASSERT_EQ(hu_dpo_mine_corrections(&alloc, db, &opts, &stats), HU_OK);
+    HU_ASSERT_TRUE(stats.triples_examined >= 1);
+    HU_ASSERT_EQ((int)stats.pairs_recorded, 0);
+    HU_ASSERT_EQ(count_dpo_pairs(db), 0); /* nothing written */
+    sqlite3_close(db);
+}
+
 static void miner_records_outbound_edit_pair_with_correct_fields(void) {
     const fixture_msg_t rows[] = {
         {"sess-A", "user", "what time is the meeting", "2026-05-10 09:00:00"},
@@ -447,6 +472,7 @@ void run_dpo_miner_tests(void) {
     HU_TEST_SUITE("DpoMiner");
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(miner_records_outbound_edit_pair_with_correct_fields);
+    HU_RUN_TEST(test_count_only_counts_without_recording);
     HU_RUN_TEST(miner_skips_unedited_messages);
     HU_RUN_TEST(miner_emits_jsonl_consumable_by_finetune_script);
     HU_RUN_TEST(miner_redacts_pii);

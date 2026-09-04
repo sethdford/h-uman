@@ -341,6 +341,39 @@ bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_alr
                                        bool courtesy_replies_enabled,
                                        uint32_t aggregate_today_count);
 
+/* ── Replay guards (incident 2026-09-01) ─────────────────────────────────
+ *
+ * After a reboot the daemon resumed from a persisted rowid two weeks behind
+ * chat.db and replayed ~2,000 old inbound messages as if fresh. These three
+ * pure/testable helpers are the guards the poll path now applies. */
+
+/* Default caps; each can be overridden at runtime by the env var named in
+ * the comment (same convention as HU_IMESSAGE_LOOKBACK). */
+#define HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT     50    /* HU_IMESSAGE_MAX_REPLAY */
+#define HU_IMESSAGE_MAX_INBOUND_AGE_SEC_DEFAULT 86400 /* HU_IMESSAGE_MAX_INBOUND_AGE_SEC */
+
+/* Replay guards (incident 2026-09-01): declared in imessage_replay_guard.h,
+ * compiled on every platform. */
+#include "human/channels/imessage_replay_guard.h"
+
+/* chat.db query: has a human-authored outbound (is_from_me=1, a real text
+ * bubble, not a tapback) landed in the same conversation AFTER `rowid`?
+ *
+ * Conversation is the chat with `chat_guid` when non-empty, else every
+ * message to `handle`. Outbound rows for which `is_ours(ctx, text, len)`
+ * returns true are the daemon's own sends and do NOT count — so a fresh
+ * process (empty echo ring) treats every later outbound as the human's,
+ * which is exactly right for a replay after restart.
+ *
+ * `sqlite_db` is a `sqlite3 *` (typed void* to keep sqlite out of this
+ * header). Returns false on NULL db or any query error (fail open: an
+ * unanswerable question must not suppress a live reply). Stub returns false
+ * when built without SQLite. */
+bool hu_imessage_user_replied_after(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t rowid,
+                                    bool (*is_ours)(void *ctx, const char *text, size_t len),
+                                    void *ctx);
+
 /* Pure text builder: format a courtesy reply into a caller-provided buffer.
  *
  *   persona_name        — display name to identify the assistant ("Atlas").

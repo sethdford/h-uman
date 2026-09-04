@@ -69,6 +69,23 @@ size_t hu_prompt_trim_plan(const char *buf, size_t len, size_t budget,
     return hu_prompt_trim_plan_floors(buf, len, budget, spans, span_count, NULL, cuts_out);
 }
 
+size_t hu_prompt_positional_cap_apply(char *buf, size_t len, size_t budget, size_t reserved_tail) {
+    if (!buf || len <= budget)
+        return len;
+    if (reserved_tail == 0 || reserved_tail >= budget || reserved_tail >= len) {
+        size_t cut = hu_prompt_positional_cap_point(buf, len, budget);
+        buf[cut] = '\0';
+        return cut;
+    }
+    size_t head_budget = budget - reserved_tail;
+    size_t tail_start = len - reserved_tail;
+    size_t cut = hu_prompt_positional_cap_point(buf, tail_start, head_budget);
+    memmove(buf + cut, buf + tail_start, reserved_tail);
+    size_t new_len = cut + reserved_tail;
+    buf[new_len] = '\0';
+    return new_len;
+}
+
 size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget) {
     if (!buf || len <= budget)
         return len;

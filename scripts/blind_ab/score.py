@@ -265,6 +265,12 @@ def main():
     ap.add_argument("--emit-gate", default=None,
                     help="Write this rater's half of the blind_ab gate JSON to "
                          "this path (requires --rater)")
+    ap.add_argument("--arm-adapter", default=None,
+                    help="adapter (path or name) that generated the AI replies in this sheet; "
+                         "recorded as human.arm.adapter so the gate can be tied to what is served "
+                         "(doctor check blind_ab_gate refuses to vouch for an unrecorded arm)")
+    ap.add_argument("--arm-note", default=None,
+                    help="free-text provenance for the arm (prompt head, base model, sheet id)")
     ap.add_argument("--rater", choices=("human", "synthetic"), default=None,
                     help="Who produced the ratings. Gate files are written ONLY "
                          "when this is given: 'human' writes the promotion-"
@@ -330,6 +336,9 @@ def main():
         "n": agg["n"],
         "verdict": verdict,
     }
+    if a.arm_adapter or a.arm_note:
+        half_fields["arm"] = {k: v for k, v in (("adapter", a.arm_adapter),
+                                                ("note", a.arm_note)) if v}
     if a.emit_gate:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         import blind_ab_gate as _gate
@@ -392,6 +401,9 @@ def main():
             "ci_lo": round(agg["ci_lo"], 4),
             "n": agg["n"],
         }
+        if a.arm_adapter or a.arm_note:
+            half["arm"] = {k: v for k, v in (("adapter", a.arm_adapter),
+                                             ("note", a.arm_note)) if v}
         if a.rater == "synthetic":
             half["judge_model"] = next(
                 (r.get("judge_model") for r in rows if r.get("judge_model")), None)

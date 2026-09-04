@@ -282,6 +282,9 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
 
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
                                     mf_entries, mf_count, out);
+        if (err == HU_OK)
+            hu_reliable_set_circuit(out, cfg->reliability.circuit_failure_threshold,
+                                    cfg->reliability.circuit_recovery_secs);
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);
@@ -475,6 +478,9 @@ hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *
 
     err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count,
                                 mf_entries, mf_count, out);
+    if (err == HU_OK)
+        hu_reliable_set_circuit(out, cfg->reliability.circuit_failure_threshold,
+                                cfg->reliability.circuit_recovery_secs);
     if (err != HU_OK) {
         if (base.vtable && base.vtable->deinit)
             base.vtable->deinit(base.ctx, alloc);

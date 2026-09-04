@@ -26,7 +26,16 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/process_util.h"
 #include "human/ml/lora_ema.h"
+
+const char *hu_lora_retrain_miner_argv0(const char *ctx_argv0, const char *self_exe) {
+    if (ctx_argv0 && ctx_argv0[0])
+        return ctx_argv0;
+    if (self_exe && self_exe[0])
+        return self_exe;
+    return "human";
+}
 
 #include <dirent.h>
 #include <errno.h>
@@ -62,6 +71,8 @@ const char *hu_lora_retrain_outcome_str(hu_lora_retrain_outcome_t o) {
         return "skipped_forgetting";
     case HU_LORA_RETRAIN_OUTCOME_EMA_SKIPPED:
         return "ema_skipped";
+    case HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER:
+        return "skipped_no_trainer";
     case HU_LORA_RETRAIN_OUTCOME_UNKNOWN:
     default:
         return "unknown";
@@ -89,6 +100,8 @@ hu_lora_retrain_outcome_t hu_lora_retrain_outcome_from_str(const char *s) {
         return HU_LORA_RETRAIN_OUTCOME_SKIPPED_FORGETTING;
     if (strcmp(s, "ema_skipped") == 0)
         return HU_LORA_RETRAIN_OUTCOME_EMA_SKIPPED;
+    if (strcmp(s, "skipped_no_trainer") == 0)
+        return HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER;
     return HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
 }
 
@@ -664,7 +677,12 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
     char payload[2048];
 
     /* ── STEP 1: pair-count probe ────────────────────────────────────── */
-    const char *miner_argv0 = ctx->miner_argv0 ? ctx->miner_argv0 : "human";
+    /* Exec the SAME binary this daemon runs as, never a PATH-resolved "human"
+     * (2026-09-02: that was a May-17 CLI; the probe was dead for weeks). */
+    char self_exe[1024];
+    if (!hu_process_self_exe_path(self_exe, sizeof(self_exe)))
+        self_exe[0] = '\0';
+    const char *miner_argv0 = hu_lora_retrain_miner_argv0(ctx->miner_argv0, self_exe);
     const char *miner_sub0 = ctx->miner_subcmd[0] ? ctx->miner_subcmd[0] : "ml";
     const char *miner_sub1 = ctx->miner_subcmd[1] ? ctx->miner_subcmd[1] : "mine-corrections";
     const char *probe_argv[] = {miner_argv0, miner_sub0, miner_sub1, "--count-only", NULL};
@@ -700,8 +718,21 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
     retrain_emit(ctx, "lora_retrain_scheduled", payload);
 
     /* ── STEP 2: finetune ────────────────────────────────────────────── */
-    const char *finetune =
-        ctx->finetune_script ? ctx->finetune_script : "scripts/finetune-gemma.py";
+    /* No configured trainer → stop here, loudly. The old relative default
+     * ("scripts/finetune-gemma.py") resolved against the daemon's cwd and
+     * failed with -1 every night; worse, if it HAD resolved it would have
+     * loaded a second model next to mlx-server. Training runs only in the
+     * launchd nightly-retrain window, which owns that sequencing. */
+    if (!ctx->finetune_script || !ctx->finetune_script[0]) {
+        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER;
+        snprintf(payload, sizeof(payload),
+                 "{\"pairs\":%lld,\"reason\":\"finetune_script not configured; "
+                 "ai.human.nightly-retrain owns training\"}",
+                 pairs);
+        retrain_emit(ctx, "lora_retrain_skipped_no_trainer", payload);
+        goto done;
+    }
+    const char *finetune = ctx->finetune_script;
     const char *finetune_argv[] = {
         finetune, "--dpo", "--from-corrections", "--no-restart-server", "--no-version", NULL};
     hu_lora_retrain_proc_result_t train_result;

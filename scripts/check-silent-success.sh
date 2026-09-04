@@ -39,15 +39,15 @@ fi
 # proven bug -- it only duplicates if the same row is re-inserted. Measured
 # 2026-08-02 against the live memory.db:
 #
-#   current_events       280,525 / 120,814 distinct = 2.3x  <- REAL, ~160k excess
+#         280,525 / 120,814 distinct = 2.3x  <- REAL, ~160k excess
 #   behavioral_feedback   16,312 /  16,308 distinct = 1.0x
 #   frontier_state            12 /      12 distinct = 1.0x
 #
 # So the check flags six and only one is actually duplicating. Baseline the known
 # ones and fail on NEW ones, matching sqlite-includer-ratchet / clone-ratchet /
-# file-size-ceiling. current_events is a live follow-up, not a false positive:
+# file-size-ceiling. is a live follow-up, not a false positive:
 # it wants the same UNIQUE-index treatment `opinions` got.
-BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries canvas_versions canvases causal_links comfort_patterns contact_baselines contact_identities contact_knowledge core_memory current_events dpo_auto_extractions dpo_pair_hashes episodic_patterns frontier_state general_lessons hyperedge_members kv lancedb_memories memory_edges oauth_tokens opinions reaction_lookup reciprocity_scores reflection_surfacings shared_references skill_profiles social_graph strategy_weights style_fingerprints temporal_patterns tier_memory tom_user_expectations tool_prefs topic_baselines training_data_extractions "
+BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries canvas_versions canvases causal_links comfort_patterns contact_baselines contact_identities contact_knowledge core_memory dpo_auto_extractions dpo_pair_hashes episodic_patterns frontier_state general_lessons hyperedge_members kv lancedb_memories memory_edges oauth_tokens opinions reaction_lookup reciprocity_scores reflection_surfacings shared_references skill_profiles social_graph strategy_weights style_fingerprints temporal_patterns tier_memory tom_user_expectations tool_prefs topic_baselines training_data_extractions "
 
 # Check 2 baselines by FILE, not by count. A global count is wrong for a staged
 # subset: one NEW file with a single discard passes if 1 < the tree-wide total,
