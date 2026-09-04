@@ -214,12 +214,17 @@ judge_creds_present() {
 archive_verdict() {
   local harness="$1" latest_json="$2"
   [ -f "$latest_json" ] || { log "  (no verdict json at $latest_json — nothing to archive)"; return 0; }
-  local dated="${ARCHIVE_DIR}/eval-${harness}-$(date '+%Y-%m-%d').json"
+  # 2026-09-04: smoke runs get their own slot. Two --smoke invocations had
+  # overwritten the day's real multiturn archive with a 1-scenario result, and
+  # the doctor's eval_freshness check ignores "-smoke-" files by name.
+  local tag=""
+  [ "$SMOKE" -eq 1 ] && tag="smoke-"
+  local dated="${ARCHIVE_DIR}/eval-${harness}-${tag}$(date '+%Y-%m-%d').json"
   cp -f "$latest_json" "$dated"
   log "  archived → $dated"
-  # Prune: keep the $RETAIN most recent dated files for this harness.
+  # Prune: keep the $RETAIN most recent dated files for this harness+slot.
   local stale
-  stale=$(ls -t "${ARCHIVE_DIR}/eval-${harness}-"*.json 2>/dev/null | tail -n +$((RETAIN + 1)) || true)
+  stale=$(ls -t "${ARCHIVE_DIR}/eval-${harness}-${tag}"[0-9]*.json 2>/dev/null | tail -n +$((RETAIN + 1)) || true)
   if [ -n "$stale" ]; then
     echo "$stale" | xargs rm -f
     log "  pruned $(echo "$stale" | wc -l | tr -d ' ') old ${harness} verdict(s)"

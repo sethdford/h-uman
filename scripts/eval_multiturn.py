@@ -184,7 +184,13 @@ Return JSON with this structure:
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-        return json.loads(raw)
+        result = json.loads(raw)
+        # 2026-09-04: the judge sometimes wraps the object in a one-element
+        # list; every caller does result.get(...), and the nightly crashed on
+        # 'list' object has no attribute 'get' before writing any verdict.
+        if isinstance(result, list):
+            result = next((r for r in result if isinstance(r, dict)), None)
+        return result if isinstance(result, dict) else None
     except Exception as e:
         print(f"  Judge error: {e}")
         return None
