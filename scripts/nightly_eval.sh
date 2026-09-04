@@ -142,8 +142,14 @@ gateway_up() {
 # up. In-process generation (a second 56 GB copy) is only allowed when :8741 is
 # DOWN and no trainer is holding the weights. 2026-09-03 04:31: an in-process
 # load beside the live server reached 94.8 GB wired and killed production.
+# 2026-09-04: nightly-retrain.sh now really stops :8741 at 03:07, so this 04:05
+# run can meet the window mid-flight. The retrain script itself, its
+# training_loop.py driver (which spawns `-m mlx_lm lora`), and the steering
+# extractor all hold the base — and between those phases only the script is
+# alive — so all three count as "a trainer". Pinned by
+# scripts/test_nightly_eval_trainer_guard.sh.
 trainer_running() {
-  pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|mlx_tune_train|dpo_mlx_train|kto_mlx_train|grpo_mlx_train" >/dev/null 2>&1
+  pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|mlx_tune_train|dpo_mlx_train|kto_mlx_train|grpo_mlx_train|nightly-retrain\.sh|training_loop\.py|extract_persona_vectors" >/dev/null 2>&1
 }
 fidelity_mode() {  # served | inprocess | skip-trainer
   if server_up; then echo served
