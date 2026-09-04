@@ -409,6 +409,7 @@ void run_graph_tests(void);
 void run_graph_ingest_tests(void);
 void run_agent_facts_tests(void);
 void run_cli_memory_import_tests(void);
+void run_cli_commands_memory_print_tests(void);
 void run_store_sqlite_vec_tests(void);
 void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
@@ -1471,6 +1472,7 @@ int main(int argc, char **argv) {
     run_graph_ingest_tests();
     run_agent_facts_tests();
     run_cli_memory_import_tests();
+    run_cli_commands_memory_print_tests();
     run_store_sqlite_vec_tests();
     run_semantic_index_tests();
     run_hybrid_reconstructive_tests();

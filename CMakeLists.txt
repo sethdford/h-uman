@@ -3650,6 +3650,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph_ingest.c
     tests/test_agent_facts.c
     tests/test_cli_memory_import.c
+    tests/test_cli_commands_memory_print.c
     tests/test_store_sqlite_vec.c
     tests/test_semantic_index.c
     tests/test_hybrid_reconstructive.c
