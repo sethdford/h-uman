@@ -131,7 +131,15 @@ run_mlxtune_candidate_stage() {
     # the watchdog SIGKILLs train-glm-adapter.sh mid-run: a killed process
     # cannot run its OWN traps either way, so serving stays down until OUR
     # trap restores it, same as any other failure path here.
-    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 bash "$REPO/scripts/train-glm-adapter.sh" \
+    # HU_TRAIN_REBALANCE_CASING=1: pull the corpus's chosen-side
+    # lowercase-start/terminal-punct habit back toward Seth's measured style
+    # card before training (scripts/rebalance_preference_corpus.py) — see the
+    # 2026-09-04 finding that an 86% lowercase-start production habit traced
+    # back to a corpus that was 77.5% lowercase by construction, an axis LUAR
+    # never measures. The nightly candidate path always wants this; a
+    # standalone `bash scripts/train-glm-adapter.sh` invocation does not
+    # unless the caller opts in (default 0 — see that script).
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 bash "$REPO/scripts/train-glm-adapter.sh" \
         --config "$config" --trainer mlx_tune --train-mode simpo \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
     local job_pid=$!

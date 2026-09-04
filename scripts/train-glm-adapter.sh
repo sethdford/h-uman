@@ -34,6 +34,18 @@ SERVICE=gui/501/ai.human.mlx-server
 # every line below behaves exactly as it always has.
 MANAGED_BY_CALLER="${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-0}"
 
+# HU_TRAIN_REBALANCE_CASING=1: run scripts/rebalance_preference_corpus.py on
+# the corpus's train.jsonl before training, pulling the CHOSEN side's
+# lowercase-start/terminal-punct habit back toward Seth's measured style
+# card (see that script's docstring for the 2026-09-04 finding: an 86%
+# lowercase-start habit in production traced back to a preference corpus
+# whose chosen side was 77.5% lowercase by construction, with LUAR blind to
+# the axis). Default OFF so every existing caller is unaffected; the
+# mlx-tune candidate stage in scripts/nightly-retrain.sh sets it to 1.
+# Refuses (nonzero exit) rather than train on a requested-but-failed
+# rebalance -- see the die() call at the rebalance step below.
+REBALANCE_CASING="${HU_TRAIN_REBALANCE_CASING:-0}"
+
 # Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
 # forking this script, so every run keeps the same guards.
 CONFIG=/Users/sethford/.human/training-data/glm-v62-sft-config.yaml
@@ -229,6 +241,29 @@ OTHERS=$(pgrep -fl "mlx-server" 2>/dev/null | grep -v "port 8741" | wc -l | tr -
 
 # --- train --------------------------------------------------------------------
 mkdir -p "$ADAPTER" "$(dirname "$LOG")"
+
+# --- optional casing rebalance (HU_TRAIN_REBALANCE_CASING=1) -------------------
+# Never mutates the original corpus dir -- stages a rebalanced copy plus a
+# scratch config pointing at it, then trains from THAT config. $CONFIG is
+# reassigned below so every trainer branch (mlx_lm / mlx_tune / mlx_lm_lora)
+# picks it up unchanged.
+if [ "$REBALANCE_CASING" = "1" ]; then
+  REBAL_DIR="${DATA_DIR}-casing-${STAMP}"
+  say "HU_TRAIN_REBALANCE_CASING=1 -- rebalancing $DATA_DIR/train.jsonl -> $REBAL_DIR"
+  mkdir -p "$REBAL_DIR"
+  "$TRAIN_PY" "$(dirname "$0")/rebalance_preference_corpus.py" \
+      --input "$DATA_DIR/train.jsonl" \
+      --output "$REBAL_DIR/train.jsonl" \
+      --sidecar "$REBAL_DIR/train.rebalance_stats.json" \
+      2>&1 | tee -a "$LOG"
+  REBAL_RC=${PIPESTATUS[0]}
+  [ "$REBAL_RC" -eq 0 ] || die "casing rebalance failed (rc=$REBAL_RC, see $LOG) -- refusing to train on a requested-but-failed rebalance"
+  cp "$DATA_DIR/valid.jsonl" "$REBAL_DIR/valid.jsonl"
+  sed "s|^data:.*|data: $REBAL_DIR|" "$CONFIG" > "$REBAL_DIR/config.yaml"
+  CONFIG="$REBAL_DIR/config.yaml"
+  say "casing rebalance done -- training from $CONFIG (stats: $REBAL_DIR/train.rebalance_stats.json)"
+fi
+
 say "training -> $ADAPTER"
 say "log      -> $LOG"
 # --train-mode and --beta MUST be CLI flags. mlx_lm_lora applies a YAML key only
