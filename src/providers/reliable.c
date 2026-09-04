@@ -191,39 +191,42 @@ static hu_error_t model_chain(hu_reliable_ctx_t *r, hu_allocator_t *alloc, const
     *out_chain = NULL;
     *out_count = 0;
 
+    /* Pick the entry whose declared fallbacks form the chain's tail: the one
+     * matching the caller's model, else the FIRST declared entry. A caller's
+     * model string is a fact about the primary, never a model an extra can
+     * serve — the 2026-09-04 audit found the reflection loop passing the
+     * provider NAME ("mlx_local"), and the old single-element chain handed
+     * that to Vertex 652 times in one night, so no cloud path existed during
+     * any local outage. With no fallbacks declared the chain is [model]. */
+    const hu_reliable_model_fallback_entry_t *entry = NULL;
     for (size_t i = 0; i < r->model_fallbacks_count; i++) {
         const hu_reliable_model_fallback_entry_t *e = &r->model_fallbacks[i];
-        if (!model_eq(e->model, e->model_len, model, model_len))
-            continue;
-
-        size_t total = 1 + (e->fallbacks ? e->fallbacks_count : 0);
-        if (total > HU_MODEL_CHAIN_MAX)
-            total = HU_MODEL_CHAIN_MAX;
-
-        hu_model_ref_t *chain =
-            (hu_model_ref_t *)alloc->alloc(alloc->ctx, total * sizeof(hu_model_ref_t));
-        if (!chain)
-            return HU_ERR_OUT_OF_MEMORY;
-
-        chain[0].model = model;
-        chain[0].model_len = model_len;
-        for (size_t j = 0; j < total - 1 && e->fallbacks; j++) {
-            chain[1 + j].model = e->fallbacks[j].model;
-            chain[1 + j].model_len = e->fallbacks[j].model_len;
+        if (model_eq(e->model, e->model_len, model, model_len)) {
+            entry = e;
+            break;
         }
-        *out_chain = chain;
-        *out_count = total;
-        return HU_OK;
     }
+    if (!entry && r->model_fallbacks_count > 0)
+        entry = &r->model_fallbacks[0];
 
-    /* No fallbacks: single-element chain */
-    hu_model_ref_t *chain = (hu_model_ref_t *)alloc->alloc(alloc->ctx, sizeof(hu_model_ref_t));
+    size_t tail = (entry && entry->fallbacks) ? entry->fallbacks_count : 0;
+    size_t total = 1 + tail;
+    if (total > HU_MODEL_CHAIN_MAX)
+        total = HU_MODEL_CHAIN_MAX;
+
+    hu_model_ref_t *chain =
+        (hu_model_ref_t *)alloc->alloc(alloc->ctx, total * sizeof(hu_model_ref_t));
     if (!chain)
         return HU_ERR_OUT_OF_MEMORY;
+
     chain[0].model = model;
     chain[0].model_len = model_len;
+    for (size_t j = 0; j + 1 < total; j++) {
+        chain[1 + j].model = entry->fallbacks[j].model;
+        chain[1 + j].model_len = entry->fallbacks[j].model_len;
+    }
     *out_chain = chain;
-    *out_count = 1;
+    *out_count = total;
     return HU_OK;
 }
 
