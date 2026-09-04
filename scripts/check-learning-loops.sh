@@ -40,7 +40,10 @@ age_days() { # file -> integer days since mtime
 
 # ── 1. LoRA adapters: newest adapter is recent AND has real weights ──────
 ADIR="$HUMAN_DIR/training-data/adapters"
-newest="$(ls -dt "$ADIR"/*/ 2>/dev/null | head -1)"
+# nightly-retrain.sh quarantines a fabricated adapter by renaming it
+# <dir>.rejected-<epoch>; mtime survives the rename, so without the filter a
+# quarantined no-op is "newest" and this line reports the wrong thing.
+newest="$(ls -dt "$ADIR"/*/ 2>/dev/null | grep -v '\.rejected-' | head -1)"
 if [[ -z "$newest" ]]; then
     bad "adapters: none under $ADIR"
 else

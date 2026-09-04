@@ -510,6 +510,22 @@ static hu_doctor_check_result_t run_serving_stability_check(hu_doctor_check_t *s
             text = launchctl_buf;
     }
 #endif
+    const char *daemon_text = NULL;
+#if !HU_IS_TEST
+    /* Second artifact: the daemon's own launchd record. Its run count is the
+     * only thing that moved while 8 ASan aborts went unreported on 2026-09-04. */
+    static char daemon_buf[4096];
+    snprintf(cmd, sizeof(cmd), "launchctl print gui/%u/ai.human.service-loop 2>/dev/null",
+             (unsigned)getuid());
+    FILE *dp = popen(cmd, "r");
+    if (dp) {
+        size_t n = fread(daemon_buf, 1, sizeof(daemon_buf) - 1, dp);
+        daemon_buf[n] = '\0';
+        pclose(dp);
+        if (n > 0)
+            daemon_text = daemon_buf;
+    }
+#endif
     hu_doctor_serving_stability_ctx_t sctx = {
         .crash_dir = NULL,
         .crash_prefix = "Python-",
@@ -517,6 +533,8 @@ static hu_doctor_check_result_t run_serving_stability_check(hu_doctor_check_t *s
         .now_unix = 0,
         .window_hours = 24,
         .max_crashes = 2,
+        .daemon_crash_prefix = "human-daemon-",
+        .daemon_launchctl_text = daemon_text,
     };
     return hu_doctor_check_serving_stability.run(self, &sctx);
 }
