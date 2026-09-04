@@ -292,10 +292,21 @@ serving_stopped=1
 # Wait for the 56 GB to actually come back — the process closing its socket does
 # NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that motivated
 # the barrier in human-serve.sh.
-for _ in $(seq 1 60); do
+# 2026-09-04: a 120 s cap was too short — the 54 GB server took longer than
+# that to exit after bootout, the script declared it "still alive", refused,
+# and restored serving without training. Wait up to STOP_WAIT_SECS (default
+# 900) polling every 5 s, and log the process state once a minute so the
+# next reader can see whether it is exiting (E) or truly stuck.
+STOP_WAIT_SECS="${HU_RETRAIN_STOP_WAIT_SECS:-900}"
+waited=0
+while :; do
     if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
        ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
-    sleep 2
+    if (( waited >= STOP_WAIT_SECS )); then break; fi
+    if (( waited % 60 == 0 )); then
+        log "  waiting for mlx-server to exit (${waited}s): $(ps -o pid=,stat=,rss= -p "$(pgrep -f "mlx-server\.py .*--port ${PORT}" | head -1)" 2>/dev/null | tr -s ' ')"
+    fi
+    sleep 5; waited=$((waited + 5))
 done
 if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
     log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
