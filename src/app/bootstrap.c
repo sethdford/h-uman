@@ -1327,6 +1327,25 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (cfg->channels.pwa.apps_count > 0 && ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
             err = hu_pwa_channel_create(alloc, (const char *const *)cfg->channels.pwa.apps,
                                         cfg->channels.pwa.apps_count, &bi->channel_slots[ch_count]);
+            /* 2026-09-04: nothing else ever called this channel's start(), so
+             * hu_pwa_channel_poll returned on every tick (running=false) and
+             * ten configured apps produced zero inbound messages. A start that
+             * fails (no browser, no monitored tab) is logged and the channel
+             * is not registered — an unstarted poll fn is silent dead weight. */
+            if (err == HU_OK) {
+                hu_channel_t *pwa = &bi->channel_slots[ch_count];
+                hu_error_t start_err = pwa->vtable && pwa->vtable->start
+                                           ? pwa->vtable->start(pwa->ctx)
+                                           : HU_ERR_NOT_SUPPORTED;
+                if (start_err != HU_OK) {
+                    hu_log_warn("bootstrap", NULL,
+                                "pwa channel not started (%s) — %zu configured app(s) will not "
+                                "be polled; open the tabs and allow browser automation",
+                                hu_error_string(start_err), cfg->channels.pwa.apps_count);
+                    hu_pwa_channel_destroy(pwa);
+                    err = start_err;
+                }
+            }
             if (err == HU_OK) {
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
