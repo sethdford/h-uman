@@ -45,6 +45,12 @@ MANAGED_BY_CALLER="${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-0}"
 # Refuses (nonzero exit) rather than train on a requested-but-failed
 # rebalance -- see the die() call at the rebalance step below.
 REBALANCE_CASING="${HU_TRAIN_REBALANCE_CASING:-0}"
+# HU_TRAIN_MATCH_EMOJI=1 (default): the same rebalance pass also strips emoji
+# from the REJECTED side of pairs whose chosen side has none, so emoji never
+# reads as "rejected" to ORPO/SimPO (2026-09-05 audit: chosen 0.5% vs rejected
+# 7.3% in the v6 corpus; the served adapter emitted 0 emoji in 68/68 replies).
+# Only takes effect when the rebalance pass runs (HU_TRAIN_REBALANCE_CASING=1).
+MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}"
 
 # Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
 # forking this script, so every run keeps the same guards.
@@ -263,6 +269,7 @@ if [ "$REBALANCE_CASING" = "1" ]; then
       --output "$REBAL_DIR/train.jsonl" \
       --sidecar "$REBAL_DIR/train.rebalance_stats.json" \
       --match-sides \
+      $( [ "$MATCH_EMOJI" = "1" ] && printf -- '--match-emoji' ) \
       2>&1 | tee -a "$LOG"
   REBAL_RC=${PIPESTATUS[0]}
   [ "$REBAL_RC" -eq 0 ] || die "casing rebalance failed (rc=$REBAL_RC, see $LOG) -- refusing to train on a requested-but-failed rebalance"

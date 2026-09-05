@@ -150,13 +150,20 @@ TAG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --tag) TAG=$2; shift 2 ;;
-    --config|--trainer|--train-mode|--beta|--gamma|--est-minutes) shift 2 ;;
+    --trainer) TRAINER_ARG=$2; shift 2 ;;
+    --train-mode) MODE_ARG=$2; shift 2 ;;
+    --beta) BETA_ARG=$2; shift 2 ;;
+    --config|--gamma|--est-minutes) shift 2 ;;
     *) shift ;;
   esac
 done
 {
   echo "MANAGED_BY_CALLER=${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-unset}"
+  echo "MATCH_EMOJI=${HU_TRAIN_MATCH_EMOJI:-unset}"
   echo "TAG=$TAG"
+  echo "TRAINER=${TRAINER_ARG:-unset}"
+  echo "MODE=${MODE_ARG:-unset}"
+  echo "BETA=${BETA_ARG:-unset}"
 } > "$HOME/.fake-train-glm-adapter.record"
 
 STAMP="$(date +%Y%m%d%H%M%S)fake"
@@ -186,6 +193,7 @@ echo "[fake-train-glm-adapter] wrote $OUT (managed_by_caller=${HU_TRAIN_SERVING_
 exit 0
 FAKE_TRAIN
 chmod +x "$FAKE_REPO/scripts/train-glm-adapter.sh"
+T6_FAKE_TRAIN_BACKUP=$(mktemp); cp "$FAKE_REPO/scripts/train-glm-adapter.sh" "$T6_FAKE_TRAIN_BACKUP"
 
 cat > "$FAKE_REPO/scripts/blind_ab/score_candidate_offline.py" <<'FAKE_SCORE'
 #!/usr/bin/env python3
@@ -199,6 +207,7 @@ with open(record, "a") as f:
 print("[fake score_candidate_offline] invoked")
 sys.exit(0)
 FAKE_SCORE
+T6_FAKE_SCORE_BACKUP=$(mktemp); cp "$FAKE_REPO/scripts/blind_ab/score_candidate_offline.py" "$T6_FAKE_SCORE_BACKUP"
 
 mkdir -p "$T6/.human/training-data/glm-v61-pref" "$T6/.human/venvs/eval312/bin"
 for i in $(seq 1 200); do
@@ -308,5 +317,35 @@ check "misbehaving-wrapper: never reaches the scoring-invocation line" \
 [ -f "$T7/.fake-listener.pid" ] && kill "$(cat "$T7/.fake-listener.pid")" 2>/dev/null
 wait 2>/dev/null
 rm -rf "$T7"
+
+# ── Case 9: trainer/mode/beta knobs reach the wrapper (2026-09-05) ──────────
+#    mlx_tune/simpo has never produced an adapter; the ORPO path that made the
+#    served v6 adapter is selectable via HU_RETRAIN_MLXTUNE_TRAINER/MODE/BETA.
+T9=$(mktemp -d)
+FAKE_REPO9="$T9/repo"; mkdir -p "$FAKE_REPO9/scripts/blind_ab"
+cp "$T6_FAKE_TRAIN_BACKUP" "$FAKE_REPO9/scripts/train-glm-adapter.sh"
+cp "$T6_FAKE_SCORE_BACKUP" "$FAKE_REPO9/scripts/blind_ab/score_candidate_offline.py"
+cp "$HERE/adapter_is_real.py" "$FAKE_REPO9/scripts/adapter_is_real.py"
+chmod +x "$FAKE_REPO9/scripts/train-glm-adapter.sh"
+mkdir -p "$T9/.human/training-data/glm-v61-pref" "$T9/.human/venvs/eval312/bin"
+for i in $(seq 1 200); do
+    printf '{"prompt":"p%d","chosen":"c%d","rejected":"r%d"}\n' "$i" "$i" "$i"
+done > "$T9/.human/training-data/glm-v61-pref/train.jsonl"
+ln -s "$(command -v python3)" "$T9/.human/venvs/eval312/bin/python"
+out9=$(HOME="$T9" HU_REPO_DIR="$FAKE_REPO9" HU_RETRAIN_PORT=19741 \
+       HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_MLXTUNE=1 \
+       HU_RETRAIN_MLXTUNE_TRAINER=mlx_lm_lora HU_RETRAIN_MLXTUNE_MODE=orpo HU_RETRAIN_MLXTUNE_BETA=0.05 bash -c '
+    source "'"$SCRIPT"'"
+    serving_stopped=1
+    run_mlxtune_candidate_stage
+')
+rec9="$(cat "$T9/.fake-train-glm-adapter.record" 2>/dev/null)"
+check "knobs: wrapper received --trainer mlx_lm_lora" "grep -q '^TRAINER=mlx_lm_lora$' <<<\"\$rec9\"" "$rec9"
+check "knobs: wrapper received --train-mode orpo" "grep -q '^MODE=orpo$' <<<\"\$rec9\"" "$rec9"
+check "knobs: wrapper received --beta 0.05" "grep -q '^BETA=0.05$' <<<\"\$rec9\"" "$rec9"
+check "knobs: emoji neutralisation is on by default for the candidate" "grep -q '^MATCH_EMOJI=1$' <<<\"\$rec9\"" "$rec9"
+check "knobs: tag names the mode (mlxtune-orpo-...)" "grep -q '^TAG=mlxtune-orpo-' <<<\"\$rec9\"" "$rec9"
+check "knobs: stage still reaches the scoring step" "[[ \"\$out9\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out9"
+rm -rf "$T9" "$T6_FAKE_TRAIN_BACKUP" "$T6_FAKE_SCORE_BACKUP"
 
 exit $fail
