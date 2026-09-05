@@ -315,6 +315,235 @@ def test_cli_refuses_on_unknown_row_shape():
     assert not os.path.exists(out)
 
 
+# --------------------------------------------------------------------------
+# index_rows now indexes BOTH sides (needed for --match-sides to write back
+# the rejected side); confirm the index shape didn't regress.
+# --------------------------------------------------------------------------
+
+
+def test_index_rows_pref_shape_rejected_index_points_at_same_rows():
+    rows = _pref_rows(5)
+    chosen_idx, rejected_idx = rbc.index_rows(rows)
+    assert len(rejected_idx) == 5
+    assert all(f == "rejected" for _, f in rejected_idx)
+    # preference shape: chosen and rejected indices name the SAME rows
+    assert [i for i, _ in chosen_idx] == [i for i, _ in rejected_idx]
+
+
+def test_index_rows_kto_shape_rejected_index_points_at_label_false_rows():
+    rows = _kto_rows(4, 3)
+    chosen_idx, rejected_idx = rbc.index_rows(rows)
+    assert len(rejected_idx) == 3
+    assert all(f == "completion" for _, f in rejected_idx)
+    # KTO shape: chosen (label=True) and rejected (label=False) are DIFFERENT rows
+    assert set(i for i, _ in chosen_idx).isdisjoint(set(i for i, _ in rejected_idx))
+
+
+# --------------------------------------------------------------------------
+# --match-sides
+# --------------------------------------------------------------------------
+
+
+def _pref_rows_mismatched(n, chosen_lc_frac=0.9, chosen_pt_frac=0.05,
+                           rejected_lc_frac=0.0, rejected_pt_frac=0.9):
+    """Reproduces the 2026-09-04 shape: rejected is heavily punctuated and
+    rarely lowercase, chosen is the opposite -- rebalancing chosen ALONE
+    widens the terminal-punct margin instead of closing it."""
+    rows = []
+    for i in range(n):
+        c_lc = i < round(n * chosen_lc_frac)
+        c_pt = i < round(n * chosen_pt_frac)
+        chosen = "yeah that works for me" if c_lc else "Yeah that works for me"
+        if c_pt:
+            chosen += "."
+        r_lc = i < round(n * rejected_lc_frac)
+        r_pt = i < round(n * rejected_pt_frac)
+        rejected = "sure happy to help with that" if r_lc else "Sure happy to help with that"
+        if r_pt:
+            rejected += "."
+        rows.append({"prompt": f"ctx {i}", "chosen": chosen, "rejected": rejected})
+    return rows
+
+
+def test_match_sides_off_by_default():
+    ap = rbc.build_parser()
+    args = ap.parse_args(["--input", "x", "--output", "y"])
+    assert args.match_sides is False
+    assert args.max_margin == rbc.DEFAULT_MAX_MARGIN
+
+
+def test_match_sides_pulls_rejected_to_the_same_target_as_chosen():
+    """The headline contract: with --match-sides both sides converge to the
+    SAME target rate on both axes, so the chosen-vs-rejected margin collapses
+    toward 0 instead of the un-matched run's margin (which the 2026-09-04
+    dry-run measured getting WORSE on terminal-punct, 0.338 -> 0.406)."""
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    _write_jsonl(inp, _pref_rows_mismatched(300))
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18",
+              "--match-sides"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    out_rows = [json.loads(line) for line in open(out)]
+    chosen_texts = [row["chosen"] for row in out_rows]
+    rejected_texts = [row["rejected"] for row in out_rows]
+    c_lc, _ = rbc.lowercase_rate(chosen_texts)
+    r_lc, _ = rbc.lowercase_rate(rejected_texts)
+    c_pt, _ = rbc.punct_rate(chosen_texts)
+    r_pt, _ = rbc.punct_rate(rejected_texts)
+    assert abs(c_lc - 0.08) < 0.02
+    assert abs(r_lc - 0.08) < 0.02
+    assert abs(c_pt - 0.18) < 0.02
+    assert abs(r_pt - 0.18) < 0.02
+    stats = json.load(open(out + ".stats.json"))
+    assert stats["match_sides"] is True
+    assert stats["stats"]["lowercase_start_rate"]["margin_after"] < 0.03
+    assert stats["stats"]["terminal_punct_rate"]["margin_after"] < 0.03
+    # length is only ever perturbed by +/-1 char from a punctuation add/strip
+    # (never a wording change) -- it must NOT be dragged toward the other
+    # side's median the way casing/punct are.
+    assert abs(stats["stats"]["median_length"]["rejected_before"] -
+               stats["stats"]["median_length"]["rejected_after"]) <= 1
+
+
+def test_match_sides_never_alters_wording_on_either_side():
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    rows = _pref_rows_mismatched(120)
+    _write_jsonl(inp, rows)
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18",
+              "--match-sides"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    out_rows = [json.loads(line) for line in open(out)]
+    for before, after in zip(rows, out_rows):
+        for field in ("chosen", "rejected"):
+            b = rbc.to_sentence_case(rbc.strip_terminal_punct(before[field]))
+            a = rbc.to_sentence_case(rbc.strip_terminal_punct(after[field]))
+            assert a == b, f"{field} wording changed: {before[field]!r} -> {after[field]!r}"
+
+
+def test_match_sides_kto_labels_get_same_distribution():
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    rows = _kto_rows(150, 60, lowercase_frac=0.9)
+    # push the label=False (rejected) side to nearly-always-punctuated, the
+    # opposite of the label=True target, mirroring the pref-shape hazard.
+    for r in rows:
+        if r["label"] is False:
+            r["completion"] = r["completion"].rstrip(".") + "."
+    _write_jsonl(inp, rows)
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18",
+              "--match-sides"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    out_rows = [json.loads(line) for line in open(out)]
+    true_rows = [row for row in out_rows if row["label"] is True]
+    false_rows = [row for row in out_rows if row["label"] is False]
+    assert len(true_rows) == 150
+    assert len(false_rows) == 60
+    lc_true, _ = rbc.lowercase_rate([row["completion"] for row in true_rows])
+    lc_false, _ = rbc.lowercase_rate([row["completion"] for row in false_rows])
+    pt_true, _ = rbc.punct_rate([row["completion"] for row in true_rows])
+    pt_false, _ = rbc.punct_rate([row["completion"] for row in false_rows])
+    assert abs(lc_true - 0.08) < 0.03
+    assert abs(lc_false - 0.08) < 0.03
+    assert abs(pt_true - 0.18) < 0.03
+    assert abs(pt_false - 0.18) < 0.03
+
+
+def test_match_sides_refuses_when_a_side_cannot_reach_target_and_writes_nothing():
+    """Rejected side has NO alphabetic character at all (e.g. "123 456"),
+    so lowercase-start is undefined (None) on every row and its rate is
+    permanently pinned at 0.0 -- it can never reach a far-away target, so
+    the post-rebalance margin must exceed --max-margin and the run must
+    refuse and write nothing."""
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    rows = []
+    for i in range(60):
+        chosen = "yeah that works" if i < 54 else "Yeah that works"
+        rows.append({"prompt": f"ctx {i}", "chosen": chosen, "rejected": "123 456"})
+    _write_jsonl(inp, rows)
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.5", "--target-punct", "0.18",
+              "--match-sides"])
+    assert r.returncode != 0
+    assert "REFUSING" in r.stdout or "REFUSING" in r.stderr
+    assert not os.path.exists(out)
+    assert not os.path.exists(out + ".stats.json")
+
+
+def test_match_sides_refuses_on_zero_rejected_rows():
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    # KTO shape with every row label=True -> zero rejected rows to match toward
+    _write_jsonl(inp, _kto_rows(50, 0, lowercase_frac=0.9))
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18",
+              "--match-sides"])
+    assert r.returncode != 0
+    assert "REFUSING" in r.stdout or "REFUSING" in r.stderr
+    assert not os.path.exists(out)
+
+
+def test_match_sides_respects_custom_max_margin():
+    """A --max-margin tight enough that even a successful convergence run
+    trips it must refuse -- confirms --max-margin is actually wired to the
+    gate, not just accepted and ignored. Uses the KTO shape with UNEQUAL
+    label=True/label=False counts (150 vs 61) so rounding
+    round(target_rate * n) lands on a different exact rate per side (a
+    preference-shape {chosen,rejected} pair always has equal n on both
+    sides, so it cannot exhibit this rounding gap)."""
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    rows = _kto_rows(150, 61, lowercase_frac=0.9)
+    for r in rows:
+        if r["label"] is False:
+            r["completion"] = r["completion"].rstrip(".") + "."
+    _write_jsonl(inp, rows)
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18",
+              "--match-sides", "--max-margin", "0.001"])
+    assert r.returncode != 0
+    assert "REFUSING" in r.stdout or "REFUSING" in r.stderr
+    assert not os.path.exists(out)
+    # the SAME corpus with a generous margin must succeed -- proves the
+    # refusal above was the margin gate, not some other failure.
+    r2 = _run(["--input", inp, "--output", out,
+               "--target-lowercase", "0.08", "--target-punct", "0.18",
+               "--match-sides", "--max-margin", "0.5"])
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert os.path.exists(out)
+
+
+def test_default_behavior_unaffected_when_match_sides_omitted():
+    """Backward compatibility: rejected side must be byte-identical
+    before vs after when --match-sides is not passed, even though the
+    corpus is the same mismatched shape --match-sides is designed to fix."""
+    d = tempfile.mkdtemp()
+    inp = os.path.join(d, "in.jsonl")
+    out = os.path.join(d, "out.jsonl")
+    rows = _pref_rows_mismatched(150)
+    _write_jsonl(inp, rows)
+    r = _run(["--input", inp, "--output", out,
+              "--target-lowercase", "0.08", "--target-punct", "0.18"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    out_rows = [json.loads(line) for line in open(out)]
+    for before, after in zip(rows, out_rows):
+        assert before["rejected"] == after["rejected"]
+    stats = json.load(open(out + ".stats.json"))
+    assert stats["match_sides"] is False
+    assert stats["stats"]["terminal_punct_rate"]["rejected_before"] == \
+        stats["stats"]["terminal_punct_rate"]["rejected_after"]
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))

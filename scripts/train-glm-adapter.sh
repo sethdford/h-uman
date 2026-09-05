@@ -249,12 +249,20 @@ mkdir -p "$ADAPTER" "$(dirname "$LOG")"
 # picks it up unchanged.
 if [ "$REBALANCE_CASING" = "1" ]; then
   REBAL_DIR="${DATA_DIR}-casing-${STAMP}"
-  say "HU_TRAIN_REBALANCE_CASING=1 -- rebalancing $DATA_DIR/train.jsonl -> $REBAL_DIR"
+  say "HU_TRAIN_REBALANCE_CASING=1 -- rebalancing $DATA_DIR/train.jsonl -> $REBAL_DIR (--match-sides)"
   mkdir -p "$REBAL_DIR"
+  # --match-sides (2026-09-04): a dry-run on the real v6 corpus found that
+  # rebalancing the chosen side ALONE made the terminal-punct margin WORSE
+  # (0.338 -> 0.406) because the rejected side is 58.9% punctuated against
+  # an 18.3% chosen target -- ORPO/SimPO would still learn "terminal
+  # punctuation is rejected". --match-sides applies the identical
+  # deterministic transform to the rejected/KTO-false side too, toward the
+  # same targets, so the sidecar stats file records both sides converging.
   "$TRAIN_PY" "$(dirname "$0")/rebalance_preference_corpus.py" \
       --input "$DATA_DIR/train.jsonl" \
       --output "$REBAL_DIR/train.jsonl" \
       --sidecar "$REBAL_DIR/train.rebalance_stats.json" \
+      --match-sides \
       2>&1 | tee -a "$LOG"
   REBAL_RC=${PIPESTATUS[0]}
   [ "$REBAL_RC" -eq 0 ] || die "casing rebalance failed (rc=$REBAL_RC, see $LOG) -- refusing to train on a requested-but-failed rebalance"

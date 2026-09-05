@@ -23,19 +23,37 @@ keep their original casing/punctuation and which get a deterministic
 transform applied (sentence-case the first letter, or add/strip a trailing
 ".", "!", "?", "..."). It NEVER invents, paraphrases, or otherwise changes
 the words of a reply — only the casing of the first letter and the presence
-of a terminal punctuation mark. The REJECTED side (or the KTO label=False
-side) is never touched; it is measured only, as the reference the CHOSEN
-side is being pulled toward matching (not exceeding).
+of a terminal punctuation mark.
+
+By default the REJECTED side (or the KTO label=False side) is never touched;
+it is measured only, as the reference the CHOSEN side is being pulled toward
+matching (not exceeding). --match-sides (default OFF; opt-in) applies the
+SAME deterministic seeded transform to the REJECTED side too, toward the
+SAME targets, so a persistently-punctuated rejected side (found 2026-09-04:
+58.9% terminal-punct against an 18.3% chosen target — rebalancing chosen
+alone made the terminal-punct margin WORSE, 0.338 -> 0.406, because
+"terminal punctuation" would still read as "rejected" to ORPO/SimPO) gets
+pulled to the same distribution as chosen. With --match-sides the preference
+pair differs in CONTENT, not casing/punctuation surface form. Median length
+is never touched on either side (Seth being shorter than the assistant
+register is a real signal, not a confound, on the evidence gathered
+2026-09-04).
 
 Refuses (exit non-zero, writes nothing) when:
   - neither --target-lowercase/--target-punct nor a readable style card is
     available (see .claude/rules/no-number-without-a-measurement.md);
-  - the input has zero rebalanceable ("chosen"/KTO-True) rows;
-  - after rebalancing, the chosen-vs-rejected margin on lowercase-start
-    still exceeds --max-lowercase-margin (default 0.15) — a persistently
-    wide gap means sampling could not close it (e.g. every candidate row is
-    already the same casing) and shipping the corpus anyway would silently
-    under-deliver the fix this script exists to make.
+  - the input has zero rebalanceable ("chosen"/KTO-True) rows, or
+    (--match-sides only) zero rejected/KTO-False rows;
+  - (--match-sides off, the default) after rebalancing, the chosen-vs-rejected
+    margin on lowercase-start still exceeds --max-lowercase-margin (default
+    0.15);
+  - (--match-sides on) after rebalancing BOTH sides, the chosen-vs-rejected
+    margin on EITHER lowercase-start or terminal-punct still exceeds
+    --max-margin (default 0.10) —
+  in every case a persistently wide gap means sampling could not close it
+  (e.g. every candidate row is already the same casing) and shipping the
+  corpus anyway would silently under-deliver the fix this script exists to
+  make.
 
 Schemas accepted (auto-detected per row):
   - preference/ORPO/DPO: {"prompt": "...", "chosen": "...", "rejected": "..."}
@@ -73,6 +91,7 @@ from eval_persona_evolution import terminal_punctuation  # noqa: E402
 
 DEFAULT_STYLE_CARD = os.path.expanduser("~/.human/personas/seth.style-card.json")
 DEFAULT_MAX_LOWERCASE_MARGIN = 0.15
+DEFAULT_MAX_MARGIN = 0.10
 TERMINAL_MARKS = ".!?"
 
 
@@ -270,28 +289,36 @@ def load_jsonl(path):
 
 
 def index_rows(rows):
-    """Returns (chosen_index, rejected_texts) where chosen_index is a list
-    of (row_i, field_name) pairs identifying every rebalanceable text, and
-    rejected_texts is the flat list of reference (never-modified) texts."""
+    """Returns (chosen_index, rejected_index), each a list of (row_i,
+    field_name) pairs identifying every rebalanceable text on that side.
+
+    For the preference {chosen,rejected} shape, chosen_index and
+    rejected_index are the SAME rows (different fields). For the KTO
+    {completion,label} shape they are DIFFERENT rows: chosen_index is every
+    label=True row, rejected_index is every label=False row.
+
+    Historically (pre --match-sides) the rejected side was read-only
+    reference data; it is now indexed the same way as chosen so
+    --match-sides can rebalance and write it back too."""
     chosen_index = []
-    rejected_texts = []
+    rejected_index = []
     for i, r in enumerate(rows):
         if not isinstance(r, dict):
             raise SystemExit(f"REFUSING: row {i} is not a JSON object; nothing written")
         if "chosen" in r and "rejected" in r:
             chosen_index.append((i, "chosen"))
-            rejected_texts.append(norm(r.get("rejected")))
+            rejected_index.append((i, "rejected"))
         elif "completion" in r and "label" in r:
             if is_kto_label_true(r.get("label")):
                 chosen_index.append((i, "completion"))
             else:
-                rejected_texts.append(norm(r.get("completion")))
+                rejected_index.append((i, "completion"))
         else:
             raise SystemExit(
                 f"REFUSING: row {i} matches neither the preference "
                 f"{{chosen,rejected}} shape nor the KTO {{completion,label}} "
                 f"shape; nothing written")
-    return chosen_index, rejected_texts
+    return chosen_index, rejected_index
 
 
 def get_indexed_texts(rows, index):
@@ -369,41 +396,66 @@ def resolve_targets(target_lowercase, target_punct, style_card_path):
 # ---------------------------------------------------------------------------
 
 
-def print_report(before_chosen, after_chosen, rejected, targets, provenance):
-    def line(label, before, after, ref):
-        margin_before = round(abs(before - ref), 4)
-        margin_after = round(abs(after - ref), 4)
-        print(f"  {label:22} chosen_before={before:<8.4f} chosen_after={after:<8.4f} "
-              f"rejected={ref:<8.4f} margin_before={margin_before:<8.4f} margin_after={margin_after:<8.4f}")
-        return margin_before, margin_after
+def print_report(before_chosen, after_chosen, before_rejected, after_rejected, match_sides, provenance):
+    """Prints and returns the before/after stats for BOTH sides. When
+    match_sides is False, before_rejected and after_rejected are expected to
+    be the same list (the rejected side is never touched) so
+    rejected_before == rejected_after and margin_before == margin_after --
+    the exact numbers the pre-match-sides caller always computed. When
+    match_sides is True, after_rejected has been independently rebalanced
+    toward the same targets, so margin_after measures how close the two
+    (now both-transformed) sides landed to each other."""
+
+    def line(label, cb, ca, rb, ra, mb, ma):
+        print(f"  {label:22} chosen_before={cb:<8.4f} chosen_after={ca:<8.4f} "
+              f"rejected_before={rb:<8.4f} rejected_after={ra:<8.4f} "
+              f"margin_before={mb:<8.4f} margin_after={ma:<8.4f}")
 
     print("[rebalance] targets:")
     for k, v in provenance.items():
         print(f"  {k}: {v}")
 
-    b_lc, _ = lowercase_rate(before_chosen)
-    a_lc, _ = lowercase_rate(after_chosen)
-    r_lc, _ = lowercase_rate(rejected)
-    b_pt, _ = punct_rate(before_chosen)
-    a_pt, _ = punct_rate(after_chosen)
-    r_pt, _ = punct_rate(rejected)
-    b_len = median_length(before_chosen)
-    a_len = median_length(after_chosen)
-    r_len = median_length(rejected)
+    c_lc_b, _ = lowercase_rate(before_chosen)
+    c_lc_a, _ = lowercase_rate(after_chosen)
+    r_lc_b, _ = lowercase_rate(before_rejected)
+    r_lc_a, _ = lowercase_rate(after_rejected)
+    c_pt_b, _ = punct_rate(before_chosen)
+    c_pt_a, _ = punct_rate(after_chosen)
+    r_pt_b, _ = punct_rate(before_rejected)
+    r_pt_a, _ = punct_rate(after_rejected)
+    c_len_b = median_length(before_chosen)
+    c_len_a = median_length(after_chosen)
+    r_len_b = median_length(before_rejected)
+    r_len_a = median_length(after_rejected)
 
-    print(f"[rebalance] n_chosen={len(before_chosen)} n_rejected={len(rejected)}")
-    print("[rebalance] axis                  chosen_before chosen_after rejected  margin_before margin_after")
-    lc_margins = line("lowercase_start_rate", b_lc, a_lc, r_lc)
-    pt_margins = line("terminal_punct_rate", b_pt, a_pt, r_pt)
-    print(f"  {'median_length':22} chosen_before={b_len:<8} chosen_after={a_len:<8} rejected={r_len:<8}")
+    lc_margin_before = round(abs(c_lc_b - r_lc_b), 4)
+    lc_margin_after = round(abs(c_lc_a - r_lc_a), 4)
+    pt_margin_before = round(abs(c_pt_b - r_pt_b), 4)
+    pt_margin_after = round(abs(c_pt_a - r_pt_a), 4)
+
+    print(f"[rebalance] n_chosen={len(before_chosen)} n_rejected={len(before_rejected)} "
+          f"match_sides={match_sides}")
+    print("[rebalance] axis                  chosen_before chosen_after rejected_before rejected_after "
+          "margin_before margin_after")
+    line("lowercase_start_rate", c_lc_b, c_lc_a, r_lc_b, r_lc_a, lc_margin_before, lc_margin_after)
+    line("terminal_punct_rate", c_pt_b, c_pt_a, r_pt_b, r_pt_a, pt_margin_before, pt_margin_after)
+    print(f"  {'median_length':22} chosen_before={c_len_b:<8} chosen_after={c_len_a:<8} "
+          f"rejected_before={r_len_b:<8} rejected_after={r_len_a:<8}")
     return {
-        "lowercase_start_rate": {"chosen_before": round(b_lc, 4), "chosen_after": round(a_lc, 4),
-                                  "rejected": round(r_lc, 4),
-                                  "margin_before": lc_margins[0], "margin_after": lc_margins[1]},
-        "terminal_punct_rate": {"chosen_before": round(b_pt, 4), "chosen_after": round(a_pt, 4),
-                                 "rejected": round(r_pt, 4),
-                                 "margin_before": pt_margins[0], "margin_after": pt_margins[1]},
-        "median_length": {"chosen_before": b_len, "chosen_after": a_len, "rejected": r_len},
+        "lowercase_start_rate": {
+            "chosen_before": round(c_lc_b, 4), "chosen_after": round(c_lc_a, 4),
+            "rejected_before": round(r_lc_b, 4), "rejected_after": round(r_lc_a, 4),
+            "margin_before": lc_margin_before, "margin_after": lc_margin_after,
+        },
+        "terminal_punct_rate": {
+            "chosen_before": round(c_pt_b, 4), "chosen_after": round(c_pt_a, 4),
+            "rejected_before": round(r_pt_b, 4), "rejected_after": round(r_pt_a, 4),
+            "margin_before": pt_margin_before, "margin_after": pt_margin_after,
+        },
+        "median_length": {
+            "chosen_before": c_len_b, "chosen_after": c_len_a,
+            "rejected_before": r_len_b, "rejected_after": r_len_a,
+        },
     }
 
 
@@ -429,8 +481,20 @@ def build_parser():
     ap.add_argument("--style-card", default=DEFAULT_STYLE_CARD,
                     help="style-card/v2 JSON to read targets from when not given on the CLI")
     ap.add_argument("--max-lowercase-margin", type=float, default=DEFAULT_MAX_LOWERCASE_MARGIN,
-                    help="refuse if |chosen_after - rejected| on lowercase-start "
-                         "exceeds this (default: %(default)s)")
+                    help="[--match-sides off, the default] refuse if "
+                         "|chosen_after - rejected| on lowercase-start exceeds this "
+                         "(default: %(default)s)")
+    ap.add_argument("--match-sides", action="store_true", default=False,
+                    help="also apply the SAME deterministic seeded casing/terminal-punct "
+                         "resampling to the REJECTED side (or KTO label=False rows), toward "
+                         "the SAME targets as the chosen side, so the preference pair differs "
+                         "in content rather than surface form. Off by default. Wording is "
+                         "never touched on either side. When set, --max-margin (not "
+                         "--max-lowercase-margin) gates BOTH axes.")
+    ap.add_argument("--max-margin", type=float, default=DEFAULT_MAX_MARGIN,
+                    help="[--match-sides only] refuse if |chosen_after - rejected_after| "
+                         "exceeds this on EITHER lowercase-start or terminal-punct "
+                         "(default: %(default)s)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dry-run", action="store_true",
                     help="measure and report only; write nothing")
@@ -450,35 +514,70 @@ def main(argv=None):
     if not rows:
         sys.exit(f"REFUSING: {args.input} has zero rows; nothing written")
 
-    chosen_index, rejected_texts = index_rows(rows)
+    chosen_index, rejected_index = index_rows(rows)
     if not chosen_index:
         sys.exit(f"REFUSING: {args.input} has zero chosen/KTO-true rows to rebalance; nothing written")
+    if args.match_sides and not rejected_index:
+        sys.exit(
+            f"REFUSING: --match-sides given but {args.input} has zero rejected/KTO-false "
+            f"rows to match toward; nothing written")
 
     target_lowercase, target_punct, provenance = resolve_targets(
         args.target_lowercase, args.target_punct, args.style_card)
 
     before_chosen = get_indexed_texts(rows, chosen_index)
-    after_chosen, axis_reports = rebalance_chosen_texts(
+    after_chosen, chosen_axis_reports = rebalance_chosen_texts(
         before_chosen, target_lowercase, target_punct, args.seed)
+
+    before_rejected = get_indexed_texts(rows, rejected_index)
+    if args.match_sides:
+        # SAME deterministic transform + seed as the chosen side, applied to
+        # an independent list -- reproducible given --seed, and it never
+        # touches wording, only casing/terminal-punct (rebalance_chosen_texts
+        # is generic over "a list of texts", not specific to the chosen side).
+        after_rejected, rejected_axis_reports = rebalance_chosen_texts(
+            before_rejected, target_lowercase, target_punct, args.seed)
+    else:
+        after_rejected = before_rejected
+        rejected_axis_reports = None
 
     print("=" * 70)
     print(f"[rebalance] input={args.input}")
-    stats = print_report(before_chosen, after_chosen, rejected_texts, None, provenance)
+    stats = print_report(before_chosen, after_chosen, before_rejected, after_rejected,
+                          args.match_sides, provenance)
     print("=" * 70)
 
     lc_margin_after = stats["lowercase_start_rate"]["margin_after"]
-    if lc_margin_after > args.max_lowercase_margin:
-        sys.exit(
-            f"REFUSING: after-rebalance lowercase-start margin {lc_margin_after:.4f} "
-            f"still exceeds --max-lowercase-margin {args.max_lowercase_margin}; "
-            f"sampling could not close the gap (are chosen/rejected already "
-            f"nearly identical on this axis?); nothing written")
+    pt_margin_after = stats["terminal_punct_rate"]["margin_after"]
+
+    if args.match_sides:
+        bad = []
+        if lc_margin_after > args.max_margin:
+            bad.append(f"lowercase-start margin {lc_margin_after:.4f}")
+        if pt_margin_after > args.max_margin:
+            bad.append(f"terminal-punct margin {pt_margin_after:.4f}")
+        if bad:
+            sys.exit(
+                f"REFUSING: --match-sides could not close " + " and ".join(bad) +
+                f" (> --max-margin {args.max_margin}); sampling could not bring both "
+                f"sides to the same casing/punctuation distribution on this input "
+                f"(is one side already saturated -- e.g. every candidate row already "
+                f"the same casing?); nothing written")
+    else:
+        if lc_margin_after > args.max_lowercase_margin:
+            sys.exit(
+                f"REFUSING: after-rebalance lowercase-start margin {lc_margin_after:.4f} "
+                f"still exceeds --max-lowercase-margin {args.max_lowercase_margin}; "
+                f"sampling could not close the gap (are chosen/rejected already "
+                f"nearly identical on this axis?); nothing written")
 
     if args.dry_run:
         print("[rebalance] --dry-run: nothing written")
         return 0
 
     set_indexed_texts(rows, chosen_index, after_chosen)
+    if args.match_sides:
+        set_indexed_texts(rows, rejected_index, after_rejected)
 
     out_dir = os.path.dirname(os.path.abspath(args.output))
     if out_dir:
@@ -492,13 +591,15 @@ def main(argv=None):
         "input": args.input,
         "output": args.output,
         "seed": args.seed,
+        "match_sides": args.match_sides,
         "targets": {"lowercase_start_rate": target_lowercase, "terminal_punct_rate": target_punct},
         "target_provenance": provenance,
         "max_lowercase_margin": args.max_lowercase_margin,
+        "max_margin": args.max_margin if args.match_sides else None,
         "n_rows": len(rows),
         "n_chosen": len(chosen_index),
-        "n_rejected": len(rejected_texts),
-        "axis_resampling": axis_reports,
+        "n_rejected": len(rejected_index),
+        "axis_resampling": {"chosen": chosen_axis_reports, "rejected": rejected_axis_reports},
         "stats": stats,
     }
     with open(sidecar_path, "w") as fh:
