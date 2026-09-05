@@ -152,7 +152,11 @@ Every area below carries: **Now** (evidence) → **SOTA** (target) → **Plan**
   `model.load_weights(strict=False)` and never injects LoRA layers, so
   `lora_*` tensors are dropped silently — a served run that DEFERs with
   "PRE and POST byte-identical" is reporting that the serving adapter is
-  inert, not that it failed to help.
+  inert, not that it failed to help. Exposure guard (2026-09-04): the swap
+  waits for a quiet window (no chat.db / memory.db message for 300 s, up to
+  15 min, else DEFERRED) and the PRE arm aborts at the next prompt boundary
+  if a message lands after the swap, so a base-model reply can leak into at
+  most one generation. `--no-quiet-guard` disables it for manual runs.
 
 ### 7. DPO flywheel (collection)
 - **Now**: restored 2026-07-18 — RL_FULL now in dev preset (recorder was

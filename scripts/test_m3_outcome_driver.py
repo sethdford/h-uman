@@ -378,6 +378,76 @@ def test_db_fallback_synthesizes_rehydratable_records(tmp: Path):
     _ok("unreachable gateway returns None sentinel, not exit", unreachable is None)
 
 
+def test_export_only_is_idempotent(tmpdir: Path):
+    """The EXPORT stage must be re-runnable without duplicating rows, and
+    must never train.
+
+    Pins the 2026-09-05 finding: the export had a single scheduled trigger
+    (the weekly Sunday m3-loop), so making it safe to run from any other
+    schedule requires that a repeat run — including one whose watermark was
+    reset, or whose state file vanished — appends nothing. Dedup that
+    consults only ~/.human/m3_driver_state.json fails that: before the fix,
+    a --since 0 run with a wiped state file re-appended every row the JSONL
+    already held. The destination file is now the dedup authority.
+    """
+    print("\n--- test_export_only_is_idempotent ---")
+    gateway_srv, gateway_url = serve(FakeGateway, fixture_outcomes())
+    try:
+        env = {"HOME": str(tmpdir), "HUMAN_GATEWAY_URL": gateway_url}
+        jsonl = tmpdir / ".human" / "training-data" / "m3-outcomes.jsonl"
+        state = tmpdir / ".human" / "m3_driver_state.json"
+
+        def lines() -> int:
+            return len([l for l in jsonl.read_text().splitlines() if l.strip()])
+
+        r = run_driver(env, "--since", "0", "--export-only")
+        _ok("export-only exit 0", r.returncode == 0,
+            f"rc={r.returncode} stderr={r.stderr!r}")
+        _ok(f"first export writes 4 rows (got {lines() if jsonl.exists() else 0})",
+            jsonl.exists() and lines() == 4)
+        first_bytes = jsonl.read_bytes()
+
+        run_driver(env, "--export-only")
+        _ok(f"re-run at watermark appends nothing (got {lines()})", lines() == 4)
+
+        run_driver(env, "--since", "0", "--export-only")
+        _ok(f"re-run with watermark reset appends nothing (got {lines()})",
+            lines() == 4)
+
+        state.unlink()
+        r = run_driver(env, "--since", "0", "--export-only")
+        _ok(f"re-run with the state file DELETED appends nothing (got {lines()})",
+            lines() == 4, f"rc={r.returncode} stderr={r.stderr!r}")
+        _ok("original rows are byte-identical after every re-run",
+            jsonl.read_bytes() == first_bytes)
+
+        # Export must load no model and produce no adapter: --run-loop is the
+        # only training path and --export-only refuses to be combined with it.
+        _ok("export-only wrote no adapter",
+            not (tmpdir / ".human" / "training-data" / "adapters").exists())
+        r = run_driver(env, "--export-only", "--run-loop")
+        _ok("--export-only + --run-loop is refused (rc=2)", r.returncode == 2,
+            f"rc={r.returncode} out={r.stdout!r}")
+
+        # --out/--state route a preview elsewhere without touching the corpus
+        # or advancing the real watermark.
+        alt = tmpdir / "preview.jsonl"
+        alt_state = tmpdir / "preview-state.json"
+        real_state_before = state.read_bytes()
+        r = run_driver(env, "--since", "0", "--export-only",
+                       "--out", str(alt), "--state", str(alt_state))
+        _ok("preview --out gets its own copy of the rows",
+            alt.exists() and len([l for l in alt.read_text().splitlines()
+                                  if l.strip()]) == 4,
+            f"rc={r.returncode} stderr={r.stderr!r}")
+        _ok("preview did not touch the default corpus", lines() == 4)
+        _ok("preview left the real watermark untouched",
+            state.read_bytes() == real_state_before)
+        _ok("preview wrote its own state file", alt_state.exists())
+    finally:
+        gateway_srv.shutdown()
+
+
 def main():
     print("M3 outcome driver e2e tests")
 
@@ -385,7 +455,8 @@ def main():
                     test_below_threshold_skips_train,
                     test_dedup_across_runs,
                     test_mlx_offline_is_soft_failure,
-                    test_db_fallback_synthesizes_rehydratable_records]:
+                    test_db_fallback_synthesizes_rehydratable_records,
+                    test_export_only_is_idempotent]:
         with tempfile.TemporaryDirectory() as d:
             test_fn(Path(d))
 

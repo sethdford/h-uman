@@ -1852,13 +1852,40 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     };
 }
 
+/* Only the sqlite engine carries the index fields. On any other engine —
+ * the markdown fallback when the sqlite path is unavailable — the cast below
+ * would read or write two pointers past a small foreign ctx (2026-09-04:
+ * ASan heap-buffer-overflow from hu_app_teardown's detach in the full
+ * suite). Same contract as hu_sqlite_memory_get_db / get_session_store. */
+static bool is_sqlite_engine(const hu_memory_t *mem) {
+    if (!mem || !mem->ctx || !mem->vtable || !mem->vtable->name)
+        return false;
+    const char *n = mem->vtable->name(mem->ctx);
+    return n && strcmp(n, "sqlite") == 0;
+}
+
 void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
                                          struct hu_vector_store *store) {
-    if (!mem || !mem->ctx)
+    if (!is_sqlite_engine(mem))
         return;
     hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
     self->sem_embedder = embedder;
     self->sem_store = store;
+}
+
+void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embedder **embedder_out,
+                                         struct hu_vector_store **store_out) {
+    if (embedder_out)
+        *embedder_out = NULL;
+    if (store_out)
+        *store_out = NULL;
+    if (!is_sqlite_engine(mem))
+        return;
+    const hu_sqlite_memory_t *self = (const hu_sqlite_memory_t *)mem->ctx;
+    if (embedder_out)
+        *embedder_out = self->sem_embedder;
+    if (store_out)
+        *store_out = self->sem_store;
 }
 
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {

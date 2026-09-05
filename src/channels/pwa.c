@@ -50,8 +50,7 @@ static uint32_t pwa_hash(const char *s, size_t len) {
 
 static void pwa_record_sent(hu_pwa_channel_ctx_t *c, const char *msg, size_t msg_len) {
     size_t slot = c->sent_ring_idx % HU_PWA_SENT_RING_SIZE;
-    size_t copy_len =
-        msg_len < HU_PWA_SENT_PREFIX_LEN - 1 ? msg_len : HU_PWA_SENT_PREFIX_LEN - 1;
+    size_t copy_len = msg_len < HU_PWA_SENT_PREFIX_LEN - 1 ? msg_len : HU_PWA_SENT_PREFIX_LEN - 1;
     memcpy(c->sent_ring[slot], msg, copy_len);
     c->sent_ring[slot][copy_len] = '\0';
     c->sent_ring_len[slot] = copy_len;
@@ -90,12 +89,18 @@ static const char *pwa_last_line(const char *content, size_t content_len, size_t
 }
 #endif /* !HU_IS_TEST */
 
+bool hu_pwa_channel_is_running(const hu_channel_t *ch) {
+    const hu_pwa_channel_ctx_t *c = ch ? (const hu_pwa_channel_ctx_t *)ch->ctx : NULL;
+    return c && c->running && c->browser_detected;
+}
+
 static hu_error_t pwa_start(void *ctx) {
     hu_pwa_channel_ctx_t *c = (hu_pwa_channel_ctx_t *)ctx;
     if (!c)
         return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
 #if HU_IS_TEST
+    c->browser_detected = true;
     return HU_OK;
 #else
     hu_error_t err = hu_pwa_detect_browser(&c->browser);
@@ -123,9 +128,8 @@ static void pwa_stop(void *ctx) {
         c->running = false;
 }
 
-static hu_error_t pwa_send(void *ctx, const char *target, size_t target_len,
-                           const char *message, size_t message_len, const char *const *media,
-                           size_t media_count) {
+static hu_error_t pwa_send(void *ctx, const char *target, size_t target_len, const char *message,
+                           size_t message_len, const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
     hu_pwa_channel_ctx_t *c = (hu_pwa_channel_ctx_t *)ctx;
@@ -176,8 +180,8 @@ static hu_error_t pwa_send(void *ctx, const char *target, size_t target_len,
             tgt = tgt_buf;
             char *result = NULL;
             size_t result_len = 0;
-            hu_error_t err = hu_pwa_send_message(c->alloc, c->browser, app, tgt, message, &result,
-                                                 &result_len);
+            hu_error_t err =
+                hu_pwa_send_message(c->alloc, c->browser, app, tgt, message, &result, &result_len);
             c->alloc->free(c->alloc->ctx, app_buf, app_len + 1);
             c->alloc->free(c->alloc->ctx, tgt_buf, tgt_len + 1);
             if (result)
@@ -196,8 +200,8 @@ static hu_error_t pwa_send(void *ctx, const char *target, size_t target_len,
     }
     char *result = NULL;
     size_t result_len = 0;
-    hu_error_t err = hu_pwa_send_message(c->alloc, c->browser, app, tgt, message, &result,
-                                         &result_len);
+    hu_error_t err =
+        hu_pwa_send_message(c->alloc, c->browser, app, tgt, message, &result, &result_len);
     if (app != c->app_names[0])
         c->alloc->free(c->alloc->ctx, (void *)app, strlen(app) + 1);
     if (result)
@@ -255,7 +259,8 @@ static const hu_channel_vtable_t pwa_vtable = {
     .send_event = NULL,
     .start_typing = NULL,
     .stop_typing = NULL,
-    .load_conversation_history = NULL, /* PWA receives messages via gateway push; no server-side history API */
+    .load_conversation_history =
+        NULL, /* PWA receives messages via gateway push; no server-side history API */
     .get_response_constraints = pwa_get_response_constraints,
     .react = NULL,
     .reply = NULL,
@@ -265,13 +270,13 @@ static const hu_channel_vtable_t pwa_vtable = {
 
 /* Build app list from all drivers with read_messages_js when apps is NULL. */
 static const char *const PWA_APPS_WITH_READ[] = {
-    "slack", "discord", "whatsapp", "gmail",     "calendar",
+    "slack",  "discord", "whatsapp", "gmail",    "calendar",
     "notion", "twitter", "telegram", "linkedin", "facebook",
 };
 #define PWA_APPS_WITH_READ_COUNT (sizeof(PWA_APPS_WITH_READ) / sizeof(PWA_APPS_WITH_READ[0]))
 
-hu_error_t hu_pwa_channel_create(hu_allocator_t *alloc, const char *const *apps,
-                                 size_t app_count, hu_channel_t *out) {
+hu_error_t hu_pwa_channel_create(hu_allocator_t *alloc, const char *const *apps, size_t app_count,
+                                 hu_channel_t *out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -371,7 +376,7 @@ hu_error_t hu_pwa_channel_poll(void *channel_ctx, hu_allocator_t *alloc,
         size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
         for (size_t i = 0; i < n; i++) {
             int sn = snprintf(msgs[i].session_key, sizeof(msgs[i].session_key), "pwa:%s",
-                             c->mock_msgs[i].app);
+                              c->mock_msgs[i].app);
             if (sn <= 0 || (size_t)sn >= sizeof(msgs[i].session_key))
                 msgs[i].session_key[0] = '\0';
             size_t ct = strlen(c->mock_msgs[i].content);
@@ -424,7 +429,7 @@ hu_error_t hu_pwa_channel_poll(void *channel_ctx, hu_allocator_t *alloc,
         }
 
         int sn = snprintf(msgs[*out_count].session_key, sizeof(msgs[*out_count].session_key),
-                         "pwa:%s", app);
+                          "pwa:%s", app);
         if (sn <= 0 || (size_t)sn >= sizeof(msgs[*out_count].session_key))
             msgs[*out_count].session_key[0] = '\0';
 

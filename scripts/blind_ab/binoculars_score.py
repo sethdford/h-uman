@@ -65,7 +65,11 @@ def load_items(args):
         for t in trials:
             if not t.get("real_seth") or not t.get("ai_response"):
                 continue  # e.g. malformed/partial trial rows
-            ctx = t.get("incoming", "")
+            # classifier_gate.py and gen_classifier_trials.py write "context";
+            # older pair files wrote "incoming". Reading only "incoming" scored
+            # every item context-free and, with GLM's BOS-less tokenizer, put
+            # the reply at position 0 (2026-09-04 crash, see test file).
+            ctx = t.get("incoming") or t.get("context") or ""
             items.append({"text": t["real_seth"], "context": ctx,
                           "label": "real", "trial": t.get("i")})
             items.append({"text": t["ai_response"], "context": ctx,
@@ -122,7 +126,14 @@ def response_token_span(tokenizer, context, text):
         while tail and tail[-1] in specials:
             tail = tail[:-1]
         resp_len = len(tail)
-    if resp_len == 0:  # pathological: keep at least one position
+    if resp_start == 0:
+        # No BOS and no context: no position predicts token 0, so the scoreable
+        # reply is tokens 1..n. Without this the predicting slice in
+        # _forward_logprobs starts at index -1 and is EMPTY
+        # ("[logsumexp] Received empty array", classifier gate 2026-09-04).
+        resp_start = 1
+        resp_len = max(0, resp_len - 1)
+    elif resp_len == 0:  # pathological: keep at least one position
         resp_len = max(1, len(full_ids) - resp_start)
     return full_ids, resp_start, resp_len
 
@@ -160,6 +171,13 @@ def run_pass(model_path, adapter_path, items, cache_dir, tag, quiet=False):
     meta = []
     for idx, it in enumerate(items):
         ids, rs, rl = response_token_span(tokenizer, it["context"], it["text"])
+        if rl == 0:
+            # e.g. a one-token reply with no context and no BOS: nothing to
+            # score. Skipped in BOTH passes (same tokenizer, same span), so
+            # combine() never looks for its .npy.
+            print(f"[{tag}] skip item {idx}: no scoreable reply tokens",
+                  file=sys.stderr)
+            continue
         lp = _forward_logprobs(model, ids, rs, rl)
         import numpy as np
         np.save(os.path.join(cache_dir, f"{tag}_{idx:05d}.npy"),

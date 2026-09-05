@@ -142,8 +142,14 @@ gateway_up() {
 # up. In-process generation (a second 56 GB copy) is only allowed when :8741 is
 # DOWN and no trainer is holding the weights. 2026-09-03 04:31: an in-process
 # load beside the live server reached 94.8 GB wired and killed production.
+# 2026-09-04: nightly-retrain.sh now really stops :8741 at 03:07, so this 04:05
+# run can meet the window mid-flight. The retrain script itself, its
+# training_loop.py driver (which spawns `-m mlx_lm lora`), and the steering
+# extractor all hold the base — and between those phases only the script is
+# alive — so all three count as "a trainer". Pinned by
+# scripts/test_nightly_eval_trainer_guard.sh.
 trainer_running() {
-  pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|mlx_tune_train|dpo_mlx_train|kto_mlx_train|grpo_mlx_train" >/dev/null 2>&1
+  pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|mlx_tune_train|dpo_mlx_train|kto_mlx_train|grpo_mlx_train|nightly-retrain\.sh|training_loop\.py|extract_persona_vectors" >/dev/null 2>&1
 }
 fidelity_mode() {  # served | inprocess | skip-trainer
   if server_up; then echo served
@@ -208,12 +214,17 @@ judge_creds_present() {
 archive_verdict() {
   local harness="$1" latest_json="$2"
   [ -f "$latest_json" ] || { log "  (no verdict json at $latest_json — nothing to archive)"; return 0; }
-  local dated="${ARCHIVE_DIR}/eval-${harness}-$(date '+%Y-%m-%d').json"
+  # 2026-09-04: smoke runs get their own slot. Two --smoke invocations had
+  # overwritten the day's real multiturn archive with a 1-scenario result, and
+  # the doctor's eval_freshness check ignores "-smoke-" files by name.
+  local tag=""
+  [ "$SMOKE" -eq 1 ] && tag="smoke-"
+  local dated="${ARCHIVE_DIR}/eval-${harness}-${tag}$(date '+%Y-%m-%d').json"
   cp -f "$latest_json" "$dated"
   log "  archived → $dated"
-  # Prune: keep the $RETAIN most recent dated files for this harness.
+  # Prune: keep the $RETAIN most recent dated files for this harness+slot.
   local stale
-  stale=$(ls -t "${ARCHIVE_DIR}/eval-${harness}-"*.json 2>/dev/null | tail -n +$((RETAIN + 1)) || true)
+  stale=$(ls -t "${ARCHIVE_DIR}/eval-${harness}-${tag}"[0-9]*.json 2>/dev/null | tail -n +$((RETAIN + 1)) || true)
   if [ -n "$stale" ]; then
     echo "$stale" | xargs rm -f
     log "  pruned $(echo "$stale" | wc -l | tr -d ' ') old ${harness} verdict(s)"

@@ -135,6 +135,12 @@ hu_error_t hu_scheduler_tick_for(hu_scheduler_t *s, int64_t now_ms, const char *
  * partial probe failure. */
 hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out);
 
+/* Number of rows of `kind` still 'pending'. Lets a periodic enqueuer keep
+ * ONE job of its kind in the queue instead of stacking one per tick — on
+ * 2026-09-04 the nightly LoRA retrain had 576 pending rows because nothing
+ * asked. HU_ERR_NOT_SUPPORTED without SQLite; *out = 0 on any failure. */
+hu_error_t hu_scheduler_pending_count_for_kind(hu_scheduler_t *s, hu_job_kind_t kind, size_t *out);
+
 /* Override the runner for `kind`.  The scheduler keeps a single
  * function pointer per kind — repeated registrations replace the prior
  * binding.  `fn == NULL` resets to the no-op default. `user_data` is

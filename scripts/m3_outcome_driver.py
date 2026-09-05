@@ -18,7 +18,21 @@ Architecture sits between two existing pieces:
         ↓ POST /v1/adapters/swap
     MLX server hot-loads the new adapter (B2 Stream B, scripts/mlx-server.py)
 
+The EXPORT stage (poll + select + dedup + append) loads no model and
+spawns no trainer — it reads the gateway ring, or falls back to the
+durable production_outcomes table, and appends JSONL. It is therefore
+safe beside the resident :8741 server and must NOT be gated by
+scripts/check-no-resident-model.sh (that guard exists for in-process
+model loads). Only --run-loop trains, and it is refused with
+--export-only. Before 2026-09-05 the export had exactly one scheduled
+trigger — the weekly Sunday ai.human.m3-loop job — so a corpus feeding a
+NIGHTLY retrain refreshed at most weekly, and only when the box happened
+to be awake at 04:00. It last appended 2026-08-02.
+
 Usage:
+    python3 scripts/m3_outcome_driver.py --export-only    # export stage only
+    python3 scripts/m3_outcome_driver.py --export-only \
+        --out /tmp/preview.jsonl --state /tmp/preview-state.json  # dry preview
     python3 scripts/m3_outcome_driver.py                 # one poll pass
     python3 scripts/m3_outcome_driver.py --dry-run       # poll but don't write
     python3 scripts/m3_outcome_driver.py --since 0       # backfill from epoch
@@ -56,22 +70,24 @@ STATE_PATH = HUMAN_HOME / "m3_driver_state.json"
 OUTCOMES_JSONL = HUMAN_HOME / "training-data" / "m3-outcomes.jsonl"
 
 
-def load_state() -> dict:
+def load_state(state_path: Path = None) -> dict:
     """Watermark + seen-hash set. JSON file, safe to delete to force backfill."""
-    if not STATE_PATH.exists():
+    state_path = state_path or STATE_PATH
+    if not state_path.exists():
         return {"last_ts_ms": 0, "seen_prompt_hashes": []}
     try:
-        return json.loads(STATE_PATH.read_text())
+        return json.loads(state_path.read_text())
     except (json.JSONDecodeError, OSError):
         return {"last_ts_ms": 0, "seen_prompt_hashes": []}
 
 
-def save_state(state: dict) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+def save_state(state: dict, state_path: Path = None) -> None:
+    state_path = state_path or STATE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     # Atomic write: tmp + rename (same pattern as personal_model.c save).
-    tmp = STATE_PATH.with_suffix(".tmp")
+    tmp = state_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2))
-    tmp.replace(STATE_PATH)
+    tmp.replace(state_path)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -253,26 +269,61 @@ def select_training_outcomes(outcomes: list[dict]) -> list[dict]:
 OUTCOMES_ROTATE_BYTES = 8 * 1024 * 1024
 
 
-def rotate_outcomes_if_needed() -> bool:
+def rotate_outcomes_if_needed(out_path: Path = None) -> bool:
     """If the outcomes JSONL exceeds OUTCOMES_ROTATE_BYTES, archive it.
     Returns True if rotation happened. Errors are non-fatal — the
     driver MUST continue functioning even if rotation fails."""
-    if not OUTCOMES_JSONL.exists():
+    out_path = out_path or OUTCOMES_JSONL
+    if not out_path.exists():
         return False
-    if OUTCOMES_JSONL.stat().st_size < OUTCOMES_ROTATE_BYTES:
+    if out_path.stat().st_size < OUTCOMES_ROTATE_BYTES:
         return False
-    archive = OUTCOMES_JSONL.with_name(
-        f"{OUTCOMES_JSONL.name}.{int(time.time())}"
+    archive = out_path.with_name(
+        f"{out_path.name}.{int(time.time())}"
     )
     try:
-        OUTCOMES_JSONL.rename(archive)
+        out_path.rename(archive)
         return True
     except OSError:
         return False
 
 
+def load_seen_from_jsonl(out_path: Path) -> set[int]:
+    """Read the prompt hashes ALREADY present in the destination JSONL.
+
+    Idempotency does not get to depend on a sidecar state file. The
+    watermark in ~/.human/m3_driver_state.json can be stale, reset, or
+    absent (a --since 0 backfill sets it to 0 on purpose), and dedup that
+    consults ONLY that file will happily append rows the JSONL already
+    holds. Seeding the seen-set from the file we are about to append to
+    makes re-running the export a no-op against the file itself, which is
+    the property the caller actually needs.
+
+    Unreadable / malformed lines are skipped, never fatal: a corrupt tail
+    must not cause a duplicate-append storm.
+    """
+    seen: set[int] = set()
+    if not out_path.exists():
+        return seen
+    try:
+        with open(out_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ph = json.loads(line).get("ph")
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if isinstance(ph, int):
+                    seen.add(ph)
+    except OSError:
+        return seen
+    return seen
+
+
 def dedup_and_append(selected: list[dict], seen_hashes: set[int],
-                     dry_run: bool) -> tuple[int, int]:
+                     dry_run: bool, out_path: Path = None) -> tuple[int, int]:
     """Skip outcomes whose prompt_hash we've already trained on. Append the
     rest as JSONL. Returns (appended_count, skipped_dup_count).
 
@@ -280,17 +331,18 @@ def dedup_and_append(selected: list[dict], seen_hashes: set[int],
     as ONE training sample (the latest wins implicitly; we keep the first
     one we see in the polling order, which is oldest-first).
     """
+    out_path = out_path or OUTCOMES_JSONL
     appended = 0
     skipped = 0
     if not dry_run:
-        OUTCOMES_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         # D6: rotate BEFORE appending so the next write starts fresh.
         # Doesn't fire on the hot path — only when the JSONL has grown
         # past the rotation threshold.
-        if rotate_outcomes_if_needed():
+        if rotate_outcomes_if_needed(out_path):
             print(f"[m3-driver] rotated outcomes JSONL "
                   f"(was > {OUTCOMES_ROTATE_BYTES // 1024 // 1024} MB)")
-    with open(OUTCOMES_JSONL, "a") if not dry_run else _devnull() as f:
+    with open(out_path, "a") if not dry_run else _devnull() as f:
         for outcome in selected:
             ph = outcome.get("ph", 0)
             if ph in seen_hashes:
@@ -330,7 +382,7 @@ def jsonl_sample_count(path: Path) -> int:
     return n
 
 
-def run_training(samples: int, simulate: bool) -> Path:
+def run_training(samples: int, simulate: bool, source_jsonl: Path = None) -> Path:
     """Kick off a LoRA fine-tune. In --simulate-train mode, writes a tiny
     placeholder safetensors-shaped file in seconds so the loop is testable
     without GPU time. Real mode hands off to training_loop.py.
@@ -362,7 +414,7 @@ def run_training(samples: int, simulate: bool) -> Path:
     import subprocess
     script = Path(__file__).resolve().parent / "training_loop.py"
     cmd = [sys.executable, str(script),
-           "--source-jsonl", str(OUTCOMES_JSONL),
+           "--source-jsonl", str(source_jsonl or OUTCOMES_JSONL),
            "--adapter-out", str(out_path)]
     print(f"[m3-driver] launching real training: {' '.join(cmd)}")
     rc = subprocess.call(cmd)
@@ -441,11 +493,39 @@ def main() -> int:
                          "rehydration works unchanged.")
     ap.add_argument("--no-db-fallback", action="store_true",
                     help="Disable the production_outcomes fallback.")
+    ap.add_argument("--out", type=Path, default=OUTCOMES_JSONL,
+                    help="Destination JSONL for the exported outcomes "
+                         "(default %(default)s). Point this at a scratch "
+                         "path to preview what an export would add without "
+                         "touching the training corpus.")
+    ap.add_argument("--state", type=Path, default=STATE_PATH,
+                    help="Watermark/seen-hash state file (default %(default)s). "
+                         "Pair it with --out when previewing so the preview "
+                         "does not advance the real watermark and starve the "
+                         "subsequent real run.")
+    ap.add_argument("--export-only", action="store_true",
+                    help="EXPORT STAGE: poll + select + dedup + append, and "
+                         "nothing else. Loads no model and spawns no trainer, "
+                         "so it is safe to run beside a resident :8741 server "
+                         "(check-no-resident-model.sh does not and must not "
+                         "gate it). Mutually exclusive with --run-loop.")
     args = ap.parse_args()
 
-    state = load_state()
+    if args.export_only and args.run_loop:
+        print("[m3-driver] --export-only and --run-loop are mutually exclusive",
+              file=sys.stderr)
+        return 2
+
+    state = load_state(args.state)
     since_ms = args.since if args.since is not None else state["last_ts_ms"]
+    # Union of the sidecar state and the destination file. The file is the
+    # authority on what has already been written; the state file only adds
+    # hashes for rows that rotation has since archived out of it.
     seen_hashes: set[int] = set(state.get("seen_prompt_hashes", []))
+    seen_in_file = load_seen_from_jsonl(args.out)
+    seen_hashes |= seen_in_file
+    print(f"[m3-driver] dedup seed: {len(seen_in_file)} hash(es) already in "
+          f"{args.out}, {len(seen_hashes)} total with state")
 
     print(f"[m3-driver] polling {args.gateway} since_ms={since_ms} "
           f"turn_kind={args.turn_kind} dry_run={args.dry_run}")
@@ -471,7 +551,8 @@ def main() -> int:
         return 0
 
     selected = select_training_outcomes(raw)
-    appended, skipped = dedup_and_append(selected, seen_hashes, args.dry_run)
+    appended, skipped = dedup_and_append(selected, seen_hashes, args.dry_run,
+                                         args.out)
 
     # Advance watermark to newest outcome's ts (raw is oldest-first per server).
     new_high = max(o.get("t", 0) for o in raw)
@@ -482,19 +563,21 @@ def main() -> int:
         # Cap the seen-hash list to avoid unbounded growth — last 100k is
         # plenty for dedup over the ring's 4096-record window.
         seen_list = list(seen_hashes)[-100_000:]
-        save_state({"last_ts_ms": new_high, "seen_prompt_hashes": seen_list})
-        print(f"[m3-driver] state saved → {STATE_PATH}")
-        print(f"[m3-driver] outcomes appended → {OUTCOMES_JSONL}")
+        save_state({"last_ts_ms": new_high, "seen_prompt_hashes": seen_list},
+                   args.state)
+        print(f"[m3-driver] state saved → {args.state}")
+        print(f"[m3-driver] outcomes appended → {args.out}")
 
     # ── Optional: close the loop ──────────────────────────────────────
     if args.run_loop and not args.dry_run:
-        total = jsonl_sample_count(OUTCOMES_JSONL)
+        total = jsonl_sample_count(args.out)
         print(f"[m3-driver] JSONL holds {total} samples (threshold={args.threshold})")
         if total < args.threshold:
             print("[m3-driver] below threshold — skip train + swap")
             return 0
         try:
-            adapter_path = run_training(total, simulate=args.simulate_train)
+            adapter_path = run_training(total, simulate=args.simulate_train,
+                                        source_jsonl=args.out)
         except Exception as e:
             print(f"[m3-driver] training failed: {e}", file=sys.stderr)
             return 3

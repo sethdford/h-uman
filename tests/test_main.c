@@ -111,6 +111,7 @@ void run_imessage_schema_tests(void);
 void run_typedstream_tests(void);
 /* M3 B4 T4: streaming-safe harmony channel-marker filter. */
 void run_harmony_filter_tests(void);
+void run_llm_json_tests(void);
 /* Phase 5: per-balloon payload decoder tests + privacy contracts. */
 void run_imessage_balloon_decode_tests(void);
 /* Cross-channel reaction emit: WhatsApp + Matrix. */
@@ -409,12 +410,14 @@ void run_graph_tests(void);
 void run_graph_ingest_tests(void);
 void run_agent_facts_tests(void);
 void run_cli_memory_import_tests(void);
+void run_cli_commands_memory_print_tests(void);
 void run_store_sqlite_vec_tests(void);
 void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
+void run_graph_state_tests(void);
 void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
@@ -1192,6 +1195,7 @@ int main(int argc, char **argv) {
     run_imessage_schema_tests();
     run_typedstream_tests();
     run_harmony_filter_tests();
+    run_llm_json_tests();
     run_imessage_balloon_decode_tests();
     run_whatsapp_reactions_tests();
     run_matrix_reactions_tests();
@@ -1471,12 +1475,14 @@ int main(int argc, char **argv) {
     run_graph_ingest_tests();
     run_agent_facts_tests();
     run_cli_memory_import_tests();
+    run_cli_commands_memory_print_tests();
     run_store_sqlite_vec_tests();
     run_semantic_index_tests();
     run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
+    run_graph_state_tests();
     run_w2_autodream_tests();
     run_w3_multigraph_tests();
     run_w4_verifier_tests();
