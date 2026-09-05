@@ -344,6 +344,8 @@ class _Args:
         self.out = None
         self.explain_dates = False
         self.full_range = False
+        self.source = None
+        self.min_covered_days = 0.0  # tests pin coverage explicitly; CLI default is 20
         self.__dict__.update(kw)
 
 
@@ -424,6 +426,222 @@ def test_run_full_range_only_succeeds_when_event_analysis_skipped(monkeypatch, t
     assert data["full_range_summary"]["status"] == "OK"
     assert data["full_range_summary"]["n"] == 200
     assert "events" in data and data["events"] == {}
+
+
+# ---------------------------------------------------------------------------
+# --source: second store reader + de-dup (synthetic fixtures only)
+# ---------------------------------------------------------------------------
+
+_MINUS4 = datetime.timezone(datetime.timedelta(hours=-4))
+
+
+def _write_jsonl(path, records):
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    return str(path)
+
+
+def _training_pair(ts_local_iso, text, prior_role="user"):
+    return {
+        "messages": [
+            {"role": prior_role, "content": "context turn"},
+            {"role": "assistant", "content": text},
+        ],
+        "metadata": {"chat_id": "x", "timestamp": ts_local_iso, "reply_length": len(text)},
+    }
+
+
+def test_local_naive_to_utc_naive_shifts_by_offset():
+    local = datetime.datetime(2026, 7, 10, 12, 0, 0)
+    assert epe.local_naive_to_utc_naive(local, tz=_MINUS4) == datetime.datetime(2026, 7, 10, 16, 0, 0)
+
+
+def test_read_export_training_pairs_shape(tmp_path):
+    path = _write_jsonl(tmp_path / "tp.jsonl", [
+        _training_pair("2026-07-10T12:00:00", "yeah on my way"),
+        _training_pair("2026-07-11T08:30:15.123456", "lol ok"),
+    ])
+    rows = epe.read_export_jsonl(path, tz=_MINUS4)
+    assert rows == [
+        (datetime.datetime(2026, 7, 10, 16, 0, 0), "yeah on my way"),
+        (datetime.datetime(2026, 7, 11, 12, 30, 15, 123456), "lol ok"),
+    ]
+
+
+def test_read_export_ground_truth_shape(tmp_path):
+    path = _write_jsonl(tmp_path / "gt.jsonl", [
+        {"incoming": "you coming?", "seth_reply": "yep 5 min", "timestamp": "2026-07-10T12:00:00",
+         "chat_id": "x", "delay_seconds": 40.0, "hour_of_day": 12, "day_of_week": 4},
+    ])
+    rows = epe.read_export_jsonl(path, tz=_MINUS4)
+    assert rows == [(datetime.datetime(2026, 7, 10, 16, 0, 0), "yep 5 min")]
+
+
+def test_read_export_unknown_shape_raises(tmp_path):
+    path = _write_jsonl(tmp_path / "bad.jsonl", [{"prompt": "a", "chosen": "b", "rejected": "c"}])
+    try:
+        epe.read_export_jsonl(path, tz=_MINUS4)
+    except ValueError as e:
+        assert "shape" in str(e)
+    else:
+        raise AssertionError("expected ValueError for a DPO-shaped record (no Seth provenance)")
+
+
+def test_read_export_skips_tapback_echo_and_blank(tmp_path):
+    path = _write_jsonl(tmp_path / "tp.jsonl", [
+        _training_pair("2026-07-10T12:00:00", "Loved \u201cok see you\u201d"),
+        _training_pair("2026-07-10T12:01:00", "   "),
+        _training_pair("2026-07-10T12:02:00", "real one"),
+    ])
+    rows = epe.read_export_jsonl(path, tz=_MINUS4)
+    assert [t for _, t in rows] == ["real one"]
+
+
+def test_read_export_last_turn_must_be_assistant(tmp_path):
+    rec = _training_pair("2026-07-10T12:00:00", "x")
+    rec["messages"].append({"role": "user", "content": "they replied"})
+    path = _write_jsonl(tmp_path / "tp.jsonl", [rec])
+    try:
+        epe.read_export_jsonl(path, tz=_MINUS4)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a record whose last turn is not Seth-authored must be rejected, not silently miscounted")
+
+
+def test_dedup_key_second_precision_and_stripped_text():
+    a = epe.dedup_key(datetime.datetime(2026, 7, 10, 16, 0, 0, 999), "  hey ")
+    b = epe.dedup_key(datetime.datetime(2026, 7, 10, 16, 0, 0, 0), "hey")
+    c = epe.dedup_key(datetime.datetime(2026, 7, 10, 16, 0, 1, 0), "hey")
+    assert a == b
+    assert a != c
+
+
+def test_merge_sources_drops_rows_already_in_primary():
+    primary = [(_dt(2026, 8, 5), "same text"), (_dt(2026, 8, 6), "only in chat.db")]
+    extra = [(_dt(2026, 8, 5), "same text"), (_dt(2026, 7, 1), "only in export")]
+    merged, stats = epe.merge_sources(primary, [("export.jsonl", extra)])
+    assert [t for _, t in merged] == ["only in export", "same text", "only in chat.db"]
+    assert stats == [{"path": "export.jsonl", "rows": 2, "added": 1, "duplicates": 1}]
+
+
+def test_merge_sources_dedups_across_two_extras():
+    primary = []
+    extra1 = [(_dt(2026, 7, 1), "a"), (_dt(2026, 7, 2), "b")]
+    extra2 = [(_dt(2026, 7, 2), "b"), (_dt(2026, 7, 3), "c")]
+    merged, stats = epe.merge_sources(primary, [("one", extra1), ("two", extra2)])
+    assert [t for _, t in merged] == ["a", "b", "c"]
+    assert stats[1] == {"path": "two", "rows": 2, "added": 1, "duplicates": 1}
+
+
+def test_merge_sources_keeps_same_text_at_different_times():
+    primary = [(_dt(2026, 8, 5), "ok")]
+    extra = [(_dt(2026, 7, 5), "ok")]
+    merged, _ = epe.merge_sources(primary, [("e", extra)])
+    assert len(merged) == 2
+
+
+def test_export_frame_filter_drops_single_char_messages():
+    msgs = [(_dt(2026, 8, 5), "k"), (_dt(2026, 8, 5), "ok"), (_dt(2026, 8, 5), "\U0001F44D")]
+    kept, dropped = epe.export_frame_filter(msgs)
+    assert [t for _, t in kept] == ["ok"]
+    assert dropped == 2
+
+
+def test_window_coverage_reports_first_last_and_days():
+    lo, hi = datetime.datetime(2026, 6, 1), datetime.datetime(2026, 7, 1)
+    msgs = [(_dt(2026, 6, 26, 9), "a"), (_dt(2026, 6, 30, 22), "b"), (_dt(2026, 7, 2), "outside")]
+    cov = epe.window_coverage(msgs, lo, hi)
+    assert cov == {"first": "2026-06-26T09:00:00", "last": "2026-06-30T22:00:00", "covered_days": 4.5}
+
+
+def test_window_coverage_empty_window():
+    assert epe.window_coverage([], datetime.datetime(2026, 6, 1), datetime.datetime(2026, 7, 1)) == {
+        "first": None, "last": None, "covered_days": 0.0}
+
+
+def test_run_with_source_merges_export_into_windows_and_reports_provenance(monkeypatch, tmp_path):
+    # chat.db (mocked): only post-event rows, so without --source the pre window is n=0.
+    chat_rows = [(_dt(2026, 8, 10), "post text %d" % i) for i in range(150)]
+    chat_rows.append((_dt(2026, 8, 10), "k"))  # 1-char row: dropped by the export frame filter
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: chat_rows)
+    # export fixture: pre-event rows (local time, offset -4h) + one exact duplicate of a chat.db row
+    recs = [_training_pair("2026-07-%02dT10:00:00" % (1 + i % 25), "pre text %d" % i) for i in range(150)]
+    recs.append(_training_pair("2026-08-10T08:00:00", "post text 0"))  # == chat.db 2026-08-10T12:00 UTC
+    src = _write_jsonl(tmp_path / "tp.jsonl", recs)
+    monkeypatch.setattr(epe, "EXPORT_TZ", _MINUS4)
+
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", source=[src], out=str(out_path)))
+    assert rc == 0, "pre window should now satisfy min_n via --source"
+    data = json.loads(out_path.read_text())
+    ev = data["events"]["job"]
+    assert ev["status"] == "OK"
+    assert ev["pre_window"]["n"] == 150
+    assert ev["post_window"]["n"] == 150  # 150 chat.db rows; the 1-char row dropped; duplicate not double-counted
+    assert ev["pre_window"]["coverage"]["first"].startswith("2026-07-01")
+    assert data["sources"] == [{"path": src, "rows": 151, "added": 150, "duplicates": 1}]
+    assert data["primary_rows_dropped_by_export_frame"] == 1
+    # no message text anywhere in the report
+    assert "pre text" not in out_path.read_text() and "post text" not in out_path.read_text()
+
+
+def test_run_with_source_still_refuses_when_pre_window_short(monkeypatch, tmp_path):
+    chat_rows = [(_dt(2026, 8, 10), "post %d" % i) for i in range(150)]
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: chat_rows)
+    src = _write_jsonl(tmp_path / "tp.jsonl",
+                       [_training_pair("2026-07-%02dT10:00:00" % (1 + i), "pre %d" % i) for i in range(20)])
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", source=[src], out=str(out_path), min_n=100))
+    assert rc == 1
+    assert not out_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# --min-covered-days: a window that passes min_n on a few days still refuses
+# ---------------------------------------------------------------------------
+
+def _spread(day_lo, day_hi, n, month=7):
+    """n rows spread evenly over [day_lo, day_hi] of the given month."""
+    days = day_hi - day_lo
+    return [(datetime.datetime(2026, month, day_lo) + datetime.timedelta(days=days * i / max(1, n - 1)), "row %d" % i)
+            for i in range(n)]
+
+
+def test_run_refuses_when_pre_window_covers_too_few_days(monkeypatch, tmp_path):
+    # job event 07-26: pre rows all on 07-20..07-24 (4 days), post rows over 08-01..08-24.
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", min_covered_days=20, out=str(out_path)))
+    assert rc == 1
+    assert not out_path.exists()
+
+
+def test_run_refusal_reason_names_covered_days(monkeypatch, capsys):
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    epe.run(_Args(event="job", min_covered_days=20))
+    report = json.loads(capsys.readouterr().out)
+    ev = report["events"]["job"]
+    assert ev["status"] == "INSUFFICIENT_DATA"
+    assert "covered_days" in ev["reason"] and "pre" in ev["reason"]
+    assert report["min_covered_days"] == 20
+    assert "axes" not in ev
+
+
+def test_run_accepts_when_both_windows_meet_coverage_floor(monkeypatch, tmp_path):
+    rows = _spread(1, 25, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", min_covered_days=20, out=str(out_path)))
+    assert rc == 0
+    assert json.loads(out_path.read_text())["events"]["job"]["status"] == "OK"
+
+
+def test_min_covered_days_zero_disables_floor(monkeypatch):
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    assert epe.run(_Args(event="job", min_covered_days=0)) == 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,215 @@
+{
+  "db": "/Users/sethford/Library/Messages/chat.db",
+  "range": {
+    "start": "2026-03-01",
+    "end": "2026-09-05"
+  },
+  "window_days": 30,
+  "min_n": 100,
+  "min_covered_days": 20.0,
+  "primary_outbound_messages_in_range": 987,
+  "total_outbound_messages_in_range": 2299,
+  "events": {
+    "job": {
+      "label": "Employer change: Vanguard -> Raymond James",
+      "event_date": "2026-07-26",
+      "date_confidence": "LOW (not pinned to +/-7 days)",
+      "date_note": "'summer 2026' spans roughly June-August; 2026-07-26 is the date the persona's fact record flipped from 'in transition' to 'Raymond James', the single most concrete dated signal available, but it is a record-update date, not a confirmed first-day date.",
+      "date_citations": [
+        "~/.human/personas/seth.json:70 core.identity: '...Chief Architect at Raymond James in St. Petersburg, Florida (started summer 2026, after leaving Vanguard)'",
+        "~/.human/personas/seth.json:51-54 core.life_events[1]: {description: 'left vanguard for raymond james', state: 'completed', as_of: '2026-07-28'}",
+        "~/.human/personas/seth.json.bak-fact-refresh2-20260726-045551 core.identity (timestamp 2026-07-26T04:55:51): 'Recently left his role as Chief Architect at Vanguard (summer 2026) and is in transition to a new role' -- Raymond James not yet named",
+        "~/.human/personas/seth.json.bak.pre-typing-quirks-removal-20260726-081742 core.identity (timestamp 2026-07-26T08:17:42, ~3h20m later): identity already names 'Chief Architect at Raymond James'"
+      ],
+      "pre_window": {
+        "start": "2026-06-26",
+        "end": "2026-07-26",
+        "n": 1324,
+        "coverage": {
+          "first": "2026-06-26T00:08:41.546216",
+          "last": "2026-07-25T23:41:32.404091",
+          "covered_days": 30.0
+        }
+      },
+      "post_window": {
+        "start": "2026-07-26",
+        "end": "2026-08-25",
+        "n": 522,
+        "coverage": {
+          "first": "2026-07-26T11:42:44.184759",
+          "last": "2026-08-24T23:42:13.392941",
+          "covered_days": 29.5
+        }
+      },
+      "status": "OK",
+      "axes": {
+        "length_chars": {
+          "pre": {
+            "mean": 38.838368580060425,
+            "ci_lo": 36.62462235649547,
+            "ci_hi": 41.35649546827795,
+            "n": 1324
+          },
+          "post": {
+            "mean": 35.82375478927203,
+            "ci_lo": 31.902298850574713,
+            "ci_hi": 40.082375478927204,
+            "n": 522
+          },
+          "delta": -3.0146137907883954,
+          "moved_beyond_ci": true
+        },
+        "lowercase_start_rate": {
+          "pre": {
+            "mean": 0.15237366003062788,
+            "ci_lo": 0.1339969372128637,
+            "ci_hi": 0.17228177641653905,
+            "n": 1306
+          },
+          "post": {
+            "mean": 0.06432748538011696,
+            "ci_lo": 0.042884990253411304,
+            "ci_hi": 0.08576998050682261,
+            "n": 513
+          },
+          "delta": -0.08804617465051093,
+          "moved_beyond_ci": true
+        },
+        "no_terminal_punct_rate": {
+          "pre": {
+            "mean": 0.7885196374622356,
+            "ci_lo": 0.7666163141993958,
+            "ci_hi": 0.8104229607250756,
+            "n": 1324
+          },
+          "post": {
+            "mean": 0.8007662835249042,
+            "ci_lo": 0.764367816091954,
+            "ci_hi": 0.8333333333333334,
+            "n": 522
+          },
+          "delta": 0.012246646062668565,
+          "moved_beyond_ci": false
+        },
+        "question_rate": {
+          "pre": {
+            "mean": 0.09063444108761329,
+            "ci_lo": 0.0755287009063444,
+            "ci_hi": 0.10649546827794562,
+            "n": 1324
+          },
+          "post": {
+            "mean": 0.09961685823754789,
+            "ci_lo": 0.07471264367816093,
+            "ci_hi": 0.12643678160919541,
+            "n": 522
+          },
+          "delta": 0.008982417149934599,
+          "moved_beyond_ci": false
+        },
+        "exclamation_rate": {
+          "pre": {
+            "mean": 0.04682779456193353,
+            "ci_lo": 0.035498489425981876,
+            "ci_hi": 0.05891238670694864,
+            "n": 1324
+          },
+          "post": {
+            "mean": 0.05555555555555555,
+            "ci_lo": 0.03639846743295019,
+            "ci_hi": 0.07662835249042145,
+            "n": 522
+          },
+          "delta": 0.008727760993622019,
+          "moved_beyond_ci": false
+        },
+        "emoji_rate": {
+          "pre": {
+            "mean": 0.0513595166163142,
+            "ci_lo": 0.04003021148036254,
+            "ci_hi": 0.0634441087613293,
+            "n": 1324
+          },
+          "post": {
+            "mean": 0.09003831417624521,
+            "ci_lo": 0.06513409961685823,
+            "ci_hi": 0.11494252873563218,
+            "n": 522
+          },
+          "delta": 0.038678797559931005,
+          "moved_beyond_ci": true
+        },
+        "formality_contractions_per_100_words": {
+          "pre": {
+            "mean": 2.7542072056447595,
+            "ci_lo": 2.3447311394695944,
+            "ci_hi": 3.1689334948153336,
+            "n": 1324
+          },
+          "post": {
+            "mean": 2.8510603290436474,
+            "ci_lo": 2.115720505055957,
+            "ci_hi": 3.579015649727325,
+            "n": 522
+          },
+          "delta": 0.09685312339888785,
+          "moved_beyond_ci": false
+        },
+        "formality_first_person_plural_per_100_words": {
+          "pre": {
+            "mean": 0.5685955801645426,
+            "ci_lo": 0.4150861344342711,
+            "ci_hi": 0.7294356368336158,
+            "n": 1324
+          },
+          "post": {
+            "mean": 0.48589554336680774,
+            "ci_lo": 0.24842016221326566,
+            "ci_hi": 0.7543988578471338,
+            "n": 522
+          },
+          "delta": -0.08270003679773485,
+          "moved_beyond_ci": false
+        },
+        "warmth_hits_per_100_words": {
+          "pre": {
+            "mean": 0.9113767373624427,
+            "ci_lo": 0.6333778552583275,
+            "ci_hi": 1.239725002230296,
+            "n": 1324
+          },
+          "post": {
+            "mean": 1.3331099748194994,
+            "ci_lo": 0.8440110668050491,
+            "ci_hi": 1.9870960244523463,
+            "n": 522
+          },
+          "delta": 0.4217332374570567,
+          "moved_beyond_ci": true
+        }
+      }
+    }
+  },
+  "sources": [
+    {
+      "path": "/Users/sethford/Projects/h-uman/data/imessage/training_pairs.jsonl",
+      "rows": 1303,
+      "added": 1303,
+      "duplicates": 0
+    },
+    {
+      "path": "/Users/sethford/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl",
+      "rows": 1302,
+      "added": 59,
+      "duplicates": 1243
+    }
+  ],
+  "primary_rows_dropped_by_export_frame": 50,
+  "source_caveats": [
+    "export rows are Seth-authored via chat.db is_from_me=1 (scripts/extract_imessage_pairs.py); DPO/memory.db stores were rejected",
+    "export timestamps converted local->UTC before windowing and de-dup",
+    "chat.db rows filtered to the export's len>=2 floor",
+    "export omits Seth messages that open a conversation window with no prior context; that exclusion cannot be reproduced on the chat.db side"
+  ],
+  "overall_status": "OK"
+}
