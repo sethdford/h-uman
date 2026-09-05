@@ -52,6 +52,9 @@ import time
 
 APPLE_EPOCH = 978307200  # 2001-01-01 00:00:00 UTC, chat.db's `date` epoch
 
+FIR_WINDOW_HOURS = 24.0  # contact-replied-within window for FIR; also the comparison
+                          # window for scripts/eval_seth_initiation_baseline.py's rate.
+
 
 def apple_ns_to_unix(apple_ns):
     if not apple_ns:
@@ -298,7 +301,7 @@ def main():
     ap.add_argument("--days", type=int, default=90, help="lookback window (default 90)")
     ap.add_argument("--reply-window-hours", type=float, default=6.0,
                     help="Seth-replied-within window for the 'positive' label (default 6h)")
-    ap.add_argument("--fir-window-hours", type=float, default=24.0,
+    ap.add_argument("--fir-window-hours", type=float, default=FIR_WINDOW_HOURS,
                     help="contact-replied-within window for FIR (default 24h)")
     ap.add_argument("--decision-window-before-hours", type=float, default=1.0,
                     help="how far BEFORE a positive moment to look for a decision (default 1h)")

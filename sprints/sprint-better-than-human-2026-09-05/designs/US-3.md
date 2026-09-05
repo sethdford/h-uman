@@ -303,6 +303,42 @@ these tests exercise the real query, not a stub).
 All ten tests run against an in-memory or `tmp_path` sqlite file — **zero** access to the
 real `~/Library/Messages/chat.db`, so the suite is fully hermetic and safe in CI.
 
+## Finding F1 (post-implementation critic fix, 2026-09-05): tapback reactions were counted as replies/initiations
+
+**Fixed** in a follow-up patch to the implementation above. `load_dm_messages()`
+(`eval_when_to_speak.py:83-127`) treats a chat.db tapback reaction — a heart/like/etc.
+react to another message, stored as an ordinary `message` row with
+`associated_message_type` in `{2000, 2001, 2003, 2004, 2005, 2006}` rather than `0`/`NULL`
+— as an indistinguishable regular message. That meant `label_unanswered()` could count a
+bare inbound heart-react as the reply that answers Seth's initiation, and
+`find_initiations()` could count a bare outbound heart-react as an initiation in its own
+right. Live-measured against this machine's chat.db: non-zero `associated_message_type`
+rows are 3.8% of in-window DM rows (90 of 2413).
+
+**Fix** (kept entirely inside `scripts/eval_seth_initiation_baseline.py`, per the same
+"don't widen the `eval_when_to_speak.py` diff for US-4" reasoning as `INITIATION_GAP_HOURS`
+above): a new function, `load_dm_messages_excluding_tapbacks()`, duplicates
+`load_dm_messages()`'s DM-chat-detection query with one added predicate,
+`COALESCE(m.associated_message_type, 0) = 0`, and `main()` now calls it instead of the
+imported `load_dm_messages()`. `eval_when_to_speak.py` itself is untouched by this fix —
+`scripts/fit_reply_delay_model.py` (US-4) still imports and calls the original,
+tapback-inclusive `load_dm_messages()` unmodified.
+
+**Tests added**: `test_inbound_tapback_not_counted_as_reply`,
+`test_outbound_tapback_not_counted_as_initiation`, and
+`test_tapback_types_2000_through_2006_all_excluded` in
+`scripts/test_eval_seth_initiation_baseline.py` — each contrasts the fixed loader against
+the unfiltered `eval_when_to_speak.load_dm_messages()` on the same fixture to pin the
+exact pre-fix behavior as a regression guard, not just assert the fixed behavior in
+isolation.
+
+**Effect on the measured baseline**: re-running the real script and the sensitivity grid
+after the fix moved `n` from 50 → 48 and `unanswered` from 16 → 15 at the recommended
+gap_hours=6/fir_window_hours=24 pair (rate 0.320 → 0.312, well within the pre-fix Wilson
+CI) — a small, expected shift, not a different conclusion. Both the fixed and the pre-fix
+numbers are recorded in `evidence/us3-seth-initiation-baseline.json` (the latter under
+`before_tapback_filter`, for the record).
+
 ## Conflicts with other stories
 
 **US-4 also lists `scripts/eval_when_to_speak.py` as touched** ("read; only touched if the
