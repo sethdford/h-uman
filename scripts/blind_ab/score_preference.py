@@ -155,6 +155,20 @@ def main():
               f"evidence artifact).", file=sys.stderr)
         return
 
+    # Hard floor: --min-n is operator-overridable (useful for a --evidence-out-less
+    # dry run against a small sample), but it must never be able to lower the
+    # AC-6.5 floor for a WRITTEN evidence file below MIN_N=20. Without this,
+    # `--min-n 1 --evidence-out ...` would commit an n=1 (or n=15) "measurement"
+    # as if it were the real floor -- exactly the fabricated-confidence shape
+    # .claude/rules/no-number-without-a-measurement.md exists to prevent.
+    evidence_min_n = max(a.min_n, MIN_N)
+    if agg["n"] < evidence_min_n:
+        print(f"RESULT_blind_ab_preference=INVALID (n={agg['n']} < {evidence_min_n} "
+              f"evidence floor; --min-n cannot lower the AC-6.5 floor for a "
+              f"written evidence file -- rerun without --evidence-out for a "
+              f"scoring-only look at n={agg['n']})", file=sys.stderr)
+        sys.exit(3)
+
     evidence = {
         "n": agg["n"],
         "win_rate": round(agg["detect"], 4),

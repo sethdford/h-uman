@@ -6,7 +6,9 @@ No network, no real AddressBook read (HU_BLIND_AB_SKIP_ADDRESSBOOK=1 is set
 for every subprocess invocation), no ~/.human writes -- redact()/build() unit
 tests inject a fixture name list directly rather than resolving contacts.
 """
+import contextlib
 import csv
+import io
 import json
 import os
 import subprocess
@@ -15,7 +17,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from make_rating_sheet import build, build_name_tokens, redact, write_outputs
+from make_rating_sheet import (build, build_name_tokens, redact,
+                                resolve_contact_name_tokens, write_outputs)
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "make_rating_sheet.py")
 
@@ -36,14 +39,63 @@ class TestRedactPhone(unittest.TestCase):
         self.assertNotIn("123-4567", out)
         self.assertIn("[phone]", out)
 
-    def test_international_format_is_redacted(self):
+    def test_international_format_digits_only_is_redacted(self):
         out = redact("text +14155551234 tonight")
         self.assertNotIn("+14155551234", out)
+        self.assertIn("[phone]", out)
+
+    def test_international_grouped_spaces_is_redacted(self):
+        out = redact("text +44 20 7946 0958 tonight")
+        self.assertNotIn("+44 20 7946 0958", out)
+        self.assertIn("[phone]", out)
+
+    def test_international_grouped_dots_is_redacted(self):
+        out = redact("text +44.20.7946.0958 tonight")
+        self.assertNotIn("+44.20.7946.0958", out)
+        self.assertIn("[phone]", out)
+
+    def test_national_grouped_spaces_is_redacted(self):
+        out = redact("call 020 7946 0958 please")
+        self.assertNotIn("020 7946 0958", out)
+        self.assertIn("[phone]", out)
+
+    def test_parens_area_code_with_dash_is_redacted(self):
+        out = redact("call (415) 555-0199 now")
+        self.assertNotIn("(415) 555-0199", out)
+        self.assertIn("[phone]", out)
+
+    def test_dotted_us_format_is_redacted(self):
+        out = redact("call 415.555.0199 now")
+        self.assertNotIn("415.555.0199", out)
         self.assertIn("[phone]", out)
 
     def test_no_phone_shaped_text_is_unchanged(self):
         out = redact("just a normal sentence with no numbers")
         self.assertEqual(out, "just a normal sentence with no numbers")
+
+    def test_year_alone_is_not_redacted(self):
+        text = "lets meet in 2026 sometime"
+        self.assertEqual(redact(text), text)
+
+    def test_time_of_day_is_not_redacted(self):
+        text = "the movie starts at 10:30"
+        self.assertEqual(redact(text), text)
+
+    def test_time_with_meridiem_is_not_redacted(self):
+        text = "see you at 3:45pm sharp"
+        self.assertEqual(redact(text), text)
+
+    def test_price_is_not_redacted(self):
+        text = "that will cost $19.99 total"
+        self.assertEqual(redact(text), text)
+
+    def test_five_digit_zip_is_not_redacted(self):
+        text = "my zip is 94107 by the way"
+        self.assertEqual(redact(text), text)
+
+    def test_zip_plus_four_is_not_redacted(self):
+        text = "zip plus four is 12345-6789"
+        self.assertEqual(redact(text), text)
 
     def test_empty_and_none_are_passthrough(self):
         self.assertEqual(redact(""), "")
@@ -90,6 +142,33 @@ class TestRedactName(unittest.TestCase):
         self.assertEqual(build_name_tokens(None), set())
         self.assertEqual(build_name_tokens([]), set())
         self.assertEqual(build_name_tokens([""]), set())
+
+
+class TestResolveContactNameTokensSkipWarning(unittest.TestCase):
+    """F4: HU_BLIND_AB_SKIP_ADDRESSBOOK degrades to phone-only redaction
+    exactly like a genuine AddressBook failure does -- both paths MUST print
+    a one-line stderr warning so a leaked test env var in a real run is
+    discoverable, per
+    .claude/rules/silent-config-gated-subsystems.md ("silent config-gated
+    subsystems must log once on disable")."""
+
+    def setUp(self):
+        self._old = os.environ.get("HU_BLIND_AB_SKIP_ADDRESSBOOK")
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        if self._old is None:
+            os.environ.pop("HU_BLIND_AB_SKIP_ADDRESSBOOK", None)
+        else:
+            os.environ["HU_BLIND_AB_SKIP_ADDRESSBOOK"] = self._old
+
+    def test_skip_env_var_set_prints_warning_and_returns_empty(self):
+        os.environ["HU_BLIND_AB_SKIP_ADDRESSBOOK"] = "1"
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            result = resolve_contact_name_tokens()
+        self.assertEqual(result, set())
+        self.assertIn("HU_BLIND_AB_SKIP_ADDRESSBOOK", buf.getvalue())
 
 
 class TestBuildDetectionMode(unittest.TestCase):

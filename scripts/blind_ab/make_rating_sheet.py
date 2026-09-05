@@ -42,11 +42,32 @@ FIELDNAMES = ["id", "context", "option_A", "option_B", "choice", "confidence",
               "axis_opinion", "axis_memory", "axis_reasoning",
               "axis_lexical", "axis_tone", "axis_syntax"]
 
-# Phone-shaped: US-style with optional separators/parens, and international
-# +country-code forms. Reuses the normalization intent of
-# scripts/mine_all_data.py's normalize_phone() (digit-run based), but this is
-# a REDACTION regex (find-and-mask), not a normalize-and-compare function.
-_PHONE_RE = re.compile(r'\+\d{7,15}|\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}')
+# Phone-shaped substrings, four alternatives in increasing grouping generality:
+#   1. \+\d{7,15}                          international, digits only, no separators
+#                                           (e.g. "+14155551234")
+#   2. \(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}  US 3-3-4, optional parens/separators
+#                                           (e.g. "555-123-4567", "(415) 555-0199",
+#                                           "415.555.0199", or a bare 10-digit run)
+#   3. \+\d{1,3}(?:[-.\s]\d{2,4}){2,4}      international, GROUPED with separators
+#                                           (e.g. "+44 20 7946 0958", "+44.20.7946.0958")
+#   4. \d{2,4}(?:[-.\s]\d{2,4}){2,3}        national, GROUPED with separators, 3-4
+#                                           groups of 2-4 digits (e.g. "020 7946 0958")
+# Alternatives 3 and 4 REQUIRE a separator between every group (no bare-digit-run
+# fallback) and require >=3 total groups of 2-4 digits each -- specifically so this
+# does NOT redact ordinary non-phone numbers that merely contain digits and a
+# separator: a bare 4-digit year ("2026", no separator at all), an HH:MM time
+# (":" is not in the separator class), a 2-decimal price ("$19.99" is only 2
+# groups, below the 3-group minimum), or a bare 5-digit zip (single group, no
+# separator; a zip+4 like "12345-6789" is a 5-digit group, above the 2-4 range).
+# Reuses the normalization intent of scripts/mine_all_data.py's normalize_phone()
+# (digit-run based), but this is a REDACTION regex (find-and-mask), not a
+# normalize-and-compare function.
+_PHONE_RE = re.compile(
+    r'\+\d{7,15}'
+    r'|\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+    r'|\+\d{1,3}(?:[-.\s]\d{2,4}){2,4}'
+    r'|\d{2,4}(?:[-.\s]\d{2,4}){2,3}'
+)
 
 # Single alphabetic token, with an optional trailing possessive/contraction
 # suffix ("Sarah's", "O'Brien's") captured separately so the possessive "'s"
@@ -105,6 +126,9 @@ def resolve_contact_name_tokens():
     phone-only redaction rather than crashing the build.
     """
     if os.environ.get("HU_BLIND_AB_SKIP_ADDRESSBOOK"):
+        print("warning: HU_BLIND_AB_SKIP_ADDRESSBOOK is set; "
+              "proceeding with phone-only redaction (no contact-name "
+              "redaction this run)", file=sys.stderr)
         return set()
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
