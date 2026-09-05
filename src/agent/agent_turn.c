@@ -1013,6 +1013,39 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
  * raters. Motivation (2026-07-22 soak): the full head's median 16,585 B alone
  * exceeds HU_PROMPT_TRIM_BUDGET_BYTES, so HU_PROMPT_TRIM's middle-trim can
  * never fit the prompt and the positional cap truncates the guard tail. */
+hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, size_t *prompt_len,
+                                           size_t guard_tail_reserved) {
+    if (!agent || !agent->alloc || !prompt || !*prompt || !prompt_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    char rules[2048];
+    size_t rules_len = 0;
+    if (agent->persona) {
+        /* Formality-aware: professional contacts get the capitalized,
+         * punctuated register; everyone else the measured casual one. */
+        const hu_persona_overlay_t *ov = hu_persona_find_overlay(
+            agent->persona, agent->active_channel, agent->active_channel_len);
+        if (hu_persona_build_absolute_rules_fmt(agent->persona, ov ? ov->formality : NULL, rules,
+                                                sizeof(rules), &rules_len) != HU_OK)
+            rules_len = 0;
+    }
+    const size_t before = *prompt_len;
+    hu_error_t err =
+        hu_prompt_cap_with_tail(agent->alloc, prompt, prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES,
+                                guard_tail_reserved, rules_len ? rules : NULL, rules_len);
+    /* Prompt-size budget guard: MLX backends return empty responses past
+     * ~28 KB (2026-05-19), so the cap is real and fires on every turn whose
+     * assembled prompt exceeds the budget. Log once per process. */
+    if (before > HU_PROMPT_TRIM_BUDGET_BYTES) {
+        static atomic_bool warned_prompt_budget = false;
+        hu_log_warn_once(&warned_prompt_budget, "agent", NULL,
+                         "system prompt truncated from %zu to %zu bytes (MLX backend cap; "
+                         "%zu-byte guard tail reserved, %zu-byte rules block appended last); "
+                         "some context dropped",
+                         before, *prompt_len, guard_tail_reserved, rules_len);
+    }
+    return err;
+}
+
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len) {
     if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
@@ -4590,21 +4623,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * we land well inside the safe zone. Truncate at the last newline
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
-        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            /* Reserve the immersive guard tail (shape rules, CRITICAL
-             * REMINDER, absolute rules) so a grown middle section — recall,
-             * exemplars — displaces context, never the rules. */
-            size_t reserved = prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed;
-            size_t before_cap = system_prompt_len;
-            system_prompt_len = hu_prompt_positional_cap_apply(
-                system_prompt, system_prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES, reserved);
-            static atomic_bool warned_prompt_budget = false;
-            hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
-                             "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap; %zu-byte guard tail reserved); some context "
-                             "dropped",
-                             before_cap, system_prompt_len, reserved);
-        }
+        /* Cap to budget keeping the guard tail (shape rules, CRITICAL
+         * REMINDER), then append the measured ABSOLUTE RULES block as the
+         * final bytes. Until 2026-09-05 the block reached only
+         * agent_stream's lean branch, so production (batch path, streaming
+         * off) never carried it. */
+        if (err == HU_OK && system_prompt)
+            (void)hu_agent_finalize_system_prompt(
+                agent, &system_prompt, &system_prompt_len,
+                prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed);
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;

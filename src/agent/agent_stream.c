@@ -682,22 +682,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 if (n > 0 && lpo + (size_t)n < sizeof(lp))
                     lpo += (size_t)n;
             }
-            /* Hard override block — last instruction has highest weight with LLMs.
-             * Addresses base model habits that resist fine-tuning.
-             * P6-5: shared helper, same source of truth as the proactive path. */
-            {
-                char rules_buf[2048];
-                size_t rules_len = 0;
-                /* Formality-aware: professional contacts get capitalized/punctuated
-                 * register, not the casual friend-voice (fixes register mismatch). */
-                if (hu_persona_build_absolute_rules_fmt(p, ov ? ov->formality : NULL, rules_buf,
-                                                        sizeof(rules_buf), &rules_len) == HU_OK &&
-                    rules_len > 0) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", rules_buf);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-            }
+            /* The ABSOLUTE RULES block is no longer appended here. It used to
+             * be added ONLY in this lean branch, which left the batch path
+             * (all of production) without it. hu_agent_finalize_system_prompt
+             * now appends it once, on every path, as the final bytes inside
+             * the prompt budget. */
             if (lpo > 0) {
                 persona_prompt = hu_strndup(agent->alloc, lp, lpo);
                 persona_prompt_len = lpo;
@@ -1315,16 +1304,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
-        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t reserved = prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed;
-            size_t before_cap = system_prompt_len;
-            system_prompt_len = hu_prompt_positional_cap_apply(
-                system_prompt, system_prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES, reserved);
-            static atomic_bool warned_stream_prompt_budget = false;
-            hu_log_warn_once(&warned_stream_prompt_budget, "agent_stream", NULL,
-                             "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap; %zu-byte guard tail reserved)",
-                             before_cap, system_prompt_len, reserved);
+        /* Same finalizer as the batch path: cap + measured ABSOLUTE RULES last. */
+        if (err == HU_OK && system_prompt) {
+            const size_t guard_reserved =
+                prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed;
+            (void)hu_agent_finalize_system_prompt(agent, &system_prompt, &system_prompt_len,
+                                                  guard_reserved);
         }
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);

@@ -885,6 +885,17 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len);
 
+/* Finish an assembled system prompt the way every turn path must: cap it to
+ * HU_PROMPT_TRIM_BUDGET_BYTES (keeping `guard_tail_reserved` bytes of the
+ * prompt.c guard tail) and make the persona's formality-aware ABSOLUTE RULES
+ * block — whose casual rule 2 is the MEASURED style card, emoji rate included
+ * — the final bytes the model reads. Idempotent; with no persona (or a block
+ * that fails to build) it is exactly the plain cap. Shared by the batch turn,
+ * the streaming turn and tools/dump_prompt_head, so what is measured is what
+ * is served. See hu_prompt_cap_with_tail for the ownership contract. */
+hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, size_t *prompt_len,
+                                           size_t guard_tail_reserved);
+
 /* Graph-grounding load, shared by BOTH turn paths (same shared-helper shape
  * as hu_agent_build_persona_head). Composes QUERY-CONDITIONED graph context
  * for the incoming message `msg` (entity-overlap scored, 1-hop walk; empty

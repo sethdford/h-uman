@@ -1,6 +1,8 @@
 #ifndef HU_AGENT_PROMPT_TRIM_H
 #define HU_AGENT_PROMPT_TRIM_H
 
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stddef.h>
 
 /* Value-aware system-prompt trim — replaces the positional 16 KB tail
@@ -109,5 +111,30 @@ size_t hu_prompt_positional_cap_point(const char *buf, size_t len, size_t budget
  * behaviour is exactly the plain cap. Mutates buf in place, NUL-terminates,
  * returns the new length (== len when len <= budget). */
 size_t hu_prompt_positional_cap_apply(char *buf, size_t len, size_t budget, size_t reserved_tail);
+
+/* Cap an assembled system prompt to `budget` AND make `tail` its final bytes.
+ *
+ * The plain cap (hu_prompt_positional_cap_apply) protects a guard tail that
+ * is already inside the buffer; it cannot protect a block appended AFTER the
+ * cap. That is how the ABSOLUTE RULES block went missing: it was appended
+ * only on the streaming path's lean branch, and production runs the batch
+ * path. This helper is the one place every path finishes a system prompt:
+ *
+ *   - `tail` absent (NULL/0) or too large to fit inside `budget`: behaves
+ *     exactly like hu_prompt_positional_cap_apply(buf, len, budget,
+ *     reserved_guard_tail) — never emits nothing.
+ *   - `tail` already present intact in the surviving region (recognised by
+ *     its first non-empty line, e.g. "=== ABSOLUTE RULES ..."): plain cap,
+ *     no second copy — so a head that embeds the block itself is safe, and
+ *     the call is idempotent.
+ *   - otherwise: cap the buffer to `budget - tail_len` keeping the guard
+ *     tail, then append `tail`, so it lands last (max recency) inside budget.
+ *
+ * Ownership: *buf may be replaced by a fresh allocation of (*len + 1) bytes;
+ * the old buffer is freed with its old length + 1, matching every call
+ * site's free contract. On allocation failure the plain cap is applied and
+ * HU_ERR_OUT_OF_MEMORY returned (the prompt is still valid). */
+hu_error_t hu_prompt_cap_with_tail(hu_allocator_t *alloc, char **buf, size_t *len, size_t budget,
+                                   size_t reserved_guard_tail, const char *tail, size_t tail_len);
 
 #endif /* HU_AGENT_PROMPT_TRIM_H */
