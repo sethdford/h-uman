@@ -235,3 +235,152 @@ def _run():
 
 if __name__ == "__main__":
     _run()
+
+
+# ---- 3. serving provenance at gate time -------------------------------------
+# 2026-07-26 -> 09-04 :8741 named an adapter and bound 0 tensors; every proxy
+# number in that window measured base+prompt. The gate writer now asks the
+# server what it serves and refuses a verdict it cannot attribute.
+import json
+import subprocess
+import tempfile
+
+from fake_mlx_server import FakeMlx, fake_dump_prompt_head
+
+_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval_blinded_ab.py")
+
+
+def _gate_file(d):
+    path = os.path.join(d, "gate.json")
+    with open(path, "w") as f:
+        json.dump({"schema_version": 1, "commit": "deadbeef",
+                   "proxy": {"tool": "eval_blinded_ab.py", "verdict": "PASS", "mode": "ENFORCING",
+                             "fool_rate": 51.0, "n_trials": 43, "n_real_pairs": 43},
+                   "human": {"verdict": "ABSENT"}, "effective_verdict": "PASS"}, f, indent=2)
+    return path, open(path, "rb").read()
+
+
+def test_gate_serving_provenance_carries_head_hash_and_server_answer():
+    d = tempfile.mkdtemp()
+    srv = FakeMlx(adapter="/adapters/seth-v6", tensors=160)
+    try:
+        head_exe = fake_dump_prompt_head(d)
+        old = (E.MLX_URL, E._DUMP_HEAD_CANDIDATES)
+        E.MLX_URL, E._DUMP_HEAD_CANDIDATES = srv.url, (head_exe,)
+        try:
+            prov = E.gate_serving_provenance()
+        finally:
+            E.MLX_URL, E._DUMP_HEAD_CANDIDATES = old
+        assert prov["adapter_path"] == "/adapters/seth-v6" and prov["tensors_loaded"] == 160
+        assert prov["adapter_bound"] is True and prov["model"] == "fake-base"
+        assert len(prov["head_sha256"]) == 64 and prov["head_bytes"] >= 500
+    finally:
+        srv.close()
+
+
+def test_gate_serving_provenance_records_missing_head_as_null_not_empty_hash():
+    srv = FakeMlx(adapter="/adapters/seth-v6", tensors=160)
+    try:
+        old = (E.MLX_URL, E._DUMP_HEAD_CANDIDATES)
+        E.MLX_URL, E._DUMP_HEAD_CANDIDATES = srv.url, ("/nonexistent/dump_prompt_head",)
+        try:
+            prov = E.gate_serving_provenance()
+        finally:
+            E.MLX_URL, E._DUMP_HEAD_CANDIDATES = old
+        assert prov["head_sha256"] is None and prov["head_bytes"] == 0
+        assert "head_error" in prov and prov["adapter_bound"] is True
+    finally:
+        srv.close()
+
+
+def test_write_gate_verdict_records_full_provenance_when_bound():
+    d = tempfile.mkdtemp()
+    path, _ = _gate_file(d)
+    serving = {"server": "http://127.0.0.1:9", "asked_at": "t", "model": "fake-base",
+               "adapter_path": "/adapters/seth-v6", "tensors_loaded": 160, "adapter_bound": True,
+               "provenance_available": True, "head_sha256": "ab" * 32, "head_bytes": 800}
+    mode, verdict, should_fail = E.write_gate_verdict(
+        path, fool_rate=60.0, n_trials=40, n_real_pairs=40, baseline=None,
+        serving=serving, preflight_serving=serving, claims_adapter=True,
+        run_mode="mlx", commit="cafe")
+    assert (mode, verdict, should_fail) == ("ENFORCING", "PASS", False)
+    proxy = json.load(open(path))["proxy"]
+    for key in ("run_mode", "judge_model", "serving", "n_trials", "n_real_pairs", "claims_adapter"):
+        assert key in proxy, key
+    assert proxy["run_mode"] == "mlx" and proxy["judge_model"] == E.EVAL_MODEL
+    assert proxy["serving"]["adapter_path"] == "/adapters/seth-v6"
+    assert proxy["serving"]["tensors_loaded"] == 160 and proxy["serving"]["model"] == "fake-base"
+    assert proxy["serving"]["head_sha256"] == "ab" * 32
+    assert json.load(open(path))["commit"] == "cafe"
+
+
+def test_write_gate_verdict_refuses_when_adapter_changed_mid_run():
+    d = tempfile.mkdtemp()
+    path, before = _gate_file(d)
+    pre = {"server": "s", "asked_at": "t", "model": "fake-base", "adapter_path": "/adapters/a",
+           "tensors_loaded": 160, "adapter_bound": True, "provenance_available": True,
+           "head_sha256": "ab" * 32, "head_bytes": 800}
+    post = dict(pre, adapter_path="/adapters/b")
+    try:
+        E.write_gate_verdict(path, fool_rate=60.0, n_trials=40, n_real_pairs=40, baseline=None,
+                             serving=post, preflight_serving=pre, claims_adapter=True,
+                             run_mode="mlx", commit=None)
+    except E._gate.ProvenanceRefusal as e:
+        assert "changed" in str(e)
+    else:
+        raise AssertionError("verdict written although the served adapter changed mid-run")
+    assert open(path, "rb").read() == before
+
+
+def test_write_gate_verdict_refuses_bound_nothing_and_leaves_gate_byte_identical():
+    d = tempfile.mkdtemp()
+    path, before = _gate_file(d)
+    inert = {"server": "s", "asked_at": "t", "model": "fake-base", "adapter_path": "/adapters/a",
+             "tensors_loaded": 0, "adapter_bound": False, "provenance_available": True,
+             "head_sha256": "ab" * 32, "head_bytes": 800}
+    try:
+        E.write_gate_verdict(path, fool_rate=60.0, n_trials=40, n_real_pairs=40, baseline=None,
+                             serving=inert, preflight_serving=inert, claims_adapter=True,
+                             run_mode="gateway", commit=None)
+    except E._gate.ProvenanceRefusal:
+        pass
+    else:
+        raise AssertionError("verdict written for an adapter that bound 0 tensors")
+    assert open(path, "rb").read() == before
+
+
+def _run_script(args, env):
+    return subprocess.run([sys.executable, _SCRIPT] + args, capture_output=True, text=True,
+                          timeout=60, env=env)
+
+
+def test_gate_run_refuses_before_generating_when_nothing_bound():
+    """End to end through the script: an inert adapter is refused at pre-flight
+    -- exit 2, gate byte-identical, ZERO generation requests -- so a nightly
+    cannot spend 45 generations plus judge calls measuring the base."""
+    d = tempfile.mkdtemp()
+    srv = FakeMlx(adapter="/adapters/seth-v6", tensors=0)
+    try:
+        path, before = _gate_file(d)
+        env = dict(os.environ, MLX_URL=srv.url, HU_BLIND_AB_GATE_PATH=path,
+                   GEMINI_API_KEY="fake-for-creds-check",
+                   HU_DUMP_PROMPT_HEAD=fake_dump_prompt_head(d))
+        r = _run_script(["--gate", "--mlx"], env)
+        assert r.returncode == 2, (r.returncode, r.stdout[-600:], r.stderr[-600:])
+        assert "REFUSING" in (r.stdout + r.stderr) and "nothing bound" in (r.stdout + r.stderr)
+        assert open(path, "rb").read() == before
+        assert srv.calls == 0
+    finally:
+        srv.close()
+
+
+def test_gate_run_refuses_when_provenance_unreachable_and_adapter_claimed():
+    d = tempfile.mkdtemp()
+    path, before = _gate_file(d)
+    env = dict(os.environ, MLX_URL="http://127.0.0.1:1/v1/chat/completions",
+               HU_BLIND_AB_GATE_PATH=path, GEMINI_API_KEY="fake-for-creds-check",
+               HU_DUMP_PROMPT_HEAD=fake_dump_prompt_head(d))
+    r = _run_script(["--gate", "--mlx"], env)
+    assert r.returncode == 2, (r.returncode, r.stdout[-600:], r.stderr[-600:])
+    assert "unreachable" in (r.stdout + r.stderr)
+    assert open(path, "rb").read() == before

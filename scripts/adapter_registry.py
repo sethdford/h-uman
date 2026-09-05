@@ -158,6 +158,34 @@ def record_training(
     _save_registry_atomic(registry, registry_path)
 
 
+def eval_is_measured(record) -> bool:
+    """True only when an eval row carries evidence: n >= 1 pairs and a reason.
+
+    seth-lora-v4-repair accumulated 14 consecutive {"score": 1.0, "verdict":
+    "SKIP"} rows (2026-07-12..25) with no n and no reason; the classifier was
+    scoring the literal "[timeout]" string. A reader that trusts `score` sees
+    fourteen perfect evals. Every reader feeding a promotion or a gate must
+    treat such a row as ABSENT (.claude/rules/no-number-without-a-measurement.md).
+    """
+    if not isinstance(record, dict):
+        return False
+    n = record.get("n")
+    reason = record.get("reason")
+    return (isinstance(n, int) and not isinstance(n, bool) and n >= 1
+            and isinstance(reason, str) and bool(reason.strip()))
+
+
+def latest_measured_eval(adapter_entry, eval_name: str = None):
+    """The newest eval row that eval_is_measured(); None when there is none.
+    The canonical read path for a score — never index eval[-1]["score"]."""
+    for rec in reversed((adapter_entry or {}).get("eval") or []):
+        if eval_name and rec.get("eval_name") != eval_name:
+            continue
+        if eval_is_measured(rec):
+            return rec
+    return None
+
+
 def record_eval(
     registry_path: Path = DEFAULT_REGISTRY_PATH,
     adapter_id: str = None,
@@ -165,17 +193,43 @@ def record_eval(
     score: float = None,
     verdict: str = None,
     timestamp: str = None,
+    n: int = None,
+    reason: str = None,
+    adapter_path: str = None,
+    base: str = None,
+    provenance: dict = None,
 ) -> None:
     """Record an evaluation result for an adapter.
+
+    Refuses (ValueError, registry untouched) a row that could not be read back
+    as a measurement: n, reason, adapter_path, base and provenance are all
+    required, and a non-null score additionally needs n >= 1.
 
     Args:
         registry_path: Path to registry.json
         adapter_id: Identifier for the adapter
         eval_name: Name of the eval (e.g., "fidelity-nightly")
-        score: Numerical score from the evaluation
+        score: Numerical score from the evaluation (None for SKIP)
         verdict: Verdict string (e.g., "PASS", "FAIL", "SKIP")
         timestamp: ISO-format timestamp (default: now)
+        n: pairs actually measured (the denominator behind `score`)
+        reason: one line saying why the verdict is what it is
+        adapter_path: the adapter that was evaluated
+        base: base model id it was paired with
+        provenance: how generation ran (mode, server, differentiation, ...)
     """
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        raise ValueError(f"record_eval: n (pairs measured) is required, got {n!r}")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("record_eval: reason is required")
+    if score is not None and n < 1:
+        raise ValueError(f"record_eval: score {score!r} with n={n} is not a measurement")
+    if not isinstance(adapter_path, str) or not adapter_path:
+        raise ValueError("record_eval: adapter_path is required")
+    if not isinstance(base, str) or not base:
+        raise ValueError("record_eval: base model id is required")
+    if not isinstance(provenance, dict):
+        raise ValueError("record_eval: provenance dict is required")
     if timestamp is None:
         timestamp = datetime.now().isoformat()
 
@@ -193,6 +247,11 @@ def record_eval(
         "eval_name": eval_name,
         "score": score,
         "verdict": verdict,
+        "n": n,
+        "reason": reason,
+        "adapter_path": adapter_path,
+        "base": base,
+        "provenance": provenance,
     }
 
     registry["adapters"][adapter_id]["eval"].append(eval_record)
@@ -352,7 +411,19 @@ def status(
             latest_eval_time = datetime.fromisoformat(latest_eval["timestamp"])
             lines.append(f"  Latest eval: {latest_eval['timestamp']}")
             lines.append(f"    Name: {latest_eval.get('eval_name', '?')}")
-            lines.append(f"    Score: {latest_eval.get('score', '?')}")
+            if eval_is_measured(latest_eval):
+                lines.append(f"    Score: {latest_eval.get('score')} (n={latest_eval['n']})")
+                lines.append(f"    Reason: {latest_eval['reason']}")
+            else:
+                lines.append("    Score: ABSENT (row has no n/reason — unevidenced, not a "
+                             "measurement; raw value ignored)")
+                measured = latest_measured_eval(adapter)
+                if measured:
+                    lines.append(f"    Latest MEASURED eval: {measured['timestamp']} "
+                                 f"score={measured.get('score')} (n={measured['n']}) "
+                                 f"verdict={measured.get('verdict', '?')}")
+                else:
+                    lines.append("    Latest MEASURED eval: (none — no row carries n/reason)")
             lines.append(f"    Verdict: {latest_eval.get('verdict', '?')}")
 
             # Flag stale evals
