@@ -305,6 +305,35 @@ def base_adapter_family_mismatch(model_id: str | None, adapter_path) -> bool:
 # 180s timeout and pure sentinel passes recorded as pre=post=1.0 SKIP.
 SENTINEL_PREFIXES = ("[timeout]", "[gen_err", "[empty]")
 
+# Runaway guard for the served path. A client-side timeout does NOT stop the
+# server's generation: on 2026-09-05 two adapter-arm generations ran 814 s and
+# 948 s (592-token dash / think-tag loops at <1 tok/s), every prompt queued
+# behind them timed out as well, and the blind-A/B step that followed found the
+# server saturated. Stop the arm instead of stacking abandoned requests.
+MAX_CONSECUTIVE_TIMEOUTS = 3
+
+# Sentinel asymmetry. Sentinels on BOTH arms mean the harness or the server is
+# failing (DEFERRED, as before). Sentinels on the ADAPTER arm alone, with the
+# base arm clean on the same server minutes earlier, mean the adapter emits
+# empties / runaways — the exact fidelity defect this gate exists to catch.
+# 2026-09-04 and 09-05 both deferred on "generation is failing, not the
+# adapter" when the base arm had 0/29 sentinels and the adapter arm 8/29.
+ASYM_BASE_ARM_MAX_SENTINELS = 1
+ASYM_ADAPTER_ARM_MIN_SENTINELS = 3
+
+
+def sentinel_breakdown(responses: list[str]) -> dict:
+    """Count sentinels by kind so a verdict says WHAT failed, not just how many."""
+    out = {"timeout": 0, "gen_err": 0, "empty": 0}
+    for r in responses:
+        if r.startswith("[timeout]"):
+            out["timeout"] += 1
+        elif r.startswith("[gen_err"):
+            out["gen_err"] += 1
+        elif r.startswith("[empty]"):
+            out["empty"] += 1
+    return out
+
 
 def is_sentinel(response: str) -> bool:
     """True when a response is a generate() error marker, not model output."""
@@ -879,6 +908,7 @@ def run_served_pass(url: str, prompts: list[dict], pass_label: str,
     every prompt; a non-empty reason stops the arm (stats["aborted"])."""
     start = time.time()
     responses = []
+    consecutive_timeouts = 0
     stats = {"pass": pass_label, "server_url": url}
     for i, p in enumerate(prompts):
         if abort_if is not None:
@@ -890,7 +920,22 @@ def run_served_pass(url: str, prompts: list[dict], pass_label: str,
                 break
         prompt_text = p["prompt"] if isinstance(p, dict) else p
         print(f"  [{pass_label}] {i+1}/{len(prompts)} {prompt_text[:50]!r}...", flush=True)
-        responses.append(generate_served(url, prompt_text, timeout_sec=gen_timeout))
+        resp = generate_served(url, prompt_text, timeout_sec=gen_timeout)
+        responses.append(resp)
+        if resp.startswith("[timeout]"):
+            consecutive_timeouts += 1
+            if consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS:
+                reason = (f"{consecutive_timeouts} consecutive client timeouts "
+                          f"({gen_timeout}s each) — the server is still generating the "
+                          f"abandoned requests (runaway generation); stopping the arm "
+                          f"rather than stacking more behind them")
+                print(f"  [{pass_label}] ABORT after {i+1}/{len(prompts)}: {reason}", flush=True)
+                stats["aborted"] = reason
+                stats["aborted_after"] = i + 1
+                stats["aborted_by"] = "timeouts"
+                break
+        else:
+            consecutive_timeouts = 0
     stats.update({"elapsed_sec": time.time() - start, "count": len(responses)})
     return (responses, stats)
 
@@ -1201,12 +1246,16 @@ def main():
                                  args.output_json, generation=gen_info)
         if pre_stats.get("aborted"):
             gen_info["pre_arm_aborted_after"] = pre_stats["aborted_after"]
-            return emit_deferred(
-                f"conversation became active during the PRE arm — aborted after "
-                f"{pre_stats['aborted_after']} generation(s) and restored the serving "
-                f"adapter ({pre_stats['aborted']}); no comparison measured",
-                args.output_json, generation=gen_info,
-            )
+            if pre_stats.get("aborted_by") == "timeouts":
+                why = (f"PRE (base) arm aborted after {pre_stats['aborted_after']} "
+                       f"generation(s) and restored the serving adapter — "
+                       f"{pre_stats['aborted']}; the BASE arm is the failing one, so "
+                       f"check the server and the zero-adapter twin, not the adapter")
+            else:
+                why = (f"conversation became active during the PRE arm — aborted after "
+                       f"{pre_stats['aborted_after']} generation(s) and restored the serving "
+                       f"adapter ({pre_stats['aborted']}); no comparison measured")
+            return emit_deferred(why, args.output_json, generation=gen_info)
         print(f"[INFO] serving adapter restored and verified: {args.adapter_path}",
               flush=True)
 
@@ -1217,6 +1266,14 @@ def main():
         except Exception as e:  # noqa: BLE001
             return emit_deferred(f"POST pass failed: {str(e)[:200]}",
                                  args.output_json, generation=gen_info)
+        if post_stats.get("aborted"):
+            # The prompts never generated count as adapter-arm sentinels: the
+            # asymmetry rule below decides whether that is the adapter (base arm
+            # clean -> FAIL) or the infrastructure (both arms failing -> DEFERRED).
+            gen_info["post_arm_aborted_after"] = post_stats["aborted_after"]
+            gen_info["post_arm_abort_reason"] = post_stats["aborted"]
+            post_responses = post_responses + (
+                ["[gen_err: not generated — arm aborted]"] * (len(prompts) - len(post_responses)))
     else:
         # PRE pass (base model only).
         # adapter_path=None is passed EXPLICITLY rather than left to the default:
@@ -1260,16 +1317,71 @@ def main():
               f"post={n_sentinel_post}, valid_pairs={len(valid_idx)}/{len(prompts)}",
               flush=True)
 
+    pre_by_type = sentinel_breakdown(pre_responses)
+    post_by_type = sentinel_breakdown(post_responses)
     min_valid = max(1, (len(prompts) * 4 + 4) // 5)  # ceil(80%)
     if len(valid_idx) < min_valid:
+        adapter_arm_defect = (n_sentinel_pre <= ASYM_BASE_ARM_MAX_SENTINELS
+                              and n_sentinel_post >= ASYM_ADAPTER_ARM_MIN_SENTINELS)
+        if adapter_arm_defect:
+            # Base arm clean, adapter arm full of empties / runaways: the adapter
+            # is the variable. Record it as the measurement it is.
+            reason = (f"adapter arm produced {n_sentinel_post}/{len(prompts)} non-answers "
+                      f"(empty={post_by_type['empty']}, timeout={post_by_type['timeout']}, "
+                      f"gen_err={post_by_type['gen_err']}) while the base arm produced "
+                      f"{n_sentinel_pre}/{len(prompts)} on the same server minutes earlier "
+                      f"— empties and runaway generations are the adapter's behavior, "
+                      f"not an infrastructure failure")
+            verdict = {
+                "timestamp": datetime.now().isoformat(),
+                "verdict": "FAIL",
+                "reason": reason,
+                "exit_code": EXIT_FAIL,
+                "n_prompts": len(prompts),
+                "n_valid_pairs": len(valid_idx),
+                "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post,
+                               "pre_by_type": pre_by_type, "post_by_type": post_by_type},
+                "gen_timeout_sec": args.gen_timeout,
+                "generation": gen_info,
+                "model_id": args.model_id,
+                "adapter_path": str(args.adapter_path),
+            }
+            print(f"[FAIL] FIDELITY_FAIL {reason}", flush=True)
+            if args.output_json:
+                args.output_json.write_text(json.dumps(verdict, indent=2))
+            log_file = args.log_dir / f"eval-fidelity-{datetime.now().strftime('%Y-%m-%d')}.json"
+            log_file.write_text(json.dumps(verdict, indent=2))
+            if args.no_registry:
+                print("[INFO] --no-registry: verdict NOT recorded in adapter registry", flush=True)
+                return EXIT_FAIL
+            try:
+                adapter_registry.record_eval(
+                    adapter_id=Path(args.adapter_path).name,
+                    eval_name="fidelity-nightly",
+                    score=None,  # no scored pairs; the verdict carries the evidence
+                    verdict="FAIL",
+                    timestamp=datetime.now().isoformat(),
+                )
+                print("[INFO] Eval result recorded to adapter registry", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[WARN] Failed to record eval to registry: {e}", file=sys.stderr, flush=True)
+            return EXIT_FAIL
+        base_arm_defect = (n_sentinel_post <= ASYM_BASE_ARM_MAX_SENTINELS
+                           and n_sentinel_pre >= ASYM_ADAPTER_ARM_MIN_SENTINELS)
         reason = (f"only {len(valid_idx)}/{len(prompts)} valid pairs "
                   f"(pre sentinels={n_sentinel_pre}, post sentinels={n_sentinel_post}); "
-                  f"generation is failing, not the adapter")
+                  + ("the BASE (zero-adapter) arm is the failing one — check the server and "
+                     "the zero-adapter twin, not the adapter"
+                     if base_arm_defect else
+                     "generation is failing on both arms — server or harness, not the adapter"))
         verdict = {
             "timestamp": datetime.now().isoformat(),
             "verdict": "DEFERRED",
             "reason": reason,
             "exit_code": EXIT_DEFERRED,
+            "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post,
+                           "pre_by_type": pre_by_type, "post_by_type": post_by_type},
+            "generation": gen_info,
         }
         print(f"[DEFERRED] FIDELITY_DEFERRED {reason}", flush=True)
         if args.output_json:
@@ -1404,7 +1516,8 @@ def main():
         "exit_code": exit_code,
         "n_prompts": len(prompts),
         "n_valid_pairs": len(valid_idx),
-        "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post},
+        "n_sentinel": {"pre": n_sentinel_pre, "post": n_sentinel_post,
+                       "pre_by_type": pre_by_type, "post_by_type": post_by_type},
         "scorer": {
             "mode": scorer_mode,
             "shape_weight": SHAPE_WEIGHT if scorer_mode == "blended" else 1.0,
