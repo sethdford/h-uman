@@ -101,6 +101,8 @@ typedef struct hu_reliability_config {
      * the cloud fallback was even tried. */
     int circuit_failure_threshold;
     int circuit_recovery_secs;
+    /* Empty-reply failover (2026-09-04): 0 (absent) or 1 → on, -1 → off. */
+    int empty_reply_failover;
 } hu_reliability_config_t;
 
 typedef struct hu_router_config {

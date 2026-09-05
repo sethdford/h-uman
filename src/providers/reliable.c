@@ -40,6 +40,12 @@ typedef struct hu_reliable_ctx {
     bool cb_open_logged; /* one WARN per open, one INFO per close */
     time_t (*now_fn)(void *);
     void *now_ud;
+    /* Empty-reply failover (2026-09-04): an HU_OK reply with no content is a
+     * failure of this provider for this prompt. Not retried on the same
+     * provider (the same prompt reproduces it) and not counted by the
+     * circuit breaker (the server is up; it just said nothing). */
+    bool empty_failover;
+    bool last_empty;
 } hu_reliable_ctx_t;
 
 static time_t circuit_now(hu_reliable_ctx_t *r) {
@@ -58,6 +64,10 @@ static bool circuit_skip_primary(hu_reliable_ctx_t *r) {
 }
 
 static void circuit_record_failure(hu_reliable_ctx_t *r) {
+    /* An empty reply is the model declining this prompt, not the server
+     * failing: it must not count towards opening the circuit. */
+    if (r->last_empty)
+        return;
     if (r->cb_failure_threshold <= 0)
         return;
     r->cb_failures++;
@@ -230,6 +240,37 @@ static hu_error_t model_chain(hu_reliable_ctx_t *r, hu_allocator_t *alloc, const
     return HU_OK;
 }
 
+/* Shared tail of both retry loops: sleep for the current backoff (never in
+ * tests), then grow it, capped by max_backoff_ms (10 s when unset). */
+static void sleep_then_grow_backoff(hu_reliable_ctx_t *r, uint64_t *backoff_ms) {
+    uint64_t wait = compute_backoff(r, *backoff_ms);
+#ifndef HU_IS_TEST
+#ifdef HU_GATEWAY_POSIX
+    if (wait > 0) {
+        struct timespec ts = {.tv_sec = (time_t)(wait / 1000),
+                              .tv_nsec = (long)((wait % 1000) * 1000000)};
+        nanosleep(&ts, NULL);
+    }
+#endif
+#else
+    (void)wait;
+#endif
+    *backoff_ms *= 2;
+    if (r->max_backoff_ms > 0 && *backoff_ms > r->max_backoff_ms)
+        *backoff_ms = r->max_backoff_ms;
+    else if (r->max_backoff_ms == 0 && *backoff_ms > 10000)
+        *backoff_ms = 10000;
+}
+
+/* An HU_OK reply with nothing in it: fail this provider for this prompt.
+ * The same prompt reproduces it, so the caller moves to the next model /
+ * provider instead of retrying here; circuit_record_failure skips it. */
+static hu_error_t empty_reply_failure(hu_reliable_ctx_t *r) {
+    r->last_empty = true;
+    store_error(r, HU_ERR_PROVIDER_RESPONSE);
+    return HU_ERR_PROVIDER_RESPONSE;
+}
+
 /* Try a single provider with retries for chat_with_system. Returns HU_OK and sets out/out_len on
  * success. */
 static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *alloc,
@@ -241,6 +282,7 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
     if (!vt || !vt->chat_with_system)
         return HU_ERR_INVALID_ARGUMENT;
 
+    r->last_empty = false;
     uint64_t backoff_ms = r->base_backoff_ms;
     if (backoff_ms < 50)
         backoff_ms = 50;
@@ -249,8 +291,16 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
         hu_error_t err =
             vt->chat_with_system(prov->ctx, alloc, system_prompt, system_prompt_len, message,
                                  message_len, model, model_len, temperature, out, out_len);
-        if (err == HU_OK)
+        if (err == HU_OK) {
+            if (r->empty_failover && (!*out || *out_len == 0)) {
+                if (*out)
+                    alloc->free(alloc->ctx, *out, *out_len + 1);
+                *out = NULL;
+                *out_len = 0;
+                return empty_reply_failure(r);
+            }
             return HU_OK;
+        }
 
         store_error(r, err);
         const char *msg = r->last_error_msg;
@@ -261,25 +311,8 @@ static hu_error_t try_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *all
         if (should_break_to_extras(r, err))
             break; /* try next provider */
 
-        if (attempt < r->max_retries) {
-            uint64_t wait = compute_backoff(r, backoff_ms);
-#ifndef HU_IS_TEST
-#ifdef HU_GATEWAY_POSIX
-            if (wait > 0) {
-                struct timespec ts = {.tv_sec = (time_t)(wait / 1000),
-                                      .tv_nsec = (long)((wait % 1000) * 1000000)};
-                nanosleep(&ts, NULL);
-            }
-#endif
-#else
-            (void)wait;
-#endif
-            backoff_ms *= 2;
-            if (r->max_backoff_ms > 0 && backoff_ms > r->max_backoff_ms)
-                backoff_ms = r->max_backoff_ms;
-            else if (r->max_backoff_ms == 0 && backoff_ms > 10000)
-                backoff_ms = 10000;
-        }
+        if (attempt < r->max_retries)
+            sleep_then_grow_backoff(r, &backoff_ms);
     }
     return final_failure(r);
 }
@@ -292,6 +325,7 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
     if (!vt || !vt->chat)
         return HU_ERR_INVALID_ARGUMENT;
 
+    r->last_empty = false;
     uint64_t backoff_ms = r->base_backoff_ms;
     if (backoff_ms < 50)
         backoff_ms = 50;
@@ -299,8 +333,15 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
     for (uint32_t attempt = 0; attempt <= r->max_retries; attempt++) {
         memset(out, 0, sizeof(*out));
         hu_error_t err = vt->chat(prov->ctx, alloc, request, model, model_len, temperature, out);
-        if (err == HU_OK)
+        if (err == HU_OK) {
+            if (r->empty_failover && (!out->content || out->content_len == 0) &&
+                out->tool_calls_count == 0) {
+                hu_chat_response_free(alloc, out);
+                memset(out, 0, sizeof(*out));
+                return empty_reply_failure(r);
+            }
             return HU_OK;
+        }
 
         store_error(r, err);
         const char *msg = r->last_error_msg;
@@ -311,25 +352,8 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
         if (should_break_to_extras(r, err))
             break;
 
-        if (attempt < r->max_retries) {
-            uint64_t wait = compute_backoff(r, backoff_ms);
-#ifndef HU_IS_TEST
-#ifdef HU_GATEWAY_POSIX
-            if (wait > 0) {
-                struct timespec ts = {.tv_sec = (time_t)(wait / 1000),
-                                      .tv_nsec = (long)((wait % 1000) * 1000000)};
-                nanosleep(&ts, NULL);
-            }
-#endif
-#else
-            (void)wait;
-#endif
-            backoff_ms *= 2;
-            if (r->max_backoff_ms > 0 && backoff_ms > r->max_backoff_ms)
-                backoff_ms = r->max_backoff_ms;
-            else if (r->max_backoff_ms == 0 && backoff_ms > 10000)
-                backoff_ms = 10000;
-        }
+        if (attempt < r->max_retries)
+            sleep_then_grow_backoff(r, &backoff_ms);
     }
     return final_failure(r);
 }
@@ -576,6 +600,12 @@ hu_error_t hu_reliable_provider_create(hu_allocator_t *alloc, const hu_reliable_
     return HU_OK;
 }
 
+void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on) {
+    if (!reliable || !reliable->ctx)
+        return;
+    ((hu_reliable_ctx_t *)reliable->ctx)->empty_failover = on;
+}
+
 void hu_reliable_set_circuit(hu_provider_t *reliable, int failure_threshold, int recovery_seconds) {
     if (!reliable || !reliable->ctx)
         return;
@@ -661,6 +691,7 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
     /* Circuit on by default (2026-09-03); hu_reliable_set_circuit overrides. */
     r->cb_failure_threshold = HU_RELIABLE_CIRCUIT_DEFAULT_THRESHOLD;
     r->cb_recovery_seconds = HU_RELIABLE_CIRCUIT_DEFAULT_RECOVERY_SECS;
+    r->empty_failover = true;
 
     if (extras_count > 0 && extras) {
         r->extras = (hu_reliable_provider_entry_t *)((char *)r + sizeof(hu_reliable_ctx_t));

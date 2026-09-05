@@ -24,6 +24,7 @@ typedef struct fake_provider {
     int calls;        /* every chat_with_system call, failing or not */
     int fail_first_n; /* calls 1..n fail with fail_err; later calls succeed */
     hu_error_t fail_err;
+    int empty_first_n; /* calls 1..n return HU_OK with NO content (2026-09-04) */
     char seen_model[64]; /* model id of the most recent call */
 } fake_provider_t;
 
@@ -43,6 +44,11 @@ static hu_error_t fake_chat_with_system(void *ctx, hu_allocator_t *alloc, const 
     f->seen_model[mn] = '\0';
     if (f->calls <= f->fail_first_n)
         return f->fail_err;
+    if (f->calls <= f->empty_first_n) {
+        *out = NULL;
+        *out_len = 0;
+        return HU_OK; /* "success" with nothing said — the think-only reply */
+    }
     size_t n = strlen(f->name);
     char *buf = (char *)alloc->alloc(alloc->ctx, n + 1);
     if (!buf)
@@ -363,6 +369,108 @@ static void test_unmatched_model_still_offers_declared_fallback_to_extras(void) 
     g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
 }
 
+/* ── empty reply fails over (2026-09-04) ─────────────────────────────── */
+static void test_empty_primary_reply_falls_to_fallback_without_retry(void) {
+    rig_t g;
+    rig_init(&g, 0, HU_OK, 2);
+    g.prim.empty_first_n = 100; /* primary always says nothing */
+    char *out;
+    size_t n;
+    HU_ASSERT_EQ(rig_call(&g, &out, &n), HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_EQ(out, "fallback");
+    HU_ASSERT_EQ(g.prim.calls, 1); /* the same prompt reproduces it: no retry */
+    HU_ASSERT_EQ(g.fb.calls, 1);
+    int failures = -1;
+    hu_reliable_circuit_state(&g.reliable, &failures, NULL);
+    HU_ASSERT_EQ(failures, 0); /* the server is up — no circuit credit */
+    rig_free_out(&g, out, n);
+    rig_deinit(&g);
+}
+
+static void test_empty_failover_off_returns_the_empty_reply(void) {
+    rig_t g;
+    rig_init(&g, 0, HU_OK, 2);
+    g.prim.empty_first_n = 100;
+    hu_reliable_set_empty_failover(&g.reliable, false);
+    char *out;
+    size_t n;
+    HU_ASSERT_EQ(rig_call(&g, &out, &n), HU_OK);
+    HU_ASSERT_TRUE(out == NULL || n == 0);
+    HU_ASSERT_EQ(g.prim.calls, 1);
+    HU_ASSERT_EQ(g.fb.calls, 0);
+    rig_free_out(&g, out, n);
+    rig_deinit(&g);
+}
+
+/* The reflection incident: caller asks for the local model, the primary says
+ * nothing, and the fallback provider must be asked for the MAPPED cloud model
+ * — never for the local model's name (Vertex 400 ×652). */
+static const hu_reliable_fallback_model_t k_cloud_models[] = {{"cloud", 5}};
+static const hu_reliable_model_fallback_entry_t k_model_map[] = {
+    {"local", 5, k_cloud_models, 1},
+};
+
+static void test_empty_reply_hands_fallback_provider_the_mapped_model(void) {
+    rig_t g;
+    memset(&g, 0, sizeof(g));
+    g.alloc = hu_system_allocator();
+    g.prim.name = "primary";
+    g.prim.empty_first_n = 100;
+    g.fb.name = "fallback";
+    hu_provider_t prim = {.ctx = &g.prim, .vtable = &fake_vtable};
+    hu_provider_t fb = {.ctx = &g.fb, .vtable = &fake_vtable};
+    g.extras[0].name = "fallback";
+    g.extras[0].name_len = 8;
+    g.extras[0].provider = fb;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&g.alloc, prim, 2, 50, g.extras, 1, k_model_map, 1,
+                                       &g.reliable),
+                 HU_OK);
+    char *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(g.reliable.vtable->chat_with_system(g.reliable.ctx, &g.alloc, "sys", 3, "hi", 2,
+                                                     "local", 5, 0.5, &out, &n),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_EQ(out, "fallback");
+    HU_ASSERT_STR_EQ(g.prim.seen_model, "local");
+    HU_ASSERT_STR_EQ(g.fb.seen_model, "cloud");
+    rig_free_out(&g, out, n);
+    rig_deinit(&g);
+}
+
+static void test_config_parses_empty_reply_failover_and_consecutive_keys(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+
+    const char *absent = "{\"reliability\":{\"provider_retries\":2}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, absent, strlen(absent)), HU_OK);
+    HU_ASSERT_EQ(cfg.reliability.empty_reply_failover, 0); /* → on */
+
+    const char *off = "{\"reliability\":{\"empty_reply_failover\":-1}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, off, strlen(off)), HU_OK);
+    HU_ASSERT_EQ(cfg.reliability.empty_reply_failover, -1);
+
+    const char *junk = "{\"reliability\":{\"empty_reply_failover\":7}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, junk, strlen(junk)), HU_OK);
+    HU_ASSERT_EQ(cfg.reliability.empty_reply_failover, -1); /* out of range: unchanged */
+
+    const char *beh = "{\"behavior\":{\"max_consecutive_replies\":8,"
+                      "\"consecutive_reset_minutes\":45}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, beh, strlen(beh)), HU_OK);
+    HU_ASSERT_EQ((int)cfg.behavior.max_consecutive_replies, 8);
+    HU_ASSERT_EQ((int)cfg.behavior.consecutive_reset_minutes, 45);
+    const char *nocap = "{\"behavior\":{\"max_consecutive_replies\":0}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, nocap, strlen(nocap)), HU_OK);
+    HU_ASSERT_EQ((int)cfg.behavior.max_consecutive_replies, 0); /* 0 = no cap */
+    hu_arena_destroy(arena);
+}
+
 void run_reliable_circuit_tests(void) {
     HU_TEST_SUITE("Reliable Circuit Breaker");
     HU_RUN_TEST(test_unmatched_model_still_offers_declared_fallback_to_extras);
@@ -375,4 +483,8 @@ void run_reliable_circuit_tests(void) {
     HU_RUN_TEST(test_set_circuit_negative_threshold_disables);
     HU_RUN_TEST(test_set_circuit_zero_keeps_defaults_and_custom_threshold_applies);
     HU_RUN_TEST(test_config_parses_circuit_keys_with_absent_as_zero);
+    HU_RUN_TEST(test_empty_primary_reply_falls_to_fallback_without_retry);
+    HU_RUN_TEST(test_empty_failover_off_returns_the_empty_reply);
+    HU_RUN_TEST(test_empty_reply_hands_fallback_provider_the_mapped_model);
+    HU_RUN_TEST(test_config_parses_empty_reply_failover_and_consecutive_keys);
 }

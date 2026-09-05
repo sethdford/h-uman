@@ -1059,6 +1059,11 @@ static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
         hu_json_get_number(obj, "circuit_recovery_secs", cfg->reliability.circuit_recovery_secs);
     if (crs >= -1 && crs <= 86400)
         cfg->reliability.circuit_recovery_secs = (int)crs;
+    /* Empty-reply failover: 0/absent = on (default), -1 = off, 1 = on. */
+    double erf =
+        hu_json_get_number(obj, "empty_reply_failover", cfg->reliability.empty_reply_failover);
+    if (erf >= -1 && erf <= 1)
+        cfg->reliability.empty_reply_failover = (int)erf;
     double cibs = hu_json_get_number(obj, "channel_initial_backoff_secs",
                                      cfg->reliability.channel_initial_backoff_secs);
     if (cibs >= 0)
