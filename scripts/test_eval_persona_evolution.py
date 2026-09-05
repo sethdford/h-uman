@@ -748,19 +748,76 @@ def test_trailing_days_reuses_source_merge(monkeypatch, tmp_path):
     assert "src text" not in out_path.read_text() and "post text" not in out_path.read_text()
 
 
-def test_trailing_days_independent_of_full_range(monkeypatch, capsys):
+def test_full_range_alone_still_summarizes_the_whole_start_end_range(monkeypatch, capsys):
+    # --full-range without --trailing-days is unaffected by this story: it
+    # must still summarize the entire fetched --start/--end range.
     rows = _spread(1, 28, 150, month=8) + _spread(1, 4, 50, month=9)
     monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
 
     epe.run(_Args(event="none", full_range=True, end="2026-09-05", min_covered_days=0))
-    report_without = json.loads(capsys.readouterr().out)
+    report = json.loads(capsys.readouterr().out)
 
-    epe.run(_Args(event="none", full_range=True, trailing_days=30, end="2026-09-05", min_covered_days=0))
-    report_with = json.loads(capsys.readouterr().out)
+    assert report["full_range_summary"]["status"] == "OK"
+    assert report["full_range_summary"]["n"] == 200
+    assert "trailing_window_summary" not in report
 
-    assert report_without["full_range_summary"] == report_with["full_range_summary"]
-    assert "trailing_window_summary" not in report_without
-    assert "trailing_window_summary" in report_with
+
+def test_full_range_and_trailing_days_is_a_cli_error(monkeypatch, capsys):
+    # Regression pin (finding 1, 2026-09-05 critic re-open): --trailing-days
+    # overrides start_dt, and BOTH full_range_summary and
+    # trailing_window_summary are computed from the same fetch_outbound_
+    # messages(start_dt, end_dt) call -- so allowing --full-range and
+    # --trailing-days together silently narrows "the whole --start/--end
+    # range" down to the trailing window with no signal to the caller
+    # (verified live: --full-range --trailing-days 30 returned
+    # full_range_summary.n=20 instead of the true full-range n=160).
+    # main() now refuses the combination outright, exit code 2, the same
+    # shape as the existing --trailing-days/--event guard.
+    def _boom(*a, **kw):
+        raise AssertionError(
+            "fetch_outbound_messages must not be called when --trailing-days "
+            "conflicts with --full-range"
+        )
+
+    monkeypatch.setattr(epe, "fetch_outbound_messages", _boom)
+    with pytest.raises(SystemExit) as exc_info:
+        epe.main(["--trailing-days", "30", "--event", "none", "--full-range"])
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--trailing-days" in err and "--full-range" in err
+
+
+def test_run_refuses_full_range_and_trailing_days_combined(monkeypatch, capsys):
+    # Defense-in-depth twin of the CLI-level test above: run() is called
+    # directly by these tests (and could be by other scripts) bypassing
+    # argparse entirely, so run() must re-derive the same refusal rather
+    # than relying on main()'s p.error. Uses a fetch stub that RAISES
+    # instead of one that ignores its arguments (unlike the old
+    # test_trailing_days_independent_of_full_range, whose
+    # `lambda *a, **kw: rows` fixture returned the same fixed rows
+    # regardless of which start_dt it was called with, and so could not
+    # detect start_dt narrowing at all): on the pre-fix code, run() proceeds
+    # to call fetch_outbound_messages with the trailing-narrowed start_dt
+    # and this test errors out on the AssertionError instead of observing
+    # rc == 2, proving the old code lacked the guard.
+    def _boom(*a, **kw):
+        raise AssertionError(
+            "fetch_outbound_messages must not be called when --trailing-days "
+            "conflicts with --full-range -- old code called it with the "
+            "trailing-narrowed start_dt and silently mislabeled the result "
+            "as full_range_summary"
+        )
+
+    monkeypatch.setattr(epe, "fetch_outbound_messages", _boom)
+
+    rc = epe.run(_Args(
+        event="none", full_range=True, trailing_days=30,
+        start="2026-06-01", end="2026-09-05", min_covered_days=0,
+    ))
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "--trailing-days" in err and "--full-range" in err
 
 
 def test_trailing_days_explicit_start_warns_and_is_overridden(monkeypatch, capsys):

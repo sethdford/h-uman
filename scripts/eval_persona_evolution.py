@@ -611,7 +611,35 @@ def run(args) -> int:
     # with end_dt - N days; reuses start_dt/end_dt for fetch_outbound_messages,
     # --source filtering, and the report's own "range" field verbatim -- no
     # separate fetch/filter path.
+    #
+    # This reuse is exactly why --trailing-days and --full-range are mutually
+    # exclusive (finding 1, 2026-09-05 critic re-open): --full-range also
+    # summarizes over that same fetch_outbound_messages(start_dt, end_dt)
+    # call, so if both flags were allowed together, --trailing-days's
+    # override of start_dt would silently narrow --full-range's "whole
+    # --start/--end range" summary down to the trailing window with no
+    # signal to the caller (verified live: --full-range --trailing-days 30
+    # returned full_range_summary.n=20 instead of the true full-range n=160)
+    # -- exactly the kind of unmeasured, mislabeled number
+    # .claude/rules/no-number-without-a-measurement.md exists to prevent.
+    # Fetching the trailing window separately (without mutating start_dt)
+    # was considered and rejected: it would duplicate the --source
+    # filter/merge path above for a second, differently-scoped `messages`
+    # list, doubling the surface this refusal contract has to hold for a
+    # combination nothing currently schedules (design doc: nobody runs
+    # --full-range today; --trailing-days is the sanctioned nightly command).
+    # Refusing the combination outright is simpler and cannot silently
+    # mislabel a number.
     trailing_days = getattr(args, "trailing_days", None)
+    if trailing_days is not None and getattr(args, "full_range", False):
+        sys.stderr.write(
+            "ERROR: --trailing-days and --full-range are mutually exclusive "
+            "(both would summarize the fetch_outbound_messages(start_dt, "
+            "end_dt) range, and --trailing-days overrides start_dt, which "
+            "would silently narrow --full-range's window to the trailing "
+            "window). Run them in separate invocations.\n"
+        )
+        return 2
     if trailing_days is not None:
         if args.start != DEFAULT_START:
             sys.stderr.write(
@@ -799,15 +827,26 @@ def main(argv=None) -> int:
     p.add_argument("--trailing-days", type=int, default=None, metavar="N",
                    help="windowed re-derivation mode: re-derive all 9 axes over the trailing N days "
                         "ending at --end (or now), overriding --start; requires --event none "
-                        "(mutually exclusive with event pre/post analysis, which uses --window-days); "
-                        "reports true coverage.covered_days alongside requested_days, never conflating "
-                        "the two (see .claude/rules/no-number-without-a-measurement.md)")
+                        "(mutually exclusive with event pre/post analysis, which uses --window-days) "
+                        "and mutually exclusive with --full-range (both summarize the same fetched "
+                        "range, and --trailing-days overriding --start would silently narrow "
+                        "--full-range's window); reports true coverage.covered_days alongside "
+                        "requested_days, never conflating the two "
+                        "(see .claude/rules/no-number-without-a-measurement.md)")
     args = p.parse_args(argv)
     if args.trailing_days is not None and args.event != "none":
         p.error(
             "--trailing-days requires --event none (event pre/post windows use "
             "--window-days, not --trailing-days); pass --event none to use "
             "--trailing-days, or drop --trailing-days to analyze events"
+        )
+    if args.trailing_days is not None and args.full_range:
+        p.error(
+            "--trailing-days and --full-range are mutually exclusive: both "
+            "summarize the fetch_outbound_messages(start_dt, end_dt) range, "
+            "and --trailing-days overrides start_dt, which would silently "
+            "narrow --full-range's reported window from --start/--end down "
+            "to the trailing window. Run them in separate invocations."
         )
     return run(args)
 

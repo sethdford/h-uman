@@ -569,8 +569,19 @@ in 3 days. A `--trailing-days 60` run today reports `coverage.covered_days ≈ 3
 chat.db alone (measured live, aggregate-only, this run) — `requested_days` (60) and
 `coverage.covered_days` (~30) are two distinct report fields, never conflated (AC-7.3;
 `scripts/test_eval_persona_evolution.py::test_trailing_days_reports_requested_days_and_true_coverage_separately`
-pins this). The `--source` merge extends the *pre-event* windows for the two named events
-(static exports, does not extend the *trailing* window, which is always anchored at
-"now") but does not and cannot change this fact for any future rolling window. Recovering
-more pre-August history (AC-7.6) is the only way to raise this ceiling, and is explicitly
-out of scope here.
+pins this). The `--source` merge extends the *pre-event* windows for the two named events,
+and it extends the *trailing* window's coverage too: `run()` filters `--source` rows to the
+same `start_dt`/`end_dt` used for `fetch_outbound_messages` (`start_dt` already overridden
+by `--trailing-days` before the merge runs), then feeds the merged `messages` into
+`trailing_window_summary` — so a source export whose timestamps predate chat.db's retention
+floor raises trailing-window coverage. Measured, not asserted: the same 60-day trailing
+window reports `coverage.covered_days = 30.0` from chat.db alone
+(`sprints/sprint-better-than-human-2026-09-05/evidence/us7-trailing-60d-chatdb-only-2026-09-05.json`)
+but **59.8** once `--source` is added
+(`sprints/sprint-better-than-human-2026-09-05/evidence/us7-trailing-60d-2026-09-05.json`,
+both committed as evidence) — correcting this section's earlier claim that `--source` "does
+not extend the trailing window." What `--source` does *not* do is raise the chat.db-only
+retention floor itself: `min(is_from_me=1 date)` keeps advancing in an unmerged, chat.db-only
+run regardless of any `--source` export. Recovering more pre-August history (AC-7.6) remains
+the only way to raise coverage for a run with no matching `--source` export, and is
+explicitly out of scope here.
