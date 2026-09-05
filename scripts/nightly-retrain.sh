@@ -347,6 +347,19 @@ fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
 
+# ── Refresh the corpus BEFORE digesting it ─────────────────────────────────
+# The export stage loads no model (it reads the daemon's ring, else
+# production_outcomes) so it is safe here, beside the still-resident server
+# and above stop_serving. Until 2026-09-05 its only trigger was the weekly
+# Sunday ai.human.m3-loop job, which last fired 2026-08-02 (it is skipped
+# whenever the Mac is asleep at Sun 04:00) — so this nightly retrained a
+# frozen 313-row file. Idempotent: a repeat append is a no-op.
+if [[ "${HU_RETRAIN_SKIP_EXPORT:-0}" != "1" && -f "$REPO/scripts/m3_outcome_driver.py" ]]; then
+    log "refreshing $SOURCE_JSONL (m3_outcome_driver --export-only)"
+    python3 "$REPO/scripts/m3_outcome_driver.py" --export-only >>"$LOG" 2>&1 \
+        || log "WARNING: outcome export returned non-zero — training from the corpus as-is"
+fi
+
 # ── Source-unchanged skip — MUST stay above every serving-stopping step ─────
 #
 # Until 2026-09-05 this window retrained unconditionally from $SOURCE_JSONL,
