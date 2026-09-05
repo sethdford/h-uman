@@ -54,10 +54,17 @@ Schema (registry.json):
         "demotion": {
           "timestamp": "...",
           "reason": "eval-regression"
-        }
+        },
+        "status": "active" | "retired" | "rejected",   # absent == "active"
+        "retired_reason": "...",                        # only when status != active
+        "retired_at": "..."
       }
     }
   }
+
+Lifecycle status is a TOP-LEVEL field on the entry, not something buried in
+training[*].metrics free text: readers that enumerate the registry use
+iter_adapters() and skip retired/rejected entries unless they ask for them.
 """
 
 import json
@@ -70,6 +77,31 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 DEFAULT_REGISTRY_PATH = Path.home() / ".human" / "training-data" / "adapters" / "registry.json"
 STALE_EVAL_DAYS = 7
+
+STATUS_ACTIVE = "active"
+STATUS_RETIRED = "retired"      # was real, superseded / no longer a candidate
+STATUS_REJECTED = "rejected"    # never valid (no-op weights, bad scale, ...)
+VALID_STATUSES = (STATUS_ACTIVE, STATUS_RETIRED, STATUS_REJECTED)
+
+
+def adapter_status(entry: dict) -> str:
+    """An entry with no `status` key is active -- every row written before the
+    field existed (2026-09-05) is a live candidate unless retired since."""
+    return entry.get("status") or STATUS_ACTIVE
+
+
+def is_active(entry: dict) -> bool:
+    return adapter_status(entry) == STATUS_ACTIVE
+
+
+def iter_adapters(registry: dict, include_retired: bool = False):
+    """Yield (adapter_id, entry) in sorted order, hiding retired/rejected rows
+    by default. Every enumerating reader goes through here so a retired
+    adapter cannot be re-surfaced as a candidate by a reader that forgot."""
+    for adapter_id in sorted(registry.get("adapters", {})):
+        entry = registry["adapters"][adapter_id]
+        if include_retired or is_active(entry):
+            yield adapter_id, entry
 
 
 def load_registry(registry_path: Path = DEFAULT_REGISTRY_PATH) -> dict:
@@ -275,9 +307,47 @@ def record_demotion(
     _save_registry_atomic(registry, registry_path)
 
 
+def record_retirement(
+    registry_path: Path = DEFAULT_REGISTRY_PATH,
+    adapter_id: str = None,
+    status: str = STATUS_RETIRED,
+    reason: str = None,
+    timestamp: str = None,
+) -> None:
+    """Mark an adapter retired or rejected. Additive: training/eval/promotion
+    history is left in place so the row still explains what happened.
+
+    Unlike the record_* writers above this REFUSES to create an entry --
+    retiring an adapter the registry never heard of would fabricate history.
+
+    Raises:
+        ValueError: status is not retired/rejected, or reason is empty
+        KeyError: adapter_id is not in the registry
+    """
+    if status not in (STATUS_RETIRED, STATUS_REJECTED):
+        raise ValueError(f"status must be one of {STATUS_RETIRED!r}/{STATUS_REJECTED!r}, got {status!r}")
+    if not reason or not reason.strip():
+        raise ValueError("a retirement needs a reason -- an unexplained retired row is as useless as a no-op adapter")
+    if timestamp is None:
+        timestamp = datetime.now().isoformat()
+
+    registry = load_registry(registry_path)
+    if adapter_id not in registry["adapters"]:
+        raise KeyError(f"adapter {adapter_id!r} is not in the registry; refusing to invent an entry to retire")
+
+    entry = registry["adapters"][adapter_id]
+    entry["status"] = status
+    entry["retired_reason"] = reason.strip()
+    entry["retired_at"] = timestamp
+    registry["timestamp"] = datetime.now().isoformat()
+
+    _save_registry_atomic(registry, registry_path)
+
+
 def status(
     registry_path: Path = DEFAULT_REGISTRY_PATH,
     live_adapter_id: str = None,
+    include_retired: bool = False,
 ) -> str:
     """Generate a human-readable status report.
 
@@ -289,6 +359,9 @@ def status(
     Args:
         registry_path: Path to registry.json
         live_adapter_id: ID of the currently-live adapter (read from config if None)
+        include_retired: also list retired/rejected adapters (hidden by default;
+            the live adapter is always shown, retired or not, because a retired
+            row serving in production is exactly the anomaly this report exists for)
 
     Returns:
         Formatted status report as a string
@@ -324,15 +397,28 @@ def status(
     now = datetime.now()
     stale_threshold = now - timedelta(days=STALE_EVAL_DAYS)
 
+    hidden = 0
     for adapter_id in sorted(registry["adapters"].keys()):
         adapter = registry["adapters"][adapter_id]
 
         is_live = adapter_id == live_adapter_id
+        lifecycle = adapter_status(adapter)
+        if lifecycle != STATUS_ACTIVE and not include_retired and not is_live:
+            hidden += 1
+            continue
+
         live_marker = " [LIVE]" if is_live else ""
+        status_marker = f" [{lifecycle.upper()}]" if lifecycle != STATUS_ACTIVE else ""
 
         lines.append("")
-        lines.append(f"Adapter: {adapter_id}{live_marker}")
+        lines.append(f"Adapter: {adapter_id}{live_marker}{status_marker}")
         lines.append(f"  Created: {adapter.get('created', 'unknown')}")
+        if lifecycle != STATUS_ACTIVE:
+            lines.append(f"  Status: {lifecycle} at {adapter.get('retired_at', 'unknown')}")
+            lines.append(f"    Reason: {adapter.get('retired_reason', '(none recorded)')}")
+            if is_live:
+                lines.append(f"    ⚠️  WARNING: LIVE ADAPTER IS MARKED {lifecycle.upper()} -- "
+                             "production is serving a row the registry says is dead")
 
         # Training history
         training = adapter.get("training", [])
@@ -379,6 +465,11 @@ def status(
             lines.append(f"  Demotion: {demotion['timestamp']}")
             lines.append(f"    Reason: {demotion.get('reason', '(none)')}")
 
+    if hidden:
+        lines.append("")
+        lines.append(f"({hidden} retired/rejected adapter{'s' if hidden != 1 else ''} hidden; "
+                     "pass --include-retired to list)")
+
     lines.append("")
     lines.append("=" * 80)
 
@@ -401,11 +492,15 @@ def main():
 
     p_status = sub.add_parser("status", help="Show adapter status")
     p_status.add_argument("--live-adapter-id", help="ID of the live adapter")
+    p_status.add_argument("--include-retired", action="store_true",
+                          help="also list retired/rejected adapters")
 
     args = parser.parse_args()
 
     if args.cmd == "status" or not args.cmd:
-        output = status(registry_path=args.registry, live_adapter_id=getattr(args, "live_adapter_id", None))
+        output = status(registry_path=args.registry,
+                        live_adapter_id=getattr(args, "live_adapter_id", None),
+                        include_retired=getattr(args, "include_retired", False))
         print(output)
         return 0
 

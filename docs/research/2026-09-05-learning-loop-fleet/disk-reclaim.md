@@ -172,3 +172,49 @@ grep -n "rejected" scripts/nightly-retrain.sh
 find <every dir> -maxdepth 2 -name "*.safetensors" / -name "config.json" / -name "adapter_config.json"
 readlink + test -e on every symlink in the directory
 ```
+
+## 6. Update 2026-09-05 (later the same day): the two no-op ORPO adapters move KEEP → SAFE
+
+The only reason `seth-glm-air-v6-orpo-20260727-063621` and
+`seth-glm-air-v61-orpo-20260728-191306` sat in the KEEP tier was "registry
+references them" (§2). That reference was a *description* in
+`training[0].metrics` free text, which no reader could act on. Both entries now
+carry a first-class top-level `status: "rejected"` (plus `retired_reason`,
+`retired_at`), written by `scripts/register_v6_adapter.py --retire … --status
+rejected` after re-measuring the weights. `adapter_registry.iter_adapters()` /
+`status` hide rejected rows by default, so the registry no longer surfaces them
+as candidates. The pre-write registry is at `registry.json.bak-20260905-retire`.
+
+Machine evidence (`scripts/adapter_is_real.py`, the same check
+`nightly-retrain.sh` runs before a swap):
+
+```
+seth-glm-air-v6-orpo-20260727-063621:  NOT REAL: all 80 lora_b tensors are zero (adapter == base model)   exit=1
+seth-glm-air-v61-orpo-20260728-191306: NOT REAL: all 80 lora_b tensors are zero (adapter == base model)   exit=1
+```
+
+§2 reference check re-run for both names (same grep set as the table above):
+
+| Adapter | registry.json | config.json | LaunchAgents | `:8741` ps args | scripts/ src/ live code | gate files | symlinks |
+|---|---|---|---|---|---|---|---|
+| `seth-glm-air-v6-orpo-20260727-063621` | key present, **`status: rejected`** | 0 | 0 | 0 | 0 (docs only: `docs/research/v6-orpo-execution-record-20260727.md`, this file) | 0 | 0 |
+| `seth-glm-air-v61-orpo-20260728-191306` | key present, **`status: rejected`** | 0 | 0 | 0 | 0 (docs only: this file) | 0 | 0 |
+
+Revised tiers (everything else in §3 unchanged):
+
+- **SAFE — 112.9 GiB** (was 108.8): adds `seth-glm-air-v6-orpo-20260727-063621`
+  (2,716,424 KiB = 2.59 GiB) and `seth-glm-air-v61-orpo-20260728-191306`
+  (1,629,856 KiB = 1.55 GiB), rejected in the registry, referenced by nothing live.
+- **KEEP — referenced**: drops those two; the rest of the §3 KEEP list stands.
+
+Additional SAFE-tier commands (**NOT executed** — same review rule as §5):
+
+```
+# rm -rf /Users/sethford/.human/training-data/adapters/seth-glm-air-v6-orpo-20260727-063621
+# rm -rf /Users/sethford/.human/training-data/adapters/seth-glm-air-v61-orpo-20260728-191306
+```
+
+Still nothing deleted. Free space at the time of this update: 64 GiB (`df -g`).
+A registry entry whose `status` is `retired`/`rejected` is no longer a KEEP
+reason on its own — the §4 retention rule's "appears under a `promoted` key"
+clause is the one that still protects an entry.

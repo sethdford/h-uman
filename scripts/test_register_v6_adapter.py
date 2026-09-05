@@ -268,3 +268,112 @@ def test_mlx_tune_adapter_with_healthy_weights_registers_cleanly(monkeypatch, tm
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# --------------------------------------------------------------------------
+# --retire: first-class lifecycle status on registry entries
+# --------------------------------------------------------------------------
+
+
+def _seed_registry(tmp_path: Path, entries: dict) -> Path:
+    """A throwaway registry.json in the exact production shape."""
+    p = tmp_path / "registry.json"
+    p.write_text(json.dumps({"schema_version": 1, "timestamp": "t", "adapters": entries}))
+    return p
+
+
+def _seed_config(tmp_path: Path, served: str) -> Path:
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"personalization": {
+        "lora_adapter_path": f"/x/adapters/{served}",
+        "lora_adapter_id": served}}))
+    return p
+
+
+def _run_retire(monkeypatch, registry, config, name, reason="lora_b 0/80", extra=()):
+    argv = ["register_v6_adapter.py", "--retire", name, "--reason", reason,
+            "--registry", str(registry), "--config", str(config), *extra]
+    monkeypatch.setattr(sys, "argv", argv)
+    reg.main()
+
+
+def test_retire_marks_entry_and_leaves_history_intact(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {
+        "noop": {"created": "c", "training": [{"timestamp": "t", "metrics": {"promoted": False}}], "eval": []},
+    })
+    config = _seed_config(tmp_path, served="live")
+    _run_retire(monkeypatch, registry, config, "noop", reason="every lora_b is 0.0")
+
+    entry = json.loads(registry.read_text())["adapters"]["noop"]
+    assert entry["status"] == "retired"
+    assert entry["retired_reason"] == "every lora_b is 0.0"
+    assert entry["retired_at"]
+    assert entry["training"][0]["metrics"] == {"promoted": False}
+
+
+def test_retire_as_rejected(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {"noop": {"created": "c", "training": [], "eval": []}})
+    config = _seed_config(tmp_path, served="live")
+    _run_retire(monkeypatch, registry, config, "noop", extra=["--status", "rejected"])
+    assert json.loads(registry.read_text())["adapters"]["noop"]["status"] == "rejected"
+
+
+def test_retire_refuses_the_served_adapter_even_with_force(monkeypatch, tmp_path):
+    """The served adapter is what :8741 answers with. Retiring its registry row
+    would make every reader hide the thing that is actually in production."""
+    registry = _seed_registry(tmp_path, {"live": {"created": "c", "training": [], "eval": []}})
+    config = _seed_config(tmp_path, served="live")
+    with pytest.raises(SystemExit, match="served"):
+        _run_retire(monkeypatch, registry, config, "live", extra=["--force"])
+    assert "status" not in json.loads(registry.read_text())["adapters"]["live"]
+
+
+def test_retire_refuses_a_promoted_adapter_without_force(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {
+        "was-good": {"created": "c", "eval": [],
+                     "training": [{"timestamp": "t", "metrics": {"promoted": True}}]},
+    })
+    config = _seed_config(tmp_path, served="live")
+    with pytest.raises(SystemExit, match="promoted"):
+        _run_retire(monkeypatch, registry, config, "was-good")
+    assert "status" not in json.loads(registry.read_text())["adapters"]["was-good"]
+
+
+def test_retire_treats_a_promotion_record_as_promoted(monkeypatch, tmp_path):
+    """m3_promote.py writes a top-level `promotion` block, not metrics.promoted --
+    both spellings mean the adapter once served and need --force."""
+    registry = _seed_registry(tmp_path, {
+        "was-good": {"created": "c", "training": [], "eval": [],
+                     "promotion": {"timestamp": "t", "evidence": "blind-a-b-gate-pass"}},
+    })
+    config = _seed_config(tmp_path, served="live")
+    with pytest.raises(SystemExit, match="promoted"):
+        _run_retire(monkeypatch, registry, config, "was-good")
+
+
+def test_retire_promoted_adapter_with_force(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {
+        "was-good": {"created": "c", "eval": [],
+                     "training": [{"timestamp": "t", "metrics": {"promoted": True}}]},
+    })
+    config = _seed_config(tmp_path, served="live")
+    _run_retire(monkeypatch, registry, config, "was-good", reason="superseded by v7", extra=["--force"])
+    assert json.loads(registry.read_text())["adapters"]["was-good"]["status"] == "retired"
+
+
+def test_retire_refuses_unknown_adapter(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {"a": {"created": "c", "training": [], "eval": []}})
+    config = _seed_config(tmp_path, served="live")
+    with pytest.raises(SystemExit, match="not in registry"):
+        _run_retire(monkeypatch, registry, config, "ghost")
+    assert set(json.loads(registry.read_text())["adapters"]) == {"a"}
+
+
+def test_retire_requires_a_reason(monkeypatch, tmp_path):
+    registry = _seed_registry(tmp_path, {"a": {"created": "c", "training": [], "eval": []}})
+    config = _seed_config(tmp_path, served="live")
+    monkeypatch.setattr(sys, "argv", ["register_v6_adapter.py", "--retire", "a",
+                                      "--registry", str(registry), "--config", str(config)])
+    with pytest.raises(SystemExit):
+        reg.main()
+    assert "status" not in json.loads(registry.read_text())["adapters"]["a"]
