@@ -79,6 +79,18 @@ Usage
         --source ~/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl
     python3 scripts/eval_persona_evolution.py --event job --out results.json
     python3 scripts/eval_persona_evolution.py --explain-dates
+
+    # Windowed re-derivation (AC-7.2): trailing N-day re-derivation of all 9
+    # axes, reusing this script's own axis/CI/refusal-contract functions.
+    # NOTE: this is the corrected nightly command -- "--full-range
+    # --window-days 30" (as spec.md section 5 originally prescribed) does
+    # NOT do what it says: --window-days is read only by the event pre/post
+    # bucketer, never by --full-range, so that command silently reports the
+    # entire --start/--end range instead of a 30-day trailing window (see
+    # spec.md section 8). Use --trailing-days for an honest windowed report:
+    python3 scripts/eval_persona_evolution.py --event none --trailing-days 30 \
+        --source data/imessage/training_pairs.jsonl \
+        --source ~/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl
 """
 import argparse
 import datetime
@@ -595,6 +607,48 @@ def run(args) -> int:
         else datetime.datetime.now()
     )
 
+    # --trailing-days: windowed re-derivation mode (AC-7.2). Overrides --start
+    # with end_dt - N days; reuses start_dt/end_dt for fetch_outbound_messages,
+    # --source filtering, and the report's own "range" field verbatim -- no
+    # separate fetch/filter path.
+    #
+    # This reuse is exactly why --trailing-days and --full-range are mutually
+    # exclusive (finding 1, 2026-09-05 critic re-open): --full-range also
+    # summarizes over that same fetch_outbound_messages(start_dt, end_dt)
+    # call, so if both flags were allowed together, --trailing-days's
+    # override of start_dt would silently narrow --full-range's "whole
+    # --start/--end range" summary down to the trailing window with no
+    # signal to the caller (verified live: --full-range --trailing-days 30
+    # returned full_range_summary.n=20 instead of the true full-range n=160)
+    # -- exactly the kind of unmeasured, mislabeled number
+    # .claude/rules/no-number-without-a-measurement.md exists to prevent.
+    # Fetching the trailing window separately (without mutating start_dt)
+    # was considered and rejected: it would duplicate the --source
+    # filter/merge path above for a second, differently-scoped `messages`
+    # list, doubling the surface this refusal contract has to hold for a
+    # combination nothing currently schedules (design doc: nobody runs
+    # --full-range today; --trailing-days is the sanctioned nightly command).
+    # Refusing the combination outright is simpler and cannot silently
+    # mislabel a number.
+    trailing_days = getattr(args, "trailing_days", None)
+    if trailing_days is not None and getattr(args, "full_range", False):
+        sys.stderr.write(
+            "ERROR: --trailing-days and --full-range are mutually exclusive "
+            "(both would summarize the fetch_outbound_messages(start_dt, "
+            "end_dt) range, and --trailing-days overrides start_dt, which "
+            "would silently narrow --full-range's window to the trailing "
+            "window). Run them in separate invocations.\n"
+        )
+        return 2
+    if trailing_days is not None:
+        if args.start != DEFAULT_START:
+            sys.stderr.write(
+                "NOTE: --trailing-days=%d overrides --start=%s; using a "
+                "start computed from --end (or now) minus %d days instead.\n"
+                % (trailing_days, args.start, trailing_days)
+            )
+        start_dt = end_dt - datetime.timedelta(days=trailing_days)
+
     if args.explain_dates:
         print(json.dumps({name: EVENTS[name] for name in event_names}, indent=2))
         return 0
@@ -703,6 +757,35 @@ def run(args) -> int:
             )["axes"]
         report["full_range_summary"] = fr_entry
 
+    if trailing_days is not None:
+        tw_n = len(messages)
+        tw_texts = [t for _, t in messages]
+        tw_coverage = window_coverage(messages, start_dt, end_dt)
+        tw_entry = {
+            "requested_days": trailing_days,
+            "window": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
+            "n": tw_n,
+            "coverage": tw_coverage,
+        }
+        tw_reasons = []
+        if tw_n < args.min_n:
+            tw_reasons.append(f"n={tw_n} < min_n={args.min_n}")
+        if tw_coverage["covered_days"] < min_cov:
+            tw_reasons.append(f"covered_days={tw_coverage['covered_days']} < min_covered_days={min_cov}")
+        if tw_reasons:
+            tw_entry["status"] = "INSUFFICIENT_DATA"
+            tw_entry["reason"] = (
+                "; ".join(tw_reasons) + ". Refusing to compute stats for the "
+                "trailing window per the no-fabricated-numbers contract."
+            )
+            insufficient = True
+        else:
+            tw_entry["status"] = "OK"
+            tw_entry["axes"] = aggregate_window(
+                tw_texts, n_resamples=args.n_resamples, seed=args.seed
+            )["axes"]
+        report["trailing_window_summary"] = tw_entry
+
     report["overall_status"] = "INSUFFICIENT_DATA" if insufficient else "OK"
 
     print(json.dumps(report, indent=2))
@@ -741,7 +824,30 @@ def main(argv=None) -> int:
                         "from scripts/extract_imessage_pairs.py); repeatable; de-duplicated against chat.db "
                         "by (timestamp, text hash)")
     p.add_argument("--explain-dates", action="store_true", help="print the event-date citations and exit, no DB access")
+    p.add_argument("--trailing-days", type=int, default=None, metavar="N",
+                   help="windowed re-derivation mode: re-derive all 9 axes over the trailing N days "
+                        "ending at --end (or now), overriding --start; requires --event none "
+                        "(mutually exclusive with event pre/post analysis, which uses --window-days) "
+                        "and mutually exclusive with --full-range (both summarize the same fetched "
+                        "range, and --trailing-days overriding --start would silently narrow "
+                        "--full-range's window); reports true coverage.covered_days alongside "
+                        "requested_days, never conflating the two "
+                        "(see .claude/rules/no-number-without-a-measurement.md)")
     args = p.parse_args(argv)
+    if args.trailing_days is not None and args.event != "none":
+        p.error(
+            "--trailing-days requires --event none (event pre/post windows use "
+            "--window-days, not --trailing-days); pass --event none to use "
+            "--trailing-days, or drop --trailing-days to analyze events"
+        )
+    if args.trailing_days is not None and args.full_range:
+        p.error(
+            "--trailing-days and --full-range are mutually exclusive: both "
+            "summarize the fetch_outbound_messages(start_dt, end_dt) range, "
+            "and --trailing-days overrides start_dt, which would silently "
+            "narrow --full-range's reported window from --start/--end down "
+            "to the trailing window. Run them in separate invocations."
+        )
     return run(args)
 
 

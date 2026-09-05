@@ -523,3 +523,65 @@ Still authored, not derived: the numeric claims inside
 `~/.human/personas/seth.json` ("1 in 8", "81%", "1 in 12") — a private
 persona file, left for the owner to trim now that rule 2 carries the
 measured values.
+
+## 8. US-7: honest event-shift comparison + windowed re-derivation (2026-09-05)
+
+**Side-by-side, not sequential:** the two events' `lowercase_start_rate` deltas move in
+*opposite* directions — move event +0.158 (95% CI-crossing, `results-2026-09-03.json`),
+job event −0.088 (95% CI-crossing, `results-2026-09-05.json`). Presented without
+qualification these read as one persona-wide trend; they are not comparable at equal
+confidence:
+
+- **job**: pre n=1,324 (30.0 covered days), post n=522 (29.5 covered days) — both windows
+  meet `--min-covered-days=20`. This delta is real, load-bearing, and is the one the
+  directional-fidelity gate ran against (status: FAIL — `length_chars` sign-matches
+  (human −3.01, gen −20.41); `emoji_rate` and `warmth_hits_per_100_words` do not (human
+  +0.039/+0.42, gen 0.0/−0.72); `lowercase_start_rate` itself is excluded from the gate as
+  a device-autocapitalization artifact, spec §3b point 2).
+- **move**: pre n=180 spans only **5.1** of an intended 30 covered days
+  (`--min-covered-days=20` refuses it as of the 2026-09-05 coverage-floor fix). Its +0.158
+  delta is retired, not disproven — it is simply not backed by enough spread of days to
+  rule out one or two atypical days dominating the mean. Treat every number attributed to
+  the move event in this document (§3b, §4) as illustrative history, not a standing
+  measurement.
+
+**Corrected nightly command.** §5 above prescribes
+`eval_persona_evolution.py --event none --full-range --window-days 30` as the rolling
+nightly log command. **This does not do what it says**: `--window-days` is read only by
+the event pre/post bucketer, never by `--full-range`, so that command reports the entire
+`--start`..`--end` range (default since 2026-03-01), not a 30-day trailing window. The
+corrected, verified command is:
+
+    python3 scripts/eval_persona_evolution.py --event none --trailing-days 30 \
+        --source data/imessage/training_pairs.jsonl \
+        --source ~/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl
+
+which reports `trailing_window_summary.coverage.covered_days` honestly (≈30 today,
+bounded by the rolling chat.db retention floor — see below) instead of silently
+mislabeling the full historical range as a 30-day window. Nightly *scheduling* of this
+command remains unimplemented (§5's "what to log" was designed, never cronned) and is
+unchanged by this story.
+
+**chat.db retention floor is a moving target, verified live 2026-09-05 ~16:30 local:**
+`min(is_from_me=1 date)` = **2026-08-06T14:42:13** (was 2026-08-03 on 2026-09-02 per §3,
+2026-08-05 on 2026-09-05 morning per the follow-up above) — the floor has advanced 3 days
+in 3 days. A `--trailing-days 60` run today reports `coverage.covered_days ≈ 30.1` from
+chat.db alone (measured live, aggregate-only, this run) — `requested_days` (60) and
+`coverage.covered_days` (~30) are two distinct report fields, never conflated (AC-7.3;
+`scripts/test_eval_persona_evolution.py::test_trailing_days_reports_requested_days_and_true_coverage_separately`
+pins this). The `--source` merge extends the *pre-event* windows for the two named events,
+and it extends the *trailing* window's coverage too: `run()` filters `--source` rows to the
+same `start_dt`/`end_dt` used for `fetch_outbound_messages` (`start_dt` already overridden
+by `--trailing-days` before the merge runs), then feeds the merged `messages` into
+`trailing_window_summary` — so a source export whose timestamps predate chat.db's retention
+floor raises trailing-window coverage. Measured, not asserted: the same 60-day trailing
+window reports `coverage.covered_days = 30.0` from chat.db alone
+(`sprints/sprint-better-than-human-2026-09-05/evidence/us7-trailing-60d-chatdb-only-2026-09-05.json`)
+but **59.8** once `--source` is added
+(`sprints/sprint-better-than-human-2026-09-05/evidence/us7-trailing-60d-2026-09-05.json`,
+both committed as evidence) — correcting this section's earlier claim that `--source` "does
+not extend the trailing window." What `--source` does *not* do is raise the chat.db-only
+retention floor itself: `min(is_from_me=1 date)` keeps advancing in an unmerged, chat.db-only
+run regardless of any `--source` export. Recovering more pre-August history (AC-7.6) remains
+the only way to raise coverage for a run with no matching `--source` export, and is
+explicitly out of scope here.

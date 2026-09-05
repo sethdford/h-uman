@@ -974,5 +974,7 @@ jobs:
           python3 scripts/test_fidelity_differentiation.py
       - name: Style-card measurement pins (hermetic, stdlib-only)
         run: python3 scripts/test_measure_style_card.py
+      - name: Persona-evolution windowed re-derivation pins (hermetic, stdlib-only)
+        run: python3 scripts/test_eval_persona_evolution.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py
