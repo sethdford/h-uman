@@ -23,8 +23,8 @@ Two modes (--mode, default "detection" -- existing behavior, unchanged):
     score_preference.py, a SEPARATE, non-promotion-gating measurement.
 
 In BOTH modes, `context`/`seth_reply`/`huuman_reply` are redacted for
-phone-number-shaped and contact-name-shaped substrings (AC-6.4) before any
-row is built -- redaction was previously entirely absent, a real privacy gap
+email-shaped, phone-number-shaped and contact-name-shaped substrings (AC-6.4)
+before any row is built -- redaction was previously entirely absent, a real privacy gap
 even for the existing detection sheets.
 
 In preference mode ONLY, a triple whose seth_reply and huuman_reply are
@@ -69,6 +69,15 @@ _PHONE_RE = re.compile(
     r'|\d{2,4}(?:[-.\s]\d{2,4}){2,3}'
 )
 
+# Email-shaped substrings: local part, "@", then a domain that MUST contain a
+# dot -- so an @-mention ("@home", "@jake") with no dotted domain is left alone.
+# Deliberately permissive on the local part (dots, plus-tags, hyphens) because
+# this is a REDACTION regex: over-matching a trailing "." is harmless, under-
+# matching leaks a third party's address (the 2026-09-05 preference sheet did,
+# in a `context` field, before this existed). Replacement string matches the
+# lead's hand-redaction on that sheet so old and new sheets read alike.
+_EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
+
 # Single alphabetic token, with an optional trailing possessive/contraction
 # suffix ("Sarah's", "O'Brien's") captured separately so the possessive "'s"
 # survives redaction while the name itself does not. Deliberately NOT a
@@ -93,7 +102,8 @@ def build_name_tokens(names):
 
 
 def redact(text, name_tokens=None):
-    """Redact phone-number-shaped and contact-name-shaped substrings.
+    """Redact email-shaped, phone-number-shaped and contact-name-shaped
+    substrings.
 
     name_tokens: iterable of name strings/tokens, matched case-insensitively
     as WHOLE tokens only (never a substring match within a longer word).
@@ -101,7 +111,10 @@ def redact(text, name_tokens=None):
     """
     if not text:
         return text
-    out = _PHONE_RE.sub("[phone]", text)
+    # Email first: consume a whole address before the phone pass can see
+    # digit fragments inside it or the name pass can match its local part.
+    out = _EMAIL_RE.sub("<redacted-email>", text)
+    out = _PHONE_RE.sub("[phone]", out)
     if name_tokens:
         name_set = {str(t).lower() for t in name_tokens}
 

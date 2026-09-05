@@ -144,6 +144,41 @@ class TestRedactName(unittest.TestCase):
         self.assertEqual(build_name_tokens([""]), set())
 
 
+class TestRedactEmail(unittest.TestCase):
+    """Email-shaped substrings are redacted in every field regardless of
+    whether the local part or domain appears in any contact list -- the
+    2026-09-05 preference sheet carried a third party's address in a
+    `context` field that phone+name redaction could not catch. Fixture
+    addresses use the RFC 2606 reserved example.com domain only."""
+
+    def test_email_in_context_is_redacted(self):
+        out = redact("send it to contact@example.com tonight")
+        self.assertNotIn("contact@example.com", out)
+        self.assertNotIn("example.com", out)
+        self.assertIn("<redacted-email>", out)
+
+    def test_email_with_plus_and_dots_is_redacted(self):
+        out = redact("cc first.last+tag@mail.example.co.uk on that")
+        self.assertNotIn("first.last+tag@mail.example.co.uk", out)
+        self.assertIn("<redacted-email>", out)
+
+    def test_at_mention_without_domain_is_left_alone(self):
+        """An '@' that is not an address (an @-mention, "@home") must
+        survive -- the regex requires a dotted domain after the '@'."""
+        self.assertEqual(redact("working @home today"), "working @home today")
+        self.assertEqual(redact("ping @jake about it"), "ping @jake about it")
+
+    def test_email_phone_and_name_redacted_together(self):
+        out = redact("Sarah's email is sarah@example.com, cell 555-123-4567",
+                     name_tokens=["Sarah"])
+        self.assertNotIn("sarah@example.com", out)
+        self.assertNotIn("555-123-4567", out)
+        self.assertNotIn("Sarah", out)
+        self.assertIn("<redacted-email>", out)
+        self.assertIn("[phone]", out)
+        self.assertIn("[name]", out)
+
+
 class TestResolveContactNameTokensSkipWarning(unittest.TestCase):
     """F4: HU_BLIND_AB_SKIP_ADDRESSBOOK degrades to phone-only redaction
     exactly like a genuine AddressBook failure does -- both paths MUST print
@@ -242,6 +277,26 @@ class TestBuildPreferenceMode(unittest.TestCase):
         rows, key, skipped = build(triples, seed=1, mode="preference")
         self.assertEqual(skipped, 1)
         self.assertEqual(len(rows), 0)
+
+    def test_email_in_reply_is_redacted_and_duplicate_skip_survives(self):
+        """Two replies that differ only in an email address become a
+        real/model duplicate after redaction and are skipped, exactly as
+        the phone case -- email redaction runs before the comparison."""
+        triples = [
+            {"id": "t1", "context": "c",
+             "seth_reply": "mail one@example.com",
+             "huuman_reply": "mail two@example.com"},
+            {"id": "t2", "context": "c",
+             "seth_reply": "mail three@example.com",
+             "huuman_reply": "different reply"},
+        ]
+        rows, key, skipped = build(triples, seed=1, mode="preference")
+        self.assertEqual(skipped, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "t2")
+        joined = rows[0]["option_A"] + rows[0]["option_B"]
+        self.assertNotIn("example.com", joined)
+        self.assertIn("<redacted-email>", joined)
 
     def test_all_duplicates_yields_zero_rows(self):
         triples = [{"id": f"t{i}", "context": "c", "seth_reply": "same",
