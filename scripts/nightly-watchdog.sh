@@ -17,12 +17,16 @@ HOME_DIR="${HOME}"
 LOGDIR="$HOME_DIR/.human/logs"; LOCKDIR="$HOME_DIR/.human/locks"; mkdir -p "$LOGDIR" "$LOCKDIR"
 LOG="$LOGDIR/nightly-watchdog.log"
 REPO="${HU_REPO_DIR:-$HOME_DIR/Projects/h-uman}"
-TODAY=$(date +%Y-%m-%d); YDAY=$(date -v-1d +%Y-%m-%d 2>/dev/null || date -d yesterday +%Y-%m-%d)
+TODAY=$(date +%Y-%m-%d)
 MLX="${HU_MLX_HEALTH:-http://127.0.0.1:8741/health}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
-# name|marker-kind|marker|wrapper|allowed-hours (HH-HH local, or "any")
+# name|marker-kind|marker|wrapper|allowed-hours (HH-HH local, or "any")|lookback-days
+# lookback-days (optional, default 2 = today/yesterday): how far back a marker
+# may be dated and still count. 7 makes a job WEEKLY without a day-of-week:
+# it runs on the first tick inside its window once the newest marker is a
+# week old, so a laptop asleep on "gate day" catches up instead of waiting.
 # retrain STOPS the production server for its run; it may only be started in
 # its contract window so a wake at 14:00 never takes :8741 down.
 JOBS=(
@@ -41,6 +45,15 @@ JOBS=(
   # 530k lines, no rotation on 2026-09-02). rotate-logs.sh copy-truncates
   # oversized logs once a day and writes its own dated marker line.
   "logrotate|line|$LOGDIR/logrotate.log|$REPO/scripts/rotate-logs.sh|any"
+  # Weekly re-measurement of the HU_SEMANTIC_RECALL LIVE gate (contract C1,
+  # flipped live 2026-09-03 on one PROMOTE; EI fell ~0.1 per run for three
+  # runs). Lookback 7 = weekly. Window 10-16 local: the 03:07 retrain (window
+  # 02-05) STOPS :8741, and the 04:05 nightly eval pushes hours of serial
+  # traffic through :8741 — a gate convoyed behind either would time out and
+  # refuse. Last in the list so the long run never delays a nightly under the
+  # lock. HTTP-only against :8741 (batch priority); on HOLD it writes an alert
+  # and flips nothing — the revert is a human decision.
+  "semantic-gate|file|$LOGDIR/semantic-gate-DATE.json|$REPO/scripts/semantic_gate_weekly.sh|10-16|7"
 )
 HOUR_NOW=${HU_WATCHDOG_HOUR:-$(date +%H)}
 in_window() {  # "any" | "HH-HH"
@@ -49,9 +62,11 @@ in_window() {  # "any" | "HH-HH"
   [ "$((10#$HOUR_NOW))" -ge "$((10#$lo))" ] && [ "$((10#$HOUR_NOW))" -lt "$((10#$hi))" ]
 }
 
-marker_present() {  # kind marker
-  local kind="$1" m="$2" d
-  for d in "$TODAY" "$YDAY"; do
+day_ago() { date -v-"$1"d +%Y-%m-%d 2>/dev/null || date -d "$1 days ago" +%Y-%m-%d; }
+marker_present() {  # kind marker [lookback-days]
+  local kind="$1" m="$2" days="${3:-2}" i d
+  for ((i = 0; i < days; i++)); do
+    d=$(day_ago "$i")
     case "$kind" in
       file) [ -s "${m//DATE/$d}" ] && return 0 ;;
       line) [ -f "$m" ] && grep -q "^\[$d" "$m" && return 0 ;;
@@ -65,15 +80,16 @@ trainer_running() { pgrep -f "mlx_lm.lora|mlx_lm_lora|train-glm-adapter|embed_se
 
 missing=(); ran=(); skipped=()
 for spec in "${JOBS[@]}"; do
-  IFS='|' read -r name kind marker wrapper window <<<"$spec"
-  if marker_present "$kind" "$marker"; then continue; fi
+  IFS='|' read -r name kind marker wrapper window lookback <<<"$spec"
+  lookback="${lookback:-2}"
+  if marker_present "$kind" "$marker" "$lookback"; then continue; fi
   missing+=("$name")
   [ -x "$wrapper" ] || { skipped+=("$name:no-wrapper"); continue; }
   if ! in_window "$window"; then skipped+=("$name:outside-window-$window"); continue; fi
   if [ "$DRY" = 1 ]; then ran+=("$name(dry)"); continue; fi
   if ! serving_up; then skipped+=("$name:mlx-down"); continue; fi
   if trainer_running; then skipped+=("$name:trainer-busy"); continue; fi
-  log "running $name ($wrapper) — marker missing for $TODAY/$YDAY"
+  log "running $name ($wrapper) — marker missing for the last $lookback day(s) ending $TODAY"
   # macOS has no flock(1): an atomic mkdir is the lock. A lock older than 6h
   # whose pid is gone is stale and reclaimed.
   LOCK="$LOCKDIR/nightly.lock.d"
@@ -89,7 +105,7 @@ for spec in "${JOBS[@]}"; do
   rc=$?
   rm -rf "$LOCK"
   log "$name exited rc=$rc"
-  if marker_present "$kind" "$marker"; then ran+=("$name"); else skipped+=("$name:ran-but-no-artifact(rc=$rc)"); fi
+  if marker_present "$kind" "$marker" "$lookback"; then ran+=("$name"); else skipped+=("$name:ran-but-no-artifact(rc=$rc)"); fi
 done
 summary="watchdog $TODAY missing=[${missing[*]:-}] ran=[${ran[*]:-}] skipped=[${skipped[*]:-}]"
 [ "$DRY" = 1 ] || log "$summary"

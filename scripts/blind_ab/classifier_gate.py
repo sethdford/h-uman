@@ -46,10 +46,14 @@ def served_adapter():
         return None
 
 def extract_auc(report):
-    """The scorer's report nests {scores: {<key>: {auc_oriented, ...}}}; take the
-    best-oriented score. Returns (key, auc) or (None, None)."""
+    """binocular_score.py's real report nests scores under report["analysis"]["scores"]
+    (top-level keys: base, adapter, contexted, n_texts, analysis, results). Prefer that
+    shape; fall back to a legacy flat {scores: {...}} shape if analysis is absent.
+    Returns (key, auc) or (None, None)."""
+    scores = ((report.get("analysis") or {}).get("scores")
+              or report.get("scores") or {})
     best = (None, None)
-    for k, v in (report.get("scores") or {}).items():
+    for k, v in scores.items():
         if isinstance(v, dict) and "auc_oriented" in v:
             if best[1] is None or v["auc_oriented"] > best[1]:
                 best = (k, v["auc_oriented"])

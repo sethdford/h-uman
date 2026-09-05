@@ -43,10 +43,14 @@
     <key>RunAtLoad</key>
     <false/>
 
+    <!-- NOT nightly-retrain.log: the script's log() already tees every line into
+         that file, so pointing launchd's stdout there too doubled every line
+         (68 duplicated lines in the last 200 on 2026-09-04). Un-teed output
+         (tracebacks, launchd's own errors) lands here instead. -->
     <key>StandardOutPath</key>
-    <string>/Users/sethford/.human/logs/nightly-retrain.log</string>
+    <string>/Users/sethford/.human/logs/nightly-retrain-launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/sethford/.human/logs/nightly-retrain.log</string>
+    <string>/Users/sethford/.human/logs/nightly-retrain-launchd.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

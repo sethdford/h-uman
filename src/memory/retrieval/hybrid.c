@@ -176,6 +176,53 @@ static bool recon_query_has_temporal_cue(const char *query, size_t query_len) {
     return false;
 }
 
+/* Test-only stage ablation for measuring the C2 reconstructive pipeline
+ * (docs/plans/2026-08-02-semantic-retrieval/memory-benchmarks-c2-ablation.json).
+ * HU_RECON_ABLATE=<comma-separated tokens> disables or varies one stage at a
+ * time so each can be scored in isolation on the same benchmark split. Unset
+ * -- the state every real caller runs under today -- reproduces Contract C2
+ * exactly (opts->reconstructive itself already defaults off; this env var
+ * only changes behavior further inside that already-opt-in path). Recognized
+ * tokens: no_scene, no_neighbors, no_rerank, no_temporal, force_sufficient,
+ * scene_coverage_first. Unrecognized tokens are ignored (no typo silently
+ * changes behavior in a way that would go unnoticed either). */
+static bool recon_ablate(const char *token) {
+    const char *env = getenv("HU_RECON_ABLATE");
+    if (!env || !*env)
+        return false;
+    size_t tlen = strlen(token);
+    const char *p = env;
+    while (*p) {
+        const char *comma = strchr(p, ',');
+        size_t seglen = comma ? (size_t)(comma - p) : strlen(p);
+        if (seglen == tlen && strncmp(p, token, tlen) == 0)
+            return true;
+        if (!comma)
+            break;
+        p = comma + 1;
+    }
+    return false;
+}
+
+/* Session-group key for scene_coverage_first: strips the day-bucket suffix
+ * off a "s:<session_id>:<day>" scene key so scenes from the same session on
+ * different days still count as one coverage unit; a "u:<key>" singleton
+ * scene (no session_id) is already its own group. */
+static void recon_session_group(const char *scene_key, char *buf, size_t buf_cap) {
+    if (buf_cap == 0)
+        return;
+    size_t len = strlen(scene_key);
+    if (scene_key[0] == 's' && scene_key[1] == ':') {
+        const char *last_colon = strrchr(scene_key, ':');
+        if (last_colon)
+            len = (size_t)(last_colon - scene_key);
+    }
+    if (len >= buf_cap)
+        len = buf_cap - 1;
+    memcpy(buf, scene_key, len);
+    buf[len] = '\0';
+}
+
 /* Reconstructive hybrid retrieval. Builds an RRF-fused candidate pool from
  * keyword/semantic/graph (entries, not hu_search_result_t, so session_id and
  * timestamp survive the merge — see hu_rrf_merge), then:
@@ -238,7 +285,6 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
                                   pool_cap, &pool, &pool_count);
     if (err != HU_OK || pool_count == 0)
         return err;
-
     /* ---- (1) scene-select ---- */
     char (*scene_keys)[HU_RECON_KEY_BUF] =
         alloc->alloc(alloc->ctx, pool_count * sizeof(*scene_keys));
@@ -293,14 +339,67 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
                 scenes[j] = t;
             }
 
-    /* Pick top scenes until their rows cover `limit` (at least the top one). */
+    /* scene_coverage_first (ablation g): reorder `scenes` so the best-scoring
+     * scene of EACH distinct session comes first (guaranteeing session
+     * coverage), then the remaining scenes in their original score order --
+     * before the standard "cover `limit` rows" selection below runs. This
+     * tests the hypothesis that plain top-scene selection trades session
+     * coverage for within-scene precision (memory-benchmarks-c2.json:
+     * temporal-reasoning 0.4, multi-session 0.8 vs 1.0 for plain hybrid). */
+    if (recon_ablate("scene_coverage_first") && scene_count > 1) {
+        recon_scene_t *ordered = alloc->alloc(alloc->ctx, scene_count * sizeof(recon_scene_t));
+        bool *picked = alloc->alloc(alloc->ctx, scene_count * sizeof(bool));
+        char (*groups)[HU_RECON_KEY_BUF] = alloc->alloc(alloc->ctx, scene_count * sizeof(*groups));
+        char (*seen)[HU_RECON_KEY_BUF] = alloc->alloc(alloc->ctx, scene_count * sizeof(*seen));
+        if (ordered && picked && groups && seen) {
+            memset(picked, 0, scene_count * sizeof(bool));
+            for (size_t i = 0; i < scene_count; i++)
+                recon_session_group(scenes[i].key, groups[i], sizeof(groups[i]));
+            size_t oc = 0, seen_count = 0;
+            for (size_t i = 0; i < scene_count; i++) {
+                bool dup = false;
+                for (size_t k = 0; k < seen_count; k++)
+                    if (strcmp(seen[k], groups[i]) == 0) {
+                        dup = true;
+                        break;
+                    }
+                if (dup)
+                    continue;
+                ordered[oc++] = scenes[i];
+                picked[i] = true;
+                memcpy(seen[seen_count], groups[i], sizeof(seen[seen_count]));
+                seen_count++;
+            }
+            for (size_t i = 0; i < scene_count; i++)
+                if (!picked[i])
+                    ordered[oc++] = scenes[i];
+            memcpy(scenes, ordered, scene_count * sizeof(recon_scene_t));
+        }
+        if (ordered)
+            alloc->free(alloc->ctx, ordered, scene_count * sizeof(recon_scene_t));
+        if (picked)
+            alloc->free(alloc->ctx, picked, scene_count * sizeof(bool));
+        if (groups)
+            alloc->free(alloc->ctx, groups, scene_count * sizeof(*groups));
+        if (seen)
+            alloc->free(alloc->ctx, seen, scene_count * sizeof(*seen));
+    }
+
+    /* Pick top scenes until their rows cover `limit` (at least the top one).
+     * no_scene (ablation b) disables the cap entirely -- every scene in the
+     * pool is "selected", which is equivalent to skipping scene-select and
+     * handing the whole RRF pool straight to neighbour expansion/rerank. */
     size_t selected_scene_count = 0;
     size_t rows_covered = 0;
-    for (size_t s = 0; s < scene_count; s++) {
-        selected_scene_count++;
-        rows_covered += scenes[s].row_count;
-        if (rows_covered >= limit)
-            break;
+    if (recon_ablate("no_scene")) {
+        selected_scene_count = scene_count;
+    } else {
+        for (size_t s = 0; s < scene_count; s++) {
+            selected_scene_count++;
+            rows_covered += scenes[s].row_count;
+            if (rows_covered >= limit)
+                break;
+        }
     }
 
     size_t work_cap = pool_count * (1 + HU_RECON_MAX_NEIGHBORS) + 8;
@@ -338,7 +437,9 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
 
     /* ---- (2) neighbour expansion within selected scenes ---- */
     size_t anchor_count = work_count;
-    for (size_t a = 0; a < anchor_count && backend && backend->vtable && backend->vtable->list;
+    bool ablate_neighbors = recon_ablate("no_neighbors");
+    for (size_t a = 0; !ablate_neighbors && a < anchor_count && backend && backend->vtable &&
+                       backend->vtable->list;
          a++) {
         const hu_memory_entry_t *anchor = &work[a];
         if (!anchor->session_id || anchor->session_id_len == 0)
@@ -406,7 +507,7 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
     }
 
     /* ---- (3) rerank: cross-encoder term overlap over the working set ---- */
-    if (work_count > 0) {
+    if (work_count > 0 && !recon_ablate("no_rerank")) {
         hu_search_result_t *sr = alloc->alloc(alloc->ctx, work_count * sizeof(hu_search_result_t));
         if (sr) {
             memset(sr, 0, work_count * sizeof(hu_search_result_t));
@@ -441,7 +542,8 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
     }
 
     /* ---- (4) time-bounded filter ---- */
-    if (work_count > 0 && recon_query_has_temporal_cue(query, query_len)) {
+    if (work_count > 0 && !recon_ablate("no_temporal") &&
+        recon_query_has_temporal_cue(query, query_len)) {
         /* (a) prefer rows closest to now: reuse the existing temporal-decay
          * helper as a generic recency bias (it already computes age against
          * time(NULL) internally). */
@@ -512,8 +614,14 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
 
     /* ---- (5) sufficiency check ---- */
     double top_score = work_count > 0 ? work_scores[0] : 0.0;
-    if (work_count == 0 || top_score < HU_RECON_SCORE_FLOOR ||
-        distinct_scenes_in_pool < HU_RECON_MIN_SCENES) {
+    bool recon_insufficient = (work_count == 0 || top_score < HU_RECON_SCORE_FLOOR ||
+                               distinct_scenes_in_pool < HU_RECON_MIN_SCENES);
+    /* force_sufficient (ablation f): never fall back to the plain hybrid
+     * merge, even when the floor/min-scenes checks would normally decline.
+     * Only meaningful when there is at least one row to return. */
+    if (recon_insufficient && work_count > 0 && recon_ablate("force_sufficient"))
+        recon_insufficient = false;
+    if (recon_insufficient) {
         /* Free the live [0, work_count) fields, then the full backing arrays
          * (sized work_cap -- may exceed work_count after the temporal-filter
          * compaction shrank the logical count without reallocating). */
@@ -741,10 +849,15 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
          * 2000 chars each) crowded the prompt cap and produced 9/40 EMPTY
          * completions in the 2026-09-02 live gate; see semantic_recall.h. */
         size_t before = semantic_result.count;
+        /* Content policy first (episodic scaffold, AI-identity confrontation:
+         * the remaining 6/40 empties of that gate) so an excluded hit never
+         * consumes byte budget. */
+        size_t filtered = hu_semantic_recall_filter_result(alloc, &semantic_result);
         size_t kept =
             hu_semantic_recall_clamp_result(alloc, &semantic_result, hu_semantic_recall_max_bytes(),
                                             HU_SEMANTIC_RECALL_HIT_MAX_BYTES);
-        hu_log_info("semantic_recall", NULL, "live: sem=%zu kept=%zu bytes=%zu budget=%zu", before,
+        hu_log_info("semantic_recall", NULL,
+                    "live: sem=%zu filtered=%zu kept=%zu bytes=%zu budget=%zu", before, filtered,
                     semantic_result.count, kept, hu_semantic_recall_max_bytes());
     }
 

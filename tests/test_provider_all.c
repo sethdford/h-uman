@@ -1,6 +1,7 @@
 /* Comprehensive provider tests (~300+ tests). */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/http.h"
 #include "human/daemon.h"
 #include "human/max_tokens.h"
 #include "human/observability/log_observer.h"
@@ -3582,7 +3583,52 @@ static void test_personalization_warn_is_one_shot_per_process(void) {
 }
 #endif
 
+/* ── Local-provider request cap (2026-09-03 half-open :8741 incident) ──
+ * The mlx_local prod entry is this OpenAI-compatible provider pointed at
+ * 127.0.0.1:8741. A loopback upstream has no network variance: if it has
+ * not answered in HU_COMPATIBLE_LOCAL_TIMEOUT_SECS it is wedged or dead
+ * (Metal OOM zombie holding a half-open socket), and the daemon must fail
+ * fast so the reliable wrapper can route to the cloud fallback. Cloud base
+ * URLs keep the shared 600 s default. */
+static void test_compatible_loopback_url_gets_local_timeout_cap(void) {
+    const char *url = "http://127.0.0.1:8741/v1/chat/completions";
+    hu_http_request_opts_t opts = {0};
+    /* pre: the shared client default is 600 s */
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(NULL), 600L);
+    hu_compatible_request_opts_for_url(url, strlen(url), &opts);
+    /* post: the provider cap is applied */
+    HU_ASSERT_EQ(opts.timeout_secs, HU_COMPATIBLE_LOCAL_TIMEOUT_SECS);
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(&opts), HU_COMPATIBLE_LOCAL_TIMEOUT_SECS);
+    HU_ASSERT_TRUE(HU_COMPATIBLE_LOCAL_TIMEOUT_SECS < 600L);
+}
+
+static void test_compatible_localhost_url_gets_local_timeout_cap(void) {
+    const char *url = "http://localhost:8741/v1/chat/completions";
+    hu_http_request_opts_t opts = {0};
+    hu_compatible_request_opts_for_url(url, strlen(url), &opts);
+    HU_ASSERT_EQ(opts.timeout_secs, HU_COMPATIBLE_LOCAL_TIMEOUT_SECS);
+}
+
+static void test_compatible_cloud_url_keeps_default_timeout(void) {
+    const char *url = "https://api.openai.com/v1/chat/completions";
+    hu_http_request_opts_t opts = {.timeout_secs = 1};
+    hu_compatible_request_opts_for_url(url, strlen(url), &opts);
+    HU_ASSERT_EQ(opts.timeout_secs, 0L); /* 0 = shared default */
+    HU_ASSERT_EQ(hu_http_effective_timeout_secs(&opts), 600L);
+}
+
+static void test_compatible_request_opts_null_safe(void) {
+    hu_http_request_opts_t opts = {.timeout_secs = 7};
+    hu_compatible_request_opts_for_url(NULL, 0, &opts);
+    HU_ASSERT_EQ(opts.timeout_secs, 0L);
+    hu_compatible_request_opts_for_url("http://127.0.0.1:1/", 18, NULL); /* must not crash */
+}
+
 void run_provider_all_tests(void) {
+    HU_RUN_TEST(test_compatible_loopback_url_gets_local_timeout_cap);
+    HU_RUN_TEST(test_compatible_localhost_url_gets_local_timeout_cap);
+    HU_RUN_TEST(test_compatible_cloud_url_keeps_default_timeout);
+    HU_RUN_TEST(test_compatible_request_opts_null_safe);
     HU_TEST_SUITE("Provider All");
     HU_RUN_TEST(test_openai_create_succeeds);
     HU_RUN_TEST(test_openai_create_null_alloc_fails);

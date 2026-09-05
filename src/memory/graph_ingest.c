@@ -31,6 +31,14 @@ hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t co
         confidence = 0.0f;
     if (confidence > 1.0f)
         confidence = 1.0f;
+    /* The graph speaks milliseconds; both live callers handed this SECONDS
+     * (daemon deep-extract passed time(NULL); the chat.db backfill passed
+     * message dates), so every event window and the composer's recency term
+     * were off by 1000x. A value in [1e9, 1e11) is unambiguously seconds
+     * (2001-09 .. 5138 in s; 1970-01-12 .. 1973-03 in ms); smaller values
+     * are abstract test ticks and stay untouched. */
+    if (now >= 1000000000LL && now < 100000000000LL)
+        now *= 1000;
 
     size_t subj_len = strlen(subject);
     size_t obj_len = strlen(object);

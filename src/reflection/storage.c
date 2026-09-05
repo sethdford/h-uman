@@ -356,18 +356,26 @@ void hu_reflection_check_failure_rate(struct sqlite3 *db, uint64_t now_ms, bool 
     }
 }
 
-uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {
+/* Run a single-column MAX(...) query; 0 when there is no row or no db. */
+static uint64_t query_max_ms(struct sqlite3 *db, const char *sql) {
     if (!db)
         return 0;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, "SELECT MAX(completed_at_ms) FROM reflection_runs WHERE status='ok'",
-                           -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return 0;
     uint64_t out = 0;
     if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_type(st, 0) == SQLITE_INTEGER)
         out = (uint64_t)sqlite3_column_int64(st, 0);
     sqlite3_finalize(st);
     return out;
+}
+
+uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {
+    return query_max_ms(db, "SELECT MAX(completed_at_ms) FROM reflection_runs WHERE status='ok'");
+}
+
+uint64_t hu_reflection_storage_last_attempt_ms(struct sqlite3 *db) {
+    return query_max_ms(db, "SELECT MAX(started_at_ms) FROM reflection_runs");
 }
 
 /* ── Phase 2 quorum predicate (T11) ────────────────────────────── */

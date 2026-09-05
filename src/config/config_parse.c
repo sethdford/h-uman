@@ -1050,6 +1050,15 @@ static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
         hu_json_get_number(obj, "provider_backoff_ms", cfg->reliability.provider_backoff_ms);
     if (pbm >= 0)
         cfg->reliability.provider_backoff_ms = (uint64_t)pbm;
+    /* Circuit breaker: 0/absent = defaults, negative = disabled (see config.h). */
+    double cft = hu_json_get_number(obj, "circuit_failure_threshold",
+                                    cfg->reliability.circuit_failure_threshold);
+    if (cft >= -1 && cft <= 100)
+        cfg->reliability.circuit_failure_threshold = (int)cft;
+    double crs =
+        hu_json_get_number(obj, "circuit_recovery_secs", cfg->reliability.circuit_recovery_secs);
+    if (crs >= -1 && crs <= 86400)
+        cfg->reliability.circuit_recovery_secs = (int)crs;
     double cibs = hu_json_get_number(obj, "channel_initial_backoff_secs",
                                      cfg->reliability.channel_initial_backoff_secs);
     if (cibs >= 0)

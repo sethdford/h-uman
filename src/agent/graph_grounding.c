@@ -2,6 +2,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/core/gate_mode.h"
 #include "human/memory/graph.h"
+#include "human/memory/graph_state.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -338,9 +339,20 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
         hu_graph_entity_t *nbrs = NULL;
         hu_graph_relation_t *rels = NULL;
         size_t ncount = 0;
+        /* Fetch twice the render budget so a superseded chain has room to
+         * collapse: the state view keeps one head per (source, type) and
+         * marks history, so "user works_at Vanguard" can never sit beside
+         * "user works_at Raymond James" as if both held (2026-09-04). */
         if (hu_graph_neighbors(g, alloc, contact_id, contact_id_len, seed->id, 1,
-                               GG_NEIGHBORS_PER_SEED, &nbrs, &rels, &ncount) == HU_OK) {
-            for (size_t i = 0; i < ncount; i++) {
+                               (size_t)GG_NEIGHBORS_PER_SEED * 2u, &nbrs, &rels,
+                               &ncount) == HU_OK) {
+            hu_graph_state_entry_t *view = NULL;
+            size_t view_n = 0;
+            if (hu_graph_state_resolve(alloc, rels, ncount, now_ms, &view, &view_n) != HU_OK)
+                view_n = 0;
+            size_t rendered = 0;
+            for (size_t k = 0; k < view_n && rendered < GG_NEIGHBORS_PER_SEED; k++) {
+                size_t i = (size_t)(view[k].rel - rels);
                 if (!nbrs[i].name || nbrs[i].name_len == 0)
                     continue;
                 const char *rel_str = hu_relation_type_to_string(rels[i].type);
@@ -354,6 +366,11 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                           gg_append(buf, max_chars, &pos, " ", 1) &&
                           gg_append(buf, max_chars, &pos, outward ? nbrs[i].name : seed->name,
                                     outward ? nbrs[i].name_len : seed->name_len);
+                char suffix[96];
+                size_t suffix_len =
+                    hu_graph_relation_state_suffix(g, alloc, &view[k], suffix, sizeof(suffix));
+                if (ok && suffix_len > 0)
+                    ok = gg_append(buf, max_chars, &pos, suffix, suffix_len);
                 if (!ok) {
                     pos = nb_start;
                     break;
@@ -364,7 +381,10 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                     pos = nb_start;
                     break;
                 }
+                rendered++;
             }
+            if (view)
+                alloc->free(alloc->ctx, view, view_n * sizeof(*view));
             hu_graph_entities_free(alloc, nbrs, ncount);
             hu_graph_relations_free(alloc, rels, ncount);
         }

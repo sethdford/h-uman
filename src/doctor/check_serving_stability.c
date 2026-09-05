@@ -85,11 +85,21 @@ static hu_doctor_check_result_t run(hu_doctor_check_t *self, void *vctx) {
     int64_t runs = hu_doctor_launchctl_runs(ctx ? ctx->launchctl_text : NULL);
     int64_t last_exit = hu_doctor_launchctl_last_exit(ctx ? ctx->launchctl_text : NULL);
 
+    /* The daemon is the second process that can crash-loop under KeepAlive with
+     * every other check green (2026-09-04: 8 ASan aborts on the memory-store
+     * path, replies dropped, nothing alarmed). Same artifacts, its own prefix. */
+    const char *dprefix =
+        (ctx && ctx->daemon_crash_prefix) ? ctx->daemon_crash_prefix : "human-daemon-";
+    int dcrashes = count_recent_crashes(dir, dprefix, now, (int64_t)window_h * 3600);
+    int64_t druns = hu_doctor_launchctl_runs(ctx ? ctx->daemon_launchctl_text : NULL);
+
     snprintf(s_detail, sizeof(s_detail),
              "{\"crash_reports_%dh\":%d,\"launchd_runs\":%lld,\"last_exit_code\":%s,"
-             "\"crash_prefix\":\"%s\",\"max_crashes\":%d}",
+             "\"crash_prefix\":\"%s\",\"max_crashes\":%d,"
+             "\"daemon_crash_reports_%dh\":%d,\"daemon_launchd_runs\":%lld,"
+             "\"daemon_crash_prefix\":\"%s\"}",
              window_h, crashes, (long long)runs, last_exit == INT64_MIN ? "null" : "0", prefix,
-             max_crashes);
+             max_crashes, window_h, dcrashes < 0 ? 0 : dcrashes, (long long)druns, dprefix);
     /* patch the real exit code in (kept simple: rewrite the null slot) */
     if (last_exit != INT64_MIN) {
         char *slot = strstr(s_detail, "\"last_exit_code\":0");
@@ -117,6 +127,15 @@ static hu_doctor_check_result_t run(hu_doctor_check_t *self, void *vctx) {
                  crashes, prefix, window_h, max_crashes, (long long)runs, last_exit_str);
         return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, s_reason, s_detail};
     }
+    if (dcrashes > max_crashes) {
+        snprintf(s_reason, sizeof(s_reason),
+                 "the daemon itself is crash-looping: %d %s*.ips crash reports in the last %dh "
+                 "(limit %d), launchd runs=%lld — launchd restarts it silently and the reply "
+                 "that triggered each crash is lost; read ~/.human/logs/asan.log.* and "
+                 "~/Library/Logs/DiagnosticReports/%s*.ips",
+                 dcrashes, dprefix, window_h, max_crashes, (long long)druns, dprefix);
+        return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, s_reason, s_detail};
+    }
     if (last_exit != INT64_MIN && last_exit != 0 && last_exit != -15 && last_exit != 15) {
         snprintf(s_reason, sizeof(s_reason),
                  "local model server's last exit was abnormal (code %lld; -11/11 = SIGSEGV) with "
@@ -124,8 +143,10 @@ static hu_doctor_check_result_t run(hu_doctor_check_t *self, void *vctx) {
                  (long long)last_exit, crashes < 0 ? 0 : crashes, window_h);
         return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, s_reason, s_detail};
     }
-    snprintf(s_reason, sizeof(s_reason), "%d crash report(s) in %dh, launchd runs=%lld",
-             crashes < 0 ? 0 : crashes, window_h, (long long)runs);
+    snprintf(s_reason, sizeof(s_reason),
+             "%d crash report(s) in %dh, launchd runs=%lld; daemon: %d crash report(s), runs=%lld",
+             crashes < 0 ? 0 : crashes, window_h, (long long)runs, dcrashes < 0 ? 0 : dcrashes,
+             (long long)druns);
     return (hu_doctor_check_result_t){HU_DOCTOR_PASS, s_reason, s_detail};
 }
 
