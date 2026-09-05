@@ -28,3 +28,11 @@ Callouts:
    time with the full suite between.
 4. Verifier round 1 on US-5 reached `:8741` twice because the dispatch prompt did not
    pin `HU_SEMANTIC_EMBED_URL`; every later dispatch pins it. Recorded in lessons.
+
+## 2026-09-05 (later) — gate updates
+
+| Story | Update |
+|---|---|
+| US-2 | fix `7acb4d470` landed (three-way PASS/BLOCK/HOLD using the candidate's LUAR CI95; HOLD exit 3; INCONCLUSIVE on missing CI). Combined verifier+critic round 2 running. |
+| US-4 | fix `8beccb6ed` landed (F1 symmetric MIR send semantics, F2 diagnostic counters on refusal; 28 tests). Aspect panel running. |
+| US-8 | critic round 1 **BLOCK**: `/admin/models/decisions` per-row array still emits shadow entries while `tier_distribution` filters them (cross-consumer regression); no test compares gate-OFF vs gate-SHADOW selections for AC-8.7; gate comment does not name the measurement. Fix dispatched (round 2 of 2). |
