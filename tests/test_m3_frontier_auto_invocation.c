@@ -31,6 +31,7 @@
  */
 
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include "human/agent/training_runner_shared.h"
 #include "human/core/allocator.h"
@@ -160,7 +161,8 @@ static void fake_mlx_lm_shim_produces_real_safetensors(void) {
         /* Skip on builds where the fixture isn't reachable from cwd. */
         return;
     }
-    const char *out_path = "/tmp/hu_m3_fake_adapter.safetensors";
+    char out_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(out_path, sizeof(out_path), "hu_m3_fake_adapter.safetensors"));
     (void)unlink(out_path);
 
     char cmd[2048];

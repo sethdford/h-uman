@@ -1,6 +1,7 @@
 #include "human/core/allocator.h"
 #include "human/music.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <string.h>
 #include <unistd.h>
 
@@ -375,7 +376,8 @@ static void test_music_taste_save_and_load(void) {
     hu_music_taste_record_send("+15551234567", 12, "Nirvana", "Come As You Are");
     hu_music_taste_record_reaction("+15551234567", 12);
 
-    const char *path = "/tmp/hu_test_music_taste.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_music_taste.json"));
     size_t path_len = strlen(path);
     HU_ASSERT_EQ(hu_music_taste_save(path, path_len), HU_OK);
 
@@ -399,7 +401,8 @@ static void test_music_taste_save_escaped_json(void) {
     hu_music_taste_record_send("+15559876543", 12, "Guns N' Roses", "Sweet Child O' Mine");
     hu_music_taste_record_send("+15559876543", 12, "AC/DC", "Back In \"Black\"");
 
-    const char *path = "/tmp/hu_test_taste_esc.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_taste_esc.json"));
     size_t path_len = strlen(path);
     HU_ASSERT_EQ(hu_music_taste_save(path, path_len), HU_OK);
     HU_ASSERT_EQ(hu_music_taste_load(path, path_len), HU_OK);

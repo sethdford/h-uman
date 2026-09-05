@@ -26,6 +26,7 @@
  */
 
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #ifdef HU_ENABLE_ML
 
@@ -99,7 +100,8 @@ static void fidelity_pass_predicate_rejects_nonfinite(void) {
 
 static void scorer_skips_rows_missing_response_field(void) {
     hu_allocator_t alloc = A();
-    const char *path = "/tmp/hu_m3_ab_scorer_missing.jsonl";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_ab_scorer_missing.jsonl"));
     (void)unlink(path);
     FILE *fp = fopen(path, "w");
     HU_ASSERT_NOT_NULL(fp);
@@ -124,8 +126,12 @@ static void scorer_skips_rows_missing_response_field(void) {
 
 static void gate_pass_when_candidate_clearly_better(void) {
     hu_allocator_t alloc = A();
-    const char *baseline_path = "/tmp/hu_m3_ab_baseline.jsonl";
-    const char *candidate_path = "/tmp/hu_m3_ab_candidate.jsonl";
+    char baseline_path[512];
+    HU_ASSERT_TRUE(
+        hu_test_tmppath(baseline_path, sizeof(baseline_path), "hu_m3_ab_baseline.jsonl"));
+    char candidate_path[512];
+    HU_ASSERT_TRUE(
+        hu_test_tmppath(candidate_path, sizeof(candidate_path), "hu_m3_ab_candidate.jsonl"));
     (void)unlink(baseline_path);
     (void)unlink(candidate_path);
 
@@ -170,8 +176,10 @@ static void gate_pass_when_candidate_clearly_better(void) {
 
 static void gate_fail_when_candidate_equals_baseline(void) {
     hu_allocator_t alloc = A();
-    const char *baseline_path = "/tmp/hu_m3_ab_dup_b.jsonl";
-    const char *candidate_path = "/tmp/hu_m3_ab_dup_c.jsonl";
+    char baseline_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(baseline_path, sizeof(baseline_path), "hu_m3_ab_dup_b.jsonl"));
+    char candidate_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(candidate_path, sizeof(candidate_path), "hu_m3_ab_dup_c.jsonl"));
     (void)unlink(baseline_path);
     (void)unlink(candidate_path);
 
@@ -201,8 +209,10 @@ static void gate_fail_when_candidate_equals_baseline(void) {
 
 static void gate_fail_when_empty_jsonl(void) {
     hu_allocator_t alloc = A();
-    const char *empty = "/tmp/hu_m3_ab_empty.jsonl";
-    const char *full = "/tmp/hu_m3_ab_full.jsonl";
+    char empty[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(empty, sizeof(empty), "hu_m3_ab_empty.jsonl"));
+    char full[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(full, sizeof(full), "hu_m3_ab_full.jsonl"));
     (void)unlink(empty);
     (void)unlink(full);
     FILE *fp = fopen(empty, "w");

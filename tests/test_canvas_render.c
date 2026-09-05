@@ -1,11 +1,15 @@
-#include "human/tools/canvas_render.h"
 #include "human/core/allocator.h"
+#include "human/tools/canvas_render.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
+#include <string.h>
 
 static void canvas_render_null_args(void) {
     hu_allocator_t a = hu_system_allocator();
-    HU_ASSERT_EQ(hu_canvas_render_to_image(NULL, "x", 1, HU_CANVAS_FORMAT_HTML, "/tmp/out.png", 12), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_canvas_render_to_image(&a, NULL, 1, HU_CANVAS_FORMAT_HTML, "/tmp/out.png", 12), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_canvas_render_to_image(NULL, "x", 1, HU_CANVAS_FORMAT_HTML, "/tmp/out.png", 12),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_canvas_render_to_image(&a, NULL, 1, HU_CANVAS_FORMAT_HTML, "/tmp/out.png", 12),
+                 HU_ERR_INVALID_ARGUMENT);
 }
 
 static void canvas_format_from_string_known(void) {
@@ -20,7 +24,11 @@ static void canvas_format_from_string_unknown(void) {
 
 static void canvas_render_test_mode(void) {
     hu_allocator_t a = hu_system_allocator();
-    HU_ASSERT_EQ(hu_canvas_render_to_image(&a, "<h1>Hi</h1>", 11, HU_CANVAS_FORMAT_HTML, "/tmp/hu_test.png", 16), HU_OK);
+    char out[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(out, sizeof(out), "hu_test.png"));
+    HU_ASSERT_EQ(
+        hu_canvas_render_to_image(&a, "<h1>Hi</h1>", 11, HU_CANVAS_FORMAT_HTML, out, strlen(out)),
+        HU_OK);
 }
 
 void run_canvas_render_tests(void) {
