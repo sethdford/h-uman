@@ -22,6 +22,15 @@ static hu_graph_t *open_tmp_graph(hu_allocator_t *alloc, char *path, size_t cap)
     return g;
 }
 
+/* hu_graph_find_entity hands the caller heap-owned name/metadata_json (see
+ * tests/test_graph.c); release both so LeakSanitizer stays clean. */
+static void free_entity_strings(hu_allocator_t *alloc, hu_graph_entity_t *ent) {
+    if (ent->name)
+        alloc->free(alloc->ctx, ent->name, ent->name_len + 1);
+    if (ent->metadata_json)
+        alloc->free(alloc->ctx, ent->metadata_json, strlen(ent->metadata_json) + 1);
+}
+
 /* Count open LIVES_IN edges for "self" true at time `at`; report whether the
  * single hit points at the entity named `expect_target`. The window read does
  * not resolve names, so compare ids via hu_graph_find_entity. */
@@ -46,6 +55,7 @@ static size_t open_lives_in_at(hu_graph_t *g, hu_allocator_t *alloc, int64_t at,
             *matches_out = true;
     }
     hu_graph_relations_free(alloc, rels, n);
+    free_entity_strings(alloc, &want);
     return hits;
 }
 
@@ -125,8 +135,30 @@ static void test_rejects_empty_fields(void) {
     unlink(path);
 }
 
+/* Both live callers hand `now` in SECONDS (daemon deep-extract: time(NULL);
+ * chat.db backfill: message dates). The graph speaks milliseconds; the
+ * ingest boundary must convert, or every window read is off by 1000x. */
+static void test_seconds_now_is_stored_as_milliseconds(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    HU_ASSERT_EQ(hu_graph_ingest_fact(g, "self", 4, "user", "works_at", "Acme", 0.9f,
+                                      1788289998LL /* seconds */, "t"),
+                 HU_OK);
+    hu_graph_relation_t *rels = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_graph_list_relations(g, &alloc, "self", 4, 8, &rels, &n), HU_OK);
+    HU_ASSERT_EQ((int)n, 1);
+    HU_ASSERT_EQ(rels[0].event_start, 1788289998000LL);
+    hu_graph_relations_free(&alloc, rels, n);
+    hu_graph_close(g, &alloc);
+    unlink(path);
+}
+
 void run_graph_ingest_tests(void) {
     HU_TEST_SUITE("graph_ingest");
+    HU_RUN_TEST(test_seconds_now_is_stored_as_milliseconds);
     HU_RUN_TEST(test_changed_fact_supersedes_prior_edge);
     HU_RUN_TEST(test_same_fact_twice_is_one_edge);
     HU_RUN_TEST(test_unknown_predicate_maps_to_related_to_not_dropped);

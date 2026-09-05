@@ -298,6 +298,14 @@ hu_error_t hu_reflection_storage_upsert(struct sqlite3 *db, const char *run_id,
  * Returns 0 if no completed runs exist yet. */
 uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db);
 
+/* Returns MAX(started_at_ms) across ALL rows regardless of status. The
+ * tick gate feeds max(last_completed, last_attempt) into the min_interval
+ * check so a failing run backs off like a successful one instead of
+ * retrying on the very next tick — the 2026-09-04 audit measured the
+ * retry storm at 63% of the serving GPU's wall time. Returns 0 when no
+ * run row exists. */
+uint64_t hu_reflection_storage_last_attempt_ms(struct sqlite3 *db);
+
 /* ── Prompt + input assembly (T4) ─────────────────────────────────
  *
  * The reflection LLM is a one-shot batch call:
@@ -438,7 +446,22 @@ typedef struct hu_reflection_run_inputs {
     uint64_t last_user_activity_ms;
     uint64_t now_ms;
     size_t max_input_chars; /* 0 = default 100K */
+    /* Model id handed to the provider. NULL/0 falls back to the config
+     * provider NAME, which is what every run did until 2026-09-04 — and a
+     * provider name is not a model: the reliable wrapper matched no
+     * model_fallbacks entry for "mlx_local", so on every local outage the
+     * cloud extra was asked for a model called "mlx_local" (652 Vertex 400s
+     * in one night). The daemon passes agent->model_name here. */
+    const char *model;
+    size_t model_len;
 } hu_reflection_run_inputs_t;
+
+/* Output budget for the reflection request. The prompt asks for up to 15
+ * patterns plus a prose summary; the local server's default (256 tokens)
+ * truncated that mid-object, which the parser then rejected as invalid
+ * JSON — 16,056 of 16,057 runs. Only honored on providers that implement
+ * `chat` (chat_with_system carries no budget). */
+#define HU_REFLECTION_MAX_OUTPUT_TOKENS 2048u
 
 typedef enum hu_reflection_run_status {
     HU_REFLECTION_RUN_OK,

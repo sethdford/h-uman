@@ -264,3 +264,17 @@ def test_tick_completion_requires_score_success():
         rd.SHEET, rd.STATE, rd.SHEET_DIR, rd.run_score = orig
         import shutil as _sh
         _sh.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_score_argv_records_arm_adapter_from_state():
+    st = {"arm_adapter": "seth-glm-air-v6-orpo-real-20260802-190128",
+          "arm_note": "49 adapter-bound trials 2026-09-04"}
+    argv = rd.score_argv(st)
+    assert argv[argv.index("--arm-adapter") + 1] == "seth-glm-air-v6-orpo-real-20260802-190128"
+    assert argv[argv.index("--arm-note") + 1] == "49 adapter-bound trials 2026-09-04"
+    assert "--rater" in argv and argv[argv.index("--rater") + 1] == "human"
+
+
+def test_score_argv_without_arm_passes_no_arm_flags():
+    argv = rd.score_argv({})
+    assert "--arm-adapter" not in argv and "--arm-note" not in argv

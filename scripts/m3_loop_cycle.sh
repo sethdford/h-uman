@@ -157,12 +157,21 @@ if [ "$PAIRS_COUNT" -ge "$DPO_THRESHOLD" ]; then
     fi
     if [ ! -f "$ADAPTER_OUT/adapters.safetensors" ] && \
        [ ! -f "$ADAPTER_OUT/adapter_model.safetensors" ]; then
-        log "  backend=local (mlx_lm.lora)"
-        python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
-            --input "$REWRITE_PAIRS" \
-            --export-jsonl "$ALPACA_OUT" \
-            --train --adapter-out "$ADAPTER_OUT" \
-            --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+        # Never two loaders: this trains IN-PROCESS. Sunday 04:00 sits inside
+        # the 02:00–05:00 retrain window and beside the resident :8741 server;
+        # loading a second model there is what killed production on
+        # 2026-09-03 04:31. The guard skips the step instead (weekly, so the
+        # next cycle retries); it never stops or restarts the server itself.
+        if guard_out=$(bash "$REPO_ROOT/scripts/check-no-resident-model.sh" 2>&1); then
+            log "  backend=local (mlx_lm.lora) — $guard_out"
+            python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
+                --input "$REWRITE_PAIRS" \
+                --export-jsonl "$ALPACA_OUT" \
+                --train --adapter-out "$ADAPTER_OUT" \
+                --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+        else
+            log "  SKIP local training: $guard_out (run in the retrain window with :8741 stopped, or M3_TRAINING_BACKEND=gce)"
+        fi
     fi
 
     # Step 4: A/B eval against the prior adapter (find via lineage)

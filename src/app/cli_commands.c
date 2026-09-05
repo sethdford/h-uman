@@ -459,11 +459,24 @@ static void memory_semantic_detach(hu_memory_t *mem) {
 /* Shared printer for `memory search --semantic|--hybrid`: rank, key, score,
  * content (truncated to 2000 bytes), then frees `res`. Both callers report
  * "No results" the same way, so leave that to the caller. */
+size_t hu_cli_memory_print_len(const char *content, size_t len) {
+    if (!content)
+        return 0;
+    if (len <= 2000)
+        return len;
+    /* Hard cut at the ceiling, backed off so a multi-byte UTF-8 sequence is
+     * never split: the 2026-09-03 live gate choked on a stray 0xE2 lead byte. */
+    size_t cut = 2000;
+    while (cut > 0 && ((unsigned char)content[cut] & 0xC0u) == 0x80u)
+        cut--;
+    return cut;
+}
+
 static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
     for (size_t i = 0; i < res->count; i++)
         printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res->entries[i].key_len,
                res->entries[i].key ? res->entries[i].key : "", res->scores ? res->scores[i] : 0.0,
-               (int)(res->entries[i].content_len > 2000 ? 2000 : res->entries[i].content_len),
+               (int)hu_cli_memory_print_len(res->entries[i].content, res->entries[i].content_len),
                res->entries[i].content ? res->entries[i].content : "");
     hu_retrieval_result_free(alloc, res);
 }

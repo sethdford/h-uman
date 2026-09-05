@@ -32,6 +32,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import eval_fidelity_nightly as e  # noqa: E402
 
+# Hermetic: never probe (or swap on) a real :8741 from a unit test. The main()
+# runs below mock the in-process seams, so force that path and a "no server"
+# answer. Without this, the auto mode found the dev box's live server.
+import os  # noqa: E402
+os.environ["HU_FIDELITY_GEN"] = "inprocess"
+os.environ.pop("HU_MLX_BASE_URL", None)
+e.served_endpoint_available = lambda *a, **k: False
+
 fails = 0
 
 

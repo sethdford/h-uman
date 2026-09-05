@@ -21,6 +21,14 @@ def test_refuses_below_min_n_and_writes_nothing():
     assert r.returncode != 0 and "REFUSING" in r.stderr
     assert not os.path.exists(os.path.join(d, "classifier_trials.json"))
 
-def test_extract_auc_picks_best_oriented():
+def test_extract_auc_picks_best_oriented_legacy_flat_shape():
+    # legacy/hypothetical flat shape: {scores: {...}} with no "analysis" wrapper
     assert cg.extract_auc({"scores": {"a": {"auc_oriented": 0.6}, "b": {"auc_oriented": 0.8}}}) == ("b", 0.8)
     assert cg.extract_auc({}) == (None, None)
+
+def test_extract_auc_reads_real_binoculars_score_report_shape():
+    # binoculars_score.py's real output nests scores under report["analysis"]["scores"];
+    # this is the shape that broke the gate on 2026-09-05 (classifier_gate.py read
+    # report["scores"] directly and found nothing, even though the scorer succeeded).
+    report = json.load(open(os.path.join(HERE, "fixtures", "classifier-gate-2026-09-05.report.json")))
+    assert cg.extract_auc(report) == ("dirA (obs=base)", 0.7546)

@@ -189,6 +189,12 @@ struct hu_embedder;
 struct hu_vector_store;
 void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
                                          struct hu_vector_store *store);
+/* The borrowed pointers currently attached (NULL when none / not sqlite).
+ * Lets a caller assert it handed over app-lifetime storage: the engine
+ * dereferences these on every indexed store, and a block-scoped temporary
+ * here aborted the daemon 21 times between 2026-09-02 and 09-04. */
+void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embedder **embedder_out,
+                                         struct hu_vector_store **store_out);
 /* Embed every `memories` row missing from the index (up to `limit`, 0 = all).
  * HU_ERR_NOT_SUPPORTED when no index is attached — never a silent 0. */
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out);

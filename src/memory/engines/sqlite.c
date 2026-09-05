@@ -18,6 +18,7 @@
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/sql_common.h"
 #include "human/memory/vector.h"
 
@@ -677,6 +678,11 @@ static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t
                                const char *content, size_t content_len) {
     if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
         !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
+        return;
+    /* Index policy: episodic "experience:" rows are stored (keyword recall,
+     * experience_log) but never embedded — they are harness scaffolding, not
+     * memories about the contact (semantic_recall.h). */
+    if (!hu_semantic_recall_key_is_indexable(key, key_len))
         return;
     hu_embedding_t emb = {0};
     hu_error_t err = self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
@@ -1846,13 +1852,40 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     };
 }
 
+/* Only the sqlite engine carries the index fields. On any other engine —
+ * the markdown fallback when the sqlite path is unavailable — the cast below
+ * would read or write two pointers past a small foreign ctx (2026-09-04:
+ * ASan heap-buffer-overflow from hu_app_teardown's detach in the full
+ * suite). Same contract as hu_sqlite_memory_get_db / get_session_store. */
+static bool is_sqlite_engine(const hu_memory_t *mem) {
+    if (!mem || !mem->ctx || !mem->vtable || !mem->vtable->name)
+        return false;
+    const char *n = mem->vtable->name(mem->ctx);
+    return n && strcmp(n, "sqlite") == 0;
+}
+
 void hu_sqlite_memory_set_semantic_index(hu_memory_t *mem, struct hu_embedder *embedder,
                                          struct hu_vector_store *store) {
-    if (!mem || !mem->ctx)
+    if (!is_sqlite_engine(mem))
         return;
     hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
     self->sem_embedder = embedder;
     self->sem_store = store;
+}
+
+void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embedder **embedder_out,
+                                         struct hu_vector_store **store_out) {
+    if (embedder_out)
+        *embedder_out = NULL;
+    if (store_out)
+        *store_out = NULL;
+    if (!is_sqlite_engine(mem))
+        return;
+    const hu_sqlite_memory_t *self = (const hu_sqlite_memory_t *)mem->ctx;
+    if (embedder_out)
+        *embedder_out = self->sem_embedder;
+    if (store_out)
+        *store_out = self->sem_store;
 }
 
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
@@ -1881,8 +1914,8 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const char *k = (const char *)sqlite3_column_text(stmt, 0);
         const char *c = (const char *)sqlite3_column_text(stmt, 1);
-        if (!k || !c)
-            continue;
+        if (!k || !c || !hu_semantic_recall_key_is_indexable(k, strlen(k)))
+            continue; /* same policy as the write path */
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 256;
             char **nk = self->alloc->alloc(self->alloc->ctx, ncap * sizeof(char *));
@@ -1965,6 +1998,58 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
         self->alloc->free(self->alloc->ctx, keys, cap * sizeof(char *));
         self->alloc->free(self->alloc->ctx, contents, cap * sizeof(char *));
     }
+    /* Purge index rows that predate the write-time exclusion: the production
+     * index carried 576 "experience:" vectors on 2026-09-02 and reindex is
+     * the only path that ever revisits existing rows. Page by id cursor so
+     * the policy lives only in hu_semantic_recall_key_is_indexable; each
+     * page is finalized before remove() writes the same connection. */
+    size_t purged = 0, purge_failed = 0;
+    if (self->sem_store->vtable->remove) {
+        const char *psql = "SELECT id FROM memories_vec_meta WHERE id > ? ORDER BY id LIMIT ?";
+        char *cursor = hu_strndup(self->alloc, "", 0);
+        while (cursor) {
+            sqlite3_stmt *ps = NULL;
+            char *ids[BATCH];
+            size_t pn = 0, seen = 0;
+            char *next = NULL;
+            if (sqlite3_prepare_v2(self->db, psql, -1, &ps, NULL) != SQLITE_OK)
+                break;
+            sqlite3_bind_text(ps, 1, cursor, -1, SQLITE_STATIC);
+            sqlite3_bind_int64(ps, 2, (sqlite3_int64)BATCH);
+            while (sqlite3_step(ps) == SQLITE_ROW) {
+                const char *id = (const char *)sqlite3_column_text(ps, 0);
+                if (!id)
+                    continue;
+                seen++;
+                hu_str_free(self->alloc, next);
+                next = hu_strndup(self->alloc, id, strlen(id));
+                if (hu_semantic_recall_key_is_indexable(id, strlen(id)))
+                    continue;
+                ids[pn] = hu_strndup(self->alloc, id, strlen(id));
+                if (ids[pn])
+                    pn++;
+            }
+            sqlite3_finalize(ps);
+            for (size_t i = 0; i < pn; i++) {
+                if (self->sem_store->vtable->remove(self->sem_store->ctx, ids[i], strlen(ids[i])) ==
+                    HU_OK)
+                    purged++;
+                else
+                    purge_failed++;
+                hu_str_free(self->alloc, ids[i]);
+            }
+            hu_str_free(self->alloc, cursor);
+            cursor = (seen == BATCH) ? next : NULL; /* short page: done */
+            if (!cursor)
+                hu_str_free(self->alloc, next);
+        }
+        hu_str_free(self->alloc, cursor);
+    }
+    if (purged)
+        hu_log_info("memory.semantic", NULL, "reindex purged %zu excluded index rows", purged);
+    if (purge_failed)
+        hu_log_warn("memory.semantic", NULL, "reindex could not purge %zu excluded index rows",
+                    purge_failed);
     if (indexed_out)
         *indexed_out = indexed;
     return HU_OK;

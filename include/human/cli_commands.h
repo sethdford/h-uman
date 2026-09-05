@@ -8,6 +8,10 @@
 hu_error_t cmd_channel(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv);
+/* Pure: bytes of content[0, len) that `human memory search` prints for one hit.
+ * Caps at 2000 bytes, backed off over UTF-8 continuation bytes so the cut never
+ * splits a multi-byte sequence. Returns len when len <= 2000; 0 on NULL. */
+size_t hu_cli_memory_print_len(const char *content, size_t len);
 hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_config(hu_allocator_t *alloc, int argc, char **argv);
 /** Prints top-level config key documentation to `out` (used by `human config schema` and tests). */

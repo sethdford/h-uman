@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **2007 source + header files, ~426K lines of C, ~284K lines of tests, 14,011 tests, 31 channels**.
+Current scale: **2051 source + header files, ~445K lines of C, ~289K lines of tests, 14,145 tests, 31 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -77,7 +77,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `HU_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 14,011+ tests must pass at zero ASan errors**
+5. **All 14,145+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `HU_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -96,7 +96,7 @@ Summary: **KISS** (straightforward control flow, explicit `#ifdef`), **YAGNI** (
 src/
   main.c                CLI entrypoint and command routing
   agent/                agent loop, context, planner, compaction, dispatcher
-  channels/             65 channel implementations (cli, telegram, discord, slack, ...)
+  channels/             66 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
   tools/                99 tool implementations
   memory/               SQLite + markdown + LRU + LanceDB + Lucid backends, embeddings, vector search, connections, consolidation, multimodal ingest

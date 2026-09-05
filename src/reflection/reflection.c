@@ -38,6 +38,7 @@
 #include "human/core/error.h"
 #include "human/core/log.h"
 #include "human/provider.h"
+#include "human/util/llm_json.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -140,7 +141,8 @@ hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool forc
         !inputs->iter_fn) {
         return HU_ERR_INVALID_ARGUMENT;
     }
-    if (!inputs->provider->vtable || !inputs->provider->vtable->chat_with_system) {
+    if (!inputs->provider->vtable ||
+        (!inputs->provider->vtable->chat && !inputs->provider->vtable->chat_with_system)) {
         /* Treat as provider error rather than INVALID_ARGUMENT — the
          * inputs are syntactically fine; this provider just doesn't
          * implement what we need. */
@@ -165,8 +167,13 @@ hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool forc
                          "in config.json to activate");
     }
 
-    /* Gate. */
+    /* Gate. The interval is measured from the last ATTEMPT, not the last
+     * success: a schema_invalid run must back off exactly like an ok run,
+     * otherwise a provider that never parses is retried every tick. */
     uint64_t last_completed_ms = hu_reflection_storage_last_completed_ms(inputs->db);
+    uint64_t last_attempt_ms = hu_reflection_storage_last_attempt_ms(inputs->db);
+    if (last_attempt_ms > last_completed_ms)
+        last_completed_ms = last_attempt_ms;
     hu_reflection_gate_result_t gate = hu_reflection_should_run(
         inputs->cfg, last_completed_ms, inputs->last_user_activity_ms, inputs->now_ms, force);
     if (gate != HU_REFLECTION_GATE_RUN_IDLE && gate != HU_REFLECTION_GATE_RUN_FORCED) {
@@ -213,11 +220,47 @@ hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool forc
      * user message is the assembled transcript. Temperature is low
      * (0.2) to nudge the model toward stable JSON shape. */
     const char *system_prompt = hu_reflection_system_prompt();
+    const char *model = (inputs->model && inputs->model_len > 0) ? inputs->model : provider_name;
+    size_t model_len =
+        (inputs->model && inputs->model_len > 0) ? inputs->model_len : strlen(provider_name);
     char *response = NULL;
     size_t response_len = 0;
-    hu_error_t ce = inputs->provider->vtable->chat_with_system(
-        inputs->provider->ctx, inputs->alloc, system_prompt, strlen(system_prompt), user_msg,
-        strlen(user_msg), provider_name, strlen(provider_name), 0.2, &response, &response_len);
+    hu_error_t ce;
+    if (inputs->provider->vtable->chat) {
+        /* Full request so the output budget travels with it; the local
+         * server's default (256 tokens) cannot hold 15 patterns. */
+        hu_chat_message_t msgs[2] = {
+            {.role = HU_ROLE_SYSTEM,
+             .content = system_prompt,
+             .content_len = strlen(system_prompt)},
+            {.role = HU_ROLE_USER, .content = user_msg, .content_len = strlen(user_msg)},
+        };
+        hu_chat_request_t req = {
+            .messages = msgs,
+            .messages_count = 2,
+            .model = model,
+            .model_len = model_len,
+            .temperature = 0.2,
+            .max_tokens = HU_REFLECTION_MAX_OUTPUT_TOKENS,
+        };
+        hu_chat_response_t resp;
+        memset(&resp, 0, sizeof(resp));
+        ce = inputs->provider->vtable->chat(inputs->provider->ctx, inputs->alloc, &req, model,
+                                            model_len, 0.2, &resp);
+        if (ce == HU_OK && resp.content && resp.content_len > 0) {
+            response = (char *)inputs->alloc->alloc(inputs->alloc->ctx, resp.content_len + 1);
+            if (response) {
+                memcpy(response, resp.content, resp.content_len);
+                response[resp.content_len] = '\0';
+                response_len = resp.content_len;
+            }
+        }
+        hu_chat_response_free(inputs->alloc, &resp);
+    } else {
+        ce = inputs->provider->vtable->chat_with_system(
+            inputs->provider->ctx, inputs->alloc, system_prompt, strlen(system_prompt), user_msg,
+            strlen(user_msg), model, model_len, 0.2, &response, &response_len);
+    }
     free(user_msg);
 
     if (ce != HU_OK || !response) {
@@ -230,14 +273,32 @@ hu_error_t hu_reflection_run(const hu_reflection_run_inputs_t *inputs, bool forc
         return HU_OK;
     }
 
-    /* Parse. */
+    /* Locate the JSON payload first: the live server fences it in
+     * ```json and reasoning models prepend <think> blocks. The parser
+     * wants the bare object. */
     hu_reflection_pattern_t *patterns = NULL;
     int pattern_count = 0;
     char *prose = NULL;
     char *parse_err = NULL;
-    hu_error_t pe = hu_reflection_parse(response, &patterns, &pattern_count, &prose, &parse_err);
-    /* Free provider response via its allocator — chat_with_system
-     * allocated it through inputs->alloc per the vtable contract. */
+    hu_error_t pe;
+    const char *payload = NULL;
+    size_t payload_len = 0;
+    if (hu_llm_json_locate(response, response_len, &payload, &payload_len)) {
+        char *bare = (char *)malloc(payload_len + 1);
+        if (bare) {
+            memcpy(bare, payload, payload_len);
+            bare[payload_len] = '\0';
+            pe = hu_reflection_parse(bare, &patterns, &pattern_count, &prose, &parse_err);
+            free(bare);
+        } else {
+            pe = HU_ERR_OUT_OF_MEMORY;
+        }
+    } else {
+        pe = HU_ERR_JSON_PARSE;
+        parse_err = strdup("no JSON payload located (truncated or non-JSON reply)");
+    }
+    /* Free provider response via its allocator — it was allocated
+     * through inputs->alloc per the vtable contract. */
     if (inputs->alloc && inputs->alloc->free && response)
         inputs->alloc->free(inputs->alloc->ctx, response, response_len);
     if (pe != HU_OK) {

@@ -14,11 +14,14 @@
 # where to look. Read-only; safe from cron, the nightly doctor, or a pre-push.
 #
 # Env overrides: HU_LOOP_ADAPTER_MAX_DAYS (7), HU_LOOP_EVAL_MAX_DAYS (3),
-#                HU_LOOP_ADAPTER_MIN_BYTES (100000), HU_LOOP_SKIP_CI=1
+#                HU_LOOP_ADAPTER_MIN_BYTES (100000), HU_LOOP_SKIP_CI=1,
+#                HU_LOOP_SEMANTIC_MAX_DAYS (10), HU_SERVICE_PLIST (service-loop plist)
 set -uo pipefail
 
 ADAPTER_MAX_DAYS="${HU_LOOP_ADAPTER_MAX_DAYS:-7}"
 EVAL_MAX_DAYS="${HU_LOOP_EVAL_MAX_DAYS:-3}"
+SEMANTIC_MAX_DAYS="${HU_LOOP_SEMANTIC_MAX_DAYS:-10}"
+SERVICE_PLIST="${HU_SERVICE_PLIST:-$HOME/Library/LaunchAgents/ai.human.service-loop.plist}"
 ADAPTER_MIN_BYTES="${HU_LOOP_ADAPTER_MIN_BYTES:-100000}"
 HUMAN_DIR="${HU_STATE_DIR:-$HOME/.human}"
 REPO="${HU_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -37,7 +40,10 @@ age_days() { # file -> integer days since mtime
 
 # ── 1. LoRA adapters: newest adapter is recent AND has real weights ──────
 ADIR="$HUMAN_DIR/training-data/adapters"
-newest="$(ls -dt "$ADIR"/*/ 2>/dev/null | head -1)"
+# nightly-retrain.sh quarantines a fabricated adapter by renaming it
+# <dir>.rejected-<epoch>; mtime survives the rename, so without the filter a
+# quarantined no-op is "newest" and this line reports the wrong thing.
+newest="$(ls -dt "$ADIR"/*/ 2>/dev/null | grep -v '\.rejected-' | head -1)"
 if [[ -z "$newest" ]]; then
     bad "adapters: none under $ADIR"
 else
@@ -93,6 +99,53 @@ if [[ "${HU_LOOP_SKIP_CI:-0}" != "1" ]] && command -v gh >/dev/null 2>&1; then
         ""|null|pending|in_progress|queued) note "ci: Human CI on main is still running (${ci:-pending})" ;;
         *)       note "ci: Human CI on main is '$ci'" ;;
     esac
+fi
+
+# ── 5. Semantic-recall LIVE gate: the weekly re-measurement must be a fresh PROMOTE ─
+# HU_SEMANTIC_RECALL went live 2026-09-03 on one measurement; the watchdog's
+# semantic-gate job (scripts/semantic_gate_weekly.sh) re-runs it weekly.
+# Newest record by generated_at across the weekly logs and the promotion
+# records in the plan dir. HOLD, INCONCLUSIVE, or stale => DEAD. This script
+# never flips anything: the revert is a human decision (spec.md, Operating LIVE).
+recall_mode="live"
+if [[ -f "$SERVICE_PLIST" ]]; then
+    m="$(grep -A1 '<key>HU_SEMANTIC_RECALL</key>' "$SERVICE_PLIST" 2>/dev/null | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -1)"
+    [[ -n "$m" ]] && recall_mode="$m"
+fi
+if [[ "$recall_mode" != "live" ]]; then
+    note "semantic-gate: HU_SEMANTIC_RECALL=$recall_mode in $(basename "$SERVICE_PLIST") — LIVE gate not required"
+else
+    sg="$(python3 - "$HUMAN_DIR/logs" "$REPO/docs/plans/2026-08-02-semantic-retrieval" <<'PY'
+import glob, json, os, sys
+from datetime import datetime, timezone
+best = None
+for d in sys.argv[1:]:
+    for p in glob.glob(os.path.join(d, "semantic-gate-*.json")) + glob.glob(os.path.join(d, "semantic-live-gate-*.json")):
+        try:
+            j = json.load(open(p))
+            t = datetime.fromisoformat(str(j["generated_at"]).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        if best is None or t > best[0]:
+            best = (t, str(j.get("verdict", "?")), p)
+if best is None:
+    print("none 0 -")
+else:
+    print(best[1], (datetime.now(timezone.utc) - best[0]).days, best[2])
+PY
+)"
+    read -r sg_verdict sg_age sg_path <<<"$sg"
+    if [[ "$sg_verdict" == "none" ]]; then
+        bad "semantic-gate: no semantic-gate-*.json record found — LIVE recall has never been re-measured (scripts/semantic_gate_weekly.sh)"
+    elif [[ "$sg_verdict" != "PROMOTE" ]]; then
+        bad "semantic-gate: newest record $(basename "$sg_path") is $sg_verdict (${sg_age}d old) — HU_SEMANTIC_RECALL is still live; revert is a human decision (spec.md, Operating LIVE)"
+    elif (( sg_age > SEMANTIC_MAX_DAYS )); then
+        bad "semantic-gate: newest PROMOTE $(basename "$sg_path") is ${sg_age}d old (cap ${SEMANTIC_MAX_DAYS}d) — weekly re-gate not producing"
+    else
+        ok "semantic-gate: $(basename "$sg_path") PROMOTE ${sg_age}d old"
+    fi
 fi
 
 if (( fails > 0 )); then

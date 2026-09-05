@@ -3,6 +3,7 @@
 #include "human/core/string.h"
 #include "human/memory/conflict_resolver.h"
 #include "human/memory/consolidation.h"
+#include "human/memory/graph_state.h"
 
 /* P2 #7 — write→invalidate hook. We forward-declare the W9 invalidate
  * function instead of including world_model.h to avoid the agent/memory
@@ -266,6 +267,12 @@ hu_error_t hu_graph_open(hu_allocator_t *alloc, const char *db_path, size_t db_p
         } else if (mig_err) {
             sqlite3_free(mig_err);
         }
+    }
+
+    if (hu_graph_normalize_timestamp_units(g) != HU_OK) {
+        sqlite3_close(g->db);
+        alloc->free(alloc->ctx, g, sizeof(hu_graph_t));
+        return HU_ERR_IO;
     }
 
     *out = g;
@@ -912,6 +919,94 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
     return rc == SQLITE_DONE ? HU_OK : HU_ERR_IO;
 }
 
+/* "<col> * 1000 where <col> is unambiguously seconds" — see graph.h. */
+#define HU_GRAPH_MS_FIX(tbl, col)                                                      \
+    "UPDATE " tbl " SET " col " = " col " * 1000 WHERE " col " >= 1000000000 AND " col \
+    " < 100000000000"
+
+hu_error_t hu_graph_normalize_timestamp_units(hu_graph_t *g) {
+    if (!g || !g->db)
+        return HU_ERR_INVALID_ARGUMENT;
+    static const char *const k_fix[] = {
+        HU_GRAPH_MS_FIX("relations", "event_start"),
+        HU_GRAPH_MS_FIX("relations", "event_end"),
+        HU_GRAPH_MS_FIX("relations", "first_seen"),
+        HU_GRAPH_MS_FIX("relations", "last_seen"),
+        HU_GRAPH_MS_FIX("entities", "event_start"),
+        HU_GRAPH_MS_FIX("entities", "event_end"),
+        HU_GRAPH_MS_FIX("entities", "first_seen"),
+        HU_GRAPH_MS_FIX("entities", "last_seen"),
+        NULL,
+    };
+    for (size_t i = 0; k_fix[i] != NULL; i++) {
+        if (sqlite3_exec(g->db, k_fix[i], NULL, NULL, NULL) != SQLITE_OK)
+            return HU_ERR_IO;
+    }
+    return HU_OK;
+}
+
+hu_error_t hu_graph_supersession_prev_name(hu_graph_t *g, hu_allocator_t *alloc,
+                                           const hu_graph_relation_t *rel, char **out_name,
+                                           size_t *out_len) {
+    if (!out_name || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_name = NULL;
+    *out_len = 0;
+    if (!g || !g->db || !alloc || !rel)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (rel->supersedes_id <= 0)
+        return HU_ERR_NOT_FOUND;
+    /* The endpoint that changed is the one the prior row does NOT share
+     * with `rel` (the source is shared for single-valued types). */
+    const char *sql = "SELECT CASE WHEN r.source_id = ? THEN t.name ELSE s.name END "
+                      "FROM relations r JOIN entities s ON s.id = r.source_id "
+                      "JOIN entities t ON t.id = r.target_id WHERE r.id = ?";
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(st, 1, rel->source_id);
+    sqlite3_bind_int64(st, 2, rel->supersedes_id);
+    hu_error_t err = HU_ERR_NOT_FOUND;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(st, 0);
+        size_t len = name ? (size_t)sqlite3_column_bytes(st, 0) : 0;
+        if (len > 0) {
+            *out_name = hu_strndup(alloc, name, len);
+            *out_len = *out_name ? len : 0;
+            err = *out_name ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+        }
+    }
+    sqlite3_finalize(st);
+    return err;
+}
+
+size_t hu_graph_relation_state_suffix(hu_graph_t *g, hu_allocator_t *alloc,
+                                      const struct hu_graph_state_entry *entry, char *buf,
+                                      size_t cap) {
+    if (!entry || !entry->rel || !buf || cap == 0)
+        return 0;
+    buf[0] = '\0';
+    int w = 0;
+    if (!entry->current) {
+        char month[16];
+        if (hu_graph_state_format_month(entry->rel->event_end, month, sizeof(month)) == 0)
+            return 0;
+        w = snprintf(buf, cap, " (until %s)", month);
+    } else if (entry->rel->supersedes_id > 0) {
+        char *name = NULL;
+        size_t len = 0;
+        if (hu_graph_supersession_prev_name(g, alloc, entry->rel, &name, &len) != HU_OK)
+            return 0;
+        w = snprintf(buf, cap, " (was: %.*s)", (int)len, name);
+        alloc->free(alloc->ctx, name, len + 1);
+    }
+    if (w <= 0 || (size_t)w >= cap) {
+        buf[0] = '\0';
+        return 0;
+    }
+    return (size_t)w;
+}
+
 #else
 
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
@@ -973,6 +1068,35 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
     (void)entity_id;
     (void)community_id;
     return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_graph_normalize_timestamp_units(hu_graph_t *g) {
+    (void)g;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_graph_supersession_prev_name(hu_graph_t *g, hu_allocator_t *alloc,
+                                           const hu_graph_relation_t *rel, char **out_name,
+                                           size_t *out_len) {
+    (void)g;
+    (void)alloc;
+    (void)rel;
+    if (out_name)
+        *out_name = NULL;
+    if (out_len)
+        *out_len = 0;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+size_t hu_graph_relation_state_suffix(hu_graph_t *g, hu_allocator_t *alloc,
+                                      const struct hu_graph_state_entry *entry, char *buf,
+                                      size_t cap) {
+    (void)g;
+    (void)alloc;
+    (void)entry;
+    if (buf && cap > 0)
+        buf[0] = '\0';
+    return 0;
 }
 
 hu_error_t hu_graph_upsert_relation_with_belief(
@@ -1043,7 +1167,17 @@ hu_error_t hu_graph_neighbors(hu_graph_t *g, hu_allocator_t *alloc, const char *
         "FROM entities e "
         "JOIN relations r ON (r.target_id = e.id AND r.source_id = ?) OR (r.source_id = e.id AND "
         "r.target_id = ?) "
-        "WHERE e.id != ? AND e.contact_id = ?";
+        "WHERE e.id != ? AND e.contact_id = ? "
+        /* Open (still-true) edges first so a max_results cap can never be
+         * filled by superseded history while the current fact is left out.
+         * Among open edges, single-valued state types (WORKS_AT = 2,
+         * LIVES_IN = 3 — the ints the schema already freezes; see
+         * hu_conflict_relation_is_single_valued) come first so the one
+         * relation kept per neighbor entity is the state-carrying one, not
+         * a generic related_to. Then insertion order: the W12 planner ranks
+         * facade neighbors in this sequence, and ordering by event_start
+         * dropped its facade-recall precision@1 below the 0.95 floor. */
+        "ORDER BY (r.event_end = 0) DESC, (r.relation_type IN (2, 3)) DESC, r.id ASC";
 
     for (size_t hop = 0; hop < max_hops && frontier_count > 0 && entity_count < max_results;
          hop++) {
@@ -1277,7 +1411,15 @@ hu_error_t hu_graph_build_context(hu_graph_t *g, hu_allocator_t *alloc, const ch
                                &entities, &relations, &count) != HU_OK)
             continue;
 
-        for (size_t i = 0; i < count && total_len < max_chars; i++) {
+        /* State-first: render what holds NOW (superseded rows collapse to
+         * their head, history is marked), never two employers as if both
+         * were true. */
+        hu_graph_state_entry_t *view = NULL;
+        size_t view_n = 0;
+        if (hu_graph_state_resolve(alloc, relations, count, now_ms(), &view, &view_n) != HU_OK)
+            view_n = 0;
+        for (size_t k = 0; k < view_n && total_len < max_chars; k++) {
+            size_t i = (size_t)(view[k].rel - relations);
             const char *src_name = "?";
             size_t src_len = 1;
             const char *tgt_name = entities[i].name ? entities[i].name : "?";
@@ -1295,14 +1437,18 @@ hu_error_t hu_graph_build_context(hu_graph_t *g, hu_allocator_t *alloc, const ch
                 }
             }
             const char *rel_str = hu_relation_type_to_string(relations[i].type);
+            char suffix[96];
+            hu_graph_relation_state_suffix(g, alloc, &view[k], suffix, sizeof(suffix));
             rem = max_chars - total_len + 1;
-            int w = snprintf(buf + total_len, rem, "- [%.*s] (%s) -> [%.*s]\n", (int)src_len,
-                             src_name, rel_str, (int)tgt_len, tgt_name);
+            int w = snprintf(buf + total_len, rem, "- [%.*s] (%s) -> [%.*s]%s\n", (int)src_len,
+                             src_name, rel_str, (int)tgt_len, tgt_name, suffix);
             if (w <= 0)
                 continue;
             size_t written = ((size_t)w < rem) ? (size_t)w : rem - 1;
             total_len += written;
         }
+        if (view)
+            alloc->free(alloc->ctx, view, view_n * sizeof(*view));
         hu_graph_entities_free(alloc, entities, count);
         hu_graph_relations_free(alloc, relations, count);
     }
