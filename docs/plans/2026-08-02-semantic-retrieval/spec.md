@@ -114,6 +114,44 @@ not start. A marginal win is not a win — it would not move a 19.5% match rate.
 Note the harness was only just corrected (`bbe7e2a1e`) — before that it scored a
 stale identity, so any pre-existing retrieval number is not a valid baseline.
 
+## Operating LIVE — weekly re-gate and the revert procedure (added 2026-09-03)
+
+`HU_SEMANTIC_RECALL=live` was set in the service-loop plist on 2026-09-03 18:15
+(daemon `a28d7c9b0`) on ONE measurement,
+`semantic-live-gate-2026-09-03-content-filter.json` (n_paired 40, 0 empties,
+composite 0.919→0.908, EI 4.275→4.175, PROMOTE; tolerances composite 0.02 /
+EI 0.15 / reality 0.15). EI has dropped about 0.1 on each of three runs; one
+more such step crosses the tolerance. So LIVE is re-measured, not assumed:
+
+- **Weekly re-gate.** `scripts/nightly-watchdog.sh`'s `semantic-gate` job runs
+  `scripts/semantic_gate_weekly.sh` (same arguments as the 09-03 run, output
+  `~/.human/logs/semantic-gate-<date>.json`, marker lookback 7 days, hour window
+  10–16 local so it never overlaps the 03:07 retrain that stops :8741 or the
+  04:05 nightly eval's hours of serial :8741 traffic). It only sends chat and
+  embedding requests to the running :8741 at batch priority; it never loads a
+  model. It refuses and writes nothing if :8741 is down, a peer gate run is in
+  progress, or fewer than `--min-n` contexts succeed in both arms.
+- **On HOLD nothing flips.** The job writes `~/.human/alerts/semantic-gate-HOLD-<date>`
+  and a `semantic-gate verdict=HOLD` line in `nightly-watchdog.log`;
+  `scripts/check-learning-loops.sh` (run by doctor-nightly) reports
+  `semantic-gate` DEAD whenever the newest record is not a PROMOTE younger than
+  10 days.
+
+**Revert procedure (a human decision — no script or job performs it):**
+
+1. Read the HOLD record's `reasons` and `context_rows`; confirm the drop is in
+   the paired set, not an artifact (`.claude/rules/no-number-without-a-measurement.md`).
+2. Edit `~/Library/LaunchAgents/ai.human.service-loop.plist`: set the
+   `HU_SEMANTIC_RECALL` string to `shadow` (SHADOW keeps logging what it would
+   retrieve, so the next gate run still has data).
+3. Kickstart the service so the plist is re-read:
+   `launchctl kickstart -k gui/$(id -u)/ai.human.service-loop`
+   (this restarts the daemon only — never :8741).
+4. Confirm: `launchctl print gui/$(id -u)/ai.human.service-loop | grep HU_SEMANTIC_RECALL`
+   shows `shadow`; `check-learning-loops.sh` then reports `semantic-gate` as a
+   NOTE (LIVE gate not required) instead of DEAD.
+5. Re-promotion needs a fresh PROMOTE from the same gate, exactly as the first flip did.
+
 ## Non-goals
 
 - Re-embedding the full 1,789-message history (start with `memories` + facts).

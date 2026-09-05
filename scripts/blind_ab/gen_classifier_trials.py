@@ -28,6 +28,8 @@ import os
 import sys
 import time
 import urllib.request
+import re
+import hashlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -63,6 +65,60 @@ def build_head():
     return head
 
 
+def _server_base(mlx_url):
+    """http://host:port from the chat-completions URL."""
+    m = re.match(r"^(https?://[^/]+)", mlx_url or "")
+    return m.group(1) if m else None
+
+
+def _get_json(url, timeout_s=5):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as r:
+            return json.load(r)
+    except Exception:
+        return None
+
+
+def serving_provenance(mlx_url, head):
+    """What the server is ACTUALLY serving, asked at generation time.
+
+    2026-07-26 → 2026-09-04 the adapter on :8741 was applied with
+    load_weights(strict=False) and bound nothing, while /health said
+    adapter_applied:true and this script wrote the literal string
+    "production :8741 + live head" as provenance. Five weeks of authorship,
+    judge-tier and classifier numbers measured base+prompt and nothing
+    downstream could tell (memory: serving-adapter-inert-on-8741). So the
+    record now carries the server's own answer — /v1/adapters/current and
+    /health — plus a hash of the head that was sent, and `adapter_bound` is
+    True / False / None (unknown), never assumed.
+
+    Returns the provenance dict; the caller decides whether to refuse."""
+    base = _server_base(mlx_url)
+    cur = _get_json(f"{base}/v1/adapters/current") if base else None
+    health = _get_json(f"{base}/health") if base else None
+    adapter_path = (cur or {}).get("adapter_path") or (health or {}).get("active_adapter") \
+        or (health or {}).get("adapter")
+    tensors = (cur or {}).get("tensors_loaded")
+    if tensors is None:
+        tensors = (health or {}).get("tensors_loaded")
+    bound = None
+    if adapter_path and isinstance(tensors, int):
+        bound = tensors > 0
+    elif adapter_path is None and cur is not None:
+        bound = False  # server answered: no adapter at all
+    return {
+        "server": base,
+        "asked_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "model": (health or {}).get("model"),
+        "adapter_path": adapter_path,
+        "tensors_loaded": tensors if isinstance(tensors, int) else None,
+        "adapter_bound": bound,
+        "provenance_available": cur is not None or health is not None,
+        "head_sha256": hashlib.sha256((head or "").encode()).hexdigest(),
+        "head_bytes": len(head or ""),
+    }
+
+
 def generate_one(mlx_url, head, context, max_tokens, temperature, timeout_s):
     body = {
         "model": "GLM-4.5-Air-4bit",  # cosmetic -- the server serves whatever is loaded, ignores this field
@@ -91,10 +147,28 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--timeout", type=int, default=180)
     ap.add_argument("--min-ok", type=int, default=20)
+    ap.add_argument("--allow-no-adapter", action="store_true",
+                    help="generate against a server that reports NO adapter (raw-base probe); "
+                         "without it a no-adapter server is refused so a nightly regen cannot "
+                         "silently measure the base")
     a = ap.parse_args()
 
     base = load_base(a.base)
     head = build_head()
+
+    prov = serving_provenance(a.mlx_url, head)
+    if prov["adapter_bound"] is False and prov["adapter_path"]:
+        # The exact lie of 07-26 → 09-04: an adapter is named but nothing bound.
+        # Every trial would measure the base; refuse rather than mislabel it.
+        sys.exit(f"REFUSING: {prov['server']} names adapter {prov['adapter_path']} but reports "
+                 f"tensors_loaded={prov['tensors_loaded']} (nothing bound); trials would measure "
+                 f"the base model under an adapter label; nothing written")
+    if not a.allow_no_adapter and prov["adapter_bound"] is False:
+        sys.exit("REFUSING: server reports no adapter loaded; pass --allow-no-adapter to "
+                 "generate raw-base trials on purpose; nothing written")
+    print(f"provenance: adapter={prov['adapter_path'] or 'none'} bound={prov['adapter_bound']} "
+          f"tensors={prov['tensors_loaded']} head_sha256={prov['head_sha256'][:12]}",
+          file=sys.stderr, flush=True)
 
     out_trials = []
     n = len(base)
@@ -128,7 +202,9 @@ def main():
 
     out = {
         "trials": out_trials,
-        "adapter": "production :8741 + live head (nightly regen)",
+        # Kept for old readers, but now the SERVER's answer, never a literal.
+        "adapter": prov["adapter_path"] or ("none" if prov["adapter_bound"] is False else "unknown"),
+        "provenance": prov,
         "date": time.strftime("%Y-%m-%d"),
         "source_base": a.base,
         "n_base": n,

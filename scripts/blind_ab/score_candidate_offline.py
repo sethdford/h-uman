@@ -52,6 +52,14 @@ file is missing/too small, either adapter directory fails the real-adapter
 check, either venv python is missing, chat.db is missing, generation
 produces fewer than --min-ok replies, or authorship_gap.py itself refuses.
 Never promotes anything — this script only measures.
+
+The report also carries a `casing_gate` field (see casing_probe.py):
+PASS/FAIL plus the candidate's lowercase-start / terminal-punct rates
+against the human side of the same generated trials. This is a narrow,
+deterministic, LUAR-independent check for the 2026-09-04 finding that a
+persona twin can score fine on authorship while still being trivially
+distinguishable by casing habits alone. It is informational only — a FAIL
+does not change `comparison.candidate_closer_to_seth` or refuse the run.
 """
 import argparse
 import json
@@ -363,6 +371,22 @@ def main(argv=None):
 
     cand_twin = gap_results["candidate"]["twin_seth_vs_adapter"]["mean"]
     serv_twin = gap_results["serving"]["twin_seth_vs_adapter"]["mean"]
+
+    # casing_gate: a narrow, deterministic, LUAR-independent check for the
+    # 2026-09-04 finding that a persona twin can score fine on authorship
+    # (vocabulary/register) while still being trivially distinguishable by
+    # "does every reply start with a lowercase letter." Runs on the
+    # CANDIDATE's own generated trials (gen_trials_paths["candidate"] already
+    # has {ai_response, real_seth} per row — the same file authorship_gap.py
+    # just scored). Purely informational: a FAIL here does not change
+    # candidate_closer_to_seth or refuse anything — this script only measures.
+    from casing_probe import compute_casing_gate_from_file  # lazy: real-run only
+    try:
+        casing_gate = compute_casing_gate_from_file(
+            gen_trials_paths["candidate"], min_trials=args.min_trials)
+    except SystemExit as e:
+        casing_gate = {"pass": None, "error": str(e)}
+
     out = {
         "date": date,
         "candidate_adapter": args.candidate,
@@ -376,11 +400,14 @@ def main(argv=None):
             "delta_candidate_minus_serving": round(cand_twin - serv_twin, 4),
             "candidate_closer_to_seth": cand_twin > serv_twin,
         },
+        "casing_gate": casing_gate,
     }
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(out, f, indent=2)
     print(json.dumps(out["comparison"], indent=1))
+    print(f"casing_gate: {'PASS' if casing_gate.get('pass') else 'FAIL' if casing_gate.get('pass') is False else 'UNKNOWN'}"
+          + (f" — {'; '.join(casing_gate.get('reasons', []))}" if casing_gate.get("reasons") else ""))
     print(f"wrote {out_path}")
     print("NEXT: promotion stays scripts/register_v6_adapter.py + a human decision. "
           "This script only measures.")

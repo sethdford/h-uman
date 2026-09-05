@@ -22,6 +22,10 @@
 #   bash scripts/nightly-retrain.sh              # honors HU_TRAIN_WINDOW
 #   HU_TRAIN_WINDOW=02:00-05:00 bash scripts/nightly-retrain.sh
 #   HU_RETRAIN_FORCE=1 bash scripts/nightly-retrain.sh   # ignore the window
+#   HU_RETRAIN_FORCE_TRAIN=1 bash scripts/nightly-retrain.sh
+#                       # retrain even when the source corpus is unchanged
+#                       # (see the source-unchanged skip below). Distinct from
+#                       # HU_RETRAIN_FORCE, which only overrides the window.
 #
 # Install as a nightly job (03:07 daily — off the :00 mark on purpose):
 #   see docs at the bottom of this file.
@@ -34,9 +38,25 @@ SERVER_LABEL="gui/$(id -u)/ai.human.mlx-server"
 WINDOW="${HU_TRAIN_WINDOW:-02:00-05:00}"
 SOURCE_JSONL="${HU_RETRAIN_SOURCE:-$HOME/.human/training-data/m3-outcomes.jsonl}"
 PORT="${HU_RETRAIN_PORT:-8741}"
+ADAPTERS_DIR="${HU_RETRAIN_ADAPTERS_DIR:-$HOME/.human/training-data/adapters}"
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+
+# sha256 of a file, bare digest on stdout. Non-zero (and silent) when the file
+# is missing or no digest tool exists, so every caller must treat "" as
+# "unknown" rather than as a value — an empty digest must never compare equal
+# to a stamp and skip a real retrain.
+hu_sha256() {
+    [[ -f "$1" ]] || return 1
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    else
+        return 1
+    fi
+}
 
 # ── mlx-tune candidate-training stage (gated, OFF by default) ───────────────
 #
@@ -131,7 +151,15 @@ run_mlxtune_candidate_stage() {
     # the watchdog SIGKILLs train-glm-adapter.sh mid-run: a killed process
     # cannot run its OWN traps either way, so serving stays down until OUR
     # trap restores it, same as any other failure path here.
-    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 bash "$REPO/scripts/train-glm-adapter.sh" \
+    # HU_TRAIN_REBALANCE_CASING=1: pull the corpus's chosen-side
+    # lowercase-start/terminal-punct habit back toward Seth's measured style
+    # card before training (scripts/rebalance_preference_corpus.py) — see the
+    # 2026-09-04 finding that an 86% lowercase-start production habit traced
+    # back to a corpus that was 77.5% lowercase by construction, an axis LUAR
+    # never measures. The nightly candidate path always wants this; a
+    # standalone `bash scripts/train-glm-adapter.sh` invocation does not
+    # unless the caller opts in (default 0 — see that script).
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 bash "$REPO/scripts/train-glm-adapter.sh" \
         --config "$config" --trainer mlx_tune --train-mode simpo \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
     local job_pid=$!
@@ -215,8 +243,79 @@ run_mlxtune_candidate_stage() {
     log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
 }
 
+# ── Stop serving (a function so scripts/test_nightly_retrain_stop_serving.sh
+#    can drive it hermetically with fake launchctl/pgrep/lsof/sleep on PATH) ──
+#
+# Sets serving_stopped=1 once the job is booted out (so the EXIT trap in the
+# main flow puts it back) and returns 0 when :PORT is free. Returns 1 — refuse
+# to train — when the server is still alive after the wait; serving_stopped
+# then reflects only whether WE booted it out, so a server this script never
+# stopped is left alone rather than kickstarted by the trap.
+#
+# 2026-09-02: `launchctl kill SIGTERM` is NOT a stop — KeepAlive={Crashed,
+# SuccessfulExit} relaunched the server within seconds, the preflight then
+# refused (two loaders), and training_loop wrote an empty adapter and exited 0.
+# bootout UNLOADS the job so nothing relaunches it until restore_serving.
+#
+# 2026-09-04: the bootout passed "gui/$(id -u)/$SERVER_LABEL" — the domain
+# prefixed TWICE, since SERVER_LABEL already carries it — so launchctl answered
+# "No such process", the server never stopped, and every nightly run since
+# aa2a1a79b was refused by the still-alive check. The test pins the label.
+stop_serving() {
+    log "stopping mlx-server to free the base weights"
+    local out rc
+    out=$(launchctl bootout "$SERVER_LABEL" 2>&1); rc=$?
+    [[ -n "$out" ]] && log "$out"
+    if [[ "$rc" -eq 0 ]]; then
+        serving_stopped=1
+    else
+        log "WARNING: launchctl bootout $SERVER_LABEL failed (rc=$rc) — job not loaded?"
+    fi
+
+    # Wait for the 56 GB to actually come back — the process closing its socket
+    # does NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that
+    # motivated the barrier in human-serve.sh. 3f12aca97: a 54 GB server can
+    # take well over 120 s to exit, so wait up to HU_RETRAIN_STOP_WAIT_SECS
+    # (default 900) polling every 5 s, and log pid/stat/rss once a minute so a
+    # truly stuck server is distinguishable from a slow exit.
+    local stop_wait_secs="${HU_RETRAIN_STOP_WAIT_SECS:-900}" waited=0
+    while :; do
+        if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
+           ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+        if (( waited >= stop_wait_secs )); then break; fi
+        if (( waited % 60 == 0 )); then
+            log "  waiting for mlx-server to exit (${waited}s): $(ps -o pid=,stat=,rss= -p "$(pgrep -f "mlx-server\.py .*--port ${PORT}" | head -1)" 2>/dev/null | tr -s ' ')"
+        fi
+        sleep 5; waited=$((waited + 5))
+    done
+    if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
+        log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
+        return 1
+    fi
+    # Belt and braces (PR #391): the shared guard answers "is it safe to load a
+    # model in-process right now?" — no server answering :8741/health, no trainer
+    # process, wired memory under 70 GB. Refuse rather than become the second loader.
+    if [[ -f "$REPO/scripts/check-no-resident-model.sh" ]]; then
+        bash "$REPO/scripts/check-no-resident-model.sh" >>"$LOG" 2>&1
+        local guard_rc=$?
+        if [[ "$guard_rc" -ne 0 ]]; then
+            log "FATAL: check-no-resident-model.sh refused (rc=$guard_rc: 1=server answering, 2=trainer running, 3=wired over limit) — not training"
+            return 1
+        fi
+        log "check-no-resident-model.sh: clear to train"
+    fi
+    # Nothing is serving and we are about to train: whatever stopped it, the
+    # trap must bring serving back afterwards.
+    serving_stopped=1
+    sleep 5
+    local free_gb
+    free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
+    log "serving stopped; ${free_gb} GB free"
+    return 0
+}
+
 # Testability hook: `HU_RETRAIN_STAGE_TEST=1 bash -c 'source scripts/nightly-retrain.sh; run_mlxtune_candidate_stage'`
-# (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()
+# (or the equivalent from a test harness) defines log()/run_mlxtune_candidate_stage()/stop_serving()
 # above and stops here — the window check, mlx-server bootout, and real
 # training below never execute. `return` works when sourced; `|| exit 0`
 # covers the (unsupported, but harmless) case of executing this file
@@ -247,6 +346,66 @@ sys.exit(0 if ok else 1)
 fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
+
+# ── Refresh the corpus BEFORE digesting it ─────────────────────────────────
+# The export stage loads no model (it reads the daemon's ring, else
+# production_outcomes) so it is safe here, beside the still-resident server
+# and above stop_serving. Until 2026-09-05 its only trigger was the weekly
+# Sunday ai.human.m3-loop job, which last fired 2026-08-02 (it is skipped
+# whenever the Mac is asleep at Sun 04:00) — so this nightly retrained a
+# frozen 313-row file. Idempotent: a repeat append is a no-op.
+if [[ "${HU_RETRAIN_SKIP_EXPORT:-0}" != "1" && -f "$REPO/scripts/m3_outcome_driver.py" ]]; then
+    log "refreshing $SOURCE_JSONL (m3_outcome_driver --export-only)"
+    python3 "$REPO/scripts/m3_outcome_driver.py" --export-only >>"$LOG" 2>&1 \
+        || log "WARNING: outcome export returned non-zero — training from the corpus as-is"
+fi
+
+# ── Source-unchanged skip — MUST stay above every serving-stopping step ─────
+#
+# Until 2026-09-05 this window retrained unconditionally from $SOURCE_JSONL,
+# a file untouched since 2026-08-02, and produced two 556 MB adapters from the
+# identical corpus (seth-m3-outcomes-20260904-212919-glm and
+# -20260905-030710-glm). Each run cost ~5 minutes of persona downtime to learn
+# nothing. Every accepted adapter now records the digest it trained from in
+# <adapter_dir>/source.sha256 (written in the "adapter real:" branch below);
+# if the newest non-rejected stamped adapter carries the digest the source has
+# right now, we exit 0 here — before the launchctl bootout, before
+# check-no-resident-model.sh, before the steering and classifier stages — so
+# mlx-server is never touched.
+#
+# The `log` above already wrote today's dated line, which is the artifact
+# nightly-watchdog.sh reads as "retrain ran", so a skip does not re-trigger it.
+#
+# Bypass with HU_RETRAIN_FORCE_TRAIN=1 (retrain the same corpus anyway).
+# HU_RETRAIN_FORCE=1 is the *window* override and deliberately does not imply
+# this one. `.rejected-` dirs are excluded exactly as check-learning-loops.sh
+# excludes them: mtime survives the quarantine rename, so an unfiltered `ls -t`
+# would let a rejected no-op adapter authorize skipping a real retrain.
+SOURCE_SHA="$(hu_sha256 "$SOURCE_JSONL" 2>/dev/null || true)"
+if [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
+    log "HU_RETRAIN_FORCE_TRAIN=1 — training even if the source is unchanged"
+elif [[ -n "$SOURCE_SHA" ]]; then
+    stamp_dir=""; stamp_sha=""
+    # mtime ORDER is the point below, and a glob cannot sort by it; adapter dir
+    # names are [A-Za-z0-9.-] only. Same idiom and same filter as
+    # check-learning-loops.sh:46 — deliberately kept identical.
+    # shellcheck disable=SC2010
+    while IFS= read -r d; do
+        [[ -n "$d" && -f "$d/source.sha256" ]] || continue
+        stamp_dir="${d%/}"
+        stamp_sha="$(awk 'NR==1{print $1}' "$d/source.sha256" 2>/dev/null)"
+        break
+    done < <(ls -dt "$ADAPTERS_DIR"/*/ 2>/dev/null | grep -v '\.rejected-')
+    if [[ -n "$stamp_sha" && "$stamp_sha" == "$SOURCE_SHA" ]]; then
+        log "source unchanged since $(basename "$stamp_dir") (sha ${SOURCE_SHA:0:12}) — skipping training, serving untouched"
+        exit 0
+    fi
+    if [[ -n "$stamp_sha" ]]; then
+        log "source changed since $(basename "$stamp_dir") (stamp ${stamp_sha:0:12} != source ${SOURCE_SHA:0:12}) — training"
+    else
+        log "no source.sha256 stamp on any staged adapter — training"
+    fi
+fi
 
 # Capture the serving base BEFORE stopping the server — resolution is
 # ps-based, so it returns nothing once the process is gone.
@@ -281,29 +440,8 @@ restore_serving() {
 }
 trap restore_serving EXIT INT TERM
 
-log "stopping mlx-server to free the base weights"
-# 2026-09-02: `launchctl kill SIGTERM` is NOT a stop — KeepAlive={Crashed,
-# SuccessfulExit} relaunched the server within seconds, the preflight then
-# refused (two loaders), and training_loop wrote an empty adapter and exited 0.
-# bootout UNLOADS the job so nothing relaunches it until restore_serving.
-launchctl bootout "gui/$(id -u)/$SERVER_LABEL" 2>&1 | tee -a "$LOG" || true
-serving_stopped=1
-
-# Wait for the 56 GB to actually come back — the process closing its socket does
-# NOT mean the kernel has reclaimed its Metal/mmap pages. Same lag that motivated
-# the barrier in human-serve.sh.
-for _ in $(seq 1 60); do
-    if ! pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 && \
-       ! lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
-    sleep 2
-done
-if pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1; then
-    log "FATAL: mlx-server still alive after bootout — refusing to train beside it"
-    exit 1
-fi
-sleep 5
-free_gb=$(vm_stat | awk '/Pages free/{gsub(/\./,"",$3); printf "%.0f", $3*16384/1073741824}')
-log "serving stopped; ${free_gb} GB free"
+# The EXIT trap above only restores what stop_serving reports as stopped.
+stop_serving || exit 1
 
 # MLX training must use the PINNED 3.12 venv, the same interpreter human-serve.sh
 # picks for the server. Bare `python3` is /opt/homebrew/bin/python3 = 3.14, which
@@ -342,6 +480,17 @@ if [[ -f "$SOURCE_JSONL" ]]; then
         train_rc=3
     elif why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
         log "  adapter real: $staged — $why"
+        # Record WHAT this adapter was trained from, inside the adapter dir, so
+        # a later run can tell "nothing new to learn" from "never trained" —
+        # see the source-unchanged skip above. Written only here, on the
+        # accepted branch: a quarantined adapter must never stamp a digest, or
+        # it would authorize skipping the retrain it failed to produce.
+        if [[ -n "$SOURCE_SHA" ]]; then
+            printf '%s  %s\n' "$SOURCE_SHA" "$SOURCE_JSONL" > "$staged/source.sha256"
+            log "  recorded source digest ${SOURCE_SHA:0:12} -> $staged/source.sha256"
+        else
+            log "  WARNING: no source digest available — next run cannot skip an unchanged corpus"
+        fi
     else
         log "  adapter FAILED the real-adapter guard: $why"
         log "  quarantining $staged -> $staged.rejected-$(date +%s)"
@@ -388,7 +537,17 @@ fi
 CYCLE_DIR="${HU_CLASSIFIER_CYCLE_DIR:-$HOME/blind_ab_run}"
 if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
     log "classifier gate on $CYCLE_DIR"
-    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
+    # Score the adapter this run just ACCEPTED (source.sha256 is written only in
+    # the accepted branch), not the served one: without --adapter the gate falls
+    # back to config.json's personalization.lora_adapter_path, so the 2026-09-04/05
+    # runs scored the served v6 and no staged adapter ever got a measurement.
+    gate_adapter_args=()
+    if [[ -n "${staged:-}" && -f "${staged:-/nonexistent}/source.sha256" ]]; then
+        gate_adapter_args=(--adapter "$staged")
+        log "classifier gate scores tonight's accepted adapter $(basename "$staged")"
+    fi
+    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window \
+        ${gate_adapter_args[@]+"${gate_adapter_args[@]}"} 2>&1 | tee -a "$LOG"
     log "classifier gate exited rc=${PIPESTATUS[0]}"
 fi
 

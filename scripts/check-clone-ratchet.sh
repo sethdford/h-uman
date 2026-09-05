@@ -21,9 +21,12 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11491   # measured 2026-09-02 on 8b530a47d
-                       # duplicated extras-dispatch preamble in reliable_chat and
-                       # reliable_chat_with_system to one line each
+CLONE_BASELINE=11465   # measured 2026-09-03 on a1cc5d3eb: gating test-unused
+                       # helpers with their callers retired three windows
+# prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser
+                       # dedup); before that the extras-dispatch preamble in
+                       # reliable_chat / reliable_chat_with_system collapsed
+                       # to one line each
 # prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read
                        # sites (file_edit, pdf, image, meeting_transcribe, computer_use
                        # PNG reader), retiring their hand-rolled fopen/fseek/ftell

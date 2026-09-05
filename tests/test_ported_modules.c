@@ -214,6 +214,26 @@ static void doctor_sch_remove_status(const char *home) {
     unlink(path);
 }
 
+/* Every scheduler test gets its own HOME from mkdtemp. The old fixed
+ * /tmp/hu_doctor_sch_* paths made two suites running at once (a peer
+ * session's pre-push hook beside this one) read each other's
+ * scheduler.status and fail on the wrong pending/completed counts. */
+static void doctor_sch_make_home(char *buf, size_t cap) {
+    snprintf(buf, cap, "/tmp/hu_doctor_sch_XXXXXX");
+    if (!mkdtemp(buf))
+        buf[0] = '\0';
+}
+
+static void doctor_sch_cleanup_home(const char *home) {
+    if (!home[0])
+        return;
+    doctor_sch_remove_status(home);
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/.human", home);
+    rmdir(dir);
+    rmdir(home);
+}
+
 static void doctor_sch_swap_home(const char *new_home, char **old_out) {
     const char *h = getenv("HOME");
     *old_out = h ? strdup(h) : NULL;
@@ -231,8 +251,9 @@ static void doctor_sch_restore_home(char *old) {
 
 static void test_doctor_check_scheduler_minified_file(void) {
     char *old = NULL;
-    char home[512];
-    HU_ASSERT_TRUE(hu_test_tmpdir(home, sizeof(home), "doctor_parse"));
+    char home[64];
+    doctor_sch_make_home(home, sizeof(home));
+    HU_ASSERT_TRUE(home[0] != '\0');
     doctor_sch_swap_home(home, &old);
     doctor_sch_write_status(home, "{\"updated_epoch\":5000,\"jobs_pending\":7,\"on_ac_power\":true,"
                                   "\"battery_pct\":88,\"jobs_completed_today\":3}");
@@ -248,15 +269,15 @@ static void test_doctor_check_scheduler_minified_file(void) {
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "on_ac=true"));
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "fresh (status_age=100s)"));
     doctor_free_semantics_result(&alloc, items, count);
-    doctor_sch_remove_status(home);
-    hu_test_rm_rf(home);
+    doctor_sch_cleanup_home(home);
     doctor_sch_restore_home(old);
 }
 
 static void test_doctor_check_scheduler_stale_warn(void) {
     char *old = NULL;
-    char home[512];
-    HU_ASSERT_TRUE(hu_test_tmpdir(home, sizeof(home), "doctor_stale"));
+    char home[64];
+    doctor_sch_make_home(home, sizeof(home));
+    HU_ASSERT_TRUE(home[0] != '\0');
     doctor_sch_swap_home(home, &old);
     doctor_sch_write_status(home,
                             "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":100,"
@@ -268,8 +289,7 @@ static void test_doctor_check_scheduler_stale_warn(void) {
     HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 6000, 3600, &items, &count, &cap), HU_OK);
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "STALE"));
     doctor_free_semantics_result(&alloc, items, count);
-    doctor_sch_remove_status(home);
-    hu_test_rm_rf(home);
+    doctor_sch_cleanup_home(home);
     doctor_sch_restore_home(old);
 }
 

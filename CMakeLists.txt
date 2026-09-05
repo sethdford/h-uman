@@ -602,6 +602,9 @@ set(HU_CORE_SOURCES
     # `<|channel>thought` markers without buffering the full response.
     # See docs/plans/2026-05-26-m3-b4-mlx-local-sse/tasks.md::T4.
     src/util/harmony_filter.c
+    # 2026-09-04: one shared locator for JSON inside LLM replies (think
+    # blocks, code fences, prose) — replaces per-caller re-derivations.
+    src/util/llm_json.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
@@ -1013,6 +1016,7 @@ set(HU_CORE_SOURCES
     # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
+    src/memory/graph_state.c
     src/memory/graph_ingest.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
@@ -3537,6 +3541,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_replay_guard.c
     tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
@@ -3649,12 +3654,14 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph_ingest.c
     tests/test_agent_facts.c
     tests/test_cli_memory_import.c
+    tests/test_cli_commands_memory_print.c
     tests/test_store_sqlite_vec.c
     tests/test_semantic_index.c
     tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
+    tests/test_graph_state.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
@@ -3957,6 +3964,7 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_schema.c)
 list(APPEND HU_TEST_SOURCES tests/test_typedstream.c)
 # M3 Bridge B Phase B4 T4: streaming-safe harmony filter tests.
 list(APPEND HU_TEST_SOURCES tests/test_harmony_filter.c)
+list(APPEND HU_TEST_SOURCES tests/test_llm_json.c)
 # Phase 5: per-balloon payload decoder tests. Pinned privacy contracts
 # (no money / no coordinates).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)
