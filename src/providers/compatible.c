@@ -484,9 +484,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
         if (msg && msg->type == HU_JSON_OBJECT) {
             const char *content = hu_json_get_string(msg, "content");
             if (content) {
-                size_t clen = strlen(content);
-                out->content = hu_strndup(alloc, content, clen);
-                out->content_len = out->content ? clen : 0;
+                /* Think scaffold / whole-reply fence stripped once here so every
+                 * consumer (persona turn, reflection, init proposer, JSON tools)
+                 * sees the reply, not the chat template's furniture. */
+                out->content =
+                    hu_helpers_dup_model_text(alloc, content, strlen(content), &out->content_len);
             }
             hu_json_value_t *tc_arr = hu_json_object_get(msg, "tool_calls");
             if (tc_arr && tc_arr->type == HU_JSON_ARRAY && tc_arr->data.array.len > 0) {
