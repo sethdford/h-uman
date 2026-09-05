@@ -408,6 +408,103 @@ static void log_tier_counts_correct(void) {
     HU_ASSERT(counts[HU_TIER_DEEP] == 1);
 }
 
+/* ── US-8: Shadow routing tests ──────────────────────────────────────── */
+
+static void shadow_predicate_boundary_12_words(void) {
+    /* 12-word message with no reasoning/emotion markers should NOT trigger shadow promotion */
+    const char *msg12 = "one two three four five six seven eight nine ten eleven twelve";
+    HU_ASSERT(!hu_model_route_shadow_would_promote_conversational(msg12, strlen(msg12)));
+}
+
+static void shadow_predicate_13_words_with_reasoning(void) {
+    /* 13 words + reasoning marker should trigger shadow promotion */
+    const char *msg =
+        "one two three four five six seven eight nine ten eleven twelve thirteen should i";
+    HU_ASSERT(hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_predicate_13_words_no_markers_no_promotion(void) {
+    /* 13 words but no reasoning or emotional markers should NOT promote */
+    const char *msg =
+        "one two three four five six seven eight nine ten eleven twelve thirteen hello";
+    HU_ASSERT(!hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_predicate_with_emotional_weight(void) {
+    /* 13 words with emotional marker should trigger promotion */
+    const char *msg = "one two three four five six seven eight nine ten eleven twelve frustrated";
+    HU_ASSERT(hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_off_by_default(void) {
+    /* With HU_DIFFICULTY_ROUTE unset (default OFF), no shadow entries are logged */
+    unsetenv("HU_DIFFICULTY_ROUTE");
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    /* Substantive CONVERSATIONAL message */
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT(sel.tier == HU_TIER_CONVERSATIONAL);
+    /* With default OFF, returns CONVERSATIONAL unchanged */
+}
+
+static void shadow_live_not_implemented_warns_once(void) {
+    /* Setting HU_DIFFICULTY_ROUTE=live should warn but not promote (LIVE is not implemented) */
+    setenv("HU_DIFFICULTY_ROUTE", "live", 1);
+
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+    hu_model_selection_t sel1 = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    /* Still returns CONVERSATIONAL (LIVE is not implemented, fails closed to OFF) */
+    HU_ASSERT(sel1.tier == HU_TIER_CONVERSATIONAL);
+
+    unsetenv("HU_DIFFICULTY_ROUTE");
+}
+
+static void tier_counts_excludes_shadow_entries(void) {
+    /* Shadow entries should NOT be counted in tier_distribution */
+    hu_route_decision_log_t log;
+    hu_route_log_init(&log);
+
+    hu_model_selection_t real_sel, shadow_sel;
+    memset(&real_sel, 0, sizeof(real_sel));
+    memset(&shadow_sel, 0, sizeof(shadow_sel));
+
+    real_sel.tier = HU_TIER_CONVERSATIONAL;
+    real_sel.source = HU_ROUTE_HEURISTIC;
+    real_sel.model = "cloud";
+    real_sel.model_len = 5;
+
+    shadow_sel.tier = HU_TIER_ANALYTICAL;
+    shadow_sel.source = HU_ROUTE_SHADOW_DIFFICULTY;
+    shadow_sel.model = "cloud";
+    shadow_sel.model_len = 5;
+
+    hu_route_log_record(&log, &real_sel, 0, 1);
+    hu_route_log_record(&log, &shadow_sel, 0, 2);
+
+    size_t counts[4];
+    hu_route_log_tier_counts(&log, counts);
+
+    /* Shadow entry (ANALYTICAL) should NOT be counted */
+    HU_ASSERT(counts[HU_TIER_ANALYTICAL] == 0);
+    HU_ASSERT(counts[HU_TIER_CONVERSATIONAL] == 1);
+}
+
+static void casual_message_never_shadow_logged(void) {
+    /* Messages <= 12 words should never trigger shadow logging, even with SHADOW=on */
+    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
+
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    const char *msg = "hey how are you"; /* 4 words, casual */
+    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+
+    unsetenv("HU_DIFFICULTY_ROUTE");
+}
+
 /* ── String conversion tests ──────────────────────────────────────────── */
 
 static void tier_str_all_values(void) {
@@ -422,6 +519,7 @@ static void source_str_all_values(void) {
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE), "judge") == 0);
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE_CACHED), "judge_cached") == 0);
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE_FALLBACK), "judge_fallback") == 0);
+    HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_SHADOW_DIFFICULTY), "shadow_difficulty") == 0);
 }
 
 static void judge_system_prompt_not_null(void) {
@@ -795,6 +893,16 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(log_record_and_get);
     HU_RUN_TEST(log_wraps_around);
     HU_RUN_TEST(log_tier_counts_correct);
+
+    /* US-8: Shadow routing */
+    HU_RUN_TEST(shadow_predicate_boundary_12_words);
+    HU_RUN_TEST(shadow_predicate_13_words_with_reasoning);
+    HU_RUN_TEST(shadow_predicate_13_words_no_markers_no_promotion);
+    HU_RUN_TEST(shadow_predicate_with_emotional_weight);
+    HU_RUN_TEST(shadow_off_by_default);
+    HU_RUN_TEST(shadow_live_not_implemented_warns_once);
+    HU_RUN_TEST(tier_counts_excludes_shadow_entries);
+    HU_RUN_TEST(casual_message_never_shadow_logged);
 
     /* String conversions */
     HU_RUN_TEST(tier_str_all_values);

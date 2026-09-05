@@ -1,9 +1,12 @@
 #include "human/agent/model_router.h"
-#include "human/config_types.h" /* hu_mlx_local_routing_t enum constants */
-#include "human/core/string.h"  /* hu_str_contains_ci_cstr */
+#include "human/config_types.h"   /* hu_mlx_local_routing_t enum constants */
+#include "human/core/gate_mode.h" /* hu_gate_mode_t, hu_gate_mode_from_env */
+#include "human/core/log.h"       /* hu_log_warn_once */
+#include "human/core/string.h"    /* hu_str_contains_ci_cstr */
 #include "human/provider.h"
 #include <ctype.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
@@ -110,6 +113,19 @@ static int relationship_weight(const char *rel, size_t rel_len) {
     if (rel_len == 8 && memcmp(rel, "familiar", 8) == 0)
         return 1;
     return 0;
+}
+
+/* US-8 SHADOW-only: would a difficulty classifier promote this CONVERSATIONAL turn
+ * to the ANALYTICAL treatment? Pure predicate, reuses word_count/needs_reasoning/
+ * emotional_weight but with independent thresholds from the tier heuristic. */
+bool hu_model_route_shadow_would_promote_conversational(const char *msg, size_t msg_len) {
+    if (!msg || msg_len == 0)
+        return false;
+    /* Casual (short) messages never get promoted; must be substantive */
+    if (word_count(msg, msg_len) <= HU_DIFFICULTY_ROUTE_SUBSTANTIVE_WORDS)
+        return false;
+    /* Substantive messages with reasoning needs or emotional weight qualify */
+    return needs_reasoning(msg, msg_len) || emotional_weight(msg, msg_len) > 0;
 }
 
 hu_model_router_config_t hu_model_router_default_config(void) {
@@ -363,6 +379,34 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const c
 
     /* Record to global decision log for dashboard visibility */
     hu_route_log_record(hu_route_global_log(), &sel, score, (int64_t)time(NULL));
+
+    /* US-8: SHADOW-only difficulty-routing measurement. Does not alter sel. */
+    if (sel.tier == HU_TIER_CONVERSATIONAL) {
+        hu_gate_mode_t diff_mode = hu_gate_mode_from_env("HU_DIFFICULTY_ROUTE", HU_GATE_OFF);
+        if (diff_mode == HU_GATE_SHADOW &&
+            hu_model_route_shadow_would_promote_conversational(msg, msg_len)) {
+            hu_model_selection_t shadow_sel;
+            memset(&shadow_sel, 0, sizeof(shadow_sel));
+            shadow_sel.tier = HU_TIER_ANALYTICAL;
+            shadow_sel.source = HU_ROUTE_SHADOW_DIFFICULTY;
+            size_t cloud_len = 0;
+            const char *cloud_model =
+                hu_model_route_cloud_fallback(cfg, HU_TIER_ANALYTICAL, &cloud_len);
+            shadow_sel.model = cloud_model;
+            shadow_sel.model_len = cloud_len;
+            shadow_sel.thinking_budget =
+                4096; /* matches apply_tier_to_selection's ANALYTICAL branch */
+            shadow_sel.temperature = 0.7;
+            hu_route_log_record(hu_route_global_log(), &shadow_sel, score, (int64_t)time(NULL));
+        } else if (diff_mode == HU_GATE_LIVE) {
+            /* LIVE is not implemented by this story (AC-8.5) — fail closed to a
+             * visible one-shot warning rather than silently behaving as OFF. */
+            static atomic_bool warned_live_unimplemented = false;
+            hu_log_warn_once(&warned_live_unimplemented, "model_router", NULL,
+                             "HU_DIFFICULTY_ROUTE=live requested but LIVE is not implemented "
+                             "(US-8 ships SHADOW-only); behaving as OFF");
+        }
+    }
 
     return sel;
 }
@@ -744,6 +788,8 @@ void hu_route_log_tier_counts(const hu_route_decision_log_t *log, size_t counts[
     size_t start = (log->count < HU_ROUTE_LOG_SIZE) ? 0 : log->head;
     for (size_t i = 0; i < log->count; i++) {
         const hu_route_decision_t *d = &log->entries[(start + i) % HU_ROUTE_LOG_SIZE];
+        if (d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            continue; /* hypothetical, never applied — US-8 */
         if (d->tier <= HU_TIER_DEEP)
             counts[d->tier]++;
     }
@@ -791,6 +837,8 @@ const char *hu_route_source_str(hu_route_source_t source) {
         return "judge_cached";
     case HU_ROUTE_JUDGE_FALLBACK:
         return "judge_fallback";
+    case HU_ROUTE_SHADOW_DIFFICULTY:
+        return "shadow_difficulty";
     default:
         return "unknown";
     }
