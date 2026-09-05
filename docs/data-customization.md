@@ -569,6 +569,25 @@ whose socket still accepted connections cost three 300-second hangs per turn):
 | --------------------------- | ------- | -------- | -------------------------------------------------------------- |
 | `circuit_failure_threshold` | 2       | -1–100   | Consecutive primary failures that open the circuit. `-1` disables it. `0`/absent = default. |
 | `circuit_recovery_secs`     | 300     | 1–86400  | Seconds the primary is skipped before one trial request.       |
+| `empty_reply_failover`      | on      | -1 / 1   | An `HU_OK` reply with no content fails that provider for that prompt (no retry on it, no circuit credit) and the chain moves to the mapped fallback model. `-1` disables. |
+
+An empty reply is not a server failure: the local model sometimes answers a
+prompt with only its thinking scaffold. Before 2026-09-04 the daemon logged
+"empty assistant response" and sent nothing, because its own cloud fallback
+only fired for a model-router local model that production never configured.
+
+### Consecutive-reply limiter (`behavior`)
+
+The daemon stops replying to one contact after `max_consecutive_replies`
+replies in a row without the real user stepping in. A quiet gap longer than
+`consecutive_reset_minutes` since the daemon's last reply starts a new burst,
+so a contact coming back later is answered again. A silenced message that
+contains a question is logged at WARN as an unanswered question.
+
+| Key                         | Default | Purpose                                                         |
+| --------------------------- | ------- | --------------------------------------------------------------- |
+| `max_consecutive_replies`   | 5       | Replies in a row before going quiet. `0` = no cap (the hourly reply budget is the runaway brake). |
+| `consecutive_reset_minutes` | 30      | Quiet gap after which the count restarts. `0` = never restarts. |
 
 ### iMessage replay guards
 

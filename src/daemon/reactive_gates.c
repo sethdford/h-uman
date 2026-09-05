@@ -75,3 +75,27 @@ const char *hu_reactive_response_ai_tell(const char *response) {
     }
     return NULL;
 }
+
+bool hu_reactive_consecutive_limit_reached(uint32_t count, uint32_t cap) {
+    if (cap == 0)
+        return false;
+    return count >= cap;
+}
+
+bool hu_reactive_consecutive_burst_expired(int64_t last_reply_unix, int64_t now_unix,
+                                           uint32_t reset_secs) {
+    if (last_reply_unix <= 0 || reset_secs == 0)
+        return false;
+    if (now_unix < last_reply_unix)
+        return false; /* clock moved backwards — keep the count, conservative */
+    return (now_unix - last_reply_unix) > (int64_t)reset_secs;
+}
+
+bool hu_reactive_message_is_question(const char *text, size_t len) {
+    if (!text)
+        return false;
+    for (size_t i = 0; i < len && text[i]; i++)
+        if (text[i] == '?')
+            return true;
+    return false;
+}

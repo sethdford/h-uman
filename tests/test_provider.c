@@ -1153,6 +1153,84 @@ static void test_helpers_openai_choice_logprob_mean(void) {
     hu_json_free(&alloc, root);
 }
 
+/* ── Model-output scaffold stripper (2026-09-04) ──────────────────────
+ * The local server hands back the chat template's think scaffold and the
+ * model's markdown fence verbatim; JSON consumers choked (reflection: 2,415
+ * schema_invalid runs in two days) and "</think>"-only replies read as empty. */
+static void test_helpers_strip_scaffold_removes_think_block(void) {
+    char s[] = "<think>\nplanning...\n</think>\n\ngood call";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "good call");
+    HU_ASSERT_EQ((int)len, 9);
+}
+
+static void test_helpers_strip_scaffold_removes_bare_close_tag(void) {
+    char s[] = "</think>\nok";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "ok");
+    HU_ASSERT_EQ((int)len, 2);
+}
+
+static void test_helpers_strip_scaffold_think_only_becomes_empty(void) {
+    char s[] = "</think>";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_EQ((int)len, 0);
+    HU_ASSERT_EQ((int)s[0], 0);
+    char t[] = "<think>never closed";
+    len = strlen(t);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(t, &len));
+    HU_ASSERT_EQ((int)len, 0);
+}
+
+static void test_helpers_strip_scaffold_unwraps_whole_reply_fence(void) {
+    char s[] = "```json\n{\n  \"a\": 1\n}\n```";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "{\n  \"a\": 1\n}");
+    HU_ASSERT_EQ((int)len, (int)strlen("{\n  \"a\": 1\n}"));
+}
+
+static void test_helpers_strip_scaffold_think_then_fence(void) {
+    char s[] = "<think>x</think>\n```json\n{\"a\":1}\n```\n";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "{\"a\":1}");
+}
+
+static void test_helpers_strip_scaffold_leaves_plain_text_alone(void) {
+    char s[] = "yeah lol";
+    size_t len = strlen(s);
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "yeah lol");
+    HU_ASSERT_EQ((int)len, 8);
+    /* An inline fence is content, not a wrapper. */
+    char t[] = "run ```make test``` first";
+    len = strlen(t);
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(t, &len));
+    HU_ASSERT_STR_EQ(t, "run ```make test``` first");
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(NULL, &len));
+}
+
+static void test_helpers_dup_model_text_returns_exact_stripped_copy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t n = 99;
+    char *c = hu_helpers_dup_model_text(&alloc, "</think>\nhey", 12, &n);
+    HU_ASSERT_NOT_NULL(c);
+    HU_ASSERT_STR_EQ(c, "hey");
+    HU_ASSERT_EQ((int)n, 3);
+    alloc.free(alloc.ctx, c, n + 1);
+    c = hu_helpers_dup_model_text(&alloc, "hey", 3, &n);
+    HU_ASSERT_NOT_NULL(c);
+    HU_ASSERT_STR_EQ(c, "hey");
+    HU_ASSERT_EQ((int)n, 3);
+    alloc.free(alloc.ctx, c, n + 1);
+    HU_ASSERT_NULL(hu_helpers_dup_model_text(&alloc, NULL, 0, &n));
+    HU_ASSERT_EQ((int)n, 0);
+}
+
 void run_provider_tests(void) {
     HU_TEST_SUITE("Provider");
     HU_RUN_TEST(test_openai_create_succeeds);
@@ -1217,4 +1295,11 @@ void run_provider_tests(void) {
     HU_RUN_TEST(test_helpers_extract_anthropic_content_empty_array_returns_null);
     HU_RUN_TEST(test_helpers_openai_choice_logprob_mean);
     HU_RUN_TEST(test_chat_response_free_null_safe);
+    HU_RUN_TEST(test_helpers_strip_scaffold_removes_think_block);
+    HU_RUN_TEST(test_helpers_strip_scaffold_removes_bare_close_tag);
+    HU_RUN_TEST(test_helpers_strip_scaffold_think_only_becomes_empty);
+    HU_RUN_TEST(test_helpers_strip_scaffold_unwraps_whole_reply_fence);
+    HU_RUN_TEST(test_helpers_strip_scaffold_think_then_fence);
+    HU_RUN_TEST(test_helpers_strip_scaffold_leaves_plain_text_alone);
+    HU_RUN_TEST(test_helpers_dup_model_text_returns_exact_stripped_copy);
 }

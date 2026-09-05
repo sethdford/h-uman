@@ -67,6 +67,7 @@
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/config_reload.h"
+#include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
@@ -2912,7 +2913,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     static size_t promotion_counter = 0;
 
     /* Per-contact Theory of Mind belief states */
-#define HU_TOM_MAX_CONTACTS    16
+#define HU_TOM_MAX_CONTACTS 16
     static hu_tom_belief_state_t tom_states[HU_TOM_MAX_CONTACTS];
     static char tom_contact_keys[HU_TOM_MAX_CONTACTS][64];
     static size_t tom_contact_count = 0;
@@ -2925,14 +2926,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     static char voice_contact_keys[HU_TOM_MAX_CONTACTS][64];
     static size_t voice_contact_count = 0;
 
-    /* Per-contact consecutive response counter.
-     * Tracks how many times Human responded in a row without the real
-     * user stepping in.  Resets when user_responded_recently fires or
-     * when the real user sends a message (is_from_me=1 in history). */
-#define HU_CONSEC_MAX_CONTACTS 32
-    static uint8_t consec_response_count[HU_CONSEC_MAX_CONTACTS];
-    static char consec_contact_keys[HU_CONSEC_MAX_CONTACTS][64];
-    static size_t consec_contact_count = 0;
+    /* Per-contact consecutive-reply limiter — include/human/daemon/consecutive_limiter.h. */
+    static hu_consec_limiter_t consec_limiter;
 
 #define HU_LEAVE_ON_READ_MAX 32
     static struct {
@@ -4804,26 +4799,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
                             batch_key);
 
-                /* Consecutive response limiter: if Human has responded to
-                 * this contact 3+ times in a row without the real user
-                 * stepping in, stay silent so we don't run away. */
-                size_t consec_idx = SIZE_MAX;
-                for (size_t ci = 0; ci < consec_contact_count; ci++) {
-                    if (key_len < sizeof(consec_contact_keys[0]) &&
-                        memcmp(consec_contact_keys[ci], batch_key, key_len) == 0 &&
-                        consec_contact_keys[ci][key_len] == '\0') {
-                        consec_idx = ci;
-                        break;
-                    }
-                }
+                /* Consecutive-reply limiter — cap and burst window from config;
+                 * a silenced direct question is logged at WARN, never quietly. */
                 if (hu_reactive_gate_active(HU_REACTIVE_GATE_CONSECUTIVE_LIMIT, llm_decides) &&
-                    consec_idx != SIZE_MAX && consec_response_count[consec_idx] >= 3 &&
                     action != HU_RESPONSE_SKIP) {
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "consecutive limit (%u) reached for %.*s — staying silent",
-                                (unsigned)consec_response_count[consec_idx],
-                                (int)(key_len > 20 ? 20 : key_len), batch_key);
-                    action = HU_RESPONSE_SKIP;
+                    uint32_t consec_seen = 0;
+                    if (hu_consec_limiter_should_silence(
+                            &consec_limiter, batch_key, key_len,
+                            config ? config->behavior.max_consecutive_replies : 5u,
+                            (config ? config->behavior.consecutive_reset_minutes : 30u) * 60u,
+                            (int64_t)time(NULL), &consec_seen)) {
+                        hu_log_warn("human", agent ? agent->observer : NULL,
+                                    "consecutive limit (%u) reached for %.*s — staying silent%s",
+                                    (unsigned)consec_seen, (int)(key_len > 20 ? 20 : key_len),
+                                    batch_key,
+                                    hu_reactive_message_is_question(combined, combined_len)
+                                        ? " — UNANSWERED QUESTION; the real user must reply"
+                                        : "");
+                        action = HU_RESPONSE_SKIP;
+                    }
                 }
 
                 /* Tapback-skip: for tapback-worthy messages, 70% chance to not respond */
@@ -5572,14 +5566,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     "staying silent",
                                     (int)(key_len > 20 ? 20 : key_len), batch_key, window);
                         /* Reset consecutive counter — real user is active */
-                        for (size_t ci = 0; ci < consec_contact_count; ci++) {
-                            if (key_len < sizeof(consec_contact_keys[0]) &&
-                                memcmp(consec_contact_keys[ci], batch_key, key_len) == 0 &&
-                                consec_contact_keys[ci][key_len] == '\0') {
-                                consec_response_count[ci] = 0;
-                                break;
-                            }
-                        }
+                        hu_consec_limiter_reset(&consec_limiter, batch_key, key_len);
                         if (agent)
                             agent->lean_prompt = false;
                         continue;
@@ -13596,15 +13583,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                 if (response) {
                     /* Bump consecutive response counter for this contact */
-                    if (consec_idx == SIZE_MAX && consec_contact_count < HU_CONSEC_MAX_CONTACTS &&
-                        key_len < sizeof(consec_contact_keys[0])) {
-                        consec_idx = consec_contact_count++;
-                        memcpy(consec_contact_keys[consec_idx], batch_key, key_len);
-                        consec_contact_keys[consec_idx][key_len] = '\0';
-                        consec_response_count[consec_idx] = 0;
-                    }
-                    if (consec_idx != SIZE_MAX)
-                        consec_response_count[consec_idx]++;
+                    hu_consec_limiter_note_reply(&consec_limiter, batch_key, key_len,
+                                                 (int64_t)time(NULL));
 
                     /* Clean up tool-generated media paths after sending */
                     if (agent) {

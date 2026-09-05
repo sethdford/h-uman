@@ -88,5 +88,15 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
     if (tsp >= 0 && tsp <= 100)
         cfg->behavior.tapback_skip_pct = (uint32_t)tsp;
 
+    /* Consecutive-reply limiter: cap (0 = none) and burst reset window. */
+    double mcr =
+        hu_json_get_number(obj, "max_consecutive_replies", cfg->behavior.max_consecutive_replies);
+    if (mcr >= 0 && mcr <= 1000)
+        cfg->behavior.max_consecutive_replies = (uint32_t)mcr;
+    double crm = hu_json_get_number(obj, "consecutive_reset_minutes",
+                                    cfg->behavior.consecutive_reset_minutes);
+    if (crm >= 0 && crm <= 100000)
+        cfg->behavior.consecutive_reset_minutes = (uint32_t)crm;
+
     return HU_OK;
 }

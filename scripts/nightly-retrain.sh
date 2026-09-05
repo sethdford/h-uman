@@ -39,6 +39,7 @@ WINDOW="${HU_TRAIN_WINDOW:-02:00-05:00}"
 SOURCE_JSONL="${HU_RETRAIN_SOURCE:-$HOME/.human/training-data/m3-outcomes.jsonl}"
 PORT="${HU_RETRAIN_PORT:-8741}"
 ADAPTERS_DIR="${HU_RETRAIN_ADAPTERS_DIR:-$HOME/.human/training-data/adapters}"
+SKIP_BASE_TRAINING=0
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
@@ -397,8 +398,15 @@ elif [[ -n "$SOURCE_SHA" ]]; then
         break
     done < <(ls -dt "$ADAPTERS_DIR"/*/ 2>/dev/null | grep -v '\.rejected-')
     if [[ -n "$stamp_sha" && "$stamp_sha" == "$SOURCE_SHA" ]]; then
-        log "source unchanged since $(basename "$stamp_dir") (sha ${SOURCE_SHA:0:12}) — skipping training, serving untouched"
-        exit 0
+        if [[ "${HU_RETRAIN_MLXTUNE:-0}" == "1" ]]; then
+            # The candidate stage has its own corpus and needs the serving-down
+            # window regardless of the outcome corpus; skip only the base training.
+            SKIP_BASE_TRAINING=1
+            log "source unchanged since $(basename "$stamp_dir") (sha ${SOURCE_SHA:0:12}) — base training skipped; continuing for the mlx-tune candidate stage"
+        else
+            log "source unchanged since $(basename "$stamp_dir") (sha ${SOURCE_SHA:0:12}) — skipping training, serving untouched"
+            exit 0
+        fi
     fi
     if [[ -n "$stamp_sha" ]]; then
         log "source changed since $(basename "$stamp_dir") (stamp ${stamp_sha:0:12} != source ${SOURCE_SHA:0:12}) — training"
@@ -454,7 +462,9 @@ TRAIN_PY="$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12"
 # Preflight still runs (it is the authority, not this script): with serving down
 # the co-residency check passes and the memory check sees real headroom. If it
 # refuses anyway, that refusal is correct and we restart serving untouched.
-if [[ -f "$SOURCE_JSONL" ]]; then
+if [[ "${SKIP_BASE_TRAINING:-0}" == "1" ]]; then
+    log "base training skipped (outcome corpus unchanged); candidate stage follows"
+elif [[ -f "$SOURCE_JSONL" ]]; then
     # --adapter-out is REQUIRED by training_loop.py's C3 fast path; without it the
     # script prints "ERROR: --adapter-out is required when --source-jsonl is set"
     # and exits 2 in under a second. Every scheduled run through 2026-09-03 hit

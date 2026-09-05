@@ -32,6 +32,15 @@ static char *resolve_key(hu_allocator_t *alloc, const hu_config_t *cfg, const ch
  * the caller still passes those into hu_reliable_create_ex which is a
  * no-op for zero entries. Model name strings are BORROWED from cfg
  * (cfg outlives the provider per the existing primary_provider pattern). */
+/* Operator tuning applied to every reliable wrapper this file builds: the
+ * circuit breaker (config.h) and the empty-reply failover off switch. */
+static void apply_reliability_tuning(const hu_config_t *cfg, hu_provider_t *out) {
+    hu_reliable_set_circuit(out, cfg->reliability.circuit_failure_threshold,
+                            cfg->reliability.circuit_recovery_secs);
+    if (cfg->reliability.empty_reply_failover < 0)
+        hu_reliable_set_empty_failover(out, false);
+}
+
 static hu_error_t build_model_fallback_chain(hu_allocator_t *alloc, const hu_config_t *cfg,
                                              hu_reliable_model_fallback_entry_t **out_entries,
                                              hu_reliable_fallback_model_t ***out_inner_arrays,
@@ -283,8 +292,7 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
                                     mf_entries, mf_count, out);
         if (err == HU_OK)
-            hu_reliable_set_circuit(out, cfg->reliability.circuit_failure_threshold,
-                                    cfg->reliability.circuit_recovery_secs);
+            apply_reliability_tuning(cfg, out);
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);
@@ -479,8 +487,7 @@ hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *
     err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count,
                                 mf_entries, mf_count, out);
     if (err == HU_OK)
-        hu_reliable_set_circuit(out, cfg->reliability.circuit_failure_threshold,
-                                cfg->reliability.circuit_recovery_secs);
+        apply_reliability_tuning(cfg, out);
     if (err != HU_OK) {
         if (base.vtable && base.vtable->deinit)
             base.vtable->deinit(base.ctx, alloc);
