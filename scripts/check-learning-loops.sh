@@ -15,7 +15,8 @@
 #
 # Env overrides: HU_LOOP_ADAPTER_MAX_DAYS (7), HU_LOOP_EVAL_MAX_DAYS (3),
 #                HU_LOOP_ADAPTER_MIN_BYTES (100000), HU_LOOP_SKIP_CI=1,
-#                HU_LOOP_SEMANTIC_MAX_DAYS (10), HU_SERVICE_PLIST (service-loop plist)
+#                HU_LOOP_SEMANTIC_MAX_DAYS (10), HU_SERVICE_PLIST (service-loop plist),
+#                HU_LOOP_OUTCOMES_MAX_DAYS (3), HU_LOOP_MEMORY_DB (~/.human/memory.db)
 set -uo pipefail
 
 ADAPTER_MAX_DAYS="${HU_LOOP_ADAPTER_MAX_DAYS:-7}"
@@ -145,6 +146,41 @@ PY
         bad "semantic-gate: newest PROMOTE $(basename "$sg_path") is ${sg_age}d old (cap ${SEMANTIC_MAX_DAYS}d) — weekly re-gate not producing"
     else
         ok "semantic-gate: $(basename "$sg_path") PROMOTE ${sg_age}d old"
+    fi
+fi
+
+# ── 6. Outcome recorder: every reactive turn must leave a production_outcomes row ─
+# production_outcomes is the nightly LoRA corpus (m3_outcome_driver.py --export-only).
+# It had NO row 2026-08-04 → 09-01 and nothing said so. The recorder itself was
+# fine: the daemon made no turns at all (frozen after the 08-04 provider crash,
+# then a laptop asleep 08-08 → 09-01), and hu_dpo_record_outbound sits downstream
+# of a completed turn. Two read-only signals, same window:
+#   turns    = messages rows with role='assistant' (written by the same reactive
+#              turn that calls the recorder in daemon.c)
+#   outcomes = production_outcomes rows by send_timestamp
+# turns>0 & outcomes=0 => DEAD (the recorder is not firing). Both 0 => NOTE: there
+# was nothing to record and the daemon itself is the question (doctor's
+# prompt_budget check owns that). A table that does not exist reads as 0 rows: a
+# fresh/quarantined store where hu_dpo_init_tables never ran IS the dead shape.
+# See docs/research/2026-09-05-learning-loop-fleet/outcome-recorder-gap.md.
+OUTCOMES_MAX_DAYS="${HU_LOOP_OUTCOMES_MAX_DAYS:-3}"
+[[ "$OUTCOMES_MAX_DAYS" =~ ^[0-9]+$ ]] || OUTCOMES_MAX_DAYS=3
+MEMDB="${HU_LOOP_MEMORY_DB:-$HUMAN_DIR/memory.db}"
+if [[ ! -f "$MEMDB" ]]; then
+    note "outcomes: no memory store at $MEMDB — cannot measure the recorder"
+elif ! command -v sqlite3 >/dev/null 2>&1; then
+    note "outcomes: sqlite3 not on PATH — cannot measure the recorder"
+else
+    ro="file:$MEMDB?mode=ro"
+    turns="$(sqlite3 "$ro" "SELECT count(*) FROM messages WHERE role='assistant' AND created_at >= datetime('now', '-${OUTCOMES_MAX_DAYS} days');" 2>/dev/null || echo 0)"
+    outcomes="$(sqlite3 "$ro" "SELECT count(*) FROM production_outcomes WHERE send_timestamp >= CAST(strftime('%s','now') AS INTEGER) - ${OUTCOMES_MAX_DAYS}*86400;" 2>/dev/null || echo 0)"
+    turns="${turns:-0}"; outcomes="${outcomes:-0}"
+    if (( turns > 0 && outcomes == 0 )); then
+        bad "outcomes: ${turns} assistant turn(s) in messages in the last ${OUTCOMES_MAX_DAYS}d but 0 production_outcomes rows — hu_dpo_record_outbound (daemon.c) is not firing; look for 'DPO init tables failed' / sota_initialized in $LOG"
+    elif (( turns == 0 && outcomes == 0 )); then
+        note "outcomes: no daemon turns and no outcomes in the last ${OUTCOMES_MAX_DAYS}d — nothing to record; the daemon itself is the question (doctor prompt_budget; the 2026-08-04→09-01 shape)"
+    else
+        ok "outcomes: ${outcomes} row(s) from ${turns} assistant turn(s) in the last ${OUTCOMES_MAX_DAYS}d"
     fi
 fi
 
