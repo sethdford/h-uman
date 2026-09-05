@@ -958,6 +958,11 @@ jobs:
         run: |
           python3 scripts/test_blind_ab_gate.py
           python3 scripts/test_check_capability_gates.py
+      # US-1 (sprint-better-than-human-2026-09-05): hermetic, stdlib-only
+      # (no chat.db, no model, no ~/.human reads) merge-script tests, same
+      # convention as the sibling tests above.
+      - name: Preference-corpus merge tests (hermetic, stdlib-only)
+        run: python3 scripts/test_merge_seth_preference_sources.py
       # Measurement-integrity pins for the fidelity nightly. Both are hermetic
       # and stdlib-only (no mlx, no model, no ~/.human reads), so they belong on
       # this job rather than a GPU host. They guard the class where the harness
