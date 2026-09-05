@@ -51,3 +51,19 @@ running on the sprint tree after US-5 (first C story to land).
 US-8: verifier round 1 PASS but it ran on a tree the fix agent was concurrently editing
 (it cites the AC-8.7 test the fix adds), so it is informational only; a clean re-verify
 runs after the fix commit lands. Critic round 2 follows the fix.
+
+## 2026-09-05 (close of execution) — 8 of 8 merged
+
+| Story | Merge commit | Gates |
+|---|---|---|
+| US-8 | `1f619c866` | verifier r2 PASS (14314/14314 on story tree; AC-8.7 mutation-proved), critic r2 MERGE-WITH-FIXES (ratchet history) → resolved by squash `7a6cb1e30` (tree byte-identical), panel PASS 5/5 across two runs (first run ERRORED on the $2.50 panelist budget; raised to $6.00 via `ASPECT_PANEL_MAX_BUDGET`) |
+
+Completed sprint tree `1f619c866`: full C suite **14329/14329 passed, 6 skipped, 0 ASan
+errors**; ratchets clone 11447/11447, daemon.c 12313/12313, agent-core factory 4 / memcmp 0,
+sqlite includers 97/97, loose root files 4/4; pytest **478 passed**.
+
+Process incidents worth the retro: US-5 implementer reported DONE with four empty test
+stubs (caught by critic+verifier); US-5 verifier r1 reached `:8741` because the prompt did
+not pin the embed URL; US-8 implementer raised `CLONE_BASELINE` mid-fix then restored it with
+invented provenance (caught by lead diff, squashed); typed agents hit turn caps (used
+general-purpose with the role in the prompt); aspect-panel budget too low for a C story.
