@@ -22,6 +22,10 @@
 #   bash scripts/nightly-retrain.sh              # honors HU_TRAIN_WINDOW
 #   HU_TRAIN_WINDOW=02:00-05:00 bash scripts/nightly-retrain.sh
 #   HU_RETRAIN_FORCE=1 bash scripts/nightly-retrain.sh   # ignore the window
+#   HU_RETRAIN_FORCE_TRAIN=1 bash scripts/nightly-retrain.sh
+#                       # retrain even when the source corpus is unchanged
+#                       # (see the source-unchanged skip below). Distinct from
+#                       # HU_RETRAIN_FORCE, which only overrides the window.
 #
 # Install as a nightly job (03:07 daily — off the :00 mark on purpose):
 #   see docs at the bottom of this file.
@@ -34,9 +38,25 @@ SERVER_LABEL="gui/$(id -u)/ai.human.mlx-server"
 WINDOW="${HU_TRAIN_WINDOW:-02:00-05:00}"
 SOURCE_JSONL="${HU_RETRAIN_SOURCE:-$HOME/.human/training-data/m3-outcomes.jsonl}"
 PORT="${HU_RETRAIN_PORT:-8741}"
+ADAPTERS_DIR="${HU_RETRAIN_ADAPTERS_DIR:-$HOME/.human/training-data/adapters}"
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+
+# sha256 of a file, bare digest on stdout. Non-zero (and silent) when the file
+# is missing or no digest tool exists, so every caller must treat "" as
+# "unknown" rather than as a value — an empty digest must never compare equal
+# to a stamp and skip a real retrain.
+hu_sha256() {
+    [[ -f "$1" ]] || return 1
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    else
+        return 1
+    fi
+}
 
 # ── mlx-tune candidate-training stage (gated, OFF by default) ───────────────
 #
@@ -327,6 +347,66 @@ fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
 
+# ── Refresh the corpus BEFORE digesting it ─────────────────────────────────
+# The export stage loads no model (it reads the daemon's ring, else
+# production_outcomes) so it is safe here, beside the still-resident server
+# and above stop_serving. Until 2026-09-05 its only trigger was the weekly
+# Sunday ai.human.m3-loop job, which last fired 2026-08-02 (it is skipped
+# whenever the Mac is asleep at Sun 04:00) — so this nightly retrained a
+# frozen 313-row file. Idempotent: a repeat append is a no-op.
+if [[ "${HU_RETRAIN_SKIP_EXPORT:-0}" != "1" && -f "$REPO/scripts/m3_outcome_driver.py" ]]; then
+    log "refreshing $SOURCE_JSONL (m3_outcome_driver --export-only)"
+    python3 "$REPO/scripts/m3_outcome_driver.py" --export-only >>"$LOG" 2>&1 \
+        || log "WARNING: outcome export returned non-zero — training from the corpus as-is"
+fi
+
+# ── Source-unchanged skip — MUST stay above every serving-stopping step ─────
+#
+# Until 2026-09-05 this window retrained unconditionally from $SOURCE_JSONL,
+# a file untouched since 2026-08-02, and produced two 556 MB adapters from the
+# identical corpus (seth-m3-outcomes-20260904-212919-glm and
+# -20260905-030710-glm). Each run cost ~5 minutes of persona downtime to learn
+# nothing. Every accepted adapter now records the digest it trained from in
+# <adapter_dir>/source.sha256 (written in the "adapter real:" branch below);
+# if the newest non-rejected stamped adapter carries the digest the source has
+# right now, we exit 0 here — before the launchctl bootout, before
+# check-no-resident-model.sh, before the steering and classifier stages — so
+# mlx-server is never touched.
+#
+# The `log` above already wrote today's dated line, which is the artifact
+# nightly-watchdog.sh reads as "retrain ran", so a skip does not re-trigger it.
+#
+# Bypass with HU_RETRAIN_FORCE_TRAIN=1 (retrain the same corpus anyway).
+# HU_RETRAIN_FORCE=1 is the *window* override and deliberately does not imply
+# this one. `.rejected-` dirs are excluded exactly as check-learning-loops.sh
+# excludes them: mtime survives the quarantine rename, so an unfiltered `ls -t`
+# would let a rejected no-op adapter authorize skipping a real retrain.
+SOURCE_SHA="$(hu_sha256 "$SOURCE_JSONL" 2>/dev/null || true)"
+if [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
+    log "HU_RETRAIN_FORCE_TRAIN=1 — training even if the source is unchanged"
+elif [[ -n "$SOURCE_SHA" ]]; then
+    stamp_dir=""; stamp_sha=""
+    # mtime ORDER is the point below, and a glob cannot sort by it; adapter dir
+    # names are [A-Za-z0-9.-] only. Same idiom and same filter as
+    # check-learning-loops.sh:46 — deliberately kept identical.
+    # shellcheck disable=SC2010
+    while IFS= read -r d; do
+        [[ -n "$d" && -f "$d/source.sha256" ]] || continue
+        stamp_dir="${d%/}"
+        stamp_sha="$(awk 'NR==1{print $1}' "$d/source.sha256" 2>/dev/null)"
+        break
+    done < <(ls -dt "$ADAPTERS_DIR"/*/ 2>/dev/null | grep -v '\.rejected-')
+    if [[ -n "$stamp_sha" && "$stamp_sha" == "$SOURCE_SHA" ]]; then
+        log "source unchanged since $(basename "$stamp_dir") (sha ${SOURCE_SHA:0:12}) — skipping training, serving untouched"
+        exit 0
+    fi
+    if [[ -n "$stamp_sha" ]]; then
+        log "source changed since $(basename "$stamp_dir") (stamp ${stamp_sha:0:12} != source ${SOURCE_SHA:0:12}) — training"
+    else
+        log "no source.sha256 stamp on any staged adapter — training"
+    fi
+fi
+
 # Capture the serving base BEFORE stopping the server — resolution is
 # ps-based, so it returns nothing once the process is gone.
 SERVING_BASE="$(python3 -c "
@@ -400,6 +480,17 @@ if [[ -f "$SOURCE_JSONL" ]]; then
         train_rc=3
     elif why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
         log "  adapter real: $staged — $why"
+        # Record WHAT this adapter was trained from, inside the adapter dir, so
+        # a later run can tell "nothing new to learn" from "never trained" —
+        # see the source-unchanged skip above. Written only here, on the
+        # accepted branch: a quarantined adapter must never stamp a digest, or
+        # it would authorize skipping the retrain it failed to produce.
+        if [[ -n "$SOURCE_SHA" ]]; then
+            printf '%s  %s\n' "$SOURCE_SHA" "$SOURCE_JSONL" > "$staged/source.sha256"
+            log "  recorded source digest ${SOURCE_SHA:0:12} -> $staged/source.sha256"
+        else
+            log "  WARNING: no source digest available — next run cannot skip an unchanged corpus"
+        fi
     else
         log "  adapter FAILED the real-adapter guard: $why"
         log "  quarantining $staged -> $staged.rejected-$(date +%s)"
@@ -446,7 +537,17 @@ fi
 CYCLE_DIR="${HU_CLASSIFIER_CYCLE_DIR:-$HOME/blind_ab_run}"
 if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
     log "classifier gate on $CYCLE_DIR"
-    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
+    # Score the adapter this run just ACCEPTED (source.sha256 is written only in
+    # the accepted branch), not the served one: without --adapter the gate falls
+    # back to config.json's personalization.lora_adapter_path, so the 2026-09-04/05
+    # runs scored the served v6 and no staged adapter ever got a measurement.
+    gate_adapter_args=()
+    if [[ -n "${staged:-}" && -f "${staged:-/nonexistent}/source.sha256" ]]; then
+        gate_adapter_args=(--adapter "$staged")
+        log "classifier gate scores tonight's accepted adapter $(basename "$staged")"
+    fi
+    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window \
+        ${gate_adapter_args[@]+"${gate_adapter_args[@]}"} 2>&1 | tee -a "$LOG"
     log "classifier gate exited rc=${PIPESTATUS[0]}"
 fi
 
