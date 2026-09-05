@@ -32,6 +32,10 @@ Exit codes:
     0 — success (swap landed or rollback succeeded)
     2 — MLX server unreachable / bad input
     3 — confirmation required but not provided
+    4 — LoRA scale exceeds the 8.0 safety ceiling
+    5 — US-2 authorship promotion gate BLOCK or INCONCLUSIVE (pass
+        --skip-authorship-gate to override; the override is recorded in the
+        registry evidence string, never silent)
 """
 from __future__ import annotations
 
@@ -50,6 +54,17 @@ try:
     import adapter_registry
 except ImportError:
     adapter_registry = None
+
+# US-2: the per-cycle LUAR promotion gate. Lives in scripts/blind_ab/ next to
+# authorship_gap.py / casing_probe.py, which it mirrors. Imported, not
+# reimplemented (.claude/rules/test-references-production-symbol.md's
+# "don't reinvent" principle applies to production code too). Stdlib-only
+# module (json/argparse/sys/glob) -- safe to import unconditionally.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blind_ab"))
+try:
+    import authorship_promotion_gate
+except ImportError:
+    authorship_promotion_gate = None
 
 HUMAN_HOME = Path.home() / ".human"
 LINEAGE_PATH = HUMAN_HOME / "training-data" / "adapter_lineage.jsonl"
@@ -203,6 +218,36 @@ def cmd_promote(args):
               file=sys.stderr)
         return 4
 
+    # US-2: never promote an adapter whose measured authorship twin regressed
+    # against what is currently serving, or fell below the measured floor.
+    # --skip-authorship-gate is the explicit, logged override for genuine
+    # emergencies (e.g. promoting a rollback target that predates this
+    # gate's own JSON). The verdict is always computed (best-effort) so an
+    # override can be RECORDED, not merely permitted -- see the evidence
+    # string below. A missing/malformed measurement is INCONCLUSIVE, which
+    # blocks exactly like BLOCK does (.claude/rules/no-number-without-a-measurement.md:
+    # refuse loudly, never silently PASS on an absent number).
+    gap_verdict = {"verdict": "INCONCLUSIVE", "reason": "authorship_promotion_gate module unavailable"}
+    if authorship_promotion_gate is not None:
+        gap_json = args.gap_json or authorship_promotion_gate._find_latest_score_json(args.adapter)
+        try:
+            if not gap_json:
+                raise SystemExit(
+                    f"INCONCLUSIVE: no candidate-authorship-*.json found for {args.adapter}; "
+                    "nothing to gate on")
+            gate_inputs = authorship_promotion_gate.load_gate_inputs_from_score_json(gap_json)
+            gap_verdict = authorship_promotion_gate.decide_promotion(
+                gate_inputs["candidate_twin"], gate_inputs["serving_twin"], gate_inputs["floor"])
+        except SystemExit as e:
+            gap_verdict = {"verdict": "INCONCLUSIVE", "reason": str(e)}
+
+    if not args.skip_authorship_gate and gap_verdict.get("verdict") != "PASS":
+        print(f"ERROR: refusing to promote {args.adapter}: authorship promotion gate "
+              f"{gap_verdict.get('verdict')} ({gap_verdict.get('reason')}). Pass "
+              f"--skip-authorship-gate to override (will be recorded as an override, "
+              f"not silently).", file=sys.stderr)
+        return 5
+
     mlx_url = args.mlx_url
 
     # Promotion requires recorded evidence (gate ref, eval score, A/B verdict).
@@ -217,6 +262,13 @@ def cmd_promote(args):
         return 2
     if not evidence:
         evidence = "(UNEVIDENCED OVERRIDE via --force-no-evidence)"
+
+    # US-2: an override is RECORDED, not merely permitted -- the registry
+    # (not just a terminal log a human may not have seen) must carry the
+    # fact that a regressed or unmeasured adapter was promoted anyway.
+    if args.skip_authorship_gate and gap_verdict.get("verdict") != "PASS":
+        evidence = (f"(authorship gate OVERRIDDEN: {gap_verdict.get('verdict')}/"
+                    f"{gap_verdict.get('reason')}) " + evidence)
 
     current = get_current_adapter(mlx_url)
     print(f"  Current adapter: {current or '(none)'}")
@@ -304,6 +356,13 @@ def main():
                            help="Promote without evidence (recorded as an unevidenced override)")
     p_promote.add_argument("--evidence", type=str, default=None,
                             help="Evidence/gate reference for promotion (e.g., 'blind-a-b-gate-pass')")
+    p_promote.add_argument("--gap-json", type=str, default=None,
+                            help="US-2: explicit score_candidate_offline.py output JSON to gate "
+                                 "on (default: newest ~/.human/logs/candidate-authorship-*.json "
+                                 "whose candidate_adapter matches --adapter)")
+    p_promote.add_argument("--skip-authorship-gate", action="store_true",
+                            help="US-2: override the LUAR promotion gate (BLOCK/INCONCLUSIVE). "
+                                 "Recorded in the registry evidence string, never silent.")
 
     p_rollback = sub.add_parser("rollback",
                                   help="Revert to the previous adapter from lineage")

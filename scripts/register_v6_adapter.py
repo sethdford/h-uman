@@ -25,6 +25,16 @@ from adapter_registry import (  # noqa: E402
     DEFAULT_REGISTRY_PATH, STATUS_REJECTED, STATUS_RETIRED, load_registry,
     record_retirement, record_training)
 
+# US-2: annotate (never block -- this script never sets promoted=True
+# regardless, see module docstring) with the same LUAR promotion-gate
+# verdict m3_promote.py enforces. Imported, not reimplemented.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blind_ab"))
+try:
+    from authorship_promotion_gate import (  # noqa: E402
+        _find_latest_score_json, decide_promotion, load_gate_inputs_from_score_json)
+except ImportError:
+    _find_latest_score_json = decide_promotion = load_gate_inputs_from_score_json = None
+
 DEFAULT_CONFIG_PATH = Path.home() / ".human" / "config.json"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -96,6 +106,37 @@ def entry_is_promoted(entry: dict) -> bool:
         return True
     return any(bool((t.get("metrics") or {}).get("promoted"))
                for t in entry.get("training", []) or [])
+
+
+def _read_authorship_gate_for(adapter_path) -> dict:
+    """US-2 annotation (informational only -- see
+    scripts/blind_ab/authorship_promotion_gate.py). This script never calls
+    sys.exit on BLOCK: recording that a regression happened is useful
+    staging evidence for the human who decides whether to run
+    scripts/m3_promote.py at all (the same reason human_gate: PENDING and
+    smoke: NOT_RUN already exist here as non-blocking annotations), and this
+    script never sets metrics["promoted"] = True regardless of what this
+    returns.
+
+    {"status": "NOT_RUN"} means no matching candidate-authorship-*.json
+    exists yet for this adapter. {"status": "INCONCLUSIVE", ...} means one
+    was found but the measurement it needs is missing/malformed. Otherwise
+    the real decide_promotion() verdict dict is returned with
+    status="RAN".
+    """
+    if _find_latest_score_json is None:
+        return {"status": "NOT_RUN", "reason": "authorship_promotion_gate module unavailable"}
+    gap_json = _find_latest_score_json(str(adapter_path))
+    if not gap_json:
+        return {"status": "NOT_RUN"}
+    try:
+        inputs = load_gate_inputs_from_score_json(gap_json)
+    except SystemExit as e:
+        return {"status": "INCONCLUSIVE", "reason": str(e), "score_json": gap_json}
+    verdict = decide_promotion(inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"])
+    verdict["status"] = "RAN"
+    verdict["score_json"] = gap_json
+    return verdict
 
 
 def retire(a) -> None:
@@ -255,6 +296,11 @@ def main():
         "train_series": trains or None,
         "corpus_manifest": a.corpus_manifest,
         "train_log": a.log,
+        # US-2: LUAR promotion-gate verdict, if a nightly candidate-authorship
+        # run has scored this adapter already. Informational only -- never
+        # flips `promoted` below, which stays False regardless (see
+        # _read_authorship_gate_for's docstring).
+        "authorship_gate": _read_authorship_gate_for(adapter),
         # Provenance for the promotion gate: this adapter is NOT certified.
         "human_gate": "PENDING -- cycle-5 sheet not generated/rated",
         "promoted": False,
@@ -307,6 +353,9 @@ def main():
     print(f"  lora_b       : {b_nonzero}/{len(bkeys)} non-zero, max|B|={b_max:.3e}")
     print(f"  lora scale   : {scale}")
     print(f"  human gate   : {metrics['human_gate']}")
+    print(f"  authorship   : {metrics['authorship_gate'].get('status')}"
+          + (f" ({metrics['authorship_gate'].get('verdict')}/{metrics['authorship_gate'].get('reason')})"
+             if metrics["authorship_gate"].get("status") == "RAN" else ""))
 
 
 if __name__ == "__main__":

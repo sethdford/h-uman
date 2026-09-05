@@ -238,6 +238,11 @@ run_mlxtune_candidate_stage() {
         "$eval_py" "$REPO/scripts/blind_ab/score_candidate_offline.py" \
             --candidate "$candidate_dir" --out "$score_out" 2>&1 | tee -a "$LOG"
         log "mlx-tune candidate stage: score_candidate_offline.py exited rc=${PIPESTATUS[0]}"
+        # US-2: surface the promotion-gate verdict here so a human doesn't have
+        # to open the JSON before deciding whether to run m3_promote.py.
+        local gate_verdict
+        gate_verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('promotion_gate',{}).get('verdict','UNKNOWN'))" "$score_out" 2>/dev/null || echo "UNKNOWN")
+        log "mlx-tune candidate stage: promotion_gate=$gate_verdict (see $score_out)"
     fi
 
     log "mlx-tune candidate stage: candidate staged at $candidate_dir (NOT promoted)"

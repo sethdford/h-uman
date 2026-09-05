@@ -387,6 +387,23 @@ def main(argv=None):
     except SystemExit as e:
         casing_gate = {"pass": None, "error": str(e)}
 
+    # promotion_gate (US-2): pure arithmetic on the LUAR twin/floor this
+    # script already computed above — no additional model load. This field
+    # is informational at THIS call site (score_candidate_offline.py never
+    # promotes anything, see module docstring); the enforcement point is
+    # scripts/m3_promote.py:cmd_promote(). A missing/malformed floor
+    # INCONCLUDEs rather than silently passing — see
+    # .claude/rules/no-number-without-a-measurement.md.
+    from authorship_promotion_gate import decide_promotion  # lazy: real-run only
+    try:
+        floor = gap_results["candidate"]["floor_seth_vs_other_humans"]["mean"]
+        promotion_gate = decide_promotion(cand_twin, serv_twin, floor)
+    except (KeyError, TypeError) as e:
+        promotion_gate = {
+            "verdict": "INCONCLUSIVE",
+            "reason": f"missing/malformed floor_seth_vs_other_humans ({type(e).__name__}: {e})",
+        }
+
     out = {
         "date": date,
         "candidate_adapter": args.candidate,
@@ -401,6 +418,7 @@ def main(argv=None):
             "candidate_closer_to_seth": cand_twin > serv_twin,
         },
         "casing_gate": casing_gate,
+        "promotion_gate": promotion_gate,
     }
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w") as f:
@@ -408,6 +426,7 @@ def main(argv=None):
     print(json.dumps(out["comparison"], indent=1))
     print(f"casing_gate: {'PASS' if casing_gate.get('pass') else 'FAIL' if casing_gate.get('pass') is False else 'UNKNOWN'}"
           + (f" — {'; '.join(casing_gate.get('reasons', []))}" if casing_gate.get("reasons") else ""))
+    print(f"promotion_gate: {promotion_gate.get('verdict')} ({promotion_gate.get('reason')})")
     print(f"wrote {out_path}")
     print("NEXT: promotion stays scripts/register_v6_adapter.py + a human decision. "
           "This script only measures.")
