@@ -263,6 +263,13 @@ typedef struct hu_behavior_config {
      * hour; 0 disables that scope. See include/human/daemon/send_budget.h. */
     uint32_t reply_budget_per_contact_hourly; /* default 10 */
     uint32_t reply_budget_global_hourly;      /* default 30 */
+    /* Consecutive-reply limiter (2026-09-04). Replies in a row to one contact
+     * without the real user stepping in before the daemon goes quiet; 0 = no
+     * cap (the hourly reply budget above is the runaway brake). A gap longer
+     * than consecutive_reset_minutes since our last reply starts a new burst.
+     * See include/human/daemon/reactive_gates.h. */
+    uint32_t max_consecutive_replies;   /* default 5 */
+    uint32_t consecutive_reset_minutes; /* default 30 */
 } hu_behavior_config_t;
 
 typedef enum hu_dm_scope {

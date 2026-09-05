@@ -14,6 +14,8 @@
  * which never do. Pure predicates; src/daemon.c consults them inline. */
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef enum hu_reactive_gate {
     /* Heuristic / cost gates: bypassed when llm_decides (LLM decides instead). */
@@ -52,5 +54,21 @@ typedef enum hu_ai_tell_action {
 } hu_ai_tell_action_t;
 
 hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried);
+
+/* ── Consecutive-reply limiter (rewritten 2026-09-04) ───────────────────
+ * `count` replies have gone out to this contact since the real user last
+ * stepped in; `cap` is behavior.max_consecutive_replies (0 = no cap). Before
+ * checking, the caller resets `count` when hu_reactive_consecutive_burst_expired
+ * says our previous reply is older than behavior.consecutive_reset_minutes — a
+ * contact coming back after lunch starts a new burst instead of inheriting the
+ * morning's silence. Why: on 2026-09-04 a rental agent's four messages, two of
+ * them direct questions, went unanswered because three earlier outputs (one a
+ * song link) had spent a hard-coded cap of 3 that only Seth typing could reset. */
+bool hu_reactive_consecutive_limit_reached(uint32_t count, uint32_t cap);
+bool hu_reactive_consecutive_burst_expired(int64_t last_reply_unix, int64_t now_unix,
+                                           uint32_t reset_secs);
+/* True when the inbound text asks something ('?' anywhere). The limiter logs a
+ * silenced question at WARN so it is never invisible again. */
+bool hu_reactive_message_is_question(const char *text, size_t len);
 
 #endif /* HU_DAEMON_REACTIVE_GATES_H */

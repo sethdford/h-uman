@@ -427,6 +427,8 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->behavior.missed_msg_max_age_sec = 86400;
     cfg->behavior.reply_budget_per_contact_hourly = 10;
     cfg->behavior.reply_budget_global_hourly = 30;
+    cfg->behavior.max_consecutive_replies = 5;
+    cfg->behavior.consecutive_reset_minutes = 30;
     cfg->behavior.missed_msg_ack_rate = 0.0029;
     cfg->behavior.missed_msg_ack_cooldown_sec = 604800;
     cfg->behavior.callback_window = 300;
