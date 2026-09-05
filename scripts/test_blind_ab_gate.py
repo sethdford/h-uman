@@ -5,6 +5,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blind_ab_gate as g
 
 
+
+# Shared by the provenance tests below AND by test_merge_preserves_other_half:
+# the runner executes each test as it is defined, so this must come first.
+def _serving(adapter, tensors, available=True):
+    bound = None
+    if adapter and isinstance(tensors, int):
+        bound = tensors > 0
+    elif adapter is None and available:
+        bound = False
+    return {"server": "http://127.0.0.1:9", "asked_at": "2026-09-04T00:00:00",
+            "model": "fake-base" if available else None,
+            "adapter_path": adapter, "tensors_loaded": tensors, "adapter_bound": bound,
+            "provenance_available": available,
+            "head_sha256": "ab" * 32, "head_bytes": 800}
+
 def test_effective_human_fail_vetoes_proxy_pass():
     proxy = {"verdict": "PASS", "mode": "ENFORCING"}
     human = {"verdict": "FAIL"}
@@ -176,18 +191,6 @@ if __name__ == "__main__":
 # 2026-07-26 -> 09-04 the adapter on :8741 bound 0 tensors while /health said
 # applied; the gate's provenance was annotated post-hoc. The writer now REFUSES
 # to emit a verdict it cannot attribute to a bound adapter.
-
-def _serving(adapter, tensors, available=True):
-    bound = None
-    if adapter and isinstance(tensors, int):
-        bound = tensors > 0
-    elif adapter is None and available:
-        bound = False
-    return {"server": "http://127.0.0.1:9", "asked_at": "2026-09-04T00:00:00",
-            "model": "fake-base" if available else None,
-            "adapter_path": adapter, "tensors_loaded": tensors, "adapter_bound": bound,
-            "provenance_available": available,
-            "head_sha256": "ab" * 32, "head_bytes": 800}
 
 
 def test_provenance_refusal_names_adapter_but_binds_nothing():
