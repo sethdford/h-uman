@@ -36,3 +36,18 @@ Callouts:
 | US-2 | fix `7acb4d470` landed (three-way PASS/BLOCK/HOLD using the candidate's LUAR CI95; HOLD exit 3; INCONCLUSIVE on missing CI). Combined verifier+critic round 2 running. |
 | US-4 | fix `8beccb6ed` landed (F1 symmetric MIR send semantics, F2 diagnostic counters on refusal; 28 tests). Aspect panel running. |
 | US-8 | critic round 1 **BLOCK**: `/admin/models/decisions` per-row array still emits shadow entries while `tier_distribution` filters them (cross-consumer regression); no test compares gate-OFF vs gate-SHADOW selections for AC-8.7; gate comment does not name the measurement. Fix dispatched (round 2 of 2). |
+
+## 2026-09-05 (evening) — 7 of 8 merged
+
+| Story | Merge commit | Gates |
+|---|---|---|
+| US-4 | `c307ee26e` | verifier PASS, critic fixed (`8beccb6ed`), panel PASS 1.0 |
+| US-5 | `046ba18ef` | verifier r2 PASS (14320/14320), critic r2 MERGE, panel PASS 1.0 (regression aspect timed out, weight 0) |
+| US-2 | `00cd842c8` | verifier r2 PASS, critic r2 MERGE, panel PASS 1.0 |
+
+Merged-tree checks: 467 pytest + 39 `test_m3_promote.py` green after US-2; full C suite
+running on the sprint tree after US-5 (first C story to land).
+
+US-8: verifier round 1 PASS but it ran on a tree the fix agent was concurrently editing
+(it cites the AC-8.7 test the fix adds), so it is informational only; a clean re-verify
+runs after the fix commit lands. Critic round 2 follows the fix.
