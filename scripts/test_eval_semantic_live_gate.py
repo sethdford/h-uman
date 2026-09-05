@@ -300,6 +300,7 @@ def test_build_context_rows_carries_no_reply_text():
     rows = G.build_context_rows(shadow_results, live_results, ids=[0])
     assert rows == [{
         "id": 0, "recall_bytes": 88, "recall_dropped": 0,
+        "shadow_recall_bytes": 0, "recall_suppressed_bytes": 0,
         "shadow": {"ei": 4, "reality": 5, "anti_ai": 1.0},
         "live": {"ei": 3, "reality": 4, "anti_ai": 1.0},
     }]
@@ -526,7 +527,8 @@ def test_main_happy_path_writes_promote_or_hold_with_context_rows(monkeypatch, f
     assert doc["recall_coverage"] == 1.0
     assert len(doc["context_rows"]) == doc["n_paired"]
     row = doc["context_rows"][0]
-    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow", "live", "register"}
+    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow_recall_bytes",
+                            "recall_suppressed_bytes", "shadow", "live", "register"}
     dumped = json.dumps(doc)
     assert "real inbound message" not in dumped  # no context/reply text leaked
 
@@ -829,3 +831,119 @@ def test_build_context_rows_carries_register_field():
     # Without registers, field should not appear.
     rows_no_reg = G.build_context_rows(shadow, live, [0, 1])
     assert "register" not in rows_no_reg[0]
+
+
+# ---------------------------------------------------------------------------
+# US-5 register-gate pair (2026-09-05 redesign after the first run measured nothing)
+# ---------------------------------------------------------------------------
+def test_recall_mode_for_arm_original_pair_and_register_pair():
+    assert G.recall_mode_for_arm("shadow", "off") == "none"
+    assert G.recall_mode_for_arm("live", "off") == "all"
+    assert G.recall_mode_for_arm("shadow", "shadow") == "none"
+    assert G.recall_mode_for_arm("live", "shadow") == "all"
+    # register gate LIVE: both arms carry recall; only casual contexts differ
+    assert G.recall_mode_for_arm("shadow", "live") == "all"
+    assert G.recall_mode_for_arm("live", "live") == "admitted"
+
+
+def test_register_gate_coverage_counts_casual_contexts_with_shadow_recall_only():
+    shadow = {0: {"recall_bytes": 120}, 1: {"recall_bytes": 0}, 2: {"recall_bytes": 500},
+              3: {"recall_bytes": 80}}
+    registers = {0: "casual", 1: "casual", 2: "substantive", 3: "casual"}
+    # 2 of 3 casual contexts had something to suppress; the substantive one is ignored
+    assert G.register_gate_coverage(shadow, [0, 1, 2, 3], registers) == pytest.approx(2 / 3)
+    assert G.register_gate_coverage(shadow, [2], registers) == 0.0
+
+
+def _arm_results(ids, recall_bytes=100, ei=4, reality=5, anti_ai=1.0):
+    return {i: {"recall_bytes": recall_bytes, "recall_dropped": 0, "recall_suppressed_bytes": 0,
+                "ei": ei, "reality": reality, "anti_ai": anti_ai} for i in ids}
+
+
+def test_register_summary_is_inconclusive_below_min_n_even_when_live_wins():
+    ids = list(range(7))
+    out = G.register_summary(_arm_results(ids, ei=3), _arm_results(ids, ei=5), ids,
+                             coverage=1.0, min_n=30)
+    assert out["n"] == 7
+    assert out["verdict"] == "INCONCLUSIVE"
+    assert "min_n 30" in out["reasons"][0]
+
+
+def test_register_summary_decides_at_or_above_min_n():
+    ids = list(range(30))
+    out = G.register_summary(_arm_results(ids, ei=4), _arm_results(ids, ei=4), ids,
+                             coverage=1.0, min_n=30)
+    assert out["verdict"] == "PROMOTE"
+    assert G.register_summary(_arm_results([], ), _arm_results([]), [], 1.0, 30) == {"n": 0, "verdict": "EMPTY"}
+
+
+def test_select_contexts_register_filter(tmp_path):
+    p = tmp_path / "ctx.jsonl"
+    short = ["ok sounds good", "will do", "sure whatever works"]
+    long_ = ["i have been thinking about whether we should move the whole team to the new "
+             "office next quarter or wait until the lease question is settled",
+             "can you explain why the deploy failed last night and what we need to change "
+             "in the pipeline so it does not happen again this week"]
+    p.write_text("\n".join(json.dumps({"incoming": t}) for t in short + long_) + "\n")
+    assert sorted(G.select_contexts(p, 10, register="substantive")) == sorted(long_)
+    assert sorted(G.select_contexts(p, 10, register="casual")) == sorted(short)
+    assert len(G.select_contexts(p, 10)) == 5
+    assert len(G.select_contexts(p, 10, register="any")) == 5
+
+
+def test_run_arm_admitted_withholds_block_for_casual_and_records_bytes(monkeypatch):
+    class Args:
+        human_bin = "/fake/human"
+        server = "http://127.0.0.1:1"
+        embed_url = "http://127.0.0.1:1"
+        model = "m"
+        top_k = 5
+        max_tokens = 40
+        temperature = 0.0
+        channel = "imessage"
+        register_gate = "live"
+
+    seen_prompts = {}
+    monkeypatch.setattr(G, "semantic_search",
+                        lambda *a, **k: ["went hiking at the state park last weekend"])
+    monkeypatch.setattr(G, "generate",
+                        lambda server, model, sp, ctx, mt, temp: seen_prompts.setdefault(ctx, sp) or "reply")
+    monkeypatch.setattr(G, "judge_ei_reality", lambda ctx, reply: {"ei": 4, "reality": 5})
+    monkeypatch.setattr(G, "score_single_reply_anti_ai", lambda *a, **k: 1.0)
+    contexts = ["hey whats up", "i wanted to ask you about the hiking trip we talked about "
+                "planning for the fall and whether the park is still an option"]
+    registers = {0: "casual", 1: "substantive"}
+    quiet = lambda *a, **k: None  # noqa: E731
+
+    live, fails = G.run_arm("live", contexts, "SYS", Args(), "/dev/null", registers=registers,
+                            log=quiet)
+    assert fails == {}
+    # casual: block withheld, its size recorded; prompt unchanged
+    assert live[0]["recall_bytes"] == 0 and live[0]["recall_suppressed_bytes"] > 0
+    assert seen_prompts[contexts[0]] == "SYS"
+    # substantive: block injected as usual
+    assert live[1]["recall_bytes"] > 0 and live[1]["recall_suppressed_bytes"] == 0
+    assert seen_prompts[contexts[1]].startswith("Relevant memories:")
+
+    # gate-OFF arm of the same pair injects for BOTH registers (semantic recall LIVE)
+    seen_prompts.clear()
+    shadow, _ = G.run_arm("shadow", contexts, "SYS", Args(), "/dev/null", registers=registers,
+                          log=quiet)
+    assert shadow[0]["recall_bytes"] > 0 and shadow[1]["recall_bytes"] > 0
+    assert G.register_gate_coverage(shadow, [0, 1], registers) == 1.0
+
+
+def test_run_arm_default_pair_is_unchanged(monkeypatch):
+    class Args:
+        human_bin = "/fake/human"; server = "http://127.0.0.1:1"; embed_url = "http://127.0.0.1:1"
+        model = "m"; top_k = 5; max_tokens = 40; temperature = 0.0; channel = "imessage"
+        register_gate = "off"
+    calls = []
+    monkeypatch.setattr(G, "semantic_search", lambda *a, **k: calls.append(1) or ["a memory"])
+    monkeypatch.setattr(G, "generate", lambda *a, **k: "reply")
+    monkeypatch.setattr(G, "judge_ei_reality", lambda ctx, reply: {"ei": 4, "reality": 5})
+    monkeypatch.setattr(G, "score_single_reply_anti_ai", lambda *a, **k: 1.0)
+    shadow, _ = G.run_arm("shadow", ["x", "y"], "SYS", Args(), "/dev/null", log=lambda *a, **k: None)
+    assert calls == [] and all(r["recall_bytes"] == 0 for r in shadow.values())
+    live, _ = G.run_arm("live", ["x", "y"], "SYS", Args(), "/dev/null", log=lambda *a, **k: None)
+    assert len(calls) == 2 and all(r["recall_bytes"] > 0 for r in live.values())

@@ -319,7 +319,11 @@ def generate(server, model, system_prompt, message, max_tokens, temperature, tim
 # --------------------------------------------------------------------------
 # Context selection (fixed, deterministic subset of a real corpus)
 # --------------------------------------------------------------------------
-def select_contexts(path, n, min_len=4, max_len=280):
+def select_contexts(path, n, min_len=4, max_len=280, register=None):
+    """register: None/"any" keeps every context; "casual"/"substantive" keeps only
+    contexts on that side of the 12-word register boundary (US-5 sizing: a
+    register-gate run needs enough CASUAL contexts, a substantive-only run needs
+    enough long ones). Filtering happens before the deterministic sha256 ordering."""
     p = Path(path).expanduser()
     if not p.is_file():
         return []
@@ -337,6 +341,8 @@ def select_contexts(path, n, min_len=4, max_len=280):
         if not (min_len <= len(text) <= max_len):
             continue
         if text in seen:
+            continue
+        if register in ("casual", "substantive") and classify_register(text) != register:
             continue
         seen.add(text)
         texts.append(text)
@@ -576,40 +582,60 @@ def score_single_reply_anti_ai(human_bin, reply, channel):
 # generation exception, empty completion) — see the per-context `reasons`
 # dict for why, so failures are attributable, not silently dropped.
 # --------------------------------------------------------------------------
-def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=None, log=print):
-    """Generate + score one arm. If registers dict is provided and register_gate is "live",
-    suppress semantic recall for casual contexts in the LIVE arm (AC-5.1/5.2)."""
+def recall_mode_for_arm(arm_name, register_gate):
+    """Which contexts get the 'Relevant memories:' block in an arm.
+
+    register_gate off/shadow (the original C1 pair): shadow = "none", live = "all".
+    register_gate live (US-5): BOTH arms run semantic recall LIVE and the pair differs
+    ONLY on casual contexts — shadow = "all" (register gate OFF), live = "admitted"
+    (register gate LIVE: casual contexts have the block withheld). A pair whose shadow
+    arm carried no recall at all cannot see the register gate: the 2026-09-05 first run
+    produced casual-arm scores identical to 16 digits in both arms and an INCONCLUSIVE
+    whose coverage denominator counted the very contexts the gate suppresses by design."""
+    if arm_name != "live":
+        return "all" if register_gate == "live" else "none"
+    return "admitted" if register_gate == "live" else "all"
+
+
+def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=None, log=print,
+            recall_mode=None):
+    """Generate + score one arm. recall_mode (see recall_mode_for_arm): "none" — no
+    semantic search; "all" — inject the block for every context; "admitted" — search
+    every context but WITHHOLD the block for casual ones, recording the bytes withheld
+    in recall_suppressed_bytes so the gate's effect is measured, not assumed."""
+    if recall_mode is None:
+        recall_mode = recall_mode_for_arm(arm_name, getattr(args, "register_gate", "off"))
+    register_gate = getattr(args, "register_gate", "off")
     results = {}
     fail_reasons = {}
     for i, ctx in enumerate(contexts):
         sp = system_prompt
         recall_bytes = 0
         recall_dropped = 0
-        register_gate_would_suppress = False
-        if arm_name == "live":
-            # AC-5.1: register gate LIVE + casual -> suppress semantic recall
-            if (registers is not None and args.register_gate == "live" and
-                    registers.get(i) == "casual"):
-                register_gate_would_suppress = True
-                log(f"  [live] {i}: register gate LIVE suppresses casual (words<={REGISTER_MAX_CASUAL_WORDS})",
-                    flush=True)
+        recall_suppressed_bytes = 0
+        if recall_mode != "none":
+            casual = registers is not None and registers.get(i) == "casual"
             # AC-5.3: register gate SHADOW -> log but do NOT suppress
-            elif (registers is not None and args.register_gate == "shadow" and
-                    registers.get(i) == "casual"):
-                log(f"  [live] {i}: register gate SHADOW would suppress casual (words<={REGISTER_MAX_CASUAL_WORDS})",
-                    flush=True)
-
-            # Only do semantic search if NOT suppressed by register gate
-            if not register_gate_would_suppress:
-                snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
-                                           ctx, args.top_k)
-                if snippets is None:
-                    fail_reasons[i] = "semantic_search_failed"
-                    log(f"  [warn][{arm_name}] semantic search failed, skipping context "
-                        f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
-                    continue
-                block, recall_dropped = build_memories_block(snippets)
-                if block:
+            if arm_name == "live" and casual and register_gate == "shadow":
+                log(f"  [live] {i}: register gate SHADOW would suppress casual "
+                    f"(words<={REGISTER_MAX_CASUAL_WORDS})", flush=True)
+            snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
+                                       ctx, args.top_k)
+            if snippets is None:
+                fail_reasons[i] = "semantic_search_failed"
+                log(f"  [warn][{arm_name}] semantic search failed, skipping context "
+                    f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
+                continue
+            block, recall_dropped = build_memories_block(snippets)
+            if block:
+                if recall_mode == "admitted" and casual:
+                    # AC-5.1: register gate LIVE + casual -> block withheld; its size is
+                    # the evidence that there was something to suppress.
+                    recall_suppressed_bytes = len(block.encode("utf-8"))
+                    log(f"  [live] {i}: register gate LIVE suppresses casual "
+                        f"(words<={REGISTER_MAX_CASUAL_WORDS}); {recall_suppressed_bytes} "
+                        f"bytes withheld", flush=True)
+                else:
                     sp = block + system_prompt
                     recall_bytes = len(block.encode("utf-8"))
         try:
@@ -628,6 +654,7 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
         results[i] = {
             "recall_bytes": recall_bytes,
             "recall_dropped": recall_dropped,
+            "recall_suppressed_bytes": recall_suppressed_bytes,
             "ei": (j["ei"] if j else None),
             "reality": (j["reality"] if j else None),
             "anti_ai": anti_ai,
@@ -699,6 +726,45 @@ def recall_coverage_of(live_results, ids):
     return hit / len(ids)
 
 
+def register_gate_coverage(shadow_results, ids, registers):
+    """register_gate=live coverage: the fraction of paired CASUAL contexts whose
+    gate-OFF arm actually carried a recall block — the only contexts on which the
+    register gate changes the prompt. Below --min-recall-coverage the run is
+    INCONCLUSIVE ("nothing to suppress on this corpus"), which is a finding, not a
+    failure. Counting suppressed casual contexts as zero-coverage (the 2026-09-05 first
+    run) makes the verdict INCONCLUSIVE by construction."""
+    casual = [i for i in ids if registers.get(i) == "casual"]
+    return recall_coverage_of(shadow_results, casual)
+
+
+def register_summary(shadow_results, live_results, reg_ids, coverage, min_n,
+                     composite_tolerance=DEFAULT_COMPOSITE_TOLERANCE,
+                     ei_tolerance=DEFAULT_EI_TOLERANCE,
+                     reality_tolerance=DEFAULT_REALITY_TOLERANCE,
+                     min_recall_coverage=DEFAULT_MIN_RECALL_COVERAGE):
+    """Per-register breakdown. A register with fewer than min_n paired contexts gets
+    INCONCLUSIVE, never PROMOTE/HOLD (the first run said PROMOTE on n=7)."""
+    if not reg_ids:
+        return {"n": 0, "verdict": "EMPTY"}
+    s = summarize_paired_arm(shadow_results, reg_ids)
+    l = summarize_paired_arm(live_results, reg_ids)  # noqa: E741
+    if len(reg_ids) < min_n:
+        verdict, reasons = "INCONCLUSIVE", [
+            f"only {len(reg_ids)} paired contexts in this register (< min_n {min_n}) — "
+            f"no per-register verdict"]
+    else:
+        verdict, reasons = decide_verdict(s, l, coverage, composite_tolerance, ei_tolerance,
+                                          reality_tolerance, min_recall_coverage)
+    return {
+        "n": len(reg_ids),
+        "shadow": s,
+        "live": l,
+        "recall_coverage": coverage,
+        "verdict": verdict,
+        "reasons": reasons,
+    }
+
+
 def build_context_rows(shadow_results, live_results, ids, registers=None):
     rows = []
     for i in ids:
@@ -707,6 +773,8 @@ def build_context_rows(shadow_results, live_results, ids, registers=None):
             "id": i,
             "recall_bytes": l["recall_bytes"],
             "recall_dropped": l.get("recall_dropped", 0),
+            "shadow_recall_bytes": s.get("recall_bytes", 0),
+            "recall_suppressed_bytes": l.get("recall_suppressed_bytes", 0),
             "shadow": {"ei": s["ei"], "reality": s["reality"], "anti_ai": s["anti_ai"]},
             "live": {"ei": l["ei"], "reality": l["reality"], "anti_ai": l["anti_ai"]},
         }
@@ -814,8 +882,14 @@ def main(argv=None):
     ap.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     ap.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
     ap.add_argument("--register-gate", choices=["off", "shadow", "live"], default="off",
-                    help="register-conditioned gate mode: off (default), shadow (log only), "
-                         "or live (suppress casual contexts in LIVE arm)")
+                    help="register-conditioned gate mode: off (default: the SHADOW-vs-LIVE "
+                         "semantic-recall pair), shadow (that pair, logging what the gate "
+                         "would suppress), or live (BOTH arms run semantic recall LIVE and "
+                         "the pair differs only on casual contexts, where the LIVE arm "
+                         "withholds the block; coverage is then measured on casual contexts "
+                         "that actually retrieved something)")
+    ap.add_argument("--register-select", choices=["any", "casual", "substantive"], default="any",
+                    help="restrict the fixed context selection to one register (sizing aid)")
     ap.add_argument("--composite-tolerance", type=float, default=DEFAULT_COMPOSITE_TOLERANCE)
     ap.add_argument("--ei-tolerance", type=float, default=DEFAULT_EI_TOLERANCE)
     ap.add_argument("--reality-tolerance", type=float, default=DEFAULT_REALITY_TOLERANCE)
@@ -849,7 +923,8 @@ def main(argv=None):
 
     print(f"[4/6] selecting >= {args.min_n} real inbound contexts from {args.contexts} ...",
          flush=True)
-    contexts = select_contexts(args.contexts, args.n)
+    contexts = select_contexts(args.contexts, args.n,
+                               register=(None if args.register_select == "any" else args.register_select))
     if len(contexts) < args.min_n:
         return refuse(f"only {len(contexts)} usable contexts found in {args.contexts} "
                       f"(< --min-n {args.min_n})")
@@ -873,7 +948,8 @@ def main(argv=None):
                         indent=2))
         return 0
 
-    print("[6/6] generating + scoring both arms (SHADOW, then LIVE) ...", flush=True)
+    print(f"[6/6] generating + scoring both arms (SHADOW={recall_mode_for_arm('shadow', args.register_gate)}, "
+          f"then LIVE={recall_mode_for_arm('live', args.register_gate)}) ...", flush=True)
     shadow_results, shadow_fail = run_arm("shadow", contexts, system_prompt, args, memory_db_path,
                                           registers=registers)
     live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path,
@@ -908,7 +984,10 @@ def main(argv=None):
         return refuse(f"LIVE arm produced {live_summary['n_ei']} judge scores in the paired "
                       f"set (< {args.min_n}) — judge may have degraded mid-run")
 
-    coverage = recall_coverage_of(live_results, ids)
+    if args.register_gate == "live":
+        coverage = register_gate_coverage(shadow_results, ids, registers)
+    else:
+        coverage = recall_coverage_of(live_results, ids)
     verdict, reasons = decide_verdict(shadow_summary, live_summary, coverage,
                                       args.composite_tolerance, args.ei_tolerance,
                                       args.reality_tolerance, args.min_recall_coverage)
@@ -932,23 +1011,16 @@ def main(argv=None):
     casual_paired_ids = [i for i in ids if registers.get(i) == "casual"]
     substantive_paired_ids = [i for i in ids if registers.get(i) == "substantive"]
 
+    tol = (args.composite_tolerance, args.ei_tolerance, args.reality_tolerance,
+           args.min_recall_coverage)
+
     def summarize_register(name, reg_ids):
-        if not reg_ids:
-            return {"n": 0, "verdict": "EMPTY"}
-        s = summarize_paired_arm(shadow_results, reg_ids)
-        l = summarize_paired_arm(live_results, reg_ids)
-        reg_coverage = recall_coverage_of(live_results, reg_ids)
-        reg_verdict, reg_reasons = decide_verdict(s, l, reg_coverage,
-                                                   args.composite_tolerance, args.ei_tolerance,
-                                                   args.reality_tolerance, args.min_recall_coverage)
-        return {
-            "n": len(reg_ids),
-            "shadow": s,
-            "live": l,
-            "recall_coverage": reg_coverage,
-            "verdict": reg_verdict,
-            "reasons": reg_reasons,
-        }
+        if args.register_gate == "live" and name == "casual":
+            reg_coverage = register_gate_coverage(shadow_results, reg_ids, registers)
+        else:
+            reg_coverage = recall_coverage_of(live_results, reg_ids)
+        return register_summary(shadow_results, live_results, reg_ids, reg_coverage,
+                                args.min_n, *tol)
 
     register_breakdown = {
         "boundary_words": REGISTER_MAX_CASUAL_WORDS,
@@ -961,7 +1033,11 @@ def main(argv=None):
         "schema": "semantic_live_gate.v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit,
-        "gate": "HU_SEMANTIC_RECALL shadow->live",
+        "gate": ("HU_SEMANTIC_RECALL_REGISTER_GATE off->live (semantic recall LIVE in both "
+                 "arms; the pair differs on casual contexts only)"
+                 if args.register_gate == "live" else "HU_SEMANTIC_RECALL shadow->live"),
+        "arms": {"shadow": recall_mode_for_arm("shadow", args.register_gate),
+                 "live": recall_mode_for_arm("live", args.register_gate)},
         "n_contexts": len(contexts),
         "n_paired": len(ids),
         "n_shadow_only": len(shadow_only),
