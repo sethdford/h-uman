@@ -410,8 +410,8 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc, const hu_feed_item_t *it
 }
 
 #ifdef HU_ENABLE_SQLITE
-#include <sqlite3.h>
 #include "human/memory/trust.h"
+#include <sqlite3.h>
 
 /* SOTA-2026 init-09: feed-origin provenance stamp.
  *
@@ -437,8 +437,7 @@ hu_provenance_t hu_feed_processor_item_provenance(const hu_feed_item_stored_t *i
         memcpy(chan, fallback, sizeof(fallback));
     }
     return hu_provenance_make(HU_TRUST_THIRD_PARTY, chan,
-                              (item && item->contact_id[0]) ? item->contact_id : NULL,
-                              now_ts);
+                              (item && item->contact_id[0]) ? item->contact_id : NULL, now_ts);
 }
 
 hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
@@ -694,6 +693,7 @@ hu_error_t hu_feed_processor_poll(hu_feed_processor_t *proc, const hu_feed_confi
             if (hu_gmail_feed_fetch(proc->alloc, proc->gmail_client_id, proc->gmail_client_id_len,
                                     proc->gmail_client_secret, proc->gmail_client_secret_len,
                                     proc->gmail_refresh_token, proc->gmail_refresh_token_len,
+                                    proc->gmail_quota_project, proc->gmail_quota_project_len,
                                     gmail_items, 10, &gmail_count) == HU_OK) {
                 for (size_t g = 0; g < gmail_count; g++) {
                     hu_feed_item_stored_t item = {0};

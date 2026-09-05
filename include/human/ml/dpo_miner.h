@@ -50,6 +50,7 @@ extern "C" {
 typedef struct hu_dpo_mine_opts {
     int correction_window_sec;
     size_t max_rows; /* 0 = mine everything; otherwise process at most N triples */
+    int count_only;  /* 1 = READ-ONLY probe: count candidate triples, record/export nothing */
 } hu_dpo_mine_opts_t;
 
 /* Per-run stats; opaque to the caller except for the count fields. */

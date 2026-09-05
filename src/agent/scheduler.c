@@ -656,11 +656,37 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
     return HU_OK;
 }
 
+hu_error_t hu_scheduler_pending_count_for_kind(hu_scheduler_t *s, hu_job_kind_t kind, size_t *out) {
+    if (!s || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = 0;
+    struct sqlite3 *db = get_db(s->m);
+    if (!db)
+        return HU_ERR_IO;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(
+            db, "SELECT COUNT(*) FROM scheduler_jobs WHERE status = 'pending' AND kind = ?", -1,
+            &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int(st, 1, (int)kind);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        *out = (size_t)sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return HU_OK;
+}
+
 #else /* !HU_ENABLE_SQLITE */
 
 hu_error_t hu_scheduler_enqueue(hu_scheduler_t *s, const hu_job_spec_t *job) {
     (void)s;
     (void)job;
+    return HU_ERR_NOT_SUPPORTED;
+}
+hu_error_t hu_scheduler_pending_count_for_kind(hu_scheduler_t *s, hu_job_kind_t kind, size_t *out) {
+    (void)s;
+    (void)kind;
+    if (out)
+        *out = 0;
     return HU_ERR_NOT_SUPPORTED;
 }
 hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {

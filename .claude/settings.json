@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "file=$(jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.(c|h)$'; then fmt=$(command -v clang-format 2>/dev/null || echo /opt/homebrew/opt/llvm/bin/clang-format); if [ -x \"$fmt\" ]; then \"$fmt\" -i \"$file\" 2>/dev/null; fi; fi; exit 0"
+            "command": "file=$(jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.(c|h)$'; then bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/format-c-file.sh\" \"$file\" 2>&1 | tail -1; fi; exit 0"
           }
         ]
       }

@@ -18,10 +18,11 @@ if [ -f "CMakeLists.txt" ]; then
     # left whole suites uncompiled: measured 12,617 tests versus 13,933 from a
     # fully-configured build. That was a 1,316-test (9.4%) blind spot in the
     # gate — those tests did not run before a push. It also fed
-    # update-stats.sh (which reads the first available build/, build2/,
-    # build-check/ or build-release/ binary), so every push stamped an
+    # update-stats.sh, which at the time re-ran the first available build/,
+    # build2/, build-check/ or build-release/ binary, so every push stamped an
     # undercounted test total across AGENTS.md, README.md and friends, and the
-    # rewrite had to be discarded by hand.
+    # rewrite had to be discarded by hand. (The stamping side is fixed below:
+    # the sync now receives the count parsed from THIS run's Results: line.)
     #
     # The flags below are the ones that add test coverage without adding an
     # external dependency: measured 13,827 tests, closing ~92% of that gap.
@@ -65,8 +66,16 @@ if [ -f "CMakeLists.txt" ]; then
     # ./human_tests from inside the build dir made those ~44 tests fail
     # spuriously (CWD couldn't resolve the relative paths).
     cd ..
-    "$BUILD_DIR/human_tests"
-    if [ $? -ne 0 ]; then
+    # Tee the run so its own "--- Results: N/N passed ---" line can be parsed
+    # below: that N is the only test count this hook has verified, and it is
+    # the one the stats sync must stamp. (POSIX sh has no pipefail, so the
+    # suite's exit status is written to a side file.)
+    results_log=$(mktemp "${TMPDIR:-/tmp}/human_tests.XXXXXX") || exit 1
+    { "$BUILD_DIR/human_tests"; echo $? > "$results_log.rc"; } | tee "$results_log"
+    tests_rc=$(cat "$results_log.rc" 2>/dev/null || echo 1)
+    TEST_COUNT=$(sed -n 's|^--- Results: \([0-9][0-9]*\)/[0-9][0-9]* passed.*|\1|p' "$results_log" | head -1)
+    rm -f "$results_log" "$results_log.rc"
+    if [ "$tests_rc" -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1
     fi
@@ -89,12 +98,25 @@ if [ -f "CMakeLists.txt" ]; then
     #
     # Skipping is always safe: stats are descriptive, and the next push from
     # an up-to-date tree re-syncs them.
+    #
+    # The count passed is the one parsed from THIS run above. Before
+    # 2026-09-03 the sync re-ran whichever build*/human_tests sorted first —
+    # a two-day-old build/ dev binary of a different tree state — and stamped
+    # 13,995 while this hook had just measured 14,125 (third recorded
+    # writer-vs-checker disagreement; see the top of this file). Likewise the
+    # binary size: this hook only builds Debug, so it cannot vouch for any
+    # release binary's age (a five-week-old build-release/ stamped ~2952 KB
+    # the same day); --keep-binary-size leaves the committed value alone.
+    # Rule: .claude/rules/no-number-without-a-measurement.md.
     if [ -x "scripts/update-stats.sh" ]; then
         behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo unknown)
-        if [ "$behind" = "0" ]; then
-            echo "Syncing project stats..."
-            if ! bash scripts/update-stats.sh --apply 2>/dev/null; then
-                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply' manually."
+        if [ "$behind" = "0" ] && [ -z "$TEST_COUNT" ]; then
+            echo "WARN: could not parse a test count from this run's Results: line;"
+            echo "  skipping stats sync rather than stamping a count from a stale binary."
+        elif [ "$behind" = "0" ]; then
+            echo "Syncing project stats (${TEST_COUNT} tests, measured by this run)..."
+            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" --keep-binary-size 2>/dev/null; then
+                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT} --keep-binary-size' manually."
             fi
         elif [ "$behind" = "unknown" ]; then
             echo "Skipping stats sync (cannot compare against origin/main)."

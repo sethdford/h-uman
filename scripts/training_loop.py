@@ -729,6 +729,18 @@ def summarize_outcomes(outcomes: list[dict]) -> dict:
     }
 
 
+# --resolve-only is honoured inside train_from_outcomes, which has no args object.
+RESOLVE_ONLY = "--resolve-only" in sys.argv
+
+
+def training_outcome_rc(train_rc: int, adapter_exists: bool) -> int:
+    """Exit code for a training attempt. 0 only when the trainer succeeded AND an
+    adapter file exists. 3 = refused/failed (nothing to stage). Pure; tested."""
+    if train_rc == 0 and adapter_exists:
+        return 0
+    return 3
+
+
 def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list[dict], int]:
     """For each outcome, look up its prompt_hash in the messages table.
     Returns (resolved, skipped) where:
@@ -1166,7 +1178,7 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             print(f"  [preflight] model={_model_for_check}")
             print(f"  [preflight] set HU_TRAIN_WINDOW / learning.training_window to allow a "
                   f"nightly slot, or HU_TRAIN_SKIP_PREFLIGHT=1 to override")
-            return 0, None, None
+            return 3, None, None  # refusal is a FAILURE, never a 'trained nothing' success
 
     try:
         return _run_mlx_lora_training_inner(resolved, adapter_out, iters, scale, model)
@@ -1404,6 +1416,15 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Guard mix:    {summary['guards']}")
 
     resolved, skipped = resolve_hashes_against_db(outcomes, db_path)
+    if outcomes and not resolved:
+        print(f"REFUSING: 0/{len(outcomes)} outcomes resolved against the messages table "
+              f"({db_path}) — the store is missing the conversations these outcomes came from "
+              f"(2026-08-08: a quarantine had wiped it). Restore the store; do not train on nothing.",
+              file=sys.stderr)
+        sys.exit(3)
+    if RESOLVE_ONLY:
+        print(json.dumps({"outcomes": len(outcomes), "resolved": len(resolved), "unresolved": skipped}))
+        sys.exit(0)
     print(f"  Resolved:     {len(resolved)} prompt hashes against {db_path.name}")
     print(f"  Skipped:      {skipped} unresolved (conversation rotated out of DB?)")
 
@@ -1500,12 +1521,14 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
-    if rc != 0 or not adapters_file.exists():
-        print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
-        print(f"  Falling back to empty-tensors safetensors.")
-        write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
-        # Still record the failed training attempt with whatever metrics we have
-        return 0
+    verdict = training_outcome_rc(rc, adapters_file.exists())
+    if verdict != 0:
+        # 2026-09-02: this path used to write an EMPTY-TENSORS safetensors and
+        # return 0. The nightly staged a 349-byte "adapter" as a success. A
+        # failed or refused run must leave NO adapter file and exit non-zero.
+        print(f"  FAILED: mlx_lm.lora training rc={rc}, adapter present={adapters_file.exists()} "
+              f"-> exiting {verdict}; no adapter written (no placeholder, ever).")
+        return verdict
 
     # Get the size of the safetensors file
     size = adapters_file.stat().st_size
@@ -1633,6 +1656,9 @@ def main():
     parser.add_argument("--no-dpo", action="store_true", help="Skip DPO training pass")
     parser.add_argument("--eval-only", action="store_true", help="Only run evaluation on current adapter")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without actual training/eval")
+    parser.add_argument("--resolve-only", action="store_true",
+                        help="Read-only: resolve outcome hashes against the messages table, print the "
+                             "counts and exit (3 if nothing resolves). No training, no server restart.")
     # Phase C3 — JSONL-driven entry point. When --source-jsonl is set,
     # the full cycle pipeline is bypassed and we run train_from_outcomes
     # instead. The driver (scripts/m3_outcome_driver.py) is the primary

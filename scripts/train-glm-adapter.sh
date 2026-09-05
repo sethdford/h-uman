@@ -11,19 +11,49 @@
 # is interrupted, or the config is rejected. The server is restarted on its
 # EXISTING v5 config -- this script never repoints or promotes anything.
 #
+# EXCEPTION: when HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 (set only by
+# scripts/nightly-retrain.sh's mlx-tune candidate stage), this script neither
+# stops NOR restores :8741 -- the caller already stopped it and restores it
+# exactly once, after a further offline-scoring step this script knows nothing
+# about. Unset (the default), behavior is unchanged from every prior release.
+#
 # Usage: scripts/train-glm-v6-orpo.sh [--dry-run]
 set -uo pipefail
 
 TRAIN_PY=/Users/sethford/.human/venvs/train312/bin/python
+# Contract C6: mlx-tune (SimPO/KTO/ORPO, reference-free, per-expert MoE LoRA)
+# lives in its OWN venv, never train312 -- see scripts/mlx_tune_env.txt.
+MLXTUNE_PY=/Users/sethford/.human/venvs/mlxtune312/bin/python
 SERVICE=gui/501/ai.human.mlx-server
+
+# HU_TRAIN_SERVING_MANAGED_BY_CALLER=1: the CALLER (scripts/nightly-retrain.sh's
+# mlx-tune candidate stage) has already stopped :8741 and owns restoring it --
+# this script must neither bootout (already done) nor restore (the caller's own
+# trap does that ONCE, after this script AND the offline scoring that follows
+# it). Standalone invocations (the default -- this env unset) are unaffected:
+# every line below behaves exactly as it always has.
+MANAGED_BY_CALLER="${HU_TRAIN_SERVING_MANAGED_BY_CALLER:-0}"
+
+# HU_TRAIN_REBALANCE_CASING=1: run scripts/rebalance_preference_corpus.py on
+# the corpus's train.jsonl before training, pulling the CHOSEN side's
+# lowercase-start/terminal-punct habit back toward Seth's measured style
+# card (see that script's docstring for the 2026-09-04 finding: an 86%
+# lowercase-start habit in production traced back to a preference corpus
+# whose chosen side was 77.5% lowercase by construction, with LUAR blind to
+# the axis). Default OFF so every existing caller is unaffected; the
+# mlx-tune candidate stage in scripts/nightly-retrain.sh sets it to 1.
+# Refuses (nonzero exit) rather than train on a requested-but-failed
+# rebalance -- see the die() call at the rebalance step below.
+REBALANCE_CASING="${HU_TRAIN_REBALANCE_CASING:-0}"
 
 # Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
 # forking this script, so every run keeps the same guards.
 CONFIG=/Users/sethford/.human/training-data/glm-v62-sft-config.yaml
 ORPO_BETA=0.05
+GAMMA=0.5                 # mlx_tune SimPO's target reward margin only
 TAG=v62-sft
-TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes)
-TRAIN_MODE=""             # only meaningful for mlx_lm_lora
+TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes) | mlx_tune (SimPO/KTO/ORPO, per-expert MoE LoRA)
+TRAIN_MODE=""             # mlx_lm_lora: dpo|orpo|cpo. mlx_tune: simpo|kto|orpo.
 EST_MINUTES=25            # estimated run length; gates the arena-overlap check
 DRY_RUN=0
 
@@ -35,6 +65,7 @@ while [ $# -gt 0 ]; do
     --tag)        TAG=$2; shift 2 ;;
     --trainer)    TRAINER=$2; shift 2 ;;
     --train-mode) TRAIN_MODE=$2; shift 2 ;;
+    --gamma)      GAMMA=$2; shift 2 ;;
     --est-minutes) EST_MINUTES=$2; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -62,6 +93,20 @@ case "$TRAINER:$TRAIN_MODE" in
     echo "[train] REFUSING --train-mode cpo: same no-op defect, not patched." >&2
     exit 2 ;;
 esac
+
+# Contract C6: --trainer mlx_tune only understands simpo/kto/orpo (its
+# reference-free objectives -- no dpo, since that needs a second resident
+# copy of the 56 GB base as the frozen reference, which is why this repo
+# uses ORPO/mlx_lm_lora at all). Refuse anything else up front.
+if [ "$TRAINER" = "mlx_tune" ]; then
+  case "$TRAIN_MODE" in
+    simpo|kto|orpo) : ;;
+    *) echo "[train] REFUSING --trainer mlx_tune --train-mode ${TRAIN_MODE:-<unset>}:" >&2
+       echo "        mlx_tune only supports simpo|kto|orpo (see scripts/mlx_tune_train.py)." >&2
+       exit 2 ;;
+  esac
+  [ -x "$MLXTUNE_PY" ] || { echo "[train] FATAL: mlx-tune venv missing: $MLXTUNE_PY (see scripts/mlx_tune_env.txt)" >&2; exit 1; }
+fi
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 ADAPTER=/Users/sethford/.human/training-data/adapters/seth-glm-air-${TAG}-${STAMP}
@@ -110,6 +155,11 @@ fi
 if [ "$DRY_RUN" = "1" ]; then
   say "DRY RUN -- would train into $ADAPTER"
   say "corpus: $(wc -l < "$DATA_DIR/train.jsonl") train / $(wc -l < "$DATA_DIR/valid.jsonl") valid"
+  if [ "$TRAINER" = "mlx_tune" ]; then
+    say "delegating to mlx_tune_train.py --dry-run (config + data + architecture support, zero weight loading)"
+    "$MLXTUNE_PY" "$(dirname "$0")/mlx_tune_train.py" --dry-run --config "$CONFIG" --train-mode "$TRAIN_MODE"
+    exit $?
+  fi
   exit 0
 fi
 
@@ -118,6 +168,10 @@ PROD_RESTORED=0
 restore_prod() {
   [ "$PROD_RESTORED" = "1" ] && return 0
   PROD_RESTORED=1
+  if [ "$MANAGED_BY_CALLER" = "1" ]; then
+    say "HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 -- leaving :8741 stopped; the caller restores it exactly once"
+    return 0
+  fi
   say "restoring production mlx-server (unchanged v5 config)..."
   # bootstrap FIRST: we booted the job out, so it is not in the domain and
   # `kickstart` would fail. kickstart is only the fallback for an already-loaded
@@ -142,21 +196,34 @@ trap restore_prod EXIT INT TERM
 
 # --- stop prod and wait for a FULL reap ---------------------------------------
 PROD_PID=$(lsof -tnP -iTCP:8741 -sTCP:LISTEN 2>/dev/null | head -1)
-say "stopping production mlx-server (pid ${PROD_PID:-none}) to free ~44 GB..."
-launchctl bootout "$SERVICE" 2>/dev/null
-for _ in $(seq 1 60); do
-  # Scope the reap check to the process WE stopped. A broad `pgrep -f mlx-server`
-  # also matches unrelated servers on other ports (e.g. an orphaned :8743 arena
-  # server), which is not what "did prod reap?" asks. A `?E` zombie still holds
-  # wired pages, so wait for the pid to be GONE, not merely exiting.
-  if { [ -z "$PROD_PID" ] || ! kill -0 "$PROD_PID" 2>/dev/null; } \
-     && ! lsof -nP -iTCP:8741 -sTCP:LISTEN >/dev/null 2>&1; then
-    break
+if [ "$MANAGED_BY_CALLER" = "1" ]; then
+  # Verify, don't trust: if the caller's claim is wrong we are one bootout away
+  # from a double-stop of a job that was never up, or -- worse -- we'd proceed
+  # to "reaped" on a port that is, in fact, still live. Check the port AND the
+  # process table before believing it (same shape as the still-alive check
+  # below), and refuse rather than silently doing our own stop behind the
+  # caller's back -- that would defeat the single-restore ordering it asked for.
+  if [ -n "$PROD_PID" ] || pgrep -f "mlx-server\.py .*--port 8741" >/dev/null 2>&1; then
+    die "HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 but :8741 is still up (pid ${PROD_PID:-unknown}) -- the caller must stop production before invoking this script"
   fi
-  sleep 2
-done
-if [ -n "$PROD_PID" ] && kill -0 "$PROD_PID" 2>/dev/null; then
-  die "production pid $PROD_PID did not reap after 120s -- refusing to load a second model"
+  say "HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 -- caller already stopped :8741 (verified down); skipping bootout"
+else
+  say "stopping production mlx-server (pid ${PROD_PID:-none}) to free ~44 GB..."
+  launchctl bootout "$SERVICE" 2>/dev/null
+  for _ in $(seq 1 60); do
+    # Scope the reap check to the process WE stopped. A broad `pgrep -f mlx-server`
+    # also matches unrelated servers on other ports (e.g. an orphaned :8743 arena
+    # server), which is not what "did prod reap?" asks. A `?E` zombie still holds
+    # wired pages, so wait for the pid to be GONE, not merely exiting.
+    if { [ -z "$PROD_PID" ] || ! kill -0 "$PROD_PID" 2>/dev/null; } \
+       && ! lsof -nP -iTCP:8741 -sTCP:LISTEN >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+  done
+  if [ -n "$PROD_PID" ] && kill -0 "$PROD_PID" 2>/dev/null; then
+    die "production pid $PROD_PID did not reap after 120s -- refusing to load a second model"
+  fi
 fi
 
 # Ground truth, not a proxy: the hazard is memory exhaustion, so measure memory.
@@ -174,6 +241,29 @@ OTHERS=$(pgrep -fl "mlx-server" 2>/dev/null | grep -v "port 8741" | wc -l | tr -
 
 # --- train --------------------------------------------------------------------
 mkdir -p "$ADAPTER" "$(dirname "$LOG")"
+
+# --- optional casing rebalance (HU_TRAIN_REBALANCE_CASING=1) -------------------
+# Never mutates the original corpus dir -- stages a rebalanced copy plus a
+# scratch config pointing at it, then trains from THAT config. $CONFIG is
+# reassigned below so every trainer branch (mlx_lm / mlx_tune / mlx_lm_lora)
+# picks it up unchanged.
+if [ "$REBALANCE_CASING" = "1" ]; then
+  REBAL_DIR="${DATA_DIR}-casing-${STAMP}"
+  say "HU_TRAIN_REBALANCE_CASING=1 -- rebalancing $DATA_DIR/train.jsonl -> $REBAL_DIR"
+  mkdir -p "$REBAL_DIR"
+  "$TRAIN_PY" "$(dirname "$0")/rebalance_preference_corpus.py" \
+      --input "$DATA_DIR/train.jsonl" \
+      --output "$REBAL_DIR/train.jsonl" \
+      --sidecar "$REBAL_DIR/train.rebalance_stats.json" \
+      2>&1 | tee -a "$LOG"
+  REBAL_RC=${PIPESTATUS[0]}
+  [ "$REBAL_RC" -eq 0 ] || die "casing rebalance failed (rc=$REBAL_RC, see $LOG) -- refusing to train on a requested-but-failed rebalance"
+  cp "$DATA_DIR/valid.jsonl" "$REBAL_DIR/valid.jsonl"
+  sed "s|^data:.*|data: $REBAL_DIR|" "$CONFIG" > "$REBAL_DIR/config.yaml"
+  CONFIG="$REBAL_DIR/config.yaml"
+  say "casing rebalance done -- training from $CONFIG (stats: $REBAL_DIR/train.rebalance_stats.json)"
+fi
+
 say "training -> $ADAPTER"
 say "log      -> $LOG"
 # --train-mode and --beta MUST be CLI flags. mlx_lm_lora applies a YAML key only
@@ -185,6 +275,15 @@ say "log      -> $LOG"
 if [ "$TRAINER" = "mlx_lm" ]; then
   say "trainer: mlx_lm.lora (SFT) -- the path that produced the live v5 adapter"
   "$TRAIN_PY" -m mlx_lm.lora -c "$CONFIG" --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+elif [ "$TRAINER" = "mlx_tune" ]; then
+  say "trainer: mlx_tune --train-mode $TRAIN_MODE --beta $ORPO_BETA (own venv: $MLXTUNE_PY)"
+  # HU_MLX_TUNE_ALLOW_LOAD=1 is the driver's own belt-and-suspenders gate
+  # (scripts/mlx_tune_train.py::cmd_train) -- it refuses to load the base
+  # unless this env var is set, so only THIS guarded sequence (prod already
+  # stopped + reaped + headroom-checked above) can trigger a load.
+  HU_MLX_TUNE_ALLOW_LOAD=1 "$MLXTUNE_PY" "$(dirname "$0")/mlx_tune_train.py" \
+      --config "$CONFIG" --train-mode "$TRAIN_MODE" --beta "$ORPO_BETA" --gamma "$GAMMA" \
+      --adapter-out "$ADAPTER" 2>&1 | tee "$LOG"
 else
   say "trainer: mlx_lm_lora --train-mode ${TRAIN_MODE:-dpo} --beta $ORPO_BETA"
   "$TRAIN_PY" -m mlx_lm_lora.train -c "$CONFIG" \
@@ -201,7 +300,7 @@ fi
 # The banner echoes the mode the trainer actually resolved. Assert on it rather
 # than trusting the flag took -- a silently-ignored train_mode is the failure
 # that produced a full "successful" SFT run instead of the ORPO we asked for.
-if [ "$TRAINER" = "mlx_lm_lora" ]; then
+if [ "$TRAINER" = "mlx_lm_lora" ] || [ "$TRAINER" = "mlx_tune" ]; then
   grep -qiE "Training Mode:.*${TRAIN_MODE:-dpo}" "$LOG" \
     || die "trainer did not resolve mode=${TRAIN_MODE:-dpo} (see $LOG)"
   say "confirmed: trainer resolved mode=${TRAIN_MODE:-dpo}, beta=$ORPO_BETA"

@@ -74,7 +74,9 @@ static const char *const hu_config_top_keys[] = {
      * the validator emits "unknown key" even though config_parse.c
      * picks them up correctly. */
     "learning",
-    "intrinsic", /* A3 intrinsic motivation — docs/plans/2026-05-29-intrinsic-motivation/ */
+    "reflection", /* parsed by config_parse.c parse_reflection; was warned as unknown on every start
+                   */
+    "intrinsic",  /* A3 intrinsic motivation — docs/plans/2026-05-29-intrinsic-motivation/ */
     "prosocial_routines", /* C-series — docs/plans/2026-05-29-prosocial-uplift/ */
     "inference",
     /* 2026-05-25: initiative layer (proactive proposer skeleton). See

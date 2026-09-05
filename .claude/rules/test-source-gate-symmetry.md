@@ -61,6 +61,62 @@ inside an `if(HU_ENABLE_FEATURE)` block, the matching test file
    source can stay in the unconditional `HU_TEST_SOURCES` list
    without breaking variant builds.
 
+## Platform gates count too (HU_HAS_IMESSAGE)
+
+Not every gate is an `HU_ENABLE_*` option. `HU_HAS_IMESSAGE` is a CMake
+option that is ON only under `if(APPLE)`, wraps `src/channels/imessage.c`
+in `if(HU_HAS_IMESSAGE)`, and is forwarded to C as `HU_HAS_IMESSAGE=1`.
+A test that calls `hu_imessage_resume_rowid` / `hu_imessage_inbound_is_stale`
+without the same gate links on every macOS job and fails on every Linux
+job (`integration-tests`), exactly like an `HU_ENABLE_*` mismatch:
+
+```
+tests/test_imessage_replay_guard.c: undefined reference to `hu_imessage_resume_rowid'
+```
+
+That is commit `012ced741`. The checker reported *"All NEW test/source
+pairs have symmetric HU_ENABLE_* gating"* both before and after the fix,
+because it only recognised `HU_ENABLE_*` tokens in `if()` conditions.
+
+The checker now treats the macros listed in `PLATFORM_GATE_MACROS` (top
+of `scripts/check-test-source-gate-symmetry.sh`; today just
+`HU_HAS_IMESSAGE`) as gates, in both places a source can be excluded:
+
+- **CMake registration** — `if(HU_HAS_IMESSAGE) list(APPEND ... src/X.c)`.
+- **Source body** — `src/X.c` registered unconditionally but with every
+  code line inside `#if HU_HAS_IMESSAGE … #endif` and no `#else` stub, so
+  it exports nothing when the macro is off. (A file that provides non-Apple
+  stubs in `#else`, like `src/channels/imessage_reactions.c`, is *not*
+  body-gated: the stub is code outside the gate.)
+
+The two accepted shapes above apply unchanged, with the macro in place of
+the option. Shape 2 for `012ced741` looks like:
+
+```c
+#include "test_framework.h"
+
+#if HU_HAS_IMESSAGE
+#include "human/channels/imessage.h"
+/* ... bodies + runner ... */
+#else
+void run_imessage_replay_guard_tests(void) { (void)0; }
+#endif
+```
+
+Adding a new platform-only macro (a future `HU_HAS_*` that is ON only on
+one OS) means adding it to `PLATFORM_GATE_MACROS` — do not normalise it to
+`HU_ENABLE_*`, CMake spells it the same way in both places.
+
+Fixtures reproducing the pre-fix shape, the body-gated shape, and both
+accepted shapes live in `tests/fixtures/check-gate-symmetry/`; run
+
+```bash
+bash tests/fixtures/check-gate-symmetry/run-smoke-test.sh
+```
+
+after touching the checker. It points the script at each fixture with
+`--root <dir> --strict` and asserts the exact exit code.
+
 ## Why this rule exists
 
 This pattern is enforced by `scripts/check-test-source-gate-symmetry.sh`

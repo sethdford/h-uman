@@ -18,6 +18,7 @@
 #include "human/memory/engines.h"
 #include "human/memory/factory.h"
 #include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/vector.h"
 #include "human/memory/vector/embedder_gemini_adapter.h"
 #include "human/memory/vector/embeddings_gemini.h"
@@ -890,10 +891,47 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (gem_provider.ctx) {
             bi->embedder = hu_embedder_gemini_adapter_create(alloc, gem_provider);
         }
+        /* Semantic recall (Phase 2): under HU_SEMANTIC_RECALL=shadow|live the
+         * real HTTP embedder + persistent sqlite-vec store replace the hash
+         * embedder + empty in-memory store, and the engine indexes writes.
+         * OFF (default) keeps the legacy pair: zero behaviour change. Gated on
+         * the Phase-1 harness re-run through this path before LIVE. */
+        if (hu_semantic_recall_mode() != HU_GATE_OFF) {
+            /* Attach straight into bi->embedder / bi->vector_store. The sqlite
+             * engine keeps the ADDRESSES it is handed
+             * (hu_sqlite_memory_set_semantic_index) and dereferences them on
+             * every indexed store, so they must outlive this block. From
+             * 2026-09-02 to 09-04 they were block-scoped temporaries copied
+             * into bi afterwards: the engine kept pointing at the dead stack
+             * slot and ASan aborted the daemon in semantic_index_row 21 times
+             * (one per restart, on the first indexed store). bi is heap-owned
+             * for the app's lifetime; these addresses stay valid. Pinned by
+             * test_bootstrap_semantic_index_points_at_app_lifetime_embedder. */
+            hu_embedder_t prev_emb = bi->embedder;
+            hu_vector_store_t prev_vs = bi->vector_store;
+            if (hu_semantic_recall_attach(alloc, &bi->memory, &bi->embedder, &bi->vector_store) ==
+                HU_OK) {
+                if (prev_emb.ctx && prev_emb.vtable && prev_emb.vtable->deinit)
+                    prev_emb.vtable->deinit(prev_emb.ctx, alloc);
+                if (prev_vs.ctx && prev_vs.vtable && prev_vs.vtable->deinit)
+                    prev_vs.vtable->deinit(prev_vs.ctx, alloc);
+                hu_log_info("bootstrap", NULL, "semantic recall %s: embedder=%s store=sqlite-vec",
+                            hu_semantic_recall_mode() == HU_GATE_LIVE ? "LIVE" : "SHADOW",
+                            hu_semantic_recall_embed_url());
+            } else {
+                /* attach clears/overwrites its outputs on failure — restore. */
+                bi->embedder = prev_emb;
+                bi->vector_store = prev_vs;
+                hu_log_warn("bootstrap", NULL,
+                            "semantic recall requested but could not attach (non-sqlite backend?)"
+                            " — staying on the legacy embedder");
+            }
+        }
         if (!bi->embedder.ctx) {
             bi->embedder = hu_embedder_local_create(alloc);
         }
-        bi->vector_store = hu_vector_store_mem_create(alloc);
+        if (!bi->vector_store.ctx)
+            bi->vector_store = hu_vector_store_mem_create(alloc);
         bi->retrieval_engine =
             hu_retrieval_create_with_vector(alloc, &bi->memory, &bi->embedder, &bi->vector_store);
         ctx->embedder = &bi->embedder;
@@ -1289,6 +1327,25 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (cfg->channels.pwa.apps_count > 0 && ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
             err = hu_pwa_channel_create(alloc, (const char *const *)cfg->channels.pwa.apps,
                                         cfg->channels.pwa.apps_count, &bi->channel_slots[ch_count]);
+            /* 2026-09-04: nothing else ever called this channel's start(), so
+             * hu_pwa_channel_poll returned on every tick (running=false) and
+             * ten configured apps produced zero inbound messages. A start that
+             * fails (no browser, no monitored tab) is logged and the channel
+             * is not registered — an unstarted poll fn is silent dead weight. */
+            if (err == HU_OK) {
+                hu_channel_t *pwa = &bi->channel_slots[ch_count];
+                hu_error_t start_err = pwa->vtable && pwa->vtable->start
+                                           ? pwa->vtable->start(pwa->ctx)
+                                           : HU_ERR_NOT_SUPPORTED;
+                if (start_err != HU_OK) {
+                    hu_log_warn("bootstrap", NULL,
+                                "pwa channel not started (%s) — %zu configured app(s) will not "
+                                "be polled; open the tabs and allow browser automation",
+                                hu_error_string(start_err), cfg->channels.pwa.apps_count);
+                    hu_pwa_channel_destroy(pwa);
+                    err = start_err;
+                }
+            }
             if (err == HU_OK) {
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];

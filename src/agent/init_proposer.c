@@ -19,6 +19,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/memory.h"
+#include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
 #include "human/reflection.h" /* T8: pull unsurfaced patterns into bundle */
 #include <stdatomic.h>
@@ -42,6 +43,101 @@ void hu_init_proposer_reset_warn_guards_for_test(void) {
     atomic_store(&g_warned_enabled, false);
     atomic_store(&g_warned_no_dnd_config, false);
 #endif
+}
+
+/* Contract C5, Part A — log every proactive PROPOSAL decision so
+ * scripts/eval_when_to_speak.py has ground truth for the daemon's OWN
+ * decisions (MIR/FIR), not just what eventually got sent. Best-effort: a
+ * logging failure (no memory backend, no db, insert error) must never
+ * fail the tick itself — this is telemetry, not a gate. Test builds
+ * (HU_IS_TEST) skip the write entirely so unit tests never touch a real
+ * db path by accident; tests exercise the repo directly instead (see
+ * tests/test_proactive_decisions_repo.c). */
+static void init_proposer_record_decision(const struct hu_agent *agent, const char *contact,
+                                          const char *trigger, const char *decision,
+                                          const char *reason, const char *message_ref,
+                                          int64_t now_unix) {
+#if defined(HU_ENABLE_SQLITE) && !HU_IS_TEST
+    if (!agent || !agent->memory)
+        return;
+    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return;
+    /* sent=0: this row is the PROPOSAL decision. The actual send outcome
+     * (whether a channel accepted delivery) is a separate later event
+     * logged by hu_daemon_proactive_send_and_record in daemon_proactive.c
+     * — recording it here would claim delivery before it happened. */
+    hu_error_t err = hu_proactive_decisions_repo_record(db, now_unix, contact, trigger, decision,
+                                                        reason, 0, message_ref);
+    if (err != HU_OK)
+        hu_log_warn("init_proposer", NULL, "proactive_decisions_repo_record failed: err=%d",
+                    (int)err);
+#else
+    (void)agent;
+    (void)contact;
+    (void)trigger;
+    (void)decision;
+    (void)reason;
+    (void)message_ref;
+    (void)now_unix;
+#endif
+}
+
+/* decision/reason mapping for init_proposer_record_decision — pure so the
+ * mapping table itself is trivially auditable (and unit-testable if a
+ * future test wants to pin it, without touching sqlite). */
+static const char *init_proposer_decision_for_result(hu_init_proposer_result_t r) {
+    switch (r) {
+    case HU_INIT_RESULT_FIRED:
+        return HU_PROACTIVE_DECISION_SEND;
+    case HU_INIT_RESULT_GATED_BUDGET:
+    case HU_INIT_RESULT_GATED_RECENCY:
+    case HU_INIT_RESULT_GATED_INTERVAL:
+        return HU_PROACTIVE_DECISION_DEFER;
+    default:
+        return HU_PROACTIVE_DECISION_DECLINE;
+    }
+}
+
+static const char *init_proposer_reason_for_result(hu_init_proposer_result_t r) {
+    switch (r) {
+    case HU_INIT_RESULT_GATED_QUIET:
+        return "quiet_hours";
+    case HU_INIT_RESULT_GATED_BUDGET:
+        return "budget_exhausted";
+    case HU_INIT_RESULT_GATED_RECENCY:
+        return "recent_inbound";
+    case HU_INIT_RESULT_GATED_INTERVAL:
+        return "interval_not_elapsed";
+    case HU_INIT_RESULT_LLM_ERROR:
+        return "llm_error";
+    case HU_INIT_RESULT_PARSE_ERROR:
+        return "parse_error";
+    case HU_INIT_RESULT_LOW_CONFIDENCE:
+        return "low_confidence";
+    case HU_INIT_RESULT_NEGATIVE:
+        return "llm_negative";
+    case HU_INIT_RESULT_GUARD_REJECT:
+        return "guard_reject";
+    case HU_INIT_RESULT_SKIP:
+        return "no_provider_or_skip";
+    case HU_INIT_RESULT_FIRED:
+    default:
+        return NULL;
+    }
+}
+
+/* Bounded, always-NUL-terminated copy of inputs->contact_id (which is a
+ * pointer+len pair, not guaranteed NUL-terminated) for the decision-log
+ * `contact` column. */
+static void init_proposer_copy_contact(const hu_proactive_compose_inputs_t *inputs, char *buf,
+                                       size_t buf_cap) {
+    buf[0] = '\0';
+    if (!inputs || !inputs->contact_id || inputs->contact_id_len == 0 || buf_cap == 0)
+        return;
+    size_t n = inputs->contact_id_len < buf_cap - 1 ? inputs->contact_id_len : buf_cap - 1;
+    memcpy(buf, inputs->contact_id, n);
+    buf[n] = '\0';
 }
 
 hu_init_proposer_result_t
@@ -986,6 +1082,12 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     if (gov_result != HU_INIT_RESULT_SKIP) {
         if (out_result)
             *out_result = gov_result;
+        char contact_buf[128];
+        init_proposer_copy_contact(inputs, contact_buf, sizeof(contact_buf));
+        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                      "init_proposer_governor",
+                                      init_proposer_decision_for_result(gov_result),
+                                      init_proposer_reason_for_result(gov_result), NULL, now_unix);
         return HU_OK;
     }
 
@@ -993,6 +1095,11 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     if (!provider || !provider->vtable || !provider->vtable->chat_with_system || !alloc) {
         if (out_result)
             *out_result = HU_INIT_RESULT_SKIP;
+        char contact_buf[128];
+        init_proposer_copy_contact(inputs, contact_buf, sizeof(contact_buf));
+        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                      "init_proposer_governor", HU_PROACTIVE_DECISION_DECLINE,
+                                      "no_provider", NULL, now_unix);
         return HU_OK;
     }
 
@@ -1022,6 +1129,8 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     size_t response_len = 0;
     hu_error_t lerr = init_proposer_call_llm(alloc, provider, sys_prompt, user_msg, model,
                                              &response, &response_len);
+    char contact_buf[128];
+    init_proposer_copy_contact(inputs, contact_buf, sizeof(contact_buf));
     if (lerr != HU_OK || !response || response_len == 0) {
         hu_log_warn("init_proposer", NULL, "LLM call (ex) failed: err=%d (response_len=%zu)",
                     (int)lerr, response_len);
@@ -1029,6 +1138,9 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
             alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_LLM_ERROR;
+        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                      "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
+                                      "llm_error", NULL, now_unix);
         return HU_OK;
     }
 
@@ -1038,6 +1150,9 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     if (perr != HU_OK) {
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
+        init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL,
+                                      "init_proposer_llm", HU_PROACTIVE_DECISION_DECLINE,
+                                      "parse_error", NULL, now_unix);
         return HU_OK;
     }
 
@@ -1149,6 +1264,21 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
         *out_result = verdict;
     if (out_decision && verdict == HU_INIT_RESULT_FIRED)
         memcpy(out_decision, &decision, sizeof(decision));
+
+    /* message_ref is a short, bounded PREFIX only — this table is a
+     * decision log, not a message store (see header for the rationale). */
+    char msg_ref_buf[65];
+    msg_ref_buf[0] = '\0';
+    if (verdict == HU_INIT_RESULT_FIRED && decision.draft_len > 0) {
+        size_t n = decision.draft_len < sizeof(msg_ref_buf) - 1 ? decision.draft_len
+                                                                : sizeof(msg_ref_buf) - 1;
+        memcpy(msg_ref_buf, decision.draft, n);
+        msg_ref_buf[n] = '\0';
+    }
+    init_proposer_record_decision(agent, contact_buf[0] ? contact_buf : NULL, "init_proposer_llm",
+                                  init_proposer_decision_for_result(verdict),
+                                  init_proposer_reason_for_result(verdict),
+                                  msg_ref_buf[0] ? msg_ref_buf : NULL, now_unix);
     return HU_OK;
 #endif
 }

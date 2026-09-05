@@ -2,10 +2,11 @@
 #define HU_AGENT_STYLE_GOVERNOR_H
 
 /* Style governor — deterministic outbound shape enforcement driven by the
- * MEASURED style card (scripts/persona_style_card.py, 2026-07-12, n=1488):
- *
- *   no-terminal-punct = 79%   (model baseline: 10%)
- *   ?-endings         =  9%   (model baseline: 31%)
+ * MEASURED style card (~/.human/personas/<persona>.style-card.json, written
+ * by scripts/measure_style_card.py — the single source for style numbers;
+ * see include/human/persona/style_card.h). At the 2026-07-12 measurement
+ * the persona ended ~4 in 5 texts with no terminal punctuation and ~1 in 10
+ * with '?', against a model baseline of 10% / 31%.
  *
  * Terminal punctuation is the single strongest "this is AI" tell for this
  * persona; the reciprocal trailing question ("What's up with you?") is the
@@ -15,7 +16,7 @@
  * Two actions:
  *   A. Strip a single terminal '.' — hash-gated so ~90% of period-ending
  *      messages lose it (combined with naturally unpunctuated output this
- *      lands near the measured 79% no-punct rate). Ellipses ("...", "…"),
+ *      lands near the card's no-punct rate). Ellipses ("...", "…"),
  *      '?', '!' are never touched by this action.
  *   B. Strip a trailing reciprocal-question boilerplate sentence ("What
  *      about you?", "How was your day?") when there is real content before

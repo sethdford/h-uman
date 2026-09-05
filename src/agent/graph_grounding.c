@@ -2,6 +2,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/core/gate_mode.h"
 #include "human/memory/graph.h"
+#include "human/memory/graph_state.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -162,7 +163,9 @@ uint32_t hu_graph_ground_fingerprint(const char *content, size_t len) {
 
 enum {
     GG_CANDIDATE_LIMIT = 64, /* top entities by mention_count considered */
-    GG_TOP_K = 4,            /* seed entities composed into the context */
+    GG_MATCH_LIMIT = 32,     /* message-driven candidates (name shares a word) */
+    GG_SCORE_CAP = GG_CANDIDATE_LIMIT + GG_MATCH_LIMIT,
+    GG_TOP_K = 4, /* seed entities composed into the context */
     GG_NEIGHBORS_PER_SEED = 4,
     GG_CONTEXT_SNIPPET_MAX = 96, /* relation `context` excerpt cap */
 };
@@ -225,15 +228,58 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
     hu_graph_entity_t *cands = NULL;
     size_t cand_count = 0;
     if (hu_graph_list_entities(g, alloc, contact_id, contact_id_len, GG_CANDIDATE_LIMIT, &cands,
-                               &cand_count) != HU_OK ||
-        cand_count == 0)
+                               &cand_count) != HU_OK)
+        cand_count = 0;
+    /* Message-driven candidates: entities whose name shares a word with the
+     * message, regardless of popularity. Without this, anything beyond the
+     * top-64 by mention_count could never seed (2026-09-01: "Vanguard" at
+     * rank 96 of 571). Appended and de-duplicated by id. */
+    hu_graph_entity_t *word_hits = NULL;
+    size_t hit_count = 0;
+    if (hu_graph_find_entities_matching(g, alloc, contact_id, contact_id_len, msg, msg_len,
+                                        GG_MATCH_LIMIT, &word_hits, &hit_count) == HU_OK &&
+        hit_count > 0) {
+        size_t total = cand_count + hit_count;
+        hu_graph_entity_t *merged =
+            (hu_graph_entity_t *)alloc->alloc(alloc->ctx, total * sizeof(*merged));
+        if (merged) {
+            size_t merged_n = 0;
+            for (size_t i = 0; i < cand_count; i++)
+                merged[merged_n++] = cands[i];
+            for (size_t j = 0; j < hit_count; j++) {
+                bool dup = false;
+                for (size_t i = 0; i < cand_count && !dup; i++)
+                    dup = (cands[i].id == word_hits[j].id);
+                if (dup) {
+                    /* free the duplicate's strings; the struct itself lives in word_hits[] */
+                    if (word_hits[j].name)
+                        alloc->free(alloc->ctx, word_hits[j].name, word_hits[j].name_len + 1);
+                    if (word_hits[j].metadata_json)
+                        alloc->free(alloc->ctx, word_hits[j].metadata_json,
+                                    strlen(word_hits[j].metadata_json) + 1);
+                } else {
+                    merged[merged_n++] = word_hits[j];
+                }
+            }
+            if (cands)
+                alloc->free(alloc->ctx, cands, cand_count * sizeof(*cands));
+            alloc->free(alloc->ctx, word_hits, hit_count * sizeof(*word_hits));
+            cands = merged;
+            cand_count = merged_n;
+        } else {
+            hu_graph_entities_free(alloc, word_hits, hit_count);
+        }
+    }
+    if (cand_count == 0) {
+        if (cands)
+            hu_graph_entities_free(alloc, cands, 0);
         return HU_OK;
-
+    }
     /* Score every candidate against the incoming message; keep the top-k
-     * with score > 0. Selection sort over <= 64 items — no allocation. */
+     * with score > 0. Selection sort over <= GG_SCORE_CAP items. */
     int64_t now_ms = (int64_t)time(NULL) * 1000;
-    double scores[GG_CANDIDATE_LIMIT];
-    for (size_t i = 0; i < cand_count && i < GG_CANDIDATE_LIMIT; i++) {
+    double scores[GG_SCORE_CAP];
+    for (size_t i = 0; i < cand_count && i < GG_SCORE_CAP; i++) {
         const hu_graph_entity_t *e = &cands[i];
         size_t words = hu_graph_ground_name_word_count(e->name, e->name_len);
         size_t hits = hu_graph_ground_entity_match_count(msg, msg_len, e->name, e->name_len);
@@ -244,7 +290,7 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
     for (size_t k = 0; k < GG_TOP_K; k++) {
         size_t best = (size_t)-1;
         double best_score = 0.0;
-        for (size_t i = 0; i < cand_count && i < GG_CANDIDATE_LIMIT; i++) {
+        for (size_t i = 0; i < cand_count && i < GG_SCORE_CAP; i++) {
             if (scores[i] > best_score) {
                 best_score = scores[i];
                 best = i;
@@ -293,9 +339,20 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
         hu_graph_entity_t *nbrs = NULL;
         hu_graph_relation_t *rels = NULL;
         size_t ncount = 0;
+        /* Fetch twice the render budget so a superseded chain has room to
+         * collapse: the state view keeps one head per (source, type) and
+         * marks history, so "user works_at Vanguard" can never sit beside
+         * "user works_at Raymond James" as if both held (2026-09-04). */
         if (hu_graph_neighbors(g, alloc, contact_id, contact_id_len, seed->id, 1,
-                               GG_NEIGHBORS_PER_SEED, &nbrs, &rels, &ncount) == HU_OK) {
-            for (size_t i = 0; i < ncount; i++) {
+                               (size_t)GG_NEIGHBORS_PER_SEED * 2u, &nbrs, &rels,
+                               &ncount) == HU_OK) {
+            hu_graph_state_entry_t *view = NULL;
+            size_t view_n = 0;
+            if (hu_graph_state_resolve(alloc, rels, ncount, now_ms, &view, &view_n) != HU_OK)
+                view_n = 0;
+            size_t rendered = 0;
+            for (size_t k = 0; k < view_n && rendered < GG_NEIGHBORS_PER_SEED; k++) {
+                size_t i = (size_t)(view[k].rel - rels);
                 if (!nbrs[i].name || nbrs[i].name_len == 0)
                     continue;
                 const char *rel_str = hu_relation_type_to_string(rels[i].type);
@@ -309,6 +366,11 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                           gg_append(buf, max_chars, &pos, " ", 1) &&
                           gg_append(buf, max_chars, &pos, outward ? nbrs[i].name : seed->name,
                                     outward ? nbrs[i].name_len : seed->name_len);
+                char suffix[96];
+                size_t suffix_len =
+                    hu_graph_relation_state_suffix(g, alloc, &view[k], suffix, sizeof(suffix));
+                if (ok && suffix_len > 0)
+                    ok = gg_append(buf, max_chars, &pos, suffix, suffix_len);
                 if (!ok) {
                     pos = nb_start;
                     break;
@@ -319,7 +381,10 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                     pos = nb_start;
                     break;
                 }
+                rendered++;
             }
+            if (view)
+                alloc->free(alloc->ctx, view, view_n * sizeof(*view));
             hu_graph_entities_free(alloc, nbrs, ncount);
             hu_graph_relations_free(alloc, rels, ncount);
         }

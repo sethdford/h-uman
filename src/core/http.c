@@ -28,6 +28,18 @@ size_t hu_http_max_provider_body_bytes(void) {
     return (size_t)3 << 20; /* 3 MiB */
 }
 
+long hu_http_effective_timeout_secs(const hu_http_request_opts_t *opts) {
+    if (opts && opts->timeout_secs > 0)
+        return opts->timeout_secs;
+    return HU_HTTP_DEFAULT_TIMEOUT_SECS;
+}
+
+long hu_http_effective_connect_timeout_secs(const hu_http_request_opts_t *opts) {
+    if (opts && opts->connect_timeout_secs > 0)
+        return opts->connect_timeout_secs;
+    return HU_HTTP_DEFAULT_CONNECT_TIMEOUT_SECS;
+}
+
 /* True if `body_len` is within the outbound cap. On the over-cap path it logs
  * once per offending request (no secrets: length + URL only). Callers must
  * reject the POST when this returns false. */
@@ -45,7 +57,8 @@ static bool hu_http_body_within_cap(const char *url, size_t body_len) {
 #if HU_IS_TEST
 /* In test mode, skip real HTTP and return mock response */
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
+    (void)max_redirs;
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
     (void)auth_header;
@@ -68,12 +81,14 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
 static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *auth_header, const char *extra_headers,
                                          const char *json_body, size_t json_body_len,
+                                         const hu_http_request_opts_t *opts,
                                          hu_http_response_t *out) {
     (void)url;
     (void)auth_header;
     (void)extra_headers;
     (void)json_body;
     (void)json_body_len;
+    (void)opts;
 
     const char *mock =
         "{\"choices\":[{\"message\":{\"content\":\"Hello from mock HTTP\"}}],"
@@ -136,6 +151,29 @@ static void add_header(struct curl_slist **list, const char *header) {
     }
 }
 
+/* Append each non-empty line of `extra_headers` ("Key: val\nKey2: val2",
+ * CRLF tolerated) to the curl header list. Lines >= 512 bytes are dropped. */
+static void add_headers_from_lines(struct curl_slist **list, const char *extra_headers) {
+    if (!extra_headers || !extra_headers[0])
+        return;
+    const char *p = extra_headers;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
+        if (linelen > 0 && linelen < 512) {
+            char line[512];
+            memcpy(line, p, linelen);
+            line[linelen] = '\0';
+            if (line[linelen - 1] == '\r')
+                line[--linelen] = '\0';
+            add_header(list, line); /* add_header ignores an empty line */
+        }
+        if (!eol)
+            break;
+        p = eol + 1;
+    }
+}
+
 /* ── Connection pool: reuse curl handles to avoid TCP/TLS handshake ── */
 #define HU_CURL_POOL_SIZE         4
 
@@ -170,8 +208,10 @@ static void curl_pool_release(CURL *h) {
     }
 }
 
-static void curl_setup_common(CURL *curl) {
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);
+static void curl_setup_common(CURL *curl, const hu_http_request_opts_t *opts) {
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, hu_http_effective_timeout_secs(opts));
+    /* Connect cap was previously unbounded (libcurl default 300 s). */
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, hu_http_effective_connect_timeout_secs(opts));
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 300L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
@@ -183,7 +223,7 @@ static void curl_setup_common(CURL *curl) {
 }
 
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -222,7 +262,24 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_setup_common(curl);
+    curl_setup_common(curl, NULL);
+    /* Opt-in redirect following (feeds: publishers move RSS URLs behind
+     * 301/307 and never come back). HTTPS-only on the hop, so a redirect
+     * cannot downgrade the transport; credentials are not re-sent to a
+     * different host (CURLOPT_UNRESTRICTED_AUTH stays 0). Pool handles are
+     * curl_easy_reset() on acquire, so this never leaks into POST paths. */
+    if (max_redirs > 0) {
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, max_redirs);
+        /* CURLOPT_REDIR_PROTOCOLS_STR is an enum, not a macro, so #ifdef
+         * cannot detect it; on libcurl ≥ 7.85 the old option is deprecated
+         * and -Werror fails the Linux build (main CI 2026-09-02). */
+#if LIBCURL_VERSION_NUM >= 0x075500
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, (long)CURLPROTO_HTTPS);
+#endif
+    }
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
@@ -263,25 +320,7 @@ static hu_error_t hu_http_get_ex_impl(hu_allocator_t *alloc, const char *url,
     memset(out, 0, sizeof(*out));
 
     struct curl_slist *headers = NULL;
-    if (extra_headers && extra_headers[0]) {
-        const char *p = extra_headers;
-        while (*p) {
-            const char *eol = strchr(p, '\n');
-            size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
-            if (linelen > 0 && linelen < 512) {
-                char line[512];
-                memcpy(line, p, linelen);
-                line[linelen] = '\0';
-                if (linelen > 0 && line[linelen - 1] == '\r')
-                    line[--linelen] = '\0';
-                if (linelen > 0)
-                    add_header(&headers, line);
-            }
-            if (!eol)
-                break;
-            p = eol + 1;
-        }
-    }
+    add_headers_from_lines(&headers, extra_headers);
 
     write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
@@ -298,7 +337,7 @@ static hu_error_t hu_http_get_ex_impl(hu_allocator_t *alloc, const char *url,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_setup_common(curl);
+    curl_setup_common(curl, NULL);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
@@ -335,6 +374,7 @@ static hu_error_t hu_http_get_ex_impl(hu_allocator_t *alloc, const char *url,
 static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *auth_header, const char *extra_headers,
                                          const char *json_body, size_t json_body_len,
+                                         const hu_http_request_opts_t *opts,
                                          hu_http_response_t *out) {
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -359,24 +399,7 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
             add_header(&headers, auth_buf);
     }
     add_header(&headers, "Content-Type: application/json");
-    if (extra_headers && extra_headers[0]) {
-        const char *p = extra_headers;
-        while (*p) {
-            const char *eol = strchr(p, '\n');
-            size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
-            if (linelen > 0 && linelen < 512) {
-                char line[512];
-                memcpy(line, p, linelen);
-                line[linelen] = '\0';
-                if (line[linelen - 1] == '\r')
-                    line[--linelen] = '\0';
-                add_header(&headers, line);
-            }
-            if (!eol)
-                break;
-            p = eol + 1;
-        }
-    }
+    add_headers_from_lines(&headers, extra_headers);
 
     write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
@@ -404,7 +427,7 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_setup_common(curl);
+    curl_setup_common(curl, opts);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
@@ -467,24 +490,7 @@ static hu_error_t hu_http_post_json_stream_impl(hu_allocator_t *alloc, const cha
             add_header(&headers, auth_buf);
     }
     add_header(&headers, "Content-Type: application/json");
-    if (extra_headers && extra_headers[0]) {
-        const char *p = extra_headers;
-        while (*p) {
-            const char *eol = strchr(p, '\n');
-            size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
-            if (linelen > 0 && linelen < 512) {
-                char line[512];
-                memcpy(line, p, linelen);
-                line[linelen] = '\0';
-                if (line[linelen - 1] == '\r')
-                    line[--linelen] = '\0';
-                add_header(&headers, line);
-            }
-            if (!eol)
-                break;
-            p = eol + 1;
-        }
-    }
+    add_headers_from_lines(&headers, extra_headers);
 
     if (json_body_len > (size_t)LONG_MAX) {
         curl_slist_free_all(headers);
@@ -498,7 +504,7 @@ static hu_error_t hu_http_post_json_stream_impl(hu_allocator_t *alloc, const cha
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb_stream);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
-    curl_setup_common(curl);
+    curl_setup_common(curl, NULL);
 
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
@@ -518,10 +524,11 @@ static hu_error_t hu_http_post_json_stream_impl(hu_allocator_t *alloc, const cha
 }
 #else
 static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                   hu_http_response_t *out) {
+                                   long max_redirs, hu_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)auth_header;
+    (void)max_redirs;
     (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
@@ -529,6 +536,7 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
 static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *auth_header, const char *extra_headers,
                                          const char *json_body, size_t json_body_len,
+                                         const hu_http_request_opts_t *opts,
                                          hu_http_response_t *out) {
     (void)alloc;
     (void)url;
@@ -536,6 +544,7 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
     (void)extra_headers;
     (void)json_body;
     (void)json_body_len;
+    (void)opts;
     (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
@@ -544,29 +553,43 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
 
 hu_error_t hu_http_post_json(hu_allocator_t *alloc, const char *url, const char *auth_header,
                              const char *json_body, size_t json_body_len, hu_http_response_t *out) {
-    if (!hu_http_body_within_cap(url, json_body_len)) {
-        if (out)
-            memset(out, 0, sizeof(*out));
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-    return hu_http_post_json_impl(alloc, url, auth_header, NULL, json_body, json_body_len, out);
+    return hu_http_post_json_opts(alloc, url, auth_header, NULL, json_body, json_body_len, NULL,
+                                  out);
 }
 
 hu_error_t hu_http_post_json_ex(hu_allocator_t *alloc, const char *url, const char *auth_header,
                                 const char *extra_headers, const char *json_body,
                                 size_t json_body_len, hu_http_response_t *out) {
+    return hu_http_post_json_opts(alloc, url, auth_header, extra_headers, json_body, json_body_len,
+                                  NULL, out);
+}
+
+hu_error_t hu_http_post_json_opts(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                                  const char *extra_headers, const char *json_body,
+                                  size_t json_body_len, const hu_http_request_opts_t *opts,
+                                  hu_http_response_t *out) {
+    if (!alloc || !url || !out)
+        return HU_ERR_INVALID_ARGUMENT;
     if (!hu_http_body_within_cap(url, json_body_len)) {
-        if (out)
-            memset(out, 0, sizeof(*out));
+        memset(out, 0, sizeof(*out));
         return HU_ERR_INVALID_ARGUMENT;
     }
     return hu_http_post_json_impl(alloc, url, auth_header, extra_headers, json_body, json_body_len,
-                                  out);
+                                  opts, out);
 }
 
 hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url, const char *auth_header,
                        hu_http_response_t *out) {
-    return hu_http_get_impl(alloc, url, auth_header, out);
+    return hu_http_get_impl(alloc, url, auth_header, 0L, out);
+}
+
+hu_error_t hu_http_get_follow(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                              int max_redirects, hu_http_response_t *out) {
+    if (max_redirects < 0)
+        max_redirects = 0;
+    if (max_redirects > 10)
+        max_redirects = 10;
+    return hu_http_get_impl(alloc, url, auth_header, (long)max_redirects, out);
 }
 
 #if defined(HU_HTTP_CURL) && !HU_IS_TEST
@@ -589,25 +612,7 @@ hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *m
     memset(out, 0, sizeof(*out));
 
     struct curl_slist *headers = NULL;
-    if (extra_headers && extra_headers[0]) {
-        const char *p = extra_headers;
-        while (*p) {
-            const char *eol = strchr(p, '\n');
-            size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
-            if (linelen > 0 && linelen < 512) {
-                char line[512];
-                memcpy(line, p, linelen);
-                line[linelen] = '\0';
-                if (linelen > 0 && line[linelen - 1] == '\r')
-                    line[--linelen] = '\0';
-                if (linelen > 0)
-                    add_header(&headers, line);
-            }
-            if (!eol)
-                break;
-            p = eol + 1;
-        }
-    }
+    add_headers_from_lines(&headers, extra_headers);
 
     write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
@@ -634,7 +639,7 @@ hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *m
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_setup_common(curl);
+    curl_setup_common(curl, NULL);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
