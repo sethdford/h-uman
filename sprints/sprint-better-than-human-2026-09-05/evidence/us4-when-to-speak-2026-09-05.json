@@ -1,0 +1,56 @@
+{
+  "story": "US-4",
+  "script": "scripts/eval_when_to_speak.py",
+  "invocation": "python3 scripts/eval_when_to_speak.py --compare-baseline sprints/sprint-better-than-human-2026-09-05/evidence/us3-seth-initiation-baseline.json",
+  "source": "~/.human/memory.db (proactive_decisions, real log) + ~/Library/Messages/chat.db, both opened mode=ro (zero writes)",
+  "privacy_note": "aggregates only -- no message text, phone numbers, handles, or names below or anywhere in the script's output",
+  "generated_at": 1788641086,
+  "days": 90,
+  "min_n": 30,
+  "decisions_source": "proactive_decisions",
+  "ac_4_1_satisfied": true,
+  "ac_4_1_note": "the printed source line reads 'proactive_decisions', not 'fallback' -- the real log (89 rows since 2026-09-02, well above the empty-window fallthrough) was used, not the structurally-biased fallback.",
+  "result": "REFUSED",
+  "refusal": {
+    "stderr_verbatim": "REFUSE: insufficient n (MIR n=724, FIR n=2, min_n=30) — not writing a result.",
+    "mir_n": 724,
+    "fir_n": 2,
+    "min_n": 30,
+    "which_metric_refused": "FIR only (MIR n=724 clears min_n=30 comfortably; FIR n=2 does not)"
+  },
+  "ac_4_2_satisfied": true,
+  "ac_4_2_note": "the script's existing refusal fired on the real log (exit 2, 'REFUSE: insufficient n ...'); --min-n was NOT lowered to force a number, per .claude/rules/no-number-without-a-measurement.md and this story's own instruction. FIR n=2 is the story's committed (negative) result for FIR, recorded verbatim above and in the diagnostic breakdown below.",
+  "diagnostic_breakdown_of_fir_pool": {
+    "note": "descriptive COUNTS only (not a rate -- these are not gated by --min-n and are not a substitute for the refused FIR rate; they exist so a reader can see WHERE the 89 raw proactive_decisions rows went, per .claude/rules/no-number-without-a-measurement.md's 'refuse loudly, don't hide the denominator' spirit). Computed by calling load_decisions() + resolve_decision_events() directly against the real proactive_decisions table, read-only, with no rate ever derived from them.",
+    "raw_rows_loaded": 89,
+    "resolved_events_after_join_dedup": 80,
+    "dropped_pre_send": 6,
+    "send_failed": 7,
+    "eligible_confirmed_send": 2,
+    "other_decline_or_defer_no_send_attempted": 65
+  },
+  "mir": {
+    "n": 724,
+    "note": "MIR clears --min-n (30) on the real log, but this story's success criterion (AC-4.3) requires BOTH mir.n and fir.n to clear before either rate is committed -- the script's combined refusal check (main()) is single-gate by design (see designs/US-4.md 'Measurement and refusal conditions'). MIR's rate is therefore not reported here either, even though its own denominator is large -- committing MIR alone without FIR would silently imply a comparison that never happened."
+  },
+  "comparison": {
+    "available": false,
+    "reason": "FIR itself refused (n=2 < min_n=30) -- there is no FIR rate to compare against Seth's US-3 baseline. This is distinct from 'baseline unavailable': the US-3 baseline (sprints/sprint-better-than-human-2026-09-05/evidence/us3-seth-initiation-baseline.json, rate=0.32, n=50) IS available and was read successfully; it is FIR's own numerator/denominator that does not exist yet."
+  },
+  "ac_4_4_satisfied": true,
+  "ac_4_4_note": "the three-way state required by AC-4.4 (FIR <= baseline / FIR > baseline / baseline unavailable) does not cover this exact case -- FIR could not be computed at all -- so a fourth, equally explicit state is recorded above ('comparison.available: false, reason: FIR itself refused') rather than silently omitting the comparison or forcing one of the other three labels onto a non-existent rate.",
+  "known_limitations": [
+    "the (contact, ts) join between a FIRED proposal row (trigger='init_proposer_llm') and its outcome row (trigger='proactive_send') is a practical key -- both call sites share the same daemon-tick `now` local (src/daemon.c:1531-1671), not a schema-enforced foreign key -- so two distinct ticks for the same contact landing on the same integer unix-second ts would collide (low-probability, undetected by this script).",
+    "an older proactive-send path (src/daemon.c's hu_init_proposer_tick_with_provider, the non-'_ex' variant) sends directly via the channel vtable and never writes to proactive_decisions; any sends through that path are invisible to this measurement -- a coverage gap in what MIR/FIR can see, not a join/dedup problem."
+  ],
+  "ac_4_5_satisfied": true,
+  "ac_4_5_note": "no change to daemon.c's decision logic or the reply-delay model's off state; this story ran a read-only measurement script only. Nothing flips to LIVE -- see designs/US-4.md 'SHADOW policy shape' (this story ships no OFF/SHADOW/LIVE gate; it produces evidence a FUTURE policy-change story would need its own gate for).",
+  "ac_4_6_satisfied": true,
+  "ac_4_6_note": ":8741 and the service-loop were not touched, restarted, or repointed by this story.",
+  "appendix_e_fallback_numbers_for_reference": {
+    "note": "the known-inflated numbers this story was asked to replace -- NOT reproduced by re-running the fallback path (that would require --memory-db pointed at a copy with proactive_decisions removed, which this story did not do); quoted from the sprint's own prior Appendix E text for context only.",
+    "mir": 0.613,
+    "fir": 0.670
+  },
+  "conclusion": "The real proactive_decisions log has too few confirmed-delivery events (n=2, post-join-dedup) to produce a defensible FIR rate under the standing --min-n=30 floor. This refusal -- not a synthetic number -- is this story's honest result. The diagnostic breakdown (6 dropped_pre_send, 7 send_failed, 65 other declines/defers out of 89 raw rows / 80 resolved events) explains why: the daemon's proactive policy is overwhelmingly declining or failing before a message ever reaches the wire, so there is very little delivered-send volume for FIR to measure against yet. A future re-run once proactive_decisions has accumulated more confirmed sends (or once the older Initiative Layer path -- Finding 3 -- is consolidated into the same log) may clear --min-n; this run should not be treated as evidence that FIR is low, only that it is not yet measurable."
+}
