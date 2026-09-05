@@ -6,6 +6,13 @@
 
 typedef struct hu_search_result {
     char *content;
+    /* memories.key of the row this result came from (owned, freed by
+     * hu_rerank_free_results), or NULL when the producer had no key. Carried
+     * through RRF merge and the in-place sorts so consumers converting back to
+     * hu_memory_entry_t can restore the real key instead of copying content
+     * into the key column (the 2026-09-03 C2-ablation contamination). */
+    char *key;
+    size_t key_len;
     float score;        /* original score (BM25 or cosine) */
     float rerank_score; /* after reranking */
     size_t original_rank;
