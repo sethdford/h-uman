@@ -13,6 +13,18 @@ check. It never trains, never generates, never loads a model — it is pure
 arithmetic on numbers `authorship_gap.py` (via score_candidate_offline.py)
 already measured.
 
+NOISE-AWARE, THREE-WAY VERDICT (2026-09-05 fix, F1): the first cut of this
+gate compared point-mean twins only (`candidate_twin <= serving_twin ->
+BLOCK`). With n~=36 trials and a bootstrap CI half-width of ~0.1
+(authorship_gap.py's `stat()` resamples splits=200 times from that same
+~36-trial pool, so its resolution is bounded by the pool size, not the
+resample count), that boundary treats ordinary measurement noise as a
+regression. The real 2026-09-02 vs 2026-09-04 cycle (twin 0.633 -> 0.625,
+delta -0.008) is a textbook case: a point-mean gate BLOCKs it every single
+night forever, even though the CIs overlap heavily and the data cannot
+actually distinguish "slightly worse" from "no change." See
+decide_promotion()'s docstring for the resulting PASS/BLOCK/HOLD verdict.
+
 Two enforcement points consume this module:
   - scripts/blind_ab/score_candidate_offline.py — adds a `promotion_gate`
     field to its own nightly output (informational at that call site; that
@@ -27,9 +39,13 @@ Two enforcement points consume this module:
 Contract (.claude/rules/no-number-without-a-measurement.md): a missing or
 malformed input REFUSES loudly (SystemExit, nothing computed) rather than
 silently defaulting to a number that could produce a false PASS.
-`decide_promotion()` itself has exactly two possible verdicts, PASS and
-BLOCK — INCONCLUSIVE is a property of the *loader* raising before
+`decide_promotion()` itself has exactly three possible verdicts, PASS,
+BLOCK, and HOLD — INCONCLUSIVE is a property of the *loader* raising before
 `decide_promotion` is ever called, never a return value of the predicate.
+HOLD means "the data cannot distinguish this from noise": no promotion (a
+consumer must treat it exactly like BLOCK for the swap decision), but also
+no regression is asserted — the recommendation is to accumulate another
+measurement cycle, not to treat the candidate as broken.
 
 No message text, phone numbers, or names ever pass through this module —
 every input is a float, a path, or a fixed string, mirroring
@@ -59,36 +75,90 @@ def _as_finite_float(v):
     return f
 
 
-def decide_promotion(candidate_twin, serving_twin, floor, min_gain=0.0):
-    """Pure. All three args are floats already read from authorship_gap.py's
-    own JSON (never hardcoded 0.625/0.70/0.62 — those numbers are context,
-    not constants). Returns {"verdict": "PASS"|"BLOCK", "reason": str,
-    "candidate_twin", "serving_twin", "floor", "delta"}.
+def _as_finite_ci95(v):
+    """Validate a [lo, hi] 95% CI as two finite floats with lo <= hi.
+    Returns (lo, hi) as floats, or None if `v` isn't a 2-element
+    list/tuple of finite, ordered numbers. Same defensive contract as
+    _as_finite_float: a malformed CI must never silently become a default
+    that changes the noise-aware verdict (a missing/short/unordered CI is
+    exactly the class of bug .claude/rules/no-number-without-a-measurement.md
+    catalogs, applied to the CI input instead of the mean)."""
+    if not isinstance(v, (list, tuple)) or len(v) != 2:
+        return None
+    lo = _as_finite_float(v[0])
+    hi = _as_finite_float(v[1])
+    if lo is None or hi is None or lo > hi:
+        return None
+    return (lo, hi)
+
+
+def decide_promotion(candidate_twin, serving_twin, floor, candidate_twin_ci95, min_gain=0.05):
+    """Pure. Returns {"verdict": "PASS"|"BLOCK"|"HOLD", "reason": str,
+    "candidate_twin", "serving_twin", "floor", "delta",
+    "candidate_twin_ci95", "min_gain"}.
 
     Never returns INCONCLUSIVE — that state is a property of MISSING
     inputs, decided by the caller (load_gate_inputs_from_score_json /
     load_gate_inputs_from_gap_jsons) before this function is ever called.
 
-    AC-2.2's literal boundary: BLOCK when new-cycle twin <= previous-cycle
-    twin (a plain `<=`, not `<` — an off-by-one here would be invisible in
-    every other test, so the boundary is pinned by its own test), OR
-    new-cycle twin < the measured floor. `min_gain` defaults to 0.0 (the
-    literal AC-2.2 boundary) and is a keyword, not a magic number buried in
-    the body, so a later story can require a minimum step size without
-    touching this function's control flow.
+    Noise-aware, three-way verdict (F1 fix, 2026-09-05). The original
+    point-mean-only gate (`candidate_twin <= serving_twin -> BLOCK`) treats
+    ordinary bootstrap noise as a regression: authorship_gap.py's CI is a
+    percentile bootstrap over splits=200 resamples of the SAME ~36-trial
+    pool, so its true resolution is bounded by the pool size, not the
+    resample count — real observed CI half-widths run ~0.1 on this metric.
+    A candidate/serving delta smaller than that half-width is not
+    distinguishable from zero, and BLOCKing on it every night starves
+    promotion forever (see module docstring's 0.633 -> 0.625 example).
+
+    Verdict order (each check short-circuits the ones below it):
+
+      1. BLOCK "below_floor" — candidate_twin < floor. The floor comparison
+         stays a plain point comparison (AC-2.2's original second
+         OR-clause): a candidate scoring below what raw non-Seth humans
+         score is disqualified regardless of how wide its own CI is.
+      2. BLOCK "regression_ci_distinguishable" — the candidate's CI upper
+         bound is BELOW the serving twin's point estimate. The data can
+         positively distinguish this as worse, not just "not better."
+      3. PASS "twin_improved_ci_distinguishable" — the candidate's CI lower
+         bound is ABOVE the serving twin's point estimate. The data can
+         positively distinguish this as better.
+      4. PASS "twin_improved_min_gain" — neither CI bound crosses the
+         serving twin (the two are statistically indistinguishable by CI
+         alone), but the point-estimate gain is at least `min_gain`
+         (default 0.05, roughly half a typical CI half-width) — a
+         deliberately smaller bar than full CI separation, so a real,
+         if noisy-looking, step forward isn't stuck behind (3) forever.
+      5. HOLD "within_noise" — none of the above: the two point estimates
+         are close, the CIs overlap, and the improvement (if any) is
+         smaller than min_gain. No promotion (treat exactly like BLOCK for
+         any swap decision) but also no regression is asserted — the
+         correct action is to accumulate another measurement cycle, not to
+         reject the candidate.
+
+    `min_gain` is a keyword, not a magic number buried in the body, so a
+    later story can retune the minimum detectable step without touching
+    this function's control flow.
     """
     delta = round(candidate_twin - serving_twin, 4)
+    ci_lo, ci_hi = candidate_twin_ci95
     base = {
         "candidate_twin": candidate_twin,
         "serving_twin": serving_twin,
         "floor": floor,
         "delta": delta,
+        "candidate_twin_ci95": [ci_lo, ci_hi],
+        "min_gain": min_gain,
     }
     if candidate_twin < floor:
         return {**base, "verdict": "BLOCK", "reason": "below_floor"}
-    if candidate_twin <= serving_twin + min_gain:
-        return {**base, "verdict": "BLOCK", "reason": "regression_vs_prior"}
-    return {**base, "verdict": "PASS", "reason": "twin_improved_over_prior_above_floor"}
+    if ci_hi < serving_twin:
+        return {**base, "verdict": "BLOCK", "reason": "regression_ci_distinguishable"}
+    if ci_lo > serving_twin:
+        return {**base, "verdict": "PASS", "reason": "twin_improved_ci_distinguishable"}
+    if delta >= min_gain:
+        return {**base, "verdict": "PASS", "reason": "twin_improved_min_gain"}
+    return {**base, "verdict": "HOLD", "reason": "within_noise"}
 
 
 def load_gate_inputs_from_score_json(path):
@@ -100,13 +170,24 @@ def load_gate_inputs_from_score_json(path):
 
     Raises SystemExit ("INCONCLUSIVE: ...") if the file is missing, fails
     to parse, or lacks comparison.twin_candidate / comparison.twin_serving /
-    candidate.floor_seth_vs_other_humans.mean as finite floats. This is the
+    candidate.floor_seth_vs_other_humans.mean / candidate.twin_seth_vs_
+    adapter.ci95 as finite (floats / an ordered [lo, hi] pair). This is the
     generalized, VERIFIED form of AC-2.3's "authorship_gap.py refused" /
     "either JSON is missing/lacks a measurement" — the literal `n` field
     inside authorship_gap.py's own stat blocks is always 200 (the bootstrap
     resample count), not a measured-sample-size signal, so checking it
     would silently pass every case this loader is meant to catch. See
     designs/US-2.md §0 for the full verification.
+
+    `candidate_twin_ci95` is read from candidate.twin_seth_vs_adapter.ci95
+    — the SAME stat block comparison.twin_candidate's mean came from
+    (authorship_gap.py's stat() always emits {"mean", "ci95", "n"}
+    together, so the two never disagree about which measurement they
+    describe). It feeds decide_promotion()'s noise-aware BLOCK/PASS/HOLD
+    split (F1 fix, 2026-09-05) — a missing or malformed CI is exactly the
+    class of bug .claude/rules/no-number-without-a-measurement.md
+    catalogs, so it INCONCLUDEs here rather than decide_promotion() ever
+    seeing a fabricated CI.
     """
     if not path or not os.path.isfile(path):
         raise SystemExit(f"INCONCLUSIVE: score JSON not found: {path}; nothing to gate on")
@@ -126,16 +207,20 @@ def load_gate_inputs_from_score_json(path):
     serv_twin = _as_finite_float(comparison.get("twin_serving"))
     floor_block = candidate.get("floor_seth_vs_other_humans")
     floor = _as_finite_float(floor_block.get("mean")) if isinstance(floor_block, dict) else None
+    twin_block = candidate.get("twin_seth_vs_adapter")
+    cand_twin_ci95 = _as_finite_ci95(twin_block.get("ci95")) if isinstance(twin_block, dict) else None
 
-    if cand_twin is None or serv_twin is None or floor is None:
+    if cand_twin is None or serv_twin is None or floor is None or cand_twin_ci95 is None:
         raise SystemExit(
             f"INCONCLUSIVE: {path} missing/non-finite twin_candidate, twin_serving, "
-            "or candidate.floor_seth_vs_other_humans.mean; nothing to gate on")
+            "candidate.floor_seth_vs_other_humans.mean, or candidate.twin_seth_vs_adapter.ci95 "
+            "(as an ordered [lo, hi] pair); nothing to gate on")
 
     return {
         "candidate_twin": cand_twin,
         "serving_twin": serv_twin,
         "floor": floor,
+        "candidate_twin_ci95": cand_twin_ci95,
         "candidate_adapter": data.get("candidate_adapter"),
         "serving_adapter": data.get("serving_adapter"),
         "candidate_gap": candidate,
@@ -175,16 +260,21 @@ def load_gate_inputs_from_gap_jsons(candidate_path, serving_path):
     cand_twin = _as_finite_float(cand_twin_block.get("mean")) if isinstance(cand_twin_block, dict) else None
     serv_twin = _as_finite_float(serv_twin_block.get("mean")) if isinstance(serv_twin_block, dict) else None
     floor = _as_finite_float(floor_block.get("mean")) if isinstance(floor_block, dict) else None
+    cand_twin_ci95 = (_as_finite_ci95(cand_twin_block.get("ci95"))
+                      if isinstance(cand_twin_block, dict) else None)
 
-    if cand_twin is None or serv_twin is None or floor is None:
+    if cand_twin is None or serv_twin is None or floor is None or cand_twin_ci95 is None:
         raise SystemExit(
             "INCONCLUSIVE: candidate/serving gap JSON missing/non-finite "
-            "twin_seth_vs_adapter.mean or floor_seth_vs_other_humans.mean; nothing to gate on")
+            "twin_seth_vs_adapter.mean, floor_seth_vs_other_humans.mean, or "
+            "candidate twin_seth_vs_adapter.ci95 (as an ordered [lo, hi] pair); "
+            "nothing to gate on")
 
     return {
         "candidate_twin": cand_twin,
         "serving_twin": serv_twin,
         "floor": floor,
+        "candidate_twin_ci95": cand_twin_ci95,
         "candidate_gap": cand,
         "serving_gap": serv,
         "candidate_json_path": str(candidate_path),
@@ -237,7 +327,11 @@ def build_parser():
     ap.add_argument("--serving-json",
                     help="authorship_gap.py --out JSON for what is currently serving "
                          "(secondary path)")
-    ap.add_argument("--min-gain", type=float, default=0.0)
+    ap.add_argument("--min-gain", type=float, default=0.05,
+                    help="minimum point-estimate improvement (candidate_twin - "
+                         "serving_twin) that counts as PASS when the CIs don't "
+                         "themselves distinguish the two (default 0.05, "
+                         "roughly half a typical CI half-width on this metric)")
     return ap
 
 
@@ -260,18 +354,25 @@ def main(argv=None):
 
     verdict = decide_promotion(
         inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"],
-        min_gain=args.min_gain)
+        inputs["candidate_twin_ci95"], min_gain=args.min_gain)
     # Visibility, not a second threshold: both sides' full gap dicts already
     # carry ceiling/twin/floor + ci95 + gap_closed_fraction (authorship_gap.py
     # computes gap_closed_fraction itself), so a human reviewing a borderline
-    # PASS/BLOCK can see the CI overlap without this module inventing a
+    # PASS/BLOCK/HOLD can see the CI overlap without this module inventing a
     # second undocumented boundary.
     verdict["candidate_gap_closed_fraction"] = (inputs.get("candidate_gap") or {}).get(
         "gap_closed_fraction")
     verdict["serving_gap_closed_fraction"] = (inputs.get("serving_gap") or {}).get(
         "gap_closed_fraction")
     print(json.dumps(verdict, indent=2))
-    return 0 if verdict["verdict"] == "PASS" else 1
+    # 0=PASS, 3=HOLD (no promotion, but not a claimed regression either —
+    # a distinct code so callers/scripts can tell "accumulate another
+    # cycle" apart from "this measurably regressed"), 1=BLOCK.
+    if verdict["verdict"] == "PASS":
+        return 0
+    if verdict["verdict"] == "HOLD":
+        return 3
+    return 1
 
 
 if __name__ == "__main__":

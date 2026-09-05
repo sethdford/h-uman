@@ -304,14 +304,24 @@ def test_promote_blocked_without_evidence():
 # ─────────────────────────────────────────────────────────────────────
 
 def _write_gate_fixture(home: Path, adapter_path: str, candidate_twin: float,
-                        serving_twin: float, floor: float, serving_path: str = "/serving-adapter"):
+                        serving_twin: float, floor: float, serving_path: str = "/serving-adapter",
+                        candidate_ci95: tuple | None = None):
     """Write a candidate-authorship-<date>.json fixture at
     <home>/.human/logs/, matching score_candidate_offline.py's real output
     shape (comparison.twin_candidate/twin_serving + candidate.
-    floor_seth_vs_other_humans.mean) so m3_promote.py's
-    authorship_promotion_gate._find_latest_score_json(args.adapter) finds
-    it by candidate_adapter equality, exactly like a real nightly run would
-    leave on disk."""
+    floor_seth_vs_other_humans.mean + candidate.twin_seth_vs_adapter.ci95)
+    so m3_promote.py's authorship_promotion_gate._find_latest_score_json
+    (args.adapter) finds it by candidate_adapter equality, exactly like a
+    real nightly run would leave on disk.
+
+    `candidate_ci95` defaults to a +/-0.1 band around candidate_twin (a
+    realistic half-width for this metric at n~=36, see designs/US-2.md
+    §4) -- pass an explicit (lo, hi) to control whether the fixture is
+    CI-distinguishable from serving_twin or not (F1 fix, 2026-09-05:
+    decide_promotion() is a noise-aware PASS/BLOCK/HOLD gate, not a
+    point-mean-only PASS/BLOCK gate)."""
+    if candidate_ci95 is None:
+        candidate_ci95 = (candidate_twin - 0.1, candidate_twin + 0.1)
     logs_dir = home / ".human" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     out_path = logs_dir / f"candidate-authorship-{time.strftime('%Y-%m-%d')}.json"
@@ -321,7 +331,7 @@ def _write_gate_fixture(home: Path, adapter_path: str, candidate_twin: float,
         "serving_adapter": serving_path,
         "candidate": {
             "ceiling_seth_vs_seth": {"mean": 0.701, "ci95": [0.6, 0.8], "n": 200},
-            "twin_seth_vs_adapter": {"mean": candidate_twin, "ci95": [candidate_twin - 0.1, candidate_twin + 0.1], "n": 200},
+            "twin_seth_vs_adapter": {"mean": candidate_twin, "ci95": list(candidate_ci95), "n": 200},
             "floor_seth_vs_other_humans": {"mean": floor, "ci95": [floor - 0.05, floor + 0.05], "n": 200},
             "gap_closed_fraction": 0.5,
         },
@@ -349,13 +359,18 @@ def _read_registry(home: Path) -> dict:
     return json.loads(reg_path.read_text())
 
 
-def test_m3_promote_blocks_on_regressed_gate():
-    """AC-2.4's exact regression shape (prior twin 0.70, new twin 0.625,
-    floor 0.62): the gate must BLOCK before the swap ever reaches the fake
-    server. The strongest possible assertion is that the fake server never
-    receives the swap POST — not just 'exit code 5', which could pass even
-    if the swap fired and only the exit code lied."""
-    print("\n--- test_m3_promote_blocks_on_regressed_gate ---")
+def test_m3_promote_holds_on_noisy_regressed_gate():
+    """AC-2.4's original regression shape (prior twin 0.70, new twin
+    0.625, floor 0.62) with a realistic +/-0.1 CI half-width: the CI does
+    NOT let the data distinguish this from serving (ci_hi=0.725 is still
+    above serving's 0.70), so the noise-aware gate's verdict is HOLD, not
+    BLOCK (F1 fix, 2026-09-05 -- see authorship_promotion_gate.py's module
+    docstring for why a point-mean-only gate on this exact shape would
+    BLOCK every night forever). HOLD must still refuse the swap exactly
+    like BLOCK does: the strongest possible assertion is that the fake
+    server never receives the swap POST — not just 'exit code 5', which
+    could pass even if the swap fired and only the exit code lied."""
+    print("\n--- test_m3_promote_holds_on_noisy_regressed_gate ---")
     FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
     FakeMLX.SWAP_HISTORY = []
     srv, url = serve_fake()
@@ -369,17 +384,51 @@ def test_m3_promote_blocks_on_regressed_gate():
             result = run_cli(home, url, "promote", "--adapter", str(adapter),
                               "--yes", "--no-prod-check",
                               "--evidence", "blind_ab gate PASS (test fixture)")
-            _ok("blocked promote exits 5", result.returncode == 5,
+            _ok("held promote exits 5", result.returncode == 5,
                 f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
-            _ok("stderr names the gate verdict",
+            _ok("stderr names the gate verdict as HOLD/within_noise, not BLOCK",
                 "authorship promotion gate" in result.stderr
-                and "BLOCK" in result.stderr and "regression_vs_prior" in result.stderr,
+                and "HOLD" in result.stderr and "within_noise" in result.stderr,
                 result.stderr)
             _ok("fake server NEVER received the swap POST",
                 len(FakeMLX.SWAP_HISTORY) == 0, f"swap history: {FakeMLX.SWAP_HISTORY}")
             _ok("server still on the original adapter",
                 FakeMLX.CURRENT_ADAPTER == "/serving-adapter",
                 f"current={FakeMLX.CURRENT_ADAPTER}")
+            _ok("adapter_registry.record_promotion was NOT called (no registry file written)",
+                _read_registry(home) == {})
+    finally:
+        srv.shutdown()
+
+
+def test_m3_promote_blocks_on_ci_distinguishable_regression():
+    """Companion to the HOLD test above: when the candidate's CI upper
+    bound is actually below serving's point estimate, the data CAN
+    distinguish a regression, and the gate must BLOCK (not HOLD). Proves
+    the CLI wiring still exercises the BLOCK path, not just PASS/HOLD."""
+    print("\n--- test_m3_promote_blocks_on_ci_distinguishable_regression ---")
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "candidate-lora.bin"
+            adapter.touch()
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.55,
+                                serving_twin=0.70, floor=0.50,
+                                candidate_ci95=(0.45, 0.65))
+            result = run_cli(home, url, "promote", "--adapter", str(adapter),
+                              "--yes", "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("blocked promote exits 5", result.returncode == 5,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
+            _ok("stderr names the gate verdict",
+                "authorship promotion gate" in result.stderr
+                and "BLOCK" in result.stderr and "regression_ci_distinguishable" in result.stderr,
+                result.stderr)
+            _ok("fake server NEVER received the swap POST",
+                len(FakeMLX.SWAP_HISTORY) == 0, f"swap history: {FakeMLX.SWAP_HISTORY}")
             _ok("adapter_registry.record_promotion was NOT called (no registry file written)",
                 _read_registry(home) == {})
     finally:
@@ -417,10 +466,14 @@ def test_m3_promote_passes_on_improved_gate():
 
 
 def test_m3_promote_skip_flag_records_override():
-    """--skip-authorship-gate must still let a regressed adapter promote
-    (the override works), but the registry's evidence string must carry
-    the fact that a BLOCK verdict was overridden — proving the override is
-    logged, not silent."""
+    """--skip-authorship-gate must still let a HOLD-verdict adapter promote
+    (the override works even for 'within noise', not just 'BLOCK'), but
+    the registry's evidence string must carry the fact that a non-PASS
+    verdict was overridden — proving the override is logged, not silent.
+    Uses the same noisy-regression fixture as
+    test_m3_promote_holds_on_noisy_regressed_gate (verdict HOLD/
+    within_noise, F1 fix 2026-09-05) — HOLD is exactly as overridable, and
+    exactly as loggable, as BLOCK."""
     print("\n--- test_m3_promote_skip_flag_records_override ---")
     FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
     FakeMLX.SWAP_HISTORY = []
@@ -445,7 +498,7 @@ def test_m3_promote_skip_flag_records_override():
             evidence = (entry.get("promotion") or {}).get("evidence", "")
             _ok("registry evidence records OVERRIDDEN", "OVERRIDDEN" in evidence, evidence)
             _ok("registry evidence records the overridden verdict/reason",
-                "BLOCK" in evidence and "regression_vs_prior" in evidence, evidence)
+                "HOLD" in evidence and "within_noise" in evidence, evidence)
     finally:
         srv.shutdown()
 
@@ -459,7 +512,8 @@ def main():
     test_promote_blocked_without_evidence()
     test_rollback_reverses_promote()
     test_last_promotion_from_lineage()
-    test_m3_promote_blocks_on_regressed_gate()
+    test_m3_promote_holds_on_noisy_regressed_gate()
+    test_m3_promote_blocks_on_ci_distinguishable_regression()
     test_m3_promote_passes_on_improved_gate()
     test_m3_promote_skip_flag_records_override()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")

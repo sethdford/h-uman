@@ -122,7 +122,8 @@ def _read_authorship_gate_for(adapter_path) -> dict:
     exists yet for this adapter. {"status": "INCONCLUSIVE", ...} means one
     was found but the measurement it needs is missing/malformed. Otherwise
     the real decide_promotion() verdict dict is returned with
-    status="RAN".
+    status="RAN" -- verdict is one of PASS/BLOCK/HOLD (noise-aware,
+    CI-based three-way gate; F1 fix, 2026-09-05), never a fourth value.
     """
     if _find_latest_score_json is None:
         return {"status": "NOT_RUN", "reason": "authorship_promotion_gate module unavailable"}
@@ -133,7 +134,8 @@ def _read_authorship_gate_for(adapter_path) -> dict:
         inputs = load_gate_inputs_from_score_json(gap_json)
     except SystemExit as e:
         return {"status": "INCONCLUSIVE", "reason": str(e), "score_json": gap_json}
-    verdict = decide_promotion(inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"])
+    verdict = decide_promotion(inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"],
+                               inputs["candidate_twin_ci95"])
     verdict["status"] = "RAN"
     verdict["score_json"] = gap_json
     return verdict

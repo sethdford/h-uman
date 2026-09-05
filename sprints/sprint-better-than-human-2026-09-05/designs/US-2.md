@@ -75,28 +75,36 @@ verdict dict, plus a `_from_file` loader that raises `SystemExit` on missing evi
 plus a thin CLI").
 
 ```python
-def decide_promotion(candidate_twin, serving_twin, floor,
-                      min_gain=0.0) -> dict:
-    """Pure. All three args are floats already read from authorship_gap.py's own
-    JSON (never hardcoded 0.625/0.70/0.62 — those numbers are context, not
-    constants). Returns {"verdict": "PASS"|"BLOCK", "reason": str,
-    "candidate_twin", "serving_twin", "floor", "delta"}.
+def decide_promotion(candidate_twin, serving_twin, floor, candidate_twin_ci95,
+                      min_gain=0.05) -> dict:
+    """Pure. Returns {"verdict": "PASS"|"BLOCK"|"HOLD", "reason": str,
+    "candidate_twin", "serving_twin", "floor", "delta", "candidate_twin_ci95",
+    "min_gain"}.
     Never returns INCONCLUSIVE — that state is a property of MISSING inputs,
     decided by the caller (load_gate_inputs_from_score_json /
     load_gate_inputs_from_gap_jsons below) before this function is ever called.
     """
     delta = round(candidate_twin - serving_twin, 4)
+    ci_lo, ci_hi = candidate_twin_ci95
     if candidate_twin < floor:
         return {"verdict": "BLOCK", "reason": "below_floor", "delta": delta, ...}
-    if candidate_twin <= serving_twin + min_gain:
-        return {"verdict": "BLOCK", "reason": "regression_vs_prior", "delta": delta, ...}
-    return {"verdict": "PASS", "reason": "twin_improved_over_prior_above_floor",
-            "delta": delta, ...}
+    if ci_hi < serving_twin:
+        return {"verdict": "BLOCK", "reason": "regression_ci_distinguishable", "delta": delta, ...}
+    if ci_lo > serving_twin:
+        return {"verdict": "PASS", "reason": "twin_improved_ci_distinguishable", "delta": delta, ...}
+    if delta >= min_gain:
+        return {"verdict": "PASS", "reason": "twin_improved_min_gain", "delta": delta, ...}
+    return {"verdict": "HOLD", "reason": "within_noise", "delta": delta, ...}
 ```
 
-`min_gain` defaults to `0.0` (AC-2.2's literal `new_twin <= prev_twin` boundary); it
-is a keyword, not a magic number buried in the body, so a later story can require a
-minimum step size without touching the predicate's control flow.
+**UPDATED by the F1 fix (2026-09-05) — see §10.** The shape above is the CURRENT
+implementation, not the original one. The story's first cut used a point-mean-only
+boundary (`candidate_twin <= serving_twin + min_gain -> BLOCK`, `min_gain` defaulting
+to `0.0`); §10 explains why that BLOCKed real, non-regressed cycles as "regressions"
+and documents the noise-aware three-way replacement. `min_gain` is still a keyword,
+not a magic number buried in the body (so it can be retuned without touching control
+flow), but it now defaults to `0.05` and only applies when the candidate's own CI is
+too wide to decide the comparison on its own.
 
 Two loaders sit in front of `decide_promotion`, both returning either a fully-populated
 input dict or raising `SystemExit("INCONCLUSIVE: ...")` — never a partially-filled dict
@@ -265,12 +273,15 @@ AC-2.1's explicit requirement). Never a hardcoded 0.625/0.70/0.62.
   `n`", per §0's finding that the literal `n` field cannot express this);
 - `--gap-json` is passed explicitly but does not exist / does not parse.
 
-**Never refuses silently as a PASS**: `decide_promotion()` itself has exactly two return
-values, `PASS` and `BLOCK` — `INCONCLUSIVE` is a property of the *loader* raising before
-`decide_promotion` is ever called, so there is no code path where a missing input
-defaults to a number that lets the predicate compute a false PASS. This is the direct
-application of `.claude/rules/no-number-without-a-measurement.md`'s "refuse loudly,
-don't fall back" to this predicate's own contract.
+**Never refuses silently as a PASS**: `decide_promotion()` itself has exactly three return
+values, `PASS`, `BLOCK`, and `HOLD` (§10) — `INCONCLUSIVE` is a property of the *loader*
+raising before `decide_promotion` is ever called, so there is no code path where a
+missing input defaults to a number that lets the predicate compute a false PASS. As of
+the F1 fix (§10), that loader-level refusal also covers a missing/malformed
+`candidate.twin_seth_vs_adapter.ci95` — the noise-aware gate's new required input — not
+just the three means. This is the direct application of
+`.claude/rules/no-number-without-a-measurement.md`'s "refuse loudly, don't fall back" to
+this predicate's own contract.
 
 ## 4. Operationalizing "toward the 0.70 ceiling" with CIs (n≈36 per run)
 
@@ -289,28 +300,37 @@ resample from (visible in the CI width itself: `0.506-0.725`, a span of 0.22 on 
 whose whole meaningful range is roughly floor-to-ceiling, `~0.62` to `~0.70`). A gate
 that chased noise inside that band would flap.
 
-**AC-2.2's literal boundary is a point-mean comparison** (`new_twin <= prev_twin OR
+**SUPERSEDED by the F1 fix (2026-09-05) — see §10.** The paragraph below is the
+ORIGINAL design's reasoning, kept for the record; it turned out to be wrong about the
+2026-09-02 → 2026-09-04 cycle, which is exactly the case §10 fixes.
+
+~~**AC-2.2's literal boundary is a point-mean comparison** (`new_twin <= prev_twin OR
 new_twin < floor`), which is what `decide_promotion()` implements — this story does not
 ask for a significance test, and the one scenario it must catch (AC-2.4: 0.70 → 0.625)
 is a ~5x-larger move than the CI half-width above, so the literal boundary is not
-noise-chasing for the case that motivated the story. But the gate's JSON output carries
+noise-chasing for the case that motivated the story.~~ But the gate's JSON output carries
 both sides' full `ceiling_seth_vs_seth` / `twin_seth_vs_adapter` /
 `floor_seth_vs_other_humans` blocks (via `load_gate_inputs_from_score_json` passing the
 whole `gap_results` dicts through, not just the three means it needs for the decision),
-so a human reviewing a borderline PASS/BLOCK can see the CI overlap and judge whether
-the move is inside noise — visibility without adding a second, undocumented threshold.
+so a human reviewing a borderline PASS/BLOCK/HOLD can see the CI overlap and judge
+whether the move is inside noise — this visibility mechanism survives the F1 fix
+unchanged, it's just no longer the ONLY way the CI gets used.
 **Toward the ceiling** is read as: report `gap_closed_fraction`
 (`authorship_gap.py:116`, `(twin - floor) / (ceiling - floor)`) for both candidate and
 serving in the gate's output, so "moving toward 0.70" is legible as a fraction-closed
-delta, not just a raw twin delta — useful trend context even though the pass/fail
-boundary itself stays the simple point comparison AC-2.2 specifies.
+delta, not just a raw twin delta — useful trend context regardless of which of the
+three verdicts the CI-based boundary lands on.
 
-Risk flagged, not silently absorbed: with n≈36 and this CI width, a genuine improvement
+~~Risk flagged, not silently absorbed: with n≈36 and this CI width, a genuine improvement
 smaller than ~0.05-0.10 could be a coin flip. If this becomes a practical problem (BLOCK
 flapping on marginal candidates), the fix is `min_gain` (already a keyword on
 `decide_promotion`, §1.1) or requiring 2 consecutive nights' BLOCK before treating it as
 a hard stop — explicitly **not** built into this story (M-sized, and AC-2.4's fixture
-doesn't need it); noted here so it isn't rediscovered the hard way.
+doesn't need it); noted here so it isn't rediscovered the hard way.~~ **This is exactly
+what happened**: the 2026-09-02 → 2026-09-04 cycle (twin 0.633 → 0.625, delta -0.008)
+BLOCKed under the point-mean gate, and would have BLOCKed every subsequent cycle
+indefinitely — the "practical problem" flagged here, not a hypothetical. §10 is that
+fix, landed the same sprint rather than deferred to a future story.
 
 ## 5. Hermetic test plan (non-vacuous assertions — a gate that cannot fail is a bug)
 
@@ -466,6 +486,74 @@ existing fake-MLX harness (~half a day), `score_candidate_offline.py` +
 `nightly-retrain.sh` one-line surfacing + AC-2.6 evidence capture on the next real
 nightly window (calendar time, not engineering time — the window runs itself at
 02:00-05:00; the implementer's job is to be ready to commit its output).
+
+## 10. F1 fix (2026-09-05): noise-aware, three-way verdict (PASS/BLOCK/HOLD)
+
+**Critic finding F1 (MEDIUM):** `decide_promotion()`'s point-mean-only boundary
+(`candidate_twin <= serving_twin + min_gain -> BLOCK`, `min_gain=0.0`) BLOCKs on pure
+measurement noise. The real 2026-09-02 → 2026-09-04 cycle (serving twin 0.633,
+candidate twin 0.625, delta -0.008) is well inside the CI half-width authorship_gap.py
+actually measures at n≈36 (§4: `[0.506, 0.725]` on the same twin value, a span of 0.22)
+— the point-mean gate would BLOCK this cycle, and every subsequent cycle with a
+similarly small delta, forever. §4's own "Risk flagged, not silently absorbed"
+paragraph predicted exactly this failure mode and named `min_gain` as the fix; this
+section is that fix, landed rather than deferred.
+
+**The fix**, implemented in `authorship_promotion_gate.py`'s `decide_promotion()` (see
+§1.1's updated code block) and threaded through both loaders
+(`load_gate_inputs_from_score_json` / `load_gate_inputs_from_gap_jsons`, which now also
+require `candidate.twin_seth_vs_adapter.ci95` — an ordered `[lo, hi]` pair of finite
+floats — and `SystemExit("INCONCLUSIVE: ...")` if it's missing or malformed, per §3):
+
+1. **BLOCK "below_floor"** — `candidate_twin < floor`. Unchanged from the original
+   design: a point comparison regardless of CI width, since scoring below raw
+   non-Seth-human authorship is disqualifying on its own terms, not a noise question.
+2. **BLOCK "regression_ci_distinguishable"** — the candidate's CI upper bound is below
+   the serving twin's point estimate. The data can positively rule out "no change or
+   better," so this is a real, not noise-attributable, regression.
+3. **PASS "twin_improved_ci_distinguishable"** — the candidate's CI lower bound is
+   above the serving twin's point estimate. Mirror of (2): the data can positively
+   rule out "no change or worse."
+4. **PASS "twin_improved_min_gain"** — neither CI bound crosses the serving twin (the
+   two are statistically indistinguishable by CI alone), but the point-estimate gain
+   is at least `min_gain` (now defaulting to `0.05`, roughly half the ~0.1 CI
+   half-width measured in practice) — a deliberately smaller bar than full CI
+   separation, so a real, if noisy-looking, improvement isn't stuck behind (3) forever.
+5. **HOLD "within_noise"** — none of the above. No promotion (a consumer treats this
+   exactly like BLOCK for any swap decision — see below), but also no regression is
+   claimed; the correct action is to accumulate another measurement cycle.
+
+**Consumers.** `m3_promote.py:cmd_promote()` already refuses the swap for
+`gap_verdict.get("verdict") != "PASS"` (exit 5) — HOLD needed no new branch there, only
+the extra `candidate_twin_ci95` argument threaded into its `decide_promotion()` call and
+a docstring/comment update naming HOLD explicitly, so a reader doesn't assume exit 5
+only ever means "regressed." `register_v6_adapter.py`'s informational annotation
+(`_read_authorship_gate_for`) is unaffected in shape — it still never blocks
+registration and never flips `promoted` — but now surfaces `HOLD`/`within_noise` as a
+third possible `authorship_gate.verdict` value alongside `PASS`/`BLOCK`. The CLI
+(`authorship_promotion_gate.py main()`) gained a fourth exit code: `0`=PASS, `1`=BLOCK,
+`2`=INCONCLUSIVE (unchanged), `3`=HOLD (new — distinct from BLOCK's `1` so a caller
+script can special-case "accumulate another cycle" without string-matching the reason).
+
+**Tests** (`scripts/blind_ab/test_authorship_promotion_gate.py`,
+`scripts/test_m3_promote.py`, `scripts/test_register_v6_adapter.py`): the real
+0.633/0.625 pair with a realistic CI → HOLD, not BLOCK
+(`test_hold_within_noise_real_09_02_vs_09_04_cycle`); a candidate 0.60 with CI upper
+bound 0.62 against serving 0.633 → BLOCK
+(`test_block_ci_distinguishable_regression_low_candidate`); a candidate 0.70 with CI
+lower bound 0.64 → PASS (`test_pass_ci_distinguishable_improvement`); below-floor still
+BLOCKs regardless of CI width
+(`test_block_below_floor_even_if_improved_and_ci_wide`); a missing/malformed CI field
+INCONCLUDEs at the loader (`test_inconclusive_missing_ci95_field`,
+`test_inconclusive_malformed_ci95_field`); all four CLI exit codes are asserted
+(`test_cli_exit_0_on_pass` / `_1_on_block` / `_2_on_inconclusive` / `_3_on_hold`). The
+`m3_promote.py`/`register_v6_adapter.py` integration tests were updated in place: the
+original AC-2.4 fixture (0.70 → 0.625 with a realistic ±0.1 CI) now demonstrates HOLD
+(`test_m3_promote_holds_on_noisy_regressed_gate`,
+`test_register_v6_adapter_annotates_hold`), and a new fixture with a tight,
+CI-distinguishable regression demonstrates that the BLOCK path is still reachable
+(`test_m3_promote_blocks_on_ci_distinguishable_regression`,
+`test_register_v6_adapter_annotates_block`).
 
 ---
 RESULT_tech-lead=READY — design verified against the actual promotion call graph (m3_promote.py:238 is the one true registry-write site, not register_v6_adapter.py), the real nightly sequence (stages after adapter_is_real.py always stop at "staged, not promoted" today), and the actual meaning of authorship_gap.py's `n` field (always 200, not a measured-sample-size signal) — all corrections and a dormant second promotion path (m3_outcome_driver.py --run-loop) are called out explicitly rather than assumed.

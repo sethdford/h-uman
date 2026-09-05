@@ -401,22 +401,48 @@ def test_register_v6_adapter_annotates_absent(monkeypatch, tmp_path, no_real_reg
 
 
 def test_register_v6_adapter_annotates_block(monkeypatch, tmp_path, no_real_registry):
-    """A matching regressed-shaped fixture is present -- the BLOCK verdict is
-    recorded AND registration still succeeds with promoted: False unchanged
-    (proves annotation never flips this script's own promoted flag, which
-    was already always False -- guards against a future edit accidentally
-    wiring this into a block)."""
+    """A matching, CI-distinguishable regressed-shaped fixture is present --
+    the BLOCK verdict is recorded AND registration still succeeds with
+    promoted: False unchanged (proves annotation never flips this script's
+    own promoted flag, which was already always False -- guards against a
+    future edit accidentally wiring this into a block).
+
+    candidate_twin_ci95=(0.60, 0.65) is tight enough that its upper bound
+    (0.65) is below serving_twin (0.70) -- decide_promotion()'s noise-aware
+    gate (F1 fix, 2026-09-05) can only BLOCK when the CI itself rules out
+    'just noise'; a wide/noisy CI on the same means would HOLD instead
+    (see test_authorship_promotion_gate.py's HOLD-vs-BLOCK pair)."""
     monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: "/fake/candidate-authorship-2026-09-05.json")
     monkeypatch.setattr(
         reg, "load_gate_inputs_from_score_json",
-        lambda path: {"candidate_twin": 0.625, "serving_twin": 0.70, "floor": 0.62})
+        lambda path: {"candidate_twin": 0.625, "serving_twin": 0.70, "floor": 0.62,
+                      "candidate_twin_ci95": (0.60, 0.65)})
     _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
     assert len(no_real_registry.calls) == 1
     metrics = no_real_registry.calls[0]["metrics"]
     assert metrics["authorship_gate"]["status"] == "RAN"
     assert metrics["authorship_gate"]["verdict"] == "BLOCK"
-    assert metrics["authorship_gate"]["reason"] == "regression_vs_prior"
+    assert metrics["authorship_gate"]["reason"] == "regression_ci_distinguishable"
     # Never flips this script's own promoted flag.
+    assert metrics["promoted"] is False
+
+
+def test_register_v6_adapter_annotates_hold(monkeypatch, tmp_path, no_real_registry):
+    """A matching fixture whose CI is too wide to distinguish candidate
+    from serving -- the HOLD verdict is recorded (not BLOCK, and not a
+    fabricated PASS), and registration still succeeds. Same numbers as
+    the real 2026-09-02 -> 2026-09-04 cycle that motivated the F1 fix
+    (twin 0.633 -> 0.625, delta -0.008, CI span ~0.22 at n~=36)."""
+    monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: "/fake/candidate-authorship-2026-09-05.json")
+    monkeypatch.setattr(
+        reg, "load_gate_inputs_from_score_json",
+        lambda path: {"candidate_twin": 0.625, "serving_twin": 0.633, "floor": 0.50,
+                      "candidate_twin_ci95": (0.506, 0.725)})
+    _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
+    metrics = no_real_registry.calls[0]["metrics"]
+    assert metrics["authorship_gate"]["status"] == "RAN"
+    assert metrics["authorship_gate"]["verdict"] == "HOLD"
+    assert metrics["authorship_gate"]["reason"] == "within_noise"
     assert metrics["promoted"] is False
 
 

@@ -33,9 +33,12 @@ Exit codes:
     2 — MLX server unreachable / bad input
     3 — confirmation required but not provided
     4 — LoRA scale exceeds the 8.0 safety ceiling
-    5 — US-2 authorship promotion gate BLOCK or INCONCLUSIVE (pass
+    5 — US-2 authorship promotion gate BLOCK, HOLD, or INCONCLUSIVE (pass
         --skip-authorship-gate to override; the override is recorded in the
-        registry evidence string, never silent)
+        registry evidence string, never silent). HOLD ("within noise" --
+        the candidate's twin CI doesn't distinguish it from serving) is
+        treated exactly like BLOCK for the swap decision: never promote on
+        a measurement that can't tell improvement from noise.
 """
 from __future__ import annotations
 
@@ -219,14 +222,19 @@ def cmd_promote(args):
         return 4
 
     # US-2: never promote an adapter whose measured authorship twin regressed
-    # against what is currently serving, or fell below the measured floor.
-    # --skip-authorship-gate is the explicit, logged override for genuine
-    # emergencies (e.g. promoting a rollback target that predates this
-    # gate's own JSON). The verdict is always computed (best-effort) so an
-    # override can be RECORDED, not merely permitted -- see the evidence
-    # string below. A missing/malformed measurement is INCONCLUSIVE, which
-    # blocks exactly like BLOCK does (.claude/rules/no-number-without-a-measurement.md:
-    # refuse loudly, never silently PASS on an absent number).
+    # against what is currently serving, fell below the measured floor, or
+    # whose twin CI doesn't distinguish it from noise (HOLD -- F1 fix,
+    # 2026-09-05: decide_promotion() is a noise-aware PASS/BLOCK/HOLD verdict,
+    # not a point-mean-only PASS/BLOCK). --skip-authorship-gate is the
+    # explicit, logged override for genuine emergencies (e.g. promoting a
+    # rollback target that predates this gate's own JSON). The verdict is
+    # always computed (best-effort) so an override can be RECORDED, not
+    # merely permitted -- see the evidence string below. A missing/malformed
+    # measurement is INCONCLUSIVE, which blocks exactly like BLOCK/HOLD does
+    # (.claude/rules/no-number-without-a-measurement.md: refuse loudly, never
+    # silently PASS on an absent number). Any verdict other than PASS
+    # (BLOCK, HOLD, or INCONCLUSIVE) refuses the swap below -- HOLD gets a
+    # distinct verdict string recorded, never silently folded into BLOCK.
     gap_verdict = {"verdict": "INCONCLUSIVE", "reason": "authorship_promotion_gate module unavailable"}
     if authorship_promotion_gate is not None:
         gap_json = args.gap_json or authorship_promotion_gate._find_latest_score_json(args.adapter)
@@ -237,7 +245,8 @@ def cmd_promote(args):
                     "nothing to gate on")
             gate_inputs = authorship_promotion_gate.load_gate_inputs_from_score_json(gap_json)
             gap_verdict = authorship_promotion_gate.decide_promotion(
-                gate_inputs["candidate_twin"], gate_inputs["serving_twin"], gate_inputs["floor"])
+                gate_inputs["candidate_twin"], gate_inputs["serving_twin"], gate_inputs["floor"],
+                gate_inputs["candidate_twin_ci95"])
         except SystemExit as e:
             gap_verdict = {"verdict": "INCONCLUSIVE", "reason": str(e)}
 

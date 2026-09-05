@@ -387,21 +387,25 @@ def main(argv=None):
     except SystemExit as e:
         casing_gate = {"pass": None, "error": str(e)}
 
-    # promotion_gate (US-2): pure arithmetic on the LUAR twin/floor this
+    # promotion_gate (US-2): pure arithmetic on the LUAR twin/floor/CI this
     # script already computed above — no additional model load. This field
     # is informational at THIS call site (score_candidate_offline.py never
     # promotes anything, see module docstring); the enforcement point is
-    # scripts/m3_promote.py:cmd_promote(). A missing/malformed floor
+    # scripts/m3_promote.py:cmd_promote(). A missing/malformed floor or CI
     # INCONCLUDEs rather than silently passing — see
-    # .claude/rules/no-number-without-a-measurement.md.
+    # .claude/rules/no-number-without-a-measurement.md. decide_promotion()
+    # is noise-aware (F1 fix, 2026-09-05): it returns PASS/BLOCK/HOLD using
+    # candidate's own twin_seth_vs_adapter.ci95, not just the point means.
     from authorship_promotion_gate import decide_promotion  # lazy: real-run only
     try:
         floor = gap_results["candidate"]["floor_seth_vs_other_humans"]["mean"]
-        promotion_gate = decide_promotion(cand_twin, serv_twin, floor)
-    except (KeyError, TypeError) as e:
+        cand_twin_ci95 = gap_results["candidate"]["twin_seth_vs_adapter"]["ci95"]
+        promotion_gate = decide_promotion(cand_twin, serv_twin, floor, cand_twin_ci95)
+    except (KeyError, TypeError, ValueError) as e:
         promotion_gate = {
             "verdict": "INCONCLUSIVE",
-            "reason": f"missing/malformed floor_seth_vs_other_humans ({type(e).__name__}: {e})",
+            "reason": f"missing/malformed floor_seth_vs_other_humans or twin ci95 "
+                      f"({type(e).__name__}: {e})",
         }
 
     out = {
