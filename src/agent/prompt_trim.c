@@ -8,6 +8,7 @@
 
 #include "human/core/gate_mode.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -135,4 +136,63 @@ size_t hu_prompt_trim_apply(char *buf, size_t len, const hu_prompt_trim_span_t *
     }
     buf[len] = '\0';
     return len;
+}
+
+/* First non-empty line of `tail`: register variants of the rules block share
+ * their opening line and differ later, so this recognises an embedded copy
+ * regardless of register. */
+static size_t tail_marker(const char *tail, size_t tail_len, const char **out) {
+    size_t s = 0;
+    while (s < tail_len && (tail[s] == '\n' || tail[s] == '\r'))
+        s++;
+    size_t e = s;
+    while (e < tail_len && tail[e] != '\n')
+        e++;
+    *out = tail + s;
+    return e - s;
+}
+
+/* Bounded substring search (C11 + libc only; no memmem). */
+static bool region_contains(const char *hay, size_t hay_len, const char *needle,
+                            size_t needle_len) {
+    if (needle_len == 0 || hay_len < needle_len)
+        return false;
+    for (size_t i = 0; i + needle_len <= hay_len; i++)
+        if (memcmp(hay + i, needle, needle_len) == 0)
+            return true;
+    return false;
+}
+
+hu_error_t hu_prompt_cap_with_tail(hu_allocator_t *alloc, char **buf, size_t *len, size_t budget,
+                                   size_t reserved_guard_tail, const char *tail, size_t tail_len) {
+    if (!alloc || !buf || !*buf || !len)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Nothing to append, or a tail that cannot fit even alone → plain cap. */
+    const bool no_tail = !tail || tail_len == 0 || tail_len >= budget;
+    const char *marker = NULL;
+    size_t marker_len = no_tail ? 0 : tail_marker(tail, tail_len, &marker);
+    if (no_tail || region_contains(*buf, *len, marker, marker_len)) {
+        *len = hu_prompt_positional_cap_apply(*buf, *len, budget, reserved_guard_tail);
+        return HU_OK;
+    }
+
+    /* Make room: the head (guard tail kept) must fit in budget - tail_len. */
+    const size_t head_budget = budget - tail_len;
+    size_t head_len = hu_prompt_positional_cap_apply(*buf, *len, head_budget, reserved_guard_tail);
+
+    const size_t new_len = head_len + tail_len;
+    char *nb = (char *)alloc->alloc(alloc->ctx, new_len + 1);
+    if (!nb) {
+        /* Fail-safe: a capped prompt without the block beats no prompt. */
+        *len = head_len;
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(nb, *buf, head_len);
+    memcpy(nb + head_len, tail, tail_len);
+    nb[new_len] = '\0';
+    alloc->free(alloc->ctx, *buf, *len + 1);
+    *buf = nb;
+    *len = new_len;
+    return HU_OK;
 }

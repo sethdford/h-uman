@@ -8,6 +8,12 @@
 hu_error_t cmd_channel(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv);
+/* Emits the `human memory search --semantic|--hybrid` result lines to `out`:
+ *   "  [<rank>] <key> (<score>): <content>"   (content truncated to 2000 bytes)
+ * One line per entry; scripts/eval_memory_benchmarks.py parses <key> out of
+ * this exact shape. Does not free `res`. Exposed for tests. */
+struct hu_retrieval_result;
+void hu_cli_memory_search_emit(FILE *out, const struct hu_retrieval_result *res);
 /* Pure: bytes of content[0, len) that `human memory search` prints for one hit.
  * Caps at 2000 bytes, backed off over UTF-8 continuation bytes so the cut never
  * splits a multi-byte sequence. Returns len when len <= 2000; 0 on NULL. */

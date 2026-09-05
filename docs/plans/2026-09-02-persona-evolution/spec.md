@@ -294,6 +294,70 @@ Caveats on this verdict, in order of weight:
 3. The two generation files are different harness paths (blind-A/B triples
    vs classifier trials) that share prompts, not one script run twice.
 
+### 2026-09-05 (later): the emoji gap — prompt fixed and wired, model still at zero
+
+The gate's failing axis was investigated to root cause before anything was
+edited. Three things were wrong, in layers:
+
+1. **The prompt contradicted itself.** The production head (dumped with
+   `tools/dump_prompt_head`, `HU_PERSONA_HEAD=live`, the mode the eval harness
+   uses) carried six emoji directives from `~/.human/personas/seth.json`, four
+   of them absolute negatives: `channel_overlays.imessage.emoji_usage: "none"`
+   (set deliberately on 2026-07-28, backup `seth.json.bak.pre-emoji-none-…`),
+   `anti_patterns` "NEVER … ZERO emoji", `voice_rhythm` "Emojis are RARE",
+   `listening` "Words, not emojis" — against two soft "sparingly, maybe 1 in
+   8" lines. Models weight absolute prohibitions over soft targets.
+2. **The measured rule never reached production.** Style-card rule 2 (§7,
+   "Emoji about 1 in 8 texts") is rendered inside the ABSOLUTE RULES block,
+   and that block was appended only in `agent_stream.c`'s lean branch.
+   Production runs the batch path with streaming off (`prompt.c` never
+   appends it; `agent_turn.c`'s "guard tail" comment claimed it did). So the
+   only emoji guidance any served reply ever saw was layer 1.
+3. **The served adapter was trained against emoji.** In the v6 / v6.1
+   preference corpora the *chosen* side has emoji in 0.5% of rows and the
+   *rejected* side in 7.3% / 5.9% (`glm-v6-pref`, `glm-v61-pref`; 382 / 426
+   rows). Chosen = Seth's real reply from the 2026-05/06 blind-A/B contexts,
+   rejected = the gemma-era model's reply, which used emoji more than Seth
+   did in that sample. ORPO learned "emoji ⇒ rejected" as a side effect.
+   The SFT corpora are closer to Seth (5–7%); the export of his own texts is
+   5.0% by this script's `has_emoji`, the 60-day card says 12.6%.
+
+What was changed (commit `3754028b5` + the persona file):
+
+- `seth.json` (backed up as `seth.json.bak.pre-emoji-measured-20260905-064428`):
+  the prohibition in `anti_patterns` and the duplicate `communication_rules`
+  line removed; the iMessage and unknown overlays, `emphasis_style`,
+  `validation_style` and the style rule now all say the same measured thing:
+  about 1 in 8 texts, a single emoji, usually at the end. The served head
+  now carries exactly two emoji statements (overlay + rule 2), both "1 in 8".
+- `hu_prompt_cap_with_tail` + `hu_agent_finalize_system_prompt`: every turn
+  path (batch, streaming) and the dumper cap to budget keeping the guard
+  tail and append the formality-aware ABSOLUTE RULES block as the final
+  bytes, idempotently. 7 tests; full suite 14,270/14,270. Cost: on turns
+  whose assembled prompt already exceeds 16,384 B, the cap now removes ~1.5
+  KB more middle context to make room for the rules.
+
+**Measured after the fix** (36 fresh trials on :8741, adapter bound, new
+head, `gate-2026-09-05-post-prompt-fix.json`): emoji rate **0/36**, unchanged.
+Gate still FAIL (length matches, emoji and now warmth do not; warmth's
+generated Δ flipped sign on a 34-prompt sample with a CI spanning zero).
+The served replies were 92% lowercase-start / 97% no terminal punctuation,
+the v6 register collapse already on record.
+
+Every generation snapshot on disk — base GLM-Air without an adapter (160),
+v5 (160), gemma-v5 (130), v6 bound (36 + 36) — has an emoji rate of exactly
+0.0. The daemon's own sent replies (memory.db) went 4.5% (May, n=200) →
+0.3% (July, n=316) → 0.0% (Aug–Sep, n=42). So the prompt was necessary but
+not sufficient: the instruction "about 1 in 8" is read as "rarely" and the
+adapter was trained to avoid emoji outright.
+
+**Next lever (not done here):** rebuild the preference corpus so emoji is
+not a chosen/rejected discriminator — either draw the chosen side from the
+full `training_pairs.jsonl` export (5% emoji) or drop rejected rows whose
+only register difference from chosen is an emoji — then retrain, and re-run
+this gate. A decode-time injector is the wrong fix (see the humanness-
+injector incident).
+
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
 The persona carries measured-style numbers in three places. File:line

@@ -98,6 +98,56 @@ def compute_effective_verdict(proxy, human):
     return "ADVISORY"
 
 
+class ProvenanceRefusal(ValueError):
+    """Raised BEFORE the gate file is touched when a proxy verdict cannot be
+    attributed to what was actually serving. The gate stays at its last real
+    measurement (no number beats a fabricated one)."""
+
+
+def proxy_provenance_refusal(serving, claims_adapter=True):
+    """Why a proxy verdict must NOT be written, or None when it may.
+
+    `serving` is the dict gen_classifier_trials.serving_provenance() returns
+    (adapter_path, tensors_loaded, adapter_bound, provenance_available, ...),
+    captured from :8741 at verdict time. `claims_adapter` is whether the run
+    is meant to measure the adapter arm (the default; --base-arm clears it).
+
+    2026-07-26 -> 09-04 the server named an adapter and bound 0 tensors while
+    /health said adapter_applied:true; every proxy number in that window
+    measured base+prompt and the gate's provenance was annotated by hand
+    afterwards. The rules below are the ways that lie can recur:
+
+      adapter named, tensors_loaded == 0       -> refuse (either arm)
+      no provenance at all (None)              -> refuse when adapter claimed
+      endpoints unreachable                    -> refuse when adapter claimed
+      server reports no adapter / unknown bind -> refuse when adapter claimed
+    """
+    if serving is None:
+        if not claims_adapter:
+            return None
+        return ("no serving provenance captured; a verdict that cannot say what "
+                "generated its replies is an annotation, not a measurement")
+    adapter = serving.get("adapter_path")
+    tensors = serving.get("tensors_loaded")
+    if adapter and isinstance(tensors, int) and tensors == 0:
+        return (f"server {serving.get('server')} names adapter {adapter} but reports "
+                f"tensors_loaded=0 (nothing bound); replies measured the base model "
+                f"under an adapter label")
+    if not claims_adapter:
+        return None
+    if not serving.get("provenance_available"):
+        return (f"provenance endpoints unreachable at {serving.get('server')} and the run "
+                f"claims the adapter arm; cannot attribute the verdict (pass --base-arm "
+                f"only if a raw-base measurement is intended)")
+    if not adapter:
+        return ("server reports no adapter loaded but the run claims the adapter arm; "
+                "pass --base-arm to measure the base on purpose")
+    if serving.get("adapter_bound") is not True:
+        return (f"server names adapter {adapter} but does not report tensors_loaded; "
+                f"binding is unverifiable, so the adapter arm cannot be attributed")
+    return None
+
+
 def _load(path):
     if os.path.exists(path):
         try:
@@ -122,11 +172,20 @@ def _save(path, data):
         f.write("\n")
 
 
-def write_proxy_half(path, proxy_fields, commit=None):
+def write_proxy_half(path, proxy_fields, commit=None, serving=None, claims_adapter=True):
+    """Write the proxy half. Raises ProvenanceRefusal, with the file untouched,
+    unless `serving` (see proxy_provenance_refusal) can vouch for the arm the
+    run claims. Every caller must capture provenance at verdict time; there is
+    no way to write an adapter-arm verdict without it."""
+    reason = proxy_provenance_refusal(serving, claims_adapter)
+    if reason:
+        raise ProvenanceRefusal(reason)
     data = _load(path)
     proxy = {"tool": "eval_blinded_ab.py",
              "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")}
     proxy.update(proxy_fields)
+    proxy["claims_adapter"] = bool(claims_adapter)
+    proxy["serving"] = serving
     data["proxy"] = proxy
     if commit:
         data["commit"] = commit

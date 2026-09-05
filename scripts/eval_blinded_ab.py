@@ -69,6 +69,10 @@ USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
 USE_GATE = "--gate" in sys.argv
 GATE_DRY_RUN = "--gate-dry-run" in sys.argv
+# The gate measures the ADAPTER arm unless told otherwise. --base-arm says a
+# raw-base measurement is intended, so a server reporting no adapter is not a
+# refusal (it is still recorded as claims_adapter=false).
+USE_BASE_ARM = "--base-arm" in sys.argv
 # Advisory Binoculars AI-tell metric appended to the results JSON after the
 # run (docs/research/2026-07-25-binoculars-discriminator.md). Measurement-side
 # only: never feeds the gate, never changes the exit code. ~12 min GPU.
@@ -92,6 +96,61 @@ for arg in sys.argv:
 
 import blind_ab_gate as _gate
 _GATE_PATH = os.environ.get("HU_BLIND_AB_GATE_PATH", _gate.GATE_PATH)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab"))
+from gen_classifier_trials import serving_provenance as _serving_provenance  # noqa: E402
+
+
+def gate_serving_provenance(mlx_url=None):
+    """What :8741 is ACTUALLY serving, asked now, plus a hash of the production
+    head. Same shape as gen_classifier_trials.serving_provenance (adapter_path,
+    tensors_loaded, adapter_bound, model, provenance_available, head_sha256).
+
+    Both --mlx and --gateway generate on :8741 underneath (the daemon calls
+    it), so the serving endpoint is the provenance source in either mode. The
+    head is built through the production path; when that path is unavailable
+    the hash is recorded as null with the reason — never the hash of "".
+    """
+    try:
+        head = production_system_prompt()
+        head_error = None
+    except SystemExit as e:
+        head, head_error = None, str(e)
+    prov = _serving_provenance(mlx_url or MLX_URL, head)
+    if head is None:
+        prov["head_sha256"] = None
+        prov["head_bytes"] = 0
+        prov["head_error"] = head_error
+    return prov
+
+
+def write_gate_verdict(gate_path, *, fool_rate, n_trials, n_real_pairs, baseline,
+                       serving, preflight_serving, claims_adapter, run_mode, commit):
+    """Decide the proxy verdict and write it with full provenance.
+
+    Raises blind_ab_gate.ProvenanceRefusal — gate file untouched — when the
+    serving provenance cannot vouch for the claimed arm, or when what was
+    served changed between pre-flight and verdict time (then the trials did
+    not all measure one configuration). Returns (mode, verdict, should_fail).
+    """
+    if claims_adapter and preflight_serving and serving:
+        for key in ("adapter_path", "tensors_loaded", "model"):
+            if preflight_serving.get(key) != serving.get(key):
+                raise _gate.ProvenanceRefusal(
+                    f"serving {key} changed mid-run: {preflight_serving.get(key)!r} -> "
+                    f"{serving.get(key)!r}; the trials did not all measure one configuration")
+    mode, verdict, should_fail = _gate.proxy_gate_decision(
+        fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
+    _gate.write_proxy_half(gate_path, {
+        "verdict": verdict, "mode": mode,
+        "fool_rate": fool_rate if n_trials else None,
+        "baseline_fool_rate": (baseline or {}).get("fool_rate"),
+        "n_trials": n_trials, "n_real_pairs": n_real_pairs,
+        "fail_under": _gate.DEFAULT_FAIL_UNDER,
+        "max_regression": _gate.DEFAULT_MAX_REGRESSION,
+        "run_mode": run_mode,
+        "judge_model": EVAL_MODEL,
+    }, commit=commit, serving=serving, claims_adapter=claims_adapter)
+    return mode, verdict, should_fail
 
 
 def _git_commit():
@@ -771,13 +830,33 @@ def main():
             "baseline_fool_rate": None, "n_trials": 0, "n_real_pairs": 0,
             "fail_under": _gate.DEFAULT_FAIL_UNDER,
             "max_regression": _gate.DEFAULT_MAX_REGRESSION,
-        }, commit=_git_commit())
+            "note": "dry run: no measurement, no serving provenance captured",
+        }, commit=_git_commit(), serving=None, claims_adapter=False)
         print("GATE: ADVISORY (dry run / no data) — not blocking")
         sys.exit(0)
 
     if not API_KEY and not os.path.exists(os.path.expanduser("~/.config/gcloud/application_default_credentials.json")):
         print("ERROR: Set GEMINI_API_KEY or configure gcloud ADC")
         sys.exit(1)
+
+    # Pre-flight provenance: refuse BEFORE generating when :8741 cannot vouch
+    # for the arm this run claims. 2026-07-26 -> 09-04 the adapter bound zero
+    # tensors while /health said applied; every gate number in that window
+    # measured base+prompt. Refusing here costs one GET pair; refusing only at
+    # verdict time would first burn ~45 generations and judge calls.
+    claims_adapter = not USE_BASE_ARM
+    preflight_serving = None
+    if USE_GATE:
+        preflight_serving = gate_serving_provenance()
+        reason = _gate.proxy_provenance_refusal(preflight_serving, claims_adapter)
+        if reason:
+            print(f"\n  REFUSING: {reason}")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left untouched; no generation attempted.")
+            sys.exit(2)
+        print(f"  Serving: adapter={preflight_serving.get('adapter_path') or 'none'} "
+              f"tensors_loaded={preflight_serving.get('tensors_loaded')} "
+              f"model={preflight_serving.get('model')} "
+              f"head_sha256={(preflight_serving.get('head_sha256') or 'null')[:12]}")
 
     pairs = load_ground_truth()
     if USE_SYNTHETIC:
@@ -940,6 +1019,8 @@ def main():
             "ai_fooled": ai_detected_correctly,
             "detection_rate": human_detected_correctly / total * 100 if total else 0,
             "fool_rate": ai_detected_correctly / total * 100 if total else 0,
+            "serving": preflight_serving,
+            "claims_adapter": claims_adapter,
             "trials": results,
         }, f, indent=2)
     print(f"\n  Full results saved to {RESULTS_PATH}")
@@ -969,16 +1050,19 @@ def main():
                   "measurement rather than overwritten with this run.")
             sys.exit(1)
 
-        mode, verdict, should_fail = _gate.proxy_gate_decision(
-            fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
-        _gate.write_proxy_half(_GATE_PATH, {
-            "verdict": verdict, "mode": mode,
-            "fool_rate": fool_rate if total else None,
-            "baseline_fool_rate": (baseline or {}).get("fool_rate"),
-            "n_trials": total, "n_real_pairs": n_real_pairs,
-            "fail_under": _gate.DEFAULT_FAIL_UNDER,
-            "max_regression": _gate.DEFAULT_MAX_REGRESSION,
-        }, commit=_git_commit())
+        # Verdict-time provenance: ask the server AGAIN and refuse if it no
+        # longer vouches for the arm, or if it differs from pre-flight.
+        serving = gate_serving_provenance()
+        try:
+            mode, verdict, should_fail = write_gate_verdict(
+                _GATE_PATH, fool_rate=fool_rate, n_trials=total, n_real_pairs=n_real_pairs,
+                baseline=baseline, serving=serving, preflight_serving=preflight_serving,
+                claims_adapter=claims_adapter, run_mode=run_mode(USE_GATEWAY, USE_MLX),
+                commit=_git_commit())
+        except _gate.ProvenanceRefusal as e:
+            print(f"\n  REFUSING: {e}")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left at its last real measurement.")
+            sys.exit(2)
         banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
                   if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
         print(f"\n  GATE: {banner}")

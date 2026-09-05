@@ -25,6 +25,7 @@
  */
 
 #include "human/agent.h"
+#include "human/agent/prompt_trim.h"
 #include "human/core/string.h"
 #include "human/persona.h"
 #include "human/persona/terseness.h"
@@ -316,6 +317,64 @@ static void test_agent_head_invalid_args_rejected(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* 2026-09-05: the measured ABSOLUTE RULES block (style-card rule 2, which
+ * carries the emoji rate) was appended only inside agent_stream's lean
+ * branch. Production runs the batch path with streaming off, so no reply
+ * ever saw it — the persona's authored "ZERO emoji" lines were the only
+ * emoji guidance the model got. The shared finalizer appends the block on
+ * every path, after the guard tail, inside budget. */
+static void test_agent_finalize_system_prompt_ends_with_measured_absolute_rules(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    hu_persona_overlay_t ov;
+    hu_persona_example_bank_t bank;
+    hu_agent_t agent;
+    ph_persona_fixture(&p, &ov, &bank);
+    ph_agent_fixture(&agent, &alloc, &p);
+
+    static const char k_head[] = "You are Sam.\nSome context.\n";
+    static const char k_guard[] = "\nCRITICAL REMINDER:\n- stay in character\n";
+    size_t len = sizeof(k_head) - 1 + sizeof(k_guard) - 1;
+    char *prompt = (char *)alloc.alloc(alloc.ctx, len + 1);
+    memcpy(prompt, k_head, sizeof(k_head) - 1);
+    memcpy(prompt + sizeof(k_head) - 1, k_guard, sizeof(k_guard) - 1);
+    prompt[len] = '\0';
+
+    HU_ASSERT_EQ(hu_agent_finalize_system_prompt(&agent, &prompt, &len, sizeof(k_guard) - 1),
+                 HU_OK);
+    HU_ASSERT_EQ((long)strlen(prompt), (long)len);
+    HU_ASSERT_LE((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    const char *rules = strstr(prompt, "=== ABSOLUTE RULES");
+    HU_ASSERT_NOT_NULL(rules);
+    /* After the guard tail, i.e. the final instruction the model reads. */
+    HU_ASSERT_TRUE(rules > strstr(prompt, "CRITICAL REMINDER"));
+    /* The measured casual rule 2 is in it: "Sam" has no style card, so the
+     * compiled default renders emoji 0.126 as "about 1 in 8 texts". */
+    HU_ASSERT_STR_CONTAINS(rules, "Emoji about 1 in 8 texts");
+    HU_ASSERT_STR_CONTAINS(rules, "You are HUMAN");
+
+    /* Idempotent: a second pass never appends a second copy. */
+    size_t before = len;
+    HU_ASSERT_EQ(hu_agent_finalize_system_prompt(&agent, &prompt, &len, sizeof(k_guard) - 1),
+                 HU_OK);
+    HU_ASSERT_EQ((long)len, (long)before);
+    HU_ASSERT_NULL(strstr(rules + 1, "=== ABSOLUTE RULES"));
+    alloc.free(alloc.ctx, prompt, len + 1);
+}
+
+static void test_agent_finalize_system_prompt_without_persona_is_plain_cap(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    ph_agent_fixture(&agent, &alloc, NULL);
+    static const char k_prompt[] = "no persona here\n";
+    size_t len = sizeof(k_prompt) - 1;
+    char *prompt = (char *)alloc.alloc(alloc.ctx, len + 1);
+    memcpy(prompt, k_prompt, len + 1);
+    HU_ASSERT_EQ(hu_agent_finalize_system_prompt(&agent, &prompt, &len, 0), HU_OK);
+    HU_ASSERT_STR_EQ(prompt, k_prompt);
+    alloc.free(alloc.ctx, prompt, len + 1);
+}
+
 void run_persona_head_gate_tests(void) {
     HU_TEST_SUITE("persona head gate (HU_PERSONA_HEAD)");
     HU_RUN_TEST(test_compact_immersive_extends_compact_with_anti_ai_tell_sections);
@@ -326,4 +385,6 @@ void run_persona_head_gate_tests(void) {
     HU_RUN_TEST(test_agent_head_unknown_gate_value_fails_closed);
     HU_RUN_TEST(test_agent_head_invalid_args_rejected);
     HU_RUN_TEST(test_compact_head_honors_terseness_and_humor_gates);
+    HU_RUN_TEST(test_agent_finalize_system_prompt_ends_with_measured_absolute_rules);
+    HU_RUN_TEST(test_agent_finalize_system_prompt_without_persona_is_plain_cap);
 }

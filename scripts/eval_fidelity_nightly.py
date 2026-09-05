@@ -1588,6 +1588,21 @@ def main():
         print("[INFO] --no-registry: verdict NOT recorded in adapter registry",
               flush=True)
         return exit_code
+    # Every row carries its evidence: n (pairs actually compared), a reason a
+    # reader can act on, the adapter/base pair, and how generation ran. A row
+    # without these is read back as ABSENT (adapter_registry.eval_is_measured);
+    # the 14 v4-repair rows of 2026-07-12..25 had none of it and read as 1.0.
+    reason = {
+        "PASS": (f"stat pass (post {post_mean:.3f} > pre {pre_mean:.3f} + 1.96*stderr "
+                 f"= {stat_threshold:.3f}) and delta_mean {delta_mean:.4f} >= floor "
+                 f"{PRACTICAL_DELTA_FLOOR}"),
+        "SKIP": (f"FIDELITY_SKIP no measurable improvement: delta_mean {delta_mean:.4f} "
+                 f"< floor {PRACTICAL_DELTA_FLOOR} (post {post_mean:.3f}, pre {pre_mean:.3f})"),
+        "FAIL": (f"statistical gate failed: post {post_mean:.3f} <= threshold "
+                 f"{stat_threshold:.3f} (delta_mean {delta_mean:.4f})"),
+    }[final_verdict]
+    provenance_keys = ("generation", "differentiation", "scorer", "n_valid_pairs", "n_prompts",
+                       "n_sentinel", "gen_timeout_sec", "pre", "post", "delta", "gate")
     try:
         adapter_name = Path(args.adapter_path).name
         adapter_registry.record_eval(
@@ -1595,7 +1610,12 @@ def main():
             eval_name="fidelity-nightly",
             score=post_mean if final_verdict != "SKIP" else None,
             verdict=final_verdict,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            n=len(valid_idx),
+            reason=reason,
+            adapter_path=str(args.adapter_path),
+            base=args.model_id,
+            provenance={k: verdict[k] for k in provenance_keys},
         )
         print(f"[INFO] Eval result recorded to adapter registry", flush=True)
     except Exception as e:
