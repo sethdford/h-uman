@@ -3664,6 +3664,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_semantic_index.c
     tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
+    tests/test_semantic_recall_register.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c
