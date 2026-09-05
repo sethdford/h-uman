@@ -11344,7 +11344,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             graph, batch_key, key_len, dr->entity_a,
                                             dr->relation ? dr->relation : "related_to",
                                             dr->entity_b, (float)dr->confidence,
-                                            (int64_t)time(NULL), "turn:deep_extract");
+                                            (int64_t)time(NULL) * 1000, "turn:deep_extract");
                                     }
                                     hu_deep_extract_result_deinit(&de_result, alloc);
                                 }
