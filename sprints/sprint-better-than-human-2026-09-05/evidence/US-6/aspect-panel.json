@@ -1,0 +1,49 @@
+{
+  "ts": "20260905T204951Z",
+  "target": "Story US-6 (preference-based human blind A/B: win rate, not detection) of sprint sprint-better-than-human-2026-09-05. Review: run `git -C /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us6 diff sprint-better-than-human-2026-09-05..sbth-us6` \u2014 files scripts/blind_ab/make_rating_sheet.py (--mode preference, phone/name redaction), scripts/blind_ab/score_preference.py (new; win rate + Wilson CI; hard n>=20 floor for evidence), scripts/blind_ab/PROTOCOL.md, scripts/blind_ab/test_make_rating_sheet.py, test_score.py additions, test_score_preference.py (new), sprints/sprint-better-than-human-2026-09-05/evidence/US-6/RATING-BLOCKED.md. Contract: stories.md US-6 and designs/US-6.md in that worktree. Rules: read-only; ABSOLUTE paths; set HU_BLIND_AB_SKIP_ADDRESSBOOK=1 for any execution; never read real sheets under ~/.human/blind_ab_human/ (list names only); never touch port 8741; no message text/phones/names in your output. Judge: contract (score.py math reused unmodified; sheet outside the repo; ids+votes only; refusals n=0, n<20, non-human rater, real/real pairs; _mode marker); edge cases (redaction false negatives/positives, order randomisation, key inversion); privacy (any path emitting text into repo files or logs); regressions (detection mode default behaviour unchanged; the live nightly gate files never written); maintainability.",
+  "aspects": [
+    {
+      "aspect": "correctness",
+      "verdict": "pass",
+      "confidence": 0.82,
+      "rationale": "Contract holds: `make_rating_sheet.py:170-176` inverts the key so `key[id]` names the model side in preference mode (probe confirmed row order and A/B placement identical to detection for the same seed, keys inverted, model side correctly keyed), and detection mode's rng consumption order matches th",
+      "elapsed_s": 94.76
+    },
+    {
+      "aspect": "edge-case",
+      "verdict": "pass",
+      "confidence": 0.8,
+      "rationale": "n=0, n<20, missing `_mode` marker, synthetic-judge stamps, and real-vs-real pairs all refuse loudly and write nothing; the one silent hazard is duplicate triple ids overwriting the answer key so one row scores inverted, which is pre-existing behaviour shared with detection mode rather than a US-6 re",
+      "elapsed_s": 107.08
+    },
+    {
+      "aspect": "regression",
+      "verdict": "pass",
+      "confidence": 0.5,
+      "rationale": "** No existing caller breaks: the only `build()` unpackers are the new tests, all CLI wrappers (regression_gate.sh, gen-v6-arm.sh) use the default `--mode detection`, whose output is byte-identical to the base for the same seed, score.py is untouched (81 tests + selftest pass), and score_preference.",
+      "elapsed_s": 80.0
+    },
+    {
+      "aspect": "security",
+      "verdict": "pass",
+      "confidence": 0.9,
+      "rationale": "No hardcoded secrets, injection, SSRF, path traversal, unsafe deserialization, or weak crypto; the only written artifacts are a redacted sheet outside the repo and an aggregate JSON of ids-free counts and rates, and no code path writes the live nightly gate files. Residual risk is limited to documen",
+      "elapsed_s": 65.93
+    },
+    {
+      "aspect": "style",
+      "verdict": "pass",
+      "confidence": 0.85,
+      "rationale": "The change is small, linear, and every non-obvious branch carries a WHY comment tied to a real incident; the only smells are duplicated tests and an unpinned over-redaction false positive, neither of which obscures intent for a future reader.",
+      "elapsed_s": 107.66
+    }
+  ],
+  "aggregate": {
+    "verdict": "PASS",
+    "pass_weight": 3.87,
+    "fail_weight": 0,
+    "pass_share": 1.0,
+    "split": false
+  },
+  "cross_family_tiebreak": null
+}
