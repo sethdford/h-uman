@@ -189,7 +189,9 @@ def test_join_dedup_confirmed_send():
 def test_join_dedup_failed_send():
     """Proposal fired (decision=send) but the outcome row records a
     channel-send failure -- resolves to zero FIR-eligible events and
-    increments send_failed, NOT dropped_pre_send."""
+    increments send_failed, NOT dropped_pre_send. F1: resolved_decision is
+    preserved as 'send' (the proposal's intent) so MIR counts it
+    symmetrically with dropped_pre_send cases."""
     rows = [
         {"ts": 200, "contact": "B", "decision": "send", "sent": False, "trigger": "init_proposer_llm"},
         {
@@ -200,7 +202,7 @@ def test_join_dedup_failed_send():
     events = ews.resolve_decision_events(rows)
     assert len(events) == 1
     e = events[0]
-    assert e["resolved_decision"] == "decline"
+    assert e["resolved_decision"] == "send"  # F1: preserved for MIR symmetry
     assert e["resolved_sent"] is False
     assert e["dropped_pre_send"] is False
     assert e["send_failed"] is True
@@ -369,6 +371,48 @@ def test_mir_missed_when_no_send_nearby():
 def test_mir_zero_positives_returns_none_rate_not_a_crash():
     mir = ews.compute_mir([], decisions_by_contact={}, before_secs=3600.0, after_secs=3600.0)
     assert mir == {"n": 0, "missed": 0, "rate": None, "wilson_ci": [0.0, 0.0]}
+
+
+def test_mir_send_failed_and_dropped_pre_send_symmetric():
+    """F1: FIRED-then-failed (send_failed=True) and FIRED-then-dropped
+    (dropped_pre_send=True) are both FIRED cases where the policy noticed
+    and tried to engage. They should be counted symmetrically by MIR --
+    both treated as presence of a 'send' decision. Verifies that
+    resolved_decision='send' is preserved for send_failed cases."""
+    # One contact with FIRED-then-failed
+    rows_failed = [
+        {"ts": 100, "contact": "A", "decision": "send", "sent": False, "trigger": "init_proposer_llm"},
+        {"ts": 100, "contact": "A", "decision": "decline", "sent": False, "trigger": "proactive_send"},
+    ]
+    # One contact with FIRED-then-dropped
+    rows_dropped = [
+        {"ts": 200, "contact": "B", "decision": "send", "sent": False, "trigger": "init_proposer_llm"},
+    ]
+    all_rows = rows_failed + rows_dropped
+
+    events = ews.resolve_decision_events(all_rows)
+    assert len(events) == 2
+    failed_event = [e for e in events if e["contact"] == "A"][0]
+    dropped_event = [e for e in events if e["contact"] == "B"][0]
+
+    # Both should have resolved_decision='send' for MIR symmetry
+    assert failed_event["resolved_decision"] == "send"
+    assert failed_event["send_failed"] is True
+    assert dropped_event["resolved_decision"] == "send"
+    assert dropped_event["dropped_pre_send"] is True
+
+    # Build decisions_by_contact index (what MIR uses)
+    decisions_by_contact = ews.decisions_by_contact_index(events)
+    positives = [
+        {"chat_id": 1, "contact": "A", "ts": 50.0, "positive": True},
+        {"chat_id": 2, "contact": "B", "ts": 150.0, "positive": True},
+    ]
+
+    mir = ews.compute_mir(positives, decisions_by_contact, before_secs=3600.0, after_secs=3600.0)
+    # Both positives should find a nearby 'send' decision, so neither is missed
+    assert mir["n"] == 2
+    assert mir["missed"] == 0
+    assert mir["rate"] == 0.0
 
 
 # ── pure-function tests: --compare-baseline (AC-4.4) ─────────────────────
@@ -696,3 +740,49 @@ def test_memory_db_missing_refuses(tmp_path, capsys):
     captured = capsys.readouterr()
     assert rc != 0
     assert "REFUSE" in captured.err
+
+
+def test_refusal_prints_diagnostic_counters_on_stderr(tmp_path, capsys):
+    """F2: On REFUSE due to insufficient n, the script must print
+    diagnostic counters to stderr so they can be regenerated from
+    stderr alone (.claude/rules/no-number-without-a-measurement.md)."""
+    chat_db_path = tmp_path / "chat.db"
+    memory_db_path = tmp_path / "memory.db"
+    out_dir = tmp_path / "out"
+
+    fb = ChatDbBuilder(chat_db_path)
+    fb.add_dm_chat(chat_id=1, contact_id="+15550005555")
+    fb.add_message(chat_id=1, ts_unix=BASE_TS, is_from_me=False)
+    fb.add_message(chat_id=1, ts_unix=BASE_TS + 60.0, is_from_me=True)
+    fb.commit_and_close()
+
+    make_memory_db_with_proactive_decisions(
+        memory_db_path,
+        rows=[
+            # One event to trigger refusal (n=1 << min_n=30)
+            (BASE_TS + 30.0, "+15550005555", "init_proposer_llm", "send", False),
+            (BASE_TS + 30.0, "+15550005555", "proactive_send", "send", True),
+        ],
+    )
+
+    rc = ews.main([
+        "--chat-db", str(chat_db_path),
+        "--memory-db", str(memory_db_path),
+        "--out-dir", str(out_dir),
+        "--days", str(BIG_DAYS),
+        # --min-n omitted -> default 30, triggers refusal
+    ])
+    captured = capsys.readouterr()
+
+    assert rc != 0
+    assert "REFUSE: insufficient n" in captured.err
+    # F2: diagnostic counters must appear on stderr
+    assert "resolved_events=" in captured.err
+    assert "fir_n=" in captured.err
+    assert "fir_dropped_pre_send=" in captured.err
+    assert "fir_send_failed=" in captured.err
+    assert "mir_n=" in captured.err
+    # Verify specific values (1 resolved event, n=1 for both MIR and FIR)
+    assert "resolved_events=1" in captured.err
+    assert "fir_n=1" in captured.err
+    assert "mir_n=1" in captured.err

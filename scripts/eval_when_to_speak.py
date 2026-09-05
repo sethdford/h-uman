@@ -304,12 +304,18 @@ def resolve_decision_events(rows):
 
     Resolution per (contact, ts) group:
       - An outcome row (trigger == 'proactive_send') is authoritative when
-        present: resolved_decision / resolved_sent come from it, never from
-        the proposal row.
+        present: resolved_sent comes from it; resolved_decision is 'send' if
+        a proposal row fired (decision=='send') regardless of the outcome's
+        decision, otherwise the outcome's decision. This preserves the
+        semantic symmetry with dropped_pre_send cases: both FIRED-then-failed
+        and FIRED-then-dropped represent engagement attempts and are counted
+        the same by MIR's presence check. FIR still correctly excludes both
+        cases via the send_failed and dropped_pre_send flags.
         * send_failed = True iff a proposal row in the SAME group had
-          decision == 'send' but the authoritative outcome's decision is
-          NOT 'send' (the proposal FIRED but died before delivery --
-          e.g. a channel-send error at daemon_proactive.c:970).
+          decision == 'send' but the outcome's decision is NOT 'send' (the
+          proposal FIRED but died before delivery -- e.g. a channel-send
+          error at daemon_proactive.c:970). In this case resolved_decision
+          is restored to 'send' (the proposal's intended action) for MIR.
       - No outcome row present, but a proposal row (trigger ==
         'init_proposer_llm') is: resolved_sent = False; resolved_decision =
         the proposal's own decision.
@@ -340,16 +346,21 @@ def resolve_decision_events(rows):
 
         if outcome_rows:
             outcome = outcome_rows[-1]
-            resolved_decision = outcome["decision"]
             resolved_sent = bool(outcome["sent"])
             proposal_fired = any(r["decision"] == "send" for r in proposal_rows)
+            send_failed = proposal_fired and outcome["decision"] != "send"
+            # For MIR's presence check, preserve resolved_decision='send' for
+            # both FIRED-then-failed and FIRED-then-dropped cases, so they are
+            # counted symmetrically as engagement attempts. FIR still correctly
+            # excludes both via the send_failed and dropped_pre_send flags.
+            resolved_decision = "send" if proposal_fired else outcome["decision"]
             events.append({
                 "contact": contact,
                 "ts": ts,
                 "resolved_decision": resolved_decision,
                 "resolved_sent": resolved_sent,
                 "dropped_pre_send": False,
-                "send_failed": proposal_fired and resolved_decision != "send",
+                "send_failed": send_failed,
             })
         elif proposal_rows:
             resolved_decision = proposal_rows[-1]["decision"]
@@ -608,6 +619,13 @@ def main(argv=None):
             "— not writing a result.",
             file=sys.stderr,
         )
+        # F2: print diagnostic counters on refusal so they can be regenerated
+        # from stderr alone (per .claude/rules/no-number-without-a-measurement.md)
+        print(f"resolved_events={len(events)}", file=sys.stderr)
+        print(f"fir_n={fir['n']}", file=sys.stderr)
+        print(f"fir_dropped_pre_send={fir['dropped_pre_send']}", file=sys.stderr)
+        print(f"fir_send_failed={fir['send_failed']}", file=sys.stderr)
+        print(f"mir_n={mir['n']}", file=sys.stderr)
         return 2
 
     total_positive_examples = sum(1 for p in positives if p["positive"])
