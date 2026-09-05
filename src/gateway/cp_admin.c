@@ -601,10 +601,14 @@ hu_error_t cp_admin_models_decisions(hu_allocator_t *alloc, hu_app_context_t *ap
     }
 
     size_t count = hu_route_log_count(log);
+    size_t real_decisions = 0;
     for (size_t i = 0; i < count; i++) {
         const hu_route_decision_t *d = hu_route_log_get(log, i);
         if (!d)
             continue;
+        if (d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            continue; /* hypothetical, never applied — US-8 */
+        real_decisions++;
         hu_json_value_t *entry = hu_json_object_new(alloc);
         if (!entry)
             continue;
@@ -619,7 +623,7 @@ hu_error_t cp_admin_models_decisions(hu_allocator_t *alloc, hu_app_context_t *ap
     }
 
     hu_json_object_set(alloc, obj, "decisions", arr);
-    hu_json_object_set(alloc, obj, "total", hu_json_number_new(alloc, (double)count));
+    hu_json_object_set(alloc, obj, "total", hu_json_number_new(alloc, (double)real_decisions));
 
     size_t tier_counts[4];
     hu_route_log_tier_counts(log, tier_counts);

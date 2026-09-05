@@ -95,10 +95,11 @@ const char *hu_model_route_cloud_fallback(const hu_model_router_config_t *cfg,
  * own word_count/needs_reasoning/emotional_weight helpers on an INDEPENDENT boundary
  * from compute_heuristic_score's own thresholds, so this is not tautological with
  * the tier heuristic that already placed the turn in CONVERSATIONAL. */
-#define HU_DIFFICULTY_ROUTE_SUBSTANTIVE_WORDS \
-    12 /* matches US-5's casual/substantive   \
-        * boundary (scripts/blind_ab/         \
-        * authorship_gap.py) */
+#define HU_DIFFICULTY_ROUTE_SUBSTANTIVE_WORDS                                   \
+    12 /* boundary for substantive messages that can admit higher-tier routing. \
+        * Used by hu_model_route_shadow_would_promote_conversational() to gate  \
+        * shadow routing decisions. Do not change without coordinating with the \
+        * eval gate in feature-gate-requires-measurement.md */
 bool hu_model_route_shadow_would_promote_conversational(const char *msg, size_t msg_len);
 
 /* Check whether the on-device model is sufficient for a given tier.

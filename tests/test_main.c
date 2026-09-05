@@ -563,6 +563,7 @@ void run_governor_tests(void);
 void run_activation_steering_tests(void);
 void run_model_router_tests(void);
 void run_model_router_health_tests(void);
+void run_cp_admin_tests(void);
 void run_humanness_context_tests(void);
 void run_turing_score_tests(void);
 void run_adversarial_turing_tests(void);
@@ -1619,6 +1620,7 @@ int main(int argc, char **argv) {
     run_activation_steering_tests();
     run_model_router_tests();
     run_model_router_health_tests();
+    run_cp_admin_tests();
     run_humanness_context_tests();
     run_turing_score_tests();
     run_adversarial_turing_tests();

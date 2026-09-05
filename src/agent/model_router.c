@@ -380,7 +380,9 @@ hu_model_selection_t hu_model_route(const hu_model_router_config_t *cfg, const c
     /* Record to global decision log for dashboard visibility */
     hu_route_log_record(hu_route_global_log(), &sel, score, (int64_t)time(NULL));
 
-    /* US-8: SHADOW-only difficulty-routing measurement. Does not alter sel. */
+    /* US-8: difficulty-based routing, SHADOW-only measurement gate. Do not flip to LIVE without
+     * scripts/eval_difficulty_route_shadow.py returning PROMOTE on >=20 paired substantive
+     * contexts (composite fidelity + LUAR twin no-regression). LIVE currently fails closed. */
     if (sel.tier == HU_TIER_CONVERSATIONAL) {
         hu_gate_mode_t diff_mode = hu_gate_mode_from_env("HU_DIFFICULTY_ROUTE", HU_GATE_OFF);
         if (diff_mode == HU_GATE_SHADOW &&

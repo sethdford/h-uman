@@ -462,6 +462,55 @@ static void shadow_live_not_implemented_warns_once(void) {
     unsetenv("HU_DIFFICULTY_ROUTE");
 }
 
+static void shadow_mode_selection_matches_off_mode_for_substantive_message(void) {
+    /* AC-8.7: substantive CONVERSATIONAL message (>12 words with reasoning marker)
+     * routes to the same tier+model in OFF and SHADOW modes; SHADOW additionally
+     * logs a hypothetical ANALYTICAL decision. Proves the shadow decision does not
+     * influence the real selection. */
+    hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
+
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    /* Substantive CONVERSATIONAL message with reasoning marker */
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+
+    /* Route in OFF mode (default) */
+    unsetenv("HU_DIFFICULTY_ROUTE");
+    hu_model_selection_t sel_off = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT_EQ(sel_off.tier, HU_TIER_CONVERSATIONAL); /* precondition for shadow test */
+
+    /* Count entries after OFF route */
+    size_t after_off = hu_route_log_count(log);
+
+    /* Route in SHADOW mode */
+    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
+    hu_model_selection_t sel_shadow = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    unsetenv("HU_DIFFICULTY_ROUTE");
+
+    /* Selection must be identical */
+    HU_ASSERT_EQ(sel_off.tier, sel_shadow.tier);
+    HU_ASSERT_STR_EQ(sel_off.model, sel_shadow.model);
+
+    /* Count total entries after both routes */
+    size_t total_count = hu_route_log_count(log);
+
+    /* SHADOW mode should have added exactly one more entry (the shadow entry).
+     * OFF route: 1 real entry
+     * SHADOW route: 1 real entry + 1 shadow entry
+     * Total expected: 3 entries */
+    HU_ASSERT_EQ(total_count, after_off + 2);
+
+    /* Count shadow entries */
+    size_t shadow_count = 0;
+    for (size_t i = 0; i < total_count; i++) {
+        const hu_route_decision_t *d = hu_route_log_get(log, i);
+        if (d && d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            shadow_count++;
+    }
+    HU_ASSERT_EQ(shadow_count, (size_t)1);
+}
+
 static void tier_counts_excludes_shadow_entries(void) {
     /* Shadow entries should NOT be counted in tier_distribution */
     hu_route_decision_log_t log;
@@ -493,14 +542,28 @@ static void tier_counts_excludes_shadow_entries(void) {
 }
 
 static void casual_message_never_shadow_logged(void) {
-    /* Messages <= 12 words should never trigger shadow logging, even with SHADOW=on */
-    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
+    /* Messages <= 12 words should never trigger shadow logging, even with SHADOW=on.
+     * Heuristic tier is REFLEXIVE and ZERO shadow entries are added. */
+    hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
 
+    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
     hu_model_router_config_t cfg = hu_model_router_default_config();
     const char *msg = "hey how are you"; /* 4 words, casual */
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
 
     HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+
+    /* Count entries in the log. Since the message is <=12 words, no shadow
+     * entry should have been added. */
+    size_t entries = hu_route_log_count(log);
+    size_t shadow_count = 0;
+    for (size_t i = 0; i < entries; i++) {
+        const hu_route_decision_t *d = hu_route_log_get(log, i);
+        if (d && d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            shadow_count++;
+    }
+    HU_ASSERT_EQ(shadow_count, (size_t)0);
 
     unsetenv("HU_DIFFICULTY_ROUTE");
 }
@@ -901,6 +964,7 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(shadow_predicate_with_emotional_weight);
     HU_RUN_TEST(shadow_off_by_default);
     HU_RUN_TEST(shadow_live_not_implemented_warns_once);
+    HU_RUN_TEST(shadow_mode_selection_matches_off_mode_for_substantive_message);
     HU_RUN_TEST(tier_counts_excludes_shadow_entries);
     HU_RUN_TEST(casual_message_never_shadow_logged);
 
