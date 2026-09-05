@@ -1,8 +1,36 @@
 #!/usr/bin/env python3
 """merge_seth_preference_sources.py — merge the provenance-verified
 Seth-authored preference sources named in
-docs/plans/2026-09-02-persona-evolution/spec.md §3b into a single
-KTO-shaped ({"prompt","completion","label"}) training corpus.
+docs/plans/2026-09-02-persona-evolution/spec.md §3b into a training corpus,
+written in TWO shapes: the paired {"prompt","chosen","rejected"} shape
+(train.jsonl) that scripts/mlx_tune_train.py's own on-disk validator
+(REQUIRED_PAIR_KEYS) requires, and the KTO-shaped
+{"prompt","completion","label"} shape (train.kto.jsonl) the original design
+(sprints/sprint-better-than-human-2026-09-05/designs/US-1.md §2) produced.
+
+WHY BOTH SHAPES (critic re-open, 2026-09-05)
+---------------------------------------------
+The original design deliberately chose KTO-only because pairing a new
+chosen row with a specific rejected row would assert a prompt
+correspondence that doesn't exist between the two pools (see §2's "Rejected
+alternative"). That reasoning is still correct about GENUINE pairing — but
+scripts/mlx_tune_train.py's validate_data_dir() / _count_and_validate_jsonl()
+(REQUIRED_PAIR_KEYS = ("prompt","chosen","rejected")) validates ONLY the
+paired shape on disk; it converts to KTO examples itself, in-process, via
+to_kto_examples(). A KTO-only train.jsonl fails that validator's key check
+and can never reach the trainer. So this script now ALSO writes a paired
+train.jsonl -- an explicit, deterministic, seeded ASSIGNMENT of a rejected
+completion to each chosen row (build_paired_rows(), below), not a claim of
+genuine prompt correspondence. Where a rejected-pool row's own original
+prompt exactly matches a chosen row's rendered prompt, that (higher-fidelity)
+pairing is preferred; every other chosen row is assigned a rejected
+completion by a fixed-seed round-robin over the (fixed-seed-shuffled)
+rejected pool, so re-running this script against the same inputs reproduces
+the identical pairing. The manifest records how many rows landed in each
+bucket (`pairing.matched_on_prompt` / `pairing.round_robin`) so a reader can
+see the pairing's actual fidelity rather than assume it. train.kto.jsonl is
+kept, unchanged in shape, as the format-agnostic ground truth of "what was
+merged" independent of any pairing decision.
 
 WHY THIS SCRIPT (sprint-better-than-human-2026-09-05 US-1)
 ------------------------------------------------------------
@@ -30,8 +58,8 @@ AC-1.1, verified against the tree rather than assumed):
                     their OWN original prompts) are read; provenance is not
                     required on this side (AC-1.2 only constrains chosen).
 
-KTO shape, not paired DPO/ORPO -- why
---------------------------------------
+KTO shape, not paired DPO/ORPO -- why (and why we ALSO emit paired now)
+------------------------------------------------------------------------
 None of the Seth-authored export shapes (training_pairs, ground_truth)
 carry a competing ("rejected") reply for the same context -- producing one
 would require a live model call, forbidden by AC-1.6 and
@@ -41,7 +69,33 @@ prompt (the training_pairs shape's preceding context messages, or the
 ground_truth shape's own `incoming` string); each reused rejected row
 keeps its own real, different prompt. scripts/rebalance_preference_corpus.py
 already accepts and exercises this shape end-to-end (including
---match-sides) with zero changes needed here.
+--match-sides) with zero changes needed here -- this remains true and
+train.kto.jsonl (below) is exactly that KTO output.
+
+But scripts/mlx_tune_train.py's on-disk validator only accepts the PAIRED
+{"prompt","chosen","rejected"} shape (see the module docstring above), so a
+KTO-only train.jsonl is dead on arrival at the trainer. train.jsonl is
+therefore written in the PAIRED shape: each chosen row is deterministically
+ASSIGNED a rejected completion (build_paired_rows()) -- preferring an exact
+prompt match against --rejected-pool's own prompts where one exists, else a
+fixed-seed round-robin -- not a claim that the assignment is a genuine
+"a human preferred X over Y for prompt P" pair. The manifest's `pairing`
+block reports how many rows fell into each bucket.
+
+Prompt type (AC-1.2 follow-up)
+--------------------------------
+extract_seth_record() returns the training_pairs shape's `prompt` as the
+raw list[{"role","content"}] context (its own real preceding turns, not a
+synthesized string) but the ground_truth shape's `incoming` as a plain
+string -- two different Python types for the same logical field. Every row
+this script WRITES normalizes `prompt` to one plain string via
+render_prompt(), matching how the existing corpus
+(~/.human/training-data/glm-v61-pref/train.jsonl) already renders
+multi-turn context: alternating "Them: "/"Seth: "-prefixed lines joined by
+"\\n" (e.g. "Them: lmaooo did you even watch that game last night\\nSeth: ha
+yeah I did..."), with a single-turn prompt left as the bare unprefixed text
+(e.g. "I've been feeling really anxious lately") -- both forms verified by
+inspecting that file's actual rows, not assumed.
 
 Provenance admission (AC-1.2)
 ------------------------------
@@ -97,11 +151,21 @@ Usage:
         --extra ~/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl \\
         --rejected-pool ~/.human/training-data/glm-v61-pref/train.jsonl \\
         --out-dir ~/.human/training-data/glm-v6-merged-20260905/
+
+Writes, under --out-dir:
+    train.jsonl       -- PAIRED {"prompt","chosen","rejected"} shape;
+                          scripts/mlx_tune_train.py's on-disk validator reads
+                          THIS file.
+    train.kto.jsonl   -- KTO {"prompt","completion","label"} shape; the
+                          original per-source merge output, unchanged.
+    manifest.json     -- counts, per-source provenance, pairing method +
+                          counts; never message text (AC-1.5).
 """
 import argparse
 import datetime
 import json
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -129,6 +193,14 @@ def extract_seth_record(rec):
       synthesized string).
     - ground_truth shape: {"seth_reply":..., "timestamp":..., "incoming":...}
       prompt = the row's own `incoming` string.
+
+    Provenance is checked via each turn's `role` field (last.get("role") ==
+    "assistant"), NOT the original chat.db `is_from_me` flag, because
+    scripts/extract_imessage_pairs.py's extract_training_pairs() translates
+    is_from_me -> role at export time and does not carry is_from_me itself
+    into the exported JSON (see its `role = "assistant" if ctx["is_from_me"]
+    else "user"` mapping) -- role is the only Seth-authorship signal these
+    export shapes still carry by the time this script reads them.
     """
     if "messages" in rec and isinstance(rec.get("metadata"), dict) and "timestamp" in rec["metadata"]:
         msgs = rec["messages"]
@@ -221,7 +293,14 @@ def read_rejected_pool(path):
     text)] -- each row's OWN original prompt, kept as-is. Rows without a
     non-empty `rejected` string are skipped and counted (not fatal: the
     rejected side carries no Seth-authorship provenance requirement --
-    AC-1.2 only constrains the chosen side)."""
+    AC-1.2 only constrains the chosen side). The rejected side is trusted
+    by CONVENTION, not verified: per AC-1.2 / designs/US-1.md §4, a
+    `rejected` field is assumed to be model output (never Seth-authored)
+    because the corpora this script is pointed at (e.g.
+    ~/.human/training-data/glm-v61-pref/train.jsonl) are themselves built
+    with that invariant (scripts/build_v6_preference_corpus.py's own
+    provenance work) -- this function does not and cannot independently
+    re-verify that invariant for an arbitrary --rejected-pool path."""
     rows = []
     n_lines = 0
     n_skipped = 0
@@ -243,6 +322,116 @@ def read_rejected_pool(path):
                 continue
             rows.append((rec.get("prompt"), rejected.strip()))
     return rows, n_lines, n_skipped
+
+
+# ---------------------------------------------------------------------------
+# Prompt rendering -- ONE plain-string shape for every row this script
+# writes, regardless of which source shape it came from (see the module
+# docstring's "Prompt type (AC-1.2 follow-up)" section).
+# ---------------------------------------------------------------------------
+
+
+def render_prompt(prompt):
+    """Normalize a prompt value from either accepted export shape (or the
+    --rejected-pool's own `prompt` field) into ONE plain string.
+
+    Accepts:
+      - a plain string (ground_truth shape's `incoming`, or an already
+        string-shaped --rejected-pool prompt) -- returned stripped, as-is;
+      - list[{"role": "user"|"assistant", "content": str}] (training_pairs
+        shape's context turns, extract_seth_record's `msgs[:-1]`) --
+        rendered to match how ~/.human/training-data/glm-v61-pref/train.jsonl
+        already renders multi-turn context: a single turn is left as the
+        bare unprefixed text (that file's single-incoming-message rows,
+        e.g. "I've been feeling really anxious lately"); two or more turns
+        are joined by "\\n" as alternating "Them: "/"Seth: "-prefixed lines
+        (that file's multi-turn rows, e.g. "Them: lmaooo did you even watch
+        that game last night\\nSeth: ha yeah I did..."), role "assistant"
+        (Seth's own prior turns) -> "Seth: ", anything else -> "Them: ";
+      - None or any other value -- coerced to "" (never emits a non-string
+        `prompt`; a missing --rejected-pool prompt must not become a JSON
+        `null` that fails an isinstance(str) check downstream).
+    """
+    if prompt is None:
+        return ""
+    if isinstance(prompt, str):
+        return prompt.strip()
+    if isinstance(prompt, list):
+        if len(prompt) == 0:
+            return ""
+        if len(prompt) == 1:
+            turn = prompt[0]
+            content = turn.get("content") if isinstance(turn, dict) else turn
+            return (content or "").strip()
+        lines = []
+        for turn in prompt:
+            if isinstance(turn, dict):
+                speaker = "Seth" if turn.get("role") == "assistant" else "Them"
+                content = (turn.get("content") or "").strip()
+            else:
+                speaker = "Them"
+                content = str(turn).strip()
+            lines.append(f"{speaker}: {content}")
+        return "\n".join(lines)
+    return str(prompt).strip()
+
+
+# ---------------------------------------------------------------------------
+# Paired-shape assignment -- scripts/mlx_tune_train.py's on-disk validator
+# (REQUIRED_PAIR_KEYS) requires {"prompt","chosen","rejected"} rows; see the
+# module docstring's "WHY BOTH SHAPES" section for why this is a
+# deterministic ASSIGNMENT, not a claim of genuine paired preference.
+# ---------------------------------------------------------------------------
+
+PAIRING_SEED = 20260905  # fixed -- re-running against the same inputs must
+                          # reproduce the identical pairing (US-1 critic fix)
+
+
+def build_paired_rows(chosen_rows, rejected_rows, seed=PAIRING_SEED):
+    """chosen_rows: list[(ts, prompt_str, text)], already time-sorted and
+    prompt-rendered (render_prompt already applied). rejected_rows:
+    list[(prompt_str, text)], the --rejected-pool's own rows, prompt already
+    rendered.
+
+    For each chosen row, prefer a rejected completion whose OWN original
+    prompt exactly equals the chosen row's rendered prompt (round-robin
+    within that prompt's own candidates, so repeats rotate rather than
+    always picking the first); otherwise assign the next completion from a
+    fixed-seed shuffle of the FULL rejected pool, round-robin. Both cursors
+    are deterministic given `seed` and the input order, so re-running this
+    script against unchanged inputs reproduces the identical output file
+    byte-for-byte.
+
+    Returns (paired_rows, stats) where paired_rows is
+    list[{"prompt","chosen","rejected"}] in chosen_rows' order and stats is
+    {"matched_on_prompt": int, "round_robin": int}.
+    """
+    by_prompt = {}
+    for p, t in rejected_rows:
+        by_prompt.setdefault(p, []).append(t)
+
+    rng = random.Random(seed)
+    shuffled_pool = [t for _, t in rejected_rows]
+    rng.shuffle(shuffled_pool)
+
+    prompt_cursor = {p: 0 for p in by_prompt}
+    round_robin_cursor = 0
+    n_matched = 0
+    n_round_robin = 0
+    paired = []
+    for _ts, prompt, chosen_text in chosen_rows:
+        candidates = by_prompt.get(prompt)
+        if candidates:
+            idx = prompt_cursor[prompt] % len(candidates)
+            rejected_text = candidates[idx]
+            prompt_cursor[prompt] += 1
+            n_matched += 1
+        else:
+            rejected_text = shuffled_pool[round_robin_cursor % len(shuffled_pool)]
+            round_robin_cursor += 1
+            n_round_robin += 1
+        paired.append({"prompt": prompt, "chosen": chosen_text, "rejected": rejected_text})
+    return paired, {"matched_on_prompt": n_matched, "round_robin": n_round_robin}
 
 
 def build_parser():
@@ -303,16 +492,34 @@ def main(argv=None):
             f"REFUSING: --rejected-pool {args.rejected_pool} has zero rows with a "
             f"non-empty rejected field; nothing written")
 
+    # Render every prompt to ONE plain-string shape (AC-1.2 follow-up) before
+    # it lands in either output file -- see render_prompt()'s docstring.
+    chosen_for_output = [(ts, render_prompt(prompt), text) for ts, text, prompt in merged]
+    rejected_for_output = [(render_prompt(prompt), text) for prompt, text in rejected_rows]
+
     kto_rows = []
-    for ts, text, prompt in merged:
-        kto_rows.append({"prompt": prompt, "completion": text, "label": True})
-    for prompt, text in rejected_rows:
-        kto_rows.append({"prompt": prompt, "completion": text, "label": False})
+    for ts, prompt_str, text in chosen_for_output:
+        kto_rows.append({"prompt": prompt_str, "completion": text, "label": True})
+    for prompt_str, text in rejected_for_output:
+        kto_rows.append({"prompt": prompt_str, "completion": text, "label": False})
+
+    paired_rows, pairing_stats = build_paired_rows(chosen_for_output, rejected_for_output)
 
     out_dir = os.path.abspath(os.path.expanduser(args.out_dir))
     os.makedirs(out_dir, exist_ok=True)
+
+    # train.jsonl: PAIRED shape -- what scripts/mlx_tune_train.py's on-disk
+    # validator (REQUIRED_PAIR_KEYS) actually requires. See the module
+    # docstring's "WHY BOTH SHAPES" section.
     train_path = os.path.join(out_dir, "train.jsonl")
     with open(train_path, "w") as fh:
+        for r in paired_rows:
+            fh.write(json.dumps(r) + "\n")
+
+    # train.kto.jsonl: the original KTO-shaped output, unchanged in shape --
+    # the format-agnostic record of what was actually merged.
+    kto_path = os.path.join(out_dir, "train.kto.jsonl")
+    with open(kto_path, "w") as fh:
         for r in kto_rows:
             fh.write(json.dumps(r) + "\n")
 
@@ -331,8 +538,16 @@ def main(argv=None):
         "n_chosen": len(merged),
         "n_rejected": len(rejected_rows),
         "n_total": len(kto_rows),
+        "pairing": {
+            "method": "match-on-rendered-prompt-else-fixed-seed-round-robin",
+            "seed": PAIRING_SEED,
+            "matched_on_prompt": pairing_stats["matched_on_prompt"],
+            "round_robin": pairing_stats["round_robin"],
+            "n_paired_rows": len(paired_rows),
+        },
         "out_dir": out_dir,
         "train_path": train_path,
+        "kto_path": kto_path,
     }
     manifest_path = os.path.join(out_dir, "manifest.json")
     with open(manifest_path, "w") as fh:
@@ -349,7 +564,10 @@ def main(argv=None):
           f"{len(rejected_rows)} kept, {rejected_skipped} skipped (no rejected field)")
     print(f"[merge] n_chosen(label=True)={len(merged)} n_rejected(label=False)={len(rejected_rows)} "
           f"n_total={len(kto_rows)}")
-    print(f"[merge] wrote {train_path}")
+    print(f"[merge] pairing: matched_on_prompt={pairing_stats['matched_on_prompt']} "
+          f"round_robin={pairing_stats['round_robin']} (seed={PAIRING_SEED})")
+    print(f"[merge] wrote {train_path} (paired shape)")
+    print(f"[merge] wrote {kto_path} (KTO shape)")
     print(f"[merge] wrote {manifest_path}")
     print("=" * 70)
     return 0

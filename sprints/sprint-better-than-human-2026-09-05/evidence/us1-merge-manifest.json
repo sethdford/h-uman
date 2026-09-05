@@ -30,6 +30,14 @@
   "n_chosen": 1362,
   "n_rejected": 426,
   "n_total": 1788,
+  "pairing": {
+    "method": "match-on-rendered-prompt-else-fixed-seed-round-robin",
+    "seed": 20260905,
+    "matched_on_prompt": 7,
+    "round_robin": 1355,
+    "n_paired_rows": 1362
+  },
   "out_dir": "/Users/sethford/.human/training-data/glm-v6-merged-20260905",
-  "train_path": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.jsonl"
+  "train_path": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.jsonl",
+  "kto_path": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.kto.jsonl"
 }

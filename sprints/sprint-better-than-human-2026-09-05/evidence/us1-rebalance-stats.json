@@ -13,9 +13,9 @@
   },
   "max_lowercase_margin": 0.15,
   "max_margin": 0.1,
-  "n_rows": 1788,
+  "n_rows": 1362,
   "n_chosen": 1362,
-  "n_rejected": 426,
+  "n_rejected": 1362,
   "axis_resampling": {
     "chosen": {
       "lowercase_start": {
@@ -33,16 +33,16 @@
     },
     "rejected": {
       "lowercase_start": {
-        "before": 0.1714,
-        "after": 0.0869,
-        "changed": 36,
-        "n": 426
+        "before": 0.1762,
+        "after": 0.0859,
+        "changed": 123,
+        "n": 1362
       },
       "terminal_punct": {
-        "before": 0.5047,
-        "after": 0.1831,
-        "changed": 137,
-        "n": 426
+        "before": 0.5007,
+        "after": 0.1836,
+        "changed": 432,
+        "n": 1362
       }
     }
   },
@@ -50,24 +50,24 @@
     "lowercase_start_rate": {
       "chosen_before": 0.1481,
       "chosen_after": 0.0893,
-      "rejected_before": 0.1714,
-      "rejected_after": 0.0869,
-      "margin_before": 0.0233,
-      "margin_after": 0.0024
+      "rejected_before": 0.1762,
+      "rejected_after": 0.0859,
+      "margin_before": 0.0281,
+      "margin_after": 0.0034
     },
     "terminal_punct_rate": {
       "chosen_before": 0.2137,
       "chosen_after": 0.1836,
-      "rejected_before": 0.5047,
-      "rejected_after": 0.1831,
-      "margin_before": 0.291,
-      "margin_after": 0.0005
+      "rejected_before": 0.5007,
+      "rejected_after": 0.1836,
+      "margin_before": 0.2871,
+      "margin_after": 0.0
     },
     "median_length": {
       "chosen_before": 27.0,
       "chosen_after": 27.0,
-      "rejected_before": 114.5,
-      "rejected_after": 114.5
+      "rejected_before": 112.0,
+      "rejected_after": 111.5
     }
   }
 }
