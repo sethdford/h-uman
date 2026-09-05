@@ -415,6 +415,7 @@ void run_store_sqlite_vec_tests(void);
 void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
+void run_semantic_recall_register_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
@@ -1482,6 +1483,7 @@ int main(int argc, char **argv) {
     run_semantic_index_tests();
     run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
+    run_semantic_recall_register_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();

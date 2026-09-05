@@ -290,3 +290,21 @@ hu_error_t hu_semantic_recall_attach(hu_allocator_t *alloc, hu_memory_t *mem,
     return HU_ERR_NOT_SUPPORTED;
 #endif
 }
+
+bool hu_semantic_recall_register_admits(const char *query, size_t query_len) {
+    if (!query || query_len == 0)
+        return false; /* fail closed: ambiguous input is treated as casual */
+    size_t words = 0;
+    bool in_word = false;
+    for (size_t i = 0; i < query_len; i++) {
+        bool ws = isspace((unsigned char)query[i]) != 0;
+        if (!ws && !in_word)
+            words++;
+        in_word = !ws;
+    }
+    return words > HU_SEMANTIC_RECALL_REGISTER_MAX_CASUAL_WORDS;
+}
+
+hu_gate_mode_t hu_semantic_recall_register_gate_mode(void) {
+    return hu_gate_mode_from_env("HU_SEMANTIC_RECALL_REGISTER_GATE", HU_GATE_OFF);
+}

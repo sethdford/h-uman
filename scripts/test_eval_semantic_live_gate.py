@@ -526,7 +526,7 @@ def test_main_happy_path_writes_promote_or_hold_with_context_rows(monkeypatch, f
     assert doc["recall_coverage"] == 1.0
     assert len(doc["context_rows"]) == doc["n_paired"]
     row = doc["context_rows"][0]
-    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow", "live"}
+    assert set(row) == {"id", "recall_bytes", "recall_dropped", "shadow", "live", "register"}
     dumped = json.dumps(doc)
     assert "real inbound message" not in dumped  # no context/reply text leaked
 
@@ -754,3 +754,78 @@ def test_context_rows_carry_recall_dropped():
     live = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0, "recall_bytes": 120, "recall_dropped": 2}}
     rows = G.build_context_rows(shadow, live, [0])
     assert rows[0]["recall_dropped"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 9. Register classification (US-5) — mirrors src/memory/semantic_recall.c
+# ---------------------------------------------------------------------------
+def test_classify_register_boundary_12_is_casual():
+    """Exactly 12 words -> casual."""
+    text = "one two three four five six seven eight nine ten eleven twelve"
+    assert G.classify_register(text) == "casual"
+
+
+def test_classify_register_boundary_13_is_substantive():
+    """Exactly 13 words -> substantive."""
+    text = "one two three four five six seven eight nine ten eleven twelve thirteen"
+    assert G.classify_register(text) == "substantive"
+
+
+def test_classify_register_short_is_casual():
+    """Short query (3 words) -> casual."""
+    text = "yo what's up"
+    assert G.classify_register(text) == "casual"
+
+
+def test_classify_register_long_is_substantive():
+    """Long realistic query (>12 words) -> substantive."""
+    text = "I've been thinking about what makes a conversation feel natural and I'm curious if you have any thoughts on that"
+    assert G.classify_register(text) == "substantive"
+
+
+def test_classify_register_extra_whitespace():
+    """Irregular spacing should not inflate word count (Python str.split() semantics)."""
+    text = "  hi   there  "
+    assert G.classify_register(text) == "casual"  # 2 words
+
+
+def test_classify_register_multiline():
+    """Multiline text with mixed whitespace."""
+    text = "word1\n  word2  \nword3 word4 word5 word6 word7 word8 word9 word10 word11 word12"
+    assert G.classify_register(text) == "casual"  # 12 words
+
+
+def test_classify_register_multiline_substantive():
+    """Multiline text >12 words."""
+    text = "word1\n  word2  \nword3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13"
+    assert G.classify_register(text) == "substantive"  # 13 words
+
+
+def test_register_max_constant_matches_c():
+    """The Python constant must match the C definition."""
+    assert G.REGISTER_MAX_CASUAL_WORDS == 12
+
+
+def test_classify_register_empty_is_casual():
+    """Empty string -> casual (boundary case)."""
+    text = ""
+    assert G.classify_register(text) == "casual"
+
+
+def test_classify_register_whitespace_only_is_casual():
+    """Whitespace only -> casual."""
+    text = "   \n\t  "
+    assert G.classify_register(text) == "casual"
+
+
+def test_build_context_rows_carries_register_field():
+    """Context rows should include the register field when provided."""
+    registers = {0: "casual", 1: "substantive"}
+    shadow = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0}, 1: {"ei": 3, "reality": 4, "anti_ai": 0.9}}
+    live = {0: {"ei": 4, "reality": 5, "anti_ai": 1.0, "recall_bytes": 0}, 1: {"ei": 3, "reality": 4, "anti_ai": 0.9, "recall_bytes": 88}}
+    rows = G.build_context_rows(shadow, live, [0, 1], registers=registers)
+    assert rows[0]["register"] == "casual"
+    assert rows[1]["register"] == "substantive"
+    # Without registers, field should not appear.
+    rows_no_reg = G.build_context_rows(shadow, live, [0, 1])
+    assert "register" not in rows_no_reg[0]

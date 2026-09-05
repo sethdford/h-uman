@@ -129,6 +129,44 @@ bool hu_semantic_recall_hit_is_excluded(const char *key, size_t key_len, const c
  * hit never consumes budget. */
 size_t hu_semantic_recall_filter_result(hu_allocator_t *alloc, hu_retrieval_result_t *res);
 
+/* ── Register-conditioned suppression (US-5: protect the LIVE gate from EI drift)
+ *
+ * Gate: HU_SEMANTIC_RECALL_REGISTER_GATE=off|shadow|live (default OFF).
+ *   OFF    — register classification is computed but ignored; LIVE behavior
+ *            unchanged from HU_SEMANTIC_RECALL=live without this gate.
+ *   SHADOW — register classification is computed and logged ("would suppress")
+ *            but semantic recall proceeds unchanged (no output difference).
+ *   LIVE   — semantic recall is suppressed for casual-register turns.
+ *
+ * Boundary: casual if word count (whitespace-delimited, matching Python
+ * str.split() semantics) is ≤12 words; substantive if >12 words.
+ * NULL / empty input is treated as casual (fails closed: recall is the
+ * untested-for-casual behavior per feature-gate-requires-measurement.md).
+ *
+ * Motivation (docs/research/2026-09-05-sota-fleet-closing-report.md):
+ * semantic recall shows +0.110 EI on substantive exchanges but -0.078 on
+ * casual ones. This gate protects the composite/EI numbers now drifting ~0.1
+ * per run toward the 0.15 revert threshold. Register classification reuses
+ * the casual/substantive boundary from scripts/blind_ab/authorship_gap.py
+ * (reply ≤12 words = casual) so measurements stay comparable. ──────────────*/
+
+#define HU_SEMANTIC_RECALL_REGISTER_MAX_CASUAL_WORDS 12u
+
+/* True when the turn's register admits semantic recall (word count strictly
+ * greater than the casual boundary, i.e. "substantive"). NULL / empty input
+ * is treated as casual (fails closed to suppression). Pure: no I/O,
+ * no allocation. */
+bool hu_semantic_recall_register_admits(const char *query, size_t query_len);
+
+/* $HU_SEMANTIC_RECALL_REGISTER_GATE=off|shadow|live, default OFF. Layered on
+ * top of hu_semantic_recall_mode(): only consulted inside the HU_GATE_LIVE
+ * branch, so this being non-OFF has zero effect unless HU_SEMANTIC_RECALL is
+ * already live. See feature-gate-requires-measurement.md — promotion to LIVE
+ * requires scripts/eval_semantic_live_gate.py's register_breakdown.substantive
+ * verdict to stay PROMOTE-eligible (composite/EI/reality within the existing
+ * tolerances), not merely a green build. */
+hu_gate_mode_t hu_semantic_recall_register_gate_mode(void);
+
 #ifdef __cplusplus
 }
 #endif
