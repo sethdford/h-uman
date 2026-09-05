@@ -13,10 +13,14 @@
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
 
 /* Tests use a single shared system allocator so leaks surface via ASan. */
 static hu_allocator_t g_alloc;
-static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
+static hu_allocator_t *A(void) {
+    g_alloc = hu_system_allocator();
+    return &g_alloc;
+}
 
 static void open_graph(hu_graph_t **g) {
     hu_error_t rc = hu_graph_open(A(), NULL, 0, g);
@@ -44,7 +48,7 @@ static void test_w1_schema_legacy_upsert_populates_event_start(void) {
     HU_ASSERT_EQ(hu_graph_list_relations(g, A(), "u1", 2, 32, &rels, &n), HU_OK);
     HU_ASSERT_EQ(n, 1);
     HU_ASSERT_GT(rels[0].event_start, 0);
-    HU_ASSERT_EQ(rels[0].event_end, 0);              /* still true */
+    HU_ASSERT_EQ(rels[0].event_end, 0); /* still true */
     HU_ASSERT_FLOAT_EQ(rels[0].confidence, 1.0f, 1e-3);
     HU_ASSERT_EQ(rels[0].supersedes_id, 0);
     HU_ASSERT_NULL(rels[0].provenance);
@@ -60,10 +64,10 @@ static void test_w1_conflict_classifier_supersede_on_works_at_change(void) {
     old_.id = 1;
     old_.target_id = 100;
     old_.type = HU_REL_WORKS_AT;
-    old_.event_end = 0;            /* still true */
+    old_.event_end = 0; /* still true */
     old_.confidence = 1.0f;
 
-    new_.target_id = 200;          /* changed employer */
+    new_.target_id = 200; /* changed employer */
     new_.type = HU_REL_WORKS_AT;
     new_.confidence = 1.0f;
 
@@ -177,8 +181,7 @@ static void test_w1_relations_in_window_returns_overlapping(void) {
     /* Q: who did Alice work for during 2024? Should return only Acme. */
     hu_graph_relation_t *rels = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_graph_relations_in_window(g, A(), "u1", 2,
-                                              1704067200000LL /* 2024-01-01 */,
+    HU_ASSERT_EQ(hu_graph_relations_in_window(g, A(), "u1", 2, 1704067200000LL /* 2024-01-01 */,
                                               1735603200000LL /* 2024-12-31 */, 32, &rels, &n),
                  HU_OK);
     HU_ASSERT_EQ(n, 1);
@@ -188,8 +191,7 @@ static void test_w1_relations_in_window_returns_overlapping(void) {
     /* Q: who did Alice work for during 2025? Should return only Globex. */
     rels = NULL;
     n = 0;
-    HU_ASSERT_EQ(hu_graph_relations_in_window(g, A(), "u1", 2,
-                                              1735689600000LL /* 2025-01-01 */,
+    HU_ASSERT_EQ(hu_graph_relations_in_window(g, A(), "u1", 2, 1735689600000LL /* 2025-01-01 */,
                                               1767139200000LL /* 2025-12-30 */, 32, &rels, &n),
                  HU_OK);
     HU_ASSERT_EQ(n, 1);
@@ -219,7 +221,7 @@ static void test_w1_trust_open_channel_with_contradiction_quarantines(void) {
     hu_write_trust_input_t in = {0};
     in.source = HU_WRITE_SOURCE_CHANNEL_OPEN;
     in.observed_at = 1735689600000LL;
-    in.now = 1735689600000LL + 24LL * 3600 * 1000;     /* 24h old */
+    in.now = 1735689600000LL + 24LL * 3600 * 1000; /* 24h old */
     in.contradiction_flag = true;
     in.recent_writes = 1;
     in.rate_limit = 100;
@@ -324,6 +326,61 @@ static void test_w1_minja_poisoning_does_not_overwrite_user_truth(void) {
     hu_graph_close(g, A());
 }
 
+/* 2026-09-04: 512 of 525 live relations stored event times in SECONDS. The
+ * open-time repair must lift them to milliseconds on relations AND entities
+ * and leave already-correct rows alone. */
+static void test_w1_normalize_units_lifts_seconds_rows_to_ms(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                             1704067200000LL, 1735689600000LL, 1.0f, NULL, 0, NULL,
+                                             0),
+                 HU_OK);
+    /* Rewrite the row the way the seconds-era writers did. */
+    sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE relations SET event_start = event_start / 1000, "
+                              "event_end = event_end / 1000, first_seen = first_seen / 1000, "
+                              "last_seen = last_seen / 1000; "
+                              "UPDATE entities SET last_seen = last_seen / 1000",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+
+    HU_ASSERT_EQ(hu_graph_normalize_timestamp_units(g), HU_OK);
+
+    hu_graph_relation_t *rels = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_graph_list_relations(g, A(), "u1", 2, 8, &rels, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_EQ(rels[0].event_start, 1704067200000LL);
+    HU_ASSERT_EQ(rels[0].event_end, 1735689600000LL);
+    HU_ASSERT_GT(rels[0].first_seen, 100000000000LL);
+    HU_ASSERT_GT(rels[0].last_seen, 100000000000LL);
+    hu_graph_relations_free(A(), rels, n);
+
+    hu_graph_entity_t ent;
+    memset(&ent, 0, sizeof(ent));
+    HU_ASSERT_EQ(hu_graph_find_entity(g, "u1", 2, "Alice", 5, &ent), HU_OK);
+    HU_ASSERT_GT(ent.last_seen, 100000000000LL);
+    if (ent.name)
+        A()->free(A()->ctx, ent.name, ent.name_len + 1);
+    if (ent.metadata_json)
+        A()->free(A()->ctx, ent.metadata_json, strlen(ent.metadata_json) + 1);
+
+    /* Idempotent: a second pass must not multiply again. */
+    HU_ASSERT_EQ(hu_graph_normalize_timestamp_units(g), HU_OK);
+    HU_ASSERT_EQ(hu_graph_list_relations(g, A(), "u1", 2, 8, &rels, &n), HU_OK);
+    HU_ASSERT_EQ(rels[0].event_start, 1704067200000LL);
+    hu_graph_relations_free(A(), rels, n);
+    hu_graph_close(g, A());
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_w1_bitemporal_tests(void) {
@@ -341,5 +398,6 @@ void run_w1_bitemporal_tests(void) {
     HU_RUN_TEST(test_w1_trust_rate_limit_trips_drop);
     HU_RUN_TEST(test_w1_quarantine_table_round_trip);
     HU_RUN_TEST(test_w1_minja_poisoning_does_not_overwrite_user_truth);
+    HU_RUN_TEST(test_w1_normalize_units_lifts_seconds_rows_to_ms);
 #endif
 }
