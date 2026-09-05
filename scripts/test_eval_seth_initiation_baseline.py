@@ -31,7 +31,11 @@ def unix_to_apple_ns(ts_unix):
 
 def make_fixture_db(path):
     """Creates (and commits + closes) a chat.db-shaped sqlite file at
-    `path`, with only the columns load_dm_messages() touches."""
+    `path`, with only the columns load_dm_messages() /
+    load_dm_messages_excluding_tapbacks() touch. associated_message_type
+    defaults to 0 (ordinary message) so every pre-existing test that
+    never sets it keeps behaving exactly as before (Finding F1's fix
+    filters on COALESCE(associated_message_type, 0) = 0)."""
     con = sqlite3.connect(str(path))
     con.executescript(
         """
@@ -42,7 +46,8 @@ def make_fixture_db(path):
             date INTEGER,
             is_from_me INTEGER,
             is_system_message INTEGER DEFAULT 0,
-            item_type INTEGER DEFAULT 0
+            item_type INTEGER DEFAULT 0,
+            associated_message_type INTEGER DEFAULT 0
         );
         CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
         """
@@ -75,12 +80,12 @@ class FixtureBuilder:
         for contact_id in contact_ids:
             self.add_dm_chat(chat_id, contact_id)
 
-    def add_message(self, chat_id, ts_unix, is_from_me):
+    def add_message(self, chat_id, ts_unix, is_from_me, associated_message_type=0):
         self._msg_id += 1
         msg_id = self._msg_id
         self.con.execute(
-            "INSERT INTO message (ROWID, date, is_from_me) VALUES (?, ?, ?)",
-            (msg_id, unix_to_apple_ns(ts_unix), 1 if is_from_me else 0),
+            "INSERT INTO message (ROWID, date, is_from_me, associated_message_type) VALUES (?, ?, ?, ?)",
+            (msg_id, unix_to_apple_ns(ts_unix), 1 if is_from_me else 0, associated_message_type),
         )
         self.con.execute(
             "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)", (chat_id, msg_id)
@@ -236,6 +241,103 @@ def test_group_chats_excluded(tmp_path):
     assert messages == []
     initiations = esib.find_initiations(messages)
     assert initiations == []
+
+
+# ── Finding F1: tapback reactions must not count as replies or initiations ──
+
+
+def test_inbound_tapback_not_counted_as_reply(tmp_path):
+    """A tapback (associated_message_type=2000, e.g. a heart-react) on
+    Seth's initiation must NOT count as the inbound reply that would mark
+    it answered. Contrasts the fixed loader
+    (load_dm_messages_excluding_tapbacks) against the unfiltered
+    eval_when_to_speak.load_dm_messages() to pin the exact bug Finding F1
+    describes: without the filter, label_unanswered() sees the tapback's
+    is_from_me=0 row and (wrongly) calls the initiation answered."""
+    db_path = tmp_path / "chat.db"
+    fb = FixtureBuilder(db_path)
+    fb.add_dm_chat(chat_id=1, contact_id="+15550001111")
+    fb.add_message(chat_id=1, ts_unix=BASE_TS, is_from_me=True)  # Seth's real initiation
+    # The only inbound row in the FIR window is a bare tapback, not a
+    # real reply.
+    fb.add_message(chat_id=1, ts_unix=BASE_TS + 60.0, is_from_me=False, associated_message_type=2000)
+    fb.commit_and_close()
+
+    chat_db = esib.open_ro(str(db_path))
+    filtered = esib.load_dm_messages_excluding_tapbacks(chat_db, since_unix=BASE_TS - 3600)
+    unfiltered = ews.load_dm_messages(chat_db, since_unix=BASE_TS - 3600)
+    chat_db.close()
+
+    # The tapback row is gone from the filtered messages; only Seth's
+    # initiation remains. The unfiltered loader still has both rows.
+    assert filtered == [(1, "+15550001111", BASE_TS, True)]
+    assert len(unfiltered) == 2
+
+    initiations = esib.find_initiations(filtered)
+    labeled = esib.label_unanswered(initiations, filtered)
+    assert len(labeled) == 1
+    assert labeled[0]["unanswered"] is True
+
+    # Regression pin: run the SAME logic against the unfiltered messages
+    # and confirm it produces the wrong (pre-fix) answer -- a bare
+    # heart-react counted as a reply.
+    initiations_unfiltered = esib.find_initiations(unfiltered)
+    labeled_unfiltered = esib.label_unanswered(initiations_unfiltered, unfiltered)
+    assert len(labeled_unfiltered) == 1
+    assert labeled_unfiltered[0]["unanswered"] is False
+
+
+def test_outbound_tapback_not_counted_as_initiation(tmp_path):
+    """A tapback SENT by Seth (associated_message_type=2000) must not be
+    treated as a conversation-opening initiation -- a heart-react is not
+    a fresh outreach, even though it is is_from_me=1 and (in this
+    fixture) the first recorded row in the chat. Contrasts against the
+    unfiltered loader to pin the bug Finding F1 describes."""
+    db_path = tmp_path / "chat.db"
+    fb = FixtureBuilder(db_path)
+    fb.add_dm_chat(chat_id=1, contact_id="+15550002222")
+    # Seth's only recorded row in this chat/window is a tapback, not a
+    # real opener.
+    fb.add_message(chat_id=1, ts_unix=BASE_TS, is_from_me=True, associated_message_type=2000)
+    fb.commit_and_close()
+
+    chat_db = esib.open_ro(str(db_path))
+    filtered = esib.load_dm_messages_excluding_tapbacks(chat_db, since_unix=BASE_TS - 3600)
+    unfiltered = ews.load_dm_messages(chat_db, since_unix=BASE_TS - 3600)
+    chat_db.close()
+
+    assert filtered == []
+    assert esib.find_initiations(filtered) == []
+
+    # Regression pin: the unfiltered loader still has the tapback row,
+    # and find_initiations() (pre-fix behavior) would wrongly count it as
+    # a first-message initiation.
+    assert len(unfiltered) == 1
+    assert len(esib.find_initiations(unfiltered)) == 1
+
+
+def test_tapback_types_2000_through_2006_all_excluded(tmp_path):
+    """Every documented tapback associated_message_type (2000 add, plus
+    the 2001/2003-2006 variants/removals seen live on this machine) is
+    excluded, not just the most common 2000 -- the filter is
+    COALESCE(associated_message_type, 0) = 0, not an allowlist of one
+    value."""
+    db_path = tmp_path / "chat.db"
+    fb = FixtureBuilder(db_path)
+    fb.add_dm_chat(chat_id=1, contact_id="+15550003333")
+    tapback_types = [2000, 2001, 2003, 2004, 2005, 2006]
+    for i, t in enumerate(tapback_types):
+        fb.add_message(chat_id=1, ts_unix=BASE_TS + i * 10.0, is_from_me=False, associated_message_type=t)
+    # One ordinary inbound message so the chat isn't entirely empty post-filter.
+    fb.add_message(chat_id=1, ts_unix=BASE_TS + 1000.0, is_from_me=False)
+    fb.commit_and_close()
+
+    chat_db = esib.open_ro(str(db_path))
+    filtered = esib.load_dm_messages_excluding_tapbacks(chat_db, since_unix=BASE_TS - 3600)
+    chat_db.close()
+
+    assert len(filtered) == 1
+    assert filtered[0][2] == BASE_TS + 1000.0
 
 
 def test_unanswered_labeling_and_end_to_end_baseline(tmp_path):

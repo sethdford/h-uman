@@ -21,6 +21,11 @@ for the full write-up and citations):
     FIR on the same window definition — this is the entire point of
     AC-3.1).
 
+Tapback reactions (chat.db rows with a non-zero associated_message_type,
+e.g. 2000-2006 for heart/like/etc. reacts) are excluded from BOTH sides of
+the measurement by load_dm_messages_excluding_tapbacks() (Finding F1): a
+bare react is not a reply, and an outbound react is not an initiation.
+
 Everything runs locally against ~/Library/Messages/chat.db, opened
 read-only (mode=ro&immutable=1, via this module's own open_ro() — see
 that function's docstring for why it is not eval_when_to_speak.py's
@@ -53,7 +58,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab"))
-from eval_when_to_speak import load_dm_messages, FIR_WINDOW_HOURS  # noqa: E402
+from eval_when_to_speak import FIR_WINDOW_HOURS, APPLE_EPOCH, apple_ns_to_unix  # noqa: E402
 from score import wilson  # noqa: E402
 
 
@@ -63,13 +68,84 @@ def open_ro(path):
     NO-GO for this story: chat.db is read-only). Deliberately NOT
     eval_when_to_speak.py's open_ro() — that helper only sets `mode=ro`
     (verified: `grep -n immutable scripts/eval_when_to_speak.py` has no
-    hits) and omits `immutable=1`. load_dm_messages() and FIR_WINDOW_HOURS
-    are still reused unmodified from eval_when_to_speak.py (see the
-    design doc's reuse precedent); only the connection helper is
-    re-declared here to satisfy AC-3.2's stronger requirement."""
+    hits) and omits `immutable=1`. FIR_WINDOW_HOURS, APPLE_EPOCH, and
+    apple_ns_to_unix are still reused unmodified from eval_when_to_speak.py
+    (see the design doc's reuse precedent); only the connection helper and
+    the DM-message loader (see load_dm_messages_excluding_tapbacks below)
+    are re-declared here — the former to satisfy AC-3.2's stronger
+    requirement, the latter for Finding F1 (tapback exclusion, see that
+    function's docstring)."""
     if not os.path.exists(path):
         return None
     return sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+
+
+def load_dm_messages_excluding_tapbacks(chat_db, since_unix):
+    """Same contract as eval_when_to_speak.load_dm_messages(): returns
+    [(chat_id, contact, ts_unix, is_from_me), ...] for every message in a
+    1:1 (DM) chat since `since_unix`, with group chats excluded via the
+    identical `HAVING COUNT(DISTINCT handle_id) = 1` rule.
+
+    Additionally excludes tapback/reaction rows (Finding F1): chat.db
+    represents a tapback (heart/like/etc. react to another message) as an
+    ordinary `message` row whose `associated_message_type` is one of
+    2000-2006 rather than 0/NULL. Neither find_initiations() nor
+    label_unanswered() should treat a bare react as a real conversational
+    turn — a heart-react on an inbound message is not a "reply", and an
+    outbound heart-react is not an "initiation". Measured live against
+    this machine's chat.db (2026-09-05): non-zero associated_message_type
+    accounts for 3.8% of in-window DM rows (90 of 2413), concentrated at
+    2000 (tapback added) with a handful of 2001/2003-2006 (tapback
+    variants/removals).
+
+    Deliberately duplicates (rather than imports) load_dm_messages()'s
+    DM-chat-detection query instead of modifying eval_when_to_speak.py —
+    that script's load_dm_messages() is shared with US-4
+    (scripts/fit_reply_delay_model.py also imports it unmodified) and this
+    story's fix must not change its behavior for other callers. See
+    Finding F1 in designs/US-3.md."""
+    cur = chat_db.cursor()
+
+    # DM chats: exactly one handle joined to the chat. Identical to
+    # eval_when_to_speak.load_dm_messages()'s own query.
+    cur.execute(
+        """
+        SELECT chj.chat_id, MIN(h.id) AS contact
+        FROM chat_handle_join chj
+        JOIN handle h ON h.ROWID = chj.handle_id
+        GROUP BY chj.chat_id
+        HAVING COUNT(DISTINCT chj.handle_id) = 1
+        """
+    )
+    dm_chat_contact = {row[0]: row[1] for row in cur.fetchall()}
+    if not dm_chat_contact:
+        return []
+
+    since_apple_ns = (since_unix - APPLE_EPOCH) * 1_000_000_000
+    cur.execute(
+        """
+        SELECT cmj.chat_id, m.date, m.is_from_me
+        FROM message m
+        JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+        WHERE m.date >= ?
+          AND m.is_system_message = 0
+          AND m.item_type = 0
+          AND COALESCE(m.associated_message_type, 0) = 0
+        ORDER BY m.date ASC
+        """,
+        (since_apple_ns,),
+    )
+    out = []
+    for chat_id, date_ns, is_from_me in cur.fetchall():
+        contact = dm_chat_contact.get(chat_id)
+        if not contact:
+            continue  # not a DM chat
+        ts = apple_ns_to_unix(date_ns)
+        if ts <= 0:
+            continue
+        out.append((chat_id, contact, ts, bool(is_from_me)))
+    return out
+
 
 # Mirrors the *value* (not a shared name) of eval_when_to_speak.py's own
 # --seth-already-engaged-hours default (see eval_when_to_speak.py:307-309:
@@ -85,7 +161,7 @@ INITIATION_GAP_HOURS = 6.0
 
 def find_initiations(messages, gap_hours=INITIATION_GAP_HOURS):
     """messages: [(chat_id, contact, ts, is_from_me), ...] from
-    load_dm_messages(). Returns [{"chat_id": ..., "ts": ...}, ...] for
+    load_dm_messages_excluding_tapbacks(). Returns [{"chat_id": ..., "ts": ...}, ...] for
     every outbound message that is either the first row in its chat_id or
     preceded (by either party) by a gap >= gap_hours. Grouped and sorted
     per chat_id internally; chat_id/contact never leave this module's
@@ -181,7 +257,7 @@ def main(argv=None):
         print(f"REFUSE: chat.db not found at {args.chat_db}", file=sys.stderr)
         return 2
 
-    messages = load_dm_messages(chat_db, since)
+    messages = load_dm_messages_excluding_tapbacks(chat_db, since)
     if not messages:
         print("REFUSE: no DM messages found in the lookback window", file=sys.stderr)
         return 2
