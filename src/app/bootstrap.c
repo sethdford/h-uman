@@ -1995,6 +1995,12 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         fclose(bi->log_fp);
     if (bi->retrieval_engine.vtable && bi->retrieval_engine.vtable->deinit)
         bi->retrieval_engine.vtable->deinit(bi->retrieval_engine.ctx, alloc);
+    /* The sqlite engine borrows the pair below (attach hands it their
+     * addresses); drop the borrow before either side is freed so a store()
+     * racing teardown cannot dereference freed memory. No-op on non-sqlite. */
+#ifdef HU_ENABLE_SQLITE
+    hu_sqlite_memory_set_semantic_index(&bi->memory, NULL, NULL);
+#endif
     if (bi->vector_store.vtable && bi->vector_store.vtable->deinit)
         bi->vector_store.vtable->deinit(bi->vector_store.ctx, alloc);
     if (bi->embedder.vtable && bi->embedder.vtable->deinit)
