@@ -270,9 +270,24 @@ def send_question(target, text, dry_run=False):
 # ── the tick ────────────────────────────────────────────────────────────
 
 
-def run_score():
-    r = subprocess.run([sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
-                        "--rater", "human", "--emit-gate", REPO_GATE],
+def score_argv(st):
+    """argv for score.py. The sheet's arm provenance (which adapter generated
+    the AI replies) lives in drip_state.json as arm_adapter / arm_note, set
+    when the sheet is seeded; without it score.py writes a human verdict that
+    names no adapter and doctor's blind_ab_gate check cannot tie it to what
+    :8741 serves (the 2026-09-04 error: v5 rated, v6 served)."""
+    argv = [sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
+            "--rater", "human", "--emit-gate", REPO_GATE]
+    if st.get("arm_adapter"):
+        argv += ["--arm-adapter", st["arm_adapter"]]
+        if st.get("arm_note"):
+            argv += ["--arm-note", st["arm_note"]]
+    return argv
+
+
+def run_score(st=None):
+    st = st if st is not None else load_state()  # tick's test double calls run_score()
+    r = subprocess.run(score_argv(st),
                        capture_output=True, text=True, timeout=60)
     print(r.stdout[-500:] if r.stdout else r.stderr[-300:])
     # score.py exit semantics: 0 = PASS verdict, 1 = ran but verdict != PASS
