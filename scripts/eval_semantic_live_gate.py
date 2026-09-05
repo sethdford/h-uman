@@ -120,6 +120,7 @@ DEFAULT_COMPOSITE_TOLERANCE = 0.02
 DEFAULT_EI_TOLERANCE = 0.15     # on the 1-5 judge scale
 DEFAULT_REALITY_TOLERANCE = 0.15
 DEFAULT_MIN_RECALL_COVERAGE = 0.5
+REGISTER_MAX_CASUAL_WORDS = 12  # mirrors semantic_recall.h; keep in sync
 PRIORITY_HEADER = {"X-HU-Priority": "batch"}
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -347,6 +348,17 @@ def select_contexts(path, n, min_len=4, max_len=280):
 
 
 # --------------------------------------------------------------------------
+# Register classification (mirrors src/memory/semantic_recall.c:hu_semantic_recall_register_admits)
+# --------------------------------------------------------------------------
+def classify_register(text):
+    """Classify a context as 'casual' (<=12 words) or 'substantive' (>12 words).
+    Mirrors the C predicate's word-count rule (whitespace-run split, i.e. Python
+    str.split() semantics). Keep in lock-step with semantic_recall.h, same
+    discipline as hit_is_excluded's existing C<->Python mirror."""
+    return "casual" if len(text.split()) <= REGISTER_MAX_CASUAL_WORDS else "substantive"
+
+
+# --------------------------------------------------------------------------
 # memory.db copy (never touch the live db)
 # --------------------------------------------------------------------------
 def copy_memory_db(src, dst_dir):
@@ -564,25 +576,42 @@ def score_single_reply_anti_ai(human_bin, reply, channel):
 # generation exception, empty completion) — see the per-context `reasons`
 # dict for why, so failures are attributable, not silently dropped.
 # --------------------------------------------------------------------------
-def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, log=print):
+def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=None, log=print):
+    """Generate + score one arm. If registers dict is provided and register_gate is "live",
+    suppress semantic recall for casual contexts in the LIVE arm (AC-5.1/5.2)."""
     results = {}
     fail_reasons = {}
     for i, ctx in enumerate(contexts):
         sp = system_prompt
         recall_bytes = 0
         recall_dropped = 0
+        register_gate_would_suppress = False
         if arm_name == "live":
-            snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
-                                       ctx, args.top_k)
-            if snippets is None:
-                fail_reasons[i] = "semantic_search_failed"
-                log(f"  [warn][{arm_name}] semantic search failed, skipping context "
-                    f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
-                continue
-            block, recall_dropped = build_memories_block(snippets)
-            if block:
-                sp = block + system_prompt
-                recall_bytes = len(block.encode("utf-8"))
+            # AC-5.1: register gate LIVE + casual -> suppress semantic recall
+            if (registers is not None and args.register_gate == "live" and
+                    registers.get(i) == "casual"):
+                register_gate_would_suppress = True
+                log(f"  [live] {i}: register gate LIVE suppresses casual (words<={REGISTER_MAX_CASUAL_WORDS})",
+                    flush=True)
+            # AC-5.3: register gate SHADOW -> log but do NOT suppress
+            elif (registers is not None and args.register_gate == "shadow" and
+                    registers.get(i) == "casual"):
+                log(f"  [live] {i}: register gate SHADOW would suppress casual (words<={REGISTER_MAX_CASUAL_WORDS})",
+                    flush=True)
+
+            # Only do semantic search if NOT suppressed by register gate
+            if not register_gate_would_suppress:
+                snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
+                                           ctx, args.top_k)
+                if snippets is None:
+                    fail_reasons[i] = "semantic_search_failed"
+                    log(f"  [warn][{arm_name}] semantic search failed, skipping context "
+                        f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
+                    continue
+                block, recall_dropped = build_memories_block(snippets)
+                if block:
+                    sp = block + system_prompt
+                    recall_bytes = len(block.encode("utf-8"))
         try:
             reply = generate(args.server, args.model, sp, ctx, args.max_tokens, args.temperature)
         except Exception as e:  # noqa: BLE001 — one bad context must not kill a 40-context run
@@ -670,17 +699,20 @@ def recall_coverage_of(live_results, ids):
     return hit / len(ids)
 
 
-def build_context_rows(shadow_results, live_results, ids):
+def build_context_rows(shadow_results, live_results, ids, registers=None):
     rows = []
     for i in ids:
         s, l = shadow_results[i], live_results[i]  # noqa: E741
-        rows.append({
+        row = {
             "id": i,
             "recall_bytes": l["recall_bytes"],
             "recall_dropped": l.get("recall_dropped", 0),
             "shadow": {"ei": s["ei"], "reality": s["reality"], "anti_ai": s["anti_ai"]},
             "live": {"ei": l["ei"], "reality": l["reality"], "anti_ai": l["anti_ai"]},
-        })
+        }
+        if registers is not None:
+            row["register"] = registers.get(i, "unknown")
+        rows.append(row)
     return rows
 
 
@@ -781,6 +813,9 @@ def main(argv=None):
     ap.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     ap.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     ap.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
+    ap.add_argument("--register-gate", choices=["off", "shadow", "live"], default="off",
+                    help="register-conditioned gate mode: off (default), shadow (log only), "
+                         "or live (suppress casual contexts in LIVE arm)")
     ap.add_argument("--composite-tolerance", type=float, default=DEFAULT_COMPOSITE_TOLERANCE)
     ap.add_argument("--ei-tolerance", type=float, default=DEFAULT_EI_TOLERANCE)
     ap.add_argument("--reality-tolerance", type=float, default=DEFAULT_REALITY_TOLERANCE)
@@ -788,6 +823,8 @@ def main(argv=None):
                     help="verdict JSON path (default: "
                          "docs/plans/2026-08-02-semantic-retrieval/semantic-live-gate-<date>.json)")
     ap.add_argument("--tmp-dir", default=None, help="scratch dir for the memory.db copy")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="parse arguments and initialize, but skip generation/scoring")
     args = ap.parse_args(argv)
 
     if args.out is None:
@@ -818,15 +855,29 @@ def main(argv=None):
                       f"(< --min-n {args.min_n})")
     print(f"      -> {len(contexts)} contexts selected", flush=True)
 
+    # Classify contexts by register (US-5: casual <=12 words, substantive >12 words)
+    registers = {i: classify_register(ctx) for i, ctx in enumerate(contexts)}
+    casual_ids = [i for i, r in registers.items() if r == "casual"]
+    substantive_ids = [i for i, r in registers.items() if r == "substantive"]
+    print(f"      register split: casual={len(casual_ids)}, substantive={len(substantive_ids)}")
+
     try:
         system_prompt = build_system_prompt(args)
     except SystemExit as e:
         return refuse(str(e))
     print(f"[5/6] production system prompt: {len(system_prompt)} chars", flush=True)
 
+    if args.dry_run:
+        print("[DRY RUN] Skipping generation/scoring (--dry-run flag set)")
+        print(json.dumps({"dry_run": True, "n_contexts": len(contexts), "registers": registers},
+                        indent=2))
+        return 0
+
     print("[6/6] generating + scoring both arms (SHADOW, then LIVE) ...", flush=True)
-    shadow_results, shadow_fail = run_arm("shadow", contexts, system_prompt, args, memory_db_path)
-    live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path)
+    shadow_results, shadow_fail = run_arm("shadow", contexts, system_prompt, args, memory_db_path,
+                                          registers=registers)
+    live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path,
+                                      registers=registers)
 
     ids = paired_ids(shadow_results, live_results)
     shadow_only = sorted(set(shadow_results) - set(live_results))
@@ -862,11 +913,49 @@ def main(argv=None):
                                       args.composite_tolerance, args.ei_tolerance,
                                       args.reality_tolerance, args.min_recall_coverage)
 
+    # AC-5.4: if register_gate is LIVE, verify that casual contexts have zero recall_bytes
+    # in the LIVE arm (suppression must actually have happened, per reports-success-does-nothing.md)
+    if args.register_gate == "live":
+        casual_paired_ids = [i for i in ids if registers.get(i) == "casual"]
+        leaking_casual = [i for i in casual_paired_ids if live_results.get(i, {}).get("recall_bytes", 0) > 0]
+        if leaking_casual:
+            return refuse(f"register gate LIVE but {len(leaking_casual)} casual context(s) "
+                         f"{leaking_casual} have recall_bytes > 0 in LIVE arm — suppression failed")
+
     try:
         git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True,
                                              cwd=str(REPO_ROOT)).strip()
     except Exception:  # noqa: BLE001
         git_commit = None
+
+    # Build register breakdown (US-5: per-register analysis)
+    casual_paired_ids = [i for i in ids if registers.get(i) == "casual"]
+    substantive_paired_ids = [i for i in ids if registers.get(i) == "substantive"]
+
+    def summarize_register(name, reg_ids):
+        if not reg_ids:
+            return {"n": 0, "verdict": "EMPTY"}
+        s = summarize_paired_arm(shadow_results, reg_ids)
+        l = summarize_paired_arm(live_results, reg_ids)
+        reg_coverage = recall_coverage_of(live_results, reg_ids)
+        reg_verdict, reg_reasons = decide_verdict(s, l, reg_coverage,
+                                                   args.composite_tolerance, args.ei_tolerance,
+                                                   args.reality_tolerance, args.min_recall_coverage)
+        return {
+            "n": len(reg_ids),
+            "shadow": s,
+            "live": l,
+            "recall_coverage": reg_coverage,
+            "verdict": reg_verdict,
+            "reasons": reg_reasons,
+        }
+
+    register_breakdown = {
+        "boundary_words": REGISTER_MAX_CASUAL_WORDS,
+        "register_gate_mode": args.register_gate,
+        "casual": summarize_register("casual", casual_paired_ids),
+        "substantive": summarize_register("substantive", substantive_paired_ids),
+    }
 
     doc = {
         "schema": "semantic_live_gate.v2",
@@ -895,7 +984,8 @@ def main(argv=None):
         },
         "shadow": shadow_summary,
         "live": live_summary,
-        "context_rows": build_context_rows(shadow_results, live_results, ids),
+        "context_rows": build_context_rows(shadow_results, live_results, ids, registers),
+        "register_breakdown": register_breakdown,
         "verdict": verdict,
         "reasons": reasons,
     }
