@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11463   # measured 2026-09-05 on merge of #386 (hybrid RRF key fix) with main
+CLONE_BASELINE=11447   # measured 2026-09-05 on merge of #386 (hybrid RRF key fix) with main
 # prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
                        # helpers with their callers retired three windows
 # prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser

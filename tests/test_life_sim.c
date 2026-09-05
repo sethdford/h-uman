@@ -134,6 +134,32 @@ static void life_sim_weekend_uses_weekend_blocks(void) {
     HU_ASSERT_STR_EQ(state.availability, "available");
 }
 
+static void life_sim_build_context_now_builds_from_wall_clock(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_daily_routine_t routine = {0};
+    routine.routine_variance = 0.15f;
+    routine.weekday_count = 1;
+    routine.weekend_count = 1;
+    snprintf(routine.weekday[0].time, sizeof(routine.weekday[0].time), "00:00");
+    snprintf(routine.weekday[0].activity, sizeof(routine.weekday[0].activity), "work");
+    snprintf(routine.weekday[0].availability, sizeof(routine.weekday[0].availability), "slow");
+    snprintf(routine.weekend[0].time, sizeof(routine.weekend[0].time), "00:00");
+    snprintf(routine.weekend[0].activity, sizeof(routine.weekend[0].activity), "rest");
+    snprintf(routine.weekend[0].availability, sizeof(routine.weekend[0].availability), "available");
+
+    size_t len = 0;
+    char *ctx = hu_life_sim_build_context_now(&alloc, &routine, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_GT(len, 0u);
+    HU_ASSERT_EQ(len, strlen(ctx));
+    /* Whatever day it is, the single block of that day type is the activity. */
+    HU_ASSERT_TRUE(strstr(ctx, "work") != NULL || strstr(ctx, "rest") != NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+
+    HU_ASSERT_NULL(hu_life_sim_build_context_now(&alloc, NULL, &len));
+    HU_ASSERT_NULL(hu_life_sim_build_context_now(&alloc, &routine, NULL));
+}
+
 void run_life_sim_tests(void) {
     HU_TEST_SUITE("life_sim");
     HU_RUN_TEST(life_sim_09_30_weekday_work_meetings_slow);
@@ -142,4 +168,5 @@ void run_life_sim_tests(void) {
     HU_RUN_TEST(life_sim_empty_weekday_uses_defaults);
     HU_RUN_TEST(life_sim_build_context_format);
     HU_RUN_TEST(life_sim_weekend_uses_weekend_blocks);
+    HU_RUN_TEST(life_sim_build_context_now_builds_from_wall_clock);
 }

@@ -115,15 +115,9 @@ hu_error_t hu_agent_build_turn_context(hu_agent_t *agent) {
     if (agent->persona && (agent->persona->daily_routine.weekday_count > 0 ||
                            agent->persona->daily_routine.weekend_count > 0)) {
 #ifndef HU_IS_TEST
-        time_t now_ts = time(NULL);
-        struct tm tm_buf;
-        struct tm *lt = hu_platform_localtime_r(&now_ts, &tm_buf);
-        int dow = lt ? lt->tm_wday : 0;
-        uint32_t seed = (uint32_t)now_ts * 1103515245u + 12345u;
-        hu_life_sim_state_t ls_state =
-            hu_life_sim_get_current(&agent->persona->daily_routine, (int64_t)now_ts, dow, seed);
         size_t ls_len = 0;
-        char *ls_ctx = hu_life_sim_build_context(alloc, &ls_state, &ls_len);
+        char *ls_ctx =
+            hu_life_sim_build_context_now(alloc, &agent->persona->daily_routine, &ls_len);
         if (ls_ctx && ls_len > 0) {
             (void)buf_append(alloc, &buf, &len, &cap, "\n", 1);
             (void)buf_append(alloc, &buf, &len, &cap, ls_ctx, ls_len);

@@ -899,6 +899,7 @@ void run_daemon_reply_fallback_tests(void);
 void run_reply_dedup_tests(void);
 void run_send_budget_tests(void);
 void run_reactive_gates_tests(void);
+void run_daemon_reactive_context_tests(void);
 void run_consecutive_limiter_tests(void);
 void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
@@ -1940,6 +1941,7 @@ int main(int argc, char **argv) {
     run_reply_dedup_tests();
     run_send_budget_tests();
     run_reactive_gates_tests();
+    run_daemon_reactive_context_tests();
     run_consecutive_limiter_tests();
     run_proactive_policy_tests();
     run_daemon_director_tests();
