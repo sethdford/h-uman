@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 import eval_persona_evolution as epe  # noqa: E402
@@ -346,6 +348,7 @@ class _Args:
         self.full_range = False
         self.source = None
         self.min_covered_days = 0.0  # tests pin coverage explicitly; CLI default is 20
+        self.trailing_days = None  # AC-7.2: windowed re-derivation mode, CLI default is None
         self.__dict__.update(kw)
 
 
@@ -642,6 +645,134 @@ def test_min_covered_days_zero_disables_floor(monkeypatch):
     rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
     monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
     assert epe.run(_Args(event="job", min_covered_days=0)) == 0
+
+
+# ---------------------------------------------------------------------------
+# --trailing-days (AC-7.2/7.3/7.4): windowed re-derivation mode
+# ---------------------------------------------------------------------------
+
+def test_trailing_days_and_nonnone_event_is_a_cli_error(monkeypatch, capsys):
+    def _boom(*a, **kw):
+        raise AssertionError(
+            "fetch_outbound_messages must not be called when --trailing-days "
+            "conflicts with a non-'none' --event"
+        )
+
+    monkeypatch.setattr(epe, "fetch_outbound_messages", _boom)
+    with pytest.raises(SystemExit) as exc_info:
+        epe.main(["--trailing-days", "30", "--event", "job"])
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--trailing-days" in err and "--event none" in err
+
+
+def test_trailing_days_computes_start_from_end_minus_n(monkeypatch, capsys):
+    rows = _spread(1, 28, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    args = _Args(event="none", trailing_days=30, end="2026-09-05")
+    epe.run(args)
+    report = json.loads(capsys.readouterr().out)
+    tw = report["trailing_window_summary"]
+    assert tw["requested_days"] == 30
+    assert tw["window"]["start"] == "2026-08-06"  # 2026-09-05 minus 30 days
+    assert tw["window"]["end"] == "2026-09-05"
+
+
+def test_trailing_days_reports_requested_days_and_true_coverage_separately(monkeypatch, tmp_path):
+    # 60 days requested; the fed data only spans 9 of those days -- the
+    # literal AC-7.3 pin: requested_days and coverage.covered_days must
+    # never collapse into the same number.
+    rows = _spread(26, 31, 100, month=8) + _spread(1, 4, 100, month=9)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    args = _Args(event="none", trailing_days=60, end="2026-09-05", min_covered_days=0, out=str(out_path))
+    rc = epe.run(args)
+    assert rc == 0
+    tw = json.loads(out_path.read_text())["trailing_window_summary"]
+    assert tw["requested_days"] == 60
+    assert tw["coverage"]["covered_days"] == 9.0
+    assert tw["requested_days"] != tw["coverage"]["covered_days"]
+
+
+def test_trailing_days_refuses_below_min_n(monkeypatch, tmp_path):
+    rows = [(_dt(2026, 8, 20), "hi")] * 5  # far under default min_n=100
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "should_not_exist.json"
+    args = _Args(event="none", trailing_days=30, end="2026-09-05", out=str(out_path))
+    rc = epe.run(args)
+    assert rc == 1
+    assert not out_path.exists()
+
+
+def test_trailing_days_refuses_below_min_covered_days(monkeypatch, capsys):
+    # n=150 (>= default min_n=100) but every message lands within one day.
+    rows = [(_dt(2026, 8, 20, h % 24), "hi %d" % h) for h in range(150)]
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    args = _Args(event="none", trailing_days=30, end="2026-09-05", min_covered_days=20)
+    rc = epe.run(args)
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    tw = report["trailing_window_summary"]
+    assert tw["status"] == "INSUFFICIENT_DATA"
+    assert "covered_days" in tw["reason"]
+
+
+def test_trailing_days_succeeds_and_writes_out(monkeypatch, tmp_path):
+    rows = _spread(6, 28, 150, month=8) + _spread(1, 4, 50, month=9)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    args = _Args(event="none", trailing_days=30, end="2026-09-05", min_covered_days=20, out=str(out_path))
+    rc = epe.run(args)
+    assert rc == 0
+    assert out_path.exists()
+    tw = json.loads(out_path.read_text())["trailing_window_summary"]
+    assert tw["status"] == "OK"
+    assert set(tw["axes"].keys()) == {label for _, label in epe.AXES}
+
+
+def test_trailing_days_reuses_source_merge(monkeypatch, tmp_path):
+    chat_rows = [(_dt(2026, 8, 20), "post text %d" % i) for i in range(50)]
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: chat_rows)
+    recs = [_training_pair("2026-08-%02dT10:00:00" % (6 + i % 23), "src text %d" % i) for i in range(100)]
+    src = _write_jsonl(tmp_path / "tp.jsonl", recs)
+    monkeypatch.setattr(epe, "EXPORT_TZ", _MINUS4)
+
+    out_path = tmp_path / "out.json"
+    args = _Args(event="none", trailing_days=30, end="2026-09-05", source=[src],
+                 min_covered_days=20, out=str(out_path))
+    rc = epe.run(args)
+    assert rc == 0, "source merge should reuse the same merge_sources/export_frame_filter path as --event/--full-range"
+    data = json.loads(out_path.read_text())
+    assert data["sources"] == [{"path": src, "rows": 100, "added": 100, "duplicates": 0}]
+    assert data["trailing_window_summary"]["n"] == 150  # 50 chat.db + 100 source, no dupes
+    assert "src text" not in out_path.read_text() and "post text" not in out_path.read_text()
+
+
+def test_trailing_days_independent_of_full_range(monkeypatch, capsys):
+    rows = _spread(1, 28, 150, month=8) + _spread(1, 4, 50, month=9)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+
+    epe.run(_Args(event="none", full_range=True, end="2026-09-05", min_covered_days=0))
+    report_without = json.loads(capsys.readouterr().out)
+
+    epe.run(_Args(event="none", full_range=True, trailing_days=30, end="2026-09-05", min_covered_days=0))
+    report_with = json.loads(capsys.readouterr().out)
+
+    assert report_without["full_range_summary"] == report_with["full_range_summary"]
+    assert "trailing_window_summary" not in report_without
+    assert "trailing_window_summary" in report_with
+
+
+def test_trailing_days_explicit_start_warns_and_is_overridden(monkeypatch, capsys):
+    rows = _spread(1, 28, 150, month=8) + _spread(1, 4, 50, month=9)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    args = _Args(event="none", trailing_days=30, start="2026-01-01", end="2026-09-05", min_covered_days=0)
+    epe.run(args)
+    captured = capsys.readouterr()
+    assert "NOTE" in captured.err
+    assert "--trailing-days" in captured.err and "2026-01-01" in captured.err
+    report = json.loads(captured.out)
+    assert report["trailing_window_summary"]["window"]["start"] == "2026-08-06"
 
 
 if __name__ == "__main__":
