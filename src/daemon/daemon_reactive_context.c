@@ -24,8 +24,13 @@
 #include "human/memory.h"
 #include "human/persona.h"
 #include "human/persona/auto_profile.h"
-#ifdef HU_ENABLE_SQLITE
+/* comfort_patterns.c is compiled on every variant (no-sqlite stubs return
+ * HU_ERR_NOT_SUPPORTED) and hu_comfort_pattern_record is called outside the
+ * SQLITE guard below, so its header must be visible unconditionally — the
+ * cross-arm64 (-DHU_ENABLE_SQLITE=OFF) build failed with an implicit
+ * declaration when it sat inside the #ifdef. */
 #include "human/memory/comfort_patterns.h"
+#ifdef HU_ENABLE_SQLITE
 #include "human/memory/contact_graph.h"
 #endif
 
