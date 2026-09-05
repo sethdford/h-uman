@@ -3878,6 +3878,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_distiller.c
     tests/test_model_router.c
     tests/test_model_router_health.c
+    tests/test_cp_admin.c
     tests/test_humanness_context.c
     tests/test_plan_executor.c
     tests/test_planner_mcts_wiring.c
