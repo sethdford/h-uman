@@ -1,3 +1,4 @@
+#include "human/providers/compatible.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -465,8 +466,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     /* Serialize against concurrent stream_chat and other compatible_chat
      * calls to avoid CURLE_COULDNT_CONNECT against single-threaded MLX
      * upstreams. See g_compatible_chat_lock declaration. */
+    hu_http_request_opts_t http_opts;
+    hu_compatible_request_opts_for_url(url_buf, (size_t)n, &http_opts);
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_provider_http_post_json(alloc, url_buf, auth, NULL, body, body_len, &parsed);
+    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, NULL, body, body_len, &http_opts,
+                                          &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)
@@ -1318,6 +1322,32 @@ static const hu_provider_vtable_t compatible_vtable = {
     .supports_vision_for_model = NULL,
     .stream_chat = compatible_stream_chat,
 };
+
+static bool compatible_url_is_loopback(const char *url, size_t url_len) {
+    static const char *const prefixes[] = {"http://127.0.0.1", "http://localhost",
+                                           "https://127.0.0.1", "https://localhost"};
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t plen = strlen(prefixes[i]);
+        if (url_len < plen || strncmp(url, prefixes[i], plen) != 0)
+            continue;
+        /* host must end here: "localhost" is not "localhost.example" */
+        char next = url_len > plen ? url[plen] : '\0';
+        if (next == '\0' || next == ':' || next == '/')
+            return true;
+    }
+    return false;
+}
+
+void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
+                                        hu_http_request_opts_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!url || url_len == 0)
+        return;
+    if (compatible_url_is_loopback(url, url_len))
+        out->timeout_secs = HU_COMPATIBLE_LOCAL_TIMEOUT_SECS;
+}
 
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out) {

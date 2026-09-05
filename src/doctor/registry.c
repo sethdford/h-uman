@@ -2,6 +2,7 @@
 #include "human/doctor.h"
 #include "human/doctor/check.h"
 #include "human/doctor/check_local_voice.h"
+#include "human/doctor/check_ops.h"
 #include "human/doctor/check_outbound_stats.h"
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
@@ -477,6 +478,103 @@ static hu_doctor_check_result_t run_reflection_loop_check(hu_doctor_check_t *sel
     return hu_doctor_check_reflection_loop.run(self, &rctx);
 }
 
+/* ── Operational-truth checks (2026-09-02) — see include/human/doctor/check_ops.h.
+ * Each wrapper resolves the production ctx; the checks themselves take explicit
+ * paths so tests can inject fixtures. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+static hu_doctor_check_result_t run_eval_freshness_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_eval_freshness.run(self, NULL); /* NULL ctx → $HOME defaults */
+}
+
+static hu_doctor_check_result_t run_serving_stability_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    const char *text = NULL;
+#if !HU_IS_TEST
+    /* `launchctl print` is the only source of the run count and last exit
+     * code. Never spawned under HU_IS_TEST (tests inject the text). */
+    static char launchctl_buf[4096];
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "launchctl print gui/%u/ai.human.mlx-server 2>/dev/null",
+             (unsigned)getuid());
+    FILE *p = popen(cmd, "r");
+    if (p) {
+        size_t n = fread(launchctl_buf, 1, sizeof(launchctl_buf) - 1, p);
+        launchctl_buf[n] = '\0';
+        pclose(p);
+        if (n > 0)
+            text = launchctl_buf;
+    }
+#endif
+    const char *daemon_text = NULL;
+#if !HU_IS_TEST
+    /* Second artifact: the daemon's own launchd record. Its run count is the
+     * only thing that moved while 8 ASan aborts went unreported on 2026-09-04. */
+    static char daemon_buf[4096];
+    snprintf(cmd, sizeof(cmd), "launchctl print gui/%u/ai.human.service-loop 2>/dev/null",
+             (unsigned)getuid());
+    FILE *dp = popen(cmd, "r");
+    if (dp) {
+        size_t n = fread(daemon_buf, 1, sizeof(daemon_buf) - 1, dp);
+        daemon_buf[n] = '\0';
+        pclose(dp);
+        if (n > 0)
+            daemon_text = daemon_buf;
+    }
+#endif
+    hu_doctor_serving_stability_ctx_t sctx = {
+        .crash_dir = NULL,
+        .crash_prefix = "Python-",
+        .launchctl_text = text,
+        .now_unix = 0,
+        .window_hours = 24,
+        .max_crashes = 2,
+        .daemon_crash_prefix = "human-daemon-",
+        .daemon_launchctl_text = daemon_text,
+    };
+    return hu_doctor_check_serving_stability.run(self, &sctx);
+}
+
+static hu_doctor_check_result_t run_log_hygiene_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_log_hygiene.run(self, NULL);
+}
+
+static hu_doctor_check_result_t run_imessage_cursor_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_imessage_cursor.run(self, NULL);
+}
+
+static hu_doctor_check_result_t run_blind_ab_gate_check(hu_doctor_check_t *self, void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    const hu_config_t *cfg = uctx ? uctx->cfg : NULL;
+    /* The repo copy (what CI reads) is only comparable when a checkout is
+     * reachable: $HU_REPO_DIR, else ~/Projects/h-uman. Absent → skipped. */
+    static char repo_buf[512];
+    const char *repo_gate = NULL;
+    const char *repo = getenv("HU_REPO_DIR");
+    const char *home = getenv("HOME");
+    if (repo && *repo)
+        snprintf(repo_buf, sizeof(repo_buf), "%s/docs/evaluation/blind_ab_gate.json", repo);
+    else if (home)
+        snprintf(repo_buf, sizeof(repo_buf),
+                 "%s/Projects/h-uman/docs/evaluation/blind_ab_gate.json", home);
+    if (repo_buf[0] && access(repo_buf, R_OK) == 0)
+        repo_gate = repo_buf;
+    hu_doctor_blind_ab_gate_ctx_t gctx = {
+        .home_gate = NULL,
+        .repo_gate = repo_gate,
+        .served_adapter = cfg ? cfg->personalization.lora_adapter_path : NULL,
+        .now_unix = 0,
+        .max_age_days = 45,
+    };
+    return hu_doctor_check_blind_ab_gate.run(self, &gctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -513,6 +611,17 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},
         {"response_pipeline", "Checks response pipeline", run_response_pipeline_check, NULL, NULL},
         {"inference", "Validates inference configuration", run_inference_check, NULL, NULL},
+        /* Operational truth (2026-09-02): the five things a green doctor missed. */
+        {"eval_freshness", "Product gate (eval-nightly) has run recently", run_eval_freshness_check,
+         NULL, NULL},
+        {"serving_stability", "Local model server is not crash-looping",
+         run_serving_stability_check, NULL, NULL},
+        {"log_hygiene", "Daemon log is bounded (rotation running)", run_log_hygiene_check, NULL,
+         NULL},
+        {"imessage_cursor", "iMessage cursor is close to chat.db max ROWID (no replay on restart)",
+         run_imessage_cursor_check, NULL, NULL},
+        {"blind_ab_gate", "Human blind-A/B verdict vouches for the served adapter",
+         run_blind_ab_gate_check, NULL, NULL},
     };
 
     size_t num_checks = sizeof(checks) / sizeof(checks[0]);

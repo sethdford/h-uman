@@ -53,11 +53,11 @@ BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries can
 # subset: one NEW file with a single discard passes if 1 < the tree-wide total,
 # which is how this guard first let its own test case through. Per-file means a
 # new offender always fails, and fixing a listed file lets it leave the list.
-# src/daemon.c: 19 discarded ->send()/->store() returns measured 2026-09-02,
-# byte-identical on origin/main (8ec08adab). Without this entry the hook refuses
-# EVERY daemon.c commit, which only pushes people to --no-verify; baselining by
-# file keeps the guard honest for new files while the 19 get fixed separately.
-DISCARD_BASELINE_FILES=" src/agent/inspiration.c src/app/main_wasi.c src/context/context_engine_rag.c src/daemon.c src/daemon/daemon_followup_sched.c src/daemon/daemon_proactive.c "
+# src/daemon.c added 2026-09-04: ~10 pre-existing discards surfaced the first
+# time the file was staged after this guard landed. Three (music share,
+# inspiration, proactive image) were fixed in that commit; the rest are the
+# follow-up "check every vtable->send in daemon.c". Remove the entry when done.
+DISCARD_BASELINE_FILES=" src/agent/inspiration.c src/app/main_wasi.c src/context/context_engine_rag.c src/daemon/daemon_followup_sched.c src/daemon/daemon_proactive.c src/daemon.c "
 
 fail=0
 

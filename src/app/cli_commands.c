@@ -446,6 +446,41 @@ static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **ar
     return err;
 }
 
+/* The semantic index lives in the SQLite engine; every other build has no
+ * index to detach, and hu_semantic_recall_attach() already refused above. */
+static void memory_semantic_detach(hu_memory_t *mem) {
+#ifdef HU_ENABLE_SQLITE
+    hu_sqlite_memory_set_semantic_index(mem, NULL, NULL);
+#else
+    (void)mem;
+#endif
+}
+
+/* Shared printer for `memory search --semantic|--hybrid`: rank, key, score,
+ * content (truncated to 2000 bytes), then frees `res`. Both callers report
+ * "No results" the same way, so leave that to the caller. */
+size_t hu_cli_memory_print_len(const char *content, size_t len) {
+    if (!content)
+        return 0;
+    if (len <= 2000)
+        return len;
+    /* Hard cut at the ceiling, backed off so a multi-byte UTF-8 sequence is
+     * never split: the 2026-09-03 live gate choked on a stray 0xE2 lead byte. */
+    size_t cut = 2000;
+    while (cut > 0 && ((unsigned char)content[cut] & 0xC0u) == 0x80u)
+        cut--;
+    return cut;
+}
+
+static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+    for (size_t i = 0; i < res->count; i++)
+        printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res->entries[i].key_len,
+               res->entries[i].key ? res->entries[i].key : "", res->scores ? res->scores[i] : 0.0,
+               (int)hu_cli_memory_print_len(res->entries[i].content, res->entries[i].content_len),
+               res->entries[i].content ? res->entries[i].content : "");
+    hu_retrieval_result_free(alloc, res);
+}
+
 /* human memory ground <contact> <message> — run the production grounding
  * composer against the graph and report matched entities + context bytes.
  * This is the proof probe for the backfill: matched > 0 on a message about a
@@ -608,10 +643,15 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             goto done;
         }
         size_t indexed = 0;
+#ifdef HU_ENABLE_SQLITE
         err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+#else
+        (void)lim;
+        err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */
+#endif
         printf("{\"indexed\": %zu, \"index_size\": %zu, \"endpoint\": \"%s\"}\n", indexed,
                svs.vtable->count(svs.ctx), hu_semantic_recall_embed_url());
-        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        memory_semantic_detach(&mem);
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--semantic") == 0) {
@@ -634,20 +674,44 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         } else if (res.count == 0) {
             printf("No results for: %s\n", argv[4]);
         } else {
-            for (size_t i = 0; i < res.count; i++)
-                printf("  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res.entries[i].key_len,
-                       res.entries[i].key ? res.entries[i].key : "",
-                       res.scores ? res.scores[i] : 0.0,
-                       (int)(res.entries[i].content_len > 2000 ? 2000 : res.entries[i].content_len),
-                       res.entries[i].content ? res.entries[i].content : "");
-            hu_retrieval_result_free(alloc, &res);
+            memory_search_print_and_free(alloc, &res);
         }
-        hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+        memory_semantic_detach(&mem);
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
+    } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--hybrid") == 0) {
+        /* human memory search --hybrid <query> — reconstructive hybrid
+         * retrieval (Contract C2): keyword + semantic merged via RRF, then
+         * scene-select -> neighbour expansion -> rerank -> time-bounded
+         * filter -> sufficiency check. This is the CLI surface the
+         * benchmark harness measures as the "hybrid_cli" (C path) column,
+         * distinct from the harness's own RRF(kw,sem) computed in Python. */
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        bool have_vec = hu_semantic_recall_attach(alloc, &mem, &semb, &svs) == HU_OK;
+        if (!have_vec)
+            fprintf(stderr, "search --hybrid: semantic index unavailable, using keyword only\n");
+        hu_retrieval_options_t opts = {0};
+        opts.limit = 10;
+        opts.reconstructive = true;
+        hu_retrieval_result_t res = {0};
+        err = hu_hybrid_retrieve(alloc, &mem, have_vec ? &semb : NULL, have_vec ? &svs : NULL, NULL,
+                                 argv[4], strlen(argv[4]), &opts, &res);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --hybrid: %s\n", hu_error_string(err));
+        } else if (res.count == 0) {
+            printf("No results for: %s\n", argv[4]);
+        } else {
+            memory_search_print_and_free(alloc, &res);
+        }
+        if (have_vec) {
+            memory_semantic_detach(&mem);
+            svs.vtable->deinit(svs.ctx, alloc);
+            semb.vtable->deinit(semb.ctx, alloc);
+        }
     } else if (strcmp(sub, "search") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "Usage: human memory search [--semantic] <query>\n");
+            fprintf(stderr, "Usage: human memory search [--semantic|--hybrid] <query>\n");
             err = HU_ERR_INVALID_ARGUMENT;
             goto done;
         }
@@ -3003,6 +3067,10 @@ hu_error_t cmd_feed(hu_allocator_t *alloc, int argc, char **argv) {
         if (cfg.feeds.gmail_refresh_token) {
             fp.gmail_refresh_token = cfg.feeds.gmail_refresh_token;
             fp.gmail_refresh_token_len = strlen(cfg.feeds.gmail_refresh_token);
+        }
+        if (cfg.feeds.gmail_quota_project) {
+            fp.gmail_quota_project = cfg.feeds.gmail_quota_project;
+            fp.gmail_quota_project_len = strlen(cfg.feeds.gmail_quota_project);
         }
         if (cfg.feeds.twitter_bearer_token) {
             fp.twitter_bearer_token = cfg.feeds.twitter_bearer_token;

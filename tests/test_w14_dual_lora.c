@@ -170,6 +170,8 @@ static hu_error_t dual_ema_aware_subprocess(const char *const argv[],
 static void dual_setup_ctx(hu_lora_retrain_ctx_t *ctx, dual_capture_t *cap,
                            dual_event_capture_t *ec, const char *test_root) {
     memset(ctx, 0, sizeof(*ctx));
+    /* Trainer is opt-in since 2026-09-02 (NULL → skipped_no_trainer). */
+    ctx->finetune_script = "/tmp/test_finetune_gemma.py";
     ctx->test_run_subprocess = dual_ema_aware_subprocess;
     ctx->test_subprocess_ud = cap;
     ctx->emit_event = dual_capture_event;

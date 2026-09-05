@@ -93,6 +93,14 @@ typedef struct hu_reliability_config {
     size_t fallback_providers_len;
     hu_config_model_fallback_t *model_fallbacks;
     size_t model_fallbacks_len;
+    /* Circuit breaker on the primary provider (2026-09-03). After
+     * circuit_failure_threshold consecutive primary failures the primary is
+     * skipped for circuit_recovery_secs and requests go straight to the
+     * fallbacks. 0 (absent) → defaults 2 / 300; negative → disabled. Without
+     * it a dead-but-listening local server cost 3 × 300 s per turn before
+     * the cloud fallback was even tried. */
+    int circuit_failure_threshold;
+    int circuit_recovery_secs;
 } hu_reliability_config_t;
 
 typedef struct hu_router_config {
@@ -228,6 +236,10 @@ typedef struct hu_feeds_config {
     char *gmail_client_id;
     char *gmail_client_secret;
     char *gmail_refresh_token;
+    /* GCP project billed for Gmail API calls. Required when the OAuth client
+     * is gcloud's own (ADC-style credentials): Google answers 403 "requires a
+     * quota project" otherwise. Sent as x-goog-user-project. */
+    char *gmail_quota_project;
     char *twitter_bearer_token;
     char *interests;
     double relevance_threshold;

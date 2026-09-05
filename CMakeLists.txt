@@ -422,6 +422,8 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 # T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
 # advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
+# Pure replay guards: always built so their (unconditional) test links on Linux.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
@@ -523,7 +525,7 @@ if(HU_ENABLE_SQLITE AND HU_ENABLE_SQLITE_VEC)
     # and our store declares sqlite3_vec_init itself (no sqlite3ext.h shims).
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
          third_party/sqlite-vec/sqlite-vec.c)
-    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w"
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w;-D_GNU_SOURCE;-include;sys/types.h"
                                 COMPILE_DEFINITIONS "SQLITE_CORE=1")
     add_compile_definitions(HU_ENABLE_SQLITE_VEC=1)
 elseif(HU_ENABLE_SQLITE)
@@ -600,9 +602,13 @@ set(HU_CORE_SOURCES
     # `<|channel>thought` markers without buffering the full response.
     # See docs/plans/2026-05-26-m3-b4-mlx-local-sse/tasks.md::T4.
     src/util/harmony_filter.c
+    # 2026-09-04: one shared locator for JSON inside LLM replies (think
+    # blocks, code fences, prose) — replaces per-caller re-derivations.
+    src/util/llm_json.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
+    src/core/log.c
     src/sse/sse_client.c
     src/websocket/websocket.c
     src/security/net_security.c
@@ -627,6 +633,15 @@ set(HU_CORE_SOURCES
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
+    src/doctor/check_ops_common.c
+    src/doctor/check_eval_freshness.c
+    src/doctor/check_serving_stability.c
+    src/doctor/check_log_hygiene.c
+    src/doctor/check_imessage_cursor.c
+    src/doctor/check_blind_ab_gate.c
+    # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
+    # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
+    src/memory/repos/chatdb_cursor_repo_sqlite.c
     src/doctor/check_provider.c
     src/doctor/check_local_voice.c
     src/doctor/check_outbound_stats.c
@@ -1001,6 +1016,7 @@ set(HU_CORE_SOURCES
     # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
+    src/memory/graph_state.c
     src/memory/graph_ingest.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
@@ -1493,6 +1509,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/style_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -3320,6 +3337,7 @@ set(HU_TEST_SOURCES
     tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
+    tests/test_style_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3360,6 +3378,7 @@ set(HU_TEST_SOURCES
     tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
+    tests/test_log_format.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
     tests/test_init_proposer_compose.c
@@ -3524,6 +3543,8 @@ set(HU_TEST_SOURCES
     tests/test_imessage_private_client.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_replay_guard.c
+    tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
@@ -3564,6 +3585,11 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_eval_freshness.c
+    tests/test_check_serving_stability.c
+    tests/test_check_log_hygiene.c
+    tests/test_check_imessage_cursor.c
+    tests/test_check_blind_ab_gate.c
     tests/test_outbound_sanitize.c
     tests/test_daemon_follow_up_watcher.c
     tests/test_cli_ctl.c
@@ -3631,11 +3657,14 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph_ingest.c
     tests/test_agent_facts.c
     tests/test_cli_memory_import.c
+    tests/test_cli_commands_memory_print.c
     tests/test_store_sqlite_vec.c
     tests/test_semantic_index.c
+    tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
+    tests/test_graph_state.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
@@ -3938,6 +3967,7 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_schema.c)
 list(APPEND HU_TEST_SOURCES tests/test_typedstream.c)
 # M3 Bridge B Phase B4 T4: streaming-safe harmony filter tests.
 list(APPEND HU_TEST_SOURCES tests/test_harmony_filter.c)
+list(APPEND HU_TEST_SOURCES tests/test_llm_json.c)
 # Phase 5: per-balloon payload decoder tests. Pinned privacy contracts
 # (no money / no coordinates).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)

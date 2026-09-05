@@ -152,6 +152,37 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
  * AutoDream tests. NULL community is allowed (entity left unclustered). */
 hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64_t community_id);
 
+/* State-first read support (2026-09-04; see graph_state.h).
+ *
+ * Name of the endpoint that CHANGED when `rel` superseded its predecessor
+ * (looked up by rel->supersedes_id): for "user works_at Initech" that
+ * replaced "user works_at Globex" this is "Globex". HU_ERR_NOT_FOUND when
+ * `rel` supersedes nothing or the prior row is gone. Caller frees *out_name
+ * via `alloc` (*out_len + 1). */
+hu_error_t hu_graph_supersession_prev_name(hu_graph_t *g, hu_allocator_t *alloc,
+                                           const hu_graph_relation_t *rel, char **out_name,
+                                           size_t *out_len);
+
+/* Repair timestamp units in place. Every writer that accepts a caller time
+ * (deep-extract via the daemon, the chat.db backfill) was handed SECONDS
+ * while the legacy upsert, the window query and the composer's recency
+ * term speak MILLISECONDS — 512 of 525 live relations on 2026-09-04.
+ * Multiplies any event_start/event_end/first_seen/last_seen in [1e9, 1e11)
+ * (2001-09 .. 5138 in s, but 1970-01-12 .. 1973-03 in ms — no real row
+ * lives there) by 1000 on relations and entities. Values below 1e9 are
+ * abstract test ticks and are left alone. Idempotent; hu_graph_open runs
+ * it after the schema migration. */
+hu_error_t hu_graph_normalize_timestamp_units(hu_graph_t *g);
+
+struct hu_graph_state_entry;
+/* Prompt suffix for one resolved state entry: " (was: <name>)" for a
+ * current relation that superseded another, " (until <Mon YYYY>)" for a
+ * history entry, "" otherwise. Writes into `buf` (cap bytes, NUL-terminated)
+ * and returns the length written; 0 means nothing to append. */
+size_t hu_graph_relation_state_suffix(hu_graph_t *g, hu_allocator_t *alloc,
+                                      const struct hu_graph_state_entry *entry, char *buf,
+                                      size_t cap);
+
 /* Traversal */
 hu_error_t hu_graph_neighbors(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                               size_t contact_id_len, int64_t entity_id, size_t max_hops,

@@ -33,6 +33,7 @@ void run_string_tests(void);
 void run_string_ci_tests(void);
 void run_rand_tests(void);
 void run_log_once_tests(void);
+void run_log_format_tests(void);
 void run_vertex_adc_tests(void);
 void run_init_proposer_tests(void);
 void run_init_proposer_compose_tests(void);
@@ -110,6 +111,7 @@ void run_imessage_schema_tests(void);
 void run_typedstream_tests(void);
 /* M3 B4 T4: streaming-safe harmony channel-marker filter. */
 void run_harmony_filter_tests(void);
+void run_llm_json_tests(void);
 /* Phase 5: per-balloon payload decoder tests + privacy contracts. */
 void run_imessage_balloon_decode_tests(void);
 /* Cross-channel reaction emit: WhatsApp + Matrix. */
@@ -304,6 +306,11 @@ void run_doctor_exit_codes_tests(void);
 void run_doctor_json_output_tests(void);
 void run_doctor_reaction_collection_wired_tests(void);
 void run_doctor_prompt_budget_tests(void);
+void run_doctor_eval_freshness_tests(void);
+void run_doctor_serving_stability_tests(void);
+void run_doctor_log_hygiene_tests(void);
+void run_doctor_imessage_cursor_tests(void);
+void run_doctor_blind_ab_gate_tests(void);
 void run_outbound_sanitize_tests(void);
 void run_daemon_follow_up_watcher_tests(void);
 void run_cli_ctl_tests(void);
@@ -348,6 +355,8 @@ void run_imessage_private_protocol_tests(void);
 void run_imessage_private_client_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
 void run_imessage_replay_guard_tests(void);
+void run_chatdb_cursor_repo_sqlite_tests(void);
+void run_reliable_circuit_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
@@ -401,11 +410,14 @@ void run_graph_tests(void);
 void run_graph_ingest_tests(void);
 void run_agent_facts_tests(void);
 void run_cli_memory_import_tests(void);
+void run_cli_commands_memory_print_tests(void);
 void run_store_sqlite_vec_tests(void);
 void run_semantic_index_tests(void);
+void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
+void run_graph_state_tests(void);
 void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
@@ -968,6 +980,7 @@ void run_persona_encryption_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
+void run_style_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
 #endif
@@ -1115,6 +1128,7 @@ int main(int argc, char **argv) {
     run_string_ci_tests();
     run_rand_tests();
     run_log_once_tests();
+    run_log_format_tests();
     run_vertex_adc_tests();
     run_init_proposer_tests();
     run_init_proposer_compose_tests();
@@ -1182,6 +1196,7 @@ int main(int argc, char **argv) {
     run_imessage_schema_tests();
     run_typedstream_tests();
     run_harmony_filter_tests();
+    run_llm_json_tests();
     run_imessage_balloon_decode_tests();
     run_whatsapp_reactions_tests();
     run_matrix_reactions_tests();
@@ -1360,6 +1375,11 @@ int main(int argc, char **argv) {
     run_doctor_json_output_tests();
     run_doctor_reaction_collection_wired_tests();
     run_doctor_prompt_budget_tests();
+    run_doctor_eval_freshness_tests();
+    run_doctor_serving_stability_tests();
+    run_doctor_log_hygiene_tests();
+    run_doctor_imessage_cursor_tests();
+    run_doctor_blind_ab_gate_tests();
     run_outbound_sanitize_tests();
     run_daemon_follow_up_watcher_tests();
     run_cli_ctl_tests();
@@ -1400,6 +1420,8 @@ int main(int argc, char **argv) {
     run_imessage_private_client_tests();
     run_imessage_chatdb_fixture_tests();
     run_imessage_replay_guard_tests();
+    run_chatdb_cursor_repo_sqlite_tests();
+    run_reliable_circuit_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
@@ -1454,11 +1476,14 @@ int main(int argc, char **argv) {
     run_graph_ingest_tests();
     run_agent_facts_tests();
     run_cli_memory_import_tests();
+    run_cli_commands_memory_print_tests();
     run_store_sqlite_vec_tests();
     run_semantic_index_tests();
+    run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
+    run_graph_state_tests();
     run_w2_autodream_tests();
     run_w3_multigraph_tests();
     run_w4_verifier_tests();
@@ -1986,6 +2011,7 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
+    run_style_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();
 #endif

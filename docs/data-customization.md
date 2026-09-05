@@ -551,6 +551,25 @@ The `behavior` config section in the runtime configuration controls seven key th
 | Reply budget per contact      | `reply_budget_per_contact_hourly` | 10 | 0–1000 | Max reactive replies to one contact per sliding hour; beyond it the daemon stays silent. `0` disables. Runaway brake, not a conversation shaper. |
 | Reply budget global           | `reply_budget_global_hourly` | 30   | 0–10000 | Max reactive replies to everyone per sliding hour. `0` disables. |
 
+## Reliability: Circuit Breaker on the Primary Provider
+
+The `reliability` section wraps the primary provider (for example the local
+`mlx_local` server) with retries and cloud fallbacks. Two rules keep a dead
+local server from wedging the daemon (2026-09-03 incident: a crashed server
+whose socket still accepted connections cost three 300-second hangs per turn):
+
+- A request that **times out** is not retried on the same provider within
+  that call; the next provider in the chain is tried immediately.
+- After `circuit_failure_threshold` consecutive primary failures the primary
+  is skipped for `circuit_recovery_secs` (the circuit is open), then one trial
+  request is allowed; a success closes the circuit. Opening and closing are
+  logged at WARN / INFO.
+
+| Key                         | Default | Range    | Purpose                                                        |
+| --------------------------- | ------- | -------- | -------------------------------------------------------------- |
+| `circuit_failure_threshold` | 2       | -1–100   | Consecutive primary failures that open the circuit. `-1` disables it. `0`/absent = default. |
+| `circuit_recovery_secs`     | 300     | 1–86400  | Seconds the primary is skipped before one trial request.       |
+
 ### iMessage replay guards
 
 Three guards keep a stale poll cursor from replaying old inbound messages as

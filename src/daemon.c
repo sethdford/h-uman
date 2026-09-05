@@ -2213,8 +2213,10 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
 /* Consecutive successful turns that produced zero-length assistant text
- * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
+ * (e.g. MLX HTTP 52 after response_guard retry). Only the non-test loop uses it. */
+#ifndef HU_IS_TEST
 static unsigned g_empty_agent_response_streak;
+#endif
 
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                           hu_service_channel_t *channels, size_t channel_count, hu_agent_t *agent,
@@ -2806,19 +2808,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_log_info("human", agent->observer, "personalization: loaded adapter '%s' from %s",
                         adapter_id, adapter_path);
         else if (le == HU_ERR_NOT_SUPPORTED) {
-            /* US-7.3 (INS-B): the provider's own load_adapter returned
-             * HU_ERR_NOT_SUPPORTED. This is the common case when the
-             * underlying primary is the `compatible` provider — even when
-             * configured as `mlx_local` (just a named entry in the
-             * compatible factory map). Try the mlx-admin HTTP API directly
-             * before giving up: if reliability.primary_provider names
-             * mlx_local AND a mlx-server is reachable, we load the adapter
-             * out-of-band via hu_mlx_admin_swap_adapter.
-             *
-             * This makes the M3 mission's main feature fire in production.
-             * Empirical: v4-repair adapter lifts persona fidelity +27pp
-             * (commit 9ab9b86e). Before this path, the warn fired and
-             * the proven adapter sat unused. */
             bool mlx_admin_ok = false;
             const char *primary = config->reliability.primary_provider;
             if (primary && strstr(primary, "mlx_local")) {
@@ -2826,13 +2815,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (!mlx_url || !mlx_url[0])
                     mlx_url = "http://127.0.0.1:8741/v1";
                 hu_mlx_admin_swap_result_t swap = {0};
-                hu_error_t se = hu_mlx_admin_swap_adapter(
-                    alloc, mlx_url, strlen(mlx_url), adapter_path, strlen(adapter_path), &swap);
+                bool already = false;
+                hu_error_t se =
+                    hu_mlx_admin_ensure_adapter(alloc, mlx_url, strlen(mlx_url), adapter_path,
+                                                strlen(adapter_path), &swap, &already);
                 if (se == HU_OK && swap.status_code == 200) {
                     mlx_admin_ok = true;
                     hu_log_info("human", agent->observer,
-                                "personalization: loaded adapter '%s' via mlx-admin (%s)",
-                                adapter_id, mlx_url);
+                                "personalization: adapter '%s' %s via mlx-admin (%s)", adapter_id,
+                                already ? "already active" : "loaded", mlx_url);
                 } else {
                     hu_log_warn("human", agent->observer,
                                 "personalization: mlx-admin swap failed: err=%d status=%d url=%s",
@@ -3498,25 +3489,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 fp.relevance_threshold = config->feeds.relevance_threshold;
                             }
                             if (config) {
-                                if (config->feeds.gmail_client_id) {
-                                    fp.gmail_client_id = config->feeds.gmail_client_id;
-                                    fp.gmail_client_id_len = strlen(config->feeds.gmail_client_id);
-                                }
-                                if (config->feeds.gmail_client_secret) {
-                                    fp.gmail_client_secret = config->feeds.gmail_client_secret;
-                                    fp.gmail_client_secret_len =
-                                        strlen(config->feeds.gmail_client_secret);
-                                }
-                                if (config->feeds.gmail_refresh_token) {
-                                    fp.gmail_refresh_token = config->feeds.gmail_refresh_token;
-                                    fp.gmail_refresh_token_len =
-                                        strlen(config->feeds.gmail_refresh_token);
-                                }
-                                if (config->feeds.twitter_bearer_token) {
-                                    fp.twitter_bearer_token = config->feeds.twitter_bearer_token;
-                                    fp.twitter_bearer_token_len =
-                                        strlen(config->feeds.twitter_bearer_token);
-                                }
+/* Borrow a config credential string + length into the processor. */
+#define HU_FEED_CRED(field)                               \
+    do {                                                  \
+        if (config->feeds.field) {                        \
+            fp.field = config->feeds.field;               \
+            fp.field##_len = strlen(config->feeds.field); \
+        }                                                 \
+    } while (0)
+                                HU_FEED_CRED(gmail_client_id);
+                                HU_FEED_CRED(gmail_client_secret);
+                                HU_FEED_CRED(gmail_refresh_token);
+                                HU_FEED_CRED(gmail_quota_project);
+                                HU_FEED_CRED(twitter_bearer_token);
+#undef HU_FEED_CRED
                             }
                             hu_feed_config_t fconf;
                             memset(&fconf, 0, sizeof(fconf));
@@ -9636,7 +9622,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             graph, batch_key, key_len, dr->entity_a,
                                             dr->relation ? dr->relation : "related_to",
                                             dr->entity_b, (float)dr->confidence,
-                                            (int64_t)time(NULL), "turn:deep_extract");
+                                            (int64_t)time(NULL) * 1000, "turn:deep_extract");
                                     }
                                     hu_deep_extract_result_deinit(&de_result, alloc);
                                 }
@@ -11712,20 +11698,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 if (has_artwork)
                                                     media[media_count++] = artwork_path;
 
-                                                ch->channel->vtable->send(
+                                                hu_error_t mserr = ch->channel->vtable->send(
                                                     ch->channel->ctx, batch_key, key_len,
                                                     share_text, st_len,
                                                     media_count > 0 ? media : NULL,
                                                     (size_t)media_count);
-
-                                                hu_log_info("human", agent ? agent->observer : NULL,
-                                                            "sent music %s: %s - %s [%s%s]",
-                                                            has_preview ? "preview" : "link",
-                                                            song.artist_name ? song.artist_name
-                                                                             : "?",
-                                                            song.track_name ? song.track_name : "?",
-                                                            has_spotify ? "spotify" : "itunes",
-                                                            has_artwork ? "+art" : "");
+                                                if (mserr != HU_OK)
+                                                    hu_log_warn("human", NULL,
+                                                                "music send failed: %d",
+                                                                (int)mserr);
+                                                else
+                                                    hu_log_info(
+                                                        "human", agent ? agent->observer : NULL,
+                                                        "sent music %s: %s - %s [%s%s]",
+                                                        has_preview ? "preview" : "link",
+                                                        song.artist_name ? song.artist_name : "?",
+                                                        song.track_name ? song.track_name : "?",
+                                                        has_spotify ? "spotify" : "itunes",
+                                                        has_artwork ? "+art" : "");
 
                                                 hu_music_taste_record_send(batch_key, key_len,
                                                                            song.artist_name,
@@ -11798,10 +11788,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     ? snprintf(cap, sizeof(cap), "%s %s",
                                                                casual_msg, share_url)
                                                     : snprintf(cap, sizeof(cap), "%s", share_url);
-                                            if (cn > 0 && (size_t)cn < sizeof(cap))
-                                                ch->channel->vtable->send(ch->channel->ctx,
-                                                                          batch_key, key_len, cap,
-                                                                          (size_t)cn, NULL, 0);
+                                            if (cn > 0 && (size_t)cn < sizeof(cap) &&
+                                                ch->channel->vtable->send(
+                                                    ch->channel->ctx, batch_key, key_len, cap,
+                                                    (size_t)cn, NULL, 0) != HU_OK)
+                                                hu_log_warn("human", agent ? agent->observer : NULL,
+                                                            "inspiration send failed");
                                         }
                                         hu_log_info("human", agent ? agent->observer : NULL,
                                                     "sent %s inspiration: %s",
@@ -11853,11 +11845,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc, img_suggest, img_suggest_len, img_path, sizeof(img_path));
                             if (ierr == HU_OK) {
                                 const char *img_media[] = {img_path};
-                                ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                          send_target_len, NULL, 0, img_media, 1);
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "proactive image sent: %.*s", (int)img_suggest_len,
-                                            img_suggest);
+                                hu_error_t iserr = ch->channel->vtable->send(
+                                    ch->channel->ctx, send_target, send_target_len, NULL, 0,
+                                    img_media, 1);
+                                if (iserr != HU_OK)
+                                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                                "proactive image send failed: %d", (int)iserr);
+                                else
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "proactive image sent: %.*s", (int)img_suggest_len,
+                                                img_suggest);
                                 (void)unlink(img_path);
                             }
                         }
