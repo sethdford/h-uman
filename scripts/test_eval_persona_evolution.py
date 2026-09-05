@@ -345,6 +345,7 @@ class _Args:
         self.explain_dates = False
         self.full_range = False
         self.source = None
+        self.min_covered_days = 0.0  # tests pin coverage explicitly; CLI default is 20
         self.__dict__.update(kw)
 
 
@@ -593,6 +594,54 @@ def test_run_with_source_still_refuses_when_pre_window_short(monkeypatch, tmp_pa
     rc = epe.run(_Args(event="job", source=[src], out=str(out_path), min_n=100))
     assert rc == 1
     assert not out_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# --min-covered-days: a window that passes min_n on a few days still refuses
+# ---------------------------------------------------------------------------
+
+def _spread(day_lo, day_hi, n, month=7):
+    """n rows spread evenly over [day_lo, day_hi] of the given month."""
+    days = day_hi - day_lo
+    return [(datetime.datetime(2026, month, day_lo) + datetime.timedelta(days=days * i / max(1, n - 1)), "row %d" % i)
+            for i in range(n)]
+
+
+def test_run_refuses_when_pre_window_covers_too_few_days(monkeypatch, tmp_path):
+    # job event 07-26: pre rows all on 07-20..07-24 (4 days), post rows over 08-01..08-24.
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", min_covered_days=20, out=str(out_path)))
+    assert rc == 1
+    assert not out_path.exists()
+
+
+def test_run_refusal_reason_names_covered_days(monkeypatch, capsys):
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    epe.run(_Args(event="job", min_covered_days=20))
+    report = json.loads(capsys.readouterr().out)
+    ev = report["events"]["job"]
+    assert ev["status"] == "INSUFFICIENT_DATA"
+    assert "covered_days" in ev["reason"] and "pre" in ev["reason"]
+    assert report["min_covered_days"] == 20
+    assert "axes" not in ev
+
+
+def test_run_accepts_when_both_windows_meet_coverage_floor(monkeypatch, tmp_path):
+    rows = _spread(1, 25, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    out_path = tmp_path / "out.json"
+    rc = epe.run(_Args(event="job", min_covered_days=20, out=str(out_path)))
+    assert rc == 0
+    assert json.loads(out_path.read_text())["events"]["job"]["status"] == "OK"
+
+
+def test_min_covered_days_zero_disables_floor(monkeypatch):
+    rows = _spread(20, 24, 150) + _spread(1, 24, 150, month=8)
+    monkeypatch.setattr(epe, "fetch_outbound_messages", lambda *a, **kw: rows)
+    assert epe.run(_Args(event="job", min_covered_days=0)) == 0
 
 
 if __name__ == "__main__":

@@ -36,7 +36,8 @@ event occurred." This script prints that caveat every run (see
 Refusal contract (see .claude/rules/no-number-without-a-measurement.md)
 ------------------------------------------------------------------------
 If ANY window (pre or post, for ANY event being analyzed) has fewer than
---min-n messages (default 100), this script:
+--min-n messages (default 100), OR spans fewer than --min-covered-days
+(default 20) between its first and last present message, this script:
   - prints a diagnostic to stdout tagged "status": "INSUFFICIENT_DATA"
   - exits with a non-zero status
   - writes NOTHING to --out, regardless of whether --out was given
@@ -103,6 +104,9 @@ DEFAULT_DB = os.path.expanduser("~/Library/Messages/chat.db")
 DEFAULT_START = "2026-03-01"
 DEFAULT_WINDOW_DAYS = 30
 DEFAULT_MIN_N = 100
+# A window can satisfy min_n on a handful of days (2026-09-03: the move event
+# passed with n=180 spanning 5.1 days). Coverage is part of the contract.
+DEFAULT_MIN_COVERED_DAYS = 20.0
 
 # Tapback echo text prefixes (e.g. 'Loved "..."') — these are reaction
 # echoes, not something Seth typed, and must not enter the style stats.
@@ -597,6 +601,7 @@ def run(args) -> int:
 
     messages = fetch_outbound_messages(args.db, start_dt, end_dt)
     primary_n = len(messages)
+    min_cov = float(getattr(args, "min_covered_days", 0.0) or 0.0)
 
     sources = list(getattr(args, "source", None) or [])
     source_stats = []
@@ -614,6 +619,7 @@ def run(args) -> int:
         "range": {"start": start_dt.date().isoformat(), "end": end_dt.date().isoformat()},
         "window_days": args.window_days,
         "min_n": args.min_n,
+        "min_covered_days": min_cov,
         "primary_outbound_messages_in_range": primary_n,
         "total_outbound_messages_in_range": len(messages),
         "events": {},
@@ -658,12 +664,20 @@ def run(args) -> int:
             },
         }
 
-        if pre_n < args.min_n or post_n < args.min_n:
+        pre_cov = entry["pre_window"]["coverage"]["covered_days"]
+        post_cov = entry["post_window"]["coverage"]["covered_days"]
+        short_coverage = [
+            f"{side} covered_days={cov} < min_covered_days={min_cov}"
+            for side, cov in (("pre", pre_cov), ("post", post_cov)) if cov < min_cov
+        ]
+        if pre_n < args.min_n or post_n < args.min_n or short_coverage:
             entry["status"] = "INSUFFICIENT_DATA"
             entry["reason"] = (
                 f"pre_window n={pre_n}, post_window n={post_n}; both must be "
-                f">= min_n={args.min_n}. Refusing to compute stats for this "
-                "event per the no-fabricated-numbers contract."
+                f">= min_n={args.min_n}"
+                + ("; " + "; ".join(short_coverage) if short_coverage else "")
+                + ". Refusing to compute stats for this event per the "
+                "no-fabricated-numbers contract."
             )
             insufficient = True
         else:
@@ -695,8 +709,9 @@ def run(args) -> int:
 
     if insufficient:
         sys.stderr.write(
-            "REFUSED: at least one window had n < min_n; wrote nothing to "
-            "--out. See the 'events[*].reason' fields above.\n"
+            "REFUSED: at least one window had n < min_n or covered_days < "
+            "min_covered_days; wrote nothing to --out. See the "
+            "'events[*].reason' fields above.\n"
         )
         return 1
 
@@ -713,6 +728,9 @@ def main(argv=None) -> int:
     p.add_argument("--end", default=None, help="overall range end, YYYY-MM-DD (default: today)")
     p.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS, help="pre/post window size in days (default: %(default)s)")
     p.add_argument("--min-n", type=int, default=DEFAULT_MIN_N, help="minimum messages per window, else refuse (default: %(default)s)")
+    p.add_argument("--min-covered-days", type=float, default=DEFAULT_MIN_COVERED_DAYS,
+                   help="minimum span (days) between the first and last message actually present in each "
+                        "window, else refuse; 0 disables (default: %(default)s)")
     p.add_argument("--event", choices=["move", "job", "both", "none"], default="both", help="which event(s) to analyze ('none' skips event analysis, useful with --full-range)")
     p.add_argument("--full-range", action="store_true", help="also report an aggregate style summary over the whole --start/--end range (no before/after split)")
     p.add_argument("--n-resamples", type=int, default=2000, help="bootstrap resamples (default: %(default)s)")

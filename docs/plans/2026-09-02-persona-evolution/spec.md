@@ -136,7 +136,7 @@ message text, handles or names were copied). Verdict per store:
 | `eval-archive/finetune-backup-20260725-114042/{train,test,valid}.jsonl` | 1,963 / 134 / 134 | assistant turns | no per-record timestamp | chat-format from `prepare-finetune.py`; timestamps stripped | rejected — cannot window |
 | `data/imessage/training_pairs.jsonl` (repo, gitignored `.gitignore:141`) | 1,303 | 1,303 | 2026-06-26..2026-07-26 | as above (`:256-267`); mtime 2026-07-26 10:52 | **best — used** |
 | `data/imessage/ground_truth.jsonl` / `voice_training_pairs.jsonl` | 689 / 1,264 | same | 2026-06-26..2026-07-26 | subsets of `training_pairs` | redundant |
-| `~/.human/training-data/m3-corpus.jsonl` | 4,910 | 2,016 (`channel=imessage`, `role=assistant`) | 2026-04-19..2026-05-19 | `role = "assistant" if is_from_me` (`scripts/m3_extract_corpus.py:208`). **Caveat:** 203 further `role=assistant` rows have `channel=memory_db` — those are the daemon's replies (`:259`), mislabelled as Seth by the file's own docstring (`:13`) | rejected — predates both windows; mixed provenance |
+| `~/.human/training-data/m3-corpus.jsonl` | 4,910 | 2,016 (`channel=imessage`, `role=assistant`) | 2026-04-19..2026-05-19 | `role = "assistant" if is_from_me` (`scripts/m3_extract_corpus.py:208`). **Caveat:** 203 further `role=assistant` rows have `channel=memory_db` — those are the daemon's replies (`:259`), mislabelled as Seth by the file's own docstring (`:13`). **Fixed 2026-09-05:** the extractor now emits `role: "daemon"` for memory_db assistant rows, so the downstream `role == "assistant"` filters (holdout split, counterfactuals, active probe) exclude them; the on-disk 05-19 corpus is unchanged | rejected — predates both windows; mixed provenance (fixed at source) |
 | `m3-corpus-train.jsonl` / `m3-holdout-prompts.jsonl` | 2,016 / 100 | `reference` field | ≤2026-05-19 | derived from the above | rejected — date |
 | `training-data/m3-alpaca-dpo-*`, `m3-counterfactuals`, `m3-rewrite-pairs`, `m3-combined-dpo`, `m3-dpo-rejections-*`, `m3-outcomes`, `dpo_finetune/`, `glm-v6-pref/`, `glm-v61-pref/`, `glm-v62-sft/`, `orpo_deliberation/`, `eval-archive/binoc-dpo-candidates.jsonl` | 2–535 each | **0** | no timestamps (or `ts` of the judge run) | `prompt/chosen/rejected`: chosen is a model output or a judged variant | rejected |
 | `training-data/finetune/`, `mlx-chat/`, `glm-v5-data/`, `voice-ideal/` (`{train,valid,test}.jsonl`) | 2,220 / 22,557 / 1,202 / 1,421 train rows | assistant turns are Seth (`prepare-finetune.py`, `prepare-texting-data.py:56` from `is_from_me`) | none per record | timestamps stripped at export | rejected — cannot window |
@@ -236,6 +236,63 @@ Per-axis (`mean [95% CI]`, `moved_beyond_ci`):
 `lowercase_start_rate` moved but is disqualified by point 2. The
 directional-fidelity gate (§5) can now be run against those three axes
 for the job event; it should not be run for the move event on this data.
+
+### 2026-09-05 follow-up: coverage floor, retention roll, and the gate
+
+**Coverage is now part of the refusal contract.** `--min-covered-days`
+(default 20) refuses any window whose first-to-last present message spans
+fewer days, exactly as `--min-n` refuses on count. Re-running `--event both`
+with the same two `--source`s now exits 1: the move event is
+`INSUFFICIENT_DATA` (`pre covered_days=5.1 < min_covered_days=20.0`), the
+job event is `OK`. The move row in the table above is therefore retired,
+not caveated. Four tests pin the floor; 66 pass in that file.
+
+**chat.db retention rolled two days between runs.** On 2026-09-03 the
+oldest `is_from_me=1` row was 2026-08-03; on 2026-09-05 it is 2026-08-05.
+The job post window lost the 08-03..08-04 rows (555 → 522), so its hole is
+now 07-27..08-04 and `length_chars` Δ moved from −3.24 to −3.02, `emoji_rate`
++0.035 → +0.039, `warmth` +0.37 → +0.42 (same signs, same `moved` flags).
+`results-2026-09-03.json` is kept as the 09-03 measurement;
+`results-2026-09-05.json` is the job-only re-run under the coverage floor
+and is what the gate below reads. This is the concrete cost of §3's data
+gap: every day without the nightly log (§5) deletes a day of the post
+window too.
+
+**The directional-fidelity gate ran** (`scripts/eval_persona_evolution_gate.py`,
+verdict in `gate-2026-09-05.json`, 10 hermetic tests). It never touches the
+serving port: it pairs two *existing* generation files by prompt hash.
+Matched prompt set = 34 contexts present in both
+`~/blind_ab_run/triples_glm_v5.json` (generated 2026-07-25 with the v5
+adapter, one day before the job date, on the 160-prompt blind-A/B set) and
+`~/blind_ab_run/remeasure-2026-09-04/classifier_trials_adapterbound.json`
+(generated 2026-09-04, first run with the v6 adapter actually bound on
+:8741). `lowercase_start_rate` is excluded by default for the reason in
+point 2 above; `--min-matched` is 30 (a separate, smaller denominator than
+the human windows' `min_n=100`, stated explicitly, not a lowering of it).
+
+| Axis (human moved beyond CI, job) | Human Δ | Generated pre (n=34) | Generated post (n=34) | Gen Δ | Sign match |
+|---|---|---|---|---|---|
+| `length_chars` | −3.02 | 54.1 [43.9, 65.5] | 35.8 [29.5, 43.2] | −18.3 | yes |
+| `emoji_rate` | +0.039 | 0.000 [0, 0] | 0.000 [0, 0] | 0.000 | **no** |
+| `warmth_hits_per_100_words` | +0.42 | 2.24 [0.80, 3.92] | 3.93 [1.44, 7.12] | +1.69 | yes |
+
+**Verdict: FAIL** (2 of 3 gated axes match; the gate requires all). The
+failing axis is informative rather than noisy: the persona emitted **zero
+emoji in 68 generated replies across both snapshots**, while Seth's own
+post-event rate is 8.6%. That is a fixed property of the prompt/adapter,
+not a directional miss, and it is also visible in `seth.json:44` ("Emoji
+sparingly — maybe 1 in 8") never surviving into output. Using the older
+2026-06-01 snapshot (`triples_current.json`) as the pre side gives the same
+verdict and the same two matches (length −3.5, warmth +1.09, emoji 0 → 0).
+
+Caveats on this verdict, in order of weight:
+1. n=34 matched prompts; the generated CIs are wide. Only `length_chars`
+   moves beyond its own CI on the generated side.
+2. The "post" generations are the v6 adapter that the 2026-09-04
+   re-measurement found writes 86% lowercase / 0% punctuation, i.e. a model
+   whose register is already known to be off on other axes.
+3. The two generation files are different harness paths (blind-A/B triples
+   vs classifier trials) that share prompts, not one script run twice.
 
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
@@ -358,8 +415,9 @@ by-window view instead of an all-time one.
   `~/Library/Messages/chat.db` holds locally.~~ Done 2026-09-03 (§3b):
   every local store was inventoried read-only and the two
   `extract_imessage_pairs.py` snapshots were merged via `--source`.
-- `--min-n` was left at 100 both times. On 2026-09-03 both events pass it,
-  but the move event passes on a 5.1-day pre window (§3b point 1); the
-  contract should gain a `covered_days` floor before that row is used.
-- The directional-fidelity gate itself (generate on matched prompts, score
-  the same three axes, compare sign) is still not run.
+- `--min-n` is still 100. `--min-covered-days` (default 20) was added
+  2026-09-05, which retires the move event on this data.
+- The directional-fidelity gate ran 2026-09-05 on existing generation files
+  only (FAIL, emoji axis). It has not been run with a fresh, single-harness
+  before/after generation pass, and cannot be until a pre-event adapter is
+  served again or a nightly generation log exists.

@@ -172,6 +172,14 @@ def test_memory_db_extractor():
             all(r["channel"] == "memory_db" for r in records))
         _ok("session_id is hashed (8 hex)",
             all(len(r["handle"]) == 8 for r in records))
+        # memory.db `assistant` rows are the DAEMON's generated replies
+        # (src/daemon.c batch path saves the response as "assistant"), not
+        # Seth's typing. They must not carry the Seth-authored role label.
+        roles = sorted(r["role"] for r in records)
+        _ok("memory_db assistant rows are relabelled 'daemon'",
+            roles == ["daemon", "user", "user"], f"got {roles}")
+        _ok("no memory_db row claims the Seth-authored 'assistant' role",
+            all(r["role"] != "assistant" for r in records))
 
 
 def test_missing_db_returns_empty():

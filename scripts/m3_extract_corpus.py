@@ -10,7 +10,9 @@ generation. Each line:
       "channel": "imessage" | "gmail" | "slack" | "memory_db",
       "ts_ms": int,
       "handle": "<contact id, hashed if --redact>",
-      "role": "user" | "assistant",   # "assistant" = Seth-authored
+      "role": "user" | "assistant" | "daemon",
+          # "assistant" = Seth-authored (chat.db is_from_me=1 only);
+          # "daemon"    = the h-uman daemon's own reply (memory_db source)
       "content": "<text, PII-redacted>"
     }
 
@@ -20,8 +22,8 @@ Why each source:
     `message` table; `is_from_me=1` means Seth wrote it. Requires
     Full Disk Access on macOS (granted to Terminal/the binary).
   - memory_db (~/.human/memory.db) — what the DAEMON has ingested
-    so far. Smaller, possibly stale, but includes channels other
-    than iMessage when configured.
+    so far: inbound contact turns ("user") and the daemon's OWN replies
+    ("daemon"). Contains no Seth-authored text; kept for context only.
   - gmail — uses HUMAN_GMAIL_REFRESH_TOKEN (from ~/.human/config.json).
     Stubbed for now (network call complexity); flag stays for parity.
   - slack — uses HUMAN_SLACK_BOT_TOKEN; same stub status.
@@ -256,7 +258,13 @@ def extract_memory_db(db_path: Path, max_records: int, redact_handles: bool) -> 
                 "channel": "memory_db",
                 "ts_ms": ts_ms,
                 "handle": hash_handle(sess) if redact_handles else sess,
-                "role": role,  # already "user" or "assistant"
+                # memory.db "assistant" rows are the daemon's generated
+                # replies (src/daemon.c saves the batch response under that
+                # role), NOT Seth's typing. Relabel so downstream filters on
+                # role == "assistant" (holdout split, counterfactuals, active
+                # probe) never train on the daemon's own output. Inventory
+                # 2026-09-03: 203 such rows were mislabelled Seth.
+                "role": "daemon" if role == "assistant" else role,
                 "content": redact_pii(content),
             })
         conn.close()
