@@ -377,3 +377,87 @@ def test_retire_requires_a_reason(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         reg.main()
     assert "status" not in json.loads(registry.read_text())["adapters"]["a"]
+
+
+# --------------------------------------------------------------------------
+# US-2: authorship_gate annotation (never blocking -- see
+# _read_authorship_gate_for's docstring). Monkeypatches the gate functions
+# reg imported from authorship_promotion_gate directly, the same pattern
+# no_real_registry uses for record_training -- hermetic, no real
+# ~/.human/logs glob involved.
+# --------------------------------------------------------------------------
+
+
+def test_register_v6_adapter_annotates_absent(monkeypatch, tmp_path, no_real_registry):
+    """No matching candidate-authorship-*.json on disk -- annotation is
+    {"status": "NOT_RUN"} and registration still succeeds (annotation is
+    informational, never blocking)."""
+    monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: None)
+    _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
+    assert len(no_real_registry.calls) == 1
+    metrics = no_real_registry.calls[0]["metrics"]
+    assert metrics["authorship_gate"] == {"status": "NOT_RUN"}
+    assert metrics["promoted"] is False
+
+
+def test_register_v6_adapter_annotates_block(monkeypatch, tmp_path, no_real_registry):
+    """A matching, CI-distinguishable regressed-shaped fixture is present --
+    the BLOCK verdict is recorded AND registration still succeeds with
+    promoted: False unchanged (proves annotation never flips this script's
+    own promoted flag, which was already always False -- guards against a
+    future edit accidentally wiring this into a block).
+
+    candidate_twin_ci95=(0.60, 0.65) is tight enough that its upper bound
+    (0.65) is below serving_twin (0.70) -- decide_promotion()'s noise-aware
+    gate (F1 fix, 2026-09-05) can only BLOCK when the CI itself rules out
+    'just noise'; a wide/noisy CI on the same means would HOLD instead
+    (see test_authorship_promotion_gate.py's HOLD-vs-BLOCK pair)."""
+    monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: "/fake/candidate-authorship-2026-09-05.json")
+    monkeypatch.setattr(
+        reg, "load_gate_inputs_from_score_json",
+        lambda path: {"candidate_twin": 0.625, "serving_twin": 0.70, "floor": 0.62,
+                      "candidate_twin_ci95": (0.60, 0.65)})
+    _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
+    assert len(no_real_registry.calls) == 1
+    metrics = no_real_registry.calls[0]["metrics"]
+    assert metrics["authorship_gate"]["status"] == "RAN"
+    assert metrics["authorship_gate"]["verdict"] == "BLOCK"
+    assert metrics["authorship_gate"]["reason"] == "regression_ci_distinguishable"
+    # Never flips this script's own promoted flag.
+    assert metrics["promoted"] is False
+
+
+def test_register_v6_adapter_annotates_hold(monkeypatch, tmp_path, no_real_registry):
+    """A matching fixture whose CI is too wide to distinguish candidate
+    from serving -- the HOLD verdict is recorded (not BLOCK, and not a
+    fabricated PASS), and registration still succeeds. Same numbers as
+    the real 2026-09-02 -> 2026-09-04 cycle that motivated the F1 fix
+    (twin 0.633 -> 0.625, delta -0.008, CI span ~0.22 at n~=36)."""
+    monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: "/fake/candidate-authorship-2026-09-05.json")
+    monkeypatch.setattr(
+        reg, "load_gate_inputs_from_score_json",
+        lambda path: {"candidate_twin": 0.625, "serving_twin": 0.633, "floor": 0.50,
+                      "candidate_twin_ci95": (0.506, 0.725)})
+    _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
+    metrics = no_real_registry.calls[0]["metrics"]
+    assert metrics["authorship_gate"]["status"] == "RAN"
+    assert metrics["authorship_gate"]["verdict"] == "HOLD"
+    assert metrics["authorship_gate"]["reason"] == "within_noise"
+    assert metrics["promoted"] is False
+
+
+def test_register_v6_adapter_annotates_inconclusive_on_bad_measurement(monkeypatch, tmp_path, no_real_registry):
+    """A matching score JSON exists but the loader refuses (malformed/missing
+    measurement) -- annotation is INCONCLUSIVE, not a fabricated verdict,
+    and registration still succeeds."""
+    monkeypatch.setattr(reg, "_find_latest_score_json", lambda adapter_path: "/fake/candidate-authorship-2026-09-05.json")
+
+    def _raise(path):
+        raise SystemExit("INCONCLUSIVE: missing twin_candidate; nothing to gate on")
+
+    monkeypatch.setattr(reg, "load_gate_inputs_from_score_json", _raise)
+    _run_main(monkeypatch, tmp_path, MLX_LM_LORA_ORPO_LOG)
+    metrics = no_real_registry.calls[0]["metrics"]
+    assert metrics["authorship_gate"]["status"] == "INCONCLUSIVE"
+    assert "INCONCLUSIVE" in metrics["authorship_gate"]["reason"]
+    assert metrics["promoted"] is False
