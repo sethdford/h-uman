@@ -106,6 +106,84 @@ bool hu_helpers_is_reasoning_model(const char *model, size_t model_len) {
     return false;
 }
 
+static bool scaffold_ws(char c) {
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+static size_t scaffold_find(const char *s, size_t from, size_t n, const char *needle, size_t nlen) {
+    for (size_t i = from; i + nlen <= n; i++)
+        if (memcmp(s + i, needle, nlen) == 0)
+            return i;
+    return n;
+}
+
+bool hu_helpers_strip_model_scaffold(char *s, size_t *len) {
+    if (!s || !len || *len == 0)
+        return false;
+    size_t n = *len;
+    size_t start = 0;
+    size_t end = n;
+    while (start < n && scaffold_ws(s[start]))
+        start++;
+    if (n - start >= 7 && memcmp(s + start, "<think>", 7) == 0) {
+        size_t close = scaffold_find(s, start + 7, n, "</think>", 8);
+        start = close < n ? close + 8 : n; /* unterminated: it was all thought */
+    } else if (n - start >= 8 && memcmp(s + start, "</think>", 8) == 0) {
+        start += 8;
+    }
+    while (start < end && scaffold_ws(s[start]))
+        start++;
+    while (end > start && scaffold_ws(s[end - 1]))
+        end--;
+    /* One whole-reply fence: ```lang\n … \n``` */
+    if (end - start >= 6 && memcmp(s + start, "```", 3) == 0 &&
+        memcmp(s + end - 3, "```", 3) == 0) {
+        size_t body = start + 3;
+        while (body < end && s[body] != '\n')
+            body++;
+        if (body < end) {
+            body++;
+            size_t body_end = end - 3;
+            if (body <= body_end) {
+                start = body;
+                end = body_end;
+                while (start < end && scaffold_ws(s[start]))
+                    start++;
+                while (end > start && scaffold_ws(s[end - 1]))
+                    end--;
+            }
+        }
+    }
+    if (start == 0 && end == n)
+        return false;
+    size_t out_len = end - start;
+    memmove(s, s + start, out_len);
+    s[out_len] = '\0';
+    *len = out_len;
+    return true;
+}
+
+char *hu_helpers_dup_model_text(hu_allocator_t *alloc, const char *s, size_t len, size_t *out_len) {
+    if (out_len)
+        *out_len = 0;
+    if (!alloc || !s)
+        return NULL;
+    char *copy = hu_strndup(alloc, s, len);
+    if (!copy)
+        return NULL;
+    size_t stripped = len;
+    if (hu_helpers_strip_model_scaffold(copy, &stripped)) {
+        char *exact = hu_strndup(alloc, copy, stripped);
+        alloc->free(alloc->ctx, copy, len + 1);
+        if (!exact)
+            return NULL;
+        copy = exact;
+    }
+    if (out_len)
+        *out_len = stripped;
+    return copy;
+}
+
 char *hu_helpers_extract_openai_content(hu_allocator_t *alloc, const char *body, size_t body_len) {
     hu_json_value_t *parsed = NULL;
     if (hu_json_parse(alloc, body, body_len, &parsed) != 0)

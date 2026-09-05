@@ -106,6 +106,33 @@ static void test_ai_tell_action_second_miss_drops(void) {
                  (int)HU_AI_TELL_DROP);
 }
 
+/* ── Consecutive-reply limiter (2026-09-04) ──────────────────────────── */
+static void test_consecutive_limit_cap_zero_never_fires(void) {
+    HU_ASSERT(!hu_reactive_consecutive_limit_reached(100, 0));
+}
+
+static void test_consecutive_limit_fires_at_cap(void) {
+    HU_ASSERT(!hu_reactive_consecutive_limit_reached(4, 5));
+    HU_ASSERT(hu_reactive_consecutive_limit_reached(5, 5));
+    HU_ASSERT(hu_reactive_consecutive_limit_reached(9, 5));
+}
+
+static void test_consecutive_burst_expires_only_after_the_window(void) {
+    HU_ASSERT(!hu_reactive_consecutive_burst_expired(0, 5000, 1800));    /* never replied */
+    HU_ASSERT(!hu_reactive_consecutive_burst_expired(1000, 2800, 1800)); /* exactly the window */
+    HU_ASSERT(hu_reactive_consecutive_burst_expired(1000, 2801, 1800));  /* one second past */
+    HU_ASSERT(!hu_reactive_consecutive_burst_expired(1000, 9999, 0));    /* window disabled */
+    HU_ASSERT(!hu_reactive_consecutive_burst_expired(2000, 1000, 1800)); /* clock went back */
+}
+
+static void test_message_is_question_finds_a_question_mark(void) {
+    const char *q = "OK, would you like to talk tomorrow?";
+    HU_ASSERT(hu_reactive_message_is_question(q, strlen(q)));
+    HU_ASSERT(!hu_reactive_message_is_question("Great yay", 9));
+    HU_ASSERT(!hu_reactive_message_is_question(NULL, 5));
+    HU_ASSERT(!hu_reactive_message_is_question("a?b", 1)); /* honours len */
+}
+
 void run_reactive_gates_tests(void) {
     HU_TEST_SUITE("Reactive Gate Split");
     HU_RUN_TEST(test_ai_tell_action_clean_reply_sends);
@@ -120,4 +147,8 @@ void run_reactive_gates_tests(void) {
     HU_RUN_TEST(test_ai_tell_incident_phrases_detected);
     HU_RUN_TEST(test_ai_tell_is_case_insensitive_and_names_phrase);
     HU_RUN_TEST(test_ai_tell_does_not_flag_human_sorry);
+    HU_RUN_TEST(test_consecutive_limit_cap_zero_never_fires);
+    HU_RUN_TEST(test_consecutive_limit_fires_at_cap);
+    HU_RUN_TEST(test_consecutive_burst_expires_only_after_the_window);
+    HU_RUN_TEST(test_message_is_question_finds_a_question_mark);
 }

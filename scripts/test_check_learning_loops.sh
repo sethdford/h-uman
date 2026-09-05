@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Hermetic tests for the `semantic-gate` line in check-learning-loops.sh and for
-# semantic_gate_weekly.sh's refuse/HOLD behaviour. Fake HOME, fake repo, fake
-# gate script — no :8741, no model, no real gate run.
+# Hermetic tests for the `semantic-gate` and `outcomes` lines in
+# check-learning-loops.sh and for semantic_gate_weekly.sh's refuse/HOLD behaviour.
+# Fake HOME, fake repo, fake gate script, throwaway memory.db — no :8741, no model,
+# no real gate run, never the real ~/.human.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T=$(mktemp -d); export HOME="$T"; export HU_STATE_DIR="$T/.human" HU_REPO_DIR="$T/repo" HU_LOOP_SKIP_CI=1
@@ -53,6 +54,45 @@ rm -f "$T/.human/logs"/semantic-gate-*.json "$T/repo/docs/plans/2026-08-02-seman
 printf '<dict><key>HU_SEMANTIC_RECALL</key>\n<string>shadow</string></dict>\n' > "$PLIST"
 out=$(bash "$CHK" 2>&1); rc=$?
 check "shadow mode -> NOTE and exit 0" "[[ \"$out\" == *'NOTE semantic-gate: HU_SEMANTIC_RECALL=shadow'* ]] && [ $rc -eq 0 ]"
+
+# ── outcomes: the production_outcomes recorder must leave a row for every daemon turn ──
+# 2026-08-04 → 09-01: zero rows for four weeks and nothing said so. Sections 1-5
+# are satisfied above (plist says shadow => semantic-gate is a NOTE), so the exit
+# code below reflects ONLY the outcomes line.
+out=$(bash "$CHK" 2>&1); rc=$?
+check "O1 no memory.db -> outcomes NOTE, exit 0" "[[ \"$out\" == *'NOTE outcomes: no memory store'* ]] && [ $rc -eq 0 ]"
+MEMDB="$T/.human/memory.db"
+mkdb() { # <turn-age-days|""> <outcome-age-days|""> [notable] — "" = no rows; notable = no outcomes table at all
+  rm -f "$MEMDB"
+  sqlite3 "$MEMDB" "CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at TEXT DEFAULT(datetime('now')));"
+  [[ "${3:-}" == notable ]] || sqlite3 "$MEMDB" "CREATE TABLE production_outcomes(id INTEGER PRIMARY KEY, channel TEXT, target TEXT, prompt TEXT, chosen TEXT, send_timestamp INTEGER);"
+  [[ -n "$1" ]] && sqlite3 "$MEMDB" "INSERT INTO messages(session_id,role,content,created_at) VALUES('+15550001111','user','hi',datetime('now','-$1 days')),('+15550001111','assistant','yo',datetime('now','-$1 days'));"
+  [[ -n "$2" ]] && sqlite3 "$MEMDB" "INSERT INTO production_outcomes(channel,target,prompt,chosen,send_timestamp) VALUES('imessage','+15550001111','hi','yo',strftime('%s','now')-$2*86400);"
+  return 0
+}
+# O2. a turn in the window with no outcome row -> DEAD (the recorder-not-firing shape)
+mkdb 1 ""
+out=$(bash "$CHK" 2>&1); rc=$?
+check "O2 turns without outcomes is DEAD" "[[ \"$out\" == *'DEAD outcomes: 1 assistant turn(s) in messages in the last 3d but 0 production_outcomes rows'* ]] && [ $rc -eq 1 ]"
+# O3. turn AND outcome in the window -> OK
+mkdb 1 1
+out=$(bash "$CHK" 2>&1); rc=$?
+check "O3 turns with outcomes is OK" "[[ \"$out\" == *'OK   outcomes: 1 row(s) from 1 assistant turn(s) in the last 3d'* ]] && [ $rc -eq 0 ]"
+# O4. the 08-04 shape: rows exist but all older than the window -> NOTE (daemon quiet), never DEAD
+mkdb 10 10
+out=$(bash "$CHK" 2>&1); rc=$?
+check "O4 only stale rows -> NOTE naming the daemon, exit 0" "[[ \"$out\" == *'NOTE outcomes: no daemon turns and no outcomes in the last 3d'* ]] && [ $rc -eq 0 ]"
+# O5. the window is configurable
+out=$(HU_LOOP_OUTCOMES_MAX_DAYS=14 bash "$CHK" 2>&1); rc=$?
+check "O5 HU_LOOP_OUTCOMES_MAX_DAYS widens the window" "[[ \"$out\" == *'OK   outcomes: 1 row(s) from 1 assistant turn(s) in the last 14d'* ]] && [ $rc -eq 0 ]"
+# O6. a fresh/quarantined store: turns recorded but hu_dpo_init_tables never ran -> DEAD
+mkdb 1 "" notable
+out=$(bash "$CHK" 2>&1); rc=$?
+check "O6 missing production_outcomes table with turns is DEAD" "[[ \"$out\" == *'DEAD outcomes: 1 assistant turn(s)'* ]] && [ $rc -eq 1 ]"
+# O7. read-only: the checker must not create or grow the store
+mkdb 1 1; before=$(stat -f %z "$MEMDB"); bash "$CHK" >/dev/null 2>&1
+check "O7 checker leaves memory.db byte-identical in size" "[ \"$(stat -f %z "$MEMDB")\" = \"$before\" ] && [ ! -e \"$MEMDB-journal\" ]"
+rm -f "$MEMDB"
 
 # ── semantic_gate_weekly.sh: refuses write nothing; HOLD writes the alert and flips nothing ──
 W="$HERE/semantic_gate_weekly.sh"; TODAY=$(date +%Y-%m-%d)

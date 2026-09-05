@@ -4,7 +4,7 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=12333   # src/daemon.c, measured 2026-09-05 on merge of #377 with main (slices A+B of the batch-reply
+MAX_BASELINE=12313   # src/daemon.c, measured 2026-09-05 on merge of #377 + consecutive-limiter carve (slices A+B of the batch-reply
                      # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
                      # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
 

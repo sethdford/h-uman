@@ -92,4 +92,14 @@ void hu_reliable_circuit_state(const hu_provider_t *reliable, int *out_failures,
 /* Test seam: inject the clock the circuit reads (NULL restores time(NULL)). */
 void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), void *now_ud);
 
+/* ── Empty-reply failover (2026-09-04) ───────────────────────────────────
+ * A provider that returns HU_OK with no content has not answered. The local
+ * model does this on certain prompts (think-only output); the daemon logged
+ * "empty assistant response" and sent nothing, because its own cloud fallback
+ * only fired on a model-router local model that production never configured.
+ * ON by default: the empty reply is treated as HU_ERR_PROVIDER_RESPONSE for
+ * that provider (no retry on it, no circuit-breaker credit) and the chain
+ * moves to the mapped fallback model / next provider. */
+void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
+
 #endif /* HU_RELIABLE_H */

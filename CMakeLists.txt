@@ -1286,6 +1286,7 @@ set(HU_CORE_SOURCES
     src/daemon/reactive_gates.c
     src/daemon/daemon_reactive_context.c
     src/daemon/daemon_reactive_prompt.c
+    src/daemon/consecutive_limiter.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_identity_graph.c
     src/daemon/daemon_config_reload.c
@@ -3466,6 +3467,7 @@ set(HU_TEST_SOURCES
     tests/test_send_budget.c
     tests/test_reactive_gates.c
     tests/test_daemon_reactive_context.c
+    tests/test_consecutive_limiter.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_trust.c

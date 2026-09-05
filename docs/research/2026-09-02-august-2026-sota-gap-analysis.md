@@ -159,3 +159,10 @@ The full-range comparison (n=977, 2026-08-03 → 09-02) against the numbers bake
 | exclamation rate | 6.4% | 3.9% [2.8, 5.1] | no |
 
 Two follow-ups filed: reconcile the contradictory style numbers to one measured source that is re-derived by window; and recover pre-August outbound history (memory.db `messages`, the eval-archive exports) so the before/after gate has data. Record: `docs/plans/2026-09-02-persona-evolution/`.
+
+### Appendix H — the nightly window trains (2026-09-05)
+
+First real nightly training since at least 2026-08-08. Sequence at 03:07: `launchctl bootout` of the server → wait for exit (up to 15 min) → `check-no-resident-model.sh` clear → `training_loop.py` on 313 m3-outcomes (8.5 min) → `adapter_is_real.py`: 556,321,251 bytes, 80/80 `lora_b` tensors non-zero → rc 0 → serving restored 03:18. `check-learning-loops.sh` reads PASS. Three defects had to fall first: the SIGTERM/KeepAlive relaunch (fixed 09-02), the missing `--adapter-out` and the stale shared-checkout copy launchd executed (09-03), and a 120 s exit wait that a 54 GB server cannot meet (09-04). The adapter is staged, not promoted.
+
+Enabled for the 09-06 window: the mlx-tune SimPO candidate stage (`HU_RETRAIN_MLXTUNE=1`), training on the preference corpus rebalanced on BOTH sides to Seth's measured casing/punctuation (margins 0.715→0.005 lowercase, 0.338→0.000 punctuation) and scored offline against v6 with LUAR plus the casing probe, all inside the serving-down window under a 90-minute cap. That is gap #8's first honest number.
+
