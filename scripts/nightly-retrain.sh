@@ -537,7 +537,17 @@ fi
 CYCLE_DIR="${HU_CLASSIFIER_CYCLE_DIR:-$HOME/blind_ab_run}"
 if [ -n "$CYCLE_DIR" ] && [ "$serving_stopped" = 1 ]; then
     log "classifier gate on $CYCLE_DIR"
-    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window 2>&1 | tee -a "$LOG"
+    # Score the adapter this run just ACCEPTED (source.sha256 is written only in
+    # the accepted branch), not the served one: without --adapter the gate falls
+    # back to config.json's personalization.lora_adapter_path, so the 2026-09-04/05
+    # runs scored the served v6 and no staged adapter ever got a measurement.
+    gate_adapter_args=()
+    if [[ -n "${staged:-}" && -f "${staged:-/nonexistent}/source.sha256" ]]; then
+        gate_adapter_args=(--adapter "$staged")
+        log "classifier gate scores tonight's accepted adapter $(basename "$staged")"
+    fi
+    python3 "$REPO/scripts/blind_ab/classifier_gate.py" --cycle-dir "$CYCLE_DIR" --in-window \
+        ${gate_adapter_args[@]+"${gate_adapter_args[@]}"} 2>&1 | tee -a "$LOG"
     log "classifier gate exited rc=${PIPESTATUS[0]}"
 fi
 
