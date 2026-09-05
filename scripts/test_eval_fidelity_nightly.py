@@ -1401,9 +1401,125 @@ def test_served_aborts_pre_arm_when_message_arrives():
 
 
 
+class _AsymServer(_FakeMlxServer):
+    """The 2026-09-05 shape: the zero-adapter (base) arm answers every prompt,
+    the serving-adapter arm returns whitespace for the first `n_empty` prompts
+    (six two-token replies in the live log) — or times out on every prompt when
+    `timeout_post` is set (two 814 s / 948 s runaways in the live log)."""
+
+    def __init__(self, serving: Path, n_empty: int = 8, timeout_post: bool = False,
+                 empty_pre_too: bool = False):
+        super().__init__(serving)
+        self.n_empty = n_empty
+        self.timeout_post = timeout_post
+        self.empty_pre_too = empty_pre_too
+        self.post_calls = 0
+
+    def __call__(self, method, url, body=None, timeout=30, headers=None):
+        if url.endswith("/v1/chat/completions"):
+            on_serving = self.adapter == self.serving
+            if on_serving and self.timeout_post:
+                raise TimeoutError("read timed out")
+            if on_serving:
+                self.post_calls += 1
+                if self.post_calls <= self.n_empty:
+                    return 200, {"choices": [{"message": {"content": "   "}}]}
+            elif self.empty_pre_too:
+                return 200, {"choices": [{"message": {"content": ""}}]}
+        return super().__call__(method, url, body=body, timeout=timeout, headers=headers)
+
+
+def _run_served_main(tmp: Path, adapter: Path, server):
+    argv = _served_argv(tmp, adapter, extra=("--gen", "served", "--no-quiet-guard"))
+    buf = io.StringIO()
+    with mock.patch.object(sys, "argv", argv), \
+         mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+         mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+         mock.patch("eval_fidelity_nightly._http_json", side_effect=server), \
+         mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+         contextlib.redirect_stdout(buf):
+        rc = eval_fidelity_nightly.main()
+    return rc, buf.getvalue(), reg
+
+
+def test_adapter_arm_sentinels_fail_not_defer():
+    """Base arm clean, adapter arm 8/25 empties: that is the adapter's behavior and
+    must land as a recorded FAIL, not a 'generation is failing' DEFERRED (the
+    2026-09-04/05 nightlies both deferred on exactly this asymmetry)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, n_empty=8)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 1, f"rc={rc}\n{out[-800:]}"
+        assert "FIDELITY_FAIL" in out and "FIDELITY_DEFERRED" not in out, out[-800:]
+        v = json.loads((tmp / "verdict.json").read_text())
+        assert v["verdict"] == "FAIL" and v["exit_code"] == 1, v
+        assert v["n_sentinel"]["pre"] == 0 and v["n_sentinel"]["post"] == 8, v["n_sentinel"]
+        assert v["n_sentinel"]["post_by_type"]["empty"] == 8, v["n_sentinel"]
+        assert "adapter's behavior" in v["reason"], v["reason"]
+        assert reg.record_eval.called, "FAIL must reach the adapter registry"
+        assert reg.record_eval.call_args.kwargs["verdict"] == "FAIL"
+        assert reg.record_eval.call_args.kwargs["score"] is None
+        assert srv.adapter == srv.serving, "serving adapter must be restored"
+        assert (tmp / f"eval-fidelity-{time.strftime('%Y-%m-%d')}.json").exists(), \
+            "FAIL must be archived like any scored verdict"
+    print("✓ adapter-arm-only sentinels: FAIL (recorded), not DEFERRED")
+
+
+def test_symmetric_sentinels_still_defer():
+    """Both arms failing is the server or the harness — keep DEFERRED and keep the
+    registry untouched (the pre-existing contract)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, n_empty=25, empty_pre_too=True)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "FIDELITY_FAIL" not in out, out[-800:]
+        assert "both arms" in out, out[-600:]
+        assert not reg.record_eval.called
+    print("✓ sentinels on both arms: still DEFERRED, registry untouched")
+
+
+def test_served_pass_aborts_after_consecutive_timeouts():
+    """Three client timeouts in a row mean the server is still chewing on abandoned
+    runaways; the arm must stop instead of queueing more behind them."""
+    with mock.patch("eval_fidelity_nightly._http_json", side_effect=TimeoutError("read timed out")):
+        resp, stats = eval_fidelity_nightly.run_served_pass(
+            "http://127.0.0.1:8743", [{"prompt": "hey"}] * 10, "POST (adapter)", gen_timeout=1)
+    assert resp == ["[timeout]"] * eval_fidelity_nightly.MAX_CONSECUTIVE_TIMEOUTS, resp
+    assert stats["aborted_by"] == "timeouts" and stats["aborted_after"] == 3, stats
+    assert "runaway" in stats["aborted"], stats["aborted"]
+    print("✓ served pass aborts after 3 consecutive timeouts")
+
+
+def test_post_arm_runaway_timeouts_are_adapter_fail():
+    """Adapter arm runs away on every prompt (client timeouts), base arm was clean:
+    the arm aborts early, the unrun prompts count as adapter-arm sentinels, and the
+    run lands as FAIL with the abort recorded in the verdict."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, timeout_post=True)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 1 and "FIDELITY_FAIL" in out, out[-800:]
+        assert "ABORT after 3/25" in out, out[-800:]
+        v = json.loads((tmp / "verdict.json").read_text())
+        assert v["n_sentinel"]["pre"] == 0 and v["n_sentinel"]["post"] == 25, v["n_sentinel"]
+        assert v["n_sentinel"]["post_by_type"]["timeout"] == 3, v["n_sentinel"]
+        assert v["generation"]["post_arm_aborted_after"] == 3, v["generation"]
+        assert srv.adapter == srv.serving
+    print("✓ adapter-arm runaway timeouts: arm aborted, recorded as FAIL")
+
+
+
 def main():
     """Run all tests."""
     tests = [
+        test_adapter_arm_sentinels_fail_not_defer,
+        test_symmetric_sentinels_still_defer,
+        test_served_pass_aborts_after_consecutive_timeouts,
+        test_post_arm_runaway_timeouts_are_adapter_fail,
         test_bootstrap_ci_basic,
         test_bootstrap_ci_single,
         test_bootstrap_ci_empty,
