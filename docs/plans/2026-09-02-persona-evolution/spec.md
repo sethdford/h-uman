@@ -425,6 +425,39 @@ senders below its floor, another consequence of the chat.db retention roll.
    produced a real candidate too, but its base m3-outcomes training failed
    (rc=1) — see `~/.human/logs/nightly-retrain.log`.
 
+### 2026-09-06: candidate promoted, measured on the served path
+
+Promoted 07:45 on Seth's instruction via `scripts/m3_promote.py promote`
+(live swap, `/v1/adapters/current` reports the candidate with 160 tensors
+bound; authorship gate recorded as OVERRIDDEN/INCONCLUSIVE because LUAR
+could not be computed), registered with parsed training evidence
+(`register_v6_adapter.py`), and pinned in `~/.human/config.json` (backup
+`config.json.bak-pre-promote-20260906-*`) so restarts keep it. Rollback:
+`python3 scripts/m3_promote.py rollback --yes` and restore that backup.
+
+**Served-path probe** (37 prompts through :8741, production head,
+`gate-2026-09-06-promoted-served.json`):
+
+| | before (v6, 2026-09-05) | promoted (2026-09-06) | Seth 60-day card |
+|---|---|---|---|
+| emoji rate | 0/36 (0%) | **7/37 (18.9%)** | 12.6% [10.5, 14.6] |
+| lowercase-start | 92% | 68% | 8.6% |
+| no terminal punct | 97% | 81% | 81.7% |
+| median chars | 33 | 44 | 27 |
+
+Gate: emoji (0.000 → 0.171) and warmth (+) now match the human direction;
+length flips on a +0.7-char generated delta against a −3.0 human delta, so
+the strict all-axes verdict is still FAIL. The offline harness had shown
+only 1/37 emoji for the same adapter — the served path is the one that
+counts, and the two harnesses do not agree on this axis.
+
+Caveats: n=37, one probe; 18.9% overshoots Seth's 12.6% (upper CI 14.6);
+lowercase-start is still 8x Seth's rate; no human blind-A/B rating and no
+LUAR number for this adapter yet — the nightly authorship job measures it
+from tonight. The running daemon keeps the previous adapter id only as a
+provenance label until its next restart (the id is read at startup and
+SIGHUP does not reload it); the server itself serves the new adapter now.
+
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
 The persona carries measured-style numbers in three places. File:line
