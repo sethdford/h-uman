@@ -377,6 +377,7 @@ static hu_error_t cmd_paperclip(hu_allocator_t *alloc, int argc, char **argv) {
 
 static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
+    /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
     const char *home = getenv("HOME");
     if (!home) {
         fprintf(stderr, "HOME not set\n");
@@ -1649,16 +1650,12 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 
 #ifdef HU_ENABLE_SQLITE
         {
-            const char *home = getenv("HOME");
-            if (home) {
-                char graph_path[1024];
-                int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
-                if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                    hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &svc_graph);
-                    if (graph_err != HU_OK)
-                        hu_log_error("main", NULL, "graph open failed: %s",
-                                     hu_error_string(graph_err));
-                }
+            char graph_path[1024];
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+            if (np > 0 && (size_t)np < sizeof(graph_path)) {
+                hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &svc_graph);
+                if (graph_err != HU_OK)
+                    hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
             }
         }
 #endif
@@ -1760,19 +1757,16 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
      * written by scripts/mine_phrase_banks.py (monthly launchd job). Missing
      * file is the normal pre-mining state; only corruption is warned. */
     {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            char pb_path[512];
-            int n = hu_paths_state(pb_path, sizeof(pb_path), "phrase_banks.json");
-            if (n > 0 && (size_t)n < sizeof(pb_path)) {
-                hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
-                if (pb_err == HU_OK)
-                    hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
-                else if (pb_err != HU_ERR_NOT_FOUND)
-                    hu_log_warn("human", NULL,
-                                "phrase banks unreadable (err=%d) at %s — using defaults",
-                                (int)pb_err, pb_path);
-            }
+        char pb_path[512];
+        int n = hu_paths_state(pb_path, sizeof(pb_path), "phrase_banks.json");
+        if (n > 0 && (size_t)n < sizeof(pb_path)) {
+            hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
+            if (pb_err == HU_OK)
+                hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
+            else if (pb_err != HU_ERR_NOT_FOUND)
+                hu_log_warn("human", NULL,
+                            "phrase banks unreadable (err=%d) at %s — using defaults", (int)pb_err,
+                            pb_path);
         }
     }
 
@@ -2099,6 +2093,7 @@ static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
     const char *sub = (argc >= 3 && argv[2]) ? argv[2] : "list";
 
     char agents_dir[512];
+    /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         fprintf(stderr, "HOME not set\n");
@@ -2583,6 +2578,7 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "PWA: browser automation unavailable in test build\n");
         return HU_OK;
 #else
+        /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "PWA learn: HOME not set\n");
@@ -3082,15 +3078,12 @@ static hu_error_t cmd_gateway(hu_allocator_t *alloc, int argc, char **argv) {
     hu_graph_t *gw_graph = NULL;
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[1024];
-            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
-            if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &gw_graph);
-                if (graph_err != HU_OK)
-                    hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
-            }
+        char graph_path[1024];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path)) {
+            hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &gw_graph);
+            if (graph_err != HU_OK)
+                hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
         }
     }
 #endif
@@ -3271,12 +3264,9 @@ int main(int argc, char *argv[]) {
     /* Load .env files: project-local, ~/.human/.env */
     load_dotenv(".env");
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char envpath[512];
-            hu_paths_state(envpath, sizeof(envpath), ".env");
+        char envpath[512];
+        if (hu_paths_state(envpath, sizeof(envpath), ".env") > 0)
             load_dotenv(envpath);
-        }
     }
 
 #if defined(__unix__) || defined(__APPLE__)

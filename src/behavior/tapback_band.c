@@ -102,8 +102,7 @@ const char *hu_tapback_bands_default_path(char *buf, size_t cap) {
     (void)buf, (void)cap;
     return NULL; /* tests never touch the real home dir */
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0] || !buf || cap == 0)
+    if (!buf || cap == 0)
         return NULL;
     int n = hu_paths_state(buf, cap, "tapback_bands.json");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;

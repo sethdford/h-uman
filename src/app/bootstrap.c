@@ -824,13 +824,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t reg_err = hu_agent_registry_create(alloc, &bi->agent_registry);
         if (reg_err == HU_OK) {
             bi->agent_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char agents_dir[512];
-                int n = hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
-                if (n > 0 && (size_t)n < sizeof(agents_dir))
-                    hu_agent_registry_discover(&bi->agent_registry, agents_dir);
-            }
+            char agents_dir[512];
+            int n = hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
+            if (n > 0 && (size_t)n < sizeof(agents_dir))
+                hu_agent_registry_discover(&bi->agent_registry, agents_dir);
             ctx->agent_registry = &bi->agent_registry;
         }
     }
@@ -840,13 +837,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t pwa_err = hu_pwa_driver_registry_init(&bi->pwa_driver_registry);
         if (pwa_err == HU_OK) {
             bi->pwa_driver_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char pwa_dir[512];
-                int n = hu_paths_state(pwa_dir, sizeof(pwa_dir), "pwa");
-                if (n > 0 && (size_t)n < sizeof(pwa_dir))
-                    hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
-            }
+            char pwa_dir[512];
+            int n = hu_paths_state(pwa_dir, sizeof(pwa_dir), "pwa");
+            if (n > 0 && (size_t)n < sizeof(pwa_dir))
+                hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
             hu_pwa_set_global_registry(&bi->pwa_driver_registry);
         }
     }

@@ -188,10 +188,6 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     /* In test mode: skip filesystem and stdin, succeed immediately. */
     return HU_OK;
 #else
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
-
     char config_path[HU_INIT_MAX_PATH];
     int n = hu_paths_state_or(config_path, sizeof(config_path), ".", "%s", HU_INIT_CONFIG_FILE);
     if (n <= 0 || (size_t)n >= sizeof(config_path))
@@ -407,9 +403,6 @@ static int memory_graph_path(char *buf, size_t cap) {
     const char *env = getenv("HU_GRAPH_DB");
     if (env && env[0])
         return snprintf(buf, cap, "%s", env);
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
     return hu_paths_state(buf, cap, "graph.db");
 }
 
@@ -797,8 +790,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             path = argv[4];
         }
         bool used_facade = false;
-        const char *home = getenv("HOME");
-        if (home) {
+        {
             char graph_path[1024];
             int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
             if (np > 0 && (size_t)np < sizeof(graph_path)) {
@@ -3218,10 +3210,8 @@ hu_error_t cmd_feed(hu_allocator_t *alloc, int argc, char **argv) {
             }
             sqlite3_finalize(stmt);
         }
-        const char *home = getenv("HOME");
-        if (home) {
-            char ingest_dir[512];
-            hu_paths_state(ingest_dir, sizeof(ingest_dir), "feeds/ingest");
+        char ingest_dir[512];
+        if (hu_paths_state(ingest_dir, sizeof(ingest_dir), "feeds/ingest") > 0) {
             printf("\nIngest directory: %s\n", ingest_dir);
             struct stat st;
             if (stat(ingest_dir, &st) == 0)

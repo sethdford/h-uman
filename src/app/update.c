@@ -458,10 +458,6 @@ hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) 
 #if HU_IS_TEST
     return HU_OK;
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_OK;
-
     char ts_path[512];
     int n = hu_paths_state(ts_path, sizeof(ts_path), "%s", LAST_CHECK_FILE);
     if (n < 0 || (size_t)n >= sizeof(ts_path))
