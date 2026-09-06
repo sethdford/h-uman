@@ -43,9 +43,9 @@ static void prospective_mark_fired_excludes_from_check(void) {
     HU_ASSERT_NOT_NULL(db);
 
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_prospective_store(db, "event", 5, "birthday", 8, "send card", 9, NULL, 0, 0,
-                                      &id),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_prospective_store(db, "event", 5, "birthday", 8, "send card", 9, NULL, 0, 0, &id),
+        HU_OK);
 
     hu_prospective_entry_t *out = NULL;
     size_t count = 0;
@@ -94,8 +94,44 @@ static void prospective_expired_entry_excluded(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Real inbound texts are mixed case; triggers are stored lowercase by the
+ * extractor (scripts/insight_stream.py --prospective). The match must fold
+ * case or the whole prospective path is dead on real messages. */
+static void prospective_keyword_match_is_case_insensitive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_prospective_store(db, "keyword", 7, "invite", 6, "resend the github invite", 24,
+                                      "+15550001111", 12, 0, &id),
+                 HU_OK);
+    hu_prospective_entry_t *out = NULL;
+    size_t count = 0;
+    const char *msg = "Did you resend the GitHub Invite?";
+    HU_ASSERT_EQ(hu_prospective_check_triggers(&alloc, db, "keyword", msg, strlen(msg),
+                                               "+15550001111", 12, (int64_t)time(NULL), &out,
+                                               &count),
+                 HU_OK);
+    HU_ASSERT_EQ(count, 1u);
+    HU_ASSERT_STR_EQ(out[0].action, "resend the github invite");
+    alloc.free(alloc.ctx, out, count * sizeof(hu_prospective_entry_t));
+
+    /* and a text that does not carry the keyword stays silent */
+    out = NULL;
+    count = 0;
+    const char *other = "how was the flight";
+    HU_ASSERT_EQ(hu_prospective_check_triggers(&alloc, db, "keyword", other, strlen(other),
+                                               "+15550001111", 12, (int64_t)time(NULL), &out,
+                                               &count),
+                 HU_OK);
+    HU_ASSERT_EQ(count, 0u);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_tests(void) {
     HU_TEST_SUITE("prospective");
+    HU_RUN_TEST(prospective_keyword_match_is_case_insensitive);
     HU_RUN_TEST(prospective_store_and_check_triggers_finds_match);
     HU_RUN_TEST(prospective_mark_fired_excludes_from_check);
     HU_RUN_TEST(prospective_expired_entry_excluded);

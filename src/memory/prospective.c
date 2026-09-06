@@ -2,9 +2,9 @@ typedef int hu_prospective_unused_;
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/memory/prospective.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/prospective.h"
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,18 +13,18 @@ typedef int hu_prospective_unused_;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 hu_error_t hu_prospective_store(sqlite3 *db, const char *trigger_type, size_t tt_len,
-                                const char *trigger_value, size_t tv_len,
-                                const char *action, size_t action_len,
-                                const char *contact_id, size_t cid_len, int64_t expires_at,
-                                int64_t *out_id) {
+                                const char *trigger_value, size_t tv_len, const char *action,
+                                size_t action_len, const char *contact_id, size_t cid_len,
+                                int64_t expires_at, int64_t *out_id) {
     if (!db || !trigger_type || !trigger_value || !action || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                               "INSERT INTO prospective_memories(trigger_type,trigger_value,action,"
-                               "contact_id,expires_at,created_at) VALUES(?,?,?,?,?,?)",
-                               -1, &stmt, NULL);
+    int rc =
+        sqlite3_prepare_v2(db,
+                           "INSERT INTO prospective_memories(trigger_type,trigger_value,action,"
+                           "contact_id,expires_at,created_at) VALUES(?,?,?,?,?,?)",
+                           -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -50,10 +50,10 @@ hu_error_t hu_prospective_store(sqlite3 *db, const char *trigger_type, size_t tt
 }
 
 hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
-                                        const char *trigger_type, const char *trigger_value,
-                                        size_t tv_len, const char *contact_id, size_t cid_len,
-                                        int64_t now_ts, hu_prospective_entry_t **out,
-                                        size_t *out_count) {
+                                         const char *trigger_type, const char *trigger_value,
+                                         size_t tv_len, const char *contact_id, size_t cid_len,
+                                         int64_t now_ts, hu_prospective_entry_t **out,
+                                         size_t *out_count) {
     if (!alloc || !db || !trigger_type || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -61,12 +61,15 @@ hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-                               "SELECT id,trigger_type,trigger_value,action,contact_id,expires_at,"
-                               "created_at FROM prospective_memories WHERE fired=0 AND "
-                               "trigger_type=? AND (instr(?,trigger_value)>0) AND "
-                               "(contact_id IS NULL OR contact_id=?) AND "
-                               "(expires_at IS NULL OR expires_at=0 OR expires_at>?)",
-                               -1, &stmt, NULL);
+                                "SELECT id,trigger_type,trigger_value,action,contact_id,expires_at,"
+                                "created_at FROM prospective_memories WHERE fired=0 AND "
+                                /* Case-folded: inbound texts are mixed case ("Did you resend
+                                 * the GitHub Invite?"), triggers are stored lowercase. A
+                                 * case-sensitive instr() never fired on real messages. */
+                                "trigger_type=? AND (instr(lower(?),lower(trigger_value))>0) AND "
+                                "(contact_id IS NULL OR contact_id=?) AND "
+                                "(expires_at IS NULL OR expires_at=0 OR expires_at>?)",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -91,10 +94,9 @@ hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            hu_prospective_entry_t *nb =
-                (hu_prospective_entry_t *)alloc->realloc(alloc->ctx, arr,
-                                                         cap * sizeof(hu_prospective_entry_t),
-                                                         new_cap * sizeof(hu_prospective_entry_t));
+            hu_prospective_entry_t *nb = (hu_prospective_entry_t *)alloc->realloc(
+                alloc->ctx, arr, cap * sizeof(hu_prospective_entry_t),
+                new_cap * sizeof(hu_prospective_entry_t));
             if (!nb) {
                 for (size_t i = 0; i < n; i++)
                     (void)0;
@@ -158,8 +160,8 @@ hu_error_t hu_prospective_mark_fired(sqlite3 *db, int64_t id) {
         return HU_ERR_INVALID_ARGUMENT;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db, "UPDATE prospective_memories SET fired=1 WHERE id=?",
-                               -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db, "UPDATE prospective_memories SET fired=1 WHERE id=?", -1, &stmt,
+                                NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -171,9 +173,9 @@ hu_error_t hu_prospective_mark_fired(sqlite3 *db, int64_t id) {
 
 /* Prospective tasks — time/event-triggered scheduled actions */
 hu_error_t hu_prospective_schedule(sqlite3 *db, const char *description, size_t desc_len,
-                                  const char *trigger_type, size_t tt_len,
-                                  const char *trigger_value, size_t tv_len,
-                                  double priority, int64_t *out_id) {
+                                   const char *trigger_type, size_t tt_len,
+                                   const char *trigger_value, size_t tv_len, double priority,
+                                   int64_t *out_id) {
     if (!db || !description || !trigger_type || !trigger_value || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
     if (strcmp(trigger_type, "time") != 0 && strcmp(trigger_type, "event") != 0 &&
@@ -182,10 +184,10 @@ hu_error_t hu_prospective_schedule(sqlite3 *db, const char *description, size_t 
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-                               "INSERT INTO prospective_tasks(description,trigger_type,"
-                               "trigger_value,priority,fired,created_at,fired_at) "
-                               "VALUES(?,?,?,?,0,?,NULL)",
-                               -1, &stmt, NULL);
+                                "INSERT INTO prospective_tasks(description,trigger_type,"
+                                "trigger_value,priority,fired,created_at,fired_at) "
+                                "VALUES(?,?,?,?,0,?,NULL)",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -207,10 +209,9 @@ hu_error_t hu_prospective_schedule(sqlite3 *db, const char *description, size_t 
 }
 
 hu_error_t hu_prospective_task_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
-                                              const char *trigger_type,
-                                              const char *trigger_value, size_t tv_len,
-                                              int64_t now_ts, hu_prospective_task_t **out,
-                                              size_t *out_count) {
+                                              const char *trigger_type, const char *trigger_value,
+                                              size_t tv_len, int64_t now_ts,
+                                              hu_prospective_task_t **out, size_t *out_count) {
     if (!alloc || !db || !trigger_type || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -251,10 +252,9 @@ hu_error_t hu_prospective_task_check_triggers(hu_allocator_t *alloc, sqlite3 *db
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            hu_prospective_task_t *nb =
-                (hu_prospective_task_t *)alloc->realloc(alloc->ctx, arr,
-                                                        cap * sizeof(hu_prospective_task_t),
-                                                        new_cap * sizeof(hu_prospective_task_t));
+            hu_prospective_task_t *nb = (hu_prospective_task_t *)alloc->realloc(
+                alloc->ctx, arr, cap * sizeof(hu_prospective_task_t),
+                new_cap * sizeof(hu_prospective_task_t));
             if (!nb) {
                 alloc->free(alloc->ctx, arr, cap * sizeof(hu_prospective_task_t));
                 sqlite3_finalize(stmt);
@@ -312,9 +312,8 @@ hu_error_t hu_prospective_task_mark_fired(sqlite3 *db, int64_t id) {
         return HU_ERR_INVALID_ARGUMENT;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                               "UPDATE prospective_tasks SET fired=1, fired_at=? WHERE id=?",
-                               -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db, "UPDATE prospective_tasks SET fired=1, fired_at=? WHERE id=?",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -332,10 +331,9 @@ hu_error_t hu_prospective_task_mark_fired(sqlite3 *db, int64_t id) {
 #include "human/memory/prospective.h"
 
 hu_error_t hu_prospective_store(void *db, const char *trigger_type, size_t tt_len,
-                                const char *trigger_value, size_t tv_len,
-                                const char *action, size_t action_len,
-                                const char *contact_id, size_t cid_len, int64_t expires_at,
-                                int64_t *out_id) {
+                                const char *trigger_value, size_t tv_len, const char *action,
+                                size_t action_len, const char *contact_id, size_t cid_len,
+                                int64_t expires_at, int64_t *out_id) {
     (void)db;
     (void)trigger_type;
     (void)tt_len;
@@ -350,11 +348,10 @@ hu_error_t hu_prospective_store(void *db, const char *trigger_type, size_t tt_le
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, void *db,
-                                        const char *trigger_type, const char *trigger_value,
-                                        size_t tv_len, const char *contact_id, size_t cid_len,
-                                        int64_t now_ts, hu_prospective_entry_t **out,
-                                        size_t *out_count) {
+hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, void *db, const char *trigger_type,
+                                         const char *trigger_value, size_t tv_len,
+                                         const char *contact_id, size_t cid_len, int64_t now_ts,
+                                         hu_prospective_entry_t **out, size_t *out_count) {
     (void)alloc;
     (void)db;
     (void)trigger_type;

@@ -149,8 +149,103 @@ def parse_notes(text, max_notes):
     return notes
 
 
+PROSPECTIVE_SYSTEM = (
+    "You are Seth Ford. {identity}\n\n"
+    "You just reread your recent texts with {name}{rel}. List the things you still OWE or intend to "
+    "follow up on, or that you should bring up when a topic comes back up — only real, open items "
+    "from the texts (something you said you'd send/do/ask/check, something they're waiting on, an "
+    "event of theirs to ask about later). Skip anything already done. Lowercase, each under 100 "
+    "characters.\n\n"
+    "Output ONLY a JSON array of at most {max_notes} objects: "
+    "{{\"remember_to\": str, \"when_they_mention\": [1-3 short lowercase keywords likely to appear "
+    "in their next text about it], \"days_valid\": integer 3-60}}. No prose."
+)
+
+
+def parse_prospective(text, max_notes):
+    m = re.search(r"\[[\s\S]*\]", text)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except Exception:
+        return []
+    out = []
+    for o in arr if isinstance(arr, list) else []:
+        if not isinstance(o, dict):
+            continue
+        action = (o.get("remember_to") or "").strip().rstrip(".")
+        kws = [str(k).strip().lower() for k in (o.get("when_they_mention") or []) if str(k).strip()]
+        # >= 4 chars: the live match is a substring test, and "mac" fires on "stomach".
+        kws = [k for k in kws if 4 <= len(k) <= 40][:3]
+        try:
+            days = int(o.get("days_valid", 14))
+        except Exception:
+            days = 14
+        days = max(3, min(60, days))
+        if action and kws and len(action) <= 140:
+            out.append({"action": action, "keywords": kws, "days": days})
+        if len(out) >= max_notes:
+            break
+    return out
+
+
+def prospective_pass(db, a, identity, contacts, targets, now_ms):
+    """Item 5: deferred intentions -> prospective_memories keyword triggers, which
+    the reactive prompt already checks (daemon_reactive_prompt.c) and renders as
+    "[PROSPECTIVE MEMORY: Remember to: ...]" when the contact's next text
+    contains the keyword. Keywords are stored lowercase; the trigger match is
+    case-folded on the C side."""
+    total = 0
+    for cid in targets:
+        meta = contacts.get(cid, {"name": cid, "relationship": ""})
+        turns = recent_turns(db, cid, a.turns)
+        if len(turns) < a.min_turns:
+            continue
+        system = PROSPECTIVE_SYSTEM.format(
+            identity=identity, name=meta["name"],
+            rel=(" (" + meta["relationship"] + ")") if meta["relationship"] else "",
+            max_notes=a.max_notes)
+        user = "recent texts (oldest first):\n" + "\n".join(turns)
+        try:
+            raw = call_model(a.url, a.model, system, user)
+        except Exception as e:
+            print(f"{cid} ({meta['name']}): model error {e}")
+            continue
+        items = parse_prospective(raw, a.max_notes)
+        print(f"{cid} ({meta['name']}): {len(items)} open intentions")
+        for it in items:
+            print(f"    [{it['days']:2d}d] {it['action']}  <- {', '.join(it['keywords'])}")
+        if a.write and items:
+            before = db.total_changes
+            rows = []
+            for it in items:
+                for kw in it["keywords"]:
+                    exists = db.execute(
+                        "SELECT 1 FROM prospective_memories WHERE trigger_type='keyword' AND "
+                        "trigger_value=? AND action=? AND contact_id=? AND fired=0",
+                        (kw, it["action"], cid)).fetchone()
+                    if exists:
+                        continue
+                    rows.append(("keyword", kw, it["action"], cid,
+                                 now_ms // 1000 + it["days"] * 86400, now_ms // 1000))
+            db.executemany(
+                "INSERT INTO prospective_memories(trigger_type,trigger_value,action,contact_id,"
+                "expires_at,created_at) VALUES(?,?,?,?,?,?)", rows)
+            db.commit()
+            new = db.total_changes - before
+            total += new
+            print(f"    wrote {new} new triggers")
+    if a.write:
+        live = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE fired=0 AND "
+                          "expires_at > strftime('%s','now')").fetchone()[0]
+        print(f"prospective done: {total} new triggers, {live} live")
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--prospective", action="store_true",
+                    help="extract open intentions into prospective_memories instead of insights")
     ap.add_argument("--contact")
     ap.add_argument("--turns", type=int, default=80)
     ap.add_argument("--min-turns", type=int, default=20)
@@ -169,6 +264,9 @@ def main():
     db.executescript(SCHEMA)
     targets = [a.contact] if a.contact else list(contacts)
     now_ms = int(time.time() * 1000)
+    if a.prospective:
+        prospective_pass(db, a, identity, contacts, targets, now_ms)
+        return 0
     total_new = 0
     for cid in targets:
         meta = contacts.get(cid, {"name": cid, "relationship": ""})
