@@ -374,6 +374,8 @@ void run_imessage_dispatcher_tests(void);
 void run_imessage_sticker_tests(void);
 void run_follow_up_tests(void);
 void run_followup_compose_tests(void);
+void run_persona_creator_preserve_tests(void);
+void run_check_persona_integrity_tests(void);
 void run_follow_up_daemon_integration_tests(void);
 void run_daemon_aloop_smoke_tests(void);
 void run_intelligence_tests(void);
@@ -1444,6 +1446,8 @@ int main(int argc, char **argv) {
     run_imessage_sticker_tests();
     run_follow_up_tests();
     run_followup_compose_tests();
+    run_persona_creator_preserve_tests();
+    run_check_persona_integrity_tests();
     run_follow_up_daemon_integration_tests();
     run_daemon_aloop_smoke_tests();
     run_intelligence_tests();

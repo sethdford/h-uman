@@ -639,6 +639,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_log_hygiene.c
     src/doctor/check_imessage_cursor.c
     src/doctor/check_blind_ab_gate.c
+    src/doctor/check_persona_integrity.c
     # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
     # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
     src/memory/repos/chatdb_cursor_repo_sqlite.c
@@ -3588,6 +3589,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_persona_integrity.c
     tests/test_check_eval_freshness.c
     tests/test_check_serving_stability.c
     tests/test_check_log_hygiene.c
@@ -3728,6 +3730,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_persona_refresh.c
+    tests/test_persona_creator_preserve.c
     tests/test_persona_rag.c
     tests/test_agent.c
     tests/test_agent_turn_state.c

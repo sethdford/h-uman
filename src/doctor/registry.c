@@ -4,6 +4,7 @@
 #include "human/doctor/check_local_voice.h"
 #include "human/doctor/check_ops.h"
 #include "human/doctor/check_outbound_stats.h"
+#include "human/doctor/check_persona_integrity.h"
 #include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
 #include "human/doctor/check_reaction_collection_wired.h"
@@ -448,6 +449,17 @@ static hu_doctor_check_result_t run_local_voice_check(hu_doctor_check_t *self, v
     return hu_doctor_check_local_voice.run(self, &lvctx);
 }
 
+/* Wrapper: persona_integrity — 2026-09-06 incident (live persona rewritten
+ * minus contacts/proactive; doctor stayed green for two hours). */
+static hu_doctor_check_result_t run_persona_integrity_check(hu_doctor_check_t *self, void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_persona_integrity_ctx_t pictx = {
+        .cfg = uctx ? (const struct hu_config *)uctx->cfg : NULL,
+        .persona_name = NULL,
+    };
+    return hu_doctor_check_persona_integrity.run(self, &pictx);
+}
+
 /* Sprint 60 (sprint-59 STATUS.md item #5) — outbound pipeline stats.
  * The check is informational (always PASS); ctx is unused because
  * the snapshot reads from process-wide static state in
@@ -622,6 +634,9 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          run_imessage_cursor_check, NULL, NULL},
         {"blind_ab_gate", "Human blind-A/B verdict vouches for the served adapter",
          run_blind_ab_gate_check, NULL, NULL},
+        {"persona_integrity",
+         "Live persona has not lost authored keys (contacts/proactive/...) vs its backups",
+         run_persona_integrity_check, NULL, NULL},
     };
 
     size_t num_checks = sizeof(checks) / sizeof(checks[0]);
