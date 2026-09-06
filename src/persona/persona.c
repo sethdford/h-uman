@@ -6,6 +6,7 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona/circadian.h"
+#include "human/persona/emotion_card.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
 #include "human/persona/style_card.h"
@@ -119,8 +120,36 @@ hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, cons
         hu_error_t rerr = hu_style_card_render_casual_rules(&card, rule2, sizeof(rule2), NULL);
         if (rerr != HU_OK)
             return rerr;
-        n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
-                     hu_rules_tail);
+        /* Rule 14 — the MEASURED emotional register, rendered from the
+         * persona's emotion card (scripts/measure_emotion_card.py). Gated on
+         * scripts/eval_emotion_register.py (nightly JSD of the twin's sent
+         * replies against the card) plus a blind A/B round: do not flip
+         * HU_EMOTION_REGISTER to live without a measurement showing the rule
+         * moves the twin TOWARD the card. OFF renders nothing; SHADOW logs
+         * once what it would send; only LIVE reaches the prompt. */
+        char rule14[512];
+        rule14[0] = '\0';
+        hu_gate_mode_t em = hu_emotion_register_mode();
+        if (em != HU_GATE_OFF) {
+            hu_emotion_card_t ecard;
+            if (hu_emotion_card_resolve(pname, pname_len, &ecard)) {
+                char rendered[512];
+                if (hu_emotion_card_render_rule(&ecard, rendered, sizeof(rendered), NULL) ==
+                    HU_OK) {
+                    if (em == HU_GATE_LIVE) {
+                        snprintf(rule14, sizeof(rule14), "%s", rendered);
+                    } else {
+                        static atomic_bool shadow_logged = false;
+                        hu_log_info_once(&shadow_logged, "persona", NULL,
+                                         "emotion register SHADOW (HU_EMOTION_REGISTER): would "
+                                         "append to the casual rules: %s",
+                                         rendered);
+                    }
+                }
+            }
+        }
+        n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail, rule14);
     }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
