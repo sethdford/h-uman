@@ -17,7 +17,11 @@ if ! command -v "$CLANG_FMT" >/dev/null 2>&1; then
 fi
 
 if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
-    staged_ch=$(git diff --cached --name-only --diff-filter=ACM -- '*.c' '*.h')
+    # include/human/design_tokens.h is GENERATED (design-tokens/build.ts) and
+    # deliberately not clang-formatted: check-drift.sh diffs the raw output, so
+    # formatting it here re-aligned 192 macro lines and failed the drift check
+    # on every token commit (2026-09-06). The compiler is its only reader.
+    staged_ch=$(git diff --cached --name-only --diff-filter=ACM -- '*.c' '*.h' | grep -v '^include/human/design_tokens.h$' || true)
     if [ -n "$staged_ch" ]; then
         echo "$staged_ch" | while IFS= read -r f; do
             if grep -qn '	' "$f" 2>/dev/null; then
