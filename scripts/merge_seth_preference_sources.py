@@ -164,6 +164,8 @@ Writes, under --out-dir:
 import argparse
 import datetime
 import json
+import re
+import hashlib
 import os
 import random
 import sys
@@ -331,6 +333,34 @@ def read_rejected_pool(path):
 # ---------------------------------------------------------------------------
 
 
+def split_valid_rows(rows, frac):
+    """Deterministic held-out split of PAIRED rows: a row goes to valid.jsonl iff
+    sha256(prompt + chosen) % round(1/frac) == 0. Content-keyed (not positional)
+    so a regenerated corpus keeps the same validation rows and val loss stays
+    comparable across regenerations. Never empties the training side."""
+    if not frac or frac <= 0:
+        return [], list(rows)
+    mod = max(1, int(round(1.0 / frac)))
+    val, train = [], []
+    for r in rows:
+        key = (str(r.get("prompt", "")) + "\x1f" + str(r.get("chosen", ""))).encode("utf-8")
+        h = int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
+        (val if h % mod == 0 else train).append(r)
+    if not train:
+        return [], list(rows)
+    return val, train
+
+
+def render_config(template_path, out_dir):
+    """The template's `data:` line rewritten to out_dir; everything else verbatim
+    (same rewrite train-glm-adapter.sh applies for its rebalanced copy)."""
+    with open(template_path) as fh:
+        text = fh.read()
+    if not re.search(r"^data:.*$", text, flags=re.M):
+        raise SystemExit(f"REFUSING: --config-template {template_path} has no 'data:' line; nothing written")
+    return re.sub(r"^data:.*$", f"data: {out_dir}", text, count=1, flags=re.M)
+
+
 def render_prompt(prompt):
     """Normalize a prompt value from either accepted export shape (or the
     --rejected-pool's own `prompt` field) into ONE plain string.
@@ -449,6 +479,16 @@ def build_parser():
     ap.add_argument("--out-dir", required=True, dest="out_dir",
                     help="directory to write train.jsonl + manifest.json into "
                          "(must be outside the repo -- see AC-1.5)")
+    ap.add_argument("--valid-frac", type=float, default=0.0, dest="valid_frac",
+                    help="fraction of PAIRED rows held out into valid.jsonl, chosen "
+                         "deterministically by content hash so regenerating the corpus "
+                         "keeps the same held-out rows (default 0 = all rows in train.jsonl, "
+                         "the US-1 contract; pass e.g. 0.05 for a trainable dir). The nightly "
+                         "candidate stage (train-glm-adapter.sh) requires valid.jsonl.")
+    ap.add_argument("--config-template", default=None, dest="config_template",
+                    help="mlx_lm-shaped YAML whose 'data:' line is rewritten to --out-dir "
+                         "and written as <out-dir>/config.yaml, so the directory is "
+                         "trainable as-is (HU_RETRAIN_MLXTUNE_DATA_DIR/_CONFIG)")
     ap.add_argument("--floor", type=int, default=DEFAULT_FLOOR,
                     help="refuse if the merged chosen (label=True) pool has fewer "
                          "rows than this (default: %(default)s)")
@@ -504,9 +544,24 @@ def main(argv=None):
         kto_rows.append({"prompt": prompt_str, "completion": text, "label": False})
 
     paired_rows, pairing_stats = build_paired_rows(chosen_for_output, rejected_for_output)
+    n_paired_total = len(paired_rows)
+    valid_rows, paired_rows = split_valid_rows(paired_rows, args.valid_frac)
 
     out_dir = os.path.abspath(os.path.expanduser(args.out_dir))
     os.makedirs(out_dir, exist_ok=True)
+
+    valid_path = None
+    if valid_rows:
+        valid_path = os.path.join(out_dir, "valid.jsonl")
+        with open(valid_path, "w") as fh:
+            for r in valid_rows:
+                fh.write(json.dumps(r) + "\n")
+
+    config_path = None
+    if args.config_template:
+        config_path = os.path.join(out_dir, "config.yaml")
+        with open(config_path, "w") as fh:
+            fh.write(render_config(args.config_template, out_dir))
 
     # train.jsonl: PAIRED shape -- what scripts/mlx_tune_train.py's on-disk
     # validator (REQUIRED_PAIR_KEYS) actually requires. See the module
@@ -535,6 +590,11 @@ def main(argv=None):
             "skipped_no_rejected_field": rejected_skipped,
         },
         "floor": args.floor,
+        "valid_frac": args.valid_frac,
+        "n_valid": len(valid_rows),
+        "valid_path": valid_path,
+        "config_template": args.config_template,
+        "config_path": config_path,
         "n_chosen": len(merged),
         "n_rejected": len(rejected_rows),
         "n_total": len(kto_rows),
@@ -543,7 +603,7 @@ def main(argv=None):
             "seed": PAIRING_SEED,
             "matched_on_prompt": pairing_stats["matched_on_prompt"],
             "round_robin": pairing_stats["round_robin"],
-            "n_paired_rows": len(paired_rows),
+            "n_paired_rows": n_paired_total, "n_train_rows": len(paired_rows),
         },
         "out_dir": out_dir,
         "train_path": train_path,
