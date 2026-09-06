@@ -988,6 +988,7 @@ void run_persona_encryption_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
 void run_style_card_tests(void);
+void run_card_file_tests(void);
 void run_emotion_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
@@ -2027,6 +2028,7 @@ int main(int argc, char **argv) {
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
     run_style_card_tests();
+    run_card_file_tests();
     run_emotion_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();

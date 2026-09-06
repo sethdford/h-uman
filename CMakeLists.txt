@@ -3343,6 +3343,7 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     tests/test_style_card.c
+    tests/test_card_file.c
     tests/test_emotion_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
