@@ -1671,6 +1671,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
+        src/memory/repos/contact_insights_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/proactive_decisions_repo_sqlite.c
@@ -4045,6 +4046,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_insights_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_moments_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_residue_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_state_repo.c)

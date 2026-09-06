@@ -1,0 +1,32 @@
+{
+  "measured_at": "2026-09-06T09:18:13",
+  "insider_vocab_size": 1007,
+  "human": {
+    "corpus": "human",
+    "n": 2219,
+    "mean_chars": 71.3,
+    "specific_per_reply": 2.134,
+    "specific_per_100_chars": 2.958,
+    "share_with_any": 0.647,
+    "insider_per_reply": 1.339,
+    "concrete_per_reply": 0.199,
+    "proper_per_reply": 0.596
+  },
+  "daemon": {
+    "corpus": "daemon",
+    "n": 300,
+    "mean_chars": 44.1,
+    "specific_per_reply": 1.1,
+    "specific_per_100_chars": 2.219,
+    "share_with_any": 0.56,
+    "insider_per_reply": 0.967,
+    "concrete_per_reply": 0.067,
+    "proper_per_reply": 0.067
+  },
+  "gate": {
+    "metric": "specific_per_reply",
+    "human": 2.134,
+    "daemon": 1.1,
+    "pass": false
+  }
+}

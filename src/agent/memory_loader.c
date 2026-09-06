@@ -13,6 +13,96 @@
 #include "human/memory.h"
 #include "human/memory/retrieval/strategy_learner.h"
 #endif
+#include "human/core/gate_mode.h"
+#include "human/memory/contact_insights_repo.h"
+#include <stdatomic.h>
+
+/* Append `text` to *out_context as a new section (newline-joined), creating the
+ * context when absent. Silent on allocation failure: the prompt is still valid
+ * without the supplement. */
+static void append_section(hu_memory_loader_t *loader, char **out_context, size_t *out_context_len,
+                           const char *text, size_t text_len) {
+    if (!text || text_len == 0)
+        return;
+    if (*out_context) {
+        size_t old_len = out_context_len ? *out_context_len : strlen(*out_context);
+        size_t total = old_len + 1 + text_len;
+        char *combined = (char *)loader->alloc->alloc(loader->alloc->ctx, total + 1);
+        if (!combined)
+            return;
+        memcpy(combined, *out_context, old_len);
+        combined[old_len] = '\n';
+        memcpy(combined + old_len + 1, text, text_len);
+        combined[total] = '\0';
+        loader->alloc->free(loader->alloc->ctx, *out_context, old_len + 1);
+        *out_context = combined;
+        if (out_context_len)
+            *out_context_len = total;
+    } else {
+        *out_context = hu_strndup(loader->alloc, text, text_len);
+        if (*out_context && out_context_len)
+            *out_context_len = text_len;
+    }
+}
+
+/* HU_INSIGHT_STREAM gate. Default OFF; -1 = read env (test seam below). */
+static int s_insight_mode_override = -1;
+
+hu_gate_mode_t hu_memory_loader_insight_mode(void) {
+    if (s_insight_mode_override >= 0)
+        return (hu_gate_mode_t)s_insight_mode_override;
+    return hu_gate_mode_from_env("HU_INSIGHT_STREAM", HU_GATE_OFF);
+}
+
+void hu_memory_loader_set_insight_mode_for_test(int mode) {
+    s_insight_mode_override = mode;
+}
+
+/* Budget for the insights block: 8 short notes, under 1 KB. With the 24 KB
+ * prompt budget this fits beside recall (~1.6 KB) and the personal model
+ * (~2.1 KB) without trimming on an ordinary turn. */
+#define HU_INSIGHT_MAX_ITEMS      8
+#define HU_INSIGHT_MAX_BYTES      900
+#define HU_INSIGHT_MIN_CONFIDENCE 0.5
+
+static const char k_insight_header[] =
+    "### What you actually remember about them (weave in naturally, never recite):\n";
+
+static void append_contact_insights(hu_memory_loader_t *loader, const char *session_id,
+                                    size_t session_id_len, char **out_context,
+                                    size_t *out_context_len) {
+    hu_gate_mode_t mode = hu_memory_loader_insight_mode();
+    if (mode == HU_GATE_OFF || !loader->memory)
+        return;
+    char *lines = NULL;
+    size_t lines_len = 0;
+    hu_error_t rerr = hu_contact_insights_render(
+        loader->memory, loader->alloc, session_id, session_id_len, HU_INSIGHT_MAX_ITEMS,
+        HU_INSIGHT_MAX_BYTES, HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
+    if (rerr != HU_OK || !lines || lines_len == 0)
+        return;
+    static atomic_bool announced = false;
+    hu_log_info_once(&announced, "insight-stream", NULL,
+                     "insight stream active: mode=%s (set HU_INSIGHT_STREAM=off to disable)",
+                     mode == HU_GATE_LIVE ? "live" : "shadow");
+    if (mode == HU_GATE_SHADOW) {
+        hu_log_info("insight-stream", NULL,
+                    "shadow: would add %zu bytes of insights for %.*s (prompt unchanged)",
+                    lines_len, (int)session_id_len, session_id);
+    } else {
+        const size_t hdr_len = sizeof(k_insight_header) - 1;
+        size_t block_len = hdr_len + lines_len;
+        char *block = (char *)loader->alloc->alloc(loader->alloc->ctx, block_len + 1);
+        if (block) {
+            memcpy(block, k_insight_header, hdr_len);
+            memcpy(block + hdr_len, lines, lines_len);
+            block[block_len] = '\0';
+            append_section(loader, out_context, out_context_len, block, block_len);
+            loader->alloc->free(loader->alloc->ctx, block, block_len + 1);
+        }
+    }
+    loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
+}
 
 static hu_retrieval_mode_t adaptive_to_retrieval_mode(hu_adaptive_strategy_t strategy) {
     switch (strategy) {
@@ -398,30 +488,20 @@ supplement:
             NULL, 0, NULL, 0, NULL, 0, (hu_personal_model_t *)loader->personal_model,
             loader->persona_ctx);
         if (ge == HU_OK && graph_text && graph_len > 0) {
+            const size_t alloc_len = graph_len; /* free contract: original len + 1 */
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)
                 graph_len = graph_cap;
-            if (*out_context) {
-                size_t old_len = out_context_len ? *out_context_len : strlen(*out_context);
-                size_t total = old_len + 1 + graph_len;
-                char *combined = (char *)loader->alloc->alloc(loader->alloc->ctx, total + 1);
-                if (combined) {
-                    memcpy(combined, *out_context, old_len);
-                    combined[old_len] = '\n';
-                    memcpy(combined + old_len + 1, graph_text, graph_len);
-                    combined[total] = '\0';
-                    loader->alloc->free(loader->alloc->ctx, *out_context, old_len + 1);
-                    *out_context = combined;
-                    if (out_context_len)
-                        *out_context_len = total;
-                }
-            } else {
-                *out_context = hu_strndup(loader->alloc, graph_text, graph_len);
-                if (*out_context && out_context_len)
-                    *out_context_len = graph_len;
-            }
-            loader->alloc->free(loader->alloc->ctx, graph_text, graph_len + 1);
+            append_section(loader, out_context, out_context_len, graph_text, graph_len);
+            loader->alloc->free(loader->alloc->ctx, graph_text, alloc_len + 1);
         }
     }
+
+    /* Insight stream (better-than-human item 3, HU_INSIGHT_STREAM). Appended
+     * LAST inside the memory section on purpose: the value-aware trim cuts
+     * the memory span head-first, so these survive longest; and the model
+     * reads them closest to the guard tail. */
+    if (err == HU_OK && session_id && session_id_len > 0)
+        append_contact_insights(loader, session_id, session_id_len, out_context, out_context_len);
     return err;
 }

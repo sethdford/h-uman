@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include "human/memory.h"
 #include "human/memory/retrieval.h"
 #include <stddef.h>
@@ -23,7 +24,7 @@ typedef struct hu_memory_loader {
     hu_allocator_t *alloc;
     size_t max_entries;
     size_t max_context_chars;
-    struct hu_w7_facade *facade; /* optional W7 facade for W12 planner recall */
+    struct hu_w7_facade *facade;              /* optional W7 facade for W12 planner recall */
     struct hu_personal_model *personal_model; /* optional; merged into W9 graph context */
     /* Story B (sprint-4 follow-up) — optional persona context threaded into
      * `hu_w7_render_world_model` so the channel-aware pragmatics digest
@@ -37,6 +38,15 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
                                  hu_memory_t *memory, hu_retrieval_engine_t *retrieval_engine,
                                  size_t max_entries, size_t max_context_chars);
 
+/* Insight stream gate (HU_INSIGHT_STREAM off|shadow|live, default off): the
+ * per-contact "what you actually remember about them" block appended last
+ * inside the memory context by hu_memory_loader_load. See
+ * include/human/memory/contact_insights_repo.h. Do not flip to live without
+ * the specificity measurement (scripts/specificity_score.py) moving. */
+hu_gate_mode_t hu_memory_loader_insight_mode(void);
+/* Test seam: force a mode; -1 reverts to reading the env. */
+void hu_memory_loader_set_insight_mode_for_test(int mode);
+
 /* Bind the W7 facade for goal-conditioned planner recall (`hu_w12_planner_recall`).
  * Call after `hu_memory_loader_init` when `agent->w7_facade` is non-NULL; safe to
  * pass NULL to clear. Do not mutate `loader->facade` directly — keeps Phase-1 wiring
@@ -46,8 +56,7 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
 /* Bind the personal model for W9 graph context enrichment. When set, the
  * supplementary world-model render merges personal style/topics/goals into
  * the graph snapshot. Safe to pass NULL. */
-void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader,
-                                         struct hu_personal_model *pm);
+void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader, struct hu_personal_model *pm);
 
 /* Story B (sprint-4 follow-up) — bind a persona context for W9 graph
  * rendering. When set, the loader's supplementary render call threads the

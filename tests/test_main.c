@@ -464,6 +464,7 @@ void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
+void run_contact_insights_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
 void run_emotional_residue_repo_tests(void);
 void run_emotional_state_repo_tests(void);
@@ -1534,6 +1535,7 @@ int main(int argc, char **argv) {
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
+    run_contact_insights_repo_tests();
     run_emotional_moments_repo_tests();
     run_emotional_residue_repo_tests();
     run_emotional_state_repo_tests();
