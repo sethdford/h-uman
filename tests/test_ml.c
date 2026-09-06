@@ -6416,6 +6416,8 @@ static void test_fidelity_status_emits_json_with_baseline(void) {
     if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "fidelity_test"))
         return;
     setenv("HU_PERSONA_DIR", tmpdir, 1);
+    const char *old_home_p = getenv("HOME");
+    char *old_home = old_home_p ? strdup(old_home_p) : NULL;
     setenv("HOME", tmpdir, 1); /* keep personal_model.bin lookup in tmp */
 
     char output[1024];
@@ -6425,7 +6427,12 @@ static void test_fidelity_status_emits_json_with_baseline(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 5, argv);
     unsetenv("HU_PERSONA_DIR");
-    unsetenv("HOME");
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else {
+        unsetenv("HOME");
+    }
 
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -6453,6 +6460,8 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "fidelity_ab"))
         return;
     setenv("HU_PERSONA_DIR", tmpdir, 1);
+    const char *old_home_p = getenv("HOME");
+    char *old_home = old_home_p ? strdup(old_home_p) : NULL;
     setenv("HOME", tmpdir, 1);
 
     /* Drop two minimal response sets in the tmp dir. */
@@ -6479,7 +6488,12 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 9, argv);
     unsetenv("HU_PERSONA_DIR");
-    unsetenv("HOME");
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else {
+        unsetenv("HOME");
+    }
 
     HU_ASSERT_EQ(err, HU_OK);
 
