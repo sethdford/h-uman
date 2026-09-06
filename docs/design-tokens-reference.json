@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-19T11:02:06.385Z",
+  "generated": "2026-09-06T11:59:52.791Z",
   "groups": {
     "color.neutral": [
       {
@@ -2140,8 +2140,8 @@
       },
       {
         "name": "text-faint",
-        "value": "#9A9490",
-        "hex": "#9A9490"
+        "value": "#726C65",
+        "hex": "#726C65"
       },
       {
         "name": "accent",
