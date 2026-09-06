@@ -35,6 +35,7 @@
 #include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
@@ -89,15 +90,15 @@ bool hu_lora_runner_attempt_cooldown_active(time_t last_attempt, time_t now, int
 
 /* Path of the attempt stamp. Lives beside the training data it rate-limits so
  * it travels with a training-data reset. */
-static void attempt_stamp_path(const char *home_dir, char *out, size_t out_cap) {
-    snprintf(out, out_cap, "%s/.human/training-data/.last_lora_attempt", home_dir);
+static void attempt_stamp_path(char *out, size_t out_cap) {
+    hu_paths_state_or(out, out_cap, "/tmp", "training-data/.last_lora_attempt");
 }
 
 /* Last attempt time, or 0 when absent/unreadable (which reads as "never" and
  * therefore allows the attempt — see the fail-open note on the predicate). */
-static time_t read_attempt_stamp(const char *home_dir) {
+static time_t read_attempt_stamp(void) {
     char path[512];
-    attempt_stamp_path(home_dir, path, sizeof(path));
+    attempt_stamp_path(path, sizeof(path));
     FILE *f = fopen(path, "r");
     if (!f)
         return 0;
@@ -109,11 +110,11 @@ static time_t read_attempt_stamp(const char *home_dir) {
 
 /* Record an attempt. Best-effort: a write failure must not block training, it
  * only means the next attempt isn't rate-limited. */
-static void write_attempt_stamp(const char *home_dir, time_t when) {
+static void write_attempt_stamp(time_t when) {
     char path[512];
-    attempt_stamp_path(home_dir, path, sizeof(path));
+    attempt_stamp_path(path, sizeof(path));
     char dir[512];
-    snprintf(dir, sizeof(dir), "%s/.human/training-data/", home_dir);
+    hu_paths_state_or(dir, sizeof(dir), "/tmp", "training-data/");
     (void)mkdir_p(dir);
     FILE *f = fopen(path, "w");
     if (!f)
@@ -250,9 +251,8 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
         const char *fixture = ctx->eval_prompt_fixture_path;
         char default_fixture[512];
         if (!fixture || !fixture[0]) {
-            const char *home = getenv("HOME");
-            snprintf(default_fixture, sizeof(default_fixture), "%s/.human/eval/persona_prompts.txt",
-                     home && home[0] ? home : "/tmp");
+            hu_paths_state_or(default_fixture, sizeof(default_fixture), "/tmp",
+                              "eval/persona_prompts.txt");
             fixture = default_fixture;
         }
 
@@ -438,12 +438,12 @@ static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const ch
         snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s", repo_env);
     else
         snprintf(repo_scripts_path, sizeof(repo_scripts_path), "%s/Projects/h-uman", home_dir);
-    snprintf(outcomes_jsonl_path, sizeof(outcomes_jsonl_path),
-             "%s/.human/training-data/m3-outcomes.jsonl", home_dir);
+    hu_paths_state(outcomes_jsonl_path, sizeof(outcomes_jsonl_path),
+                   "training-data/m3-outcomes.jsonl");
     time_t now = time(NULL);
     snprintf(timestamp_buf, sizeof(timestamp_buf), "%lld", (long long)now);
-    snprintf(adapters_output_path, sizeof(adapters_output_path),
-             "%s/.human/training-data/adapters/auto-%s", home_dir, timestamp_buf);
+    hu_paths_state(adapters_output_path, sizeof(adapters_output_path),
+                   "training-data/adapters/auto-%s", timestamp_buf);
 
     hu_log_info("lora_training_runner", observer,
                 "dispatching frontier-MLX training (outcomes=%s, adapter=%s)", outcomes_jsonl_path,
@@ -460,12 +460,15 @@ static hu_error_t dispatch_frontier_mlx_training(hu_allocator_t *alloc, const ch
      * documents the flow). Chain export && train so a fresh machine or a
      * consumed/absent JSONL regenerates instead of failing on a missing
      * file. Both steps append to the same per-dispatch log. */
+    char train_log_path[512];
+    hu_paths_state(train_log_path, sizeof(train_log_path), "logs/training-loop-%s.log",
+                   timestamp_buf);
     snprintf(cmd_buf, sizeof(cmd_buf),
              "{ python3 %s/scripts/m3_outcome_driver.py && "
              "python3 %s/scripts/training_loop.py --source-jsonl %s --adapter-out %s ; } "
-             ">> %s/.human/logs/training-loop-%s.log 2>&1",
+             ">> %s 2>&1",
              repo_scripts_path, repo_scripts_path, outcomes_jsonl_path, adapters_output_path,
-             home_dir, timestamp_buf);
+             train_log_path);
 
     hu_log_info("lora_training_runner", observer, "executing: %s", cmd_buf);
 
@@ -554,7 +557,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
          * Stamped on ATTEMPT, not success, so a refused or crashed run still
          * spends the cooldown — otherwise a fast-failing run reinstates the
          * tight loop this prevents. */
-        time_t last_attempt = read_attempt_stamp(home);
+        time_t last_attempt = read_attempt_stamp();
         time_t now = runner_now();
         if (hu_lora_runner_attempt_cooldown_active(last_attempt, now,
                                                    HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS)) {
@@ -564,7 +567,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
                         (long long)(now - last_attempt), HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS);
             return HU_OK;
         }
-        write_attempt_stamp(home, now);
+        write_attempt_stamp(now);
 #endif /* !HU_IS_TEST */
         /* Compiled out under HU_IS_TEST on purpose. The dispatch below is
          * already stubbed in test builds, so a cooldown here would guard
@@ -647,10 +650,10 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
                                  sizeof(adapter_id)) != HU_OK) {
             snprintf(adapter_id, sizeof(adapter_id), "unknown-dpo-step-0");
         }
-        const char *home = getenv("HOME");
         char proof_dir[512];
-        snprintf(proof_dir, sizeof(proof_dir), "%s/.human/proofs/%s",
-                 home && home[0] ? home : "/tmp", adapter_id);
+        /* write_proof_bundle() writes here, so the /tmp fallback must survive:
+         * an unresolvable state dir must not become "" and land in cwd. */
+        hu_paths_state_or(proof_dir, sizeof(proof_dir), "/tmp", "proofs/%s", adapter_id);
         (void)write_proof_bundle(proof_dir, promote_adapter, &gate_verdict);
 
         if (!promote_adapter) {

@@ -4,6 +4,7 @@
  * Sprint B Story 4 (docs/plans/2026-05-19-sprint-backlog.md). */
 
 #include "human/research/contact_narrative.h"
+#include "human/core/paths.h"
 
 #include "human/config.h"
 #include "human/core/log.h"
@@ -37,7 +38,7 @@ size_t hu_contact_narrative_default_path(const char *contact_handle, char *out, 
 
     /* Ensure the parent dir exists (0700 — same as ~/.human/). */
     char dir[512];
-    int dn = snprintf(dir, sizeof(dir), "%s/.human/contacts", home);
+    int dn = hu_paths_state(dir, sizeof(dir), "contacts");
     if (dn < 0 || (size_t)dn >= sizeof(dir))
         return 0;
     (void)mkdir(dir, 0700); /* ignore EEXIST */
@@ -338,8 +339,7 @@ hu_error_t cmd_narrate(hu_allocator_t *alloc, int argc, char **argv) {
     char default_db[512];
     if (!db) {
         const char *home = getenv("HOME");
-        if (home && home[0] &&
-            snprintf(default_db, sizeof(default_db), "%s/Library/Messages/chat.db", home) > 0) {
+        if (home && home[0] && hu_paths_chatdb(default_db, sizeof(default_db)) > 0) {
             db = default_db;
         }
     }

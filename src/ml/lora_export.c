@@ -4,6 +4,7 @@
  * Sprint B C-loop (2026-05-24). */
 
 #include "human/ml/lora_export.h"
+#include "human/core/paths.h"
 
 #include "human/cli_commands.h"
 #include "human/core/log.h"
@@ -102,7 +103,8 @@ size_t hu_lora_export_render_jsonl_line(const hu_lora_export_pair_t *pair, char 
 
 /* ── pure KTO JSONL line render ─────────────────────────────────────── */
 
-size_t hu_lora_export_render_kto_jsonl_line(const hu_lora_export_kto_t *row, char *out, size_t cap) {
+size_t hu_lora_export_render_kto_jsonl_line(const hu_lora_export_kto_t *row, char *out,
+                                            size_t cap) {
     if (!row || !out || cap < 32)
         return 0;
     out[0] = '\0';
@@ -116,8 +118,7 @@ size_t hu_lora_export_render_kto_jsonl_line(const hu_lora_export_kto_t *row, cha
     hu_lora_export_json_escape(row->prompt, esc_prompt, sizeof(esc_prompt));
     hu_lora_export_json_escape(row->completion, esc_completion, sizeof(esc_completion));
 
-    int n = snprintf(out, cap,
-                     "{\"prompt\":\"%s\",\"completion\":\"%s\",\"label\":%s,\"ts\":%lld}",
+    int n = snprintf(out, cap, "{\"prompt\":\"%s\",\"completion\":\"%s\",\"label\":%s,\"ts\":%lld}",
                      esc_prompt, esc_completion, row->label ? "true" : "false",
                      (long long)row->timestamp);
     if (n < 0)
@@ -325,13 +326,12 @@ hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv) {
     char out_buf[512];
     if (!db_path) {
         const char *home = getenv("HOME");
-        if (home && home[0] && snprintf(db_buf, sizeof(db_buf), "%s/.human/dpo_pairs.db", home) > 0)
+        if (home && home[0] && hu_paths_state(db_buf, sizeof(db_buf), "dpo_pairs.db") > 0)
             db_path = db_buf;
     }
     if (!out_path) {
         const char *home = getenv("HOME");
-        if (home && home[0] &&
-            snprintf(out_buf, sizeof(out_buf), "%s/.human/lora-pairs.jsonl", home) > 0)
+        if (home && home[0] && hu_paths_state(out_buf, sizeof(out_buf), "lora-pairs.jsonl") > 0)
             out_path = out_buf;
     }
     if (!db_path || !out_path) {
@@ -398,13 +398,12 @@ hu_error_t cmd_export_kto(hu_allocator_t *alloc, int argc, char **argv) {
     char out_buf[512];
     if (!db_path) {
         const char *home = getenv("HOME");
-        if (home && home[0] && snprintf(db_buf, sizeof(db_buf), "%s/.human/memory.db", home) > 0)
+        if (home && home[0] && hu_paths_state(db_buf, sizeof(db_buf), "memory.db") > 0)
             db_path = db_buf;
     }
     if (!out_path) {
         const char *home = getenv("HOME");
-        if (home && home[0] &&
-            snprintf(out_buf, sizeof(out_buf), "%s/.human/lora-kto.jsonl", home) > 0)
+        if (home && home[0] && hu_paths_state(out_buf, sizeof(out_buf), "lora-kto.jsonl") > 0)
             out_path = out_buf;
     }
     if (!db_path || !out_path) {

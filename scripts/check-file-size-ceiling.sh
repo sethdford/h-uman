@@ -19,7 +19,7 @@ fi
 # than the 14132 this branch was written against). This branch contributed the
 # auto-lock wiring above, not a baseline change — the two edits collided only
 # because they touch adjacent lines.
-MAX_BASELINE=14082   # src/daemon.c, 2026-07-27 post-sched-send-outcome carve (was 14090)
+MAX_BASELINE=14060   # src/daemon.c, 2026-09-06 formatted (was 14082)
                      # took daemon.c to 14085; 5 lines of headroom are reserved for the SIGHUP
                      # config-reload call site the carve was made to pay for. Net: -42.
                      # Lower as god-files are carved.

@@ -5,6 +5,7 @@
  * stay declared extern in human/daemon/common.h — only their definitions and
  * the surrounding logic moved, so no consumer changed. */
 
+#include "human/core/paths.h"
 #include "human/daemon/identity_graph.h"
 
 #include "human/agent.h"
@@ -31,7 +32,7 @@ void hu_daemon_identity_graph_load(struct hu_agent *agent) {
     char ident_path[1024];
     if (!home || !home[0])
         return;
-    if (snprintf(ident_path, sizeof(ident_path), "%s/.human/identity_graph.json", home) <= 0)
+    if (hu_paths_state(ident_path, sizeof(ident_path), "identity_graph.json") <= 0)
         return;
 
     hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);

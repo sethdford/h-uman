@@ -1,6 +1,7 @@
 #include "human/data/loader.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@ typedef struct {
 
 extern const hu_embedded_data_result_t *hu_embedded_data_lookup(const char *path);
 
-#define HU_DATA_MAX_FILE_SIZE (1024 * 1024)  /* 1MB limit */
+#define HU_DATA_MAX_FILE_SIZE (1024 * 1024) /* 1MB limit */
 
 static const char *s_data_dir = NULL;
 
@@ -33,15 +34,15 @@ static hu_error_t hu_data_expand_home(const char *path, char *buf, size_t buflen
     if (home == NULL)
         return HU_ERR_NOT_FOUND;
 
-    int written = snprintf(buf, buflen, "%s/.human/data/%s", home, path);
+    int written = hu_paths_state(buf, buflen, "data/%s", path);
     if (written < 0 || (size_t)written >= buflen)
         return HU_ERR_IO;
 
     return HU_OK;
 }
 
-hu_error_t hu_data_load_embedded(hu_allocator_t *alloc, const char *relative_path,
-                                 char **out, size_t *out_len) {
+hu_error_t hu_data_load_embedded(hu_allocator_t *alloc, const char *relative_path, char **out,
+                                 size_t *out_len) {
     if (alloc == NULL || relative_path == NULL || out == NULL || out_len == NULL)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -55,7 +56,7 @@ hu_error_t hu_data_load_embedded(hu_allocator_t *alloc, const char *relative_pat
         return HU_ERR_OUT_OF_MEMORY;
 
     memcpy(copy, entry->data, entry->len);
-    copy[entry->len] = '\0';  /* null-terminate */
+    copy[entry->len] = '\0'; /* null-terminate */
 
     *out = copy;
     *out_len = entry->len;
@@ -73,8 +74,8 @@ hu_error_t hu_data_borrow_embedded(const char *relative_path, const char **out, 
     return HU_OK;
 }
 
-hu_error_t hu_data_load(hu_allocator_t *alloc, const char *relative_path,
-                        char **out, size_t *out_len) {
+hu_error_t hu_data_load(hu_allocator_t *alloc, const char *relative_path, char **out,
+                        size_t *out_len) {
     if (alloc == NULL || relative_path == NULL || out == NULL || out_len == NULL)
         return HU_ERR_INVALID_ARGUMENT;
 

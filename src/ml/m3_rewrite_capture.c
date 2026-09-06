@@ -14,6 +14,7 @@
  */
 
 #include "human/ml/m3_rewrite_capture.h"
+#include "human/core/paths.h"
 
 #include "human/core/json.h"
 
@@ -116,8 +117,8 @@ hu_error_t hu_m3_rewrite_pair_record(hu_allocator_t *alloc, const char *path, co
         const char *home = getenv("HOME");
         if (!home || !home[0])
             return HU_ERR_IO;
-        int n = snprintf(default_path, sizeof(default_path),
-                         "%s/.human/training-data/" DEFAULT_FILENAME, home);
+        int n =
+            hu_paths_state(default_path, sizeof(default_path), "training-data/" DEFAULT_FILENAME);
         if (n < 0 || (size_t)n >= sizeof(default_path))
             return HU_ERR_INTERNAL;
         out_path = default_path;

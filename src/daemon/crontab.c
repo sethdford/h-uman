@@ -5,6 +5,7 @@
  */
 #include "human/crontab.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/platform.h"
 #include <stdio.h>
@@ -13,7 +14,6 @@
 #include <sys/stat.h>
 
 #define HU_CRONTAB_FILE        "crontab.json"
-#define HU_CRONTAB_DIR         ".human"
 #define HU_CRONTAB_TEST_FILE   "human_crontab_test.json"
 #define HU_CRONTAB_MAX_ENTRIES 256
 #define HU_CRONTAB_ID_MAX      64
@@ -81,22 +81,17 @@ hu_error_t hu_crontab_get_path(hu_allocator_t *alloc, char **path, size_t *path_
     *path_len = (size_t)n;
     return HU_OK;
 #else
-    char *home = hu_platform_get_home_dir(alloc);
-    if (!home)
-        return HU_ERR_IO;
-    size_t hlen = strlen(home);
-    size_t need = hlen + strlen(HU_CRONTAB_DIR) + strlen(HU_CRONTAB_FILE) + 4;
-    *path = (char *)alloc->alloc(alloc->ctx, need);
-    if (!*path) {
-        alloc->free(alloc->ctx, home, hlen + 1);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    int n = snprintf(*path, need, "%s/%s/%s", home, HU_CRONTAB_DIR, HU_CRONTAB_FILE);
-    alloc->free(alloc->ctx, home, hlen + 1);
-    if (n <= 0 || (size_t)n >= need) {
-        alloc->free(alloc->ctx, *path, need);
+    char tmp[1024];
+    int n = hu_paths_state(tmp, sizeof(tmp), "%s", HU_CRONTAB_FILE);
+    if (n < 0)
+        return HU_ERR_IO; /* no resolvable state dir — the prior "no home" outcome */
+    if ((size_t)n >= sizeof(tmp))
         return HU_ERR_INTERNAL;
-    }
+    size_t need = (size_t)n + 1;
+    *path = (char *)alloc->alloc(alloc->ctx, need);
+    if (!*path)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(*path, tmp, need);
     *path_len = (size_t)n;
     return HU_OK;
 #endif

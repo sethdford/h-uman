@@ -1,5 +1,6 @@
 #include "human/tools/canvas.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/tools/validation.h"
 #include <errno.h>
@@ -16,7 +17,6 @@
     "\"action\"]}"
 #define CANVAS_MAX         16
 #define CANVAS_MAX_CONTENT 16384
-#define CANVAS_DIR_SUFFIX  "/.human/canvas"
 typedef struct {
     char *id;
     char *title;
@@ -327,7 +327,7 @@ hu_error_t hu_canvas_create(hu_allocator_t *alloc, hu_tool_t *out) {
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     const char *home = getenv("HOME");
     if (home) {
-        snprintf(c->persist_dir, sizeof(c->persist_dir), "%s%s", home, CANVAS_DIR_SUFFIX);
+        hu_paths_state(c->persist_dir, sizeof(c->persist_dir), "canvas");
         canvas_init_persist_dir(c);
         canvas_load_from_disk(c);
     }

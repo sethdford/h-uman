@@ -10,6 +10,7 @@
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
@@ -88,8 +89,6 @@ bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix) {
 
 #define HU_IMESSAGE_SENT_RING_SIZE  32
 #define HU_IMESSAGE_SENT_PREFIX_LEN 256
-#define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
-#define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
 
 /* hu_imessage_extract_attributed_body now lives in src/util/typedstream.c
  * (unconditionally compiled) so unconditional callers like
@@ -98,11 +97,7 @@ bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix) {
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
 static void imessage_rowid_path(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (home)
-        snprintf(buf, cap, "%s/" HU_IMESSAGE_ROWID_FILE, home);
-    else
-        buf[0] = '\0';
+    (void)hu_paths_state(buf, cap, "imessage.rowid"); /* empty on failure by contract */
 }
 
 static int64_t imessage_load_rowid(void) {
@@ -176,10 +171,7 @@ const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls) {
 bool hu_imessage_status_path(char *buf, size_t cap) {
     if (!buf || cap < 16)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
-    int n = snprintf(buf, cap, "%s/" HU_IMESSAGE_STATUS_FILE, home);
+    int n = hu_paths_state(buf, cap, "imessage.poll_status");
     return n > 0 && (size_t)n < cap;
 }
 
@@ -300,14 +292,9 @@ static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
     /* Ensure ~/.human exists. mkdir is idempotent (EEXIST ignored). Also
      * mkdir the parent so test fixtures that pin HOME to a fresh tmp path
      * don't silently fail before .human is reached. */
-    const char *home = getenv("HOME");
-    if (home && home[0]) {
-        (void)mkdir(home, 0700);
-        char dir[512];
-        int dn = snprintf(dir, sizeof(dir), "%s/.human", home);
-        if (dn > 0 && (size_t)dn < sizeof(dir))
-            (void)mkdir(dir, 0700);
-    }
+    char dir[512];
+    (void)hu_paths_state_mkdir(dir,
+                               sizeof(dir)); /* creates missing parents too — fresh test HOMEs */
     /* iMessage channel config at ~/.human/imessage.json. Contains
      * allow-list contacts (PII) and channel preferences; 0600 to
      * match the daemon's other config files. */
@@ -522,7 +509,7 @@ bool hu_imessage_courtesy_log_path(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return false;
-    int n = snprintf(buf, cap, "%s/.human/imessage_courtesy.log", home);
+    int n = hu_paths_state(buf, cap, "imessage_courtesy.log");
     return n > 0 && (size_t)n < cap;
 }
 
@@ -618,7 +605,7 @@ static void imessage_courtesy_ensure_dir(void) {
         return;
     (void)mkdir(home, 0700);
     char dir[512];
-    int n = snprintf(dir, sizeof(dir), "%s/.human", home);
+    int n = hu_paths_state_dir(dir, sizeof(dir));
     if (n > 0 && (size_t)n < sizeof(dir))
         (void)mkdir(dir, 0700);
 }
@@ -943,12 +930,8 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     if (!handle || handle_len == 0 || within_seconds <= 0)
         return false;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        return false;
-
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return false;
 
@@ -1269,11 +1252,8 @@ static const hu_imessage_caps_t *imsg_caps_cached(hu_imessage_ctx_t *c) {
 /* Open the user's chat.db read-only. Single place that builds the path, so the
  * boilerplate is not repeated per query helper. Returns NULL on any failure. */
 static sqlite3 *imsg_open_user_chatdb(void) {
-    const char *home_env = getenv("HOME");
-    if (!home_env)
-        return NULL;
     char db_p[512];
-    int dp = snprintf(db_p, sizeof(db_p), "%s/Library/Messages/chat.db", home_env);
+    int dp = hu_paths_chatdb(db_p, sizeof(db_p));
     if (dp <= 0 || (size_t)dp >= sizeof(db_p))
         return NULL;
     sqlite3 *db = NULL;
@@ -1423,7 +1403,7 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
     const char *home_env = getenv("HOME");
     if (home_env) {
         char db_p[512];
-        int dp = snprintf(db_p, sizeof(db_p), "%s/Library/Messages/chat.db", home_env);
+        int dp = hu_paths_chatdb(db_p, sizeof(db_p));
         if (dp > 0 && (size_t)dp < sizeof(db_p)) {
             sqlite3 *db = NULL;
             if (imessage_open_chatdb(db_p, &db) == SQLITE_OK) {
@@ -2419,11 +2399,8 @@ static bool imessage_health_check(void *ctx) {
         if (c->circuit_breaker_tripped)
             return false;
     }
-    const char *home = getenv("HOME");
-    if (!home)
-        return false;
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return false;
     if (access(db_path, R_OK) != 0) {
@@ -2453,7 +2430,7 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
         return HU_ERR_NOT_SUPPORTED;
 
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_INTERNAL;
 
@@ -2608,10 +2585,8 @@ hu_error_t hu_imessage_build_tapback_context(hu_allocator_t *alloc, const char *
     *out_len = 0;
 
     char db_path[512];
-    const char *home = getenv("HOME");
-    if (!home)
+    if (hu_paths_chatdb(db_path, sizeof(db_path)) < 0)
         return HU_ERR_IO;
-    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
 
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
@@ -2713,12 +2688,8 @@ int hu_imessage_count_recent_gif_tapbacks(const char *contact_id, size_t contact
     if (!contact_id || contact_id_len == 0)
         return 0;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        return 0;
-
     char db_path[512];
-    int dp = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
     if (dp < 0 || (size_t)dp >= sizeof(db_path))
         return 0;
 
@@ -2769,12 +2740,8 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
     if (!contact_id || contact_id_len == 0)
         return 0;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        return 0;
-
     char db_path[512];
-    int dp = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
     if (dp < 0 || (size_t)dp >= sizeof(db_path))
         return 0;
 
@@ -2828,7 +2795,7 @@ int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len)
         return -1;
 
     char db_path[512];
-    int dp = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
     if (dp < 0 || (size_t)dp >= sizeof(db_path))
         return -1;
 
@@ -2870,10 +2837,8 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
     *out_len = 0;
 
     char db_path[512];
-    const char *home = getenv("HOME");
-    if (!home)
+    if (hu_paths_chatdb(db_path, sizeof(db_path)) < 0)
         return HU_ERR_IO;
-    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
 
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
@@ -3028,10 +2993,8 @@ hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contac
      * of hu_imessage_build_read_receipt_context but returns structured data
      * instead of an LLM prompt string. */
     char db_path[512];
-    const char *home = getenv("HOME");
-    if (!home)
+    if (hu_paths_chatdb(db_path, sizeof(db_path)) < 0)
         return HU_ERR_IO;
-    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
 
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
@@ -3123,10 +3086,8 @@ hu_error_t hu_imessage_find_inbound_unreplied(const char *contact_id, size_t con
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
     /* Open chat.db and find most recent inbound from contact. */
     char db_path[512];
-    const char *home = getenv("HOME");
-    if (!home)
+    if (hu_paths_chatdb(db_path, sizeof(db_path)) < 0)
         return HU_ERR_IO;
-    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
 
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
@@ -3265,7 +3226,7 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
         const char *home_env = getenv("HOME");
         if (home_env) {
             char db_path[512];
-            int dn = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home_env);
+            int dn = hu_paths_chatdb(db_path, sizeof(db_path));
             if (dn > 0 && (size_t)dn < sizeof(db_path)) {
                 sqlite3 *db = NULL;
                 if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
@@ -4075,11 +4036,8 @@ static hu_error_t parent_guid_to_text_prefix(const char *guid, size_t guid_len, 
         return HU_ERR_INVALID_ARGUMENT;
     out[0] = '\0';
 #ifdef HU_ENABLE_SQLITE
-    const char *home = getenv("HOME");
-    if (!home)
-        return HU_ERR_NOT_FOUND;
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_NOT_FOUND;
     sqlite3 *db = NULL;
@@ -4329,11 +4287,8 @@ bool hu_imessage_ax_parent_is_last_message(const char *target, size_t target_len
     if (!parent_guid || parent_guid_len == 0)
         return false;
 #ifdef HU_ENABLE_SQLITE
-    const char *home = getenv("HOME");
-    if (!home)
-        return false;
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return false;
 
@@ -4403,11 +4358,8 @@ bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
     if (!target || target_len == 0)
         return false;
 #ifdef HU_ENABLE_SQLITE
-    const char *home = getenv("HOME");
-    if (!home)
-        return false;
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return false;
 
@@ -4462,11 +4414,8 @@ bool hu_imessage_ax_reply_verify_threaded(const char *target, size_t target_len,
 
 int64_t hu_imessage_ax_reply_newest_rowid(void) {
 #ifdef HU_ENABLE_SQLITE
-    const char *home = getenv("HOME");
-    if (!home)
-        return 0;
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return 0;
     sqlite3 *db = NULL;
@@ -5026,7 +4975,7 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
         const char *home_env = getenv("HOME");
         if (home_env) {
             char db_path[512];
-            int dn = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home_env);
+            int dn = hu_paths_chatdb(db_path, sizeof(db_path));
             if (dn > 0 && (size_t)dn < sizeof(db_path)) {
                 sqlite3 *db = NULL;
                 if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
@@ -5141,12 +5090,11 @@ char *hu_imessage_get_attachment_path(hu_allocator_t *alloc, int64_t message_id)
     if (!alloc || message_id <= 0)
         return NULL;
 
-    const char *home = getenv("HOME");
+    const char *home = getenv("HOME"); /* still needed below: ~ expansion + attachment-dir check */
     if (!home)
         return NULL;
-
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return NULL;
 
@@ -5216,12 +5164,11 @@ char *hu_imessage_get_latest_attachment_path(hu_allocator_t *alloc, const char *
     if (!alloc || !contact_id || contact_id_len == 0)
         return NULL;
 
-    const char *home = getenv("HOME");
+    const char *home = getenv("HOME"); /* still needed below: ~ expansion + attachment-dir check */
     if (!home)
         return NULL;
-
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return NULL;
 
@@ -5402,7 +5349,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         return HU_ERR_NOT_SUPPORTED;
 
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_INTERNAL;
 
@@ -5988,7 +5935,7 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
     if (!home)
         return HU_ERR_NOT_SUPPORTED;
     char db_path[512];
-    if (snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home) < 0)
+    if (hu_paths_chatdb(db_path, sizeof(db_path)) < 0)
         return HU_ERR_INTERNAL;
 
     sqlite3 *db = NULL;
@@ -6123,7 +6070,7 @@ hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size
     }
 
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path)) {
         buf[0] = '\0';
         return HU_ERR_IO;

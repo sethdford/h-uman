@@ -5,6 +5,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +21,7 @@ static const char *eval_data_dir(void) {
     const char *home = getenv("HOME");
     if (!home)
         home = ".";
-    snprintf(fallback, sizeof(fallback), "%s/.human/eval-datasets", home);
+    (void)hu_paths_state_or(fallback, sizeof(fallback), ".", "eval-datasets");
     return fallback;
 }
 
@@ -36,7 +37,7 @@ bool hu_eval_dataset_resolve_path(const char *suite, char *out_buf, size_t out_c
  * NULL when the file doesn't exist (HU_ERR_NOT_FOUND) or can't be read
  * (HU_ERR_IO). */
 static hu_error_t read_file(hu_allocator_t *alloc, const char *path, char **out_buf,
-                             size_t *out_len) {
+                            size_t *out_len) {
     *out_buf = NULL;
     *out_len = 0;
     struct stat st;
@@ -152,8 +153,8 @@ hu_error_t hu_eval_locomo_load(hu_allocator_t *alloc, hu_eval_locomo_dataset_t *
     }
 
     size_t n = items->data.array.len;
-    hu_eval_locomo_item_t *list = (hu_eval_locomo_item_t *)alloc->alloc(
-        alloc->ctx, n * sizeof(hu_eval_locomo_item_t));
+    hu_eval_locomo_item_t *list =
+        (hu_eval_locomo_item_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_eval_locomo_item_t));
     if (!list) {
         hu_json_free(alloc, root);
         return HU_ERR_OUT_OF_MEMORY;
@@ -220,8 +221,8 @@ hu_error_t hu_eval_locomo_load(hu_allocator_t *alloc, hu_eval_locomo_dataset_t *
     /* If we skipped rows the trailing slots are zeroed; resize to fit
      * exactly so the count and the allocation match (so free is symmetric). */
     if (kept < n) {
-        hu_eval_locomo_item_t *tight = (hu_eval_locomo_item_t *)alloc->alloc(
-            alloc->ctx, kept * sizeof(hu_eval_locomo_item_t));
+        hu_eval_locomo_item_t *tight =
+            (hu_eval_locomo_item_t *)alloc->alloc(alloc->ctx, kept * sizeof(hu_eval_locomo_item_t));
         if (tight) {
             memcpy(tight, list, kept * sizeof(hu_eval_locomo_item_t));
             alloc->free(alloc->ctx, list, n * sizeof(hu_eval_locomo_item_t));
@@ -262,16 +263,14 @@ void hu_eval_lme_free(hu_allocator_t *alloc, hu_eval_lme_dataset_t *ds) {
 /* Free a partially-populated row + the rows accumulated so far + the
  * (still-original-sized) array. Used in OOM rollback paths. */
 static void lme_rollback_partial(hu_allocator_t *alloc, hu_eval_lme_item_t *cur,
-                                  hu_eval_lme_item_t *list, size_t kept,
-                                  size_t array_n) {
+                                 hu_eval_lme_item_t *list, size_t kept, size_t array_n) {
     if (cur) {
         if (cur->category)
             alloc->free(alloc->ctx, cur->category, strlen(cur->category) + 1);
         if (cur->prompt)
             alloc->free(alloc->ctx, cur->prompt, strlen(cur->prompt) + 1);
         if (cur->candidate_answer)
-            alloc->free(alloc->ctx, cur->candidate_answer,
-                        strlen(cur->candidate_answer) + 1);
+            alloc->free(alloc->ctx, cur->candidate_answer, strlen(cur->candidate_answer) + 1);
         for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
             if (cur->keywords[k])
                 alloc->free(alloc->ctx, cur->keywords[k], strlen(cur->keywords[k]) + 1);
@@ -284,8 +283,7 @@ static void lme_rollback_partial(hu_allocator_t *alloc, hu_eval_lme_item_t *cur,
         if (prev->prompt)
             alloc->free(alloc->ctx, prev->prompt, strlen(prev->prompt) + 1);
         if (prev->candidate_answer)
-            alloc->free(alloc->ctx, prev->candidate_answer,
-                        strlen(prev->candidate_answer) + 1);
+            alloc->free(alloc->ctx, prev->candidate_answer, strlen(prev->candidate_answer) + 1);
         for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
             if (prev->keywords[k])
                 alloc->free(alloc->ctx, prev->keywords[k], strlen(prev->keywords[k]) + 1);
@@ -325,8 +323,8 @@ hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out) {
     }
 
     size_t n = items->data.array.len;
-    hu_eval_lme_item_t *list = (hu_eval_lme_item_t *)alloc->alloc(
-        alloc->ctx, n * sizeof(hu_eval_lme_item_t));
+    hu_eval_lme_item_t *list =
+        (hu_eval_lme_item_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_eval_lme_item_t));
     if (!list) {
         hu_json_free(alloc, root);
         return HU_ERR_OUT_OF_MEMORY;
@@ -342,8 +340,7 @@ hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out) {
         const char *pr = hu_json_get_string(e, "prompt");
         const char *ans = hu_json_get_string(e, "candidate_answer");
         hu_json_value_t *kws = hu_json_object_get(e, "keywords");
-        if (!cat || !pr || !ans || !kws || kws->type != HU_JSON_ARRAY ||
-            kws->data.array.len == 0)
+        if (!cat || !pr || !ans || !kws || kws->type != HU_JSON_ARRAY || kws->data.array.len == 0)
             continue; /* skip malformed rows */
 
         hu_eval_lme_item_t *it = &list[kept];
@@ -377,8 +374,7 @@ hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out) {
             /* No usable keywords — skip this row. */
             alloc->free(alloc->ctx, it->category, strlen(it->category) + 1);
             alloc->free(alloc->ctx, it->prompt, strlen(it->prompt) + 1);
-            alloc->free(alloc->ctx, it->candidate_answer,
-                        strlen(it->candidate_answer) + 1);
+            alloc->free(alloc->ctx, it->candidate_answer, strlen(it->candidate_answer) + 1);
             memset(it, 0, sizeof(*it));
             continue;
         }
@@ -392,8 +388,8 @@ hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out) {
         return HU_ERR_TOOL_VALIDATION;
     }
     if (kept < n) {
-        hu_eval_lme_item_t *tight = (hu_eval_lme_item_t *)alloc->alloc(
-            alloc->ctx, kept * sizeof(hu_eval_lme_item_t));
+        hu_eval_lme_item_t *tight =
+            (hu_eval_lme_item_t *)alloc->alloc(alloc->ctx, kept * sizeof(hu_eval_lme_item_t));
         if (tight) {
             memcpy(tight, list, kept * sizeof(hu_eval_lme_item_t));
             alloc->free(alloc->ctx, list, n * sizeof(hu_eval_lme_item_t));

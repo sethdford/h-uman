@@ -9,6 +9,7 @@
 #include "human/bus.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/cost.h"
@@ -1212,7 +1213,7 @@ static bool cp_fidelity_resolve_ab_status_path(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return false;
-    int written = snprintf(buf, cap, "%s/.human/last_fidelity_ab.json", home);
+    int written = hu_paths_state(buf, cap, "last_fidelity_ab.json");
     return written > 0 && (size_t)written < cap;
 }
 

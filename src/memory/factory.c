@@ -1,4 +1,5 @@
 #include "human/memory/factory.h"
+#include "human/core/paths.h"
 #include "human/memory/engines.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,7 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
         if (!path) {
             const char *home = getenv("HOME");
             if (home) {
-                int n = snprintf(buf, sizeof(buf), "%s/.human/memory.db", home);
+                int n = hu_paths_state(buf, sizeof(buf), "memory.db");
                 if (n > 0 && (size_t)n < sizeof(buf))
                     path = buf;
             }
@@ -45,7 +46,7 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
         char buf2[HU_MEM_PATH_MAX];
         const char *home = getenv("HOME");
         if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.human/lancedb", home);
+            int n = hu_paths_state(buf2, sizeof(buf2), "lancedb");
             if (n > 0 && (size_t)n < sizeof(buf2))
                 return hu_lancedb_memory_create(alloc, buf2);
         }
@@ -58,7 +59,7 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
         char buf2[HU_MEM_PATH_MAX];
         const char *home = getenv("HOME");
         if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.human/lucid.db", home);
+            int n = hu_paths_state(buf2, sizeof(buf2), "lucid.db");
             if (n > 0 && (size_t)n < sizeof(buf2))
                 return hu_lucid_memory_create(alloc, buf2, ws);
         }

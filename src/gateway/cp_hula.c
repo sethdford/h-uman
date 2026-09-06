@@ -2,6 +2,7 @@
 
 #include "cp_internal.h"
 #include "human/agent/hula_analytics.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -19,10 +20,11 @@ static void default_hula_trace_dir(char *buf, size_t cap) {
         buf[0] = '\0';
         return;
     }
-    (void)snprintf(buf, cap, "%s/.human/hula_traces", h);
+    (void)hu_paths_state(buf, cap, "hula_traces");
 }
 
-/* Prefer HU_HULA_TRACE_DIR (same as CLI `human hula run`) so dashboard lists match persist location. */
+/* Prefer HU_HULA_TRACE_DIR (same as CLI `human hula run`) so dashboard lists match persist
+ * location. */
 static void resolve_hula_trace_dir(char *buf, size_t cap) {
     if (!buf || cap == 0)
         return;
@@ -290,9 +292,9 @@ hu_error_t cp_hula_traces_delete(hu_allocator_t *alloc, hu_app_context_t *app, h
 #endif
 }
 
-hu_error_t cp_hula_traces_analytics(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
-                                    const hu_control_protocol_t *proto, const hu_json_value_t *root,
-                                    char **out, size_t *out_len) {
+hu_error_t cp_hula_traces_analytics(hu_allocator_t *alloc, hu_app_context_t *app,
+                                    hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                    const hu_json_value_t *root, char **out, size_t *out_len) {
     (void)app;
     (void)conn;
     (void)proto;

@@ -7,6 +7,7 @@
  */
 
 #include "human/daemon_reaction_poll.h"
+#include "human/core/paths.h"
 
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_reactions.h"
@@ -101,15 +102,9 @@ static void free_event_strings(hu_reaction_event_t *ev) {
 static const char *resolve_chatdb_path(const hu_reaction_collection_config_t *cfg) {
     if (cfg && cfg->chatdb_path[0])
         return cfg->chatdb_path;
-    const char *env = getenv("HU_CHATDB");
-    if (env && env[0])
-        return env;
+    /* hu_paths_chatdb honors HU_CHATDB itself and yields <0 when unresolvable. */
     static char home_path[512];
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    snprintf(home_path, sizeof(home_path), "%s/Library/Messages/chat.db", home);
-    return home_path;
+    return hu_paths_chatdb(home_path, sizeof(home_path)) > 0 ? home_path : NULL;
 }
 
 hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_unix,

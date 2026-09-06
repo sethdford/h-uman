@@ -5,6 +5,7 @@
  * with per-file and total character limits, and merges in priority order.
  */
 #include "human/agent/instruction_discover.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <errno.h>
 #include <limits.h>
@@ -173,8 +174,8 @@ hu_error_t hu_instruction_merge(hu_allocator_t *alloc, const hu_instruction_file
             break;
         }
 
-        int hdr_len = snprintf(buf + pos, total + 1 - pos, "# %s instructions (%s)\n",
-                               source_label, files[i].path);
+        int hdr_len = snprintf(buf + pos, total + 1 - pos, "# %s instructions (%s)\n", source_label,
+                               files[i].path);
         if (hdr_len > 0) {
             pos += (size_t)hdr_len;
             chars_used += (size_t)hdr_len;
@@ -226,8 +227,8 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
 
     /* Pre-allocate file array (max: 1 workspace + 10 walk + 1 user = 12) */
     size_t max_files = HU_INSTRUCTION_MAX_WALK_LEVELS + 2;
-    disc->files =
-        (hu_instruction_file_t *)alloc->alloc(alloc->ctx, sizeof(hu_instruction_file_t) * max_files);
+    disc->files = (hu_instruction_file_t *)alloc->alloc(alloc->ctx,
+                                                        sizeof(hu_instruction_file_t) * max_files);
     if (!disc->files) {
         alloc->free(alloc->ctx, disc, sizeof(*disc));
         return HU_ERR_OUT_OF_MEMORY;
@@ -317,7 +318,7 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
         const char *home = getenv("HOME");
         if (home && home[0]) {
             char user_path[PATH_MAX];
-            int n = snprintf(user_path, sizeof(user_path), "%s/.human/instructions.md", home);
+            int n = hu_paths_state(user_path, sizeof(user_path), "instructions.md");
             if (n > 0 && (size_t)n < sizeof(user_path)) {
                 char *canon = NULL;
                 size_t canon_len = 0;

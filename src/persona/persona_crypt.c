@@ -17,6 +17,7 @@
 
 #define _GNU_SOURCE 1
 
+#include "human/core/paths.h"
 #include "human/persona/crypto.h"
 
 #include "human/core/allocator.h"
@@ -119,7 +120,7 @@ static hu_error_t resolve_keyfile_path(char *out, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return HU_ERR_CONFIG_INVALID;
-    int n = snprintf(out, cap, "%s/.human/keys/persona.key", home);
+    int n = hu_paths_state(out, cap, "keys/persona.key");
     if (n < 0 || (size_t)n >= cap)
         return HU_ERR_INVALID_ARGUMENT;
     return HU_OK;

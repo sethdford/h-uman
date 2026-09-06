@@ -5,6 +5,9 @@
 # Session isolation: warn if this commit is landing on main in the SHARED
 # checkout while other Claude sessions have live worktrees (advisory; set
 # HU_WORKTREE_STRICT=1 to make it blocking).
+# Gates auto-lock lowered baselines only when run from here (scripts/lib/ratchet.sh).
+export HU_RATCHET_FROM_HOOK=1
+
 if [ -x "scripts/check-session-worktree.sh" ]; then
     bash scripts/check-session-worktree.sh || exit 1
 fi
@@ -249,6 +252,16 @@ if [ -n "$staged_src_c" ] && [ -x "scripts/check-file-size-ceiling.sh" ]; then
         echo ""
         echo "Pre-commit blocked: a src/*.c file exceeds the size ratchet."
         echo "Split it — see .claude/rules/file-size-ceiling.md."
+        exit 1
+    fi
+fi
+
+staged_state_path_ch=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(src|include)/.*\.(c|h)$' || true)
+if [ -n "$staged_state_path_ch" ] && [ -x "scripts/check-state-path-literals.sh" ]; then
+    if ! bash scripts/check-state-path-literals.sh; then
+        echo ""
+        echo "Pre-commit blocked: a hand-rolled \$HOME/.human or chat.db path literal."
+        echo "Route it through hu_paths_* — see .claude/rules/state-paths-through-helper.md."
         exit 1
     fi
 fi

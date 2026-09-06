@@ -1,4 +1,5 @@
 #include "human/daemon/reply_dedup.h"
+#include "human/core/paths.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,7 +213,7 @@ static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return 0;
-    int n = snprintf(buf, cap, "%s/.human/reply_dedup.json", home);
+    int n = hu_paths_state(buf, cap, "reply_dedup.json");
     return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
 }
 

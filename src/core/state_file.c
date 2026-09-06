@@ -1,4 +1,5 @@
 #include "human/core/state_file.h"
+#include "human/core/paths.h"
 #include <stdlib.h>
 
 const char *hu_state_file_default_path(const char *filename, char *buf, size_t cap) {
@@ -11,7 +12,7 @@ const char *hu_state_file_default_path(const char *filename, char *buf, size_t c
     const char *home = getenv("HOME");
     if (!home || !home[0] || !filename || !filename[0] || !buf || cap == 0)
         return NULL;
-    int n = snprintf(buf, cap, "%s/.human/%s", home, filename);
+    int n = hu_paths_state(buf, cap, "%s", filename);
     if (n <= 0 || (size_t)n >= cap)
         return NULL;
     return buf;

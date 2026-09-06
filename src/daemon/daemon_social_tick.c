@@ -10,6 +10,7 @@
  * is the orchestrator. */
 
 #include "human/daemon_social_tick.h"
+#include "human/core/paths.h"
 
 #include "human/channels/contact_signature.h"
 #include "human/channels/imessage_gaps.h"
@@ -33,20 +34,14 @@ static const char *default_out_path(void) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return NULL;
-    snprintf(path, sizeof(path), "%s/.human/social_state.json", home);
+    hu_paths_state(path, sizeof(path), "social_state.json");
     return path;
 }
 
 static const char *default_db_path(void) {
-    const char *env = getenv("HU_CHATDB");
-    if (env && env[0])
-        return env;
+    /* hu_paths_chatdb honors HU_CHATDB itself and yields <0 when unresolvable. */
     static char home_path[512];
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    snprintf(home_path, sizeof(home_path), "%s/Library/Messages/chat.db", home);
-    return home_path;
+    return hu_paths_chatdb(home_path, sizeof(home_path)) > 0 ? home_path : NULL;
 }
 
 /* Best-effort `mkdir -p` for the parent of `path`.

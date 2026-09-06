@@ -30,6 +30,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/cost.h"
 #include "human/cron.h"
 #include "human/crontab.h"
@@ -381,7 +382,7 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_ERR_INTERNAL;
     }
     char sched_path[512];
-    int sn = snprintf(sched_path, sizeof(sched_path), "%s/.human/scheduled.json", home);
+    int sn = hu_paths_state(sched_path, sizeof(sched_path), "scheduled.json");
     if (sn < 0 || (size_t)sn >= sizeof(sched_path))
         return HU_ERR_INTERNAL;
 
@@ -1650,7 +1651,7 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
             const char *home = getenv("HOME");
             if (home) {
                 char graph_path[1024];
-                int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
+                int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
                 if (np > 0 && (size_t)np < sizeof(graph_path)) {
                     hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &svc_graph);
                     if (graph_err != HU_OK)
@@ -1756,7 +1757,7 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         const char *home = getenv("HOME");
         if (home && home[0]) {
             char pb_path[512];
-            int n = snprintf(pb_path, sizeof(pb_path), "%s/.human/phrase_banks.json", home);
+            int n = hu_paths_state(pb_path, sizeof(pb_path), "phrase_banks.json");
             if (n > 0 && (size_t)n < sizeof(pb_path)) {
                 hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
                 if (pb_err == HU_OK)
@@ -2097,7 +2098,7 @@ static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "HOME not set\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
-    snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
+    hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
 
     hu_agent_registry_t reg;
     hu_error_t err = hu_agent_registry_create(alloc, &reg);
@@ -2582,7 +2583,7 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
             return HU_ERR_IO;
         }
         char db_path[512];
-        int n = snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        int n = hu_paths_state(db_path, sizeof(db_path), "memory.db");
         if (n <= 0 || (size_t)n >= sizeof(db_path))
             return HU_ERR_IO;
         hu_memory_t mem = hu_sqlite_memory_create(alloc, db_path);
@@ -3078,7 +3079,7 @@ static hu_error_t cmd_gateway(hu_allocator_t *alloc, int argc, char **argv) {
         const char *home = getenv("HOME");
         if (home) {
             char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
             if (np > 0 && (size_t)np < sizeof(graph_path)) {
                 hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &gw_graph);
                 if (graph_err != HU_OK)
@@ -3262,7 +3263,7 @@ int main(int argc, char *argv[]) {
         const char *home = getenv("HOME");
         if (home) {
             char envpath[512];
-            snprintf(envpath, sizeof(envpath), "%s/.human/.env", home);
+            hu_paths_state(envpath, sizeof(envpath), ".env");
             load_dotenv(envpath);
         }
     }

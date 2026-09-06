@@ -5,16 +5,17 @@
  */
 #include "human/agent/timing.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define HU_TIMING_MIN_SAMPLES 5
-#define MS_PER_SEC 1000
-#define LCG_MUL 1103515245u
-#define LCG_ADD 12345u
+#define MS_PER_SEC            1000
+#define LCG_MUL               1103515245u
+#define LCG_ADD               12345u
 
 static int compare_double(const void *a, const void *b) {
     double da = *(const double *)a;
@@ -147,7 +148,7 @@ hu_error_t hu_timing_bucket_from_samples(const double *samples, size_t count,
 }
 
 static void blend_buckets(const hu_timing_bucket_t *a, const hu_timing_bucket_t *b,
-                         hu_timing_bucket_t *out) {
+                          hu_timing_bucket_t *out) {
     if (a->sample_count == 0 && b->sample_count == 0) {
         memset(out, 0, sizeof(*out));
         return;
@@ -286,9 +287,9 @@ void hu_timing_model_deinit(hu_allocator_t *alloc, hu_timing_model_t *model) {
 }
 
 #ifdef HU_ENABLE_SQLITE
+#include "human/core/string.h"
 #include <sqlite3.h>
 #include <time.h>
-#include "human/core/string.h"
 
 static int timing_cmp_double(const void *a, const void *b) {
     double da = *(const double *)a, db = *(const double *)b;
@@ -297,11 +298,13 @@ static int timing_cmp_double(const void *a, const void *b) {
 
 static void timing_fill_bucket(hu_timing_bucket_t *b, double *samples, size_t n) {
     memset(b, 0, sizeof(*b));
-    if (n == 0) return;
+    if (n == 0)
+        return;
     qsort(samples, n, sizeof(double), timing_cmp_double);
     b->sample_count = (uint32_t)n;
     b->mean = 0;
-    for (size_t i = 0; i < n; i++) b->mean += samples[i];
+    for (size_t i = 0; i < n; i++)
+        b->mean += samples[i];
     b->mean /= (double)n;
     b->p10 = samples[perc_idx(n, 10)];
     b->p25 = samples[perc_idx(n, 25)];
@@ -312,26 +315,35 @@ static void timing_fill_bucket(hu_timing_bucket_t *b, double *samples, size_t n)
 
 hu_error_t hu_timing_model_learn_from_db(hu_timing_model_t *model, sqlite3 *db,
                                          const char *contact_id, size_t contact_id_len) {
-    if (!model || !db || !contact_id) return HU_ERR_INVALID_ARGUMENT;
-    const char *sql =
-        "SELECT sent_ts, is_from_me, msg_len FROM ("
-        "  SELECT DISTINCT m1.ROWID, m1.date/1000000000 + 978307200 AS sent_ts, "
-        "         m1.is_from_me, LENGTH(m1.text) AS msg_len "
-        "  FROM message m1 "
-        "  JOIN chat_message_join cmj ON cmj.message_id = m1.ROWID "
-        "  JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id "
-        "  JOIN handle h ON h.ROWID = chj.handle_id "
-        "  WHERE h.id = ?1 AND m1.text IS NOT NULL "
-        "  ORDER BY m1.date DESC LIMIT 2000"
-        ") ORDER BY sent_ts ASC";
+    if (!model || !db || !contact_id)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *sql = "SELECT sent_ts, is_from_me, msg_len FROM ("
+                      "  SELECT DISTINCT m1.ROWID, m1.date/1000000000 + 978307200 AS sent_ts, "
+                      "         m1.is_from_me, LENGTH(m1.text) AS msg_len "
+                      "  FROM message m1 "
+                      "  JOIN chat_message_join cmj ON cmj.message_id = m1.ROWID "
+                      "  JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id "
+                      "  JOIN handle h ON h.ROWID = chj.handle_id "
+                      "  WHERE h.id = ?1 AND m1.text IS NOT NULL "
+                      "  ORDER BY m1.date DESC LIMIT 2000"
+                      ") ORDER BY sent_ts ASC";
     sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return HU_ERR_IO;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
     sqlite3_bind_text(stmt, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
-    double all_lat[500]; size_t all_n = 0;
-    double hour_lat[24][200]; size_t hour_n[24]; memset(hour_n, 0, sizeof(hour_n));
-    double day_lat[7][200]; size_t day_n[7]; memset(day_n, 0, sizeof(day_n));
-    double len_lat[3][200]; size_t len_n[3]; memset(len_n, 0, sizeof(len_n));
-    int64_t prev_ts = 0; int prev_from_me = -1, prev_msg_len = 0;
+    double all_lat[500];
+    size_t all_n = 0;
+    double hour_lat[24][200];
+    size_t hour_n[24];
+    memset(hour_n, 0, sizeof(hour_n));
+    double day_lat[7][200];
+    size_t day_n[7];
+    memset(day_n, 0, sizeof(day_n));
+    double len_lat[3][200];
+    size_t len_n[3];
+    memset(len_n, 0, sizeof(len_n));
+    int64_t prev_ts = 0;
+    int prev_from_me = -1, prev_msg_len = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         int64_t ts = sqlite3_column_int64(stmt, 0);
         int from_me = sqlite3_column_int(stmt, 1);
@@ -339,38 +351,51 @@ hu_error_t hu_timing_model_learn_from_db(hu_timing_model_t *model, sqlite3 *db,
         if (prev_from_me == 0 && from_me == 1 && prev_ts > 0) {
             double lat = (double)(ts - prev_ts);
             if (lat > 0.5 && lat < 86400.0) {
-                if (all_n < 500) all_lat[all_n++] = lat;
-                struct tm tm_ts; time_t tt = (time_t)prev_ts;
+                if (all_n < 500)
+                    all_lat[all_n++] = lat;
+                struct tm tm_ts;
+                time_t tt = (time_t)prev_ts;
                 struct tm *lt = localtime_r(&tt, &tm_ts);
                 if (lt) {
-                    if (hour_n[lt->tm_hour] < 200) hour_lat[lt->tm_hour][hour_n[lt->tm_hour]++] = lat;
-                    if (day_n[lt->tm_wday] < 200) day_lat[lt->tm_wday][day_n[lt->tm_wday]++] = lat;
+                    if (hour_n[lt->tm_hour] < 200)
+                        hour_lat[lt->tm_hour][hour_n[lt->tm_hour]++] = lat;
+                    if (day_n[lt->tm_wday] < 200)
+                        day_lat[lt->tm_wday][day_n[lt->tm_wday]++] = lat;
                 }
                 int bk = prev_msg_len < 20 ? 0 : (prev_msg_len < 100 ? 1 : 2);
-                if (len_n[bk] < 200) len_lat[bk][len_n[bk]++] = lat;
+                if (len_n[bk] < 200)
+                    len_lat[bk][len_n[bk]++] = lat;
             }
         }
-        prev_ts = ts; prev_from_me = from_me; prev_msg_len = msg_len;
+        prev_ts = ts;
+        prev_from_me = from_me;
+        prev_msg_len = msg_len;
     }
     sqlite3_finalize(stmt);
     timing_fill_bucket(&model->overall, all_lat, all_n);
-    for (int h = 0; h < 24; h++) timing_fill_bucket(&model->by_hour[h], hour_lat[h], hour_n[h]);
-    for (int d = 0; d < 7; d++) timing_fill_bucket(&model->by_day[d], day_lat[d], day_n[d]);
-    for (int b = 0; b < 3; b++) timing_fill_bucket(&model->by_msg_length[b], len_lat[b], len_n[b]);
+    for (int h = 0; h < 24; h++)
+        timing_fill_bucket(&model->by_hour[h], hour_lat[h], hour_n[h]);
+    for (int d = 0; d < 7; d++)
+        timing_fill_bucket(&model->by_day[d], day_lat[d], day_n[d]);
+    for (int b = 0; b < 3; b++)
+        timing_fill_bucket(&model->by_msg_length[b], len_lat[b], len_n[b]);
     model->computed_at = (uint64_t)time(NULL);
     return HU_OK;
 }
 
-hu_error_t hu_timing_model_learn_from_chatdb(hu_timing_model_t *model,
-                                             const char *contact_id, size_t contact_id_len) {
-    if (!model || !contact_id) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_timing_model_learn_from_chatdb(hu_timing_model_t *model, const char *contact_id,
+                                             size_t contact_id_len) {
+    if (!model || !contact_id)
+        return HU_ERR_INVALID_ARGUMENT;
     const char *home = getenv("HOME");
-    if (!home) return HU_ERR_INVALID_ARGUMENT;
+    if (!home)
+        return HU_ERR_INVALID_ARGUMENT;
     char path[512];
-    snprintf(path, sizeof(path), "%s/Library/Messages/chat.db", home);
+    hu_paths_chatdb(path, sizeof(path));
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
-        if (db) sqlite3_close(db);
+        if (db)
+            sqlite3_close(db);
         return HU_ERR_IO;
     }
     hu_error_t err = hu_timing_model_learn_from_db(model, db, contact_id, contact_id_len);

@@ -11,6 +11,7 @@
 #include "human/core/allocator.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/init_dpo_bridge.h"
 #endif
@@ -128,7 +129,7 @@ size_t hu_init_outcome_resolve_path(char *out_buf, size_t out_cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return 0;
-    int n = snprintf(out_buf, out_cap, "%s/.human/%s", home, HU_INIT_OUTCOME_FILENAME);
+    int n = hu_paths_state(out_buf, out_cap, "%s", HU_INIT_OUTCOME_FILENAME);
     if (n <= 0)
         return 0;
     return (size_t)n < out_cap ? (size_t)n : out_cap - 1;
@@ -690,7 +691,7 @@ static hu_error_t query_chat_db_for_reply(const char *target, int64_t since_unix
     if (!home)
         return HU_ERR_IO;
     char db_path[1024];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n <= 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_IO;
 

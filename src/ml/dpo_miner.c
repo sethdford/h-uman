@@ -12,6 +12,7 @@
  */
 
 #include "human/ml/dpo_miner.h"
+#include "human/core/paths.h"
 #include "human/ml/dpo.h"
 #include "human/ml/training_data_extractor.h"
 #include "human/ml/training_data_quality.h"
@@ -50,8 +51,7 @@ hu_error_t hu_dpo_miner_resolve_export(const char *export_flag_path, int no_expo
         out->should_export = 0;
         return HU_OK;
     }
-    int n =
-        snprintf(out->export_path, sizeof(out->export_path), "%s/.human/dpo/pairs.jsonl", home_dir);
+    int n = hu_paths_state(out->export_path, sizeof(out->export_path), "dpo/pairs.jsonl");
     if (n <= 0 || (size_t)n >= sizeof(out->export_path))
         return HU_ERR_INTERNAL;
     out->should_export = 1;

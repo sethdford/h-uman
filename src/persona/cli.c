@@ -1,6 +1,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/persona.h"
 #include "human/persona/eval.h"
@@ -808,7 +809,7 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
                 const char *home = getenv("HOME");
                 if (home && home[0]) {
                     char parent[HU_PERSONA_PATH_MAX];
-                    int pn = snprintf(parent, sizeof(parent), "%s/.human", home);
+                    int pn = hu_paths_state_dir(parent, sizeof(parent));
                     if (pn > 0 && (size_t)pn < sizeof(parent))
                         (void)mkdir(parent, 0755);
                 }
@@ -1051,7 +1052,7 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
                 const char *home = getenv("HOME");
                 if (home && home[0]) {
                     char parent[HU_PERSONA_PATH_MAX];
-                    int pp = snprintf(parent, sizeof(parent), "%s/.human", home);
+                    int pp = hu_paths_state_dir(parent, sizeof(parent));
                     if (pp > 0 && (size_t)pp < sizeof(parent))
                         (void)mkdir(parent, 0755);
                 }
@@ -1073,7 +1074,7 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
                 return HU_ERR_NOT_FOUND;
             }
             char db_path[HU_PERSONA_PATH_MAX];
-            int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+            int n = hu_paths_chatdb(db_path, sizeof(db_path));
             if (n <= 0 || (size_t)n >= sizeof(db_path))
                 return HU_ERR_INVALID_ARGUMENT;
             sqlite3 *db = NULL;

@@ -35,6 +35,7 @@
 
 #include "human/security/keystore.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/crypto.h"
 
 #include <errno.h>
@@ -68,10 +69,10 @@
 
 /* ── constants ─────────────────────────────────────────────────────────── */
 
-#define KS_KEY_LEN      32   /* master key and per-table data key length */
-#define KS_NONCE_LEN    12   /* legacy ChaCha20 nonce length (v0) */
-#define KS_HMAC_LEN     32   /* HMAC-SHA256 output length */
-#define KS_SALT_LEN     16   /* per-user salt length (works for PBKDF2 and Argon2id) */
+#define KS_KEY_LEN      32     /* master key and per-table data key length */
+#define KS_NONCE_LEN    12     /* legacy ChaCha20 nonce length (v0) */
+#define KS_HMAC_LEN     32     /* HMAC-SHA256 output length */
+#define KS_SALT_LEN     16     /* per-user salt length (works for PBKDF2 and Argon2id) */
 #define KS_PBKDF2_ITERS 600000 /* OWASP 2023 PBKDF2-HMAC-SHA256 minimum */
 #define KS_CT_OVERHEAD  (KS_NONCE_LEN + KS_HMAC_LEN)
 #define KS_USER_ID_MAX  128
@@ -89,19 +90,19 @@
  * crypto_aead_xchacha20poly1305_ietf_*. Authenticated by Poly1305 so
  * misdetection from a v0 leading-byte collision fails fast and the
  * decoder transparently falls through to v0. */
-#define KS_V1_MAGIC          0x01
+#define KS_V1_MAGIC 0x01
 #ifdef HU_HAS_LIBSODIUM
-#define KS_V1_NONCE_LEN      crypto_aead_xchacha20poly1305_ietf_NPUBBYTES /* 24 */
-#define KS_V1_TAG_LEN        crypto_aead_xchacha20poly1305_ietf_ABYTES    /* 16 */
-#define KS_V1_OVERHEAD       (1 + KS_V1_NONCE_LEN + KS_V1_TAG_LEN)
+#define KS_V1_NONCE_LEN crypto_aead_xchacha20poly1305_ietf_NPUBBYTES /* 24 */
+#define KS_V1_TAG_LEN   crypto_aead_xchacha20poly1305_ietf_ABYTES    /* 16 */
+#define KS_V1_OVERHEAD  (1 + KS_V1_NONCE_LEN + KS_V1_TAG_LEN)
 #endif
 
 /* KDF flag file values. The flag is a sibling to the salt file:
  * <key_dir>/<user_id>.kdf. Single byte file. Missing => v0 (PBKDF2).
  * Written once on first unlock so subsequent unlocks pick the same
  * algorithm and the master key stays reproducible. */
-#define KS_KDF_V0_PBKDF2     0x00
-#define KS_KDF_V1_ARGON2ID   0x01
+#define KS_KDF_V0_PBKDF2   0x00
+#define KS_KDF_V1_ARGON2ID 0x01
 
 /* ── secure zero ────────────────────────────────────────────────────────── */
 
@@ -124,10 +125,10 @@ static void ks_secure_zero(void *p, size_t n) {
 
 struct hu_keystore {
     hu_allocator_t *alloc;
-    char            user_id[KS_USER_ID_MAX];
-    uint8_t         master_key[KS_KEY_LEN];
-    int             data_keys_count; /* number of distinct tables encrypted */
-    bool            master_key_present;
+    char user_id[KS_USER_ID_MAX];
+    uint8_t master_key[KS_KEY_LEN];
+    int data_keys_count; /* number of distinct tables encrypted */
+    bool master_key_present;
 };
 
 /* ── directory helpers ──────────────────────────────────────────────────── */
@@ -145,7 +146,7 @@ static void keystore_dir(char *out, size_t cap) {
 #else
     const char *home = getenv("HOME");
     if (home && *home)
-        snprintf(out, cap, "%s/.human/keys", home);
+        hu_paths_state(out, cap, "keys");
     else
         snprintf(out, cap, "/tmp");
 #endif
@@ -366,9 +367,8 @@ static void ks_kdf_version_persist(const char *user_id, uint8_t version) {
  * For a 32-byte output we only need block 1. This makes the loop
  * straightforward and avoids the variable-length-output path.
  */
-static void pbkdf2_hmac_sha256(const uint8_t *password, size_t password_len,
-                                const uint8_t *salt, size_t salt_len,
-                                uint32_t iterations, uint8_t out[KS_KEY_LEN]) {
+static void pbkdf2_hmac_sha256(const uint8_t *password, size_t password_len, const uint8_t *salt,
+                               size_t salt_len, uint32_t iterations, uint8_t out[KS_KEY_LEN]) {
     /* Salt || INT(1) — the input to U_1. */
     uint8_t salt_with_idx[KS_SALT_LEN + 4];
     if (salt_len > KS_SALT_LEN)
@@ -445,8 +445,7 @@ static int kdf_passphrase(const char *pp, size_t pp_len, const char *user_id,
             unsigned long long ops = crypto_pwhash_OPSLIMIT_MODERATE;
             size_t mem = crypto_pwhash_MEMLIMIT_MODERATE;
 #endif
-            rc = crypto_pwhash(out, KS_KEY_LEN,
-                               (const char *)pp, pp_len, salt, ops, mem,
+            rc = crypto_pwhash(out, KS_KEY_LEN, (const char *)pp, pp_len, salt, ops, mem,
                                crypto_pwhash_ALG_ARGON2ID13);
         }
 #endif
@@ -479,18 +478,14 @@ static int kdf_passphrase(const char *pp, size_t pp_len, const char *user_id,
 }
 
 /* Per-table data key: HMAC-SHA256(master_key, table_name). */
-static void derive_data_key(const uint8_t master[KS_KEY_LEN],
-                             const char *table_name,
-                             uint8_t out[KS_KEY_LEN]) {
-    hu_hmac_sha256(master, KS_KEY_LEN,
-                   (const uint8_t *)table_name, strlen(table_name),
-                   out);
+static void derive_data_key(const uint8_t master[KS_KEY_LEN], const char *table_name,
+                            uint8_t out[KS_KEY_LEN]) {
+    hu_hmac_sha256(master, KS_KEY_LEN, (const uint8_t *)table_name, strlen(table_name), out);
 }
 
 /* ── lifecycle ──────────────────────────────────────────────────────────── */
 
-hu_error_t hu_keystore_open(hu_allocator_t *alloc, const char *user_id,
-                             hu_keystore_t **out) {
+hu_error_t hu_keystore_open(hu_allocator_t *alloc, const char *user_id, hu_keystore_t **out) {
     if (!alloc || !user_id || !*user_id || !out)
         return HU_ERR_INVALID_ARGUMENT;
     if (strlen(user_id) >= KS_USER_ID_MAX)
@@ -514,8 +509,7 @@ void hu_keystore_close(hu_keystore_t *ks, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, ks, sizeof(*ks));
 }
 
-hu_error_t hu_keystore_unlock_with_passphrase(hu_keystore_t *ks,
-                                               const char *pp, size_t pp_len) {
+hu_error_t hu_keystore_unlock_with_passphrase(hu_keystore_t *ks, const char *pp, size_t pp_len) {
     if (!ks || !pp || pp_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -534,16 +528,15 @@ hu_error_t hu_keystore_status(hu_keystore_t *ks, hu_keystore_status_t *out) {
         return HU_ERR_INVALID_ARGUMENT;
     out->master_key_present = ks->master_key_present;
     out->keychain_available = false; /* OS-keychain not implemented yet */
-    out->data_keys_count    = ks->data_keys_count;
-    out->key_rotated_at     = 0;
+    out->data_keys_count = ks->data_keys_count;
+    out->key_rotated_at = 0;
     return HU_OK;
 }
 
 /* ── AEAD encrypt / decrypt ─────────────────────────────────────────────── */
 
-hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
-                                const void *plaintext, size_t pt_len,
-                                void **out_ciphertext, size_t *out_len) {
+hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name, const void *plaintext,
+                               size_t pt_len, void **out_ciphertext, size_t *out_len) {
     if (!ks || !table_name || (!plaintext && pt_len > 0) || !out_ciphertext || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!ks->master_key_present)
@@ -569,9 +562,8 @@ hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
         randombytes_buf(nonce, KS_V1_NONCE_LEN);
         unsigned long long ct_len_out = 0;
         if (crypto_aead_xchacha20poly1305_ietf_encrypt(
-                ct + 1 + KS_V1_NONCE_LEN, &ct_len_out,
-                (const unsigned char *)plaintext, (unsigned long long)pt_len,
-                (const unsigned char *)table_name,
+                ct + 1 + KS_V1_NONCE_LEN, &ct_len_out, (const unsigned char *)plaintext,
+                (unsigned long long)pt_len, (const unsigned char *)table_name,
                 (unsigned long long)strlen(table_name), NULL, nonce, dk) != 0) {
             ks->alloc->free(ks->alloc->ctx, ct, total);
             ks_secure_zero(dk, KS_KEY_LEN);
@@ -603,8 +595,7 @@ hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
     memcpy(ct, nonce, KS_NONCE_LEN);
     if (pt_len > 0)
         hu_chacha20_encrypt(dk, nonce, 0, plaintext, ct + KS_NONCE_LEN, pt_len);
-    hu_hmac_sha256(dk, KS_KEY_LEN, ct, KS_NONCE_LEN + pt_len,
-                   ct + KS_NONCE_LEN + pt_len);
+    hu_hmac_sha256(dk, KS_KEY_LEN, ct, KS_NONCE_LEN + pt_len, ct + KS_NONCE_LEN + pt_len);
 
     ks_secure_zero(dk, KS_KEY_LEN);
     ks_secure_zero(nonce, KS_NONCE_LEN);
@@ -614,9 +605,8 @@ hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
     return HU_OK;
 }
 
-hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
-                                const void *ciphertext, size_t ct_len,
-                                void **out_plaintext, size_t *out_len) {
+hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name, const void *ciphertext,
+                               size_t ct_len, void **out_plaintext, size_t *out_len) {
     if (!ks || !table_name || !ciphertext || !out_plaintext || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!ks->master_key_present)
@@ -630,14 +620,11 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
     /* Attempt v1 envelope first when the leading byte and minimum
      * length match. Poly1305 fails fast on a wrong key/AAD, so a v0
      * blob whose first byte happens to be 0x01 just falls through. */
-    if (ct_len >= KS_V1_OVERHEAD && blob[0] == KS_V1_MAGIC &&
-        ks_sodium_init_once() == 0) {
+    if (ct_len >= KS_V1_OVERHEAD && blob[0] == KS_V1_MAGIC && ks_sodium_init_once() == 0) {
         const uint8_t *nonce = blob + 1;
         const uint8_t *body = blob + 1 + KS_V1_NONCE_LEN;
-        unsigned long long body_len =
-            (unsigned long long)(ct_len - 1 - KS_V1_NONCE_LEN);
-        size_t pt_capacity =
-            ct_len - 1 - KS_V1_NONCE_LEN - KS_V1_TAG_LEN;
+        unsigned long long body_len = (unsigned long long)(ct_len - 1 - KS_V1_NONCE_LEN);
+        size_t pt_capacity = ct_len - 1 - KS_V1_NONCE_LEN - KS_V1_TAG_LEN;
         uint8_t *pt = ks->alloc->alloc(ks->alloc->ctx, pt_capacity + 1);
         if (!pt) {
             ks_secure_zero(dk, KS_KEY_LEN);
@@ -645,8 +632,7 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
         }
         unsigned long long pt_len_out = 0;
         if (crypto_aead_xchacha20poly1305_ietf_decrypt(
-                pt, &pt_len_out, NULL, body, body_len,
-                (const unsigned char *)table_name,
+                pt, &pt_len_out, NULL, body, body_len, (const unsigned char *)table_name,
                 (unsigned long long)strlen(table_name), nonce, dk) == 0) {
             pt[pt_len_out] = '\0';
             ks_secure_zero(dk, KS_KEY_LEN);
@@ -668,7 +654,7 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
     }
 
     size_t pt_len = ct_len - KS_CT_OVERHEAD;
-    const uint8_t *nonce     = blob;
+    const uint8_t *nonce = blob;
     const uint8_t *encrypted = blob + KS_NONCE_LEN;
     const uint8_t *stored_tag = blob + KS_NONCE_LEN + pt_len;
 

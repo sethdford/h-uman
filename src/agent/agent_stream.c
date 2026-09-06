@@ -44,6 +44,7 @@
 #include "human/context_engine.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/core/tokens.h"
 #include "human/eval/consistency.h"
@@ -636,8 +637,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         memcpy(qbuf, msg, qn);
                         qbuf[qn] = '\0';
                         char cpath[768];
-                        int pn =
-                            snprintf(cpath, sizeof(cpath), "%s/.human/voice_corpus.jsonl", home);
+                        int pn = hu_paths_state(cpath, sizeof(cpath), "voice_corpus.jsonl");
                         if (pn > 0 && (size_t)pn < sizeof(cpath)) {
                             char rag_buf[2048];
                             size_t rn = hu_persona_rag_ground_from_file(
@@ -3149,12 +3149,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
     /* Auto-save session after successful streaming turn */
     if (agent->auto_save && agent->session_id[0] != '\0') {
-        const char *home = getenv("HOME");
         char sdir[512];
-        if (home)
-            snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-        else
-            snprintf(sdir, sizeof(sdir), ".human/sessions");
+        hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
         hu_session_persist_save(agent->alloc, agent, sdir, NULL);
     }
 

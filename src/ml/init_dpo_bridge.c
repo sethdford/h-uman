@@ -14,6 +14,7 @@
 #ifdef HU_ENABLE_ML
 
 #include "human/ml/init_dpo_bridge.h"
+#include "human/core/paths.h"
 #include "human/ml/cli.h"
 #include "human/ml/dpo.h"
 
@@ -361,7 +362,7 @@ hu_error_t hu_ml_cli_pair_init_singles(hu_allocator_t *alloc, int argc, const ch
             fprintf(stderr, "[pair-init-singles] HOME not set; cannot locate memory.db\n");
             return HU_ERR_IO;
         }
-        snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        hu_paths_state(db_path, sizeof(db_path), "memory.db");
     }
 
     sqlite3 *db = NULL;

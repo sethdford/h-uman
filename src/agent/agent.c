@@ -20,6 +20,7 @@
 #include "human/config.h"
 #include "human/core/endpoints.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
@@ -1354,8 +1355,10 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
          * (unknown) but the loop still functions. */
         if (!agent->m3_id_map) {
             char map_path[2048];
-            int mn = snprintf(map_path, sizeof(map_path), "%s/.human/training-data/m3_id_map.json",
-                              getenv("HOME") ? getenv("HOME") : "/tmp");
+            /* Prior code fell back to /tmp when HOME was unset; keep that exact
+             * behavior rather than let an unresolvable state dir become "". */
+            int mn = hu_paths_state_or(map_path, sizeof(map_path), "/tmp",
+                                       "training-data/m3_id_map.json");
             if (mn > 0 && (size_t)mn < sizeof(map_path)) {
                 (void)hu_m3_id_map_create(agent->alloc, map_path, &agent->m3_id_map);
             }
@@ -2007,7 +2010,7 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
         const char *home = getenv("HOME");
         if (home) {
             char audit_path[512];
-            int ap = snprintf(audit_path, sizeof(audit_path), "%s/.human/audit_log.db", home);
+            int ap = hu_paths_state(audit_path, sizeof(audit_path), "audit_log.db");
             if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
                 hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
                                                      &agent->w15_audit_log);

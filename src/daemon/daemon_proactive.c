@@ -28,6 +28,7 @@
 #include "human/config.h"
 #include "human/context/protective.h"
 #include "human/context/self_awareness.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
@@ -777,8 +778,7 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
         snprintf(db_path, sizeof(db_path), "%s/models/per_contact", cfg->workspace_dir);
     } else {
         /* Fallback: use ~/.human */
-        const char *home = getenv("HOME");
-        snprintf(db_path, sizeof(db_path), "%s/.human/models/per_contact", home ? home : "/tmp");
+        hu_paths_state_or(db_path, sizeof(db_path), "/tmp", "models/per_contact");
     }
 
     hu_error_t pm_err = hu_personal_model_load_for_contact(&contact_model, contact_handle, db_path);

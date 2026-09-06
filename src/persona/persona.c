@@ -3,6 +3,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona/circadian.h"
@@ -34,7 +35,7 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return NULL;
-    int n = snprintf(buf, cap, "%s/.human/personas", home);
+    int n = hu_paths_state(buf, cap, "personas");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
 
@@ -3059,8 +3060,7 @@ hu_error_t hu_persona_load(hu_allocator_t *alloc, const char *name, size_t name_
         const char *home = getenv("HOME");
         if (home) {
             char ra_path[HU_PERSONA_PATH_MAX];
-            int rn =
-                snprintf(ra_path, sizeof(ra_path), "%s/.human/photos/recent_activity.json", home);
+            int rn = hu_paths_state(ra_path, sizeof(ra_path), "photos/recent_activity.json");
             if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
                 FILE *rf = fopen(ra_path, "rb");
                 if (rf) {

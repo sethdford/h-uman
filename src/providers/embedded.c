@@ -6,6 +6,7 @@
 #include "human/providers/embedded.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/platform.h"
@@ -23,10 +24,11 @@
 #endif
 
 #define EMBEDDED_PROMPT_MAX 32768
-#define EMBEDDED_LLAMA_CLI   "llama-cli"
-#define EMBEDDED_MODELS_DIR  ".human/models"
+#define EMBEDDED_LLAMA_CLI  "llama-cli"
 
-typedef struct { hu_embedded_config_t config; } embedded_ctx_t;
+typedef struct {
+    hu_embedded_config_t config;
+} embedded_ctx_t;
 
 #if defined(HU_ENABLE_EMBEDDED_MODEL) && defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
 static const char *find_model_path(hu_allocator_t *alloc, const hu_embedded_config_t *config,
@@ -51,7 +53,7 @@ static const char *find_model_path(hu_allocator_t *alloc, const hu_embedded_conf
     if (!home)
         return NULL;
 
-    int n = snprintf(buf, buf_size, "%s/%s", home, EMBEDDED_MODELS_DIR);
+    int n = hu_paths_state(buf, buf_size, "models");
     if (n <= 0 || (size_t)n >= buf_size) {
         alloc->free(alloc->ctx, home, strlen(home) + 1);
         return NULL;
@@ -74,7 +76,7 @@ static const char *find_model_path(hu_allocator_t *alloc, const hu_embedded_conf
         if (strcmp(e->d_name + nlen - 5, ".gguf") != 0)
             continue;
 
-        n = snprintf(buf, buf_size, "%s/%s/%s", home, EMBEDDED_MODELS_DIR, e->d_name);
+        n = hu_paths_state(buf, buf_size, "models/%s", e->d_name);
         if (n > 0 && (size_t)n < buf_size && access(buf, R_OK) == 0)
             found = buf;
         break;
@@ -88,8 +90,8 @@ static const char *find_model_path(hu_allocator_t *alloc, const hu_embedded_conf
 static hu_error_t embedded_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                             const char *system_prompt, size_t system_prompt_len,
                                             const char *message, size_t message_len,
-                                            const char *model, size_t model_len,
-                                            double temperature, char **out, size_t *out_len) {
+                                            const char *model, size_t model_len, double temperature,
+                                            char **out, size_t *out_len) {
     (void)model;
     (void)model_len;
     (void)temperature;
@@ -150,8 +152,7 @@ static hu_error_t embedded_chat_with_system(void *ctx, hu_allocator_t *alloc,
         const char *argv[] = {EMBEDDED_LLAMA_CLI, "-m", model_path, "-p", prompt_buf, NULL};
 
         hu_run_result_t result = {0};
-        hu_error_t err =
-            hu_process_run(alloc, argv, NULL, 4 * 1024 * 1024, &result);
+        hu_error_t err = hu_process_run(alloc, argv, NULL, 4 * 1024 * 1024, &result);
         if (err != HU_OK) {
             hu_run_result_free(alloc, &result);
             return err;

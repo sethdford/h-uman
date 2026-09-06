@@ -555,6 +555,7 @@ set(HU_CORE_SOURCES
     src/core/arena.c
     src/core/string.c
     src/core/tokens.c
+    src/core/paths.c
     src/core/io_secure.c
     src/core/file.c
     src/core/json.c
@@ -3523,6 +3524,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c
     tests/test_core_extended.c
+    tests/test_paths.c
     tests/test_gateway_extended.c
     tests/test_gateway_voice.c
     tests/test_gateway_hula_traces.c

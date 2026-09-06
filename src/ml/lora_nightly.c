@@ -4,6 +4,7 @@
  * Sprint B residuals #3 (2026-05-24). */
 
 #include "human/ml/lora_nightly.h"
+#include "human/core/paths.h"
 
 #include "human/core/endpoints.h"
 #include "human/core/json.h"
@@ -29,14 +30,12 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return false;
-    snprintf(cfg->db_path, sizeof(cfg->db_path), "%s/.human/memory.db", home);
-    snprintf(cfg->pairs_jsonl_path, sizeof(cfg->pairs_jsonl_path), "%s/.human/lora-pairs.jsonl",
-             home);
-    snprintf(cfg->adapters_dir, sizeof(cfg->adapters_dir), "%s/.human/adapters", home);
-    snprintf(cfg->current_symlink, sizeof(cfg->current_symlink), "%s/.human/adapter-current", home);
+    hu_paths_state(cfg->db_path, sizeof(cfg->db_path), "memory.db");
+    hu_paths_state(cfg->pairs_jsonl_path, sizeof(cfg->pairs_jsonl_path), "lora-pairs.jsonl");
+    hu_paths_state(cfg->adapters_dir, sizeof(cfg->adapters_dir), "adapters");
+    hu_paths_state(cfg->current_symlink, sizeof(cfg->current_symlink), "adapter-current");
     snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), HU_MLX_DEFAULT_BASE_URL);
-    snprintf(cfg->gate_verdict_path, sizeof(cfg->gate_verdict_path), "%s/.human/blind_ab_gate.json",
-             home);
+    hu_paths_state(cfg->gate_verdict_path, sizeof(cfg->gate_verdict_path), "blind_ab_gate.json");
     /* Default base model — MUST match the SERVING base so the trained
      * adapter can be hot-swapped without a quantization mismatch (the
      * 2026-07-18 audit found serving on gemma-4-31b-it-8bit while the live

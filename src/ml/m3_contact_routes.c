@@ -19,6 +19,7 @@
  */
 
 #include "human/ml/m3_contact_routes.h"
+#include "human/core/paths.h"
 
 #include "human/core/json.h"
 
@@ -202,8 +203,8 @@ hu_error_t hu_m3_contact_routes_create(hu_allocator_t *alloc, const char *path,
     if (!use_path || !use_path[0]) {
         const char *home = getenv("HOME");
         if (home && home[0]) {
-            int n = snprintf(default_path, sizeof(default_path),
-                             "%s/.human/training-data/m3_contact_routes.json", home);
+            int n = hu_paths_state(default_path, sizeof(default_path),
+                                   "training-data/m3_contact_routes.json");
             if (n > 0 && (size_t)n < sizeof(default_path))
                 use_path = default_path;
         }

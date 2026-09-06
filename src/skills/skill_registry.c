@@ -6,6 +6,7 @@
 #include "human/core/http.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/crypto.h"
 #include "human/update.h"
@@ -43,8 +44,8 @@ static void entry_free(hu_allocator_t *a, hu_skill_registry_entry_t *e) {
 }
 
 /* Registry search tag handling; also linked by test_skills.c for array/string coverage. */
-void hu_skill_registry_resolve_tags_string(hu_json_value_t *tags_val, char *tags_buf, size_t tags_buf_len,
-                                         const char **out_tags_str) {
+void hu_skill_registry_resolve_tags_string(hu_json_value_t *tags_val, char *tags_buf,
+                                           size_t tags_buf_len, const char **out_tags_str) {
     *out_tags_str = NULL;
     if (!tags_val || tags_buf_len == 0)
         return;
@@ -173,12 +174,7 @@ hu_error_t hu_skill_registry_publish(hu_allocator_t *alloc, const char *skill_di
 size_t hu_skill_registry_get_installed_dir(char *out, size_t out_len) {
     if (!out || out_len == 0)
         return 0;
-    const char *home = getenv("HOME");
-    if (!home) {
-        out[0] = '\0';
-        return 0;
-    }
-    int n = snprintf(out, out_len, "%s/.human/skills", home);
+    int n = hu_paths_state(out, out_len, "skills");
     return (n > 0 && (size_t)n < out_len) ? (size_t)n : 0;
 }
 
@@ -395,8 +391,8 @@ static hu_error_t remove_dir_recursive(const char *path) {
         return (errno == ENOENT) ? HU_OK : HU_ERR_IO;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
-        if (e->d_name[0] == '.' && (e->d_name[1] == '\0' ||
-                                    (e->d_name[1] == '.' && e->d_name[2] == '\0')))
+        if (e->d_name[0] == '.' &&
+            (e->d_name[1] == '\0' || (e->d_name[1] == '.' && e->d_name[2] == '\0')))
             continue;
         char sub[512];
         int n = snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
@@ -425,7 +421,8 @@ static hu_error_t remove_dir_recursive(const char *path) {
     return HU_OK;
 }
 
-/* https://github.com/org/repo/tree/branch/path → https://raw.githubusercontent.com/org/repo/branch/path/ */
+/* https://github.com/org/repo/tree/branch/path →
+ * https://raw.githubusercontent.com/org/repo/branch/path/ */
 static bool github_tree_url_to_raw_base(const char *tree_url, char *out, size_t out_len) {
     static const char prefix[] = "https://github.com/";
     if (!tree_url || strncmp(tree_url, prefix, sizeof(prefix) - 1U) != 0)
@@ -438,8 +435,8 @@ static bool github_tree_url_to_raw_base(const char *tree_url, char *out, size_t 
     const char *after_tree = tree + 6;
     if (!after_tree[0])
         return false;
-    int n = snprintf(out, out_len, "https://raw.githubusercontent.com/%.*s/%s/",
-                     (int)org_repo_len, path, after_tree);
+    int n = snprintf(out, out_len, "https://raw.githubusercontent.com/%.*s/%s/", (int)org_repo_len,
+                     path, after_tree);
     return n > 0 && (size_t)n < out_len;
 }
 
@@ -500,14 +497,14 @@ hu_error_t hu_skill_registry_install(hu_allocator_t *alloc, const char *source_p
         return HU_ERR_INVALID_ARGUMENT;
 
     char base_dir[512];
-    int n = snprintf(base_dir, sizeof(base_dir), "%s/.human/skills", home);
+    int n = hu_paths_state(base_dir, sizeof(base_dir), "skills");
     if (n <= 0 || (size_t)n >= sizeof(base_dir))
         return HU_ERR_INVALID_ARGUMENT;
     if (mkdir(base_dir, 0755) != 0 && errno != EEXIST)
         return HU_ERR_IO;
 
     char dest_dir[512];
-    n = snprintf(dest_dir, sizeof(dest_dir), "%s/.human/skills/%.256s", home, name);
+    n = hu_paths_state(dest_dir, sizeof(dest_dir), "skills/%.256s", name);
     if (n <= 0 || (size_t)n >= sizeof(dest_dir))
         return HU_ERR_INVALID_ARGUMENT;
     if (mkdir(dest_dir, 0755) != 0 && errno != EEXIST)
@@ -644,7 +641,7 @@ hu_error_t hu_skill_registry_install_by_name(hu_allocator_t *alloc, const char *
     }
 
     char base_dir[512];
-    n = snprintf(base_dir, sizeof(base_dir), "%s/.human/skills", home);
+    n = hu_paths_state(base_dir, sizeof(base_dir), "skills");
     if (n <= 0 || (size_t)n >= sizeof(base_dir)) {
         hu_http_response_free(alloc, &mresp);
         return HU_ERR_INVALID_ARGUMENT;
@@ -655,7 +652,7 @@ hu_error_t hu_skill_registry_install_by_name(hu_allocator_t *alloc, const char *
     }
 
     char dest_dir[512];
-    n = snprintf(dest_dir, sizeof(dest_dir), "%s/.human/skills/%.256s", home, name);
+    n = hu_paths_state(dest_dir, sizeof(dest_dir), "skills/%.256s", name);
     if (n <= 0 || (size_t)n >= sizeof(dest_dir)) {
         hu_http_response_free(alloc, &mresp);
         return HU_ERR_INVALID_ARGUMENT;
@@ -717,7 +714,7 @@ hu_error_t hu_skill_registry_uninstall(const char *name) {
         return HU_ERR_INVALID_ARGUMENT;
 
     char dir_path[512];
-    int n = snprintf(dir_path, sizeof(dir_path), "%s/.human/skills/%.256s", home, name);
+    int n = hu_paths_state(dir_path, sizeof(dir_path), "skills/%.256s", name);
     if (n <= 0 || (size_t)n >= sizeof(dir_path))
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -727,7 +724,7 @@ hu_error_t hu_skill_registry_uninstall(const char *name) {
 
     /* Also remove flat .skill.json for backward compatibility */
     char flat_path[512];
-    n = snprintf(flat_path, sizeof(flat_path), "%s/.human/skills/%.256s.skill.json", home, name);
+    n = hu_paths_state(flat_path, sizeof(flat_path), "skills/%.256s.skill.json", name);
     if (n > 0 && (size_t)n < sizeof(flat_path))
         unlink(flat_path);
 
@@ -857,12 +854,7 @@ hu_error_t hu_skill_registry_publish(hu_allocator_t *alloc, const char *skill_di
 size_t hu_skill_registry_get_installed_dir(char *out, size_t out_len) {
     if (!out || out_len == 0)
         return 0;
-    const char *home = getenv("HOME");
-    if (!home) {
-        out[0] = '\0';
-        return 0;
-    }
-    int n = snprintf(out, out_len, "%s/.human/skills", home);
+    int n = hu_paths_state(out, out_len, "skills");
     return (n > 0 && (size_t)n < out_len) ? (size_t)n : 0;
 }
 

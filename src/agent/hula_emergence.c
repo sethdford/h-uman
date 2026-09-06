@@ -1,5 +1,6 @@
 #include "human/agent/hula_emergence.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/platform.h"
 #include <errno.h>
@@ -29,14 +30,14 @@ static void default_trace_dir(char *buf, size_t cap) {
         buf[0] = '\0';
         return;
     }
-    (void)snprintf(buf, cap, "%s/.human/hula_traces", p);
+    (void)hu_paths_state(buf, cap, "hula_traces");
 #else
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         buf[0] = '\0';
         return;
     }
-    (void)snprintf(buf, cap, "%s/.human/hula_traces", home);
+    (void)hu_paths_state(buf, cap, "hula_traces");
 #endif
 }
 
@@ -134,9 +135,8 @@ hu_error_t hu_hula_trace_persist(hu_allocator_t *alloc, const char *trace_dir,
             hu_json_object_set(alloc, root, "program", prog_val);
     }
     if (program_source && program_source_len > 0)
-        hu_json_object_set(
-            alloc, root, "program_source",
-            hu_json_string_new(alloc, program_source, program_source_len));
+        hu_json_object_set(alloc, root, "program_source",
+                           hu_json_string_new(alloc, program_source, program_source_len));
 
     if (program_source && program_source_len > 0)
         hu_json_object_set(alloc, root, "program_source",
@@ -353,7 +353,7 @@ hu_error_t hu_hula_emergence_promote(hu_allocator_t *alloc, const char *skills_d
         const char *home = getenv("HOME");
         if (!home)
             return HU_ERR_NOT_FOUND;
-        if (snprintf(base, sizeof(base), "%s/.human/skills", home) >= (int)sizeof(base))
+        if (hu_paths_state(base, sizeof(base), "skills") >= (int)sizeof(base))
             return HU_ERR_INVALID_ARGUMENT;
     }
     if (hula_trace_prepare_dir(base, true) != HU_OK)

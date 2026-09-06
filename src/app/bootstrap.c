@@ -12,6 +12,7 @@
 #include "human/config.h"
 #include "human/context_engine.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/data/loader.h"
 #include "human/hook.h"
 #include "human/memory.h"
@@ -825,7 +826,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             const char *home = getenv("HOME");
             if (home && home[0]) {
                 char agents_dir[512];
-                int n = snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
+                int n = hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
                 if (n > 0 && (size_t)n < sizeof(agents_dir))
                     hu_agent_registry_discover(&bi->agent_registry, agents_dir);
             }
@@ -841,7 +842,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             const char *home = getenv("HOME");
             if (home && home[0]) {
                 char pwa_dir[512];
-                int n = snprintf(pwa_dir, sizeof(pwa_dir), "%s/.human/pwa", home);
+                int n = hu_paths_state(pwa_dir, sizeof(pwa_dir), "pwa");
                 if (n > 0 && (size_t)n < sizeof(pwa_dir))
                     hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
             }

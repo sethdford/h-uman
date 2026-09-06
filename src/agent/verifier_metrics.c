@@ -1,4 +1,5 @@
 #include "human/agent/verifier_metrics.h"
+#include "human/core/paths.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -13,7 +14,7 @@ bool hu_verifier_metrics_path(char *out, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return false;
-    int n = snprintf(out, cap, "%s/.human/verifier_metrics.json", home);
+    int n = hu_paths_state(out, cap, "verifier_metrics.json");
     return n > 0 && (size_t)n < cap;
 }
 
@@ -57,14 +58,9 @@ hu_error_t hu_verifier_metrics_save(hu_verifier_metrics_t *metrics) {
         return HU_ERR_INVALID_ARGUMENT;
     /* mkdir ~/.human (and HOME) idempotently; mirrors the imessage
      * poll-status writer so test fixtures with a fresh HOME don't fail. */
-    const char *home = getenv("HOME");
-    if (home && home[0]) {
-        (void)mkdir(home, 0700);
-        char dir[512];
-        int dn = snprintf(dir, sizeof(dir), "%s/.human", home);
-        if (dn > 0 && (size_t)dn < sizeof(dir))
-            (void)mkdir(dir, 0700);
-    }
+    char dir[512];
+    (void)hu_paths_state_mkdir(dir,
+                               sizeof(dir)); /* creates missing parents too — fresh test HOMEs */
     metrics->last_update_epoch = (int64_t)time(NULL);
     FILE *f = fopen(path, "w");
     if (!f)

@@ -15,6 +15,7 @@
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/eval.h"
@@ -70,7 +71,6 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 #include <dirent.h>
 #endif
 
-#define HU_INIT_CONFIG_DIR  ".human"
 #define HU_INIT_CONFIG_FILE "config.json"
 #define HU_INIT_MAX_PATH    1024
 
@@ -185,8 +185,7 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
         home = ".";
 
     char config_path[HU_INIT_MAX_PATH];
-    int n = snprintf(config_path, sizeof(config_path), "%s/%s/%s", home, HU_INIT_CONFIG_DIR,
-                     HU_INIT_CONFIG_FILE);
+    int n = hu_paths_state_or(config_path, sizeof(config_path), ".", "%s", HU_INIT_CONFIG_FILE);
     if (n <= 0 || (size_t)n >= sizeof(config_path))
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -203,7 +202,7 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     }
 
     char dir_path[HU_INIT_MAX_PATH];
-    n = snprintf(dir_path, sizeof(dir_path), "%s/%s", home, HU_INIT_CONFIG_DIR);
+    n = hu_paths_state_dir_or(dir_path, sizeof(dir_path), ".");
     if (n <= 0 || (size_t)n >= sizeof(dir_path))
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -227,7 +226,7 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
 
     /* Create personas directory and starter persona */
     char persona_dir[HU_INIT_MAX_PATH];
-    n = snprintf(persona_dir, sizeof(persona_dir), "%s/%s/personas", home, HU_INIT_CONFIG_DIR);
+    n = hu_paths_state_or(persona_dir, sizeof(persona_dir), ".", "personas");
     if (n > 0 && (size_t)n < sizeof(persona_dir)) {
         if (mkdir(persona_dir, 0700) == 0 || errno == EEXIST) {
             char persona_path[HU_INIT_MAX_PATH];
@@ -538,7 +537,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         const char *home = getenv("HOME");
         if (home) {
             char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
             if (np > 0 && (size_t)np < sizeof(graph_path)) {
                 hu_graph_t *g = NULL;
                 hu_error_t ge = hu_graph_open(alloc, graph_path, (size_t)np, &g);
@@ -2953,7 +2952,7 @@ hu_error_t cmd_feed(hu_allocator_t *alloc, int argc, char **argv) {
         const char *home = getenv("HOME");
         if (home) {
             char ingest_dir[512];
-            snprintf(ingest_dir, sizeof(ingest_dir), "%s/.human/feeds/ingest", home);
+            hu_paths_state(ingest_dir, sizeof(ingest_dir), "feeds/ingest");
             printf("\nIngest directory: %s\n", ingest_dir);
             struct stat st;
             if (stat(ingest_dir, &st) == 0)

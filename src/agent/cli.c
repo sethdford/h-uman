@@ -9,6 +9,7 @@
 #include "human/core/endpoints.h"
 #include "human/core/file.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #ifdef HU_HAS_VOICE_CHANNEL
 #include "human/channels/voice_channel.h"
 #endif
@@ -158,7 +159,7 @@ static bool mlx_auto_serve(const char *prov_name) {
      * so a fresh install resolves to the canonical location. */
     char candidates[4][HU_CLI_MAX_PATH];
     size_t ncand = 0;
-    snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/.human/bin/human-serve.sh", home);
+    hu_paths_state(candidates[ncand++], HU_CLI_MAX_PATH, "bin/human-serve.sh");
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Projects/h-uman/scripts/human-serve.sh",
              home);
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Documents/h-uman/scripts/human-serve.sh",
@@ -874,7 +875,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         const char *home = getenv("HOME");
         if (home) {
             char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
             if (np > 0 && (size_t)np < sizeof(graph_path))
                 (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
         }
@@ -916,7 +917,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         char sessions_dir[512];
         const char *home = getenv("HOME");
         if (home)
-            snprintf(sessions_dir, sizeof(sessions_dir), "%s/.human/sessions", home);
+            hu_paths_state(sessions_dir, sizeof(sessions_dir), "sessions");
         else
             snprintf(sessions_dir, sizeof(sessions_dir), ".human/sessions");
         if (parsed_args.session_id && parsed_args.session_id[0]) {

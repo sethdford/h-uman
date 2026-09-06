@@ -50,7 +50,12 @@ drove every target instantly to its floor.
 
 **Auto-lock — hard, in pre-commit, no calendar.** `scripts/lib/ratchet.sh`
 `ratchet_autolock` rewrites the baseline constant to the measured value whenever
-a counter drops, and stages it. It can only tighten, so it can never block a
+a counter drops, and stages it — **only when invoked from the pre-commit hook**
+(`HU_RATCHET_FROM_HOOK=1`). A manual gate run reports the possible lock and leaves
+the constant alone: a mid-refactor tree is transient (unformatted, half-edited),
+and on 2026-09-06 a manual run froze `daemon.c` at 14064 while the hook's
+clang-format re-wrapped the same code to 14074, refusing the commit that had
+made the file smaller. It can only tighten, so it can never block a
 commit. It refuses to fire when the gate file has unstaged edits (staging it
 would sweep in-flight work into someone else's commit), when the measurement is
 non-numeric, or under `HU_RATCHET_NO_AUTOLOCK=1`. All twelve of those paths are

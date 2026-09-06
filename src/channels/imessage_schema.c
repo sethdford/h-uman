@@ -23,6 +23,7 @@
 
 #include "human/channels/imessage_schema.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/crypto.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -278,8 +279,7 @@ hu_error_t hu_imessage_schema_probe(const char *db_path, hu_imessage_schema_caps
     if (!resolved) {
         const char *home = getenv("HOME");
         if (home && home[0]) {
-            int n =
-                snprintf(default_path, sizeof(default_path), "%s/Library/Messages/chat.db", home);
+            int n = hu_paths_chatdb(default_path, sizeof(default_path));
             if (n > 0 && (size_t)n < sizeof(default_path))
                 resolved = default_path;
         }

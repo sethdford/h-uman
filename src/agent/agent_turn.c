@@ -8,6 +8,7 @@
 #include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/core/tokens.h"
 #include "human/data/loader.h"
@@ -8610,12 +8611,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
             /* Auto-save session after successful turn completion */
             if (agent->auto_save && agent->session_id[0] != '\0') {
-                const char *home = getenv("HOME");
                 char sdir[512];
-                if (home)
-                    snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-                else
-                    snprintf(sdir, sizeof(sdir), ".human/sessions");
+                hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
                 hu_session_persist_save(agent->alloc, agent, sdir, NULL);
             }
 

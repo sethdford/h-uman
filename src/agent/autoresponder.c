@@ -9,6 +9,7 @@
  * sanitize directly with synthetic provider output). */
 
 #include "human/autoresponder.h"
+#include "human/core/paths.h"
 
 #include "human/config.h"
 #include "human/core/log.h"
@@ -383,7 +384,7 @@ static const char *resolve_log_path(const hu_autoresponder_config_t *cfg, char *
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return NULL;
-    int n = snprintf(buf, cap, "%s/.human/autoresponder.log", home);
+    int n = hu_paths_state(buf, cap, "autoresponder.log");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
 
@@ -931,7 +932,7 @@ hu_error_t cmd_autoresponder(hu_allocator_t *alloc, int argc, char **argv) {
     if (!path) {
         const char *home = getenv("HOME");
         if (home && home[0] &&
-            snprintf(path_buf, sizeof(path_buf), "%s/.human/autoresponder.log", home) > 0) {
+            hu_paths_state(path_buf, sizeof(path_buf), "autoresponder.log") > 0) {
             path = path_buf;
         }
     }

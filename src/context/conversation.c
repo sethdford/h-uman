@@ -4,6 +4,7 @@
 #include "human/core/file.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/filler_recency.h"
@@ -8981,8 +8982,7 @@ size_t hu_conversation_contact_photo_path(const char *contact_id, size_t cid_len
                 int blob_len = sqlite3_column_bytes(blob_stmt, 0);
                 if (blob && blob_len > 0) {
                     char cache_dir[512];
-                    int cd = snprintf(cache_dir, sizeof(cache_dir),
-                                      "%s/.human/cache/contact-photos", home);
+                    int cd = hu_paths_state(cache_dir, sizeof(cache_dir), "cache/contact-photos");
                     if (cd > 0 && (size_t)cd < sizeof(cache_dir)) {
                         (void)mkdir(cache_dir, 0700);
                         n = snprintf(out_path, out_cap, "%s/%lld.jpg", cache_dir,

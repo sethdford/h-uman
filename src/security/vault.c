@@ -31,6 +31,7 @@
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <errno.h>
@@ -282,7 +283,7 @@ hu_vault_t *hu_vault_create(hu_allocator_t *alloc, const char *vault_path) {
         const char *home = getenv("HOME");
         if (!home)
             home = ".";
-        int n = snprintf(v->vault_path, sizeof(v->vault_path), "%s/.human/vault.json", home);
+        int n = hu_paths_state_or(v->vault_path, sizeof(v->vault_path), ".", "vault.json");
         if (n <= 0 || (size_t)n >= sizeof(v->vault_path))
             v->vault_path[0] = '\0';
     }

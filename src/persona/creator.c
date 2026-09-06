@@ -1,5 +1,6 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/persona.h"
 #include <errno.h>
@@ -517,7 +518,7 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             const char *home = getenv("HOME");
             if (home && home[0]) {
                 char parent[HU_PERSONA_CREATOR_PATH_MAX];
-                int pn = snprintf(parent, sizeof(parent), "%s/.human", home);
+                int pn = hu_paths_state_dir(parent, sizeof(parent));
                 if (pn > 0 && (size_t)pn < sizeof(parent))
                     (void)mkdir(parent, 0755);
             }

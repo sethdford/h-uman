@@ -22,6 +22,7 @@
  */
 
 #include "human/memory/minja_guard.h"
+#include "human/core/paths.h"
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -65,35 +66,18 @@ static const char *const HU_MINJA_PATTERNS_INSTRUCTION[] = {
 
 /* Tier 2: identity / role overwrite (MINJA target-1: name + role facts). */
 static const char *const HU_MINJA_PATTERNS_IDENTITY[] = {
-    "your new name is",
-    "your name is now",
-    "from now your name",
-    "you are now called",
-    "you are now",
-    "you will now be",
-    "you will now act",
-    "your new persona",
-    "your preferred name",
-    "please answer as",
-    "respond only as",
-    "respond as if you are",
-    "i am your",
-    "i am your new",
-    "the user is now",
-    "the real user is",
-    "i am the actual user",
+    "your new name is",   "your name is now",     "from now your name",
+    "you are now called", "you are now",          "you will now be",
+    "you will now act",   "your new persona",     "your preferred name",
+    "please answer as",   "respond only as",      "respond as if you are",
+    "i am your",          "i am your new",        "the user is now",
+    "the real user is",   "i am the actual user",
 };
 
 /* Tier 3: capability / permission unlock. */
 static const char *const HU_MINJA_PATTERNS_CAPABILITY[] = {
-    "developer mode",
-    "jailbreak",
-    "dan mode",
-    "without restrictions",
-    "ignore your guidelines",
-    "ignore safety",
-    "bypass the filter",
-    "no restrictions",
+    "developer mode",         "jailbreak",     "dan mode",          "without restrictions",
+    "ignore your guidelines", "ignore safety", "bypass the filter", "no restrictions",
 };
 
 #define HU_MINJA_TIER_COUNT 3
@@ -128,8 +112,7 @@ static const size_t HU_MINJA_TIER_SIZES[HU_MINJA_TIER_COUNT] = {
  *
  * Returns the number of bytes written to `out` (NOT including any NUL).
  */
-static int hu_codepoint_decode_utf8(const unsigned char *p, size_t avail,
-                                    uint32_t *out_cp) {
+static int hu_codepoint_decode_utf8(const unsigned char *p, size_t avail, uint32_t *out_cp) {
     if (avail == 0) {
         *out_cp = 0;
         return 1;
@@ -143,14 +126,13 @@ static int hu_codepoint_decode_utf8(const unsigned char *p, size_t avail,
         *out_cp = ((uint32_t)(b0 & 0x1F) << 6) | (uint32_t)(p[1] & 0x3F);
         return 2;
     }
-    if ((b0 & 0xF0) == 0xE0 && avail >= 3 && (p[1] & 0xC0) == 0x80 &&
-        (p[2] & 0xC0) == 0x80) {
+    if ((b0 & 0xF0) == 0xE0 && avail >= 3 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
         *out_cp = ((uint32_t)(b0 & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) |
                   (uint32_t)(p[2] & 0x3F);
         return 3;
     }
-    if ((b0 & 0xF8) == 0xF0 && avail >= 4 && (p[1] & 0xC0) == 0x80 &&
-        (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
+    if ((b0 & 0xF8) == 0xF0 && avail >= 4 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 &&
+        (p[3] & 0xC0) == 0x80) {
         *out_cp = ((uint32_t)(b0 & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) |
                   ((uint32_t)(p[2] & 0x3F) << 6) | (uint32_t)(p[3] & 0x3F);
         return 4;
@@ -163,31 +145,51 @@ static int hu_codepoint_decode_utf8(const unsigned char *p, size_t avail,
 static unsigned char hu_cyrillic_confusable_to_ascii(uint32_t cp) {
     /* Lowercase pairs first. */
     switch (cp) {
-    case 0x0430: return 'a'; /* а */
-    case 0x0435: return 'e'; /* е */
-    case 0x043E: return 'o'; /* о */
-    case 0x0440: return 'p'; /* р */
-    case 0x0441: return 'c'; /* с */
-    case 0x0443: return 'y'; /* у */
-    case 0x0445: return 'x'; /* х */
-    case 0x0456: return 'i'; /* і */
-    case 0x0410: return 'a'; /* А */
-    case 0x0412: return 'b'; /* В */
-    case 0x0415: return 'e'; /* Е */
-    case 0x041A: return 'k'; /* К */
-    case 0x041C: return 'm'; /* М */
-    case 0x041D: return 'h'; /* Н — looks like H */
-    case 0x041E: return 'o'; /* О */
-    case 0x0420: return 'p'; /* Р */
-    case 0x0421: return 'c'; /* С */
-    case 0x0422: return 't'; /* Т */
-    case 0x0425: return 'x'; /* Х */
-    default: return 0;
+    case 0x0430:
+        return 'a'; /* а */
+    case 0x0435:
+        return 'e'; /* е */
+    case 0x043E:
+        return 'o'; /* о */
+    case 0x0440:
+        return 'p'; /* р */
+    case 0x0441:
+        return 'c'; /* с */
+    case 0x0443:
+        return 'y'; /* у */
+    case 0x0445:
+        return 'x'; /* х */
+    case 0x0456:
+        return 'i'; /* і */
+    case 0x0410:
+        return 'a'; /* А */
+    case 0x0412:
+        return 'b'; /* В */
+    case 0x0415:
+        return 'e'; /* Е */
+    case 0x041A:
+        return 'k'; /* К */
+    case 0x041C:
+        return 'm'; /* М */
+    case 0x041D:
+        return 'h'; /* Н — looks like H */
+    case 0x041E:
+        return 'o'; /* О */
+    case 0x0420:
+        return 'p'; /* Р */
+    case 0x0421:
+        return 'c'; /* С */
+    case 0x0422:
+        return 't'; /* Т */
+    case 0x0425:
+        return 'x'; /* Х */
+    default:
+        return 0;
     }
 }
 
-static size_t hu_minja_normalize(const char *in, size_t in_len, char *out,
-                                 size_t out_cap, size_t *out_nonascii) {
+static size_t hu_minja_normalize(const char *in, size_t in_len, char *out, size_t out_cap,
+                                 size_t *out_nonascii) {
     size_t w = 0;
     size_t nonascii_bytes = 0;
     const unsigned char *p = (const unsigned char *)in;
@@ -198,8 +200,7 @@ static size_t hu_minja_normalize(const char *in, size_t in_len, char *out,
         i += (size_t)consumed;
 
         /* Drop zero-width / BOM / combining marks. */
-        if (cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0x2060 ||
-            cp == 0xFEFF)
+        if (cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0x2060 || cp == 0xFEFF)
             continue;
         if (cp >= 0x0300 && cp <= 0x036F)
             continue;
@@ -247,12 +248,23 @@ static void hu_minja_leetspeak_decode(char *buf, size_t len) {
         char c = buf[i];
         char repl = 0;
         switch (c) {
-        case '1': repl = 'i'; break;
-        case '3': repl = 'e'; break;
-        case '0': repl = 'o'; break;
-        case '5': repl = 's'; break;
-        case '@': repl = 'a'; break;
-        default: break;
+        case '1':
+            repl = 'i';
+            break;
+        case '3':
+            repl = 'e';
+            break;
+        case '0':
+            repl = 'o';
+            break;
+        case '5':
+            repl = 's';
+            break;
+        case '@':
+            repl = 'a';
+            break;
+        default:
+            break;
         }
         if (!repl)
             continue;
@@ -292,8 +304,7 @@ bool hu_minja_detect(const char *text, size_t len, const char *user_locale) {
     /* Stage 1: NFKC-equivalent normalize into a stack buffer. */
     char norm[1024];
     size_t nonascii = 0;
-    size_t norm_len = hu_minja_normalize(text, scan_len, norm, sizeof(norm),
-                                         &nonascii);
+    size_t norm_len = hu_minja_normalize(text, scan_len, norm, sizeof(norm), &nonascii);
 
     /* Stage 2: lowercase + leetspeak decode in place. */
     for (size_t i = 0; i < norm_len; i++)
@@ -342,8 +353,7 @@ static int hu_minja_open_quarantine_fd(void) {
         const char *home = getenv("HOME");
         if (!home)
             return -1;
-        int w = snprintf(path, sizeof(path), "%s/.human/private/quarantine.log",
-                         home);
+        int w = hu_paths_state(path, sizeof(path), "private/quarantine.log");
         if (w <= 0 || (size_t)w >= sizeof(path))
             return -1;
         /* Best-effort mkdir of parent dirs. */
@@ -364,14 +374,12 @@ static int hu_minja_open_quarantine_fd(void) {
      * (`..`, `%2e%2e`, percent-double-encoded variants) the same way
      * the gateway does for HTTP paths — this satisfies the taint check
      * and gives genuine defence-in-depth against a malicious HOME. */
-    if (strstr(path, "..") != NULL || strstr(path, "%2e") != NULL ||
-        strstr(path, "%2E") != NULL)
+    if (strstr(path, "..") != NULL || strstr(path, "%2e") != NULL || strstr(path, "%2E") != NULL)
         return -1;
     return open(path, O_CREAT | O_APPEND | O_WRONLY, 0600);
 }
 
-void hu_minja_quarantine_log(const char *text, size_t len,
-                             const hu_provenance_t *prov) {
+void hu_minja_quarantine_log(const char *text, size_t len, const hu_provenance_t *prov) {
     if (!text || len == 0 || !prov)
         return;
     int fd = hu_minja_open_quarantine_fd();
@@ -394,13 +402,12 @@ void hu_minja_quarantine_log(const char *text, size_t len,
     }
     snippet[sw] = '\0';
 
-    int w = snprintf(line, sizeof(line),
-                     "{\"ts\":%lld,\"tier\":%d,\"channel\":\"%.*s\","
-                     "\"handle\":\"%.*s\",\"snippet\":\"%s\"}\n",
-                     (long long)prov->source_ts, (int)prov->tier,
-                     (int)strlen(prov->channel), prov->channel,
-                     (int)strlen(prov->contact_handle), prov->contact_handle,
-                     snippet);
+    int w =
+        snprintf(line, sizeof(line),
+                 "{\"ts\":%lld,\"tier\":%d,\"channel\":\"%.*s\","
+                 "\"handle\":\"%.*s\",\"snippet\":\"%s\"}\n",
+                 (long long)prov->source_ts, (int)prov->tier, (int)strlen(prov->channel),
+                 prov->channel, (int)strlen(prov->contact_handle), prov->contact_handle, snippet);
     if (w > 0 && (size_t)w < sizeof(line)) {
         /* GNU libc declares write() with warn_unused_result; the
          * (void) cast isn't enough on -Werror=unused-result. We

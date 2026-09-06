@@ -16,22 +16,23 @@ hu_error_t hu_bpe_tokenizer_create(hu_allocator_t *alloc, hu_bpe_tokenizer_t **o
 
 hu_error_t hu_bpe_tokenizer_load(hu_bpe_tokenizer_t *tok, const char *path);
 
-hu_error_t hu_bpe_tokenizer_train(hu_bpe_tokenizer_t *tok, const char **texts,
-                                  size_t texts_count, size_t vocab_size,
-                                  const char *pattern);
+/* Load <data_dir>/tokenizer.vocab, else the state dir's models/tokenizer.vocab.
+ * HU_ERR_NOT_FOUND when neither loads; tok then keeps its default byte-level
+ * vocab, which every caller treats as acceptable. */
+hu_error_t hu_bpe_tokenizer_load_default(hu_bpe_tokenizer_t *tok, const char *data_dir);
 
-hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *text,
-                                   size_t text_len, int32_t **ids_out,
-                                   size_t *ids_count);
+hu_error_t hu_bpe_tokenizer_train(hu_bpe_tokenizer_t *tok, const char **texts, size_t texts_count,
+                                  size_t vocab_size, const char *pattern);
+
+hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *text, size_t text_len,
+                                   int32_t **ids_out, size_t *ids_count);
 
 hu_error_t hu_bpe_tokenizer_decode(const hu_bpe_tokenizer_t *tok, const int32_t *ids,
-                                   size_t ids_count, char **text_out,
-                                   size_t *text_len_out);
+                                   size_t ids_count, char **text_out, size_t *text_len_out);
 
 size_t hu_bpe_tokenizer_vocab_size(const hu_bpe_tokenizer_t *tok);
 
-size_t hu_bpe_tokenizer_token_byte_length(const hu_bpe_tokenizer_t *tok,
-                                          int32_t token_id);
+size_t hu_bpe_tokenizer_token_byte_length(const hu_bpe_tokenizer_t *tok, int32_t token_id);
 
 hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path);
 

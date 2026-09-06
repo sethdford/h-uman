@@ -8,6 +8,7 @@
  * module just accumulates and decides. */
 
 #include "human/agent/prompt_budget.h"
+#include "human/core/paths.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
@@ -206,7 +207,7 @@ size_t hu_prompt_budget_snapshot_path(char *out_buf, size_t out_cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return 0;
-    int n = snprintf(out_buf, out_cap, "%s/.human/prompt_budget.snapshot.json", home);
+    int n = hu_paths_state(out_buf, out_cap, "prompt_budget.snapshot.json");
     return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
 }
 

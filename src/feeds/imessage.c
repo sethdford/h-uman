@@ -4,6 +4,7 @@
 #include "human/feeds/imessage.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/feeds/ingest.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -13,7 +14,8 @@
 #if HU_IS_TEST
 
 hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
-    hu_feed_ingest_item_t *items, size_t items_cap, size_t *out_count) {
+                                  hu_feed_ingest_item_t *items, size_t items_cap,
+                                  size_t *out_count) {
     (void)alloc;
     (void)since_epoch;
     if (!items || !out_count || items_cap < 2)
@@ -22,16 +24,15 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
     (void)strncpy(items[0].source, "imessage", sizeof(items[0].source) - 1);
     (void)strncpy(items[0].content_type, "message", sizeof(items[0].content_type) - 1);
     (void)strncpy(items[0].content,
-        "Check out this new AI coding tool, it supports autonomous agents",
-        sizeof(items[0].content) - 1);
+                  "Check out this new AI coding tool, it supports autonomous agents",
+                  sizeof(items[0].content) - 1);
     items[0].content_len = strlen(items[0].content);
     items[0].ingested_at = (int64_t)time(NULL);
     (void)strncpy(items[0].contact_id, "+15555550100", sizeof(items[0].contact_id) - 1);
     (void)strncpy(items[1].source, "imessage", sizeof(items[1].source) - 1);
     (void)strncpy(items[1].content_type, "message", sizeof(items[1].content_type) - 1);
-    (void)strncpy(items[1].content,
-        "Have you tried the new local LLM? 70B runs great on M4",
-        sizeof(items[1].content) - 1);
+    (void)strncpy(items[1].content, "Have you tried the new local LLM? 70B runs great on M4",
+                  sizeof(items[1].content) - 1);
     items[1].content_len = strlen(items[1].content);
     items[1].ingested_at = (int64_t)time(NULL);
     (void)strncpy(items[1].contact_id, "+15555550101", sizeof(items[1].contact_id) - 1);
@@ -56,7 +57,8 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
 #define IMESSAGE_NS_PER_SEC   1000000000LL
 
 hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
-    hu_feed_ingest_item_t *items, size_t items_cap, size_t *out_count) {
+                                  hu_feed_ingest_item_t *items, size_t items_cap,
+                                  size_t *out_count) {
     (void)alloc;
     if (!items || !out_count || items_cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -67,7 +69,7 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
         return HU_ERR_NOT_FOUND;
 
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n <= 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -76,7 +78,8 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
 
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
-        if (db) sqlite3_close(db);
+        if (db)
+            sqlite3_close(db);
         return HU_ERR_IO;
     }
 
@@ -87,7 +90,7 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
     int64_t channel_rowid = 0;
     {
         char rowid_path[512];
-        int rp = snprintf(rowid_path, sizeof(rowid_path), "%s/.human/imessage.rowid", home);
+        int rp = hu_paths_state(rowid_path, sizeof(rowid_path), "imessage.rowid");
         if (rp > 0 && (size_t)rp < sizeof(rowid_path)) {
             FILE *rf = fopen(rowid_path, "r");
             if (rf) {
@@ -98,14 +101,13 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
         }
     }
 
-    const char *sql =
-        "SELECT m.text, m.date, m.is_from_me, h.id AS handle_id, m.attributedBody "
-        "FROM message m "
-        "LEFT JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE ((m.text IS NOT NULL AND m.text != '') "
-        "    OR (m.attributedBody IS NOT NULL AND LENGTH(m.attributedBody) > 0)) "
-        "AND m.date > ?1 AND m.ROWID > ?3 "
-        "ORDER BY m.date DESC LIMIT ?2";
+    const char *sql = "SELECT m.text, m.date, m.is_from_me, h.id AS handle_id, m.attributedBody "
+                      "FROM message m "
+                      "LEFT JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE ((m.text IS NOT NULL AND m.text != '') "
+                      "    OR (m.attributedBody IS NOT NULL AND LENGTH(m.attributedBody) > 0)) "
+                      "AND m.date > ?1 AND m.ROWID > ?3 "
+                      "ORDER BY m.date DESC LIMIT ?2";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -158,12 +160,14 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
 #else
 
 hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
-    hu_feed_ingest_item_t *items, size_t items_cap, size_t *out_count) {
+                                  hu_feed_ingest_item_t *items, size_t items_cap,
+                                  size_t *out_count) {
     (void)alloc;
     (void)since_epoch;
     (void)items;
     (void)items_cap;
-    if (out_count) *out_count = 0;
+    if (out_count)
+        *out_count = 0;
     return HU_ERR_NOT_SUPPORTED;
 }
 

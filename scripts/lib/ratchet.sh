@@ -37,6 +37,17 @@ ratchet_autolock() {
     [ -n "$old" ] || return 0
     [ "$current" -lt "$old" ] 2>/dev/null || return 0
 
+    # Lock only when invoked by the pre-commit hook. A manual gate run
+    # mid-refactor measures a transient tree — unformatted, half-edited — and
+    # would freeze a minimum the finished commit cannot meet. 2026-09-06:
+    # daemon.c locked at 14064 from a manual run; the hook's clang-format then
+    # re-wrapped the same code to 14074 and refused the commit that made it
+    # smaller. The hook exports HU_RATCHET_FROM_HOOK=1.
+    if [ "${HU_RATCHET_FROM_HOOK:-0}" != "1" ]; then
+        echo "NOTE: $var could lock lower ($old -> $current); it locks when this commits." >&2
+        return 0
+    fi
+
     git rev-parse --show-toplevel >/dev/null 2>&1 || return 0
 
     # Refuse to touch a script that already carries unstaged edits: staging it

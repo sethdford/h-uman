@@ -3,6 +3,7 @@
  */
 
 #include "human/plugin_discovery.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,7 @@ size_t hu_plugin_get_default_dir(char *out, size_t out_len) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return 0;
-    int n = snprintf(out, out_len, "%s/.human/plugins", home);
+    int n = hu_paths_state(out, out_len, "plugins");
     if (n < 0 || (size_t)n >= out_len)
         return 0;
     return (size_t)n;

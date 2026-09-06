@@ -1,6 +1,7 @@
 #include "human/memory/personal_model.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/memory/anticipatory.h"
 #include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
@@ -2896,7 +2897,7 @@ const char *hu_personal_model_resolve_default_path(char *buf, size_t cap) {
     if (!home || !home[0]) {
         return NULL;
     }
-    int n = snprintf(buf, cap, "%s/.human/personal_model.bin", home);
+    int n = hu_paths_state(buf, cap, "personal_model.bin");
     if (n <= 0 || (size_t)n >= cap) {
         return NULL;
     }

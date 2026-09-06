@@ -39,7 +39,7 @@ fi
 # stays green, and ratchet_autolock re-measures on the next run and tightens to
 # the real number. A ratchet may only tighten, so no gain is lost — locking it is
 # just deferred by one run.
-CLONE_BASELINE=11506   # auto-locked 2026-07-30 (was 11514)
+CLONE_BASELINE=11455   # locked 2026-09-06 to the hook-formatted tree after the hu_paths_* sweep (was 11506)
                        # duplicated extras-dispatch preamble in reliable_chat and
                        # reliable_chat_with_system to one line each
 # prior: 11505         # token-ratio consolidation (human/core/tokens.h)

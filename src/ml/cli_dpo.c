@@ -27,6 +27,7 @@
 
 #include "human/ml/cli_dpo.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/ml/dpo.h"
 #include "human/ml/rl_trainer.h"
 #include "human/provider.h"
@@ -312,7 +313,7 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
             return HU_ERR_IO;
         }
         char db_path[1024];
-        snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        hu_paths_state(db_path, sizeof(db_path), "memory.db");
         sqlite3 *db = NULL;
         if (sqlite3_open(db_path, &db) != SQLITE_OK) {
             fprintf(stderr, "[dpo-train] failed to open %s: %s\n", db_path,

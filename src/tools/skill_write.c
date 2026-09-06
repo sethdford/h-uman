@@ -6,6 +6,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/tool.h"
 #include "human/tools/path_security.h"
@@ -111,7 +112,7 @@ static hu_error_t skill_write_execute(void *ctx, hu_allocator_t *alloc, const hu
 
 #ifndef _WIN32
     char base_dir[512];
-    int n = snprintf(base_dir, sizeof(base_dir), "%s/.human/skills", home);
+    int n = hu_paths_state(base_dir, sizeof(base_dir), "skills");
     if (n <= 0 || (size_t)n >= sizeof(base_dir)) {
         *out = hu_tool_result_fail("path too long", 13);
         return HU_OK;
@@ -153,8 +154,8 @@ static hu_error_t skill_write_execute(void *ctx, hu_allocator_t *alloc, const hu
     }
 
     char skill_path[512];
-    n = snprintf(skill_path, sizeof(skill_path), "%s/.human/skills/%.*s.skill.json", home,
-                 (int)name_len, name);
+    n = hu_paths_state(skill_path, sizeof(skill_path), "skills/%.*s.skill.json", (int)name_len,
+                       name);
     if (n <= 0 || (size_t)n >= sizeof(skill_path)) {
         alloc->free(alloc->ctx, json_str, json_len + 1);
         *out = hu_tool_result_fail("path too long", 13);

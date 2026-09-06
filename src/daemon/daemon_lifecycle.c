@@ -7,11 +7,12 @@
  *   - hu_daemon_install/uninstall/logs (launchd on macOS, systemd on Linux)
  *   - Internal helpers: validate_home, get_pid_path
  */
-#include "human/core/log.h"
 #include "human/daemon_lifecycle.h"
-#include "human/daemon.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/log.h"
+#include "human/core/paths.h"
+#include "human/daemon.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,6 @@
 #include <unistd.h>
 #endif
 
-#define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
 #define HU_MAX_PATH        1024
 
@@ -52,7 +52,7 @@ int hu_daemon_get_pid_path(char *buf, size_t buf_size) {
         home = ".";
     if (hu_daemon_validate_home(home) != HU_OK)
         return -1;
-    return snprintf(buf, buf_size, "%s/%s/%s", home, HU_DAEMON_PID_DIR, HU_DAEMON_PID_FILE);
+    return hu_paths_state_or(buf, buf_size, ".", "%s", HU_DAEMON_PID_FILE);
 }
 
 /* ── Daemon management ───────────────────────────────────────────────── */
@@ -92,11 +92,8 @@ hu_error_t hu_daemon_start(void) {
     if (n <= 0 || (size_t)n >= sizeof(path))
         return HU_ERR_INVALID_ARGUMENT;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
     char dir[HU_MAX_PATH];
-    n = snprintf(dir, sizeof(dir), "%s/%s", home, HU_DAEMON_PID_DIR);
+    n = hu_paths_state_dir_or(dir, sizeof(dir), ".");
     if (n <= 0 || (size_t)n >= sizeof(dir))
         return HU_ERR_IO;
 
@@ -186,11 +183,8 @@ hu_error_t hu_daemon_write_pid(void) {
     if (n <= 0 || (size_t)n >= sizeof(path))
         return HU_ERR_INVALID_ARGUMENT;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
     char dir[HU_MAX_PATH];
-    n = snprintf(dir, sizeof(dir), "%s/%s", home, HU_DAEMON_PID_DIR);
+    n = hu_paths_state_dir_or(dir, sizeof(dir), ".");
     if (n <= 0 || (size_t)n >= sizeof(dir))
         return HU_ERR_INVALID_ARGUMENT;
 #ifndef HU_IS_TEST
@@ -286,7 +280,7 @@ hu_error_t hu_daemon_install(hu_allocator_t *alloc) {
         return HU_ERR_IO;
 
     char log_path[HU_MAX_PATH];
-    n = snprintf(log_path, sizeof(log_path), "%s/.human/human.log", home);
+    n = hu_paths_state(log_path, sizeof(log_path), "human.log");
     if (n <= 0 || (size_t)n >= sizeof(log_path))
         return HU_ERR_IO;
 
@@ -376,7 +370,7 @@ hu_error_t hu_daemon_logs(void) {
         return HU_ERR_INVALID_ARGUMENT;
 
     char log_path[HU_MAX_PATH];
-    int n = snprintf(log_path, sizeof(log_path), "%s/.human/human.log", home);
+    int n = hu_paths_state(log_path, sizeof(log_path), "human.log");
     if (n <= 0 || (size_t)n >= sizeof(log_path))
         return HU_ERR_IO;
 

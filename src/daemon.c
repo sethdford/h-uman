@@ -14,6 +14,7 @@
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/rand.h"
 #include "human/core/string.h"
@@ -186,7 +187,6 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 #include <unistd.h>
 #endif
 
-#define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
 #define HU_MAX_PATH        1024
 
@@ -702,7 +702,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         const char *sched_home = getenv("HOME");
         if (sched_home) {
             char sp[512];
-            int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sched_home);
+            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
             if (sn > 0 && (size_t)sn < sizeof(sp))
                 hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
         }
@@ -767,7 +767,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 const char *sh = getenv("HOME");
                 if (sh) {
                     char sp[512];
-                    int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sh);
+                    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
                     if (sn > 0 && (size_t)sn < sizeof(sp))
                         hu_conversation_sched_save(sp, (size_t)sn);
                 }
@@ -1828,7 +1828,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         const char *sh = getenv("HOME");
                         if (sh) {
                             char sp[512];
-                            int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sh);
+                            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
                             if (sn > 0 && (size_t)sn < sizeof(sp))
                                 hu_conversation_sched_save(sp, (size_t)sn);
                         }
@@ -2316,7 +2316,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         const char *home_ar = getenv("HOME");
         char ar_path[1024];
         if (home_ar && home_ar[0] &&
-            snprintf(ar_path, sizeof(ar_path), "%s/.human/autoresponder.json", home_ar) > 0) {
+            hu_paths_state(ar_path, sizeof(ar_path), "autoresponder.json") > 0) {
             hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
             if (are == HU_OK && g_autoresponder_cfg.enabled) {
                 g_autoresponder_loaded = true;
@@ -2439,7 +2439,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         const char *home = getenv("HOME");
         if (home) {
             char graph_path[HU_MAX_PATH];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
             if (np > 0 && (size_t)np < sizeof(graph_path)) {
                 if (hu_graph_open(alloc, graph_path, (size_t)np, &graph) != HU_OK)
                     hu_log_error("human", agent ? agent->observer : NULL, "graph open failed: %.*s",
@@ -2464,7 +2464,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         const char *home = getenv("HOME");
         if (home && *home) {
             char ks_dir[HU_MAX_PATH];
-            int kn = snprintf(ks_dir, sizeof(ks_dir), "%s/.human/keys", home);
+            int kn = hu_paths_state(ks_dir, sizeof(ks_dir), "keys");
             if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
                 struct stat ks_st;
                 if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
@@ -2564,10 +2564,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (w14_canned_lb_path[0] == '\0') {
-                            const char *hm = getenv("HOME");
-                            (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path),
-                                           "%s/.human/eval/leaderboard_canned_20.json",
-                                           hm && hm[0] ? hm : "/tmp");
+                            (void)hu_paths_state_or(w14_canned_lb_path, sizeof(w14_canned_lb_path),
+                                                    "/tmp", "eval/leaderboard_canned_20.json");
                         }
                     }
 
@@ -2617,10 +2615,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (w14_prompt_fixture_path[0] == '\0') {
-                            const char *hm = getenv("HOME");
-                            (void)snprintf(w14_prompt_fixture_path, sizeof(w14_prompt_fixture_path),
-                                           "%s/.human/eval/persona_prompts.txt",
-                                           hm && hm[0] ? hm : "/tmp");
+                            (void)hu_paths_state_or(w14_prompt_fixture_path,
+                                                    sizeof(w14_prompt_fixture_path), "/tmp",
+                                                    "eval/persona_prompts.txt");
                         }
                     }
                     w14_lora_ctx.eval_prompt_fixture_path = w14_prompt_fixture_path;
@@ -2628,18 +2625,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
 #endif
             w14_lora_ctx.config_template = hu_learner_default_config();
-            {
-                const char *hm = getenv("HOME");
-                if (hm && hm[0]) {
-                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
-                                   sizeof(w14_lora_ctx.config_template.adapter_output_path),
-                                   "%s/.human/ml/w14_learner_adapter.lora", hm);
-                } else {
-                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
-                                   sizeof(w14_lora_ctx.config_template.adapter_output_path), "%s",
-                                   "/tmp/human_w14_learner_adapter.lora");
-                }
-            }
+            if (hu_paths_state(w14_lora_ctx.config_template.adapter_output_path,
+                               sizeof(w14_lora_ctx.config_template.adapter_output_path),
+                               "ml/w14_learner_adapter.lora") < 0)
+                (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
+                               sizeof(w14_lora_ctx.config_template.adapter_output_path), "%s",
+                               "/tmp/human_w14_learner_adapter.lora");
             if (hu_w14_scheduler_register_lora_runner(agent->w14_scheduler, &w14_lora_ctx) ==
                 HU_OK) {
                 w14_lora_wired = true;
@@ -2667,17 +2658,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 memset(&w14_td_ctx, 0, sizeof(w14_td_ctx));
                 w14_td_ctx.alloc = alloc;
                 w14_td_ctx.scheduler = agent->w14_scheduler;
-                const char *hm = getenv("HOME");
                 static char td_db_path[512];
                 static char td_out_dir[512];
-                if (hm && hm[0]) {
-                    (void)snprintf(td_db_path, sizeof(td_db_path), "%s/.human/memory.db", hm);
-                    (void)snprintf(td_out_dir, sizeof(td_out_dir), "%s/.human/ml/training_data",
-                                   hm);
-                } else {
+                if (hu_paths_state(td_db_path, sizeof(td_db_path), "memory.db") < 0)
                     (void)snprintf(td_db_path, sizeof(td_db_path), "/tmp/human_memory.db");
+                if (hu_paths_state(td_out_dir, sizeof(td_out_dir), "ml/training_data") < 0)
                     (void)snprintf(td_out_dir, sizeof(td_out_dir), "/tmp/human_training_data");
-                }
                 w14_td_ctx.memory_db_path = td_db_path;
                 w14_td_ctx.output_dir = td_out_dir;
                 hu_error_t tde = hu_w14_scheduler_register_training_data_runner(
@@ -2699,22 +2685,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 static char retrain_current_symlink[512];
                 static char retrain_pidfile[512];
                 memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
-                const char *hm2 = getenv("HOME");
-                if (hm2 && hm2[0]) {
-                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
-                                   "%s/.human/ml/seth-lora-candidate", hm2);
-                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
-                                   "%s/.human/ml/seth-lora-current", hm2);
-                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
-                                   "%s/.human/lora_retrain.pid", hm2);
-                } else {
+                if (hu_paths_state(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "ml/seth-lora-candidate") < 0)
                     (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
                                    "/tmp/human_seth_lora_candidate");
+                if (hu_paths_state(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "ml/seth-lora-current") < 0)
                     (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
                                    "/tmp/human_seth_lora_current");
+                if (hu_paths_state(retrain_pidfile, sizeof(retrain_pidfile), "lora_retrain.pid") <
+                    0)
                     (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
                                    "/tmp/human_lora_retrain.pid");
-                }
                 w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
                 w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
                 w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
@@ -3662,8 +3644,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             const char *home = getenv("HOME");
                             char chat_path[512], mem_path[512];
                             if (home) {
-                                snprintf(chat_path, sizeof(chat_path), "%s/.human/chat.db", home);
-                                snprintf(mem_path, sizeof(mem_path), "%s/.human/memory.db", home);
+                                hu_paths_state(chat_path, sizeof(chat_path), "chat.db");
+                                hu_paths_state(mem_path, sizeof(mem_path), "memory.db");
                             } else {
                                 snprintf(chat_path, sizeof(chat_path), ".human/chat.db");
                                 snprintf(mem_path, sizeof(mem_path), ".human/memory.db");
@@ -3671,8 +3653,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             /* Load BPE tokenizer; skip ML if no vocab available */
                             hu_bpe_tokenizer_t *tok = NULL;
                             char vocab_path[512];
-                            snprintf(vocab_path, sizeof(vocab_path),
-                                     "%s/.human/models/tokenizer.vocab", home ? home : ".");
+                            hu_paths_state_or(vocab_path, sizeof(vocab_path), ".",
+                                              "models/tokenizer.vocab");
                             if (hu_bpe_tokenizer_create(alloc, &tok) == HU_OK) {
                                 if (hu_bpe_tokenizer_load(tok, vocab_path) != HU_OK) {
                                     hu_bpe_tokenizer_deinit(tok);
@@ -3734,7 +3716,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *pr_home = getenv("HOME");
                         char pr_db[512];
                         if (pr_home && pr_home[0])
-                            snprintf(pr_db, sizeof(pr_db), "%s/.human/memory.db", pr_home);
+                            hu_paths_state(pr_db, sizeof(pr_db), "memory.db");
                         else
                             snprintf(pr_db, sizeof(pr_db), ".human/memory.db");
                         size_t pr_total = 0;
@@ -13000,8 +12982,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *rh = getenv("HOME");
                                 if (rh) {
                                     char rcp[512];
-                                    int rn = snprintf(rcp, sizeof(rcp),
-                                                      "%s/.human/gif_calibration.json", rh);
+                                    int rn =
+                                        hu_paths_state(rcp, sizeof(rcp), "gif_calibration.json");
                                     if (rn > 0 && (size_t)rn < sizeof(rcp))
                                         hu_conversation_gif_cal_save(rcp, (size_t)rn);
                                 }
@@ -13029,8 +13011,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *gh = getenv("HOME");
                         if (gh) {
                             char gcp[512];
-                            int gn =
-                                snprintf(gcp, sizeof(gcp), "%s/.human/gif_calibration.json", gh);
+                            int gn = hu_paths_state(gcp, sizeof(gcp), "gif_calibration.json");
                             if (gn > 0 && (size_t)gn < sizeof(gcp))
                                 hu_conversation_gif_cal_load(gcp, (size_t)gn);
                         }
@@ -13041,7 +13022,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *mh = getenv("HOME");
                         if (mh) {
                             char mtp[512];
-                            int mn = snprintf(mtp, sizeof(mtp), "%s/.human/music_taste.json", mh);
+                            int mn = hu_paths_state(mtp, sizeof(mtp), "music_taste.json");
                             if (mn > 0 && (size_t)mn < sizeof(mtp))
                                 hu_music_taste_load(mtp, (size_t)mn);
                         }
@@ -13137,9 +13118,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             const char *cal_home = getenv("HOME");
                                             if (cal_home) {
                                                 char cal_path[512];
-                                                int cp_n = snprintf(
-                                                    cal_path, sizeof(cal_path),
-                                                    "%s/.human/gif_calibration.json", cal_home);
+                                                int cp_n =
+                                                    hu_paths_state(cal_path, sizeof(cal_path),
+                                                                   "gif_calibration.json");
                                                 if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
                                                     hu_conversation_gif_cal_save(cal_path,
                                                                                  (size_t)cp_n);
@@ -13177,8 +13158,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *home = getenv("HOME");
                         if (home) {
                             char stk_dir[512];
-                            int sd_n =
-                                snprintf(stk_dir, sizeof(stk_dir), "%s/.human/stickers", home);
+                            int sd_n = hu_paths_state(stk_dir, sizeof(stk_dir), "stickers");
                             if (sd_n > 0 && (size_t)sd_n < sizeof(stk_dir)) {
                                 char stk_path[640];
                                 size_t sp_len = hu_conversation_select_sticker(
@@ -13403,9 +13383,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                         const char *th = getenv("HOME");
                                                         if (th) {
                                                             char tp[512];
-                                                            int tn2 = snprintf(
-                                                                tp, sizeof(tp),
-                                                                "%s/.human/music_taste.json", th);
+                                                            int tn2 = hu_paths_state(
+                                                                tp, sizeof(tp), "music_taste.json");
                                                             if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
                                                                 hu_music_taste_save(tp,
                                                                                     (size_t)tn2);
@@ -13484,9 +13463,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                         const char *th = getenv("HOME");
                                                         if (th) {
                                                             char tp[512];
-                                                            int tn2 = snprintf(
-                                                                tp, sizeof(tp),
-                                                                "%s/.human/music_taste.json", th);
+                                                            int tn2 = hu_paths_state(
+                                                                tp, sizeof(tp), "music_taste.json");
                                                             if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
                                                                 hu_music_taste_save(tp,
                                                                                     (size_t)tn2);

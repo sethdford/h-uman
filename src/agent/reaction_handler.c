@@ -16,6 +16,7 @@
  * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
+#include "human/core/paths.h"
 #include "human/memory/identity_resolver.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
@@ -206,7 +207,7 @@ static int rxn_db_open(void) {
     const char *home = getenv("HOME");
     if (!home || !*home)
         home = "/tmp";
-    snprintf(path_buf, sizeof(path_buf), "%s/.human/reaction_lookup.db", home);
+    (void)hu_paths_state_or(path_buf, sizeof(path_buf), "/tmp", "reaction_lookup.db");
     return rxn_db_open_at(path_buf, &s_db);
 }
 

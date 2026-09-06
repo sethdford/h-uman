@@ -20,6 +20,7 @@
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/eval/bootstrap_ci.h"
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
@@ -719,7 +720,8 @@ hu_error_t hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocat
         const char *home = getenv("HOME");
         if (!home || !home[0])
             home = "/tmp";
-        snprintf(out_dir, sizeof(out_dir), "%s/.human/proofs/demo-%ld", home, (long)hu_e2e_now());
+        long demo_ts = (long)hu_e2e_now();
+        hu_paths_state_or(out_dir, sizeof(out_dir), "/tmp", "proofs/demo-%ld", demo_ts);
     }
     if (write_evidence_dir(out_dir, &run) != HU_OK)
         return HU_ERR_IO;

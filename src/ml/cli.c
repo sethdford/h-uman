@@ -3,6 +3,7 @@
 #include "human/ml/cli.h"
 #include "human/agent/scheduler_status_json.h"
 #include "human/config.h"
+#include "human/core/paths.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #endif
@@ -113,24 +114,7 @@ static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const c
     if (err != HU_OK)
         return err;
 
-    char path[1024];
-    int loaded = 0;
-    if (data_dir && data_dir[0]) {
-        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
-        if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK) {
-            loaded = 1;
-        }
-    }
-    if (!loaded) {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
-            if (n > 0 && (size_t)n < sizeof(path))
-                (void)hu_bpe_tokenizer_load(tok, path);
-        }
-        /* On both failures, tok keeps its default 256-byte byte-level vocab
-         * — every token is one byte, BPB is well-defined. */
-    }
+    (void)hu_bpe_tokenizer_load_default(tok, data_dir); /* default byte vocab on a miss */
 
     int32_t *token_bytes = NULL;
     size_t count = 0;
@@ -417,7 +401,7 @@ static void print_scheduler_status_block(void) {
     if (!home || !*home)
         return;
     char path[512];
-    int n = snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    int n = hu_paths_state(path, sizeof(path), "scheduler.status");
     if (n <= 0 || (size_t)n >= sizeof(path))
         return;
     FILE *f = fopen(path, "r");
@@ -586,7 +570,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
             fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
-        int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+        int n = hu_paths_state(default_db, sizeof(default_db), "memory.db");
         if (n <= 0 || (size_t)n >= sizeof(default_db))
             return HU_ERR_INTERNAL;
         db_path = default_db;
@@ -755,7 +739,7 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
         if (!db_path) {
             const char *home = getenv("HOME");
             if (home) {
-                snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+                hu_paths_state(default_db, sizeof(default_db), "memory.db");
                 db_path = default_db;
             }
         }
@@ -1149,10 +1133,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
              * default_adapter[512] into adapter_output_path[256] via "%s",
              * which GCC -Werror=format-truncation rejects. home/persona_name
              * are unbounded char* so GCC cannot prove truncation here. */
-            const char *home = getenv("HOME");
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
-                     "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
-                     persona_name);
+            hu_paths_state_or(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), ".",
+                              "training-data/adapters/lora-persona-%s", persona_name);
         }
 
         if (data_dir) {
@@ -3310,7 +3292,7 @@ hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const
             const char *home = getenv("HOME");
             if (!home)
                 home = ".";
-            snprintf(home_db, sizeof(home_db), "%s/.human/memory.db", home);
+            (void)hu_paths_state_or(home_db, sizeof(home_db), ".", "memory.db");
             db_path = home_db;
         }
     }
@@ -3318,7 +3300,7 @@ hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const
         const char *home = getenv("HOME");
         if (!home)
             home = ".";
-        snprintf(home_export, sizeof(home_export), "%s/.human/dpo/reactions.jsonl", home);
+        (void)hu_paths_state_or(home_export, sizeof(home_export), ".", "dpo/reactions.jsonl");
         export_path = home_export;
         (void)hu_dpo_miner_ensure_parent_dir(export_path);
     }

@@ -5,6 +5,7 @@
 #include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/providers/api_key.h"
 #include <stdbool.h>
@@ -608,8 +609,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         workspace_dir[sizeof(workspace_dir) - 1] = '\0';
     } else {
         char path_buf[HU_MAX_PATH];
-        int n =
-            snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR, HU_CONFIG_FILE);
+        int n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_CONFIG_FILE);
         if (n <= 0 || (size_t)n >= sizeof(path_buf)) {
             out->config_path = hu_strdup(&a, "");
             out->workspace_dir = hu_strdup(&a, ".");
@@ -622,8 +622,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         strncpy(global_path, path_buf, sizeof(global_path) - 1);
         global_path[sizeof(global_path) - 1] = '\0';
 
-        n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR,
-                     HU_DEFAULT_WORKSPACE);
+        n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_DEFAULT_WORKSPACE);
         if (n > 0 && (size_t)n < sizeof(path_buf))
             strncpy(workspace_dir, path_buf, sizeof(workspace_dir) - 1);
         else
@@ -653,7 +652,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
     /* Tighten config directory permissions if too permissive (default path only) */
     if (!path_override || !path_override[0]) {
         char dir_buf[HU_MAX_PATH];
-        int dn = snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, HU_CONFIG_DIR);
+        int dn = hu_paths_state_dir_or(dir_buf, sizeof(dir_buf), ".");
         if (dn > 0 && (size_t)dn < sizeof(dir_buf)) {
             struct stat dir_st;
             if (stat(dir_buf, &dir_st) == 0 && (dir_st.st_mode & 0077) != 0)

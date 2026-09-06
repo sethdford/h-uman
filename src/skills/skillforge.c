@@ -4,6 +4,7 @@
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -619,12 +620,12 @@ hu_error_t hu_skillforge_install(const char *name, const char *url) {
         return HU_ERR_INVALID_ARGUMENT;
 
     char path[1024];
-    int n = snprintf(path, sizeof(path), "%s/.human/skills/%.256s.skill.json", home, name);
+    int n = hu_paths_state(path, sizeof(path), "skills/%.256s.skill.json", name);
     if (n <= 0 || (size_t)n >= sizeof(path))
         return HU_ERR_INVALID_ARGUMENT;
 
     char dir_path[1024];
-    n = snprintf(dir_path, sizeof(dir_path), "%s/.human/skills", home);
+    n = hu_paths_state(dir_path, sizeof(dir_path), "skills");
     if (n <= 0 || (size_t)n >= sizeof(dir_path))
         return HU_ERR_INVALID_ARGUMENT;
 #ifndef _WIN32
@@ -880,10 +881,11 @@ hu_error_t hu_skillforge_build_prompt_catalog(hu_allocator_t *alloc, hu_skillfor
                              sf->skills[i].description ? sf->skills[i].description : "");
     }
     if (omitted > 0) {
-        pos = hu_buf_appendf(buf, cap, pos,
-                             "\n(%zu more skills installed; use skill_run with a skill name for full "
-                             "instructions.)\n",
-                             omitted);
+        pos =
+            hu_buf_appendf(buf, cap, pos,
+                           "\n(%zu more skills installed; use skill_run with a skill name for full "
+                           "instructions.)\n",
+                           omitted);
     }
     buf[pos] = '\0';
     *out = buf;
@@ -908,8 +910,7 @@ hu_error_t hu_skillforge_uninstall(hu_skillforge_t *sf, const char *name) {
             const char *home = getenv("HOME");
             if (home) {
                 char path[1024];
-                int n =
-                    snprintf(path, sizeof(path), "%s/.human/skills/%.256s.skill.json", home, name);
+                int n = hu_paths_state(path, sizeof(path), "skills/%.256s.skill.json", name);
                 if (n > 0 && (size_t)n < sizeof(path))
                     remove(path);
             }

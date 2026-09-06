@@ -33,6 +33,7 @@ new_repo() {
 baseline_of() { grep -oE '^FOO_BASELINE=[0-9]+' "$1/gate.sh" | cut -d= -f2; }
 staged_p()   { git -C "$1" diff --cached --name-only | grep -qx gate.sh && echo yes || echo no; }
 
+export HU_RATCHET_FROM_HOOK=1   # the cases below model the pre-commit hook
 echo "ratchet_autolock:"
 
 # 1. Measured BELOW baseline -> tighten and stage. The whole point.
@@ -74,6 +75,9 @@ done
 d=$(new_repo)
 ( cd "$d" && . "$LIB" && HU_RATCHET_NO_AUTOLOCK=1 ratchet_autolock FOO_BASELINE 90 gate.sh >/dev/null )
 check "HU_RATCHET_NO_AUTOLOCK=1 disables it"     "100" "$(baseline_of "$d")"
+
+d=$(new_repo); ( cd "$d" && . "$LIB" && HU_RATCHET_FROM_HOOK=0 ratchet_autolock FOO_BASELINE 90 gate.sh >/dev/null 2>&1 )
+check "manual run (not from the hook) does not lock" "100" "$(baseline_of "$d")"
 rm -rf "$d"
 
 # 7. Unknown variable name -> no-op, no crash.
