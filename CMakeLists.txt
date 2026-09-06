@@ -3387,6 +3387,7 @@ set(HU_TEST_SOURCES
     tests/test_init_dpo_bridge.c
     tests/test_prompt_budget.c
     tests/test_prompt_budget_snapshot.c
+    tests/test_daemon_maintenance.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_file_slurp.c

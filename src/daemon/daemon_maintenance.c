@@ -66,6 +66,30 @@ hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *conf
     return cfg;
 }
 
+bool hu_daemon_prompt_budget_flush(hu_prompt_budget_t *budget, int64_t now_ms,
+                                   int64_t *last_flush_ms) {
+    if (!budget || !last_flush_ms)
+        return false;
+    /* First call always flushes: the tick fires on service-loop entry, so a
+     * restarted daemon replaces the previous process's file immediately
+     * instead of letting it age through doctor's 120 s window. After that
+     * the gap is deliberately half the tick period — a gate equal to the
+     * period skips every tick whose monotonic delta lands a few ms short
+     * (the 2026-09-06 alternate-minute skip). */
+    if (*last_flush_ms != 0 && now_ms - *last_flush_ms < HU_DAEMON_PB_FLUSH_MIN_GAP_MS)
+        return false;
+    hu_error_t err = hu_prompt_budget_save_snapshot(budget);
+    if (err != HU_OK) {
+        static atomic_bool warned = false;
+        hu_log_warn_once(&warned, "human", NULL,
+                         "prompt_budget snapshot flush failed: %s — doctor will report "
+                         "~/.human/prompt_budget.snapshot.json stale until a flush succeeds",
+                         hu_error_string(err));
+    }
+    *last_flush_ms = now_ms;
+    return true;
+}
+
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
 void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
@@ -97,18 +121,14 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
             last_verifier_flush_ms = now_vf_ms;
         }
         /* prompt_budget snapshot flush — operator visibility for
-         * the B3 Phase 1 accumulator. Mirrors verifier's 60s
-         * cadence but uses the atomic Personal Model write
-         * discipline (verifier's own write is non-atomic — a
-         * documented weakness; we don't propagate it here).
+         * the B3 Phase 1 accumulator. Flushes on the first tick and
+         * on every tick thereafter (gate in hu_daemon_prompt_budget_flush,
+         * pinned by tests/test_daemon_maintenance.c) using the atomic
+         * Personal Model write discipline (verifier's own write is
+         * non-atomic — a documented weakness; we don't propagate it here).
          * See docs/plans/2026-05-25-doctor-prompt-budget-initiative/. */
         static int64_t last_pb_flush_ms = 0;
-        if (last_pb_flush_ms == 0)
-            last_pb_flush_ms = now_vf_ms;
-        if (agent->prompt_budget && now_vf_ms - last_pb_flush_ms >= 60000) {
-            (void)hu_prompt_budget_save_snapshot(agent->prompt_budget);
-            last_pb_flush_ms = now_vf_ms;
-        }
+        (void)hu_daemon_prompt_budget_flush(agent->prompt_budget, now_vf_ms, &last_pb_flush_ms);
     }
     /* Periodic memory consolidation */
     if (config && config->consolidation_interval_hours > 0 && agent && agent->memory) {
