@@ -1,4 +1,5 @@
-/* contact_insights repo + the memory loader's HU_INSIGHT_STREAM block.
+/* contact_insights repo (src/memory/repos/contact_insights_repo_sqlite.c) +
+ * the memory loader's HU_INSIGHT_STREAM block.
  * Item 3 of docs/plans/2026-09-06-better-than-human. */
 
 #include "test_framework.h"

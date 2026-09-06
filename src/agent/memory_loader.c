@@ -65,8 +65,10 @@ void hu_memory_loader_set_insight_mode_for_test(int mode) {
 #define HU_INSIGHT_MAX_BYTES      900
 #define HU_INSIGHT_MIN_CONFIDENCE 0.5
 
+#ifdef HU_ENABLE_SQLITE /* only the SQLite build renders the block (see below) */
 static const char k_insight_header[] =
     "### What you actually remember about them (weave in naturally, never recite):\n";
+#endif
 
 static void append_contact_insights(hu_memory_loader_t *loader, const char *session_id,
                                     size_t session_id_len, char **out_context,
@@ -74,6 +76,18 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *sess
     hu_gate_mode_t mode = hu_memory_loader_insight_mode();
     if (mode == HU_GATE_OFF || !loader->memory)
         return;
+#ifndef HU_ENABLE_SQLITE
+    /* The insight stream lives in the SQLite repo
+     * (src/memory/repos/contact_insights_repo_sqlite.c, registered under
+     * if(HU_ENABLE_SQLITE)); without it there is nothing to render. Left as
+     * an unconditional call, minimal-build / no-sqlite / cross-arm64 fail to
+     * link on hu_contact_insights_render (Human CI 2026-09-06). */
+    (void)session_id;
+    (void)session_id_len;
+    (void)out_context;
+    (void)out_context_len;
+    return;
+#else
     char *lines = NULL;
     size_t lines_len = 0;
     hu_error_t rerr = hu_contact_insights_render(
@@ -102,6 +116,7 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *sess
         }
     }
     loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
+#endif
 }
 
 static hu_retrieval_mode_t adaptive_to_retrieval_mode(hu_adaptive_strategy_t strategy) {
