@@ -22,6 +22,14 @@
  *      about you?", "How was your day?") when there is real content before
  *      it. Genuine content-bearing questions never match (exact-phrase
  *      match, not substring — substring-classifier-pitfalls discipline).
+ *   C. Capitalize a lowercase start (2026-09-06). The card says the persona
+ *      starts lowercase 8.6% of the time (a phone autocapitalizes; the rest
+ *      are deliberate overrides); the served adapter starts lowercase 80%
+ *      (production_outcomes, last 3 days) and the prompt rule alone did not
+ *      move it. Hash-gated so lowercase starts land at the card's rate, not
+ *      0%. Applies to the first letter and to the first letter after each
+ *      newline (each line is a bubble). URL starts and non-letters are left
+ *      alone. HU_STYLE_GOVERNOR_CASING=off disables only this action.
  *
  * STYLE_GOVERNOR activation is gated on the blind A/B rating-drip
  * measurement (docs/evaluation/blind_ab_gate.json): do not flip to
@@ -48,6 +56,7 @@ typedef enum hu_style_governor_mode {
 /* Action bits reported by hu_style_governor_shape. */
 #define HU_STYLE_GOV_ACTION_PERIOD_STRIPPED   (1u << 0)
 #define HU_STYLE_GOV_ACTION_QUESTION_STRIPPED (1u << 1)
+#define HU_STYLE_GOV_ACTION_START_CAPITALIZED (1u << 2)
 
 /* Pure shaping core (security-predicate-extraction pattern: testable
  * without the pipeline).
@@ -65,6 +74,26 @@ typedef enum hu_style_governor_mode {
 hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size_t len,
                                    unsigned period_roll, char **out, size_t *out_len,
                                    unsigned *actions);
+
+/* Full shaping core: actions A, B and C. `casing_roll` is 0-99; a lowercase
+ * start is capitalized when casing_roll >= lowercase_start_pct, so exactly
+ * lowercase_start_pct% of lowercase-starting messages keep it. 100 never
+ * capitalizes (the casing kill switch); 0 always does.
+ * hu_style_governor_shape is this with casing disabled (pct 100). */
+hu_error_t hu_style_governor_shape_ex(hu_allocator_t *alloc, const char *text, size_t len,
+                                      unsigned period_roll, unsigned casing_roll,
+                                      unsigned lowercase_start_pct, char **out, size_t *out_len,
+                                      unsigned *actions);
+
+/* Second, independent 0-99 roll for action C (different hash basis, so the
+ * casing decision is not correlated with the period decision). */
+unsigned hu_style_governor_casing_roll(const char *text, size_t len);
+
+/* Card-derived lowercase-start percentage for action C, resolved once per
+ * process from the persona's style card (compiled default when absent) and
+ * cached; 100 when HU_STYLE_GOVERNOR_CASING=off. `persona` may be NULL. */
+struct hu_persona;
+unsigned hu_style_governor_lowercase_start_pct(const struct hu_persona *persona);
 
 /* FNV-1a based 0-99 roll for a message — exposed so tests and the stage
  * derive identical values. */
