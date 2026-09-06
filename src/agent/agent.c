@@ -2011,17 +2011,13 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
             hu_log_warn("agent", NULL, "W7 facade open failed: %s", hu_error_string(err));
     }
     if (agent->w7_facade && !agent->w15_audit_log) {
-        const char *home = getenv("HOME");
-        if (home) {
-            char audit_path[512];
-            int ap = hu_paths_state(audit_path, sizeof(audit_path), "audit_log.db");
-            if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
-                hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
-                                                     &agent->w15_audit_log);
-                if (ae != HU_OK)
-                    hu_log_warn("agent", NULL, "W15 audit log open failed: %s",
-                                hu_error_string(ae));
-            }
+        char audit_path[512];
+        int ap = hu_paths_state(audit_path, sizeof(audit_path), "audit_log.db");
+        if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
+            hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
+                                                 &agent->w15_audit_log);
+            if (ae != HU_OK)
+                hu_log_warn("agent", NULL, "W15 audit log open failed: %s", hu_error_string(ae));
         }
     }
     if (agent->w7_facade && !agent->w14_scheduler) {

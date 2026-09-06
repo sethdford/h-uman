@@ -204,9 +204,6 @@ static int rxn_db_open(void) {
         return 1;
 
     static char path_buf[1024];
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        home = "/tmp";
     (void)hu_paths_state_or(path_buf, sizeof(path_buf), "/tmp", "reaction_lookup.db");
     return rxn_db_open_at(path_buf, &s_db);
 }

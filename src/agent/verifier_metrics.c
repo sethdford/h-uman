@@ -11,9 +11,6 @@
 bool hu_verifier_metrics_path(char *out, size_t cap) {
     if (!out || cap == 0)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
     int n = hu_paths_state(out, cap, "verifier_metrics.json");
     return n > 0 && (size_t)n < cap;
 }

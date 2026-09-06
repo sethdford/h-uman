@@ -629,24 +629,21 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
              * tier (turn_tier < 0) skip it. */
             if (agent->config && agent->config->agent.rag_grounding_enabled &&
                 agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
-                const char *home = getenv("HOME");
-                if (home && *home) {
-                    char qbuf[512];
-                    size_t qn = msg_len < sizeof(qbuf) - 1 ? msg_len : sizeof(qbuf) - 1;
-                    if (msg && qn > 0) {
-                        memcpy(qbuf, msg, qn);
-                        qbuf[qn] = '\0';
-                        char cpath[768];
-                        int pn = hu_paths_state(cpath, sizeof(cpath), "voice_corpus.jsonl");
-                        if (pn > 0 && (size_t)pn < sizeof(cpath)) {
-                            char rag_buf[2048];
-                            size_t rn = hu_persona_rag_ground_from_file(
-                                qbuf, cpath, 3, rag_buf, sizeof(rag_buf), agent->alloc);
-                            if (rn > 0) {
-                                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n%s", rag_buf);
-                                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                                    lpo += (size_t)n;
-                            }
+                char qbuf[512];
+                size_t qn = msg_len < sizeof(qbuf) - 1 ? msg_len : sizeof(qbuf) - 1;
+                if (msg && qn > 0) {
+                    memcpy(qbuf, msg, qn);
+                    qbuf[qn] = '\0';
+                    char cpath[768];
+                    int pn = hu_paths_state(cpath, sizeof(cpath), "voice_corpus.jsonl");
+                    if (pn > 0 && (size_t)pn < sizeof(cpath)) {
+                        char rag_buf[2048];
+                        size_t rn = hu_persona_rag_ground_from_file(qbuf, cpath, 3, rag_buf,
+                                                                    sizeof(rag_buf), agent->alloc);
+                        if (rn > 0) {
+                            int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n%s", rag_buf);
+                            if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                                lpo += (size_t)n;
                         }
                     }
                 }

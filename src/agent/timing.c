@@ -387,11 +387,9 @@ hu_error_t hu_timing_model_learn_from_chatdb(hu_timing_model_t *model, const cha
                                              size_t contact_id_len) {
     if (!model || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *home = getenv("HOME");
-    if (!home)
-        return HU_ERR_INVALID_ARGUMENT;
     char path[512];
-    hu_paths_chatdb(path, sizeof(path));
+    if (hu_paths_chatdb(path, sizeof(path)) < 0)
+        return HU_ERR_INVALID_ARGUMENT;
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
         if (db)

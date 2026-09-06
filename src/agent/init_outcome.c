@@ -126,9 +126,6 @@ size_t hu_init_outcome_resolve_path(char *out_buf, size_t out_cap) {
         return copy;
     }
 #endif
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
     int n = hu_paths_state(out_buf, out_cap, "%s", HU_INIT_OUTCOME_FILENAME);
     if (n <= 0)
         return 0;
@@ -687,9 +684,6 @@ static hu_error_t query_chat_db_for_reply(const char *target, int64_t since_unix
                                           int64_t *reply_at) {
     *has_reply = false;
     *reply_at = 0;
-    const char *home = getenv("HOME");
-    if (!home)
-        return HU_ERR_IO;
     char db_path[1024];
     int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n <= 0 || (size_t)n >= sizeof(db_path))

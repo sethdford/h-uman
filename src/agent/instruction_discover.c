@@ -315,28 +315,25 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
 
     /* 3. User-level: ~/.human/instructions.md */
     {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            char user_path[PATH_MAX];
-            int n = hu_paths_state(user_path, sizeof(user_path), "instructions.md");
-            if (n > 0 && (size_t)n < sizeof(user_path)) {
-                char *canon = NULL;
-                size_t canon_len = 0;
-                err = hu_instruction_validate_path(alloc, user_path, (size_t)n, &canon, &canon_len);
-                if (err == HU_OK && canon) {
-                    struct stat st;
-                    if (stat(canon, &st) == 0 && S_ISREG(st.st_mode)) {
-                        if (!inode_visited(visited_inodes, visited_count, st.st_ino)) {
-                            hu_instruction_file_t file;
-                            err = hu_instruction_file_read(alloc, canon,
-                                                           HU_INSTRUCTION_SOURCE_USER_HOME, &file);
-                            if (err == HU_OK) {
-                                disc->files[disc->file_count++] = file;
-                            }
+        char user_path[PATH_MAX];
+        int n = hu_paths_state(user_path, sizeof(user_path), "instructions.md");
+        if (n > 0 && (size_t)n < sizeof(user_path)) {
+            char *canon = NULL;
+            size_t canon_len = 0;
+            err = hu_instruction_validate_path(alloc, user_path, (size_t)n, &canon, &canon_len);
+            if (err == HU_OK && canon) {
+                struct stat st;
+                if (stat(canon, &st) == 0 && S_ISREG(st.st_mode)) {
+                    if (!inode_visited(visited_inodes, visited_count, st.st_ino)) {
+                        hu_instruction_file_t file;
+                        err = hu_instruction_file_read(alloc, canon,
+                                                       HU_INSTRUCTION_SOURCE_USER_HOME, &file);
+                        if (err == HU_OK) {
+                            disc->files[disc->file_count++] = file;
                         }
                     }
-                    alloc->free(alloc->ctx, canon, canon_len + 1);
                 }
+                alloc->free(alloc->ctx, canon, canon_len + 1);
             }
         }
     }

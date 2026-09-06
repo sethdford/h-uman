@@ -205,9 +205,6 @@ size_t hu_prompt_budget_snapshot_path(char *out_buf, size_t out_cap) {
         return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
     }
 #endif
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
     int n = hu_paths_state(out_buf, out_cap, "prompt_budget.snapshot.json");
     return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
 }

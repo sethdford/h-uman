@@ -32,11 +32,6 @@ static void default_trace_dir(char *buf, size_t cap) {
     }
     (void)hu_paths_state(buf, cap, "hula_traces");
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0]) {
-        buf[0] = '\0';
-        return;
-    }
     (void)hu_paths_state(buf, cap, "hula_traces");
 #endif
 }
@@ -350,10 +345,10 @@ hu_error_t hu_hula_emergence_promote(hu_allocator_t *alloc, const char *skills_d
             return HU_ERR_INVALID_ARGUMENT;
         memcpy(base, skills_dir, strlen(skills_dir) + 1);
     } else {
-        const char *home = getenv("HOME");
-        if (!home)
+        int n = hu_paths_state(base, sizeof(base), "skills");
+        if (n < 0)
             return HU_ERR_NOT_FOUND;
-        if (hu_paths_state(base, sizeof(base), "skills") >= (int)sizeof(base))
+        if (n >= (int)sizeof(base))
             return HU_ERR_INVALID_ARGUMENT;
     }
     if (hula_trace_prepare_dir(base, true) != HU_OK)

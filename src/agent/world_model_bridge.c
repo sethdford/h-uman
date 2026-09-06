@@ -1378,9 +1378,6 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
 bool hu_w14_scheduler_status_path(char *out_path, size_t cap) {
     if (!out_path || cap == 0)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        return false;
     int n = hu_paths_state(out_path, cap, "scheduler.status");
     return n > 0 && (size_t)n < cap;
 }

@@ -872,13 +872,10 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     hu_agent_set_retrieval_engine(agent_p, &retrieval_engine);
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[1024];
-            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
-            if (np > 0 && (size_t)np < sizeof(graph_path))
-                (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
-        }
+        char graph_path[1024];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path))
+            (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
     }
     if (cli_graph) {
         hu_retrieval_set_graph(&retrieval_engine, cli_graph);
@@ -915,10 +912,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
      * or generate a session ID so auto_save works for new sessions. */
     {
         char sessions_dir[512];
-        const char *home = getenv("HOME");
-        if (home)
-            hu_paths_state(sessions_dir, sizeof(sessions_dir), "sessions");
-        else
+        if (hu_paths_state(sessions_dir, sizeof(sessions_dir), "sessions") < 0)
             snprintf(sessions_dir, sizeof(sessions_dir), ".human/sessions");
         if (parsed_args.session_id && parsed_args.session_id[0]) {
             size_t sid_len = strlen(parsed_args.session_id);
