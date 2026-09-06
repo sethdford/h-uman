@@ -489,7 +489,18 @@ elif [[ -f "$SOURCE_JSONL" ]]; then
     staged="$ADAPTER_OUT"
     [[ -d "$staged" ]] || staged=$(ls -d "${ADAPTER_OUT}"-* 2>/dev/null | head -1)
     if [[ "$train_rc" != "0" ]]; then
-        log "  training FAILED rc=$train_rc — see the lines above; NO adapter was produced tonight"
+        # rc!=0 means one of two very different things: the trainer crashed and
+        # produced nothing, or it trained a REAL adapter and its own quality
+        # gate refused promotion. On 2026-09-06 the gate FAILed (val loss 3.548
+        # vs best-of-history 3.384, rc=1) and this line reported "NO adapter was
+        # produced" over a real 556 MB one. Tell them apart by looking.
+        if [[ -n "$staged" && -d "$staged" ]] && why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
+            gate_line="$(grep -a -E '\[quality-gate\] Regression verdict:' "$LOG" 2>/dev/null | tail -1 | sed 's/^ *//')"
+            log "  training exited rc=$train_rc but a REAL adapter was staged: $staged — $why"
+            log "  training_loop's quality gate refused promotion (${gate_line:-no verdict line found}); adapter stays STAGED, NOT promoted"
+        else
+            log "  training FAILED rc=$train_rc — see the lines above; NO real adapter was produced tonight"
+        fi
     elif [[ -z "$staged" || ! -d "$staged" ]]; then
         log "  WARNING: rc=0 but no adapter dir at $ADAPTER_OUT — treating as failure"
         train_rc=3
