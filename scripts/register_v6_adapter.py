@@ -7,6 +7,12 @@ a val loss nobody measured is the failure class in
 row when the evidence it would cite is absent.
 
 Usage: register_v6_adapter.py --adapter <dir> --log <train log> [--smoke <json>]
+       register_v6_adapter.py --retire <name> --reason "..." [--status rejected] [--force]
+
+--retire stamps a first-class lifecycle status (retired|rejected) on an existing
+entry so every enumerating reader (adapter_registry.iter_adapters / status)
+hides it. It refuses the SERVED adapter outright (config.json
+personalization.lora_adapter_path), and refuses a promoted one without --force.
 """
 import argparse
 import json
@@ -15,7 +21,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from adapter_registry import record_training  # noqa: E402
+from adapter_registry import (  # noqa: E402
+    DEFAULT_REGISTRY_PATH, STATUS_REJECTED, STATUS_RETIRED, load_registry,
+    record_retirement, record_training)
+
+# US-2: annotate (never block -- this script never sets promoted=True
+# regardless, see module docstring) with the same LUAR promotion-gate
+# verdict m3_promote.py enforces. Imported, not reimplemented.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blind_ab"))
+try:
+    from authorship_promotion_gate import (  # noqa: E402
+        _find_latest_score_json, decide_promotion, load_gate_inputs_from_score_json)
+except ImportError:
+    _find_latest_score_json = decide_promotion = load_gate_inputs_from_score_json = None
+
+DEFAULT_CONFIG_PATH = Path.home() / ".human" / "config.json"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # mlx_lm_lora (preference modes) reports accuracy and margin; mlx_lm (SFT) reports
@@ -58,14 +78,119 @@ def val_is_inert(vals):
     return len({v[1] for v in vals}) == 1
 
 
+def served_adapter_names(config_path: Path) -> set:
+    """Every spelling config.json uses for the adapter :8741 is serving.
+
+    lora_adapter_path is authoritative (it is what mlx-server was launched
+    with); lora_adapter_id is the registry key and normally its basename. Both
+    are returned so a mismatch between them still protects whichever one the
+    caller names.
+    """
+    try:
+        cfg = json.loads(Path(config_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    pers = cfg.get("personalization", {}) or {}
+    names = set()
+    if pers.get("lora_adapter_path"):
+        names.add(Path(pers["lora_adapter_path"]).name)
+    if pers.get("lora_adapter_id"):
+        names.add(pers["lora_adapter_id"])
+    return {n for n in names if n}
+
+
+def entry_is_promoted(entry: dict) -> bool:
+    """Promoted means it served: either m3_promote.py's top-level `promotion`
+    block, or a training row whose metrics say promoted=true."""
+    if entry.get("promotion"):
+        return True
+    return any(bool((t.get("metrics") or {}).get("promoted"))
+               for t in entry.get("training", []) or [])
+
+
+def _read_authorship_gate_for(adapter_path) -> dict:
+    """US-2 annotation (informational only -- see
+    scripts/blind_ab/authorship_promotion_gate.py). This script never calls
+    sys.exit on BLOCK: recording that a regression happened is useful
+    staging evidence for the human who decides whether to run
+    scripts/m3_promote.py at all (the same reason human_gate: PENDING and
+    smoke: NOT_RUN already exist here as non-blocking annotations), and this
+    script never sets metrics["promoted"] = True regardless of what this
+    returns.
+
+    {"status": "NOT_RUN"} means no matching candidate-authorship-*.json
+    exists yet for this adapter. {"status": "INCONCLUSIVE", ...} means one
+    was found but the measurement it needs is missing/malformed. Otherwise
+    the real decide_promotion() verdict dict is returned with
+    status="RAN" -- verdict is one of PASS/BLOCK/HOLD (noise-aware,
+    CI-based three-way gate; F1 fix, 2026-09-05), never a fourth value.
+    """
+    if _find_latest_score_json is None:
+        return {"status": "NOT_RUN", "reason": "authorship_promotion_gate module unavailable"}
+    gap_json = _find_latest_score_json(str(adapter_path))
+    if not gap_json:
+        return {"status": "NOT_RUN"}
+    try:
+        inputs = load_gate_inputs_from_score_json(gap_json)
+    except SystemExit as e:
+        return {"status": "INCONCLUSIVE", "reason": str(e), "score_json": gap_json}
+    verdict = decide_promotion(inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"],
+                               inputs["candidate_twin_ci95"])
+    verdict["status"] = "RAN"
+    verdict["score_json"] = gap_json
+    return verdict
+
+
+def retire(a) -> None:
+    name = a.retire
+    if not a.reason or not a.reason.strip():
+        sys.exit("FATAL: --retire needs --reason; an unexplained retired row is a non-measurement")
+
+    served = served_adapter_names(Path(a.config))
+    if name in served:
+        # No --force override: hiding the served adapter from every reader
+        # would make the status report and the promotion gates blind to
+        # production. Un-serve it first, then retire.
+        sys.exit(f"FATAL: {name} is the served adapter per {a.config} "
+                 "personalization.lora_adapter_path -- refusing to retire what :8741 answers with")
+
+    registry = load_registry(Path(a.registry))
+    entry = registry.get("adapters", {}).get(name)
+    if entry is None:
+        sys.exit(f"FATAL: {name} is not in registry {a.registry}")
+    if entry_is_promoted(entry) and not a.force:
+        sys.exit(f"FATAL: {name} has promoted evidence in the registry; pass --force to retire it anyway")
+
+    record_retirement(registry_path=Path(a.registry), adapter_id=name,
+                      status=a.status, reason=a.reason)
+    print(f"[registry] {name}: status={a.status}")
+    print(f"  reason       : {a.reason.strip()}")
+    print(f"  registry     : {a.registry}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--adapter", required=True)
-    ap.add_argument("--log", required=True)
+    ap.add_argument("--adapter", help="adapter dir to register (with --log)")
+    ap.add_argument("--log", help="training log the metrics are parsed from")
     ap.add_argument("--smoke")
     ap.add_argument("--corpus-manifest",
                     default=str(Path.home() / ".human/training-data/glm-v6-pref/manifest.json"))
+    ap.add_argument("--retire", metavar="NAME", help="mark an existing entry retired/rejected")
+    ap.add_argument("--reason", help="why (required with --retire)")
+    ap.add_argument("--status", choices=[STATUS_RETIRED, STATUS_REJECTED], default=STATUS_RETIRED,
+                    help="lifecycle status to set with --retire (default: retired)")
+    ap.add_argument("--force", action="store_true",
+                    help="retire even if the entry has promoted evidence (never the served adapter)")
+    ap.add_argument("--registry", default=str(DEFAULT_REGISTRY_PATH))
+    ap.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                    help="config.json that names the served adapter")
     a = ap.parse_args()
+
+    if a.retire:
+        retire(a)
+        return
+    if not a.adapter or not a.log:
+        ap.error("--adapter and --log are required unless --retire is given")
 
     adapter = Path(a.adapter)
     cfg_path = adapter / "adapter_config.json"
@@ -173,6 +298,11 @@ def main():
         "train_series": trains or None,
         "corpus_manifest": a.corpus_manifest,
         "train_log": a.log,
+        # US-2: LUAR promotion-gate verdict, if a nightly candidate-authorship
+        # run has scored this adapter already. Informational only -- never
+        # flips `promoted` below, which stays False regardless (see
+        # _read_authorship_gate_for's docstring).
+        "authorship_gate": _read_authorship_gate_for(adapter),
         # Provenance for the promotion gate: this adapter is NOT certified.
         "human_gate": "PENDING -- cycle-5 sheet not generated/rated",
         "promoted": False,
@@ -211,7 +341,7 @@ def main():
         metrics["smoke"] = {"status": "NOT_RUN"}
 
     adapter_id = adapter.name
-    record_training(adapter_id=adapter_id, metrics=metrics)
+    record_training(registry_path=Path(a.registry), adapter_id=adapter_id, metrics=metrics)
     print(f"[registry] recorded training for {adapter_id}")
     print(f"  n_pairs      : {metrics['n_pairs']} {metrics['n_pairs_by_source']}")
     print(f"  train loss   : {metrics['train_loss_first']} -> {metrics['train_loss_last']}")
@@ -225,6 +355,9 @@ def main():
     print(f"  lora_b       : {b_nonzero}/{len(bkeys)} non-zero, max|B|={b_max:.3e}")
     print(f"  lora scale   : {scale}")
     print(f"  human gate   : {metrics['human_gate']}")
+    print(f"  authorship   : {metrics['authorship_gate'].get('status')}"
+          + (f" ({metrics['authorship_gate'].get('verdict')}/{metrics['authorship_gate'].get('reason')})"
+             if metrics["authorship_gate"].get("status") == "RAN" else ""))
 
 
 if __name__ == "__main__":

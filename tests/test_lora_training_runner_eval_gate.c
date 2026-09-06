@@ -7,6 +7,7 @@
 #include "human/persona/persona_deltas.h"
 #include "human/provider_test_seam.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <unistd.h>
 
@@ -60,8 +61,6 @@ static void test_runner_blocks_promotion_when_gate_rejects(void) {
     char path[256];
     snprintf(path, sizeof(path), "/tmp/test-adapter-%d.lora", (int)getpid());
     unlink(path);
-    unlink("/tmp/test-adapter.lora");
-    unlink("/tmp/test-adapter.lora.rejected");
 
     hu_lora_runner_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
@@ -76,7 +75,9 @@ static void test_runner_blocks_promotion_when_gate_rejects(void) {
     snprintf(ctx.config_template.adapter_output_path,
              sizeof(ctx.config_template.adapter_output_path), "%s", path);
 
-    setenv("HOME", "/tmp/test-home", 1);
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(home, sizeof(home), "test-home"));
+    setenv("HOME", home, 1);
     hu_lora_runner_set_test_clock(1747042800);
 
     hu_job_spec_t spec;
@@ -139,7 +140,9 @@ static void test_runner_promotes_measured_gate_scores(void) {
     snprintf(ctx.config_template.adapter_output_path,
              sizeof(ctx.config_template.adapter_output_path), "%s", path);
 
-    setenv("HOME", "/tmp/test-home", 1);
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(home, sizeof(home), "test-home"));
+    setenv("HOME", home, 1);
     hu_lora_runner_set_test_clock(1747042800);
 
     hu_job_spec_t spec;

@@ -11,6 +11,7 @@
 #include "human/memory/graph.h"
 #include "human/ml/lora_retrain_runner.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -172,7 +173,10 @@ static void test_retrain_without_finetune_script_skips_after_probe(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
+    char cand[512], cur[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand, sizeof(cand), "test_candidate"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur, sizeof(cur), "test_current"));
+    setup_ctx(&ctx, &cap, &ec, cand, cur);
     ctx.finetune_script = NULL; /* the daemon's real configuration */
 
     queue_response(&cap, 0, "{\"pairs\":163}");
@@ -199,7 +203,10 @@ static void test_retrain_empty_finetune_script_also_skips(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
+    char cand[512], cur[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand, sizeof(cand), "test_candidate"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur, sizeof(cur), "test_current"));
+    setup_ctx(&ctx, &cap, &ec, cand, cur);
     ctx.finetune_script = "";
 
     queue_response(&cap, 0, "{\"pairs\":3}");
@@ -225,7 +232,10 @@ static void test_retrain_enqueues_and_invokes_finetune(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
+    char cand[512], cur[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand, sizeof(cand), "test_candidate"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur, sizeof(cur), "test_current"));
+    setup_ctx(&ctx, &cap, &ec, cand, cur);
 
     /* Pair-count probe: returns 7 pairs. */
     queue_response(&cap, 0, "{\"pairs\":7}");
@@ -256,7 +266,7 @@ static void test_retrain_enqueues_and_invokes_finetune(void) {
     HU_ASSERT_EQ((long long)ctx.last_pairs_consumed, 7LL);
 
     /* Cleanup symlink so subsequent tests start clean. */
-    (void)unlink("/tmp/test_current");
+    (void)unlink(cur);
 }
 
 /* ── AC-7.5.2 PASS: promote happens, symlink updated ─────────────────── */
@@ -269,7 +279,10 @@ static void test_retrain_promotes_on_pass_skips_on_fail(void) {
         event_capture_t ec;
         memset(&ec, 0, sizeof(ec));
         hu_lora_retrain_ctx_t ctx;
-        setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_pass", "/tmp/test_current_pass");
+        char cand_pass[512], cur_pass[512];
+        HU_ASSERT_TRUE(hu_test_tmppath(cand_pass, sizeof(cand_pass), "test_candidate_pass"));
+        HU_ASSERT_TRUE(hu_test_tmppath(cur_pass, sizeof(cur_pass), "test_current_pass"));
+        setup_ctx(&ctx, &cap, &ec, cand_pass, cur_pass);
 
         queue_response(&cap, 0, "{\"pairs\":3}");
         queue_response(&cap, 0, "");
@@ -283,11 +296,11 @@ static void test_retrain_promotes_on_pass_skips_on_fail(void) {
 
         /* The symlink should now exist and point at the candidate. */
         char buf[256] = {0};
-        ssize_t n = readlink("/tmp/test_current_pass", buf, sizeof(buf) - 1);
+        ssize_t n = readlink(cur_pass, buf, sizeof(buf) - 1);
         HU_ASSERT_GT(n, 0);
         buf[n] = '\0';
-        HU_ASSERT_STR_EQ(buf, "/tmp/test_candidate_pass");
-        (void)unlink("/tmp/test_current_pass");
+        HU_ASSERT_STR_EQ(buf, cand_pass);
+        (void)unlink(cur_pass);
     }
     /* FAIL half: */
     {
@@ -296,7 +309,10 @@ static void test_retrain_promotes_on_pass_skips_on_fail(void) {
         event_capture_t ec;
         memset(&ec, 0, sizeof(ec));
         hu_lora_retrain_ctx_t ctx;
-        setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_fail", "/tmp/test_current_fail");
+        char cand_fail[512], cur_fail[512];
+        HU_ASSERT_TRUE(hu_test_tmppath(cand_fail, sizeof(cand_fail), "test_candidate_fail"));
+        HU_ASSERT_TRUE(hu_test_tmppath(cur_fail, sizeof(cur_fail), "test_current_fail"));
+        setup_ctx(&ctx, &cap, &ec, cand_fail, cur_fail);
 
         queue_response(&cap, 0, "{\"pairs\":5}");
         queue_response(&cap, 0, "");
@@ -325,7 +341,7 @@ static void test_retrain_promotes_on_pass_skips_on_fail(void) {
 
         /* Symlink does NOT exist — never created. */
         char dummy[64];
-        HU_ASSERT_LT(readlink("/tmp/test_current_fail", dummy, sizeof(dummy)), 0);
+        HU_ASSERT_LT(readlink(cur_fail, dummy, sizeof(dummy)), 0);
     }
 }
 
@@ -337,7 +353,10 @@ static void test_retrain_treats_judgment_skip_as_not_pass(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_skip", "/tmp/test_current_skip");
+    char cand_skip[512], cur_skip[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_skip, sizeof(cand_skip), "test_candidate_skip"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_skip, sizeof(cur_skip), "test_current_skip"));
+    setup_ctx(&ctx, &cap, &ec, cand_skip, cur_skip);
 
     queue_response(&cap, 0, "{\"pairs\":4}");
     queue_response(&cap, 0, "");
@@ -352,7 +371,7 @@ static void test_retrain_treats_judgment_skip_as_not_pass(void) {
 
     /* Verify symlink NOT created — SKIP must not promote. */
     char dummy[64];
-    HU_ASSERT_LT(readlink("/tmp/test_current_skip", dummy, sizeof(dummy)), 0);
+    HU_ASSERT_LT(readlink(cur_skip, dummy, sizeof(dummy)), 0);
 }
 
 /* ── AC-7.5.3: finetune failure preserves current adapter ────────────── */
@@ -363,7 +382,10 @@ static void test_retrain_failure_preserves_adapter(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_x", "/tmp/test_current_x");
+    char cand_x[512], cur_x[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_x, sizeof(cand_x), "test_candidate_x"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_x, sizeof(cur_x), "test_current_x"));
+    setup_ctx(&ctx, &cap, &ec, cand_x, cur_x);
 
     queue_response(&cap, 0, "{\"pairs\":12}");
     /* finetune crashes (exit code 137 = SIGKILL'd by OOM). */
@@ -393,7 +415,7 @@ static void test_retrain_failure_preserves_adapter(void) {
     /* Current symlink preserved (never existed in this test → also not
      * created). */
     char dummy[64];
-    HU_ASSERT_LT(readlink("/tmp/test_current_x", dummy, sizeof(dummy)), 0);
+    HU_ASSERT_LT(readlink(cur_x, dummy, sizeof(dummy)), 0);
 }
 
 /* ── AC-7.5.4: empty-delta → skipped_no_new_data ─────────────────────── */
@@ -404,7 +426,10 @@ static void test_retrain_skipped_on_empty_delta(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_e", "/tmp/test_current_e");
+    char cand_e[512], cur_e[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_e, sizeof(cand_e), "test_candidate_e"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_e, sizeof(cur_e), "test_current_e"));
+    setup_ctx(&ctx, &cap, &ec, cand_e, cur_e);
 
     /* Probe returns 0 pairs. */
     queue_response(&cap, 0, "{\"pairs\":0}");
@@ -428,7 +453,8 @@ static void test_retrain_skipped_on_empty_delta(void) {
 
 static void test_retrain_skipped_if_pidfile_held(void) {
     /* Pre-create the PID file with a live PID (our own). */
-    const char *pf = "/tmp/test_lora_retrain.pid";
+    char pf[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(pf, sizeof(pf), "test_lora_retrain.pid"));
     (void)unlink(pf);
     FILE *fp = fopen(pf, "w");
     HU_ASSERT_NOT_NULL(fp);
@@ -440,7 +466,10 @@ static void test_retrain_skipped_if_pidfile_held(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_p", "/tmp/test_current_p");
+    char cand_p[512], cur_p[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_p, sizeof(cand_p), "test_candidate_p"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_p, sizeof(cur_p), "test_current_p"));
+    setup_ctx(&ctx, &cap, &ec, cand_p, cur_p);
     ctx.pidfile_path = pf;
 
     /* Queue responses we expect NOT to be consumed. */
@@ -512,7 +541,10 @@ static void test_retrain_probe_malformed_routes_to_failed(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_m", "/tmp/test_current_m");
+    char cand_m[512], cur_m[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_m, sizeof(cand_m), "test_candidate_m"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_m, sizeof(cur_m), "test_current_m"));
+    setup_ctx(&ctx, &cap, &ec, cand_m, cur_m);
 
     /* Malformed probe stdout (no "pairs" key). retrain_parse_pairs → -1.
      * Must route to FAILED with lora_retrain_probe_failed, NOT
@@ -538,7 +570,10 @@ static void test_retrain_probe_malformed_routes_to_failed(void) {
     event_capture_t ec2;
     memset(&ec2, 0, sizeof(ec2));
     hu_lora_retrain_ctx_t ctx2;
-    setup_ctx(&ctx2, &cap2, &ec2, "/tmp/test_candidate_z", "/tmp/test_current_z");
+    char cand_z[512], cur_z[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_z, sizeof(cand_z), "test_candidate_z"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_z, sizeof(cur_z), "test_current_z"));
+    setup_ctx(&ctx2, &cap2, &ec2, cand_z, cur_z);
     queue_response(&cap2, 0, "{\"pairs\":0}");
     HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx2), HU_OK);
     HU_ASSERT_EQ(ctx2.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA);
@@ -554,7 +589,10 @@ static void test_retrain_gate_exit_nonzero_routes_to_failed(void) {
     event_capture_t ec;
     memset(&ec, 0, sizeof(ec));
     hu_lora_retrain_ctx_t ctx;
-    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_g", "/tmp/test_current_g");
+    char cand_g[512], cur_g[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(cand_g, sizeof(cand_g), "test_candidate_g"));
+    HU_ASSERT_TRUE(hu_test_tmppath(cur_g, sizeof(cur_g), "test_current_g"));
+    setup_ctx(&ctx, &cap, &ec, cand_g, cur_g);
 
     queue_response(&cap, 0, "{\"pairs\":9}");
     queue_response(&cap, 0, "");
@@ -584,7 +622,7 @@ static void test_retrain_gate_exit_nonzero_routes_to_failed(void) {
 
     /* No symlink was created (no promote ran). */
     char dummy[64];
-    HU_ASSERT_LT(readlink("/tmp/test_current_g", dummy, sizeof(dummy)), 0);
+    HU_ASSERT_LT(readlink(cur_g, dummy, sizeof(dummy)), 0);
 }
 
 /* ── FIX-1: enqueue helper drives the scheduler with the correct spec ── */

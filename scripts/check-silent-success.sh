@@ -56,12 +56,12 @@ BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries can
 # src/daemon.c (2026-09-04): its pre-existing discards surfaced the first time
 # the file was staged after this guard landed. Three (music share, inspiration,
 # proactive image) were fixed in that commit; the rest are the follow-up "check
-# every vtable->send in daemon.c". The file is 99-baselined below rather than
+# every vtable->send in daemon.c". The file is COUNT-baselined below rather than
 # exempted, so the count can only shrink (a NOTE says when to lower it) while
 # any NEW discard still fails. Override the table only for the guard's own
 # smoke test.
 DISCARD_BASELINE_FILES=" src/agent/inspiration.c src/app/main_wasi.c src/context/context_engine_rag.c src/daemon/daemon_followup_sched.c src/daemon/daemon_proactive.c "
-DISCARD_BASELINE_99S="${HU_SILENT_SUCCESS_99S:- src/daemon.c:17 }"
+DISCARD_BASELINE_COUNTS="${HU_SILENT_SUCCESS_COUNTS:- src/daemon.c:17 }"
 
 fail=0
 

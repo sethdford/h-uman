@@ -59,9 +59,23 @@ def main():
     ap.add_argument("--min-trials", type=int, default=20)
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
-    trials = json.load(open(a.trials))["trials"]
+    raw = json.load(open(a.trials))["trials"]
+    # A trial only counts when BOTH texts exist: a missing/empty ai_response is a
+    # failed generation, and "[timeout]" is the sentinel the generators emit.
+    # --min-trials used to be checked on the raw row count, so 25 rows with zero
+    # usable replies passed the input gate and the twin was computed on nothing.
+    def usable(t):
+        return (isinstance(t, dict)
+                and isinstance(t.get("real_seth"), str) and t["real_seth"].strip()
+                and isinstance(t.get("ai_response"), str) and t["ai_response"].strip()
+                and not t["ai_response"].startswith("[timeout]"))
+    trials = [t for t in raw if usable(t)]
+    if not trials:
+        sys.exit(f"REFUSING: 0 valid trials after filtering ({len(raw)} rows, none with both "
+                 f"real_seth and ai_response); nothing written")
     if len(trials) < a.min_trials:
-        sys.exit(f"REFUSING: {len(trials)} trials < {a.min_trials}; nothing written")
+        sys.exit(f"REFUSING: {len(trials)} valid trials (of {len(raw)} rows) < {a.min_trials}; "
+                 f"nothing written")
     try:
         profile = load_luar()
     except Exception as e:
@@ -92,7 +106,7 @@ def main():
         if not xs: return None
         xs = sorted(xs); n = len(xs)
         return {"mean": round(sum(xs) / n, 3), "ci95": [round(xs[int(0.025 * n)], 3), round(xs[int(0.975 * n) - 1], 3)], "n": n}
-    out = {"date": time.strftime("%Y-%m-%d"), "protocol": "PersonalBench 5v5 LUAR-MUD, 64-token episodes", "trials": len(trials),
+    out = {"date": time.strftime("%Y-%m-%d"), "protocol": "PersonalBench 5v5 LUAR-MUD, 64-token episodes", "trials": len(trials), "trials_raw": len(raw),
            "registers": {"casual": reg.count("casual"), "substantive": reg.count("substantive")},
            "other_senders_for_floor": len(others), "splits": a.splits,
            "ceiling_seth_vs_seth": stat(res["ceiling"]), "twin_seth_vs_adapter": stat(res["twin"]),

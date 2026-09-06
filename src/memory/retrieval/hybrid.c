@@ -44,6 +44,12 @@ static hu_error_t entries_to_search_results(hu_allocator_t *alloc, const hu_memo
                                                                         : entries[i].key_len)
                     : 0;
         out[i].content = content && len > 0 ? hu_strndup(alloc, content, len) : NULL;
+        /* Carry the memories.key so the merge can hand it back (see
+         * search_results_to_entries); NULL stays NULL. */
+        out[i].key = entries[i].key && entries[i].key_len > 0
+                         ? hu_strndup(alloc, entries[i].key, entries[i].key_len)
+                         : NULL;
+        out[i].key_len = out[i].key ? entries[i].key_len : 0;
         out[i].score = (float)(scores && i < count ? scores[i] : 0.0);
         out[i].rerank_score = 0.0f;
         out[i].original_rank = i;
@@ -77,10 +83,18 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
             size_t len = strlen(results[i].content);
             entries[i].content = hu_strndup(alloc, results[i].content, len);
             entries[i].content_len = len;
-            entries[i].key = hu_strndup(alloc, results[i].content, len);
-            entries[i].key_len = len;
+            /* Restore the row's real key. A producer that had no key (e.g. a
+             * hand-built hu_search_result_t) still gets the content-as-key
+             * fallback so the entry is never keyless. */
+            if (results[i].key && results[i].key_len > 0) {
+                entries[i].key = hu_strndup(alloc, results[i].key, results[i].key_len);
+                entries[i].key_len = results[i].key_len;
+            } else {
+                entries[i].key = hu_strndup(alloc, results[i].content, len);
+                entries[i].key_len = len;
+            }
             entries[i].id = entries[i].key;
-            entries[i].id_len = len;
+            entries[i].id_len = entries[i].key_len;
         }
         entries[i].score = (double)results[i].rerank_score;
         scores[i] = (double)results[i].rerank_score;
@@ -845,20 +859,42 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         semantic_result.count = 0;
         semantic_result.scores = NULL;
     } else if (hu_semantic_recall_mode() == HU_GATE_LIVE && semantic_result.count > 0) {
-        /* LIVE: bound the recall block at the source. Unbounded hits (up to
-         * 2000 chars each) crowded the prompt cap and produced 9/40 EMPTY
-         * completions in the 2026-09-02 live gate; see semantic_recall.h. */
-        size_t before = semantic_result.count;
-        /* Content policy first (episodic scaffold, AI-identity confrontation:
-         * the remaining 6/40 empties of that gate) so an excluded hit never
-         * consumes byte budget. */
-        size_t filtered = hu_semantic_recall_filter_result(alloc, &semantic_result);
-        size_t kept =
-            hu_semantic_recall_clamp_result(alloc, &semantic_result, hu_semantic_recall_max_bytes(),
-                                            HU_SEMANTIC_RECALL_HIT_MAX_BYTES);
-        hu_log_info("semantic_recall", NULL,
-                    "live: sem=%zu filtered=%zu kept=%zu bytes=%zu budget=%zu", before, filtered,
-                    semantic_result.count, kept, hu_semantic_recall_max_bytes());
+        /* Register-conditioned suppression (US-5): casual turns skip recall
+         * even when HU_SEMANTIC_RECALL=live, protecting EI from the -0.078 drop
+         * observed on casual exchanges in the 2026-09-05 SOTA gate. */
+        hu_gate_mode_t reg_gate = hu_semantic_recall_register_gate_mode();
+        bool admits = hu_semantic_recall_register_admits(query, query_len);
+        if (reg_gate != HU_GATE_OFF && !admits) {
+            if (reg_gate == HU_GATE_LIVE) {
+                hu_log_info("semantic_recall_register", NULL,
+                            "live: suppressed (casual, words<=%u) sem=%zu -> 0",
+                            HU_SEMANTIC_RECALL_REGISTER_MAX_CASUAL_WORDS, semantic_result.count);
+                hu_retrieval_result_free(alloc, &semantic_result);
+                semantic_result.entries = NULL;
+                semantic_result.count = 0;
+                semantic_result.scores = NULL;
+            } else { /* SHADOW: log the would-be suppression, change nothing */
+                hu_log_info("semantic_recall_register", NULL,
+                            "shadow: would suppress (casual, words<=%u) sem=%zu (kept)",
+                            HU_SEMANTIC_RECALL_REGISTER_MAX_CASUAL_WORDS, semantic_result.count);
+            }
+        }
+        if (reg_gate != HU_GATE_LIVE || admits) {
+            /* LIVE: bound the recall block at the source. Unbounded hits (up to
+             * 2000 chars each) crowded the prompt cap and produced 9/40 EMPTY
+             * completions in the 2026-09-02 live gate; see semantic_recall.h. */
+            size_t before = semantic_result.count;
+            /* Content policy first (episodic scaffold, AI-identity confrontation:
+             * the remaining 6/40 empties of that gate) so an excluded hit never
+             * consumes byte budget. */
+            size_t filtered = hu_semantic_recall_filter_result(alloc, &semantic_result);
+            size_t kept = hu_semantic_recall_clamp_result(alloc, &semantic_result,
+                                                          hu_semantic_recall_max_bytes(),
+                                                          HU_SEMANTIC_RECALL_HIT_MAX_BYTES);
+            hu_log_info("semantic_recall", NULL,
+                        "live: sem=%zu filtered=%zu kept=%zu bytes=%zu budget=%zu", before,
+                        filtered, semantic_result.count, kept, hu_semantic_recall_max_bytes());
+        }
     }
 
     /* Contract C2: attempt reconstruction with keyword + semantic (+ graph).

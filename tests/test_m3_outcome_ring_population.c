@@ -21,6 +21,7 @@
  */
 
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #ifdef HU_ENABLE_ML
 
@@ -66,7 +67,9 @@ static hu_m3_frontier_adapter_t *open_fixture(hu_allocator_t *alloc, const char 
 
 static void test_m3_record_outcome_advances_ring_head(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_pop_head.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_pop_head.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
 
     HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), 0ULL);
@@ -85,7 +88,9 @@ static void test_m3_record_outcome_advances_ring_head(void) {
 
 static void test_m3_record_outcome_captures_token_and_latency(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_pop_fields.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_pop_fields.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
 
     const uint64_t ts = 1700000001234ULL;
@@ -140,7 +145,9 @@ static int64_t count_persisted_outcomes(sqlite3 *db) {
 
 static void test_m3_outcome_drain_persists_to_sqlite(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_drain_persist.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_drain_persist.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
     sqlite3 *db = open_in_memory_db();
 
@@ -183,7 +190,9 @@ static void test_m3_outcome_drain_persists_to_sqlite(void) {
 
 static void test_m3_outcome_drain_advances_marker(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_drain_marker.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_drain_marker.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
     sqlite3 *db = open_in_memory_db();
 
@@ -227,7 +236,9 @@ static void test_m3_outcome_drain_advances_marker(void) {
 
 static void test_m3_outcome_drain_tick_respects_interval(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_drain_tick.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_drain_tick.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
     sqlite3 *db = open_in_memory_db();
     hu_daemon_tick_m3_outcome_drain_reset_warn_guards_for_test();
@@ -281,7 +292,9 @@ static void test_m3_outcome_drain_tick_respects_interval(void) {
 
 static void test_m3_outcome_drain_handles_empty_ring(void) {
     hu_allocator_t alloc = A();
-    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, "/tmp/hu_m3_drain_empty.bin");
+    char fixture[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(fixture, sizeof(fixture), "hu_m3_drain_empty.bin"));
+    hu_m3_frontier_adapter_t *a = open_fixture(&alloc, fixture);
     HU_ASSERT_NOT_NULL(a);
     sqlite3 *db = open_in_memory_db();
 

@@ -65,3 +65,65 @@ something else (and the arbitration build should be re-justified). If detection 
   (Risk R12 in the plan.)
 - Rotate contexts between baseline and post-arbitration runs so raters don't memorize items.
 - Keep raters blind to which arm (on/off) they're rating.
+
+## Preference measurement (win rate) [US-6]
+
+**This is a SEPARATE measurement from the detection protocol above.** It asks a
+different question, is scored by a different script, and never touches the
+promotion-authoritative gate (`~/.human/blind_ab_gate.json`,
+`docs/evaluation/blind_ab_gate.json`). Never mix the two framings on one sheet.
+
+### The question
+
+For each item, the rater sees the same two unlabeled replies as the detection
+protocol -- but answers a different question: **"Which of these two replies
+would you rather RECEIVE from Seth -- not which one IS Seth, which one do you
+PREFER?"** Confidence 1-5, same column, same meaning.
+
+- **Win rate** = fraction of items where the rater's pick matches the MODEL
+  (h-uman) reply, not Seth's real one.
+- **0.50 = a coin flip** between the two. **> 0.50 = the model reply is
+  preferred over Seth's own reply** -- a genuinely harder bar than detection's
+  "indistinguishable," and the whole point of measuring it separately.
+- A win rate below 0.5 is an acceptable, honestly-recorded outcome. This
+  protocol does not retry sampling or reframe questions until the number
+  looks better (AC-6.6).
+
+### Procedure
+
+1. `make_rating_sheet.py triples.json --mode preference --out-dir <path outside
+   the repo>` -- reuses the same exported `triples.json` as detection (same
+   `context`/`seth_reply`/`huuman_reply`), just a different sheet framing.
+   Redacts phone-number-shaped and contact-name-shaped substrings from every
+   field before writing (same redaction as the detection sheet, applied in
+   both modes). Any triple whose `seth_reply` and `huuman_reply` are identical
+   after redaction has no "model side" to prefer and is excluded, with the
+   skip count printed.
+2. Send each rater the sheet + preference-framed instructions (this section,
+   or a sibling `RATER_INSTRUCTIONS_PREFERENCE.txt`). They fill `choice`
+   (A/B) and `confidence` (1-5) for every row -- same mechanics as detection,
+   different question.
+3. `score_preference.py rating_sheet_<rater>.csv --key answer_key.json --rater
+   human --evidence-out sprints/<sprint>/evidence/US-6/preference-results-<date>.json`
+   -- reuses `score.py`'s `wilson()`/`score_rows()` math UNMODIFIED to compute
+   win rate + 95% CI. Refuses (exit non-zero, writes nothing) below n=20
+   pairs, for a non-`human` rater tag on an evidence-writing invocation, or
+   against a key that isn't stamped `"_mode": "preference"`.
+
+### What this is NOT
+
+- **Not a gate.** No LLM judge is ever in the verdict path, and this script
+  has no code path that touches either blind-A/B gate file. It is a
+  measurement, not a promotion decision.
+- **Not the detection protocol.** The 0.60/0.55/0.60 detection thresholds
+  above are completely untouched by this section; a sheet built with
+  `--mode preference` cannot be scored by `score.py` or vice versa without an
+  explicit refusal (the `_mode` marker enforces this).
+
+### Known limitation
+
+Redaction is regex (phone-shaped) + a real contact-name-token match, not a
+general PII scrubber -- an unusual phone format or a nickname absent from the
+AddressBook can slip through. A human should skim a generated sheet before
+sending it to raters, the same manual judgment the existing recruitment step
+already requires.

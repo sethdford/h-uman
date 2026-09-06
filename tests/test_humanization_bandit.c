@@ -2,6 +2,7 @@
 #include "human/agent/humanization_bandit.h"
 #include "human/core/allocator.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -291,7 +292,8 @@ static void test_bandit_override_null_bandit_unchanged(void) {
  * tests/test_somatic.c somatic_save_load_roundtrip family. ── */
 
 static void bandit_save_load_roundtrip(void) {
-    const char *path = "/tmp/hu_test_bandit_roundtrip.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_bandit_roundtrip.json"));
     remove(path);
     hu_allocator_t alloc = hu_system_allocator();
     hu_contextual_bandit_t *bandit = NULL;
@@ -345,7 +347,8 @@ static void bandit_load_missing_file_keeps_state(void) {
 }
 
 static void bandit_load_corrupt_file_keeps_state(void) {
-    const char *path = "/tmp/hu_test_bandit_corrupt.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_bandit_corrupt.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_NOT_NULL(f);
     fputs("{\"version\": 1, \"arms\": [{oops", f);
@@ -370,7 +373,8 @@ static void bandit_load_clamps_out_of_range(void) {
     /* A hand-edited or corrupted-but-parseable file must not inject values
      * outside the arm's legal range (alpha/beta >= 1.0, updates >= 0) —
      * the gamma sampler misbehaves at alpha/beta <= 0. */
-    const char *path = "/tmp/hu_test_bandit_clamp.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_bandit_clamp.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_NOT_NULL(f);
     fputs("{\"version\": 1, \"arms\": ["
@@ -410,7 +414,8 @@ static void bandit_load_clamps_out_of_range(void) {
  * didn't reach the decision path, both would be conservative and the
  * strict inequality below would fail. */
 static void bandit_loaded_posterior_changes_next_choice(void) {
-    const char *path = "/tmp/hu_test_bandit_pin.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_bandit_pin.json"));
     uint64_t contact = 9001ULL;
 
     hu_allocator_t alloc = hu_system_allocator();

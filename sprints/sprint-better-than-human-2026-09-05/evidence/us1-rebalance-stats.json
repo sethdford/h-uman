@@ -1,0 +1,73 @@
+{
+  "input": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.jsonl",
+  "output": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.rebalanced.jsonl",
+  "seed": 42,
+  "match_sides": true,
+  "targets": {
+    "lowercase_start_rate": 0.0861878453038674,
+    "terminal_punct_rate": 0.183214
+  },
+  "target_provenance": {
+    "lowercase_start": "style_card:axes.lowercase_start_rate.value=0.0862 (/Users/sethford/.human/personas/seth.style-card.json)",
+    "terminal_punct": "style_card:1-axes.no_terminal_punct_rate.value=0.1832 (/Users/sethford/.human/personas/seth.style-card.json)"
+  },
+  "max_lowercase_margin": 0.15,
+  "max_margin": 0.1,
+  "n_rows": 1362,
+  "n_chosen": 1362,
+  "n_rejected": 1362,
+  "axis_resampling": {
+    "chosen": {
+      "lowercase_start": {
+        "before": 0.1481,
+        "after": 0.0893,
+        "changed": 83,
+        "n": 1344
+      },
+      "terminal_punct": {
+        "before": 0.2137,
+        "after": 0.1836,
+        "changed": 41,
+        "n": 1362
+      }
+    },
+    "rejected": {
+      "lowercase_start": {
+        "before": 0.1762,
+        "after": 0.0859,
+        "changed": 123,
+        "n": 1362
+      },
+      "terminal_punct": {
+        "before": 0.5007,
+        "after": 0.1836,
+        "changed": 432,
+        "n": 1362
+      }
+    }
+  },
+  "stats": {
+    "lowercase_start_rate": {
+      "chosen_before": 0.1481,
+      "chosen_after": 0.0893,
+      "rejected_before": 0.1762,
+      "rejected_after": 0.0859,
+      "margin_before": 0.0281,
+      "margin_after": 0.0034
+    },
+    "terminal_punct_rate": {
+      "chosen_before": 0.2137,
+      "chosen_after": 0.1836,
+      "rejected_before": 0.5007,
+      "rejected_after": 0.1836,
+      "margin_before": 0.2871,
+      "margin_after": 0.0
+    },
+    "median_length": {
+      "chosen_before": 27.0,
+      "chosen_after": 27.0,
+      "rejected_before": 112.0,
+      "rejected_after": 111.5
+    }
+  }
+}

@@ -1284,6 +1284,8 @@ set(HU_CORE_SOURCES
     src/daemon/reply_dedup.c
     src/daemon/send_budget.c
     src/daemon/reactive_gates.c
+    src/daemon/daemon_reactive_context.c
+    src/daemon/daemon_reactive_prompt.c
     src/daemon/consecutive_limiter.c
     src/daemon/daemon_identity.c
     src/daemon/daemon_identity_graph.c
@@ -3464,6 +3466,7 @@ set(HU_TEST_SOURCES
     tests/test_reply_dedup.c
     tests/test_send_budget.c
     tests/test_reactive_gates.c
+    tests/test_daemon_reactive_context.c
     tests/test_consecutive_limiter.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
@@ -3661,6 +3664,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_semantic_index.c
     tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
+    tests/test_semantic_recall_register.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c
@@ -3874,6 +3878,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_distiller.c
     tests/test_model_router.c
     tests/test_model_router_health.c
+    tests/test_cp_admin.c
     tests/test_humanness_context.c
     tests/test_plan_executor.c
     tests/test_planner_mcts_wiring.c

@@ -22,6 +22,12 @@ hu_life_sim_state_t hu_life_sim_get_current(const hu_daily_routine_t *routine, i
 
 /* Build context string for prompt. "[LIFE CONTEXT: You just finished dinner...]" */
 char *hu_life_sim_build_context(hu_allocator_t *alloc, const hu_life_sim_state_t *state,
-                                 size_t *out_len);
+                                size_t *out_len);
+
+/* The two steps above for the wall clock: local weekday from time(NULL), the
+ * jitter seed derived from it, then the context string. Shared by the agent
+ * prompt builder and the daemon's reactive prompt slice. NULL routine → NULL. */
+char *hu_life_sim_build_context_now(hu_allocator_t *alloc, const hu_daily_routine_t *routine,
+                                    size_t *out_len);
 
 #endif /* HU_PERSONA_LIFE_SIM_H */

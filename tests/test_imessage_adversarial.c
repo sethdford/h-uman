@@ -20,6 +20,7 @@
 #include "human/core/error.h"
 #include "human/persona.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -2081,13 +2082,9 @@ static void imessage_status_file_roundtrip(void) {
      * it before we run. The save helper will mkdir(~/.human) on demand. */
     const char *prev_home = getenv("HOME");
     char *saved = prev_home ? strdup(prev_home) : NULL;
-    setenv("HOME", "/tmp/hu_imsg_status_roundtrip", 1);
-    /* Best-effort cleanup of stale dir from a previous run (don't fail if it
-     * doesn't exist or contains files; mkdir handles that next). */
-    char prev_status[512];
-    snprintf(prev_status, sizeof(prev_status),
-             "/tmp/hu_imsg_status_roundtrip/.human/imessage.poll_status");
-    unlink(prev_status);
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmpdir(home, sizeof(home), "imsg_status_roundtrip"));
+    setenv("HOME", home, 1);
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
@@ -2115,7 +2112,7 @@ static void imessage_status_file_roundtrip(void) {
     HU_ASSERT_TRUE(strstr(buf, "\"circuit_breaker_tripped\": true") != NULL);
     hu_imessage_destroy(&ch);
 
-    unlink(prev_status);
+    hu_test_rm_rf(home);
     if (saved) {
         setenv("HOME", saved, 1);
         free(saved);

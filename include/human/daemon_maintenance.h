@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "core/allocator.h"
+#include "memory/consolidation.h"
 #include <time.h>
 
 /**
@@ -17,6 +18,15 @@
  */
 
 struct hu_agent;
+
+/** The consolidation settings the daemon uses for every hu_memory_consolidate
+ *  call it makes (periodic tick and topic-switch): behavior.decay_days /
+ *  behavior.dedup_threshold from config (30 / 0 when config is NULL), a fixed
+ *  0.5 decay factor and 5000-entry cap, and the agent's provider + model.
+ *  Unconditional (not cron/test gated) because the reactive prompt slice
+ *  links against it in every build variant. */
+hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
+                                                         struct hu_agent *agent);
 
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
@@ -35,8 +45,7 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
  *  training-data extraction cadence, nightly LoRA retrain enqueue, the
  *  scheduler tick itself, post-tick status save, and personal-model idle
  *  decay. Moved verbatim from daemon.c hu_service_run. */
-void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t *config,
-                                       time_t t);
+void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t *config, time_t t);
 #endif /* HU_ENABLE_SQLITE */
 
 #endif /* HU_HAS_CRON && !HU_IS_TEST */

@@ -1,0 +1,43 @@
+{
+  "primary": {
+    "path": "/Users/sethford/Projects/h-uman/data/imessage/training_pairs.jsonl",
+    "rows": 1303,
+    "kept": 1303
+  },
+  "extras": [
+    {
+      "path": "/Users/sethford/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl",
+      "rows": 1302,
+      "added": 59,
+      "duplicates": 1243
+    },
+    {
+      "path": "/Users/sethford/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl",
+      "rows": 690,
+      "added": 0,
+      "duplicates": 690
+    }
+  ],
+  "dropped_empty": 0,
+  "dropped_tapback": 0,
+  "rejected_pool": {
+    "path": "/Users/sethford/.human/training-data/glm-v61-pref/train.jsonl",
+    "rows": 426,
+    "kept": 426,
+    "skipped_no_rejected_field": 0
+  },
+  "floor": 500,
+  "n_chosen": 1362,
+  "n_rejected": 426,
+  "n_total": 1788,
+  "pairing": {
+    "method": "match-on-rendered-prompt-else-fixed-seed-round-robin",
+    "seed": 20260905,
+    "matched_on_prompt": 7,
+    "round_robin": 1355,
+    "n_paired_rows": 1362
+  },
+  "out_dir": "/Users/sethford/.human/training-data/glm-v6-merged-20260905",
+  "train_path": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.jsonl",
+  "kto_path": "/Users/sethford/.human/training-data/glm-v6-merged-20260905/train.kto.jsonl"
+}
