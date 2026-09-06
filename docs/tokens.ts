@@ -659,7 +659,7 @@ export const tokens = {
     surfaceGlow: "radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.06) 0%, transparent 70%)",
     surfaceGradient: "linear-gradient(180deg, #FFFFFF 0%, #F5F5F3 100%)",
     text: "#2D2A26",
-    textFaint: "#9A9490",
+    textFaint: "#726C65",
     textMuted: "#6B655E",
     textSecondary: "#4A4540",
     textTertiary: "#6B655E",
