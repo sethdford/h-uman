@@ -277,12 +277,9 @@ hu_error_t hu_imessage_schema_probe(const char *db_path, hu_imessage_schema_caps
     char default_path[512];
     const char *resolved = db_path;
     if (!resolved) {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            int n = hu_paths_chatdb(default_path, sizeof(default_path));
-            if (n > 0 && (size_t)n < sizeof(default_path))
-                resolved = default_path;
-        }
+        int n = hu_paths_chatdb(default_path, sizeof(default_path));
+        if (n > 0 && (size_t)n < sizeof(default_path))
+            resolved = default_path;
         if (!resolved)
             resolved = "~/Library/Messages/chat.db"; /* surface as IO error */
     }

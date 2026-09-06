@@ -28,10 +28,7 @@ void hu_daemon_identity_graph_load(struct hu_agent *agent) {
     hu_agent_t *ag = (hu_agent_t *)agent;
     hu_observer_t *obs = ag ? ag->observer : NULL;
 
-    const char *home = getenv("HOME");
     char ident_path[1024];
-    if (!home || !home[0])
-        return;
     if (hu_paths_state(ident_path, sizeof(ident_path), "identity_graph.json") <= 0)
         return;
 

@@ -64,6 +64,7 @@ hu_error_t hu_imessage_feed_fetch(hu_allocator_t *alloc, int64_t since_epoch,
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is INVALID_ARGUMENT. */
     const char *home = getenv("HOME");
     if (!home)
         return HU_ERR_NOT_FOUND;

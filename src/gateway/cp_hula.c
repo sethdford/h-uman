@@ -15,11 +15,6 @@
 #endif
 
 static void default_hula_trace_dir(char *buf, size_t cap) {
-    const char *h = getenv("HOME");
-    if (!h || !h[0]) {
-        buf[0] = '\0';
-        return;
-    }
     (void)hu_paths_state(buf, cap, "hula_traces");
 }
 

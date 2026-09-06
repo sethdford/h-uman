@@ -18,9 +18,6 @@ static const char *eval_data_dir(void) {
     if (env && *env)
         return env;
     static char fallback[512];
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
     (void)hu_paths_state_or(fallback, sizeof(fallback), ".", "eval-datasets");
     return fallback;
 }

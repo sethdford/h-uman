@@ -417,11 +417,8 @@ static void register_reply_for_reactions_rl(const struct hu_config *config, stru
         }
         if (!db) {
             static char home_db[512];
-            const char *hm = getenv("HOME");
-            if (hm && hm[0]) {
-                hu_paths_chatdb(home_db, sizeof(home_db));
+            if (hu_paths_chatdb(home_db, sizeof(home_db)) > 0)
                 db = home_db;
-            }
         }
         if (db && hu_imessage_lookup_latest_sent_guid(db, thread, response, msg_ref,
                                                       sizeof(msg_ref)) != HU_OK)

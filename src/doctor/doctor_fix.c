@@ -92,9 +92,6 @@ static bool ensure_dir(const char *path) {
 }
 
 static bool get_human_dir(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
     int n = hu_paths_state_dir(buf, cap);
     return n > 0 && (size_t)n < cap;
 }

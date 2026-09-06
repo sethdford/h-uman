@@ -84,6 +84,7 @@ hu_error_t hu_file_ingest_fetch(hu_allocator_t *alloc, hu_feed_ingest_item_t *it
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is INVALID_ARGUMENT. */
     const char *home = getenv("HOME");
     if (!home)
         return HU_ERR_NOT_FOUND;

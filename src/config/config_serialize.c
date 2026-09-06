@@ -17,12 +17,9 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
     hu_allocator_t a = cfg->allocator;
 
     char dir_buf[HU_MAX_PATH];
-    const char *home = getenv("HOME");
-    if (home) {
-        int n = hu_paths_state_dir(dir_buf, sizeof(dir_buf));
-        if (n > 0 && (size_t)n < sizeof(dir_buf))
-            (void)mkdir(dir_buf, 0700);
-    }
+    int n = hu_paths_state_dir(dir_buf, sizeof(dir_buf));
+    if (n > 0 && (size_t)n < sizeof(dir_buf))
+        (void)mkdir(dir_buf, 0700);
 
     hu_json_value_t *root = hu_json_object_new(&a);
     if (!root)

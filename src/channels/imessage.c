@@ -588,9 +588,6 @@ size_t hu_imessage_build_courtesy_reply(const char *persona_name, const char *ow
 bool hu_imessage_courtesy_log_path(char *buf, size_t cap) {
     if (!buf || cap < 16)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
     int n = hu_paths_state(buf, cap, "imessage_courtesy.log");
     return n > 0 && (size_t)n < cap;
 }
@@ -1490,27 +1487,24 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
 
     char chat_rowid_str[32] = {0};
 #if defined(HU_ENABLE_SQLITE)
-    const char *home_env = getenv("HOME");
-    if (home_env) {
-        char db_p[512];
-        int dp = hu_paths_chatdb(db_p, sizeof(db_p));
-        if (dp > 0 && (size_t)dp < sizeof(db_p)) {
-            sqlite3 *db = NULL;
-            if (imessage_open_chatdb(db_p, &db) == SQLITE_OK) {
-                sqlite3_stmt *cs = NULL;
-                if (sqlite3_prepare_v2(db,
-                                       "SELECT cmj.chat_id FROM chat_message_join cmj "
-                                       "WHERE cmj.message_id = ? LIMIT 1",
-                                       -1, &cs, NULL) == SQLITE_OK) {
-                    sqlite3_bind_int64(cs, 1, message_id);
-                    if (sqlite3_step(cs) == SQLITE_ROW) {
-                        int64_t rowid = sqlite3_column_int64(cs, 0);
-                        snprintf(chat_rowid_str, sizeof(chat_rowid_str), "%lld", (long long)rowid);
-                    }
-                    sqlite3_finalize(cs);
+    char db_p[512];
+    int dp = hu_paths_chatdb(db_p, sizeof(db_p));
+    if (dp > 0 && (size_t)dp < sizeof(db_p)) {
+        sqlite3 *db = NULL;
+        if (imessage_open_chatdb(db_p, &db) == SQLITE_OK) {
+            sqlite3_stmt *cs = NULL;
+            if (sqlite3_prepare_v2(db,
+                                   "SELECT cmj.chat_id FROM chat_message_join cmj "
+                                   "WHERE cmj.message_id = ? LIMIT 1",
+                                   -1, &cs, NULL) == SQLITE_OK) {
+                sqlite3_bind_int64(cs, 1, message_id);
+                if (sqlite3_step(cs) == SQLITE_ROW) {
+                    int64_t rowid = sqlite3_column_int64(cs, 0);
+                    snprintf(chat_rowid_str, sizeof(chat_rowid_str), "%lld", (long long)rowid);
                 }
-                sqlite3_close(db);
+                sqlite3_finalize(cs);
             }
+            sqlite3_close(db);
         }
     }
 #endif
@@ -2521,6 +2515,7 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     *out_count = 0;
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+    /* Kept: no HOME is NOT_SUPPORTED here, while a helper failure below is INTERNAL. */
     const char *home = getenv("HOME");
     if (!home)
         return HU_ERR_NOT_SUPPORTED;
@@ -2884,10 +2879,6 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
 
 int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len) {
     if (!handle || handle_len == 0)
-        return -1;
-
-    const char *home = getenv("HOME");
-    if (!home)
         return -1;
 
     char db_path[512];
@@ -3319,55 +3310,52 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     int row_offset = -1; /* messages after target in same chat; -1 = unknown */
 #if defined(HU_ENABLE_SQLITE)
     if (message_id > 0) {
-        const char *home_env = getenv("HOME");
-        if (home_env) {
-            char db_path[512];
-            int dn = hu_paths_chatdb(db_path, sizeof(db_path));
-            if (dn > 0 && (size_t)dn < sizeof(db_path)) {
-                sqlite3 *db = NULL;
-                if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
-                    sqlite3_stmt *stmt = NULL;
-                    if (sqlite3_prepare_v2(
-                            db, "SELECT text, attributedBody FROM message WHERE ROWID = ?", -1,
-                            &stmt, NULL) == SQLITE_OK) {
-                        sqlite3_bind_int64(stmt, 1, message_id);
-                        if (sqlite3_step(stmt) == SQLITE_ROW) {
-                            const char *text = (const char *)sqlite3_column_text(stmt, 0);
-                            if (!text || text[0] == '\0') {
-                                const unsigned char *ab = sqlite3_column_blob(stmt, 1);
-                                int ab_len = sqlite3_column_bytes(stmt, 1);
-                                if (ab && ab_len > 0) {
-                                    content_len = hu_imessage_extract_attributed_body(
-                                        ab, (size_t)ab_len, content_buf, sizeof(content_buf));
-                                }
-                            } else {
-                                size_t len = strlen(text);
-                                if (len >= sizeof(content_buf))
-                                    len = sizeof(content_buf) - 1;
-                                memcpy(content_buf, text, len);
-                                content_buf[len] = '\0';
-                                content_len = len;
+        char db_path[512];
+        int dn = hu_paths_chatdb(db_path, sizeof(db_path));
+        if (dn > 0 && (size_t)dn < sizeof(db_path)) {
+            sqlite3 *db = NULL;
+            if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
+                sqlite3_stmt *stmt = NULL;
+                if (sqlite3_prepare_v2(db,
+                                       "SELECT text, attributedBody FROM message WHERE ROWID = ?",
+                                       -1, &stmt, NULL) == SQLITE_OK) {
+                    sqlite3_bind_int64(stmt, 1, message_id);
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const char *text = (const char *)sqlite3_column_text(stmt, 0);
+                        if (!text || text[0] == '\0') {
+                            const unsigned char *ab = sqlite3_column_blob(stmt, 1);
+                            int ab_len = sqlite3_column_bytes(stmt, 1);
+                            if (ab && ab_len > 0) {
+                                content_len = hu_imessage_extract_attributed_body(
+                                    ab, (size_t)ab_len, content_buf, sizeof(content_buf));
                             }
+                        } else {
+                            size_t len = strlen(text);
+                            if (len >= sizeof(content_buf))
+                                len = sizeof(content_buf) - 1;
+                            memcpy(content_buf, text, len);
+                            content_buf[len] = '\0';
+                            content_len = len;
                         }
-                        sqlite3_finalize(stmt);
                     }
-                    /* Row offset: count non-tapback messages after this one in the same chat.
-                     * Gives us a reliable index from the bottom of the transcript view. */
-                    sqlite3_stmt *off_stmt = NULL;
-                    const char *off_sql = "SELECT COUNT(*) FROM message m "
-                                          "JOIN chat_message_join cmj ON m.ROWID = cmj.message_id "
-                                          "WHERE cmj.chat_id = ("
-                                          "  SELECT cmj2.chat_id FROM chat_message_join cmj2 "
-                                          "  WHERE cmj2.message_id = ?1 LIMIT 1"
-                                          ") AND m.ROWID > ?1 AND m.associated_message_type = 0";
-                    if (sqlite3_prepare_v2(db, off_sql, -1, &off_stmt, NULL) == SQLITE_OK) {
-                        sqlite3_bind_int64(off_stmt, 1, message_id);
-                        if (sqlite3_step(off_stmt) == SQLITE_ROW)
-                            row_offset = sqlite3_column_int(off_stmt, 0);
-                        sqlite3_finalize(off_stmt);
-                    }
-                    sqlite3_close(db);
+                    sqlite3_finalize(stmt);
                 }
+                /* Row offset: count non-tapback messages after this one in the same chat.
+                 * Gives us a reliable index from the bottom of the transcript view. */
+                sqlite3_stmt *off_stmt = NULL;
+                const char *off_sql = "SELECT COUNT(*) FROM message m "
+                                      "JOIN chat_message_join cmj ON m.ROWID = cmj.message_id "
+                                      "WHERE cmj.chat_id = ("
+                                      "  SELECT cmj2.chat_id FROM chat_message_join cmj2 "
+                                      "  WHERE cmj2.message_id = ?1 LIMIT 1"
+                                      ") AND m.ROWID > ?1 AND m.associated_message_type = 0";
+                if (sqlite3_prepare_v2(db, off_sql, -1, &off_stmt, NULL) == SQLITE_OK) {
+                    sqlite3_bind_int64(off_stmt, 1, message_id);
+                    if (sqlite3_step(off_stmt) == SQLITE_ROW)
+                        row_offset = sqlite3_column_int(off_stmt, 0);
+                    sqlite3_finalize(off_stmt);
+                }
+                sqlite3_close(db);
             }
         }
     }
@@ -5068,58 +5056,55 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
     {
         int64_t persisted = imessage_load_rowid();
-        const char *home_env = getenv("HOME");
-        if (home_env) {
-            char db_path[512];
-            int dn = hu_paths_chatdb(db_path, sizeof(db_path));
-            if (dn > 0 && (size_t)dn < sizeof(db_path)) {
-                sqlite3 *db = NULL;
-                if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
-                    int64_t db_max = 0;
-                    sqlite3_stmt *stmt = NULL;
-                    if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &stmt, NULL) ==
-                        SQLITE_OK) {
-                        if (sqlite3_step(stmt) == SQLITE_ROW)
-                            db_max = sqlite3_column_int64(stmt, 0);
-                        sqlite3_finalize(stmt);
-                    }
-                    if (persisted > 0 && persisted <= db_max) {
-                        /* Cap the replay. A persisted cursor far behind db max
-                         * is a stale cursor (daemon down, deaf watch, crash
-                         * mid-write), not a backlog the human wants answered:
-                         * those messages were seen and handled on the phone.
-                         * Incident 2026-09-01: 893-row gap replayed as fresh. */
-                        int64_t max_replay = hu_imessage_parse_env_int64(
-                            getenv("HU_IMESSAGE_MAX_REPLAY"), HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT);
-                        int64_t skipped = 0;
-                        c->last_rowid =
-                            hu_imessage_resume_rowid(persisted, db_max, max_replay, &skipped);
-                        if (skipped > 0) {
-                            hu_log_warn("imessage", NULL,
-                                        "persisted rowid=%lld is %lld rows behind db max=%lld "
-                                        "(cap %lld); SKIPPING the backlog and resuming from "
-                                        "db max — stale cursor, not a backlog to answer",
-                                        (long long)persisted, (long long)skipped, (long long)db_max,
-                                        (long long)max_replay);
-                            imessage_save_rowid(c->last_rowid);
-                        } else {
-                            hu_log_info("imessage", NULL,
-                                        "resuming from persisted rowid=%lld (db max=%lld, "
-                                        "recovering %lld messages)",
-                                        (long long)persisted, (long long)db_max,
-                                        (long long)(db_max - persisted));
-                        }
-                    } else {
-                        c->last_rowid = db_max;
-                        const char *lookback_env = getenv("HU_IMESSAGE_LOOKBACK");
-                        if (lookback_env) {
-                            long lb = strtol(lookback_env, NULL, 10);
-                            if (lb > 0 && lb < 100 && c->last_rowid > lb)
-                                c->last_rowid -= lb;
-                        }
-                    }
-                    sqlite3_close(db);
+        char db_path[512];
+        int dn = hu_paths_chatdb(db_path, sizeof(db_path));
+        if (dn > 0 && (size_t)dn < sizeof(db_path)) {
+            sqlite3 *db = NULL;
+            if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
+                int64_t db_max = 0;
+                sqlite3_stmt *stmt = NULL;
+                if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &stmt, NULL) ==
+                    SQLITE_OK) {
+                    if (sqlite3_step(stmt) == SQLITE_ROW)
+                        db_max = sqlite3_column_int64(stmt, 0);
+                    sqlite3_finalize(stmt);
                 }
+                if (persisted > 0 && persisted <= db_max) {
+                    /* Cap the replay. A persisted cursor far behind db max
+                     * is a stale cursor (daemon down, deaf watch, crash
+                     * mid-write), not a backlog the human wants answered:
+                     * those messages were seen and handled on the phone.
+                     * Incident 2026-09-01: 893-row gap replayed as fresh. */
+                    int64_t max_replay = hu_imessage_parse_env_int64(
+                        getenv("HU_IMESSAGE_MAX_REPLAY"), HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT);
+                    int64_t skipped = 0;
+                    c->last_rowid =
+                        hu_imessage_resume_rowid(persisted, db_max, max_replay, &skipped);
+                    if (skipped > 0) {
+                        hu_log_warn("imessage", NULL,
+                                    "persisted rowid=%lld is %lld rows behind db max=%lld "
+                                    "(cap %lld); SKIPPING the backlog and resuming from "
+                                    "db max — stale cursor, not a backlog to answer",
+                                    (long long)persisted, (long long)skipped, (long long)db_max,
+                                    (long long)max_replay);
+                        imessage_save_rowid(c->last_rowid);
+                    } else {
+                        hu_log_info("imessage", NULL,
+                                    "resuming from persisted rowid=%lld (db max=%lld, "
+                                    "recovering %lld messages)",
+                                    (long long)persisted, (long long)db_max,
+                                    (long long)(db_max - persisted));
+                    }
+                } else {
+                    c->last_rowid = db_max;
+                    const char *lookback_env = getenv("HU_IMESSAGE_LOOKBACK");
+                    if (lookback_env) {
+                        long lb = strtol(lookback_env, NULL, 10);
+                        if (lb > 0 && lb < 100 && c->last_rowid > lb)
+                            c->last_rowid -= lb;
+                    }
+                }
+                sqlite3_close(db);
             }
         }
     }
@@ -5459,6 +5444,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         imsg_watch_start(c);
     }
 
+    /* Kept: no HOME is NOT_SUPPORTED here, while a helper failure below is INTERNAL. */
     const char *home = getenv("HOME");
     if (!home)
         return HU_ERR_NOT_SUPPORTED;
@@ -6093,6 +6079,7 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
     *out_len = 0;
     out_text[0] = '\0';
 
+    /* Kept: no HOME is NOT_SUPPORTED here, while a helper failure below is INTERNAL. */
     const char *home = getenv("HOME");
     if (!home)
         return HU_ERR_NOT_SUPPORTED;
@@ -6225,6 +6212,7 @@ hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size
     return HU_ERR_NOT_FOUND;
 #else
 #ifdef HU_ENABLE_SQLITE
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is HU_ERR_IO. */
     const char *home = getenv("HOME");
     if (!home) {
         buf[0] = '\0';

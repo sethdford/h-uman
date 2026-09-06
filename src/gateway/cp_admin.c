@@ -1214,9 +1214,6 @@ static bool cp_fidelity_resolve_ab_status_path(char *buf, size_t cap) {
         memcpy(buf, override, n + 1);
         return true;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
     int written = hu_paths_state(buf, cap, "last_fidelity_ab.json");
     return written > 0 && (size_t)written < cap;
 }

@@ -599,10 +599,6 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
     out->arena = arena;
     out->allocator = a;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
-
     char global_path[HU_MAX_PATH];
     char workspace_dir[HU_MAX_PATH];
 

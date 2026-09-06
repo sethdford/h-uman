@@ -31,11 +31,7 @@
 
 static const char *default_out_path(void) {
     static char path[512];
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    hu_paths_state(path, sizeof(path), "social_state.json");
-    return path;
+    return hu_paths_state(path, sizeof(path), "social_state.json") > 0 ? path : NULL;
 }
 
 static const char *default_db_path(void) {

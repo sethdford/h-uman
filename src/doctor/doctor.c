@@ -807,6 +807,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
      * matches what the daemon experiences, we attempt a real sqlite open
      * (read-only) and run a no-op query. Without sqlite at build time we
      * fall back to access() and explicitly disclaim the limitation. */
+    /* Kept: the guard owns the "$HOME is not set" diagnostic; the helper fails silently. */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR,
@@ -1375,6 +1376,7 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
     if (!alloc || !items || !count || !cap)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Kept: the guard owns the "$HOME unset" line; the helper's failure reads "path overflow". */
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
@@ -1549,9 +1551,6 @@ static int resolve_state_dir(char *out, size_t cap) {
         memcpy(out, override, len + 1);
         return 0;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
     int n = hu_paths_state_dir(out, cap);
     if (n <= 0 || (size_t)n >= cap)
         return -1;

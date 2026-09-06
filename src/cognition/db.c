@@ -15,9 +15,6 @@ hu_error_t hu_cognition_db_open(sqlite3 **out) {
     const char *path = ":memory:";
 #else
     static char path_buf[1024];
-    const char *home = getenv("HOME");
-    if (!home)
-        home = "/tmp";
     hu_paths_state(path_buf, sizeof(path_buf), "cognition.db");
     path_buf[sizeof(path_buf) - 1] = '\0';
     const char *path = path_buf;

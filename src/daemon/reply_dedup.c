@@ -210,9 +210,6 @@ static hu_reply_dedup_t g_reply_dedup;
 static bool g_reply_dedup_loaded;
 
 static size_t daemon_reply_dedup_path(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
     int n = hu_paths_state(buf, cap, "reply_dedup.json");
     return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
 }

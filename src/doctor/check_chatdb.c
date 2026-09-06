@@ -35,10 +35,6 @@ static hu_doctor_check_result_t check_chatdb_readable(hu_doctor_check_t *self, v
     /* Platform not applicable on non-macOS systems */
     return (hu_doctor_check_result_t){HU_DOCTOR_NA, "", NULL};
 #else
-    const char *home = getenv("HOME");
-    if (!home || !*home) {
-        home = "/tmp"; /* fallback — unlikely to have chat.db there, but better than crash */
-    }
 
     /* Build path: ~/Library/Messages/chat.db */
     char path_buf[1024];

@@ -30,6 +30,7 @@ static hu_error_t hu_data_expand_home(const char *path, char *buf, size_t buflen
             return HU_ERR_IO;
         return HU_OK;
     }
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is HU_ERR_IO. */
     const char *home = getenv("HOME");
     if (home == NULL)
         return HU_ERR_NOT_FOUND;
