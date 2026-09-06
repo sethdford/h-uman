@@ -974,7 +974,12 @@ jobs:
           python3 scripts/test_fidelity_differentiation.py
       - name: Style-card measurement pins (hermetic, stdlib-only)
         run: python3 scripts/test_measure_style_card.py
-      - name: Persona-evolution windowed re-derivation pins (hermetic, stdlib-only)
+      # Not stdlib-only: this suite is written against pytest fixtures
+      # (monkeypatch / tmp_path / capsys), so pytest is installed for it.
+      # Main went red on 2026-09-05 when it landed without this step.
+      - name: Install pytest for the persona-evolution suite
+        run: python3 -m pip install --quiet pytest
+      - name: Persona-evolution windowed re-derivation pins (hermetic, no chat.db)
         run: python3 scripts/test_eval_persona_evolution.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py
