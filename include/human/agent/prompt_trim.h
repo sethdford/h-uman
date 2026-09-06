@@ -22,10 +22,21 @@
  *
  * See docs/research/2026-07-11-prompt-composition-shrink-plan.md. */
 
-/* System-prompt hard cap in bytes. Mirrors the MLX-safe positional cap
- * enforced in agent_turn.c (empty responses observed above ~28 KB;
- * 16 KB keeps a wide margin — 2026-05-19 finding). */
-#define HU_PROMPT_TRIM_BUDGET_BYTES 16384
+/* System-prompt hard cap in bytes. Mirrors the positional cap enforced in
+ * agent_turn.c.
+ *
+ * History: 16 KB from a 2026-05-19 finding that the (Gemma-era) MLX backend
+ * returned empty responses above ~28 KB. Re-measured 2026-09-06 against the
+ * served GLM-4.5-Air-4bit on :8741 with cache-defeating prompts and a fact
+ * planted at 60% depth: 16/24/32/40 KB all answered, all recalled the fact,
+ * prompt_tokens scaled linearly (3031/4518/5947/7518), cold latency
+ * 10.2/15.0/20.6/27.5 s. The empty-response cliff is gone. Meanwhile the
+ * live prompt averages ~17 KB (persona 9.0 K, personal model 2.1 K, guard
+ * 1.8 K, memory 1.6 K, STM 1.1 K, ...) so a 16 KB cap cut memory and
+ * personal-model bytes on most turns — exactly the specificity the n=40
+ * human raters flagged. 24 KB fits the mean prompt with headroom at ~5 s
+ * extra cold prefill; 32 KB was judged not worth the latency yet. */
+#define HU_PROMPT_TRIM_BUDGET_BYTES 24576
 
 typedef enum hu_prompt_trim_mode {
     HU_PROMPT_TRIM_OFF = 0,

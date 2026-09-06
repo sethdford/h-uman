@@ -1032,13 +1032,15 @@ hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, siz
     hu_error_t err =
         hu_prompt_cap_with_tail(agent->alloc, prompt, prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES,
                                 guard_tail_reserved, rules_len ? rules : NULL, rules_len);
-    /* Prompt-size budget guard: MLX backends return empty responses past
-     * ~28 KB (2026-05-19), so the cap is real and fires on every turn whose
-     * assembled prompt exceeds the budget. Log once per process. */
+    /* Prompt-size budget guard. The budget is a latency/attention choice now,
+     * not a server cliff (see HU_PROMPT_TRIM_BUDGET_BYTES for the 2026-09-06
+     * re-measurement); it still fires on any turn whose assembled prompt
+     * exceeds it, and whatever it drops is context the model never sees.
+     * Log once per process. */
     if (before > HU_PROMPT_TRIM_BUDGET_BYTES) {
         static atomic_bool warned_prompt_budget = false;
         hu_log_warn_once(&warned_prompt_budget, "agent", NULL,
-                         "system prompt truncated from %zu to %zu bytes (MLX backend cap; "
+                         "system prompt truncated from %zu to %zu bytes (prompt budget cap; "
                          "%zu-byte guard tail reserved, %zu-byte rules block appended last); "
                          "some context dropped",
                          before, *prompt_len, guard_tail_reserved, rules_len);

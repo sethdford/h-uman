@@ -445,10 +445,11 @@ static void test_prompt_graph_context_present_immersive(void) {
  * LIVE lands under HU_PROMPT_TRIM_BUDGET_BYTES by dropping MIDDLE bytes
  * while the persona head and the CRITICAL REMINDER tail survive. */
 
-/* Builds a >16K memory context: an OLDEST marker line, filler lines, and a
+/* Builds an over-budget memory context: an OLDEST marker line, filler lines, and a
  * NEWEST marker line. Caller frees (len + 1). */
 static char *big_memory_context(hu_allocator_t *alloc, size_t *out_len) {
-    const size_t target = 20000;
+    const size_t target =
+        (size_t)HU_PROMPT_TRIM_BUDGET_BYTES + 3616; /* over budget by the same margin at any cap */
     char *buf = (char *)alloc->alloc(alloc->ctx, target + 64);
     HU_ASSERT_NOT_NULL(buf);
     size_t len = 0;
