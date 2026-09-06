@@ -8023,25 +8023,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                memory_ctx_len > 100 ? 0.8 : 0.4);
 
             /* Style learning: adaptive schedule — early sessions learn faster,
-             * then settle into a steady cadence. Also triggers on corrections. */
+             * then settle into a steady cadence.
+             *
+             * Gated on learning.persona_refresh_enabled (default false), the same
+             * switch as the daemon refresh tick. hu_persona_style_reanalyze saves
+             * through hu_persona_creator_write, which serializes only hu_persona_t
+             * fields; on 2026-09-06 06:01 this call rewrote the live persona
+             * without contacts / proactive / life_events / style_rules, killing
+             * every proactive path until a manual restore. Do not un-gate without
+             * a writer that preserves unknown keys (.claude/rules/persona.md). */
             {
-                bool should_reanalyze = false;
-                if (agent->persona_name && agent->persona_name_len > 0 && agent->memory) {
-                    if (agent->history_count <= 20 && agent->history_count % 10 == 0 &&
-                        agent->history_count > 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 20 && agent->history_count <= 100 &&
-                             agent->history_count % 25 == 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 100 && agent->history_count % 50 == 0)
-                        should_reanalyze = true;
-                }
+                bool pr_enabled = agent->config && agent->config->learning.persona_refresh_enabled;
+                bool should_reanalyze =
+                    agent->persona_name && agent->persona_name_len > 0 && agent->memory &&
+                    hu_persona_style_reanalyze_due(pr_enabled, agent->history_count);
                 if (should_reanalyze) {
                     const char *ch = agent->active_channel ? agent->active_channel : "cli";
                     size_t ch_len = agent->active_channel_len ? agent->active_channel_len : 3;
                     const char *cid = agent->memory_session_id ? agent->memory_session_id : "";
                     size_t cid_len =
                         agent->memory_session_id_len ? agent->memory_session_id_len : 0;
+                    hu_log_info("agent_turn", agent->observer,
+                                "persona style reanalyze: rewriting persona '%.*s' from history "
+                                "(history_count=%zu, learning.persona_refresh_enabled=true)",
+                                (int)agent->persona_name_len, agent->persona_name,
+                                agent->history_count);
                     (void)hu_persona_style_reanalyze(
                         agent->alloc, &agent->provider, agent->model_name, agent->model_name_len,
                         agent->memory, agent->persona_name, agent->persona_name_len, ch, ch_len,
