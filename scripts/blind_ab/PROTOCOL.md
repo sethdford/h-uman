@@ -122,8 +122,9 @@ PREFER?"** Confidence 1-5, same column, same meaning.
 
 ### Known limitation
 
-Redaction is regex (phone-shaped) + a real contact-name-token match, not a
-general PII scrubber -- an unusual phone format or a nickname absent from the
-AddressBook can slip through. A human should skim a generated sheet before
+Redaction is regex (phone-shaped and email-shaped, the latter replaced with
+`<redacted-email>`) + a real contact-name-token match, not a general PII
+scrubber -- an unusual phone format, an address with no dotted domain, or a
+nickname absent from the AddressBook can slip through. A human should skim a generated sheet before
 sending it to raters, the same manual judgment the existing recruitment step
 already requires.
