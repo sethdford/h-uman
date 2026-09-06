@@ -34,9 +34,6 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
         memcpy(buf, override, len + 1);
         return buf;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
     int n = hu_paths_state(buf, cap, "personas");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
@@ -3103,66 +3100,61 @@ hu_error_t hu_persona_load(hu_allocator_t *alloc, const char *name, size_t name_
      * This gives the persona runtime awareness of where the user has been lately,
      * so it can say "I was in Boston last week" instead of making things up. */
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char ra_path[HU_PERSONA_PATH_MAX];
-            int rn = hu_paths_state(ra_path, sizeof(ra_path), "photos/recent_activity.json");
-            if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
-                FILE *rf = fopen(ra_path, "rb");
-                if (rf) {
-                    if (fseek(rf, 0, SEEK_END) == 0) {
-                        long rsz = ftell(rf);
-                        if (rsz > 0 && rsz < (long)(32 * 1024)) {
-                            rewind(rf);
-                            char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
-                            if (rbuf) {
-                                size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
-                                rbuf[rrd] = '\0';
-                                /* Parse the JSON to build a concise summary string */
-                                hu_json_value_t *ra_root = NULL;
-                                hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
-                                if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
-                                    hu_json_value_t *locs =
-                                        hu_json_object_get(ra_root, "locations");
-                                    int window =
-                                        (int)hu_json_get_number(ra_root, "window_days", 30);
-                                    int photo_count =
-                                        (int)hu_json_get_number(ra_root, "photo_count", 0);
-                                    if (locs && locs->type == HU_JSON_ARRAY &&
-                                        locs->data.array.len > 0 && photo_count > 0) {
-                                        char summary[1024];
-                                        int sn = snprintf(summary, sizeof(summary),
-                                                          "Recent activity (last %d days, %d "
-                                                          "photos): ",
-                                                          window, photo_count);
-                                        size_t loc_count = locs->data.array.len;
-                                        for (size_t li = 0; li < loc_count && li < 5 &&
-                                                            (size_t)sn < sizeof(summary) - 60;
-                                             li++) {
-                                            const hu_json_value_t *loc = locs->data.array.items[li];
-                                            if (!loc || loc->type != HU_JSON_OBJECT)
-                                                continue;
-                                            const char *place = hu_json_get_string(loc, "place");
-                                            int pc = (int)hu_json_get_number(loc, "photo_count", 0);
-                                            if (place && pc > 0) {
-                                                sn += snprintf(
-                                                    summary + sn, sizeof(summary) - (size_t)sn,
-                                                    "%s%s (%d)", li > 0 ? ", " : "", place, pc);
-                                            }
+        char ra_path[HU_PERSONA_PATH_MAX];
+        int rn = hu_paths_state(ra_path, sizeof(ra_path), "photos/recent_activity.json");
+        if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
+            FILE *rf = fopen(ra_path, "rb");
+            if (rf) {
+                if (fseek(rf, 0, SEEK_END) == 0) {
+                    long rsz = ftell(rf);
+                    if (rsz > 0 && rsz < (long)(32 * 1024)) {
+                        rewind(rf);
+                        char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
+                        if (rbuf) {
+                            size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
+                            rbuf[rrd] = '\0';
+                            /* Parse the JSON to build a concise summary string */
+                            hu_json_value_t *ra_root = NULL;
+                            hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
+                            if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
+                                hu_json_value_t *locs = hu_json_object_get(ra_root, "locations");
+                                int window = (int)hu_json_get_number(ra_root, "window_days", 30);
+                                int photo_count =
+                                    (int)hu_json_get_number(ra_root, "photo_count", 0);
+                                if (locs && locs->type == HU_JSON_ARRAY &&
+                                    locs->data.array.len > 0 && photo_count > 0) {
+                                    char summary[1024];
+                                    int sn = snprintf(summary, sizeof(summary),
+                                                      "Recent activity (last %d days, %d "
+                                                      "photos): ",
+                                                      window, photo_count);
+                                    size_t loc_count = locs->data.array.len;
+                                    for (size_t li = 0; li < loc_count && li < 5 &&
+                                                        (size_t)sn < sizeof(summary) - 60;
+                                         li++) {
+                                        const hu_json_value_t *loc = locs->data.array.items[li];
+                                        if (!loc || loc->type != HU_JSON_OBJECT)
+                                            continue;
+                                        const char *place = hu_json_get_string(loc, "place");
+                                        int pc = (int)hu_json_get_number(loc, "photo_count", 0);
+                                        if (place && pc > 0) {
+                                            sn += snprintf(
+                                                summary + sn, sizeof(summary) - (size_t)sn,
+                                                "%s%s (%d)", li > 0 ? ", " : "", place, pc);
                                         }
-                                        if ((size_t)sn < sizeof(summary))
-                                            out->recent_activity =
-                                                hu_strndup(alloc, summary, (size_t)sn);
                                     }
+                                    if ((size_t)sn < sizeof(summary))
+                                        out->recent_activity =
+                                            hu_strndup(alloc, summary, (size_t)sn);
                                 }
-                                if (ra_root)
-                                    hu_json_free(alloc, ra_root);
-                                alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                             }
+                            if (ra_root)
+                                hu_json_free(alloc, ra_root);
+                            alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                         }
                     }
-                    fclose(rf);
                 }
+                fclose(rf);
             }
         }
     }

@@ -280,9 +280,6 @@ hu_vault_t *hu_vault_create(hu_allocator_t *alloc, const char *vault_path) {
         memcpy(v->vault_path, vault_path, len);
         v->vault_path[len] = '\0';
     } else {
-        const char *home = getenv("HOME");
-        if (!home)
-            home = ".";
         int n = hu_paths_state_or(v->vault_path, sizeof(v->vault_path), ".", "vault.json");
         if (n <= 0 || (size_t)n >= sizeof(v->vault_path))
             v->vault_path[0] = '\0';

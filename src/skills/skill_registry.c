@@ -492,10 +492,6 @@ hu_error_t hu_skill_registry_install(hu_allocator_t *alloc, const char *source_p
     }
     hu_json_free(alloc, parsed);
 
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_INVALID_ARGUMENT;
-
     char base_dir[512];
     int n = hu_paths_state(base_dir, sizeof(base_dir), "skills");
     if (n <= 0 || (size_t)n >= sizeof(base_dir))
@@ -634,12 +630,6 @@ hu_error_t hu_skill_registry_install_by_name(hu_allocator_t *alloc, const char *
     }
     hu_json_free(alloc, parsed);
 
-    const char *home = getenv("HOME");
-    if (!home || !home[0]) {
-        hu_http_response_free(alloc, &mresp);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
     char base_dir[512];
     n = hu_paths_state(base_dir, sizeof(base_dir), "skills");
     if (n <= 0 || (size_t)n >= sizeof(base_dir)) {
@@ -709,9 +699,6 @@ hu_error_t hu_skill_registry_uninstall(const char *name) {
 
 #if !defined(HU_IS_TEST) || !HU_IS_TEST
 #ifdef HU_GATEWAY_POSIX
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_INVALID_ARGUMENT;
 
     char dir_path[512];
     int n = hu_paths_state(dir_path, sizeof(dir_path), "skills/%.256s", name);

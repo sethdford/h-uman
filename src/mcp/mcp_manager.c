@@ -205,9 +205,6 @@ static void slot_load_oauth_token(hu_allocator_t *alloc, hu_mcp_mgr_slot_t *slot
         return; /* OAuth not configured for this server */
 
     /* Try to load cached token from ~/.human/oauth_tokens.json */
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
 
     /* Build path: ~/.human/oauth_tokens.json */
     char token_path[512];

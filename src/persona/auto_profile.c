@@ -84,6 +84,7 @@ hu_error_t hu_persona_auto_profile(hu_allocator_t *alloc, const char *contact_id
 #endif
 
 #if defined(HU_ENABLE_SQLITE)
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is INVALID_ARGUMENT. */
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return HU_ERR_NOT_FOUND;

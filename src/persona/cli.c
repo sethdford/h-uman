@@ -806,13 +806,10 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         {
             const char *override = getenv("HU_PERSONA_DIR");
             if (!override || !override[0]) {
-                const char *home = getenv("HOME");
-                if (home && home[0]) {
-                    char parent[HU_PERSONA_PATH_MAX];
-                    int pn = hu_paths_state_dir(parent, sizeof(parent));
-                    if (pn > 0 && (size_t)pn < sizeof(parent))
-                        (void)mkdir(parent, 0755);
-                }
+                char parent[HU_PERSONA_PATH_MAX];
+                int pn = hu_paths_state_dir(parent, sizeof(parent));
+                if (pn > 0 && (size_t)pn < sizeof(parent))
+                    (void)mkdir(parent, 0755);
             }
             if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
                 fprintf(stderr, "Could not create persona directory\n");
@@ -1049,13 +1046,10 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         {
             const char *override = getenv("HU_PERSONA_DIR");
             if (!override || !override[0]) {
-                const char *home = getenv("HOME");
-                if (home && home[0]) {
-                    char parent[HU_PERSONA_PATH_MAX];
-                    int pp = hu_paths_state_dir(parent, sizeof(parent));
-                    if (pp > 0 && (size_t)pp < sizeof(parent))
-                        (void)mkdir(parent, 0755);
-                }
+                char parent[HU_PERSONA_PATH_MAX];
+                int pp = hu_paths_state_dir(parent, sizeof(parent));
+                if (pp > 0 && (size_t)pp < sizeof(parent))
+                    (void)mkdir(parent, 0755);
             }
             if (mkdir(base, 0755) != 0 && errno != EEXIST)
                 return HU_ERR_IO;
@@ -1068,6 +1062,8 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
 
         if (args->from_imessage) {
 #if defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+            /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently.
+             */
             const char *home = getenv("HOME");
             if (!home || !home[0]) {
                 fprintf(stderr, "HOME not set\n");

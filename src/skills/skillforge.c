@@ -615,9 +615,6 @@ hu_error_t hu_skillforge_install(const char *name, const char *url) {
     (void)url;
     return HU_OK;
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_INVALID_ARGUMENT;
 
     char path[1024];
     int n = hu_paths_state(path, sizeof(path), "skills/%.256s.skill.json", name);
@@ -907,13 +904,10 @@ hu_error_t hu_skillforge_uninstall(hu_skillforge_t *sf, const char *name) {
             }
             sf->skills_len--;
 
-            const char *home = getenv("HOME");
-            if (home) {
-                char path[1024];
-                int n = hu_paths_state(path, sizeof(path), "skills/%.256s.skill.json", name);
-                if (n > 0 && (size_t)n < sizeof(path))
-                    remove(path);
-            }
+            char path[1024];
+            int n = hu_paths_state(path, sizeof(path), "skills/%.256s.skill.json", name);
+            if (n > 0 && (size_t)n < sizeof(path))
+                remove(path);
             return HU_OK;
         }
     }

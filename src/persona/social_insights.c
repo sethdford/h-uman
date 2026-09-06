@@ -84,9 +84,6 @@ size_t hu_persona_render_social_insights(const struct hu_personal_model *model, 
 #include <stdlib.h> /* getenv */
 
 static const char *default_snapshot_path(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
     int n = hu_paths_state(buf, cap, "social_state.json");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }

@@ -104,6 +104,7 @@ static hu_error_t skill_write_execute(void *ctx, hu_allocator_t *alloc, const hu
     }
     return HU_OK;
 #else
+    /* Kept: the guard reports "HOME not set"; the helper's failure below reads "path too long". */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         *out = hu_tool_result_fail("HOME not set", 13);

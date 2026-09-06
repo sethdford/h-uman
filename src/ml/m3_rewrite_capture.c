@@ -114,6 +114,7 @@ hu_error_t hu_m3_rewrite_pair_record(hu_allocator_t *alloc, const char *path, co
     char default_path[2048];
     const char *out_path = path;
     if (!out_path || !out_path[0]) {
+        /* Kept: no HOME is HU_ERR_IO here, while a helper failure below is INTERNAL. */
         const char *home = getenv("HOME");
         if (!home || !home[0])
             return HU_ERR_IO;

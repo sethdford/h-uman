@@ -201,13 +201,10 @@ hu_error_t hu_m3_contact_routes_create(hu_allocator_t *alloc, const char *path,
     char default_path[2048];
     const char *use_path = path;
     if (!use_path || !use_path[0]) {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            int n = hu_paths_state(default_path, sizeof(default_path),
-                                   "training-data/m3_contact_routes.json");
-            if (n > 0 && (size_t)n < sizeof(default_path))
-                use_path = default_path;
-        }
+        int n = hu_paths_state(default_path, sizeof(default_path),
+                               "training-data/m3_contact_routes.json");
+        if (n > 0 && (size_t)n < sizeof(default_path))
+            use_path = default_path;
     }
     if (use_path) {
         size_t plen = strlen(use_path);

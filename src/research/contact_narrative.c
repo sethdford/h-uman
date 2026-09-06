@@ -32,9 +32,6 @@
 size_t hu_contact_narrative_default_path(const char *contact_handle, char *out, size_t cap) {
     if (!contact_handle || !*contact_handle || !out || cap < 16)
         return 0;
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
 
     /* Ensure the parent dir exists (0700 — same as ~/.human/). */
     char dir[512];
@@ -337,12 +334,8 @@ hu_error_t cmd_narrate(hu_allocator_t *alloc, int argc, char **argv) {
 
     /* Default chat.db. */
     char default_db[512];
-    if (!db) {
-        const char *home = getenv("HOME");
-        if (home && home[0] && hu_paths_chatdb(default_db, sizeof(default_db)) > 0) {
-            db = default_db;
-        }
-    }
+    if (!db && hu_paths_chatdb(default_db, sizeof(default_db)) > 0)
+        db = default_db;
 
     /* Default output path. */
     char default_out[512];

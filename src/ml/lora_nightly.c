@@ -27,10 +27,8 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
     if (!cfg)
         return false;
     memset(cfg, 0, sizeof(*cfg));
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
+    if (hu_paths_state(cfg->db_path, sizeof(cfg->db_path), "memory.db") < 0)
         return false;
-    hu_paths_state(cfg->db_path, sizeof(cfg->db_path), "memory.db");
     hu_paths_state(cfg->pairs_jsonl_path, sizeof(cfg->pairs_jsonl_path), "lora-pairs.jsonl");
     hu_paths_state(cfg->adapters_dir, sizeof(cfg->adapters_dir), "adapters");
     hu_paths_state(cfg->current_symlink, sizeof(cfg->current_symlink), "adapter-current");

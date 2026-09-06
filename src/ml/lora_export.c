@@ -325,13 +325,11 @@ hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv) {
     char db_buf[512];
     char out_buf[512];
     if (!db_path) {
-        const char *home = getenv("HOME");
-        if (home && home[0] && hu_paths_state(db_buf, sizeof(db_buf), "dpo_pairs.db") > 0)
+        if (hu_paths_state(db_buf, sizeof(db_buf), "dpo_pairs.db") > 0)
             db_path = db_buf;
     }
     if (!out_path) {
-        const char *home = getenv("HOME");
-        if (home && home[0] && hu_paths_state(out_buf, sizeof(out_buf), "lora-pairs.jsonl") > 0)
+        if (hu_paths_state(out_buf, sizeof(out_buf), "lora-pairs.jsonl") > 0)
             out_path = out_buf;
     }
     if (!db_path || !out_path) {
@@ -397,13 +395,11 @@ hu_error_t cmd_export_kto(hu_allocator_t *alloc, int argc, char **argv) {
     char db_buf[512];
     char out_buf[512];
     if (!db_path) {
-        const char *home = getenv("HOME");
-        if (home && home[0] && hu_paths_state(db_buf, sizeof(db_buf), "memory.db") > 0)
+        if (hu_paths_state(db_buf, sizeof(db_buf), "memory.db") > 0)
             db_path = db_buf;
     }
     if (!out_path) {
-        const char *home = getenv("HOME");
-        if (home && home[0] && hu_paths_state(out_buf, sizeof(out_buf), "lora-kto.jsonl") > 0)
+        if (hu_paths_state(out_buf, sizeof(out_buf), "lora-kto.jsonl") > 0)
             out_path = out_buf;
     }
     if (!db_path || !out_path) {

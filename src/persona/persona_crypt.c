@@ -117,6 +117,7 @@ static hu_error_t resolve_keyfile_path(char *out, size_t cap) {
         memcpy(out, override, n + 1);
         return HU_OK;
     }
+    /* Kept: no HOME is CONFIG_INVALID here, while a helper failure below is INVALID_ARGUMENT. */
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return HU_ERR_CONFIG_INVALID;

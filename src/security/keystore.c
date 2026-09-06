@@ -144,10 +144,7 @@ static void keystore_dir(char *out, size_t cap) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
     snprintf(out, cap, "/tmp");
 #else
-    const char *home = getenv("HOME");
-    if (home && *home)
-        hu_paths_state(out, cap, "keys");
-    else
+    if (hu_paths_state(out, cap, "keys") < 0)
         snprintf(out, cap, "/tmp");
 #endif
 }

@@ -357,6 +357,7 @@ hu_error_t hu_ml_cli_pair_init_singles(hu_allocator_t *alloc, int argc, const ch
     if (override && override[0]) {
         snprintf(db_path, sizeof(db_path), "%s", override);
     } else {
+        /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently. */
         const char *home = getenv("HOME");
         if (!home || !*home) {
             fprintf(stderr, "[pair-init-singles] HOME not set; cannot locate memory.db\n");

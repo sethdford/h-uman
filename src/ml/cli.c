@@ -399,9 +399,6 @@ hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv)
  * ~/.human/scheduler.status. Uses `hu_scheduler_status_parse_json` (same as
  * `human doctor scheduler`) so key order and whitespace never drift between tools. */
 static void print_scheduler_status_block(void) {
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        return;
     char path[512];
     int n = hu_paths_state(path, sizeof(path), "scheduler.status");
     if (n <= 0 || (size_t)n >= sizeof(path))
@@ -573,6 +570,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
      * Plain automatic storage is correct. */
     char default_db[512];
     if (!db_path) {
+        /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently. */
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
@@ -751,13 +749,8 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
          * pointer once the block exits (CodeRabbit 2026-05-17 finding). */
         char default_db[512] = {0};
         const char *db_path = memory_db ? memory_db : chat_db;
-        if (!db_path) {
-            const char *home = getenv("HOME");
-            if (home) {
-                hu_paths_state(default_db, sizeof(default_db), "memory.db");
-                db_path = default_db;
-            }
-        }
+        if (!db_path && hu_paths_state(default_db, sizeof(default_db), "memory.db") > 0)
+            db_path = default_db;
         if (db_path) {
             size_t dpo_count = 0;
             hu_error_t dpo_err =
@@ -3310,17 +3303,11 @@ hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const
         if (env && env[0]) {
             db_path = env;
         } else {
-            const char *home = getenv("HOME");
-            if (!home)
-                home = ".";
             (void)hu_paths_state_or(home_db, sizeof(home_db), ".", "memory.db");
             db_path = home_db;
         }
     }
     if (!export_path) {
-        const char *home = getenv("HOME");
-        if (!home)
-            home = ".";
         (void)hu_paths_state_or(home_export, sizeof(home_export), ".", "dpo/reactions.jsonl");
         export_path = home_export;
         (void)hu_dpo_miner_ensure_parent_dir(export_path);

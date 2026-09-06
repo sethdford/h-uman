@@ -717,9 +717,6 @@ hu_error_t hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocat
     if (args.out_dir) {
         snprintf(out_dir, sizeof(out_dir), "%s", args.out_dir);
     } else {
-        const char *home = getenv("HOME");
-        if (!home || !home[0])
-            home = "/tmp";
         long demo_ts = (long)hu_e2e_now();
         hu_paths_state_or(out_dir, sizeof(out_dir), "/tmp", "proofs/demo-%ld", demo_ts);
     }

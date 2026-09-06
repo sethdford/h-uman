@@ -325,9 +325,7 @@ hu_error_t hu_canvas_create(hu_allocator_t *alloc, hu_tool_t *out) {
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
-    const char *home = getenv("HOME");
-    if (home) {
-        hu_paths_state(c->persist_dir, sizeof(c->persist_dir), "canvas");
+    if (hu_paths_state(c->persist_dir, sizeof(c->persist_dir), "canvas") > 0) {
         canvas_init_persist_dir(c);
         canvas_load_from_disk(c);
     }

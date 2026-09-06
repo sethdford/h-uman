@@ -2893,10 +2893,6 @@ const char *hu_personal_model_resolve_default_path(char *buf, size_t cap) {
         memcpy(buf, override, len + 1);
         return buf;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0]) {
-        return NULL;
-    }
     int n = hu_paths_state(buf, cap, "personal_model.bin");
     if (n <= 0 || (size_t)n >= cap) {
         return NULL;

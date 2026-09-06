@@ -350,9 +350,6 @@ static int hu_minja_open_quarantine_fd(void) {
             return -1;
         memcpy(path, override, n + 1);
     } else {
-        const char *home = getenv("HOME");
-        if (!home)
-            return -1;
         int w = hu_paths_state(path, sizeof(path), "private/quarantine.log");
         if (w <= 0 || (size_t)w >= sizeof(path))
             return -1;

@@ -10,9 +10,6 @@
 #include <string.h>
 
 size_t hu_plugin_get_default_dir(char *out, size_t out_len) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
     int n = hu_paths_state(out, out_len, "plugins");
     if (n < 0 || (size_t)n >= out_len)
         return 0;
