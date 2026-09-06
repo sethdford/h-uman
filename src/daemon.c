@@ -704,8 +704,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
          * writes from a separate process, and the previous once-per-process
          * load left those entries invisible until the next daemon restart
          * (2026-07-27). Cheap: one stat() per pass, load only on change. */
-        const char *sched_home = getenv("HOME");
-        if (sched_home) {
+        {
             char sp[512];
             int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
             if (sn > 0 && (size_t)sn < sizeof(sp))
@@ -769,13 +768,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
                                              sched_msg, sched_len);
-                const char *sh = getenv("HOME");
-                if (sh) {
-                    char sp[512];
-                    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                    if (sn > 0 && (size_t)sn < sizeof(sp))
-                        hu_conversation_sched_save(sp, (size_t)sn);
-                }
+                char sp[512];
+                int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+                if (sn > 0 && (size_t)sn < sizeof(sp))
+                    hu_conversation_sched_save(sp, (size_t)sn);
             }
         }
     }
@@ -1823,13 +1819,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                     "scheduled morning message for %s: %.*s",
                                     cp->name ? cp->name : cp->contact_id, (int)greeting_len,
                                     greeting);
-                        const char *sh = getenv("HOME");
-                        if (sh) {
-                            char sp[512];
-                            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                            if (sn > 0 && (size_t)sn < sizeof(sp))
-                                hu_conversation_sched_save(sp, (size_t)sn);
-                        }
+                        char sp[512];
+                        int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+                        if (sn > 0 && (size_t)sn < sizeof(sp))
+                            hu_conversation_sched_save(sp, (size_t)sn);
                     }
                 }
             }
@@ -2313,10 +2306,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * rule: log once at info level whether config was loaded, and on
      * disable explain how to enable. */
     {
-        const char *home_ar = getenv("HOME");
         char ar_path[1024];
-        if (home_ar && home_ar[0] &&
-            hu_paths_state(ar_path, sizeof(ar_path), "autoresponder.json") > 0) {
+        if (hu_paths_state(ar_path, sizeof(ar_path), "autoresponder.json") > 0) {
             hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
             if (are == HU_OK && g_autoresponder_cfg.enabled) {
                 g_autoresponder_loaded = true;
@@ -2436,15 +2427,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     hu_keystore_t *daemon_keystore = NULL;
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[HU_MAX_PATH];
-            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
-            if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                if (hu_graph_open(alloc, graph_path, (size_t)np, &graph) != HU_OK)
-                    hu_log_error("human", agent ? agent->observer : NULL, "graph open failed: %.*s",
-                                 np, graph_path);
-            }
+        char graph_path[HU_MAX_PATH];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path)) {
+            if (hu_graph_open(alloc, graph_path, (size_t)np, &graph) != HU_OK)
+                hu_log_error("human", agent ? agent->observer : NULL, "graph open failed: %.*s", np,
+                             graph_path);
         }
     }
     if (graph && agent && agent->retrieval_engine)
@@ -2461,53 +2449,50 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * If the directory exists and HU_KEYSTORE_PASSPHRASE is set, open
      * and unlock. Otherwise log a warning and continue in plaintext. */
     {
-        const char *home = getenv("HOME");
-        if (home && *home) {
-            char ks_dir[HU_MAX_PATH];
-            int kn = hu_paths_state(ks_dir, sizeof(ks_dir), "keys");
-            if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
-                struct stat ks_st;
-                if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
-                    const char *uid = getenv("USER");
-                    if (!uid || !*uid)
-                        uid = "default";
-                    hu_error_t ks_err = hu_keystore_open(alloc, uid, &daemon_keystore);
-                    if (ks_err == HU_OK && daemon_keystore) {
-                        const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
-                        if (pp && *pp) {
-                            ks_err =
-                                hu_keystore_unlock_with_passphrase(daemon_keystore, pp, strlen(pp));
-                            if (ks_err == HU_OK) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "W15: keystore unlocked for user=%s", uid);
-                            } else {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "W15: keystore unlock failed (%s); "
-                                            "encryption inactive this session",
-                                            hu_error_string(ks_err));
-                                hu_keystore_close(daemon_keystore, alloc);
-                                daemon_keystore = NULL;
-                            }
+        char ks_dir[HU_MAX_PATH];
+        int kn = hu_paths_state(ks_dir, sizeof(ks_dir), "keys");
+        if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
+            struct stat ks_st;
+            if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
+                const char *uid = getenv("USER");
+                if (!uid || !*uid)
+                    uid = "default";
+                hu_error_t ks_err = hu_keystore_open(alloc, uid, &daemon_keystore);
+                if (ks_err == HU_OK && daemon_keystore) {
+                    const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
+                    if (pp && *pp) {
+                        ks_err =
+                            hu_keystore_unlock_with_passphrase(daemon_keystore, pp, strlen(pp));
+                        if (ks_err == HU_OK) {
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "W15: keystore unlocked for user=%s", uid);
                         } else {
                             hu_log_warn("human", agent ? agent->observer : NULL,
-                                        "W15: keystore directory exists but "
-                                        "HU_KEYSTORE_PASSPHRASE unset; "
-                                        "encryption inactive this session");
+                                        "W15: keystore unlock failed (%s); "
+                                        "encryption inactive this session",
+                                        hu_error_string(ks_err));
                             hu_keystore_close(daemon_keystore, alloc);
                             daemon_keystore = NULL;
                         }
                     } else {
                         hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "W15: keystore open failed (%s)", hu_error_string(ks_err));
+                                    "W15: keystore directory exists but "
+                                    "HU_KEYSTORE_PASSPHRASE unset; "
+                                    "encryption inactive this session");
+                        hu_keystore_close(daemon_keystore, alloc);
                         daemon_keystore = NULL;
                     }
                 } else {
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "W15: no keystore at %s; "
-                                "memory encryption not active "
-                                "(run `human keystore init` to enable)",
-                                ks_dir);
+                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                "W15: keystore open failed (%s)", hu_error_string(ks_err));
+                    daemon_keystore = NULL;
                 }
+            } else {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "W15: no keystore at %s; "
+                            "memory encryption not active "
+                            "(run `human keystore init` to enable)",
+                            ks_dir);
             }
         }
     }
@@ -3610,12 +3595,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             /* Prepare training data from conversations */
                             const char *data_dir = "/tmp/hu_ml_data";
                             size_t msg_processed = 0;
-                            const char *home = getenv("HOME");
                             char chat_path[512], mem_path[512];
-                            if (home) {
-                                hu_paths_state(chat_path, sizeof(chat_path), "chat.db");
-                                hu_paths_state(mem_path, sizeof(mem_path), "memory.db");
-                            } else {
+                            if (hu_paths_state(chat_path, sizeof(chat_path), "chat.db") < 0 ||
+                                hu_paths_state(mem_path, sizeof(mem_path), "memory.db") < 0) {
                                 snprintf(chat_path, sizeof(chat_path), ".human/chat.db");
                                 snprintf(mem_path, sizeof(mem_path), ".human/memory.db");
                             }
@@ -3682,11 +3664,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                hu_persona_refresh_should_run(true, (int64_t)t,
                                                              last_persona_refresh)) {
                         last_persona_refresh = (int64_t)t;
-                        const char *pr_home = getenv("HOME");
                         char pr_db[512];
-                        if (pr_home && pr_home[0])
-                            hu_paths_state(pr_db, sizeof(pr_db), "memory.db");
-                        else
+                        if (hu_paths_state(pr_db, sizeof(pr_db), "memory.db") < 0)
                             snprintf(pr_db, sizeof(pr_db), ".human/memory.db");
                         size_t pr_total = 0;
                         hu_error_t pr_err = hu_persona_refresh_example_banks(
@@ -11206,14 +11185,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             uint64_t gcnow = (uint64_t)time(NULL) * 1000ULL;
                             if (gcnow - last_gif_cal_save_ms > 30000) {
                                 last_gif_cal_save_ms = gcnow;
-                                const char *rh = getenv("HOME");
-                                if (rh) {
-                                    char rcp[512];
-                                    int rn =
-                                        hu_paths_state(rcp, sizeof(rcp), "gif_calibration.json");
-                                    if (rn > 0 && (size_t)rn < sizeof(rcp))
-                                        hu_conversation_gif_cal_save(rcp, (size_t)rn);
-                                }
+                                char rcp[512];
+                                int rn = hu_paths_state(rcp, sizeof(rcp), "gif_calibration.json");
+                                if (rn > 0 && (size_t)rn < sizeof(rcp))
+                                    hu_conversation_gif_cal_save(rcp, (size_t)rn);
                             }
                         }
                     }
@@ -11235,24 +11210,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     static bool gif_cal_loaded;
                     if (!gif_cal_loaded) {
                         gif_cal_loaded = true;
-                        const char *gh = getenv("HOME");
-                        if (gh) {
-                            char gcp[512];
-                            int gn = hu_paths_state(gcp, sizeof(gcp), "gif_calibration.json");
-                            if (gn > 0 && (size_t)gn < sizeof(gcp))
-                                hu_conversation_gif_cal_load(gcp, (size_t)gn);
-                        }
+                        char gcp[512];
+                        int gn = hu_paths_state(gcp, sizeof(gcp), "gif_calibration.json");
+                        if (gn > 0 && (size_t)gn < sizeof(gcp))
+                            hu_conversation_gif_cal_load(gcp, (size_t)gn);
                     }
                     static bool music_taste_loaded;
                     if (!music_taste_loaded) {
                         music_taste_loaded = true;
-                        const char *mh = getenv("HOME");
-                        if (mh) {
-                            char mtp[512];
-                            int mn = hu_paths_state(mtp, sizeof(mtp), "music_taste.json");
-                            if (mn > 0 && (size_t)mn < sizeof(mtp))
-                                hu_music_taste_load(mtp, (size_t)mn);
-                        }
+                        char mtp[512];
+                        int mn = hu_paths_state(mtp, sizeof(mtp), "music_taste.json");
+                        if (mn > 0 && (size_t)mn < sizeof(mtp))
+                            hu_music_taste_load(mtp, (size_t)mn);
                     }
                 }
 
@@ -11342,16 +11311,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         hu_conversation_gif_cal_record_send(
                                             batch_key, key_len, gif_query, gif_query_len);
                                         {
-                                            const char *cal_home = getenv("HOME");
-                                            if (cal_home) {
-                                                char cal_path[512];
-                                                int cp_n =
-                                                    hu_paths_state(cal_path, sizeof(cal_path),
-                                                                   "gif_calibration.json");
-                                                if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
-                                                    hu_conversation_gif_cal_save(cal_path,
-                                                                                 (size_t)cp_n);
-                                            }
+                                            char cal_path[512];
+                                            int cp_n = hu_paths_state(cal_path, sizeof(cal_path),
+                                                                      "gif_calibration.json");
+                                            if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
+                                                hu_conversation_gif_cal_save(cal_path,
+                                                                             (size_t)cp_n);
                                         }
                                         gif_sent_this_turn = true;
                                         hu_log_info("human", agent ? agent->observer : NULL,
@@ -11382,23 +11347,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (hu_conversation_should_send_sticker(combined, combined_len, last_resp,
                                                             last_resp_len, stk_seed,
                                                             sticker_prob)) {
-                        const char *home = getenv("HOME");
-                        if (home) {
-                            char stk_dir[512];
-                            int sd_n = hu_paths_state(stk_dir, sizeof(stk_dir), "stickers");
-                            if (sd_n > 0 && (size_t)sd_n < sizeof(stk_dir)) {
-                                char stk_path[640];
-                                size_t sp_len = hu_conversation_select_sticker(
-                                    combined, combined_len, stk_seed, stk_dir, (size_t)sd_n,
-                                    stk_path, sizeof(stk_path));
-                                if (sp_len > 0 && access(stk_path, R_OK) == 0) {
-                                    usleep(1500000 + (stk_seed % 2000000));
-                                    const char *media[] = {stk_path};
-                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                              send_target_len, "", 0, media, 1);
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "sent sticker: %s", stk_path);
-                                }
+                        char stk_dir[512];
+                        int sd_n = hu_paths_state(stk_dir, sizeof(stk_dir), "stickers");
+                        if (sd_n > 0 && (size_t)sd_n < sizeof(stk_dir)) {
+                            char stk_path[640];
+                            size_t sp_len = hu_conversation_select_sticker(
+                                combined, combined_len, stk_seed, stk_dir, (size_t)sd_n, stk_path,
+                                sizeof(stk_path));
+                            if (sp_len > 0 && access(stk_path, R_OK) == 0) {
+                                usleep(1500000 + (stk_seed % 2000000));
+                                const char *media[] = {stk_path};
+                                ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                          send_target_len, "", 0, media, 1);
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "sent sticker: %s", stk_path);
                             }
                         }
                     }
@@ -11607,15 +11569,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
                                                     if (tnow - last_taste_save_ms > 30000) {
                                                         last_taste_save_ms = tnow;
-                                                        const char *th = getenv("HOME");
-                                                        if (th) {
-                                                            char tp[512];
-                                                            int tn2 = hu_paths_state(
-                                                                tp, sizeof(tp), "music_taste.json");
-                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                                hu_music_taste_save(tp,
-                                                                                    (size_t)tn2);
-                                                        }
+                                                        char tp[512];
+                                                        int tn2 = hu_paths_state(
+                                                            tp, sizeof(tp), "music_taste.json");
+                                                        if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                            hu_music_taste_save(tp, (size_t)tn2);
                                                     }
                                                 }
                                             } else {
@@ -11691,15 +11649,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
                                                     if (tnow - last_taste_save_ms > 30000) {
                                                         last_taste_save_ms = tnow;
-                                                        const char *th = getenv("HOME");
-                                                        if (th) {
-                                                            char tp[512];
-                                                            int tn2 = hu_paths_state(
-                                                                tp, sizeof(tp), "music_taste.json");
-                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                                hu_music_taste_save(tp,
-                                                                                    (size_t)tn2);
-                                                        }
+                                                        char tp[512];
+                                                        int tn2 = hu_paths_state(
+                                                            tp, sizeof(tp), "music_taste.json");
+                                                        if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                            hu_music_taste_save(tp, (size_t)tn2);
                                                     }
                                                 }
                                             }
