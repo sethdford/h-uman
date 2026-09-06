@@ -53,12 +53,20 @@ fall-through, truncation, and the fallback contracts.
 `scripts/check-state-path-literals.sh`, wired into `.githooks/pre-commit`
 (fires when a `src/` or `include/` C/H file is staged). Ceiling 0, freeze-only.
 
-## Follow-up
+## Follow-up (closed 2026-09-06)
 
-177 `getenv("HOME")` guards remain: each is `if (!home) return X;` in front of
-a helper call that now performs the same check. Removing one is a control-flow
-change (the return value at the check may differ), so it is a per-site edit,
-not a sweep.
+The 146 `getenv("HOME")` guards that sat in front of a helper call were
+reviewed one function at a time; 101 were redundant and are gone. A guard is
+redundant only when the helper's failure is checked and produces the same
+outcome the guard did. The 45 that remain are either (a) a real use of `home`
+for a non-state path (launchd/systemd, gcloud ADC, AddressBook, repo
+candidates) or (b) marked with a one-line `Kept:` comment naming the outcome
+that would change — usually a stderr diagnostic the helper's silent `-1`
+would lose, or a different error code. Do not re-sweep them.
+
+One trap from that pass: unwrapping two sibling `if (home) { char sp[]; … }`
+blocks into a shared scope shadows the second declaration, and `-Wshadow` is
+`-Werror` in the ML build. Keep a bare block when the names repeat.
 
 ## Related
 
