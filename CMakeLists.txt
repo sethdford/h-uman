@@ -1511,7 +1511,9 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/card_file.c
     src/persona/style_card.c
+    src/persona/emotion_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -3340,6 +3342,7 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     tests/test_style_card.c
+    tests/test_emotion_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
