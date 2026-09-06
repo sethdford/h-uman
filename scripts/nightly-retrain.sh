@@ -90,8 +90,17 @@ run_mlxtune_candidate_stage() {
     fi
 
     local max_min="${HU_RETRAIN_MLXTUNE_MAX_MIN:-90}"
+    # Trainer selection (2026-09-05): mlx_tune/simpo has never produced an
+    # adapter here; the ORPO path that made the served v6 adapter is
+    # `HU_RETRAIN_MLXTUNE_TRAINER=mlx_lm_lora HU_RETRAIN_MLXTUNE_MODE=orpo
+    # HU_RETRAIN_MLXTUNE_BETA=0.05`. Defaults keep tonight's behaviour.
+    local trainer="${HU_RETRAIN_MLXTUNE_TRAINER:-mlx_tune}"
+    local mode="${HU_RETRAIN_MLXTUNE_MODE:-simpo}"
+    local beta="${HU_RETRAIN_MLXTUNE_BETA:-}"
+    local beta_args=()
+    [[ -n "$beta" ]] && beta_args=(--beta "$beta")
     local stamp; stamp="$(date +%Y%m%d-%H%M)"
-    local mlxtune_tag="mlxtune-simpo-${stamp}"
+    local mlxtune_tag="mlxtune-${mode}-${stamp}"
     # train-glm-adapter.sh appends its OWN "-<TAG>-<its own STAMP>" naming
     # (ADAPTER=.../seth-glm-air-${TAG}-${STAMP}), so the real output directory
     # is this prefix PLUS a suffix we do not know in advance. Resolve the
@@ -103,7 +112,7 @@ run_mlxtune_candidate_stage() {
     local mlxtune_py="$HOME/.human/venvs/mlxtune312/bin/python"
     local eval_py="$HOME/.human/venvs/eval312/bin/python"
 
-    log "mlx-tune candidate stage: config=$config data=$data_dir out=${candidate_dir_prefix}-* cap=${max_min}min"
+    log "mlx-tune candidate stage: config=$config data=$data_dir trainer=$trainer mode=$mode beta=${beta:-default} out=${candidate_dir_prefix}-* cap=${max_min}min"
 
     if [[ "${HU_RETRAIN_DRY_RUN:-0}" == "1" ]]; then
         log "mlx-tune candidate stage: DRY RUN (HU_RETRAIN_DRY_RUN=1) — loading nothing"
@@ -160,8 +169,9 @@ run_mlxtune_candidate_stage() {
     # never measures. The nightly candidate path always wants this; a
     # standalone `bash scripts/train-glm-adapter.sh` invocation does not
     # unless the caller opts in (default 0 — see that script).
-    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 bash "$REPO/scripts/train-glm-adapter.sh" \
-        --config "$config" --trainer mlx_tune --train-mode simpo \
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 \
+      HU_TRAIN_MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}" bash "$REPO/scripts/train-glm-adapter.sh" \
+        --config "$config" --trainer "$trainer" --train-mode "$mode" ${beta_args[@]+"${beta_args[@]}"} \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
     local job_pid=$!
     # Explicit >/dev/null redirect is load-bearing, not cosmetic: without it
@@ -388,7 +398,12 @@ fi
 # excludes them: mtime survives the quarantine rename, so an unfiltered `ls -t`
 # would let a rejected no-op adapter authorize skipping a real retrain.
 SOURCE_SHA="$(hu_sha256 "$SOURCE_JSONL" 2>/dev/null || true)"
-if [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
+if [[ "${HU_RETRAIN_SKIP_BASE:-0}" == "1" ]]; then
+    # Candidate-only run: keep the serving-down window, skip the m3-outcomes
+    # base training regardless of the source digest (2026-09-05).
+    SKIP_BASE_TRAINING=1
+    log "HU_RETRAIN_SKIP_BASE=1 — base (m3-outcomes) training skipped; candidate stage only"
+elif [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
     log "HU_RETRAIN_FORCE_TRAIN=1 — training even if the source is unchanged"
 elif [[ -n "$SOURCE_SHA" ]]; then
     stamp_dir=""; stamp_sha=""
@@ -468,7 +483,7 @@ TRAIN_PY="$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12"
 # the co-residency check passes and the memory check sees real headroom. If it
 # refuses anyway, that refusal is correct and we restart serving untouched.
 if [[ "${SKIP_BASE_TRAINING:-0}" == "1" ]]; then
-    log "base training skipped (outcome corpus unchanged); candidate stage follows"
+    log "base training skipped (unchanged corpus or HU_RETRAIN_SKIP_BASE=1); candidate stage follows"
 elif [[ -f "$SOURCE_JSONL" ]]; then
     # --adapter-out is REQUIRED by training_loop.py's C3 fast path; without it the
     # script prints "ERROR: --adapter-out is required when --source-jsonl is set"

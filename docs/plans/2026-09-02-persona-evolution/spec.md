@@ -358,6 +358,106 @@ only register difference from chosen is an emoji — then retrain, and re-run
 this gate. A decode-time injector is the wrong fix (see the humanness-
 injector incident).
 
+### 2026-09-05/06: corpus builder fixed and a candidate retrained
+
+**Builder fix** (`6d76d9813`). `scripts/build_v6_preference_corpus.py` now
+strips emoji from the rejected side of every pair whose chosen side has none
+(`neutralize_emoji_pairs`), keeps chosen-side emoji (Seth's real signal),
+drops a pair that would become empty or identical rather than fabricating
+one, refuses in `validate()` if the rejected emoji rate still exceeds chosen
+by more than 0.02, and records before/after rates in the manifest. The same
+rule is importable by `scripts/rebalance_preference_corpus.py --match-emoji`
+so existing corpora get it at train time; `train-glm-adapter.sh` passes it by
+default (`HU_TRAIN_MATCH_EMOJI=1`). Per-source audit of the live sources: the
+discriminator came entirely from `generated_v2` (27 rejected-only rows of
+217); arena (1/541) and cycle-4 (0/42) were neutral.
+
+**Why the retrain used the existing v6.1 corpus, not a fresh build.** A fresh
+build today would drop the 48 human-weighted pairs (the rated sheet has 0
+rated rows — it is the unrated v6 sheet) and add ~385 arena rows (541 vs 156
+in July). Training on that would change three things at once. Instead the
+candidate trained on `glm-v61-pref` (463 pairs, the last human-curated
+composition) with the train-time pass: casing/punctuation rebalanced to the
+style card on both sides (lowercase-start 0.71 → 0.09 chosen, 0.17 → 0.09
+rejected; terminal punct 0.24/0.50 → 0.18/0.18) and **25 rejected-only emoji
+rows → 0** (chosen rate 0.005, rejected 0.000, 0 rows dropped).
+
+**Retrain** (2026-09-05 08:56–09:21, `scripts/nightly-retrain.sh` candidate
+stage with the new knobs `HU_RETRAIN_MLXTUNE_TRAINER=mlx_lm_lora
+…MODE=orpo …BETA=0.05 HU_RETRAIN_SKIP_BASE=1`): the recipe that produced the
+served adapter (`glm-v61-orpo-config.yaml`, 400 iters, lr 5e-6, beta 0.05,
+rank 8, scale 2.0 verified in `adapter_config.json`). Serving was stopped for
+25 minutes and restored healthy. ORPO validation margin went −0.151 → +0.039
+with accuracy 0.00 → 0.82 by iteration 400 (the served v6 run never crossed
+zero). Guard: REAL, 80/80 `lora_b` non-zero. Candidate:
+`seth-glm-air-mlxtune-orpo-20260905-0856-20260905-085655`, **staged, not
+promoted** (promotion stays `register_v6_adapter.py` + a human call).
+
+**Measured**, both arms generated in the same offline harness (mlx_lm, fixed
+prompt head, 37 prompts, temperature 0.7):
+
+| | emoji | lowercase-start | no terminal punct | median chars |
+|---|---|---|---|---|
+| candidate (this retrain) | **1/37 (2.7%)** | 100% | 97% | 37 |
+| serving v6 adapter, same harness | 0/37 | 100% | 95% | 69 |
+| Seth, 60-day card | 12.6% | 8.6% | 81.7% | 27 |
+
+Gate (`gate-2026-09-05-retrain-*-arm.json`, pre side = v5 07-25 generations,
+35 matched prompts): candidate **FAIL** with 2/3 signs matching — length
+(−, matches) and **emoji (0.000 → 0.029, matches for the first time)**;
+warmth flips (2.17 → 0.29, human +0.42). Serving arm: 0/3 match.
+
+Read this as: the corpus change removed the anti-emoji push and one emoji
+appeared where none ever had, on 37 samples. That is a direction, not a
+fixed gap — the positive signal in the corpus is 2 chosen rows out of 426,
+and no amount of neutralising rejected rows adds more. LUAR (the promotion
+metric) could not be computed: `authorship_gap.py` refused with 19 other
+senders below its floor, another consequence of the chat.db retention roll.
+
+**Two findings for whoever picks this up:**
+1. The 100% lowercase-start in BOTH arms is not the adapter and not the
+   prompt (the served head says "normal capitalization" three times). The
+   base model with no adapter under the July harness prompt was also 100%
+   lowercase (160/160), and the first-letter rebalance cannot fix chosen
+   texts that are lowercase mid-sentence. Casing needs a corpus-content fix,
+   not a first-letter transform.
+2. The independent 2026-09-06 03:07 nightly (main checkout, SimPO stage)
+   produced a real candidate too, but its base m3-outcomes training failed
+   (rc=1) — see `~/.human/logs/nightly-retrain.log`.
+
+### 2026-09-06: candidate promoted, measured on the served path
+
+Promoted 07:45 on Seth's instruction via `scripts/m3_promote.py promote`
+(live swap, `/v1/adapters/current` reports the candidate with 160 tensors
+bound; authorship gate recorded as OVERRIDDEN/INCONCLUSIVE because LUAR
+could not be computed), registered with parsed training evidence
+(`register_v6_adapter.py`), and pinned in `~/.human/config.json` (backup
+`config.json.bak-pre-promote-20260906-*`) so restarts keep it. Rollback:
+`python3 scripts/m3_promote.py rollback --yes` and restore that backup.
+
+**Served-path probe** (37 prompts through :8741, production head,
+`gate-2026-09-06-promoted-served.json`):
+
+| | before (v6, 2026-09-05) | promoted (2026-09-06) | Seth 60-day card |
+|---|---|---|---|
+| emoji rate | 0/36 (0%) | **7/37 (18.9%)** | 12.6% [10.5, 14.6] |
+| lowercase-start | 92% | 68% | 8.6% |
+| no terminal punct | 97% | 81% | 81.7% |
+| median chars | 33 | 44 | 27 |
+
+Gate: emoji (0.000 → 0.171) and warmth (+) now match the human direction;
+length flips on a +0.7-char generated delta against a −3.0 human delta, so
+the strict all-axes verdict is still FAIL. The offline harness had shown
+only 1/37 emoji for the same adapter — the served path is the one that
+counts, and the two harnesses do not agree on this axis.
+
+Caveats: n=37, one probe; 18.9% overshoots Seth's 12.6% (upper CI 14.6);
+lowercase-start is still 8x Seth's rate; no human blind-A/B rating and no
+LUAR number for this adapter yet — the nightly authorship job measures it
+from tonight. The running daemon keeps the previous adapter id only as a
+provenance label until its next restart (the id is read at startup and
+SIGHUP does not reload it); the server itself serves the new adapter now.
+
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
 The persona carries measured-style numbers in three places. File:line
