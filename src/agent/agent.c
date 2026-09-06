@@ -619,7 +619,11 @@ hu_error_t hu_agent_from_config(
     out->meta_params.default_confidence_threshold = 0.5;
     out->meta_params.refinement_frequency_weeks = 4;
     out->meta_params.discovery_min_feedback_count = 3;
-#ifdef HU_ENABLE_SKILLS
+/* HU_HAS_SKILLS is what CMake defines for the skills option; this block
+ * tested HU_ENABLE_SKILLS (the CMake option name, never a macro) and was
+ * compiled out of every build, so meta-learning never loaded from the DB
+ * (2026-09-04 audit). */
+#ifdef HU_HAS_SKILLS
     if (memory) {
         sqlite3 *db = hu_sqlite_memory_get_db(memory);
         if (db && hu_meta_learning_load(db, &out->meta_params) == HU_OK) {

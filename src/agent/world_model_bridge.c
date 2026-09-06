@@ -1277,6 +1277,14 @@ hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, 
                                                          int budget_ms) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
+    /* One nightly retrain in the queue is the contract. The caller re-arms
+     * every 24 h but the job waits for idle + AC power, so without this
+     * check the rows stack up (576 pending on 2026-09-04) and every tick
+     * re-evaluates all of them. HU_OK here re-arms the caller's timer. */
+    size_t pending = 0;
+    if (hu_scheduler_pending_count_for_kind(s->s, HU_JOB_LORA_RETRAIN_NIGHTLY, &pending) == HU_OK &&
+        pending > 0)
+        return HU_OK;
     hu_job_spec_t job;
     memset(&job, 0, sizeof(job));
     job.kind = HU_JOB_LORA_RETRAIN_NIGHTLY;

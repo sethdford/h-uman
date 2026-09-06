@@ -1,7 +1,7 @@
 /* outbound/style_governor.c — measured-shape enforcement stage.
  *
  * Enforces the persona's MEASURED texting shape at egress (style card
- * 2026-07-12, n=1488: 79% no-terminal-punct, 9% ?-endings — vs model
+ * 2026-07-12; the live numbers are in the persona style card — vs model
  * baseline 10% / 31%). Prompt rules ask for a distribution; this stage
  * enforces it deterministically.
  *
@@ -17,7 +17,10 @@
 #include "human/agent/style_governor.h"
 #include "human/agent/outbound_pipeline.h"
 #include "human/core/log.h"
+#include "human/persona.h"
+#include "human/persona/style_card.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,15 +53,56 @@ void hu_style_governor_set_mode_for_test(int mode) {
 
 /* ── Deterministic roll ───────────────────────────────────────────── */
 
-unsigned hu_style_governor_roll(const char *text, size_t len) {
-    /* FNV-1a 32-bit. Same text → same roll: shaping is reproducible and
-     * ~90% of period-ending messages strip (across distinct messages). */
-    uint32_t h = 2166136261u;
+/* FNV-1a 32-bit over the text from `basis`, reduced to 0-99. Same text and
+ * basis → same roll: shaping is reproducible across processes. */
+static unsigned fnv_roll(const char *text, size_t len, uint32_t basis) {
+    uint32_t h = basis;
     for (size_t i = 0; i < len; i++) {
         h ^= (unsigned char)text[i];
         h *= 16777619u;
     }
     return (unsigned)(h % 100u);
+}
+
+unsigned hu_style_governor_casing_roll(const char *text, size_t len) {
+    /* Different offset basis than hu_style_governor_roll, so the casing and
+     * period decisions for one message are not the same number. */
+    return fnv_roll(text, len, 0x9747b28cu);
+}
+
+/* ── Action C: card-derived lowercase-start percentage (cached) ───────── */
+static atomic_int s_lower_pct = -1; /* -1 = unresolved */
+
+unsigned hu_style_governor_lowercase_start_pct(const struct hu_persona *persona) {
+    int cached = atomic_load_explicit(&s_lower_pct, memory_order_relaxed);
+    if (cached >= 0)
+        return (unsigned)cached;
+    unsigned pct = 100; /* never capitalize until resolved otherwise */
+    const char *env = getenv("HU_STYLE_GOVERNOR_CASING");
+    if (!(env && env[0] && strcmp(env, "off") == 0)) {
+        hu_style_card_t card;
+        hu_style_card_resolve(persona ? persona->name : NULL, persona ? persona->name_len : 0,
+                              &card);
+        double v = card.lowercase_start_rate * 100.0;
+        if (v < 0.0)
+            v = 0.0;
+        if (v > 100.0)
+            v = 100.0;
+        pct = (unsigned)lround(v);
+    }
+    atomic_store_explicit(&s_lower_pct, (int)pct, memory_order_relaxed);
+    return pct;
+}
+
+#if HU_IS_TEST
+void hu_style_governor_reset_casing_for_test(void) {
+    atomic_store_explicit(&s_lower_pct, -1, memory_order_relaxed);
+}
+#endif
+
+unsigned hu_style_governor_roll(const char *text, size_t len) {
+    /* ~90% of period-ending messages strip (across distinct messages). */
+    return fnv_roll(text, len, 2166136261u);
 }
 
 /* ── Pure shaping core ────────────────────────────────────────────── */
@@ -113,9 +157,27 @@ static size_t normalize_sentence(const char *text, size_t s, size_t e, char *buf
     return n;
 }
 
+static bool starts_with_url(const char *s, size_t n) {
+    return (n >= 4 && strncmp(s, "http", 4) == 0) || (n >= 4 && strncmp(s, "www.", 4) == 0);
+}
+
+/* First index >= from that starts a line's content (skips spaces/tabs). */
+static size_t line_start(const char *s, size_t from, size_t n) {
+    while (from < n && (s[from] == ' ' || s[from] == '\t'))
+        from++;
+    return from;
+}
+
 hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size_t len,
                                    unsigned period_roll, char **out, size_t *out_len,
                                    unsigned *actions) {
+    return hu_style_governor_shape_ex(alloc, text, len, period_roll, 0, 100, out, out_len, actions);
+}
+
+hu_error_t hu_style_governor_shape_ex(hu_allocator_t *alloc, const char *text, size_t len,
+                                      unsigned period_roll, unsigned casing_roll,
+                                      unsigned lowercase_start_pct, char **out, size_t *out_len,
+                                      unsigned *actions) {
     if (!alloc || !text || !out || !out_len || !actions)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -126,7 +188,7 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
     unsigned acts = 0;
 
     /* Action B — strip a trailing reciprocal-question boilerplate sentence
-     * when real content precedes it (measured ?-ending rate is 9%; the
+     * when real content precedes it (the card's ?-ending rate is ~1 in 10; the
      * model's 31% is mostly this assistant reciprocity reflex). */
     if (cur > 1 && text[cur - 1] == '?') {
         size_t s = cur - 1;
@@ -159,14 +221,24 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
 
     /* Action A — strip a single terminal '.' (never "..", "...", "…", '?',
      * '!'), hash-gated to ~90% of period-ending messages so the corpus
-     * no-terminal-punct rate (~79%) is approached, not overshot to 100%. */
+     * no-terminal-punct rate (~4 in 5 per the card) is approached, not overshot to 100%. */
     if (cur >= 2 && text[cur - 1] == '.' && text[cur - 2] != '.' &&
         period_roll < HU_STYLE_GOV_PERIOD_STRIP_PCT) {
         cur--;
         acts |= HU_STYLE_GOV_ACTION_PERIOD_STRIPPED;
     }
 
-    if (acts == 0 || cur == len)
+    /* Action C — capitalize a lowercase start (and the start of each later
+     * line: one bubble per line), gated so the card's lowercase-start rate is
+     * kept rather than driven to zero. Length never changes. */
+    bool capitalize = false;
+    if (lowercase_start_pct < 100 && casing_roll >= lowercase_start_pct) {
+        size_t i = line_start(text, 0, cur);
+        if (i < cur && text[i] >= 'a' && text[i] <= 'z' && !starts_with_url(text + i, cur - i))
+            capitalize = true;
+    }
+
+    if (acts == 0 && !capitalize)
         return HU_OK;
 
     char *shaped = (char *)alloc->alloc(alloc->ctx, cur + 1);
@@ -174,6 +246,20 @@ hu_error_t hu_style_governor_shape(hu_allocator_t *alloc, const char *text, size
         return HU_ERR_OUT_OF_MEMORY;
     memcpy(shaped, text, cur);
     shaped[cur] = '\0';
+    if (capitalize) {
+        size_t i = 0;
+        while (i < cur) {
+            i = line_start(shaped, i, cur);
+            if (i < cur && shaped[i] >= 'a' && shaped[i] <= 'z' &&
+                !starts_with_url(shaped + i, cur - i))
+                shaped[i] = (char)(shaped[i] - 32);
+            while (i < cur && shaped[i] != '\n')
+                i++;
+            if (i < cur)
+                i++; /* past the newline */
+        }
+        acts |= HU_STYLE_GOV_ACTION_START_CAPITALIZED;
+    }
     *out = shaped;
     *out_len = cur;
     *actions = acts;
@@ -191,7 +277,10 @@ size_t hu_style_governor_apply_inplace(hu_allocator_t *alloc, char *buf, size_t 
     size_t shaped_len = 0;
     unsigned actions = 0;
     unsigned roll = hu_style_governor_roll(buf, len);
-    if (hu_style_governor_shape(alloc, buf, len, roll, &shaped, &shaped_len, &actions) != HU_OK ||
+    unsigned casing = hu_style_governor_casing_roll(buf, len);
+    if (hu_style_governor_shape_ex(alloc, buf, len, roll, casing,
+                                   hu_style_governor_lowercase_start_pct(NULL), &shaped,
+                                   &shaped_len, &actions) != HU_OK ||
         !shaped)
         return len;
 
@@ -224,9 +313,10 @@ static hu_outbound_verdict_t style_governor_run(hu_outbound_pipeline_stage_t *se
     if (atomic_compare_exchange_strong(&s_logged_mode, &expected, true)) {
         static const char *const names[] = {"off", "shadow", "live"};
         hu_log_info("style_governor", NULL,
-                    "style governor mode=%s (HU_STYLE_GOVERNOR; measured card "
-                    "targets: 79%% no-terminal-punct, 9%% ?-endings)",
-                    names[mode]);
+                    "style governor mode=%s (HU_STYLE_GOVERNOR; measured card targets from "
+                    "the persona style card: mostly no terminal punct, few ?-endings, "
+                    "lowercase start %u%%)",
+                    names[mode], hu_style_governor_lowercase_start_pct(ctx ? ctx->persona : NULL));
     }
     if (mode == HU_STYLE_GOVERNOR_OFF || !msg || !msg->content || msg->content_len == 0 || !ctx ||
         !ctx->alloc)
@@ -236,8 +326,10 @@ static hu_outbound_verdict_t style_governor_run(hu_outbound_pipeline_stage_t *se
     size_t shaped_len = 0;
     unsigned actions = 0;
     unsigned roll = hu_style_governor_roll(msg->content, msg->content_len);
-    if (hu_style_governor_shape(ctx->alloc, msg->content, msg->content_len, roll, &shaped,
-                                &shaped_len, &actions) != HU_OK ||
+    unsigned casing = hu_style_governor_casing_roll(msg->content, msg->content_len);
+    if (hu_style_governor_shape_ex(ctx->alloc, msg->content, msg->content_len, roll, casing,
+                                   hu_style_governor_lowercase_start_pct(ctx->persona), &shaped,
+                                   &shaped_len, &actions) != HU_OK ||
         !shaped)
         return hu_outbound_verdict_send();
 

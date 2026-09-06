@@ -1,0 +1,49 @@
+{
+  "ts": "20260905T205707Z",
+  "target": "Story US-4 (when-to-speak: measured MIR/FIR from the real proactive_decisions log with (contact,ts) join+dedup, refuse-not-fallback, --compare-baseline against the US-3 Seth baseline) of sprint sprint-better-than-human-2026-09-05. Review: `git -C /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us4 diff sprint-better-than-human-2026-09-05..sbth-us4 -- scripts/eval_when_to_speak.py scripts/test_eval_when_to_speak.py sprints/sprint-better-than-human-2026-09-05/evidence/us4-when-to-speak-2026-09-05.json` (commits fb816f7f3 + 8beccb6ed). Contract: stories.md US-4 and designs/US-4.md in that worktree. Prior gates: verifier PASS (non-vacuity proven by reverting the join), critic MERGE-WITH-FIXES fixed in 8beccb6ed (F1: send_failed events keep resolved_decision='send' for MIR symmetry while FIR excludes them; F2: refusal prints resolved_events/fir_n/fir_dropped_pre_send/fir_send_failed/mir_n to stderr, still writes nothing). Rules for you: read-only; ABSOLUTE paths; run `python3 -m pytest -q /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us4/scripts/test_eval_when_to_speak.py` (28 tests) and synthetic sqlite under $TMPDIR only; NEVER open ~/.human/memory.db or ~/Library/Messages/chat.db; never touch port 8741; no message text/phones/contact names in your output. Judge: correctness of join/dedup and the F1 symmetry (does FIR still exclude send_failed and dropped_pre_send from the delivered pool? does MIR count both?); edge cases (duplicate rows, ts skew, missing outcome table, min_n refusal, baseline file missing/unreadable); security/privacy (evidence JSON aggregates only; refusal stderr has no identifiers); regressions to existing callers of eval_when_to_speak.py (grep scripts/ and .github/ for invocations; default flags unchanged?); maintainability.",
+  "aspects": [
+    {
+      "aspect": "correctness",
+      "verdict": "pass",
+      "confidence": 0.86,
+      "rationale": "`resolve_decision_events()` (scripts/eval_when_to_speak.py:287-388) groups by (contact, ts), takes the last outcome row as authoritative, and keeps `resolved_decision='send'` with `send_failed=True` when a fired proposal's outcome is non-send; `compute_fir()` (:415-470) skips `dropped_pre_send` and ",
+      "elapsed_s": 98.47
+    },
+    {
+      "aspect": "edge-case",
+      "verdict": "pass",
+      "confidence": 0.78,
+      "rationale": "Decision-log inputs that could corrupt the metric (duplicate rows, int/float ts skew, NULL fields, missing tables, n below min_n) are all handled and the F1 send_failed symmetry is correct; the one unhandled input is a wrong-shaped baseline JSON (string rate or top-level array), which crashes with a",
+      "elapsed_s": 115.39
+    },
+    {
+      "aspect": "regression",
+      "verdict": "pass",
+      "confidence": 0.87,
+      "rationale": "The only at-risk callers are the three sibling scripts that import from eval_when_to_speak.py (eval_seth_initiation_baseline, eval_reply_delay_model, fit_reply_delay_model); their imported symbols (open_ro, load_dm_messages, APPLE_EPOCH, apple_ns_to_unix, FIR_WINDOW_HOURS) are untouched and all thre",
+      "elapsed_s": 107.87
+    },
+    {
+      "aspect": "security",
+      "verdict": "pass",
+      "confidence": 0.92,
+      "rationale": "No new security or privacy exposure: SQL stays parameterized, the evidence JSON and refusal stderr carry only aggregate counters and a unix timestamp, the baseline file is read-only and consumed as a single numeric field, and the sole external importer's symbols are unchanged.",
+      "elapsed_s": 86.48
+    },
+    {
+      "aspect": "style",
+      "verdict": "pass",
+      "confidence": 0.85,
+      "rationale": "The join/dedup and F1 symmetry are correct and pinned by non-vacuous tests (28/28 pass; send_failed and dropped_pre_send both keep resolved_decision='send' for MIR while compute_fir skips both before the eligible pool), refusal writes nothing and its stderr counters carry no identifiers, evidence JS",
+      "elapsed_s": 49.79
+    }
+  ],
+  "aggregate": {
+    "verdict": "PASS",
+    "pass_weight": 4.28,
+    "fail_weight": 0,
+    "pass_share": 1.0,
+    "split": false
+  },
+  "cross_family_tiebreak": null
+}

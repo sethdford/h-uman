@@ -88,6 +88,10 @@ bool hu_lora_runner_attempt_cooldown_active(time_t last_attempt, time_t now, int
     return (now - last_attempt) < (time_t)cooldown_seconds;
 }
 
+/* The stamp helpers have exactly one caller, the daemon-side dispatch below,
+ * which is compiled out under HU_IS_TEST — so they are too, or -Werror
+ * flags them unused in the test build. The predicate above stays public. */
+#ifndef HU_IS_TEST
 /* Path of the attempt stamp. Lives beside the training data it rate-limits so
  * it travels with a training-data reset. */
 static void attempt_stamp_path(char *out, size_t out_cap) {
@@ -122,6 +126,7 @@ static void write_attempt_stamp(time_t when) {
     (void)fprintf(f, "%lld\n", (long long)when);
     (void)fclose(f);
 }
+#endif /* !HU_IS_TEST */
 
 static hu_error_t mkdir_p(const char *path) {
     char tmp[512];
@@ -148,9 +153,10 @@ static hu_error_t mkdir_p(const char *path) {
 #include <time.h>
 #include <unistd.h>
 
-/* runner_now / hu_lora_runner_attempt_cooldown_active / attempt_stamp_path /
- * read_attempt_stamp / write_attempt_stamp / mkdir_p now live above this gate,
- * unconditionally — their caller and header declaration are both unguarded. */
+/* runner_now / hu_lora_runner_attempt_cooldown_active / mkdir_p live above this
+ * gate, unconditionally — their callers and header declarations are unguarded.
+ * The attempt-stamp file helpers sit above it too but under !HU_IS_TEST,
+ * matching their only caller. */
 
 static hu_error_t write_stub_file(const char *path, const char *body) {
     FILE *f = fopen(path, "w");

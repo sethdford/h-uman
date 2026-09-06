@@ -1,0 +1,84 @@
+{
+  "db": "/Users/sethford/Library/Messages/chat.db",
+  "range": {
+    "start": "2026-07-07",
+    "end": "2026-09-05"
+  },
+  "window_days": 30,
+  "min_n": 100,
+  "min_covered_days": 20.0,
+  "primary_outbound_messages_in_range": 963,
+  "total_outbound_messages_in_range": 963,
+  "events": {},
+  "trailing_window_summary": {
+    "requested_days": 60,
+    "window": {
+      "start": "2026-07-07",
+      "end": "2026-09-05"
+    },
+    "n": 963,
+    "coverage": {
+      "first": "2026-08-06T14:42:13.642698",
+      "last": "2026-09-05T15:41:34.679494",
+      "covered_days": 30.0
+    },
+    "status": "OK",
+    "axes": {
+      "length_chars": {
+        "mean": 34.48390446521287,
+        "ci_lo": 31.847352024922117,
+        "ci_hi": 37.245067497403944,
+        "n": 963
+      },
+      "lowercase_start_rate": {
+        "mean": 0.0967741935483871,
+        "ci_lo": 0.0778642936596218,
+        "ci_hi": 0.11568409343715239,
+        "n": 899
+      },
+      "no_terminal_punct_rate": {
+        "mean": 0.814122533748702,
+        "ci_lo": 0.7892004153686397,
+        "ci_hi": 0.838006230529595,
+        "n": 963
+      },
+      "question_rate": {
+        "mean": 0.10072689511941849,
+        "ci_lo": 0.08203530633437175,
+        "ci_hi": 0.12045690550363447,
+        "n": 963
+      },
+      "exclamation_rate": {
+        "mean": 0.037383177570093455,
+        "ci_lo": 0.02596053997923157,
+        "ci_hi": 0.04984423676012461,
+        "n": 963
+      },
+      "emoji_rate": {
+        "mean": 0.12149532710280374,
+        "ci_lo": 0.10072689511941849,
+        "ci_hi": 0.14330218068535824,
+        "n": 963
+      },
+      "formality_contractions_per_100_words": {
+        "mean": 2.2821674029833408,
+        "ci_lo": 1.8124365318465203,
+        "ci_hi": 2.7631822649818454,
+        "n": 963
+      },
+      "formality_first_person_plural_per_100_words": {
+        "mean": 0.4170192332186102,
+        "ci_lo": 0.2690291708983298,
+        "ci_hi": 0.5832502561474525,
+        "n": 963
+      },
+      "warmth_hits_per_100_words": {
+        "mean": 1.2249774123838213,
+        "ci_lo": 0.9091930371937702,
+        "ci_hi": 1.5588551711779957,
+        "n": 963
+      }
+    }
+  },
+  "overall_status": "OK"
+}

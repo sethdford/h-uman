@@ -91,6 +91,7 @@ static const char *get_opt(const char **argv, int argc, int i, const char *opt) 
     return NULL;
 }
 
+#ifndef HU_IS_TEST
 /* Phase 0 helper — load a BPE tokenizer using the project convention
  * (data_dir/tokenizer.vocab → ~/.human/models/tokenizer.vocab → default
  * 256-byte byte-level BPE) and derive the token_bytes table for BPB.
@@ -129,6 +130,7 @@ static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const c
     *out_count = count;
     return HU_OK;
 }
+#endif /* !HU_IS_TEST */
 
 hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     (void)alloc;
@@ -506,6 +508,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
      * from "user did not mention export". Without this, the default-
      * enable block below silently re-enables export after --no-export. */
     int export_disabled_explicitly = 0;
+    int count_only = 0; /* --count-only: read-only probe, prints {"pairs": N} */
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--db");
         if (v) {
@@ -528,6 +531,10 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
                 return HU_ERR_INVALID_ARGUMENT;
             }
             i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--count-only") == 0) {
+            count_only = 1;
             continue;
         }
         if (strcmp(argv[i], "--no-export") == 0) {
@@ -556,6 +563,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     (void)correction_window_sec;
     (void)want_export;
     (void)export_disabled_explicitly;
+    (void)count_only;
     printf("[mine-corrections] test mode: skipped\n");
     return HU_OK;
 #else
@@ -605,7 +613,14 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
 
     hu_dpo_mine_stats_t stats;
     memset(&stats, 0, sizeof(stats));
+    opts.count_only = count_only;
     hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (count_only && err == HU_OK) {
+        /* The C nightly runner parses exactly this shape (retrain_parse_pairs). */
+        printf("{\"pairs\": %zu}\n", stats.triples_examined);
+        sqlite3_close(db);
+        return HU_OK;
+    }
     if (err != HU_OK) {
         fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
         sqlite3_close(db);
@@ -2227,6 +2242,7 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
  * comparator counts empty responses as `skipped`, so a few provider
  * hiccups don't poison the mean. */
 
+#ifndef HU_IS_TEST
 /* Build a minimal "system" prompt from the persona's identity and
  * top traits, suitable for passing to a chat call. Returns 0 on
  * success (string written into `out`), non-zero when the persona
@@ -2261,6 +2277,7 @@ static size_t hu_ml_lora_runner_build_system_prompt(const hu_persona_t *persona,
     }
     return n;
 }
+#endif /* !HU_IS_TEST */
 
 /* Write a `["resp1", "resp2", ...]` JSON array to `path`. JSON
  * escaping uses `hu_json_string_new` + `hu_json_stringify` so the
@@ -2547,6 +2564,10 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
      * `response` field. Lets unit tests exercise the full
      * load → write → JSON round-trip without spinning up a
      * provider, which is unavailable in tests anyway. */
+    (void)provider_name;
+    (void)model;
+    (void)adapter_path;
+    (void)adapter_id;
     size_t produced = 0;
     for (size_t b = 0; b < persona.example_banks_count && produced < total_examples; b++) {
         const hu_persona_example_bank_t *bank = &persona.example_banks[b];

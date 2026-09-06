@@ -547,6 +547,60 @@ The `behavior` config section in the runtime configuration controls seven key th
 | Memory decay window           | `decay_days`               | 30      | 1–365    | Days before memories fade in consolidation                    |
 | Deduplication threshold       | `dedup_threshold`          | 70      | 1–100    | Similarity percentage (0–100) to consider memories duplicates |
 | Missed message threshold      | `missed_msg_threshold_sec` | 1800    | 60–86400 | Seconds gap to trigger "missed message" acknowledgment        |
+| Missed message ceiling        | `missed_msg_max_age_sec`   | 86400   | >threshold–604800 | Above this gap no acknowledgment is sent at all (a "just saw this" on a days-old message is a tell) |
+| Reply budget per contact      | `reply_budget_per_contact_hourly` | 10 | 0–1000 | Max reactive replies to one contact per sliding hour; beyond it the daemon stays silent. `0` disables. Runaway brake, not a conversation shaper. |
+| Reply budget global           | `reply_budget_global_hourly` | 30   | 0–10000 | Max reactive replies to everyone per sliding hour. `0` disables. |
+
+## Reliability: Circuit Breaker on the Primary Provider
+
+The `reliability` section wraps the primary provider (for example the local
+`mlx_local` server) with retries and cloud fallbacks. Two rules keep a dead
+local server from wedging the daemon (2026-09-03 incident: a crashed server
+whose socket still accepted connections cost three 300-second hangs per turn):
+
+- A request that **times out** is not retried on the same provider within
+  that call; the next provider in the chain is tried immediately.
+- After `circuit_failure_threshold` consecutive primary failures the primary
+  is skipped for `circuit_recovery_secs` (the circuit is open), then one trial
+  request is allowed; a success closes the circuit. Opening and closing are
+  logged at WARN / INFO.
+
+| Key                         | Default | Range    | Purpose                                                        |
+| --------------------------- | ------- | -------- | -------------------------------------------------------------- |
+| `circuit_failure_threshold` | 2       | -1–100   | Consecutive primary failures that open the circuit. `-1` disables it. `0`/absent = default. |
+| `circuit_recovery_secs`     | 300     | 1–86400  | Seconds the primary is skipped before one trial request.       |
+| `empty_reply_failover`      | on      | -1 / 1   | An `HU_OK` reply with no content fails that provider for that prompt (no retry on it, no circuit credit) and the chain moves to the mapped fallback model. `-1` disables. |
+
+An empty reply is not a server failure: the local model sometimes answers a
+prompt with only its thinking scaffold. Before 2026-09-04 the daemon logged
+"empty assistant response" and sent nothing, because its own cloud fallback
+only fired for a model-router local model that production never configured.
+
+### Consecutive-reply limiter (`behavior`)
+
+The daemon stops replying to one contact after `max_consecutive_replies`
+replies in a row without the real user stepping in. A quiet gap longer than
+`consecutive_reset_minutes` since the daemon's last reply starts a new burst,
+so a contact coming back later is answered again. A silenced message that
+contains a question is logged at WARN as an unanswered question.
+
+| Key                         | Default | Purpose                                                         |
+| --------------------------- | ------- | --------------------------------------------------------------- |
+| `max_consecutive_replies`   | 5       | Replies in a row before going quiet. `0` = no cap (the hourly reply budget is the runaway brake). |
+| `consecutive_reset_minutes` | 30      | Quiet gap after which the count restarts. `0` = never restarts. |
+
+### iMessage replay guards
+
+Three guards keep a stale poll cursor from replaying old inbound messages as
+if they were new (incident 2026-09-01: a reboot resumed from a two-week-old
+cursor and re-answered threads the human had already closed). They are
+environment overrides in the daemon's launchd plist, not `config.json` keys:
+
+| Guard | Env var | Default | Behavior |
+| ----- | ------- | ------- | -------- |
+| Resume cap | `HU_IMESSAGE_MAX_REPLAY` | 50 rows | If the persisted cursor is more than this many rows behind chat.db, the backlog is skipped and the daemon resumes from the current max (logged as a warning). |
+| Stale inbound | `HU_IMESSAGE_MAX_INBOUND_AGE_SEC` | 86400 | Inbound rows older than this are dropped at poll time (`0` disables). |
+| Already answered | (always on) | — | An inbound row with a later human-authored text bubble in the same conversation is skipped; the daemon's own sends do not count. |
 
 ## How to Customize
 

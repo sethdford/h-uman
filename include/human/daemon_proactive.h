@@ -1,6 +1,7 @@
 #ifndef HU_DAEMON_PROACTIVE_H
 #define HU_DAEMON_PROACTIVE_H
 
+#include "agent/governor.h" /* hu_proactive_budget_t (send_and_record) */
 #include "core/allocator.h"
 #include "core/error.h"
 #include "daemon.h"
@@ -181,5 +182,15 @@ hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sql
                                                       size_t limit, hu_feed_item_stored_t **out,
                                                       size_t *out_count);
 #endif
+
+/* Send a proactive check-in and record it ONLY if the channel accepted it.
+ * Returns true when the message was actually accepted for delivery; false means
+ * nothing was sent and NO bookkeeping (send-recency, proactive outcome, governor
+ * budget) was performed. Callers must treat false as a non-send. */
+bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *channel,
+                                         const struct hu_contact_profile *cp, const char *ch_name,
+                                         const char *target, size_t target_len, const char *message,
+                                         size_t message_len, int64_t now,
+                                         hu_proactive_budget_t *gov_budget);
 
 #endif /* HU_DAEMON_PROACTIVE_H */

@@ -1,5 +1,6 @@
 #include "human/agent/contextual_bandit.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -267,7 +268,8 @@ static void test_contextual_bandit_save_load_deterministic(void) {
     }
 
     /* Save to temp file. */
-    const char *tmp_path = "/tmp/bandit_test_save_load.bin";
+    char tmp_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(tmp_path, sizeof(tmp_path), "bandit_test_save_load.bin"));
     err = hu_contextual_bandit_save(bandit, tmp_path);
     HU_ASSERT_EQ(err, HU_OK);
 

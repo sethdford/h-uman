@@ -102,6 +102,13 @@ fi
 # unavailable (old binary, non-git tree). Override: HU_INSTALL_FORCE=1.
 "$SCRIPT_DIR/check-install-provenance.sh" "$SOURCE_BIN" "$INSTALL_BIN" "$ROOT"
 
+# ── Cursor-gap preflight: never restart onto a stale iMessage poll cursor
+# 2026-09-01: a reboot resumed the poll two weeks behind chat.db and replayed
+# ~2,000 old inbound messages to real contacts. The binary now caps that
+# replay, but the install is exactly the moment the cursor must be checked
+# against ground truth and said out loud. Override: HU_CURSOR_GAP_FORCE=1.
+"$SCRIPT_DIR/check-imessage-cursor-gap.sh"
+
 # Verify the local cert exists; if not, refuse to fall back to ad-hoc because
 # that produces an even less stable TCC identity.
 if ! security find-identity -v -p codesigning 2>/dev/null | grep -qE "\"$CODESIGN_IDENT\""; then
@@ -287,6 +294,20 @@ if [[ "$BOOTSTRAP_OK" == "false" ]]; then
 fi
 
 launchctl kickstart -k -p "gui/$UID/$SERVICE_LABEL"
+
+# `human` (the interactive CLI) and `human-daemon` are the SAME binary under
+# two names. Before 2026-09-02 ~/.local/bin/human was a May-17 build that no
+# install step ever refreshed, so anything that shelled out to bare `human`
+# (nightly LoRA probe, crontab, humans at a prompt) ran a 3.5-month-old
+# schema. A symlink keeps the two names on one verified, code-signed file.
+CLI_LINK="$PREFIX/bin/human"
+if [[ -L "$CLI_LINK" && "$(readlink "$CLI_LINK")" == "$INSTALL_BIN" ]]; then
+    echo "==> cli    $CLI_LINK already -> $INSTALL_BIN"
+else
+    [[ -e "$CLI_LINK" && ! -L "$CLI_LINK" ]] && mv -f "$CLI_LINK" "$CLI_LINK.pre-symlink-$(date +%s)"
+    ln -sfn "$INSTALL_BIN" "$CLI_LINK"
+    echo "==> cli    $CLI_LINK -> $INSTALL_BIN"
+fi
 
 # Give it a beat to do its first poll, then tell the truth about state.
 sleep 4

@@ -1015,6 +1015,41 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
  * raters. Motivation (2026-07-22 soak): the full head's median 16,585 B alone
  * exceeds HU_PROMPT_TRIM_BUDGET_BYTES, so HU_PROMPT_TRIM's middle-trim can
  * never fit the prompt and the positional cap truncates the guard tail. */
+hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, size_t *prompt_len,
+                                           size_t guard_tail_reserved) {
+    if (!agent || !agent->alloc || !prompt || !*prompt || !prompt_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    char rules[2048];
+    size_t rules_len = 0;
+    if (agent->persona) {
+        /* Formality-aware: professional contacts get the capitalized,
+         * punctuated register; everyone else the measured casual one. */
+        const hu_persona_overlay_t *ov = hu_persona_find_overlay(
+            agent->persona, agent->active_channel, agent->active_channel_len);
+        if (hu_persona_build_absolute_rules_fmt(agent->persona, ov ? ov->formality : NULL, rules,
+                                                sizeof(rules), &rules_len) != HU_OK)
+            rules_len = 0;
+    }
+    const size_t before = *prompt_len;
+    hu_error_t err =
+        hu_prompt_cap_with_tail(agent->alloc, prompt, prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES,
+                                guard_tail_reserved, rules_len ? rules : NULL, rules_len);
+    /* Prompt-size budget guard. The budget is a latency/attention choice now,
+     * not a server cliff (see HU_PROMPT_TRIM_BUDGET_BYTES for the 2026-09-06
+     * re-measurement); it still fires on any turn whose assembled prompt
+     * exceeds it, and whatever it drops is context the model never sees.
+     * Log once per process. */
+    if (before > HU_PROMPT_TRIM_BUDGET_BYTES) {
+        static atomic_bool warned_prompt_budget = false;
+        hu_log_warn_once(&warned_prompt_budget, "agent", NULL,
+                         "system prompt truncated from %zu to %zu bytes (prompt budget cap; "
+                         "%zu-byte guard tail reserved, %zu-byte rules block appended last); "
+                         "some context dropped",
+                         before, *prompt_len, guard_tail_reserved, rules_len);
+    }
+    return err;
+}
+
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len) {
     if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
@@ -4592,17 +4627,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * we land well inside the safe zone. Truncate at the last newline
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
-        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
-                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
-            static atomic_bool warned_prompt_budget = false;
-            hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
-                             "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap); some context dropped",
-                             system_prompt_len, cut);
-            system_prompt[cut] = '\0';
-            system_prompt_len = cut;
-        }
+        /* Cap to budget keeping the guard tail (shape rules, CRITICAL
+         * REMINDER), then append the measured ABSOLUTE RULES block as the
+         * final bytes. Until 2026-09-05 the block reached only
+         * agent_stream's lean branch, so production (batch path, streaming
+         * off) never carried it. */
+        if (err == HU_OK && system_prompt)
+            (void)hu_agent_finalize_system_prompt(
+                agent, &system_prompt, &system_prompt_len,
+                prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed);
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;
@@ -7998,25 +8031,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                memory_ctx_len > 100 ? 0.8 : 0.4);
 
             /* Style learning: adaptive schedule — early sessions learn faster,
-             * then settle into a steady cadence. Also triggers on corrections. */
+             * then settle into a steady cadence.
+             *
+             * Gated on learning.persona_refresh_enabled (default false), the same
+             * switch as the daemon refresh tick. hu_persona_style_reanalyze saves
+             * through hu_persona_creator_write, which serializes only hu_persona_t
+             * fields; on 2026-09-06 06:01 this call rewrote the live persona
+             * without contacts / proactive / life_events / style_rules, killing
+             * every proactive path until a manual restore. Do not un-gate without
+             * a writer that preserves unknown keys (.claude/rules/persona.md). */
             {
-                bool should_reanalyze = false;
-                if (agent->persona_name && agent->persona_name_len > 0 && agent->memory) {
-                    if (agent->history_count <= 20 && agent->history_count % 10 == 0 &&
-                        agent->history_count > 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 20 && agent->history_count <= 100 &&
-                             agent->history_count % 25 == 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 100 && agent->history_count % 50 == 0)
-                        should_reanalyze = true;
-                }
+                bool pr_enabled = agent->config && agent->config->learning.persona_refresh_enabled;
+                bool should_reanalyze =
+                    agent->persona_name && agent->persona_name_len > 0 && agent->memory &&
+                    hu_persona_style_reanalyze_due(pr_enabled, agent->history_count);
                 if (should_reanalyze) {
                     const char *ch = agent->active_channel ? agent->active_channel : "cli";
                     size_t ch_len = agent->active_channel_len ? agent->active_channel_len : 3;
                     const char *cid = agent->memory_session_id ? agent->memory_session_id : "";
                     size_t cid_len =
                         agent->memory_session_id_len ? agent->memory_session_id_len : 0;
+                    hu_log_info("agent_turn", agent->observer,
+                                "persona style reanalyze: rewriting persona '%.*s' from history "
+                                "(history_count=%zu, learning.persona_refresh_enabled=true)",
+                                (int)agent->persona_name_len, agent->persona_name,
+                                agent->history_count);
                     (void)hu_persona_style_reanalyze(
                         agent->alloc, &agent->provider, agent->model_name, agent->model_name_len,
                         agent->memory, agent->persona_name, agent->persona_name_len, ch, ch_len,

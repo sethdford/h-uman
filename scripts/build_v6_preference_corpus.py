@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""Assemble the seth-glm-air-v6 preference corpus.
+
+v6 is the ladder's preference round (roadmap `plans/2026-07-11-adapter-v5-roadmap.md`).
+It targets the three failure modes HUMAN blind raters identified on the v5 arm --
+NOT the stale-fact premise, which `docs/research/v6-corpus-regeneration-scope-20260727.md`
+measured and ruled out (0.7% corpus contamination).
+
+TARGETS, AS RE-RANKED BY THE n=40 HUMAN GATE (2026-07-27, detection 0.225 PASS).
+The original v6 headline was over-elaboration, on cycle-2/3 evidence at n=12. At
+n=40 -- 3.3x the power -- that axis accounts for ~1 of 9 detections. Reading all
+nine (see the block above FACTUAL_NOT_TRAINABLE), the trainable tells are:
+
+    1. PERFORMED WIT      -- reaching for a quip instead of answering. Strongest
+                             single cluster; bab_090 answers "500 right?" with
+                             "i can spot a bot from a mile away".
+    2. GENERIC PLATITUDE  -- anonymous-plausible where Seth names names, and
+                             coach register ("take a breath you got this") where
+                             Seth is flat ("Yeah, it is").
+    3. FLAT WHERE WARM    -- literal correction where Seth is warm and playful.
+    4. OVER-ELABORATION   -- demoted from headline to fourth. Still real and still
+                             systematic (model longer than Seth in 82% of the 160
+                             cycle-4 items, median ratio 2.25x), but it is not what
+                             human raters actually catch.
+
+NOT a target: wrong event-state facts (3 of the 9). A preference round cannot
+teach a fact the model does not have; that is the memory/retrieval path.
+
+SOURCE ADMISSION IS DEFAULT-DENY. Every candidate source was audited; the ones
+admitted are listed in ADMITTED with the evidence that admitted them, and the ones
+rejected are in REJECTED with the measurement that rejected them. Adding a source
+means adding it here with its audit, not loosening a filter.
+
+Output (default ~/.human/training-data/glm-v6-pref/):
+    train.jsonl / valid.jsonl  -- {"prompt","chosen","rejected"} per row
+    manifest.json              -- counts, per-source provenance, and the list of
+                                  cycle-4 ids consumed (the cycle-5 eval MUST
+                                  exclude these or it measures memorisation)
+"""
+import argparse
+import csv
+import json
+import os
+import random
+import sqlite3
+import sys
+import unicodedata
+from pathlib import Path
+
+HOME = Path(os.path.expanduser("~"))
+CYCLE4_TRIPLES = HOME / "blind_ab_run/cycle4-20260726/triples.json"
+MEMORY_DB = HOME / ".human/memory.db"
+RATED_SHEET = HOME / ".human/blind_ab_human/rating_sheet.csv"
+RATED_KEY = HOME / ".human/blind_ab_human/answer_key.json"
+
+# --- The n=40 human detections: the highest-signal pairs that exist -------------
+# Cycle-4 human gate 2026-07-27: detection 0.225 (9/40), Wilson CI [0.123, 0.350],
+# PASS (~/.human/blind_ab_gate.json). Each detection is a case where a rater who
+# knows Seth picked his real reply out of the pair -- so chosen=real, rejected=the
+# model's own output, on the exact axis that gave it away.
+#
+# THE n=40 RESULT RE-RANKED THE TARGETS. Over-elaboration, v6's original headline,
+# accounts for ~1 of the 9. Reading all nine, they cluster four ways:
+#
+#   performed_wit    (2) bab_095 "wrong take: pineapple on pizza is actually fine"
+#                        bab_090 "i can spot a bot from a mile away" -- to "500 right?",
+#                        i.e. it does not even answer the question
+#   generic_platitude(2) bab_053 "yeah that's the corporate grind for you" against
+#                        Seth naming Vanguard, LinkedIn, incoming executives
+#                        bab_047 "take a breath you got this" against a flat "Yeah, it is"
+#   flat_where_warm  (1) bab_150 "i never mentioned divorce" against Seth's
+#                        "Ha ha no no, let's get it done! ASAP"
+#   over_elaboration (1) bab_013 three paragraphs against "Old as dirt"
+#
+# The remaining 3 (bab_005 "done moving all settled in now", bab_114 "last day's
+# friday", bab_155 "i don't have anything settling by may 22nd") are WRONG
+# EVENT-STATE FACTS. A preference round cannot teach a fact the model does not
+# have -- that is the memory/retrieval path. They are EXCLUDED by id below rather
+# than trained on, because the "chosen" reply asserts a date the model has no way
+# to know, so training it teaches confident assertion, not accuracy.
+FACTUAL_NOT_TRAINABLE = {"bab_005", "bab_114", "bab_155"}
+
+# Repeat count for the human-detected pairs. They are ~1.5% of the corpus by
+# count but are the only pairs certified by a human who knows Seth, so they are
+# oversampled rather than left to drown in 400 synthetic rows.
+HUMAN_PAIR_WEIGHT = 8
+
+# --- Admitted dpo_pairs sources -------------------------------------------------
+# Audited 2026-07-27 against the whole table (700 rows).
+ADMITTED = {
+    "generated_v2": "217 rows. chosen=terse Seth register, rejected=generic "
+                    "assistant prose. Squarely targets modes 1 and 3.",
+    "arena": "156 rows. Self-play arena; chosen is consistently the terser, "
+             "less self-referential of the two. Targets modes 1 and 2.",
+}
+
+# --- Rejected dpo_pairs sources -------------------------------------------------
+# Each rejection is a measurement, not a preference. Re-run the audit in
+# scripts/audit_dpo_pairs.py before re-admitting any of these.
+REJECTED = {
+    "auto_correction": "118 rows, but 109 are EXACT duplicates of outbound_edit "
+                       "and 21% show the sliding-window signature (prompt[N] == "
+                       "chosen[N-1]) -- 'chosen' is the NEXT thread message, not "
+                       "a better reply. Training this teaches non-sequiturs.",
+    "outbound_edit": "110 rows, 109 duplicated with auto_correction, same "
+                     "sliding-window mislabel.",
+    "user_feedback": "51 rows, 51/51 have an empty chosen or rejected side. "
+                     "Empty-chosen into a preference objective is exactly the "
+                     "2026-05 ORPO blank-output collapse.",
+    "implicit_feedback": "38 rows, inverted in inspection -- assistant-register "
+                         "replies appear on the chosen side.",
+    "reflection_retry": "10 rows of echoes, literal 'GOOD', and a truncated "
+                        "fragment as chosen.",
+}
+
+# --- Curated cycle-4 gold -------------------------------------------------------
+# 75 of the 160 cycle-4 items tripped a target-mode detector; all 75 were then read
+# by hand because the detector cannot distinguish "the model over-elaborated" from
+# "Seth's logged next message answered a DIFFERENT message". `export_seth_triples.py`
+# pairs a context with Seth's next SENT message, and in real threads that is often a
+# non-sequitur. 42 kept / 33 dropped.
+CYCLE4_KEEP = [
+    "c4-005", "c4-008", "c4-014", "c4-015", "c4-016", "c4-021", "c4-022",
+    "c4-027", "c4-028", "c4-032", "c4-043", "c4-044", "c4-050", "c4-052",
+    "c4-053", "c4-059", "c4-063", "c4-070", "c4-071", "c4-075", "c4-076",
+    "c4-079", "c4-080", "c4-081", "c4-082", "c4-083", "c4-090", "c4-092",
+    "c4-093", "c4-094", "c4-113", "c4-115", "c4-117", "c4-121", "c4-125",
+    "c4-126", "c4-129", "c4-135", "c4-138", "c4-142", "c4-147", "c4-160",
+]
+
+# Why each dropped item was dropped -- kept so the judgement is auditable and so a
+# future curator does not silently re-admit a poisoned pair.
+CYCLE4_DROP = {
+    "context_mismatch": [
+        "c4-009", "c4-019", "c4-029", "c4-040", "c4-057", "c4-066", "c4-068",
+        "c4-072", "c4-077", "c4-078", "c4-099", "c4-102", "c4-105", "c4-108",
+        "c4-118", "c4-123", "c4-131", "c4-137", "c4-146", "c4-150", "c4-036",
+    ],
+    "export_artifact_blank_image": [
+        # Context is a stripped image attachment. The model correctly says it
+        # cannot see an image; Seth answered the picture. Not a failure.
+        "c4-012", "c4-041", "c4-047", "c4-056", "c4-095",
+    ],
+    "grounding_not_elaboration": [
+        # Model fabricated a fact. Real bug, wrong training signal -- the fix is
+        # grounding, and 'chosen' here would teach a different false assertion.
+        "c4-013",
+    ],
+    "model_reply_is_better": [
+        # Rejecting these would train warmth OUT.
+        "c4-155", "c4-023",
+    ],
+    "ai_self_disclosure_ambiguous": [
+        # "is this an AI?" prompts. Seth's real replies concede the bot; the
+        # model's denial may be the wanted behaviour. Not ours to settle here.
+        "c4-046", "c4-096",
+    ],
+    "weak_preference_signal": [
+        # Seth's own reply is long too, so the pair does not teach brevity.
+        "c4-035", "c4-055",
+    ],
+}
+
+
+# --- Emoji must not be a chosen/rejected discriminator ------------------------
+# 2026-09-05 audit of the v6 / v6.1 corpora this script wrote: chosen side
+# 0.5% emoji, rejected side 7.3% / 5.9% -- every bit of it from generated_v2,
+# whose "generic assistant" rejected replies used emoji and whose terse chosen
+# replies did not. ORPO learned "emoji => rejected" as a side effect, and the
+# served adapter emitted 0 emoji in 68/68 replies against Seth's measured 12.6%
+# (docs/plans/2026-09-02-persona-evolution/spec.md §3b). Same shape as the
+# casing confound scripts/rebalance_preference_corpus.py exists for.
+#
+# The fix strips emoji from the REJECTED side of any pair whose chosen side has
+# none, so the pair differs in content, never in emoji. Emoji on the chosen side
+# (Seth's real replies) is kept: that is the positive signal. Nothing is ever
+# invented -- a reply that was ONLY emoji, or that would collapse into its
+# partner, drops the whole pair instead.
+MAX_EMOJI_MARGIN = 0.02   # rejected_rate - chosen_rate allowed after neutralisation
+
+
+def is_emoji_char(ch):
+    """Same heuristic as scripts/eval_persona_evolution.py / persona_style_card.py."""
+    return unicodedata.category(ch) == "So" or 0x1F000 <= ord(ch) <= 0x1FAFF
+
+
+def strip_emoji(text):
+    """Remove emoji (plus the ZWJ / variation-selector glue that only exists
+    to join them) and tidy the whitespace that removal leaves behind."""
+    out = []
+    for ch in text or "":
+        if is_emoji_char(ch) or ch in ("‍", "️", "︎", "⃣"):
+            continue
+        out.append(ch)
+    return " ".join("".join(out).split())
+
+
+def has_emoji(text):
+    return any(is_emoji_char(ch) for ch in (text or ""))
+
+
+def neutralize_emoji_pairs(rows):
+    """In place: strip emoji from `rejected` where `chosen` has none. Pairs
+    that would become empty or identical are removed. Returns the number of
+    rows touched (stripped or dropped)."""
+    touched = 0
+    kept = []
+    for r in rows:
+        if has_emoji(r["rejected"]) and not has_emoji(r["chosen"]):
+            touched += 1
+            stripped = strip_emoji(r["rejected"])
+            if not stripped or stripped == r["chosen"]:
+                continue          # drop: neutralising would fabricate a degenerate pair
+            r["rejected"] = stripped
+        kept.append(r)
+    rows[:] = kept
+    return touched
+
+
+def emoji_stats(rows):
+    n = len(rows)
+    ch = sum(1 for r in rows if has_emoji(r["chosen"]))
+    rj = sum(1 for r in rows if has_emoji(r["rejected"]))
+    return {
+        "n": n,
+        "chosen_rate": (ch / n) if n else 0.0,
+        "rejected_rate": (rj / n) if n else 0.0,
+        "rejected_only": sum(1 for r in rows if has_emoji(r["rejected"]) and not has_emoji(r["chosen"])),
+        "chosen_only": sum(1 for r in rows if has_emoji(r["chosen"]) and not has_emoji(r["rejected"])),
+        "margin": ((rj - ch) / n) if n else 0.0,
+    }
+
+
+def norm(s):
+    return (s or "").strip()
+
+
+def load_human_detections(sheet=RATED_SHEET, keyfile=RATED_KEY, weight=HUMAN_PAIR_WEIGHT):
+    """Pairs a human rater actually detected. chosen=real Seth, rejected=the model.
+
+    Returns [] (with a warning) rather than a fabricated set if the sheet is not
+    rated -- an unrated sheet must never silently contribute training pairs.
+    """
+    if not sheet.exists() or not keyfile.exists():
+        print(f"WARNING: no rated sheet at {sheet}; skipping human detections",
+              file=sys.stderr)
+        return []
+    key = json.load(open(keyfile))
+    key = key.get("key", key)
+    rows = list(csv.DictReader(open(sheet)))
+    rated = [r for r in rows if (r.get("choice") or "").strip()]
+    if not rated:
+        print(f"WARNING: {sheet} has 0 rated rows; skipping human detections",
+              file=sys.stderr)
+        return []
+
+    out = []
+    for r in rated:
+        k = key.get(r["id"])
+        if not k or (r["choice"] or "").strip().upper() != str(k).strip().upper():
+            continue                      # rater was fooled -> no preference signal
+        if r["id"] in FACTUAL_NOT_TRAINABLE:
+            continue                      # wrong-fact tells are not LoRA-addressable
+        real = r["option_A"] if k == "A" else r["option_B"]
+        ai = r["option_B"] if k == "A" else r["option_A"]
+        if not norm(real) or not norm(ai) or norm(real) == norm(ai):
+            continue
+        for _ in range(weight):
+            out.append({"prompt": norm(r["context"]), "chosen": norm(real),
+                        "rejected": norm(ai), "_src": "human_detected_n40",
+                        "_id": r["id"]})
+    return out
+
+
+def load_cycle4(path):
+    rows, keep = [], set(CYCLE4_KEEP)
+    triples = json.load(open(path))
+    by_id = {t["id"]: t for t in triples}
+    missing = keep - set(by_id)
+    if missing:
+        raise SystemExit(f"FATAL: curated ids absent from {path}: {sorted(missing)}")
+    for tid in CYCLE4_KEEP:
+        t = by_id[tid]
+        rows.append({
+            "prompt": norm(t["context"]),
+            "chosen": norm(t["seth_reply"]),
+            "rejected": norm(t["huuman_reply"]),
+            "_src": "cycle4_curated",
+            "_id": tid,
+        })
+    return rows
+
+
+def load_dpo_pairs(db_path):
+    db = sqlite3.connect(str(db_path))
+    rows, seen = [], set()
+    for src in ADMITTED:
+        for p, c, r in db.execute(
+                "SELECT prompt,chosen,rejected FROM dpo_pairs WHERE source=?", (src,)):
+            p, c, r = norm(p), norm(c), norm(r)
+            if not c or not r or c == r:
+                continue
+            key = (p, c, r)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({"prompt": p, "chosen": c, "rejected": r, "_src": src, "_id": ""})
+    return rows
+
+
+def validate(rows, floor):
+    """Refuse to emit a corpus that cannot support the claim made of it."""
+    problems = []
+    for i, r in enumerate(rows):
+        if not r["chosen"] or not r["rejected"]:
+            problems.append(f"row {i} ({r['_src']}): empty chosen/rejected")
+        if r["chosen"] == r["rejected"]:
+            problems.append(f"row {i} ({r['_src']}): chosen == rejected")
+    if problems:
+        raise SystemExit("FATAL: degenerate rows:\n  " + "\n  ".join(problems[:20]))
+    es = emoji_stats(rows)
+    if es["margin"] > MAX_EMOJI_MARGIN:
+        raise SystemExit(
+            f"FATAL: emoji still marks the rejected side (rejected {es['rejected_rate']:.3f} vs "
+            f"chosen {es['chosen_rate']:.3f}, {es['rejected_only']} rejected-only rows, margin "
+            f"{es['margin']:.3f} > {MAX_EMOJI_MARGIN}). Run neutralize_emoji_pairs before "
+            f"validate -- training on this teaches 'emoji => rejected'.")
+    if len(rows) < floor:
+        raise SystemExit(
+            f"FATAL: {len(rows)} pairs < floor {floor}. Training on this would be "
+            f"training on noise. Widen the audited sources or stop.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out-dir", default=str(HOME / ".human/training-data/glm-v6-pref"))
+    ap.add_argument("--cycle4", default=str(CYCLE4_TRIPLES))
+    ap.add_argument("--db", default=str(MEMORY_DB))
+    ap.add_argument("--valid-frac", type=float, default=0.08)
+    ap.add_argument("--floor", type=int, default=200,
+                    help="Refuse to emit fewer pairs than this.")
+    ap.add_argument("--seed", type=int, default=42)
+    args = ap.parse_args()
+
+    gold = load_cycle4(Path(args.cycle4))
+    synth = load_dpo_pairs(Path(args.db))
+    human = load_human_detections()
+    rows = human + gold + synth
+    emoji_before = emoji_stats(rows)
+    emoji_touched = neutralize_emoji_pairs(rows)
+    emoji_after = emoji_stats(rows)
+    validate(rows, args.floor)
+
+    rng = random.Random(args.seed)
+    rng.shuffle(rows)
+    n_val = max(8, int(len(rows) * args.valid_frac))
+    valid, train = rows[:n_val], rows[n_val:]
+
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, part in (("train", train), ("valid", valid)):
+        with open(out / f"{name}.jsonl", "w") as fh:
+            for r in part:
+                fh.write(json.dumps({k: r[k] for k in ("prompt", "chosen", "rejected")}) + "\n")
+
+    by_src = {}
+    for r in rows:
+        by_src[r["_src"]] = by_src.get(r["_src"], 0) + 1
+    manifest = {
+        "built": "scripts/build_v6_preference_corpus.py",
+        "targets": ["over_elaboration", "register_warmth", "assistant_disclosure"],
+        "counts": {"total": len(rows), "train": len(train), "valid": len(valid)},
+        "by_source": by_src,
+        "admitted_sources": ADMITTED,
+        "rejected_sources": REJECTED,
+        # The cycle-5 eval MUST exclude these ids -- they are now training data.
+        "cycle4_ids_consumed": CYCLE4_KEEP,
+        "cycle4_dropped": CYCLE4_DROP,
+        "emoji": {"before": emoji_before, "after": emoji_after,
+                  "rejected_rows_neutralized": emoji_touched, "max_margin": MAX_EMOJI_MARGIN},
+        "seed": args.seed,
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    print(f"[v6-corpus] wrote {out}")
+    for k, v in sorted(by_src.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:20} {v:>4}")
+    print(f"  {'TOTAL':20} {len(rows):>4}  (train {len(train)} / valid {len(valid)})")
+    print(f"[v6-corpus] emoji: chosen {emoji_after['chosen_rate']:.3f} / rejected "
+          f"{emoji_after['rejected_rate']:.3f} after neutralising {emoji_touched} rejected-only rows "
+          f"(was {emoji_before['chosen_rate']:.3f} / {emoji_before['rejected_rate']:.3f})")
+    print(f"[v6-corpus] cycle-4 ids consumed: {len(CYCLE4_KEEP)} "
+          f"(exclude ALL of these from the cycle-5 eval)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

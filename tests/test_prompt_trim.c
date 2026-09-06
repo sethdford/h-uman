@@ -18,6 +18,7 @@
  */
 
 #include "human/agent/prompt_trim.h"
+#include "human/core/allocator.h"
 #include "test_framework.h"
 
 #include <stdlib.h>
@@ -207,8 +208,187 @@ static void test_positional_cap_falls_back_to_hard_budget_without_newline(void) 
     HU_ASSERT_EQ(hu_prompt_positional_cap_point(no_nl, sizeof(no_nl) - 1, 20), (size_t)20);
 }
 
+/* ── Reserve-aware positional cap ──────────────────────────────────────
+ * The plain positional cap cuts the TAIL, which on the immersive path is
+ * the guard (shape rules, CRITICAL REMINDER, ABSOLUTE RULES). A recall
+ * block that arrives before the tail therefore displaces the rules.
+ * hu_prompt_positional_cap_apply keeps the trailing `reserved` bytes and
+ * cuts the middle instead, so recall can never push the rules out. */
+
+#define K_RULES     "\nABSOLUTE RULES:\n- never say certainly\n- one message\n"
+#define K_RULES_LEN (sizeof(K_RULES) - 1)
+
+static char *build_over_budget_prompt(size_t head_bytes, size_t recall_bytes, size_t *len_out) {
+    size_t total = head_bytes + recall_bytes + K_RULES_LEN;
+    char *buf = (char *)malloc(total + 1);
+    size_t pos = 0;
+    for (; pos < head_bytes; pos++)
+        buf[pos] = (pos % 40 == 39) ? '\n' : 'H';
+    for (size_t i = 0; i < recall_bytes; i++, pos++)
+        buf[pos] = (i % 60 == 59) ? '\n' : 'R';
+    memcpy(buf + pos, K_RULES, K_RULES_LEN);
+    pos += K_RULES_LEN;
+    buf[pos] = '\0';
+    *len_out = pos;
+    return buf;
+}
+
+static void test_cap_apply_keeps_reserved_rules_tail_and_fits_budget(void) {
+    size_t len = 0;
+    /* (budget - 884) B head + 1,200 B recall + rules > budget, whatever the budget is. */
+    char *buf = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
+    HU_ASSERT_GT((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    size_t new_len =
+        hu_prompt_positional_cap_apply(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
+    HU_ASSERT_LE((long)new_len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_EQ((long)strlen(buf), (long)new_len);
+    /* Rules block survives verbatim at the very end. */
+    HU_ASSERT(new_len >= K_RULES_LEN);
+    HU_ASSERT(memcmp(buf + new_len - K_RULES_LEN, K_RULES, K_RULES_LEN) == 0);
+    /* Head start survives; the cut lands on a line boundary. */
+    HU_ASSERT_EQ((int)buf[0], (int)'H');
+    HU_ASSERT_EQ((int)buf[new_len - K_RULES_LEN - 1], (int)'\n');
+    free(buf);
+}
+
+static void test_cap_apply_under_budget_is_noop(void) {
+    size_t len = 0;
+    char *buf = build_over_budget_prompt(1000, 200, &len);
+    char *copy = strdup(buf);
+    size_t new_len =
+        hu_prompt_positional_cap_apply(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
+    HU_ASSERT_EQ((long)new_len, (long)len);
+    HU_ASSERT_STR_EQ(buf, copy);
+    free(copy);
+    free(buf);
+}
+
+static void test_cap_apply_reserved_too_large_falls_back_to_plain_cap(void) {
+    size_t len = 0;
+    char *buf = build_over_budget_prompt(200, 100, &len);
+    /* Budget 64 with a reservation >= budget: cannot honour it, so behave
+     * exactly like the plain positional cap (never return more than budget). */
+    size_t plain = hu_prompt_positional_cap_point(buf, len, 64);
+    size_t new_len = hu_prompt_positional_cap_apply(buf, len, 64, 64);
+    HU_ASSERT_EQ((long)new_len, (long)plain);
+    HU_ASSERT_EQ((long)strlen(buf), (long)new_len);
+    free(buf);
+}
+
+/* ---- hu_prompt_cap_with_tail: the ABSOLUTE RULES block must be the FINAL
+ * bytes the model sees, on every path, inside budget. ---- */
+
+static const char K_TAIL[] = "\n=== ABSOLUTE RULES (override everything above) ===\n1. You are "
+                             "HUMAN.\n2. Emoji about 1 in 8 texts.\n";
+#define K_TAIL_LEN (sizeof(K_TAIL) - 1)
+
+/* An allocator-owned copy so the helper's free(old, len+1) contract holds. */
+static char *owned_copy(hu_allocator_t *a, const char *src, size_t len) {
+    char *b = (char *)a->alloc(a->ctx, len + 1);
+    memcpy(b, src, len);
+    b[len] = '\0';
+    return b;
+}
+
+static void test_cap_with_tail_appends_when_under_budget(void) {
+    hu_allocator_t a = hu_system_allocator();
+    size_t len = 0;
+    char *tmp = build_over_budget_prompt(1000, 200, &len);
+    char *buf = owned_copy(&a, tmp, len);
+    free(tmp);
+    HU_ASSERT_EQ(hu_prompt_cap_with_tail(&a, &buf, &len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN,
+                                         K_TAIL, K_TAIL_LEN),
+                 HU_OK);
+    HU_ASSERT_EQ((long)strlen(buf), (long)len);
+    HU_ASSERT(len >= K_TAIL_LEN);
+    HU_ASSERT(memcmp(buf + len - K_TAIL_LEN, K_TAIL, K_TAIL_LEN) == 0);
+    /* The guard tail that was already there sits right before the rules. */
+    HU_ASSERT(memcmp(buf + len - K_TAIL_LEN - K_RULES_LEN, K_RULES, K_RULES_LEN) == 0);
+    a.free(a.ctx, buf, len + 1);
+}
+
+static void test_cap_with_tail_over_budget_cuts_middle_keeps_guard_then_rules(void) {
+    hu_allocator_t a = hu_system_allocator();
+    size_t len = 0;
+    char *tmp = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
+    char *buf = owned_copy(&a, tmp, len);
+    free(tmp);
+    HU_ASSERT_GT((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_EQ(hu_prompt_cap_with_tail(&a, &buf, &len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN,
+                                         K_TAIL, K_TAIL_LEN),
+                 HU_OK);
+    HU_ASSERT_LE((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_EQ((long)strlen(buf), (long)len);
+    HU_ASSERT(memcmp(buf + len - K_TAIL_LEN, K_TAIL, K_TAIL_LEN) == 0);
+    HU_ASSERT(memcmp(buf + len - K_TAIL_LEN - K_RULES_LEN, K_RULES, K_RULES_LEN) == 0);
+    HU_ASSERT_EQ((int)buf[0], (int)'H');
+    a.free(a.ctx, buf, len + 1);
+}
+
+static void test_cap_with_tail_skips_when_block_already_present(void) {
+    hu_allocator_t a = hu_system_allocator();
+    size_t len = 0;
+    char *tmp = build_over_budget_prompt(1000, 200, &len);
+    /* Embed the block already (a head that carries it itself). */
+    size_t elen = len + K_TAIL_LEN;
+    char *buf = (char *)a.alloc(a.ctx, elen + 1);
+    memcpy(buf, tmp, len);
+    memcpy(buf + len, K_TAIL, K_TAIL_LEN);
+    buf[elen] = '\0';
+    free(tmp);
+    size_t before = elen;
+    HU_ASSERT_EQ(hu_prompt_cap_with_tail(&a, &buf, &elen, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN,
+                                         K_TAIL, K_TAIL_LEN),
+                 HU_OK);
+    HU_ASSERT_EQ((long)elen, (long)before);
+    /* Exactly one copy of the marker line. */
+    const char *first = strstr(buf, "=== ABSOLUTE RULES");
+    HU_ASSERT_NOT_NULL(first);
+    HU_ASSERT_NULL(strstr(first + 1, "=== ABSOLUTE RULES"));
+    a.free(a.ctx, buf, elen + 1);
+}
+
+static void test_cap_with_tail_null_tail_matches_plain_cap_apply(void) {
+    hu_allocator_t a = hu_system_allocator();
+    size_t len = 0;
+    char *tmp = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
+    char *expect = strdup(tmp);
+    size_t elen =
+        hu_prompt_positional_cap_apply(expect, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
+    char *buf = owned_copy(&a, tmp, len);
+    free(tmp);
+    HU_ASSERT_EQ(
+        hu_prompt_cap_with_tail(&a, &buf, &len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN, NULL, 0),
+        HU_OK);
+    HU_ASSERT_EQ((long)len, (long)elen);
+    HU_ASSERT_STR_EQ(buf, expect);
+    free(expect);
+    a.free(a.ctx, buf, len + 1);
+}
+
+static void test_cap_with_tail_too_large_tail_is_plain_cap_no_append(void) {
+    hu_allocator_t a = hu_system_allocator();
+    size_t len = 0;
+    char *tmp = build_over_budget_prompt(200, 100, &len);
+    char *buf = owned_copy(&a, tmp, len);
+    free(tmp);
+    /* Budget 64, tail 100: cannot fit → plain cap, nothing appended. */
+    HU_ASSERT_EQ(hu_prompt_cap_with_tail(&a, &buf, &len, 64, 0, K_TAIL, 100), HU_OK);
+    HU_ASSERT_LE((long)len, 64L);
+    HU_ASSERT_NULL(strstr(buf, "ABSOLUTE"));
+    a.free(a.ctx, buf, len + 1);
+}
+
 void run_prompt_trim_tests(void) {
+    HU_RUN_TEST(test_cap_with_tail_appends_when_under_budget);
+    HU_RUN_TEST(test_cap_with_tail_over_budget_cuts_middle_keeps_guard_then_rules);
+    HU_RUN_TEST(test_cap_with_tail_skips_when_block_already_present);
+    HU_RUN_TEST(test_cap_with_tail_null_tail_matches_plain_cap_apply);
+    HU_RUN_TEST(test_cap_with_tail_too_large_tail_is_plain_cap_no_append);
     HU_TEST_SUITE("Prompt trim");
+    HU_RUN_TEST(test_cap_apply_keeps_reserved_rules_tail_and_fits_budget);
+    HU_RUN_TEST(test_cap_apply_under_budget_is_noop);
+    HU_RUN_TEST(test_cap_apply_reserved_too_large_falls_back_to_plain_cap);
     HU_RUN_TEST(test_trim_mode_parse_unknown_and_empty_default_off);
     HU_RUN_TEST(test_trim_mode_parse_shadow);
     HU_RUN_TEST(test_trim_mode_parse_live_aliases);

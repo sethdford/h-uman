@@ -7,8 +7,10 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona/circadian.h"
+#include "human/persona/emotion_card.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
+#include "human/persona/style_card.h"
 #include "human/persona/terseness.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,17 +55,17 @@ static const char hu_rules_head[] =
 
 /* Register: CASUAL (default) — friend-texting voice.
  *
- * Rule 2 is MEASURED, not authored (scripts/persona_style_card.py,
- * n=1488 typed msgs, 2026-07-12): starts_lowercase=4% (the phone
- * autocapitalizes), no-terminal-punct=79%, ?-endings=9%. The old
- * "All lowercase unless SHOUTING" directive contradicted both the
- * corpus and the persona JSON's own "Normal capitalization" rule —
- * the model's per-turn agonizing over that conflict is what leaked
- * to real contacts on 2026-07-11. */
-static const char hu_rules_casual[] =
-    "2. Normal capitalization (your phone capitalizes for you); CAPS only when "
-    "SHOUTING. Most texts have no period at the end — stop like a real text. "
-    "Question marks only when actually asking.\n"
+ * Rule 2 is MEASURED, not authored, and is RENDERED from the persona's
+ * style card (~/.human/personas/<name>.style-card.json, written by
+ * scripts/measure_style_card.py) via hu_style_card_render_casual_rules —
+ * no style number is hard-coded here. The old "All lowercase unless
+ * SHOUTING" directive contradicted both the corpus and the persona JSON's
+ * own "Normal capitalization" rule; the model's per-turn agonizing over
+ * that conflict is what leaked to real contacts on 2026-07-11, and on
+ * 2026-09-03 this comment, the card and seth.json still carried three
+ * different numbers for the same axis. The card is now the only source;
+ * hu_style_card_default is the fallback when it is missing. */
+static const char hu_rules_casual_tail[] =
     "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
     "7. Text like you're on your phone texting a friend.\n";
@@ -101,11 +103,55 @@ static bool formality_is_formal(const char *formality) {
 
 hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, const char *formality,
                                                char *buf, size_t cap, size_t *out_len) {
-    (void)persona;
     if (!buf || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *reg = formality_is_formal(formality) ? hu_rules_formal : hu_rules_casual;
-    int n = snprintf(buf, cap, "%s%s%s", hu_rules_head, reg, hu_rules_tail);
+    int n;
+    if (formality_is_formal(formality)) {
+        n = snprintf(buf, cap, "%s%s%s", hu_rules_head, hu_rules_formal, hu_rules_tail);
+    } else {
+        /* Casual rule 2 comes from the measured style card (or the compiled
+         * default, logged once, when the persona has no card). */
+        hu_style_card_t card;
+        const char *pname = persona ? persona->name : NULL;
+        size_t pname_len = 0;
+        if (pname)
+            pname_len = persona->name_len ? persona->name_len : strlen(pname);
+        hu_style_card_resolve(pname, pname_len, &card);
+        char rule2[512];
+        hu_error_t rerr = hu_style_card_render_casual_rules(&card, rule2, sizeof(rule2), NULL);
+        if (rerr != HU_OK)
+            return rerr;
+        /* Rule 14 — the MEASURED emotional register, rendered from the
+         * persona's emotion card (scripts/measure_emotion_card.py). Gated on
+         * scripts/eval_emotion_register.py (nightly JSD of the twin's sent
+         * replies against the card) plus a blind A/B round: do not flip
+         * HU_EMOTION_REGISTER to live without a measurement showing the rule
+         * moves the twin TOWARD the card. OFF renders nothing; SHADOW logs
+         * once what it would send; only LIVE reaches the prompt. */
+        char rule14[512];
+        rule14[0] = '\0';
+        hu_gate_mode_t em = hu_emotion_register_mode();
+        if (em != HU_GATE_OFF) {
+            hu_emotion_card_t ecard;
+            if (hu_emotion_card_resolve(pname, pname_len, &ecard)) {
+                char rendered[512];
+                if (hu_emotion_card_render_rule(&ecard, rendered, sizeof(rendered), NULL) ==
+                    HU_OK) {
+                    if (em == HU_GATE_LIVE) {
+                        snprintf(rule14, sizeof(rule14), "%s", rendered);
+                    } else {
+                        static atomic_bool shadow_logged = false;
+                        hu_log_info_once(&shadow_logged, "persona", NULL,
+                                         "emotion register SHADOW (HU_EMOTION_REGISTER): would "
+                                         "append to the casual rules: %s",
+                                         rendered);
+                    }
+                }
+            }
+        }
+        n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail, rule14);
+    }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)
@@ -5417,6 +5463,14 @@ static hu_error_t persona_compact_append_str(hu_allocator_t *alloc, char **buf, 
                                              size_t *cap, const char *s) {
     return append_prompt(alloc, buf, len, cap, s, strlen(s));
 }
+/* Append `s` followed by a newline. */
+static hu_error_t persona_compact_append_line(hu_allocator_t *alloc, char **buf, size_t *len,
+                                              size_t *cap, const char *s, size_t s_len) {
+    hu_error_t err = append_prompt(alloc, buf, len, cap, s, s_len);
+    if (err != HU_OK)
+        return err;
+    return append_prompt(alloc, buf, len, cap, "\n", 1);
+}
 
 static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
                                                   const hu_persona_t *persona, const char *channel,
@@ -5681,6 +5735,27 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
             if (err != HU_OK)
                 goto fail;
         }
+    }
+
+    /* 6b. Env-gated directives that the full builder carries and this head
+     * silently dropped (2026-09-04 audit): with HU_PERSONA_HEAD=live the
+     * daemon never enters hu_persona_build_prompt, so HU_TERSENESS=live and
+     * HU_HUMOR_DIRECTIVE=live were no-ops in production. Same gates, same
+     * directive text; LIVE appends, SHADOW/OFF leave the prompt unchanged. */
+    if (hu_terse_mode_from_env() == HU_TERSE_LIVE) {
+        const char *td = hu_terse_directive();
+        err = persona_compact_append_line(alloc, &buf, &len, &cap, td, strlen(td));
+        if (err != HU_OK)
+            goto fail;
+    }
+    if (hu_gate_mode_from_env("HU_HUMOR_DIRECTIVE", HU_GATE_OFF) == HU_GATE_LIVE) {
+        char hum_dir[768];
+        size_t hum_len = 0;
+        if (hu_persona_build_humor_directive(persona, hum_dir, sizeof(hum_dir), &hum_len) ==
+                HU_OK &&
+            hum_len > 0 &&
+            (err = persona_compact_append_line(alloc, &buf, &len, &cap, hum_dir, hum_len)) != HU_OK)
+            goto fail;
     }
 
     /* 7. Closing imperative: shape constraints + anti-pattern guards. */

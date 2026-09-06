@@ -5,15 +5,26 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+/* The HU_IS_TEST mock in src/tts/audio_pipeline.c names its scratch file
+ * after the pid so concurrent suites never share it; mirror that here. */
+static const char *expected_mock_path(char *buf, size_t cap, const char *stem, const char *ext) {
+    snprintf(buf, cap, "/tmp/%s-%ld.%s", stem, (long)getpid(), ext);
+    return buf;
+}
 
 static void test_audio_mp3_to_caf_mock_creates_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
     static const unsigned char mock_mp3[] = {0xFF, 0xFB, 0x90, 0x00};
     char out_path[256] = {0};
-    hu_error_t err = hu_audio_mp3_to_caf(&alloc, mock_mp3, sizeof(mock_mp3), out_path, sizeof(out_path));
+    hu_error_t err =
+        hu_audio_mp3_to_caf(&alloc, mock_mp3, sizeof(mock_mp3), out_path, sizeof(out_path));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(strlen(out_path) > 0);
-    HU_ASSERT_STR_EQ(out_path, "/tmp/human-voice-test.mp3");
+    char expected[256];
+    HU_ASSERT_STR_EQ(out_path,
+                     expected_mock_path(expected, sizeof(expected), "human-voice-test", "mp3"));
 
     /* File should exist */
     FILE *f = fopen(out_path, "rb");
@@ -31,7 +42,8 @@ static void test_audio_cleanup_temp_removes_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
     static const unsigned char mock_mp3[] = {0x00, 0x01};
     char out_path[256] = {0};
-    hu_error_t err = hu_audio_mp3_to_caf(&alloc, mock_mp3, sizeof(mock_mp3), out_path, sizeof(out_path));
+    hu_error_t err =
+        hu_audio_mp3_to_caf(&alloc, mock_mp3, sizeof(mock_mp3), out_path, sizeof(out_path));
     HU_ASSERT_EQ(err, HU_OK);
     hu_audio_cleanup_temp(out_path);
     FILE *f = fopen(out_path, "rb");
@@ -60,14 +72,16 @@ static void test_audio_mp3_to_caf_null_out_path_returns_error(void) {
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
-/* Mock path is 26 bytes incl. NUL; cap 10 cannot fit full path → error after file write */
+/* Mock path is ~30 bytes incl. NUL; cap 10 cannot fit full path → error after file write */
 static void test_audio_mp3_to_caf_mock_path_buffer_too_small(void) {
     hu_allocator_t alloc = hu_system_allocator();
     static const unsigned char mock_mp3[] = {0xFF, 0xFB, 0x90, 0x00};
     char out_path[16] = {0};
     hu_error_t err = hu_audio_mp3_to_caf(&alloc, mock_mp3, sizeof(mock_mp3), out_path, 10);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
-    hu_audio_cleanup_temp("/tmp/human-voice-test.mp3");
+    char expected[256];
+    hu_audio_cleanup_temp(
+        expected_mock_path(expected, sizeof(expected), "human-voice-test", "mp3"));
 }
 
 static void test_audio_cleanup_temp_null_safe(void) {
@@ -85,7 +99,9 @@ static void test_audio_tts_bytes_to_temp_writes_mp3(void) {
     hu_error_t err =
         hu_audio_tts_bytes_to_temp(&alloc, data, sizeof(data), "mp3", out_path, sizeof(out_path));
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(out_path, "/tmp/human-tts-bytes-test.mp3");
+    char expected[256];
+    HU_ASSERT_STR_EQ(out_path,
+                     expected_mock_path(expected, sizeof(expected), "human-tts-bytes-test", "mp3"));
     FILE *f = fopen(out_path, "rb");
     HU_ASSERT_NOT_NULL(f);
     fclose(f);
@@ -99,7 +115,9 @@ static void test_audio_tts_bytes_to_temp_writes_wav(void) {
     hu_error_t err =
         hu_audio_tts_bytes_to_temp(&alloc, data, sizeof(data), "wav", out_path, sizeof(out_path));
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(out_path, "/tmp/human-tts-bytes-test.wav");
+    char expected[256];
+    HU_ASSERT_STR_EQ(out_path,
+                     expected_mock_path(expected, sizeof(expected), "human-tts-bytes-test", "wav"));
     hu_audio_cleanup_temp(out_path);
 }
 
@@ -107,8 +125,7 @@ static void test_audio_tts_bytes_to_temp_rejects_bad_ext(void) {
     hu_allocator_t alloc = hu_system_allocator();
     static const unsigned char data[] = {0x01};
     char out_path[256] = {0};
-    hu_error_t err =
-        hu_audio_tts_bytes_to_temp(&alloc, data, 1, "ogg", out_path, sizeof(out_path));
+    hu_error_t err = hu_audio_tts_bytes_to_temp(&alloc, data, 1, "ogg", out_path, sizeof(out_path));
     HU_ASSERT_NEQ(err, HU_OK);
 }
 

@@ -30,12 +30,14 @@
 #include "human/context/self_awareness.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/daemon_learning_tick.h" /* hu_daemon_proactive_outcome_record_send */
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
 #include "human/memory.h"
 #include "human/memory/compression.h"
 #include "human/memory/degradation.h"
 #include "human/memory/personal_model.h"
+#include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/persona.h"
 #include "human/platform.h"
 #ifdef HU_ENABLE_SQLITE
@@ -892,4 +894,95 @@ bool hu_daemon_proactive_should_skip_for_budget(hu_proactive_budget_t *budget, u
     if (!budget)
         return false;
     return !hu_governor_has_budget(budget, now_ms);
+}
+
+/* Contract C5, Part A — log the actual SEND outcome of a proactive check-in
+ * (as distinct from the earlier PROPOSAL decision logged by
+ * init_proposer_record_decision in src/agent/init_proposer.c). This is the
+ * row that carries sent=1 + a message_ref, because this is the one call
+ * site that knows delivery actually happened. Best-effort: a logging
+ * failure must never affect the send outcome itself. */
+static void daemon_proactive_record_decision(struct hu_agent *agent, const char *contact,
+                                             const char *decision, const char *reason, int sent,
+                                             const char *message, size_t message_len, int64_t now) {
+#ifdef HU_ENABLE_SQLITE
+    if (!agent || !agent->memory)
+        return;
+    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return;
+    /* message_ref is a short, bounded PREFIX only — this table is a
+     * decision log, not a message store. */
+    char ref_buf[65];
+    ref_buf[0] = '\0';
+    if (message && message_len > 0) {
+        size_t n = message_len < sizeof(ref_buf) - 1 ? message_len : sizeof(ref_buf) - 1;
+        memcpy(ref_buf, message, n);
+        ref_buf[n] = '\0';
+    }
+    hu_error_t err = hu_proactive_decisions_repo_record(
+        db, now, contact, "proactive_send", decision, reason, sent, ref_buf[0] ? ref_buf : NULL);
+    if (err != HU_OK)
+        hu_log_warn("daemon_proactive", NULL, "proactive_decisions_repo_record failed: err=%d",
+                    (int)err);
+#else
+    (void)agent;
+    (void)contact;
+    (void)decision;
+    (void)reason;
+    (void)sent;
+    (void)message;
+    (void)message_len;
+    (void)now;
+#endif
+}
+
+/* Send a proactive check-in and record it, ONLY if the channel accepted it.
+ *
+ * Extracted from daemon.c (which is at its size ratchet) together with the fix
+ * for a discarded return value. Previously the send's hu_error_t was thrown
+ * away, so a FAILED send still logged "proactive check-in sent", recorded
+ * send-recency (which suppresses later REACTIVE replies to that contact), fed
+ * hu_daemon_proactive_outcome_record_send (training the humanization bandit on a
+ * message nobody received), and charged the governor budget (throttling real
+ * sends). One unchecked return corrupted four downstream systems.
+ *
+ * Measured 2026-08-02: 12 "proactive check-in sent" lines in the daemon log and
+ * ZERO matching rows in chat.db.
+ *
+ * Returns true only when the message was actually accepted for delivery. */
+bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *channel,
+                                         const struct hu_contact_profile *cp, const char *ch_name,
+                                         const char *target, size_t target_len, const char *message,
+                                         size_t message_len, int64_t now,
+                                         hu_proactive_budget_t *gov_budget) {
+    if (!channel || !channel->vtable || !channel->vtable->send || !cp)
+        return false;
+
+    const char *who = cp->name ? cp->name : cp->contact_id;
+    hu_error_t send_rc =
+        channel->vtable->send(channel->ctx, target, target_len, message, message_len, NULL, 0);
+    if (send_rc != HU_OK) {
+        hu_log_warn("human", agent ? agent->observer : NULL,
+                    "proactive check-in to %s FAILED (err=%d), nothing delivered; "
+                    "skipping recency/outcome/governor bookkeeping",
+                    who, (int)send_rc);
+        daemon_proactive_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_DECLINE,
+                                         "send_failed", 0, NULL, 0, now);
+        return false;
+    }
+
+    /* FU-1: record proactive send so reactive deferral works. */
+    if (agent)
+        hu_contact_send_recency_record(&agent->contact_send_recency, cp->contact_id,
+                                       strlen(cp->contact_id), now, HU_SEND_PATH_PROACTIVE);
+    (void)hu_daemon_proactive_outcome_record_send(agent ? agent->memory : NULL, ch_name, target,
+                                                  target_len);
+    hu_log_info("human", agent ? agent->observer : NULL, "proactive check-in sent to %s: %.*s", who,
+                (int)message_len, message ? message : "");
+    daemon_proactive_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_SEND, NULL, 1,
+                                     message, message_len, now);
+    if (gov_budget)
+        hu_governor_record_sent(gov_budget, (uint64_t)time(NULL) * 1000ULL);
+    return true;
 }

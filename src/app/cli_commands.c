@@ -23,15 +23,23 @@
  * alongside the RL_FULL-gated competitive/leaderboard/gate handlers. The gated
  * handlers are only *called* under HU_ENABLE_RL_FULL, so an unconditional
  * declaration is safe and keeps `human eval score` available in every build. */
+#include "human/agent/graph_grounding.h"
+#include "human/agent/memory_loader.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/eval/cli_eval.h"
 #include "human/eval/turing_adversarial.h"
 #include "human/eval_benchmarks.h"
 #include "human/eval_dashboard.h"
 #include "human/evaluation/evaluation.h"
 #include "human/memory.h"
+#include "human/memory/agent_facts.h"
+#include "human/memory/fact_extract.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
+#include "human/memory/graph_ingest.h"
 #include "human/memory/personal_model.h"
+#include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
 typedef struct hu_memory_facade hu_memory_facade_t;
@@ -391,12 +399,186 @@ hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv) {
 
 /* ── memory ─────────────────────────────────────────────────────────────── */
 
+/* ── memory import-facts / ground (Task 4, 2026-09-01) ─────────────────── */
+
+/* Resolve the grounding graph path: $HU_GRAPH_DB overrides (tests), else
+ * $HOME/.human/graph.db — the same file daemon.c:2435 opens. */
+static int memory_graph_path(char *buf, size_t cap) {
+    const char *env = getenv("HU_GRAPH_DB");
+    if (env && env[0])
+        return snprintf(buf, cap, "%s", env);
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    return hu_paths_state(buf, cap, "graph.db");
+}
+
+/* human memory import-facts <jsonl> [--exclude pred1,pred2] — thin wrapper over
+ * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db. */
+static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: human memory import-facts <facts.jsonl> [--exclude p1,p2]\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *exclude = NULL;
+    for (int i = 4; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--exclude") == 0)
+            exclude = argv[i + 1];
+    char graph_path[1024];
+    int np = memory_graph_path(graph_path, sizeof(graph_path));
+    hu_graph_t *g = NULL;
+    hu_error_t err = HU_ERR_INVALID_ARGUMENT;
+    if (np > 0 && (size_t)np < sizeof(graph_path))
+        err = hu_graph_open(alloc, graph_path, (size_t)np, &g);
+    if (err != HU_OK || !g) {
+        fprintf(stderr, "import-facts: cannot open graph %s: %s\n", graph_path,
+                hu_error_string(err));
+        return err == HU_OK ? HU_ERR_INTERNAL : err;
+    }
+    size_t imported = 0, skipped = 0;
+    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &skipped);
+    hu_graph_close(g, alloc);
+    printf("{\"imported\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n", imported, skipped,
+           graph_path);
+    if (err == HU_ERR_NOT_FOUND && imported == 0)
+        fprintf(stderr, "import-facts: nothing imported from %s\n", argv[3]);
+    return err;
+}
+
+/* The semantic index lives in the SQLite engine; every other build has no
+ * index to detach, and hu_semantic_recall_attach() already refused above. */
+static void memory_semantic_detach(hu_memory_t *mem) {
+#ifdef HU_ENABLE_SQLITE
+    hu_sqlite_memory_set_semantic_index(mem, NULL, NULL);
+#else
+    (void)mem;
+#endif
+}
+
+/* Shared printer for `memory search --semantic|--hybrid`: rank, key, score,
+ * content (truncated to 2000 bytes). Public so tests can drive it against a
+ * real retrieval result; the wrapper below adds the free. Both callers report
+ * "No results" the same way, so leave that to the caller. */
+size_t hu_cli_memory_print_len(const char *content, size_t len) {
+    if (!content)
+        return 0;
+    if (len <= 2000)
+        return len;
+    /* Hard cut at the ceiling, backed off so a multi-byte UTF-8 sequence is
+     * never split: the 2026-09-03 live gate choked on a stray 0xE2 lead byte. */
+    size_t cut = 2000;
+    while (cut > 0 && ((unsigned char)content[cut] & 0xC0u) == 0x80u)
+        cut--;
+    return cut;
+}
+
+void hu_cli_memory_search_emit(FILE *out, const hu_retrieval_result_t *res) {
+    if (!out || !res)
+        return;
+    for (size_t i = 0; i < res->count; i++)
+        fprintf(out, "  [%zu] %.*s (%.3f): %.*s\n", i + 1, (int)res->entries[i].key_len,
+                res->entries[i].key ? res->entries[i].key : "", res->scores ? res->scores[i] : 0.0,
+                (int)hu_cli_memory_print_len(res->entries[i].content, res->entries[i].content_len),
+                res->entries[i].content ? res->entries[i].content : "");
+}
+
+static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+    hu_cli_memory_search_emit(stdout, res);
+    hu_retrieval_result_free(alloc, res);
+}
+
+/* human memory ground <contact> <message> — run the production grounding
+ * composer against the graph and report matched entities + context bytes.
+ * This is the proof probe for the backfill: matched > 0 on a message about a
+ * known fact means the graph can reach it. */
+static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, const char *contact,
+                                      const char *msg) {
+    char graph_path[1024];
+    int np = memory_graph_path(graph_path, sizeof(graph_path));
+    hu_graph_t *g = NULL;
+    if (np <= 0 || (size_t)np >= sizeof(graph_path) ||
+        hu_graph_open(alloc, graph_path, (size_t)np, &g) != HU_OK || !g) {
+        fprintf(stderr, "ground: cannot open graph %s\n", graph_path);
+        return HU_ERR_NOT_FOUND;
+    }
+    hu_w7_facade_t *facade = NULL;
+    hu_error_t err = hu_w7_facade_open(g, alloc, &facade);
+    if (err != HU_OK) {
+        hu_graph_close(g, alloc);
+        return err;
+    }
+    hu_memory_loader_t loader;
+    memset(&loader, 0, sizeof(loader));
+    err = hu_memory_loader_init(&loader, alloc, mem, NULL, 8, 4000);
+    if (err == HU_OK) {
+        hu_memory_loader_set_facade(&loader, facade);
+        char *ctx = NULL;
+        size_t ctx_len = 0, matched = 0;
+        err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0, &ctx,
+                                      &ctx_len, &matched);
+        printf("matched=%zu bytes=%zu\n", matched, ctx_len);
+        if (ctx && ctx_len)
+            printf("%.*s\n", (int)ctx_len, ctx);
+        if (ctx)
+            alloc->free(alloc->ctx, ctx, ctx_len + 1);
+    }
+    hu_w7_facade_close(facade, alloc);
+    hu_graph_close(g, alloc);
+    return err;
+}
+
+/* human memory agent-facts-dry <reply text> — Contract C3 measurement hook.
+ * Runs the identical extraction hu_agent_facts_record_reply would run
+ * (subject relabelled "assistant", commitment detection with from_me=true),
+ * but never touches a graph or memory store. Used by
+ * scripts/eval_agent_promise_recall.py to score recall against a
+ * hand-labelled set without needing HU_AGENT_FACTS live or a running
+ * daemon. Prints one JSON object to stdout. */
+static hu_error_t memory_agent_facts_dry(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: human memory agent-facts-dry <reply text>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *reply = argv[3];
+    size_t reply_len = strlen(reply);
+    hu_fact_extract_result_t facts;
+    char commitment[512];
+    char who[64];
+    bool has_commitment = false;
+    hu_error_t err = hu_agent_facts_dry_run(reply, reply_len, &facts, commitment,
+                                            sizeof(commitment), who, sizeof(who), &has_commitment);
+    if (err != HU_OK) {
+        fprintf(stderr, "agent-facts-dry: %s\n", hu_error_string(err));
+        return err;
+    }
+    printf("{\"facts\": [");
+    for (size_t i = 0; i < facts.fact_count; i++) {
+        const hu_heuristic_fact_t *f = &facts.facts[i];
+        printf("%s{\"subject\": \"%s\", \"predicate\": \"%s\", \"object\": \"%s\", "
+               "\"confidence\": %.2f}",
+               i ? ", " : "", f->subject, f->predicate, f->object, (double)f->confidence);
+    }
+    printf("], \"commitment\": %s, \"commitment_text\": \"%s\", \"who\": \"%s\"}\n",
+           has_commitment ? "true" : "false", has_commitment ? commitment : "",
+           has_commitment ? who : "");
+    return HU_OK;
+}
+
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki>\n");
+        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit|wiki|"
+               "import-facts|ground|reindex|agent-facts-dry>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
+    if (strcmp(sub, "import-facts") == 0)
+        return memory_import_facts(alloc, argc, argv); /* needs graph.db only, no config */
+    if (strcmp(sub, "agent-facts-dry") == 0)
+        return memory_agent_facts_dry(argc, argv); /* pure extraction, no graph/memory/config */
+    if (strcmp(sub, "ground") == 0 && argc < 5) {
+        fprintf(stderr, "Usage: human memory ground <contact> <message>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
     if ((strcmp(sub, "search") == 0 || strcmp(sub, "get") == 0) && argc < 4) {
         fprintf(stderr, "Usage: human memory %s <query>\n", sub);
         return HU_ERR_INVALID_ARGUMENT;
@@ -446,15 +628,96 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             for (size_t i = 0; i < count; i++) {
                 printf("  [%zu] %.*s: %.*s\n", i + 1, (int)entries[i].key_len,
                        entries[i].key ? entries[i].key : "",
-                       (int)(entries[i].content_len > 80 ? 80 : entries[i].content_len),
+                       (int)(entries[i].content_len > 2000 ? 2000 : entries[i].content_len),
                        entries[i].content ? entries[i].content : "");
                 hu_memory_entry_free_fields(alloc, &entries[i]);
             }
             alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
         }
+    } else if (strcmp(sub, "reindex") == 0) {
+        /* human memory reindex [--limit N] — embed every memories row missing
+         * from the semantic index via the configured endpoint. */
+        size_t lim = 0;
+        for (int i = 3; i + 1 < argc; i++)
+            if (strcmp(argv[i], "--limit") == 0)
+                lim = (size_t)strtoul(argv[i + 1], NULL, 10);
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
+        if (err != HU_OK) {
+            fprintf(stderr, "reindex: cannot attach semantic index: %s\n", hu_error_string(err));
+            goto done;
+        }
+        size_t indexed = 0;
+#ifdef HU_ENABLE_SQLITE
+        err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+#else
+        (void)lim;
+        err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */
+#endif
+        printf("{\"indexed\": %zu, \"index_size\": %zu, \"endpoint\": \"%s\"}\n", indexed,
+               svs.vtable->count(svs.ctx), hu_semantic_recall_embed_url());
+        memory_semantic_detach(&mem);
+        svs.vtable->deinit(svs.ctx, alloc);
+        semb.vtable->deinit(semb.ctx, alloc);
+    } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--semantic") == 0) {
+        /* human memory search --semantic <query> — the semantic retriever alone
+         * (embed query -> sqlite-vec KNN), for the Phase-1 harness on the live
+         * C path. Prints rank, key, score, content. */
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --semantic: cannot attach: %s\n", hu_error_string(err));
+            goto done;
+        }
+        hu_retrieval_options_t opts = {0};
+        opts.limit = 10;
+        hu_retrieval_result_t res = {0};
+        err = hu_semantic_retrieve(alloc, &semb, &svs, argv[4], strlen(argv[4]), &opts, &res);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --semantic: %s\n", hu_error_string(err));
+        } else if (res.count == 0) {
+            printf("No results for: %s\n", argv[4]);
+        } else {
+            memory_search_print_and_free(alloc, &res);
+        }
+        memory_semantic_detach(&mem);
+        svs.vtable->deinit(svs.ctx, alloc);
+        semb.vtable->deinit(semb.ctx, alloc);
+    } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--hybrid") == 0) {
+        /* human memory search --hybrid <query> — reconstructive hybrid
+         * retrieval (Contract C2): keyword + semantic merged via RRF, then
+         * scene-select -> neighbour expansion -> rerank -> time-bounded
+         * filter -> sufficiency check. This is the CLI surface the
+         * benchmark harness measures as the "hybrid_cli" (C path) column,
+         * distinct from the harness's own RRF(kw,sem) computed in Python. */
+        hu_embedder_t semb = {0};
+        hu_vector_store_t svs = {0};
+        bool have_vec = hu_semantic_recall_attach(alloc, &mem, &semb, &svs) == HU_OK;
+        if (!have_vec)
+            fprintf(stderr, "search --hybrid: semantic index unavailable, using keyword only\n");
+        hu_retrieval_options_t opts = {0};
+        opts.limit = 10;
+        opts.reconstructive = true;
+        hu_retrieval_result_t res = {0};
+        err = hu_hybrid_retrieve(alloc, &mem, have_vec ? &semb : NULL, have_vec ? &svs : NULL, NULL,
+                                 argv[4], strlen(argv[4]), &opts, &res);
+        if (err != HU_OK) {
+            fprintf(stderr, "search --hybrid: %s\n", hu_error_string(err));
+        } else if (res.count == 0) {
+            printf("No results for: %s\n", argv[4]);
+        } else {
+            memory_search_print_and_free(alloc, &res);
+        }
+        if (have_vec) {
+            memory_semantic_detach(&mem);
+            svs.vtable->deinit(svs.ctx, alloc);
+            semb.vtable->deinit(semb.ctx, alloc);
+        }
     } else if (strcmp(sub, "search") == 0) {
         if (argc < 4) {
-            fprintf(stderr, "Usage: human memory search <query>\n");
+            fprintf(stderr, "Usage: human memory search [--semantic|--hybrid] <query>\n");
             err = HU_ERR_INVALID_ARGUMENT;
             goto done;
         }
@@ -584,6 +847,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                 hu_audit_logger_destroy(logger, alloc);
             }
         }
+    } else if (strcmp(sub, "ground") == 0) {
+        err = memory_ground_probe(alloc, &mem, argv[3], argv[4]);
     } else if (strcmp(sub, "wiki") == 0) {
         /* Wave C thin LLM-wiki surface: personal-model facts/topics as markdown. */
         const char *contact = NULL;
@@ -2808,6 +3073,10 @@ hu_error_t cmd_feed(hu_allocator_t *alloc, int argc, char **argv) {
         if (cfg.feeds.gmail_refresh_token) {
             fp.gmail_refresh_token = cfg.feeds.gmail_refresh_token;
             fp.gmail_refresh_token_len = strlen(cfg.feeds.gmail_refresh_token);
+        }
+        if (cfg.feeds.gmail_quota_project) {
+            fp.gmail_quota_project = cfg.feeds.gmail_quota_project;
+            fp.gmail_quota_project_len = strlen(cfg.feeds.gmail_quota_project);
         }
         if (cfg.feeds.twitter_bearer_token) {
             fp.twitter_bearer_token = cfg.feeds.twitter_bearer_token;

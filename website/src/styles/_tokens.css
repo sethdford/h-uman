@@ -777,7 +777,7 @@
     );
     --hu-surface-gradient: linear-gradient(180deg, #ffffff 0%, #f5f5f3 100%);
     --hu-text: #2d2a26;
-    --hu-text-faint: #9a9490;
+    --hu-text-faint: #726c65;
     --hu-text-muted: #6b655e;
     --hu-text-secondary: #4a4540;
     --hu-text-tertiary: #6b655e;
@@ -989,7 +989,7 @@
   );
   --hu-surface-gradient: linear-gradient(180deg, #ffffff 0%, #f5f5f3 100%);
   --hu-text: #2d2a26;
-  --hu-text-faint: #9a9490;
+  --hu-text-faint: #726c65;
   --hu-text-muted: #6b655e;
   --hu-text-secondary: #4a4540;
   --hu-text-tertiary: #6b655e;

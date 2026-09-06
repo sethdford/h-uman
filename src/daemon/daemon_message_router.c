@@ -32,6 +32,7 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -386,14 +387,18 @@ bool hu_daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *
 
 /* ── Reaction-lookup registration (one funnel for every reply route) ─────── */
 
-void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+#if defined(HU_ENABLE_RL_FULL)
+/* The reaction-collection half: register the sent reply so a later tapback
+ * joins to it, and attach the message_ref to the production_outcomes row.
+ * Returns early when reaction collection is off — which is why anything that
+ * must run on EVERY sent reply (agent facts, below) lives in the caller, not
+ * here: in production reaction_collection.enabled is false, and the first
+ * C3 wiring sat after these returns and never ran. */
+static void register_reply_for_reactions_rl(const struct hu_config *config, struct hu_agent *agent,
                                             const char *ch_name, const char *thread,
                                             const char *prompt, const char *response,
                                             size_t response_len, char *msg_ref_out,
                                             size_t msg_ref_cap) {
-    if (msg_ref_out && msg_ref_cap > 0)
-        msg_ref_out[0] = '\0';
-#if defined(HU_ENABLE_RL_FULL)
     if (!ch_name || !thread || !response || response_len == 0)
         return;
     if (config && !config->reaction_collection.enabled)
@@ -443,17 +448,56 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
     hu_reaction_handler_register_assistant_message_for_production(
         ch_name, thread_key, msg_ref, prompt ? prompt : "", response,
         (agent && agent->sota.last_rejected_draft) ? agent->sota.last_rejected_draft : "");
+    /* Task 9: the reactive path recorded its production_outcomes row before
+     * the channel returned the sent message id; attach the ref now so the
+     * row joins to tapbacks and, later, to chat.db (daemon output becomes
+     * separable from the user's own typing). */
+    if (agent && agent->sota.sota_initialized && msg_ref[0] && strncmp(msg_ref, "out-", 4) != 0) {
+        hu_error_t ref_err =
+            hu_dpo_set_outbound_message_ref(&agent->sota.dpo_collector, ch_name, strlen(ch_name),
+                                            thread, strlen(thread), msg_ref, strlen(msg_ref));
+        if (ref_err != HU_OK && ref_err != HU_ERR_NOT_FOUND)
+            hu_log_warn("daemon", agent->observer, "message_ref attach failed: %s",
+                        hu_error_string(ref_err));
+    }
     if (msg_ref_out && msg_ref_cap > 0)
         snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
+}
+#endif /* HU_ENABLE_RL_FULL */
+
+void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+                                            const char *ch_name, const char *thread,
+                                            const char *prompt, const char *response,
+                                            size_t response_len, char *msg_ref_out,
+                                            size_t msg_ref_cap) {
+    if (msg_ref_out && msg_ref_cap > 0)
+        msg_ref_out[0] = '\0';
+#if defined(HU_ENABLE_RL_FULL)
+    register_reply_for_reactions_rl(config, agent, ch_name, thread, prompt, response, response_len,
+                                    msg_ref_out, msg_ref_cap);
 #else
     (void)config;
-    (void)agent;
     (void)ch_name;
-    (void)thread;
     (void)prompt;
-    (void)response;
-    (void)response_len;
 #endif
+    /* Contract C3 — the daemon's own reply becomes a first-class fact with
+     * provenance ("agent:<msg_ref>") instead of vanishing once sent. Env
+     * gated OFF by default (hu_gate_mode_from_env inside), so this is a
+     * no-op unless HU_AGENT_FACTS=shadow|on. Runs in every build and
+     * regardless of reaction_collection.enabled: it depends only on the graph
+     * and the memory store. `thread` is the same contact key the
+     * deep-extract writer uses (daemon.c's batch_key), so agent facts land in
+     * the same graph bucket as user facts for that contact. */
+    if (agent && thread && thread[0] && response && response_len > 0) {
+        char ref[96];
+        if (msg_ref_out && msg_ref_out[0])
+            snprintf(ref, sizeof(ref), "%s", msg_ref_out);
+        else
+            snprintf(ref, sizeof(ref), "out-%lld", (long long)time(NULL));
+        (void)hu_agent_facts_record_reply(agent->verifier_graph, agent->memory, thread,
+                                          strlen(thread), response, response_len, ref,
+                                          (int64_t)time(NULL));
+    }
 }
 
 /* ── Roadmap #18: stale-tapback demotion (reply-style path) ──────────────── */

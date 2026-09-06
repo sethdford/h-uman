@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Record the seth-glm-air-v6 training run in the adapter registry.
+
+Metrics are PARSED FROM THE RUN LOG, never hand-typed. A registry row asserting
+a val loss nobody measured is the failure class in
+.claude/rules/no-number-without-a-measurement.md -- so this refuses to write a
+row when the evidence it would cite is absent.
+
+Usage: register_v6_adapter.py --adapter <dir> --log <train log> [--smoke <json>]
+       register_v6_adapter.py --retire <name> --reason "..." [--status rejected] [--force]
+
+--retire stamps a first-class lifecycle status (retired|rejected) on an existing
+entry so every enumerating reader (adapter_registry.iter_adapters / status)
+hides it. It refuses the SERVED adapter outright (config.json
+personalization.lora_adapter_path), and refuses a promoted one without --force.
+"""
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from adapter_registry import (  # noqa: E402
+    DEFAULT_REGISTRY_PATH, STATUS_REJECTED, STATUS_RETIRED, load_registry,
+    record_retirement, record_training)
+
+# US-2: annotate (never block -- this script never sets promoted=True
+# regardless, see module docstring) with the same LUAR promotion-gate
+# verdict m3_promote.py enforces. Imported, not reimplemented.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blind_ab"))
+try:
+    from authorship_promotion_gate import (  # noqa: E402
+        _find_latest_score_json, decide_promotion, load_gate_inputs_from_score_json)
+except ImportError:
+    _find_latest_score_json = decide_promotion = load_gate_inputs_from_score_json = None
+
+DEFAULT_CONFIG_PATH = Path.home() / ".human" / "config.json"
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# mlx_lm_lora (preference modes) reports accuracy and margin; mlx_lm (SFT) reports
+# neither. Match both shapes rather than silently finding nothing and registering
+# an adapter with no training evidence at all.
+VAL = re.compile(
+    r"Iter\s+(\d+):\s*Val loss\s+([0-9.-]+).*?Val accuracy\s+([0-9.-]+).*?"
+    r"Val margin\s+([0-9.-]+)", re.I)
+VAL_SFT = re.compile(r"Iter\s+(\d+):\s*Val loss\s+([0-9.-]+)", re.I)
+TRAIN = re.compile(
+    r"Iter\s+(\d+):\s*loss\s+([0-9.-]+),.*?acc\s+([0-9.-]+),\s*margin\s+([0-9.-]+)", re.I)
+TRAIN_SFT = re.compile(r"Iter\s+(\d+):\s*Train loss\s+([0-9.-]+)", re.I)
+# mlx-tune's SimPO/KTO/ORPO trainers (contract C6, scripts/mlx_tune_train.py)
+# report neither Iter-shaped line -- they print "  Step N/M | Loss: X.XXXX |
+# batch_size: B" (mlx_tune/rl_trainers.py). No per-step accuracy/margin.
+TRAIN_MLXTUNE = re.compile(r"Step\s+(\d+)/\d+\s*\|\s*Loss:\s*([0-9.eE+-]+)", re.I)
+# mlx-tune's trainer __init__ prints these unconditionally (rl_trainers.py);
+# SimPO's line is "Beta: X, Gamma: Y", the other two just "Beta: X".
+BETA_MLXTUNE = re.compile(r"Beta:\s*([0-9.eE+-]+)", re.I)
+GAMMA_MLXTUNE = re.compile(r"Beta:\s*[0-9.eE+-]+,\s*Gamma:\s*([0-9.eE+-]+)", re.I)
+# Every line scripts/mlx_tune_train.py prints itself is prefixed with this --
+# the one unambiguous way to tell trainer=mlx_tune apart from
+# trainer=mlx_lm_lora, since both print an identical "Training Mode: X"
+# banner (mlx_lm_lora/train.py:1265) and mlx-tune has its own "orpo" mode
+# distinct from mlx_lm_lora's patched one -- objective alone is ambiguous.
+MLXTUNE_MARKER = "[mlx_tune_train]"
+
+
+def val_is_inert(vals):
+    """True when every validation reading is bit-identical.
+
+    A metric that never moves while the model demonstrably learns is not a weak
+    effect -- it is the treatment never being applied. Recording such a number as
+    'val_loss' would put a non-measurement into the registry where a promotion
+    gate could later read it as evidence. See
+    .claude/rules/no-number-without-a-measurement.md.
+    """
+    if len(vals) < 2:
+        return False
+    return len({v[1] for v in vals}) == 1
+
+
+def served_adapter_names(config_path: Path) -> set:
+    """Every spelling config.json uses for the adapter :8741 is serving.
+
+    lora_adapter_path is authoritative (it is what mlx-server was launched
+    with); lora_adapter_id is the registry key and normally its basename. Both
+    are returned so a mismatch between them still protects whichever one the
+    caller names.
+    """
+    try:
+        cfg = json.loads(Path(config_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    pers = cfg.get("personalization", {}) or {}
+    names = set()
+    if pers.get("lora_adapter_path"):
+        names.add(Path(pers["lora_adapter_path"]).name)
+    if pers.get("lora_adapter_id"):
+        names.add(pers["lora_adapter_id"])
+    return {n for n in names if n}
+
+
+def entry_is_promoted(entry: dict) -> bool:
+    """Promoted means it served: either m3_promote.py's top-level `promotion`
+    block, or a training row whose metrics say promoted=true."""
+    if entry.get("promotion"):
+        return True
+    return any(bool((t.get("metrics") or {}).get("promoted"))
+               for t in entry.get("training", []) or [])
+
+
+def _read_authorship_gate_for(adapter_path) -> dict:
+    """US-2 annotation (informational only -- see
+    scripts/blind_ab/authorship_promotion_gate.py). This script never calls
+    sys.exit on BLOCK: recording that a regression happened is useful
+    staging evidence for the human who decides whether to run
+    scripts/m3_promote.py at all (the same reason human_gate: PENDING and
+    smoke: NOT_RUN already exist here as non-blocking annotations), and this
+    script never sets metrics["promoted"] = True regardless of what this
+    returns.
+
+    {"status": "NOT_RUN"} means no matching candidate-authorship-*.json
+    exists yet for this adapter. {"status": "INCONCLUSIVE", ...} means one
+    was found but the measurement it needs is missing/malformed. Otherwise
+    the real decide_promotion() verdict dict is returned with
+    status="RAN" -- verdict is one of PASS/BLOCK/HOLD (noise-aware,
+    CI-based three-way gate; F1 fix, 2026-09-05), never a fourth value.
+    """
+    if _find_latest_score_json is None:
+        return {"status": "NOT_RUN", "reason": "authorship_promotion_gate module unavailable"}
+    gap_json = _find_latest_score_json(str(adapter_path))
+    if not gap_json:
+        return {"status": "NOT_RUN"}
+    try:
+        inputs = load_gate_inputs_from_score_json(gap_json)
+    except SystemExit as e:
+        return {"status": "INCONCLUSIVE", "reason": str(e), "score_json": gap_json}
+    verdict = decide_promotion(inputs["candidate_twin"], inputs["serving_twin"], inputs["floor"],
+                               inputs["candidate_twin_ci95"])
+    verdict["status"] = "RAN"
+    verdict["score_json"] = gap_json
+    return verdict
+
+
+def retire(a) -> None:
+    name = a.retire
+    if not a.reason or not a.reason.strip():
+        sys.exit("FATAL: --retire needs --reason; an unexplained retired row is a non-measurement")
+
+    served = served_adapter_names(Path(a.config))
+    if name in served:
+        # No --force override: hiding the served adapter from every reader
+        # would make the status report and the promotion gates blind to
+        # production. Un-serve it first, then retire.
+        sys.exit(f"FATAL: {name} is the served adapter per {a.config} "
+                 "personalization.lora_adapter_path -- refusing to retire what :8741 answers with")
+
+    registry = load_registry(Path(a.registry))
+    entry = registry.get("adapters", {}).get(name)
+    if entry is None:
+        sys.exit(f"FATAL: {name} is not in registry {a.registry}")
+    if entry_is_promoted(entry) and not a.force:
+        sys.exit(f"FATAL: {name} has promoted evidence in the registry; pass --force to retire it anyway")
+
+    record_retirement(registry_path=Path(a.registry), adapter_id=name,
+                      status=a.status, reason=a.reason)
+    print(f"[registry] {name}: status={a.status}")
+    print(f"  reason       : {a.reason.strip()}")
+    print(f"  registry     : {a.registry}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--adapter", help="adapter dir to register (with --log)")
+    ap.add_argument("--log", help="training log the metrics are parsed from")
+    ap.add_argument("--smoke")
+    ap.add_argument("--corpus-manifest",
+                    default=str(Path.home() / ".human/training-data/glm-v6-pref/manifest.json"))
+    ap.add_argument("--retire", metavar="NAME", help="mark an existing entry retired/rejected")
+    ap.add_argument("--reason", help="why (required with --retire)")
+    ap.add_argument("--status", choices=[STATUS_RETIRED, STATUS_REJECTED], default=STATUS_RETIRED,
+                    help="lifecycle status to set with --retire (default: retired)")
+    ap.add_argument("--force", action="store_true",
+                    help="retire even if the entry has promoted evidence (never the served adapter)")
+    ap.add_argument("--registry", default=str(DEFAULT_REGISTRY_PATH))
+    ap.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                    help="config.json that names the served adapter")
+    a = ap.parse_args()
+
+    if a.retire:
+        retire(a)
+        return
+    if not a.adapter or not a.log:
+        ap.error("--adapter and --log are required unless --retire is given")
+
+    adapter = Path(a.adapter)
+    cfg_path = adapter / "adapter_config.json"
+    if not (adapter / "adapters.safetensors").exists() or not cfg_path.exists():
+        sys.exit(f"FATAL: incomplete adapter at {adapter}")
+
+    cfg = json.load(open(cfg_path))
+    scale = cfg.get("lora_parameters", {}).get("scale")
+    if scale != 2.0:
+        sys.exit(f"FATAL: adapter scale is {scale}, expected 2.0 -- not registering an unsafe adapter")
+
+    text = ANSI.sub("", Path(a.log).read_text(errors="replace"))
+
+    # Determine the objective FROM THE LOG. Never assume it -- an adapter recorded
+    # under the wrong objective is a provenance lie a later gate would act on.
+    is_mlx_tune = MLXTUNE_MARKER in text
+    m = re.search(r"Training [Mm]ode:\s*(\w+)", text)
+    if m:
+        objective = m.group(1).lower()          # mlx_lm_lora OR mlx_tune path
+    elif re.search(r"Iter\s+\d+:\s*Train loss", text):
+        objective = "sft"                        # mlx_lm.lora path
+    else:
+        sys.exit("FATAL: cannot determine the training objective from the log -- "
+                 "refusing to register an adapter with unknown provenance")
+
+    # trainer is NOT the same question as objective: mlx-tune has its own
+    # reference-free "orpo" (per-expert MoE LoRA), distinct from
+    # mlx_lm_lora's patched "orpo" -- both print an identical "Training
+    # Mode: orpo" banner, so objective alone cannot disambiguate them. The
+    # [mlx_tune_train] prefix is what scripts/mlx_tune_train.py stamps on
+    # (almost) every line it prints, so its presence is unambiguous.
+    if is_mlx_tune:
+        trainer = "mlx_tune"
+    elif m:
+        trainer = "mlx_lm_lora"
+    else:
+        trainer = "mlx_lm"
+
+    # The no-op check, again, at registration. The trainer guard already runs it,
+    # but a registry row is what a promotion gate reads, so it must not depend on
+    # someone having run the right script. v6 and v6.1 were both registered before
+    # anyone checked the weights, and both were no-ops.
+    import mlx.core as mx
+    w = mx.load(str(adapter / "adapters.safetensors"))
+    bkeys = [k for k in w if k.endswith("lora_b")]
+    b_nonzero = sum(1 for k in bkeys if float(mx.abs(w[k]).max()) > 0)
+    b_max = max((float(mx.abs(w[k]).max()) for k in bkeys), default=0.0)
+    if b_nonzero == 0:
+        sys.exit(f"FATAL: all {len(bkeys)} lora_b are 0.0 -- this adapter is a no-op "
+                 "(identical to base). Refusing to register it as trained.")
+
+    vals = [(int(i), float(l), float(ac), float(m)) for i, l, ac, m in VAL.findall(text)]
+    trains = [(int(i), float(l), float(ac), float(m)) for i, l, ac, m in TRAIN.findall(text)]
+    # SFT logs carry loss only -- pad accuracy/margin with None-equivalents so the
+    # downstream shape is uniform, but never invent values.
+    if not vals:
+        vals = [(int(i), float(l), float("nan"), float("nan")) for i, l in VAL_SFT.findall(text)]
+    if not trains:
+        trains = [(int(i), float(l), float("nan"), float("nan")) for i, l in TRAIN_SFT.findall(text)]
+    if not trains and is_mlx_tune:
+        trains = [(int(i), float(l), float("nan"), float("nan")) for i, l in TRAIN_MLXTUNE.findall(text)]
+    manifest = json.load(open(a.corpus_manifest))
+
+    # mlx_lm_lora writes a MINIMAL adapter_config.json (lora_parameters only), so
+    # the recipe is read back from the log, not from the config.
+    def grab(pat, cast=str):
+        m = re.search(pat, text, re.I)
+        return cast(m.group(1)) if m else None
+
+    inert = val_is_inert(vals)
+
+    # mlx-tune prints its own real Beta/Gamma at trainer-init -- read the
+    # measured value instead of guessing the mlx_lm_lora hardcoded default.
+    beta_mlxtune = None
+    gamma_mlxtune = None
+    if is_mlx_tune:
+        bm = BETA_MLXTUNE.search(text)
+        beta_mlxtune = float(bm.group(1)) if bm else None
+        gm = GAMMA_MLXTUNE.search(text)
+        gamma_mlxtune = float(gm.group(1)) if gm else None
+
+    metrics = {
+        "objective": objective,
+        "trainer": trainer,
+        "train_mode": objective if is_mlx_tune else None,
+        "beta": beta_mlxtune if is_mlx_tune else (0.05 if objective in ("orpo", "dpo", "cpo") else None),
+        "gamma": gamma_mlxtune,
+        "weights": {"lora_b_nonzero": f"{b_nonzero}/{len(bkeys)}",
+                    "max_abs_lora_b": b_max},
+        "base_model": grab(r"Model:\s*(\S+)"),
+        "iters": len(trains) and max(t[0] for t in trains) or None,
+        "learning_rate": grab(r"Learning Rate:\s*(\S+)"),
+        "num_layers": cfg.get("num_layers"),
+        "lora_scale": scale,
+        "n_pairs": manifest["counts"]["total"],
+        "n_pairs_by_source": manifest["by_source"],
+        "targets": manifest["targets"],
+        # Train-side is the only signal that actually moved.
+        "train_loss_first": trains[0][1] if trains else None,
+        "train_loss_last": trains[-1][1] if trains else None,
+        "train_acc_first": trains[0][2] if trains else None,
+        "train_acc_last": trains[-1][2] if trains else None,
+        "train_margin_first": trains[0][3] if trains else None,
+        "train_margin_last": trains[-1][3] if trains else None,
+        "train_series": trains or None,
+        "corpus_manifest": a.corpus_manifest,
+        "train_log": a.log,
+        # US-2: LUAR promotion-gate verdict, if a nightly candidate-authorship
+        # run has scored this adapter already. Informational only -- never
+        # flips `promoted` below, which stays False regardless (see
+        # _read_authorship_gate_for's docstring).
+        "authorship_gate": _read_authorship_gate_for(adapter),
+        # Provenance for the promotion gate: this adapter is NOT certified.
+        "human_gate": "PENDING -- cycle-5 sheet not generated/rated",
+        "promoted": False,
+    }
+
+    if inert:
+        # Do NOT store a val_loss key at all. A consumer that reads
+        # metrics["val_loss"] must not find a number that measured nothing.
+        metrics["validation"] = {
+            "status": "NOT_MEASURED",
+            "reason": "every Val reading was bit-identical across all "
+                      f"{len(vals)} checkpoints while train metrics moved -- "
+                      "mlx_lm_lora's evaluate_orpo did not see the LoRA updates",
+            "identical_reading": {"loss": vals[0][1], "accuracy": vals[0][2],
+                                  "margin": vals[0][3]} if vals else None,
+        }
+        print("WARNING: validation was INERT (identical at every checkpoint); "
+              "recording status=NOT_MEASURED instead of a val_loss", file=sys.stderr)
+    elif vals:
+        metrics["validation"] = {
+            "status": "measured",
+            "val_loss_first": vals[0][1], "val_loss_last": vals[-1][1],
+            "val_acc_last": vals[-1][2], "val_margin_last": vals[-1][3],
+            "series": vals,
+        }
+    else:
+        metrics["validation"] = {"status": "ABSENT", "reason": "no Val lines in log"}
+        print("WARNING: no 'Val loss' lines found -- status=ABSENT, no number invented",
+              file=sys.stderr)
+
+    if a.smoke and Path(a.smoke).exists():
+        smoke = json.load(open(a.smoke))
+        metrics["smoke"] = smoke.get("summary", smoke)
+        metrics["smoke_path"] = a.smoke
+    else:
+        metrics["smoke"] = {"status": "NOT_RUN"}
+
+    adapter_id = adapter.name
+    record_training(registry_path=Path(a.registry), adapter_id=adapter_id, metrics=metrics)
+    print(f"[registry] recorded training for {adapter_id}")
+    print(f"  n_pairs      : {metrics['n_pairs']} {metrics['n_pairs_by_source']}")
+    print(f"  train loss   : {metrics['train_loss_first']} -> {metrics['train_loss_last']}")
+    print(f"  train acc    : {metrics['train_acc_first']} -> {metrics['train_acc_last']}")
+    print(f"  train margin : {metrics['train_margin_first']} -> {metrics['train_margin_last']}"
+          f"  {'(still NEGATIVE: rejected still scores above chosen)' if (metrics['train_margin_last'] or 0) < 0 else ''}")
+    print(f"  validation   : {metrics['validation']['status']}")
+    print(f"  smoke        : {metrics['smoke'].get('status', 'recorded')}")
+    print(f"  trainer      : {trainer}" + (f" (train_mode={metrics['train_mode']})" if is_mlx_tune else ""))
+    print(f"  objective    : {objective}")
+    print(f"  lora_b       : {b_nonzero}/{len(bkeys)} non-zero, max|B|={b_max:.3e}")
+    print(f"  lora scale   : {scale}")
+    print(f"  human gate   : {metrics['human_gate']}")
+    print(f"  authorship   : {metrics['authorship_gate'].get('status')}"
+          + (f" ({metrics['authorship_gate'].get('verdict')}/{metrics['authorship_gate'].get('reason')})"
+             if metrics["authorship_gate"].get("status") == "RAN" else ""))
+
+
+if __name__ == "__main__":
+    main()

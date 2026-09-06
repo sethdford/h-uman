@@ -1,5 +1,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/file.h"
+#include "human/core/json.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/persona.h"
@@ -504,6 +506,110 @@ static hu_error_t write_json_string_array(FILE *f, char **arr, size_t count) {
     return HU_OK;
 }
 
+/* A persona file with years of contacts and banks is well under this. */
+#define HU_PERSONA_CREATOR_MAX_FILE_BYTES (8ul * 1024ul * 1024ul)
+
+/* Carry forward every top-level key of the persona file that this writer does
+ * not itself emit. The streaming writer above serializes exactly the fields
+ * hu_persona_t carries; a persona JSON on disk routinely carries more
+ * (life_events, style_rules, proactive, anti_patterns, sensory, ...) that
+ * other loaders read straight from the file. Before this, any save through
+ * this writer silently dropped them: on 2026-09-06 06:01 the per-turn style
+ * reanalyze rewrote the live persona from 24 keys to 15 and every proactive
+ * path went dark. .claude/rules/persona.md: "Extra fields must be preserved."
+ *
+ * Mechanics: `tmp_path` holds the freshly streamed file, which always ends in
+ * "\n}\n". Parse both files, find keys in the old root missing from the new,
+ * and splice them in before the closing brace as compact JSON — the streamed
+ * part keeps its hand-editable layout. An unreadable or unparsable old file
+ * preserves nothing (there is nothing trustworthy to preserve) and does not
+ * block the write. */
+static hu_error_t creator_preserve_unknown_keys(hu_allocator_t *alloc, const char *old_path,
+                                                const char *tmp_path) {
+    char *old_text = NULL, *new_text = NULL;
+    size_t old_len = 0, new_len = 0;
+    hu_json_value_t *old_root = NULL, *new_root = NULL;
+    hu_error_t err = HU_OK;
+
+    if (hu_file_slurp(alloc, old_path, HU_PERSONA_CREATOR_MAX_FILE_BYTES, &old_text, &old_len) !=
+        HU_OK)
+        return HU_OK; /* first write of this persona (or nothing trustworthy to keep) */
+    if (hu_json_parse(alloc, old_text, old_len, &old_root) != HU_OK || !old_root ||
+        old_root->type != HU_JSON_OBJECT) {
+        err = HU_OK;
+        goto done;
+    }
+    if ((err = hu_file_slurp(alloc, tmp_path, HU_PERSONA_CREATOR_MAX_FILE_BYTES, &new_text,
+                             &new_len)) != HU_OK)
+        goto done;
+    if ((err = hu_json_parse(alloc, new_text, new_len, &new_root)) != HU_OK)
+        goto done;
+    if (!new_root || new_root->type != HU_JSON_OBJECT) {
+        err = HU_ERR_IO;
+        goto done;
+    }
+
+    /* The streamed file ends in "\n}\n" by construction (see the writer's
+     * final fputs). Anything else means it is not ours to splice into. */
+    static const char tail[] = "\n}\n";
+    const size_t tail_len = sizeof(tail) - 1;
+    if (new_len < tail_len || memcmp(new_text + new_len - tail_len, tail, tail_len) != 0) {
+        err = HU_ERR_IO;
+        goto done;
+    }
+
+    size_t preserved = 0;
+    FILE *f = NULL;
+    for (size_t i = 0; i < old_root->data.object.len; i++) {
+        const hu_json_pair_t *pair = &old_root->data.object.pairs[i];
+        if (!pair->key || !pair->value || hu_json_object_get(new_root, pair->key))
+            continue;
+        char *val_text = NULL;
+        size_t val_len = 0;
+        if ((err = hu_json_stringify(alloc, pair->value, &val_text, &val_len)) != HU_OK)
+            goto close_out;
+        if (!f) {
+            f = fopen(tmp_path, "wb");
+            if (!f) {
+                alloc->free(alloc->ctx, val_text, val_len + 1);
+                err = HU_ERR_IO;
+                goto done;
+            }
+            /* Everything up to (not including) the closing brace. */
+            if (fwrite(new_text, 1, new_len - tail_len, f) != new_len - tail_len) {
+                alloc->free(alloc->ctx, val_text, val_len + 1);
+                err = HU_ERR_IO;
+                goto close_out;
+            }
+        }
+        fputs(",\n  ", f);
+        write_json_string(f, pair->key);
+        fputs(": ", f);
+        fwrite(val_text, 1, val_len, f);
+        alloc->free(alloc->ctx, val_text, val_len + 1);
+        preserved++;
+    }
+    if (f)
+        fputs(tail, f);
+close_out:
+    if (f) {
+        if (ferror(f))
+            err = HU_ERR_IO;
+        fclose(f);
+    }
+    (void)preserved;
+done:
+    if (old_root)
+        hu_json_free(alloc, old_root);
+    if (new_root)
+        hu_json_free(alloc, new_root);
+    if (old_text)
+        alloc->free(alloc->ctx, old_text, old_len + 1);
+    if (new_text)
+        alloc->free(alloc->ctx, new_text, new_len + 1);
+    return err;
+}
+
 hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *persona) {
     if (!alloc || !persona || !persona->name)
         return HU_ERR_INVALID_ARGUMENT;
@@ -534,7 +640,15 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
     if (n <= 0 || (size_t)n >= sizeof(path))
         return HU_ERR_INVALID_ARGUMENT;
 
-    FILE *f = fopen(path, "wb");
+    /* Stream to a sibling temp file and rename over the target at the end:
+     * a reader (or a crash) never sees a half-written persona, and the old
+     * file stays intact for creator_preserve_unknown_keys to read. */
+    char tmp_path[HU_PERSONA_CREATOR_PATH_MAX + 32];
+    int tn = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp-%ld", path, (long)getpid());
+    if (tn <= 0 || (size_t)tn >= sizeof(tmp_path))
+        return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *f = fopen(tmp_path, "wb");
     if (!f)
         return HU_ERR_IO;
 
@@ -1256,11 +1370,25 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
 
     if (ferror(f)) {
         fclose(f);
+        (void)unlink(tmp_path);
         return HU_ERR_IO;
     }
     fclose(f);
+
+    {
+        hu_error_t perr = creator_preserve_unknown_keys(alloc, path, tmp_path);
+        if (perr != HU_OK) {
+            (void)unlink(tmp_path);
+            return perr;
+        }
+    }
+    if (rename(tmp_path, path) != 0) {
+        (void)unlink(tmp_path);
+        return HU_ERR_IO;
+    }
     return HU_OK;
 fail:
     fclose(f);
+    (void)unlink(tmp_path);
     return HU_ERR_IO;
 }

@@ -20,7 +20,11 @@ if ! command -v "$CLANG_FMT" >/dev/null 2>&1; then
 fi
 
 if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
-    staged_ch=$(git diff --cached --name-only --diff-filter=ACM -- '*.c' '*.h')
+    # include/human/design_tokens.h is GENERATED (design-tokens/build.ts) and
+    # deliberately not clang-formatted: check-drift.sh diffs the raw output, so
+    # formatting it here re-aligned 192 macro lines and failed the drift check
+    # on every token commit (2026-09-06). The compiler is its only reader.
+    staged_ch=$(git diff --cached --name-only --diff-filter=ACM -- '*.c' '*.h' | grep -v '^include/human/design_tokens.h$' || true)
     if [ -n "$staged_ch" ]; then
         echo "$staged_ch" | while IFS= read -r f; do
             if grep -qn '	' "$f" 2>/dev/null; then
@@ -240,6 +244,15 @@ if [ -n "$staged_agent" ] && [ -x "scripts/check-agent-core-boundary.sh" ]; then
         echo ""
         echo "Pre-commit blocked: agent-core boundary violation."
         echo "See .claude/rules/agent-core-boundary.md."
+        exit 1
+    fi
+fi
+
+# Reports-success-does-nothing: OR IGNORE with no constraint to ignore, and
+# discarded send/store returns. Both shipped this week and both looked healthy.
+staged_c=$(git diff --cached --name-only --diff-filter=ACM -- 'src/*.c' 'src/**/*.c' 2>/dev/null)
+if [ -n "$staged_c" ] && [ -x "scripts/check-silent-success.sh" ]; then
+    if ! scripts/check-silent-success.sh $staged_c; then
         exit 1
     fi
 fi

@@ -729,6 +729,18 @@ def summarize_outcomes(outcomes: list[dict]) -> dict:
     }
 
 
+# --resolve-only is honoured inside train_from_outcomes, which has no args object.
+RESOLVE_ONLY = "--resolve-only" in sys.argv
+
+
+def training_outcome_rc(train_rc: int, adapter_exists: bool) -> int:
+    """Exit code for a training attempt. 0 only when the trainer succeeded AND an
+    adapter file exists. 3 = refused/failed (nothing to stage). Pure; tested."""
+    if train_rc == 0 and adapter_exists:
+        return 0
+    return 3
+
+
 def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list[dict], int]:
     """For each outcome, look up its prompt_hash in the messages table.
     Returns (resolved, skipped) where:
@@ -1115,6 +1127,52 @@ def training_config_for_model(model: str, iters: int, scale: float) -> dict:
     return config
 
 
+VAL_SET_MOD = 10
+VAL_SET_CAP = 64
+
+
+def split_train_valid(lines, mod=VAL_SET_MOD, cap=VAL_SET_CAP):
+    """Deterministic, content-keyed train/valid split.
+
+    The old positional split (every 10th line, capped) re-drew the validation
+    set whenever the corpus grew by a row, so val loss was not comparable
+    night to night: on 2026-09-06 a 239->257-pair corpus moved val loss
+    3.438->3.548 and the regression gate FAILed a run that may not have
+    regressed at all. Here a line is a validation candidate iff
+    sha256(line) % mod == 0; candidates are ordered by hash and capped, so an
+    existing corpus keeps its validation rows when rows are appended.
+    Returns (train_lines, valid_lines, val_set_id) where val_set_id is a
+    12-hex digest of the chosen rows (None when no validation set) — recorded
+    with the result so dpo_results.regression_verdict compares like with like.
+    """
+    import hashlib
+    keyed = []
+    for line in lines:
+        h = hashlib.sha256(line.encode("utf-8")).digest()
+        keyed.append((int.from_bytes(h[:8], "big"), line))
+    cands = sorted((k, l) for k, l in keyed if k % mod == 0)[:cap]  # noqa: E741
+    if not cands and len(keyed) >= 2:
+        # Tiny corpus with no hash hits: hold out the single smallest-hash row so
+        # mlx_lm still reports a Val loss (the gate judges on absent evidence
+        # otherwise) — still content-keyed, so still stable across re-runs.
+        cands = [min(keyed)]
+    val = [l for _, l in cands]  # noqa: E741
+    val_set = set(val)
+    train = [l for l in lines if l not in val_set]  # noqa: E741
+    if not train or not val:                 # 0 or 1 rows: don't starve training
+        return list(lines), [], None
+    vid = hashlib.sha256("\n".join(val).encode("utf-8")).hexdigest()[:12]
+    return train, val, vid
+
+
+def read_val_set_id(adapter_out: Path):
+    """val_set_id recorded beside the adapter by the split (None if absent)."""
+    try:
+        return json.loads((Path(adapter_out) / "val_set.json").read_text()).get("val_set_id")
+    except (OSError, ValueError):
+        return None
+
+
 def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
                           iters: int = 500, scale: float = 2.0,
                           model: str | None = None) -> Tuple[int, Optional[float], Optional[float]]:
@@ -1166,7 +1224,7 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             print(f"  [preflight] model={_model_for_check}")
             print(f"  [preflight] set HU_TRAIN_WINDOW / learning.training_window to allow a "
                   f"nightly slot, or HU_TRAIN_SKIP_PREFLIGHT=1 to override")
-            return 0, None, None
+            return 3, None, None  # refusal is a FAILURE, never a 'trained nothing' success
 
     try:
         return _run_mlx_lora_training_inner(resolved, adapter_out, iters, scale, model)
@@ -1195,13 +1253,18 @@ def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
     train_data_dir = Path(tmpdir) / "data"
     train_data_dir.mkdir(parents=True)
     _all_lines = Path(sft_batch).read_text().splitlines()
-    _val = _all_lines[::10][:64]          # every 10th sample, capped
-    _train = [l for i, l in enumerate(_all_lines) if i % 10 != 0]
-    if not _train:                        # tiny batches: don't starve training
-        _train, _val = _all_lines, []
+    _train, _val, _val_set_id = split_train_valid(_all_lines)
     (train_data_dir / "train.jsonl").write_text("\n".join(_train) + "\n")
     if _val:
         (train_data_dir / "valid.jsonl").write_text("\n".join(_val) + "\n")
+    # Recorded beside the adapter so the result record + regression gate can
+    # tell which validation set this val_loss was measured on.
+    Path(adapter_out).mkdir(parents=True, exist_ok=True)
+    (Path(adapter_out) / "val_set.json").write_text(json.dumps({
+        "val_set_id": _val_set_id, "n_valid": len(_val), "n_train": len(_train),
+        "mod": VAL_SET_MOD, "cap": VAL_SET_CAP}) + "\n")
+    print(f"  validation split: {len(_val)} rows, val_set_id={_val_set_id} "
+          f"(content-hash; val loss is comparable only within one id)")
 
     # Base model + hyperparameters. Model comes from the serving resolution
     # (train_from_outcomes passes it); config keys use the nested
@@ -1404,6 +1467,15 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Guard mix:    {summary['guards']}")
 
     resolved, skipped = resolve_hashes_against_db(outcomes, db_path)
+    if outcomes and not resolved:
+        print(f"REFUSING: 0/{len(outcomes)} outcomes resolved against the messages table "
+              f"({db_path}) — the store is missing the conversations these outcomes came from "
+              f"(2026-08-08: a quarantine had wiped it). Restore the store; do not train on nothing.",
+              file=sys.stderr)
+        sys.exit(3)
+    if RESOLVE_ONLY:
+        print(json.dumps({"outcomes": len(outcomes), "resolved": len(resolved), "unresolved": skipped}))
+        sys.exit(0)
     print(f"  Resolved:     {len(resolved)} prompt hashes against {db_path.name}")
     print(f"  Skipped:      {skipped} unresolved (conversation rotated out of DB?)")
 
@@ -1500,12 +1572,14 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
-    if rc != 0 or not adapters_file.exists():
-        print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
-        print(f"  Falling back to empty-tensors safetensors.")
-        write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
-        # Still record the failed training attempt with whatever metrics we have
-        return 0
+    verdict = training_outcome_rc(rc, adapters_file.exists())
+    if verdict != 0:
+        # 2026-09-02: this path used to write an EMPTY-TENSORS safetensors and
+        # return 0. The nightly staged a 349-byte "adapter" as a success. A
+        # failed or refused run must leave NO adapter file and exit non-zero.
+        print(f"  FAILED: mlx_lm.lora training rc={rc}, adapter present={adapters_file.exists()} "
+              f"-> exiting {verdict}; no adapter written (no placeholder, ever).")
+        return verdict
 
     # Get the size of the safetensors file
     size = adapters_file.stat().st_size
@@ -1554,6 +1628,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
               f"— regression gate cannot judge this run")
 
     # Append this run's results with the parsed loss metrics
+    val_set_id = read_val_set_id(adapter_out)
     dpo_results.append_result(
         results_file,
         datetime.now().isoformat(),
@@ -1564,7 +1639,8 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         alignment_score=None,
         lora_scale=scale,
         iters=iters,
-        git_commit=dpo_results.get_git_commit()
+        git_commit=dpo_results.get_git_commit(),
+        val_set_id=val_set_id,
     )
 
     # Record training result to adapter registry
@@ -1595,8 +1671,10 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     if val_loss is None:
         verdict = 'INCONCLUSIVE'
     else:
-        verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
-    print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss})")
+        verdict = dpo_results.regression_verdict(
+            history, {'val_loss': val_loss, 'val_set_id': val_set_id})
+    print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss}, "
+          f"val_set_id={val_set_id})")
 
     if verdict == 'INCONCLUSIVE':
         print(f"  [quality-gate] INCONCLUSIVE: no validation loss to judge — "
@@ -1633,6 +1711,9 @@ def main():
     parser.add_argument("--no-dpo", action="store_true", help="Skip DPO training pass")
     parser.add_argument("--eval-only", action="store_true", help="Only run evaluation on current adapter")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without actual training/eval")
+    parser.add_argument("--resolve-only", action="store_true",
+                        help="Read-only: resolve outcome hashes against the messages table, print the "
+                             "counts and exit (3 if nothing resolves). No training, no server restart.")
     # Phase C3 — JSONL-driven entry point. When --source-jsonl is set,
     # the full cycle pipeline is bypassed and we run train_from_outcomes
     # instead. The driver (scripts/m3_outcome_driver.py) is the primary

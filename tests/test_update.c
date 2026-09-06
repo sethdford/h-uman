@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/update.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <string.h>
 
 /* ── hu_version_compare tests ───────────────────────────────────────── */
@@ -133,7 +134,9 @@ static void config_parse_auto_update_apply(void) {
 static void config_defaults_auto_update_off(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_config_t cfg;
-    setenv("HOME", "/tmp/human_update_test_noconfig", 1);
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(home, sizeof(home), "human_update_test_noconfig"));
+    setenv("HOME", home, 1);
     hu_error_t err = hu_config_load(&alloc, &cfg);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(cfg.auto_update);

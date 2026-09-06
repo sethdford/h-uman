@@ -39,9 +39,39 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
         cfg->behavior.dedup_threshold = (uint32_t)dt;
 
     /* Missed message acknowledgment threshold in seconds */
-    double mmts = hu_json_get_number(obj, "missed_msg_threshold_sec", cfg->behavior.missed_msg_threshold_sec);
+    double mmts =
+        hu_json_get_number(obj, "missed_msg_threshold_sec", cfg->behavior.missed_msg_threshold_sec);
     if (mmts >= 60 && mmts <= 86400)
         cfg->behavior.missed_msg_threshold_sec = (uint32_t)mmts;
+
+    /* Ceiling above which no missed-message acknowledgment is sent at all.
+     * Must exceed the threshold; capped at 7 days. */
+    double mmma =
+        hu_json_get_number(obj, "missed_msg_max_age_sec", cfg->behavior.missed_msg_max_age_sec);
+    if (mmma > cfg->behavior.missed_msg_threshold_sec && mmma <= 7 * 86400)
+        cfg->behavior.missed_msg_max_age_sec = (uint32_t)mmma;
+
+    /* Reactive reply budget: replies per sliding hour, 0 disables a scope.
+     * Bounded so a typo cannot silently set an absurd cap. */
+    double rbc = hu_json_get_number(obj, "reply_budget_per_contact_hourly",
+                                    cfg->behavior.reply_budget_per_contact_hourly);
+    if (rbc >= 0 && rbc <= 1000)
+        cfg->behavior.reply_budget_per_contact_hourly = (uint32_t)rbc;
+    double rbg = hu_json_get_number(obj, "reply_budget_global_hourly",
+                                    cfg->behavior.reply_budget_global_hourly);
+    if (rbg >= 0 && rbg <= 10000)
+        cfg->behavior.reply_budget_global_hourly = (uint32_t)rbg;
+
+    /* Filler-bank rate + per-contact cooldown. The bank fired on 21 of 57
+     * sends in Aug 2026; Seth's measured rate for that opener class is 0.29%.
+     * Rate is a probability in [0,1]; cooldown is 1 minute .. 90 days. */
+    double mmar = hu_json_get_number(obj, "missed_msg_ack_rate", cfg->behavior.missed_msg_ack_rate);
+    if (mmar >= 0.0 && mmar <= 1.0)
+        cfg->behavior.missed_msg_ack_rate = mmar;
+    double mmac = hu_json_get_number(obj, "missed_msg_ack_cooldown_sec",
+                                     cfg->behavior.missed_msg_ack_cooldown_sec);
+    if (mmac >= 60 && mmac <= 90.0 * 86400)
+        cfg->behavior.missed_msg_ack_cooldown_sec = (uint32_t)mmac;
 
     /* Callback delay window in seconds */
     double cw = hu_json_get_number(obj, "callback_window", cfg->behavior.callback_window);
@@ -57,6 +87,16 @@ hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
     double tsp = hu_json_get_number(obj, "tapback_skip_pct", cfg->behavior.tapback_skip_pct);
     if (tsp >= 0 && tsp <= 100)
         cfg->behavior.tapback_skip_pct = (uint32_t)tsp;
+
+    /* Consecutive-reply limiter: cap (0 = none) and burst reset window. */
+    double mcr =
+        hu_json_get_number(obj, "max_consecutive_replies", cfg->behavior.max_consecutive_replies);
+    if (mcr >= 0 && mcr <= 1000)
+        cfg->behavior.max_consecutive_replies = (uint32_t)mcr;
+    double crm = hu_json_get_number(obj, "consecutive_reset_minutes",
+                                    cfg->behavior.consecutive_reset_minutes);
+    if (crm >= 0 && crm <= 100000)
+        cfg->behavior.consecutive_reset_minutes = (uint32_t)crm;
 
     return HU_OK;
 }

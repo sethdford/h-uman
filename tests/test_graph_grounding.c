@@ -5,6 +5,7 @@
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "test_framework.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -151,6 +152,48 @@ static void test_compose_selects_relevant_entity_content(void) {
     gg_fixture_close(&fx);
 }
 
+/* 2026-09-01: after the backfill (571 entities) a once-mentioned entity sat
+ * far below the 64-entity popularity cap and could never seed grounding even
+ * when the message named it verbatim. Candidates must be message-driven too. */
+static void test_compose_finds_low_mention_entity_beyond_candidate_cap(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    /* 80 filler entities, each mentioned 3x so they outrank a single mention. */
+    for (int i = 0; i < 80; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "filler%02d", i);
+        int64_t id = 0;
+        for (int k = 0; k < 3; k++)
+            hu_graph_upsert_entity(fx.graph, "alice", 5, name, strlen(name), HU_ENTITY_TOPIC, NULL,
+                                   &id);
+    }
+    int64_t vg = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "alice", 5, "vanguard", 8, HU_ENTITY_ORGANIZATION,
+                                        NULL, &vg),
+                 HU_OK);
+    /* Below the popularity cap: list_entities(64) must NOT contain it ... */
+    hu_graph_entity_t *top = NULL;
+    size_t top_n = 0;
+    HU_ASSERT_EQ(hu_graph_list_entities(fx.graph, &fx.alloc, "alice", 5, 64, &top, &top_n), HU_OK);
+    bool in_top = false;
+    for (size_t i = 0; i < top_n; i++)
+        if (top[i].id == vg)
+            in_top = true;
+    hu_graph_entities_free(&fx.alloc, top, top_n);
+    HU_ASSERT_FALSE(in_top);
+    /* ... yet the composer still seeds it from the message. */
+    const char *msg = "hows vanguard treating you these days";
+    char *out = NULL;
+    size_t out_len = 0, matched = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, msg, strlen(msg), 0, &out,
+                                         &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_TRUE(matched >= 1);
+    if (out)
+        fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
 /* Irrelevant message -> EMPTY injection. Empty is VALID and better than
  * the pre-2026-07 behavior (same generic community summaries every turn). */
 static void test_compose_irrelevant_message_returns_empty(void) {
@@ -267,6 +310,111 @@ static void test_compose_no_graph_is_failopen(void) {
     HU_ASSERT_TRUE(out == NULL);
     HU_ASSERT_EQ((int)out_len, 0);
     HU_ASSERT_EQ((int)matched, 0);
+}
+
+/* ── State-first read path (2026-09-04) ──────────────────────────────────
+ * The write side closes a superseded WORKS_AT / LIVES_IN row (event_end +
+ * supersedes_id); the composer must render the CURRENT head with its
+ * predecessor, and an old edge only as dated history — never two employers
+ * as if both held (the event-state tell in the n=40 human gate). */
+static void seed_user_job_chain(gg_fixture_t *fx) {
+    int64_t user = 0, acme = 0, globex = 0, initech = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx->graph, "alice", 5, "user", 4, HU_ENTITY_PERSON, NULL, &user),
+        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "alice", 5, "Acme", 4, HU_ENTITY_ORGANIZATION,
+                                        NULL, &acme),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "alice", 5, "Globex", 6, HU_ENTITY_ORGANIZATION,
+                                        NULL, &globex),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "alice", 5, "Initech", 7, HU_ENTITY_ORGANIZATION,
+                                        NULL, &initech),
+                 HU_OK);
+    /* Acme (2024) -> Globex (2025) -> Initech (2026): each supersedes the prior. */
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(fx->graph, "alice", 5, user, acme, HU_REL_WORKS_AT,
+                                             1.0f, 1704067200000LL, 0, 1.0f, NULL, 0, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(fx->graph, "alice", 5, user, globex, HU_REL_WORKS_AT,
+                                             1.0f, 1735689600000LL, 0, 1.0f, NULL, 0, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(fx->graph, "alice", 5, user, initech, HU_REL_WORKS_AT,
+                                             1.0f, 1767225600000LL, 0, 1.0f, NULL, 0, NULL, 0),
+                 HU_OK);
+}
+
+static void test_compose_renders_current_employer_with_predecessor(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_user_job_chain(&fx);
+    const char *msg = "hows the new gig at initech";
+    char *out = NULL;
+    size_t out_len = 0, matched = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, msg, strlen(msg), 0, &out,
+                                         &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "user works_at Initech (was: Globex)");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "works_at Globex");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "Acme");
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Seeding from the OLD employer walks only the closed edge: it must read as
+ * dated history, not as a current job. */
+static void test_compose_marks_superseded_employer_as_history(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_user_job_chain(&fx);
+    const char *msg = "still talk to anyone from acme";
+    char *out = NULL;
+    size_t out_len = 0, matched = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, msg, strlen(msg), 0, &out,
+                                         &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "user works_at Acme (until Jan 2025)");
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Seeding from the person walks every edge of the chain; only the head
+ * renders, and the cap can no longer be filled by history. */
+static void test_compose_from_person_seed_collapses_chain_to_head(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_user_job_chain(&fx);
+    const char *msg = "what is the user up to";
+    char *out = NULL;
+    size_t out_len = 0, matched = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, msg, strlen(msg), 0, &out,
+                                         &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "user works_at Initech (was: Globex)");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "works_at Globex");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "works_at Acme");
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* The legacy prompt builder shares the read path: same contract. */
+static void test_build_context_hides_superseded_employer(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_user_job_chain(&fx);
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(
+        hu_graph_build_context(fx.graph, &fx.alloc, "alice", 5, "user", 4, 1, 2048, &out, &out_len),
+        HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "(works_at) -> [Initech] (was: Globex)");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "[Globex]\n");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "[Acme]");
+    fx.alloc.free(fx.alloc.ctx, out, 2048 + 1);
+    gg_fixture_close(&fx);
 }
 #endif
 
@@ -446,12 +594,17 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_ground_fingerprint_varies_with_content);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_compose_selects_relevant_entity_content);
+    HU_RUN_TEST(test_compose_finds_low_mention_entity_beyond_candidate_cap);
     HU_RUN_TEST(test_compose_irrelevant_message_returns_empty);
     HU_RUN_TEST(test_compose_word_boundary_prevents_false_seed);
     HU_RUN_TEST(test_compose_respects_budget_cap);
     HU_RUN_TEST(test_compose_varies_with_conversation);
     HU_RUN_TEST(test_compose_scopes_to_contact);
     HU_RUN_TEST(test_compose_no_graph_is_failopen);
+    HU_RUN_TEST(test_compose_renders_current_employer_with_predecessor);
+    HU_RUN_TEST(test_compose_marks_superseded_employer_as_history);
+    HU_RUN_TEST(test_compose_from_person_seed_collapses_chain_to_head);
+    HU_RUN_TEST(test_build_context_hides_superseded_employer);
     HU_RUN_TEST(test_autodream_tick_populates_community_summaries_for_contact);
 #endif
 }

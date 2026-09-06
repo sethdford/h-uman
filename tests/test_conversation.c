@@ -5,6 +5,7 @@
 #include "human/persona.h"
 #include "human/platform/calendar.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -3052,7 +3053,8 @@ static void gif_cal_save_and_load_roundtrip(void) {
     hu_conversation_gif_cal_record_reaction("persist_test", 12);
     float rate_before = hu_conversation_gif_cal_hit_rate("persist_test", 12);
 
-    const char *path = "/tmp/hu_test_gif_cal.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_gif_cal.json"));
     hu_error_t err = hu_conversation_gif_cal_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3214,7 +3216,8 @@ static void sched_save_and_load_roundtrip(void) {
     uint64_t now = (uint64_t)time(NULL) * 1000ULL;
     hu_conversation_schedule_message_on("persist_user", 12, "telegram", 8, "hi from persist", 15,
                                         now + 60000);
-    const char *path = "/tmp/hu_test_sched.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched.json"));
     hu_error_t err = hu_conversation_sched_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3237,7 +3240,8 @@ static void sched_save_and_load_roundtrip(void) {
  * delivery pass; an unchanged file is not re-read (no thrash); an absent
  * file leaves memory authoritative. */
 static void sched_reload_if_changed_picks_up_external_add(void) {
-    const char *path = "/tmp/hu_test_sched_reload.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_reload.json"));
     (void)unlink(path);
     uint64_t now = (uint64_t)time(NULL) * 1000ULL;
 
@@ -3402,7 +3406,8 @@ static void split_for_cadence_null_inputs_return_zero(void) {
 
 static void gif_cal_save_escapes_quotes(void) {
     hu_conversation_gif_cal_record_send("test\"quoted", 11, "query", 5);
-    const char *path = "/tmp/hu_test_gif_cal_esc.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_gif_cal_esc.json"));
     hu_error_t err = hu_conversation_gif_cal_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3422,7 +3427,8 @@ static void gif_cal_save_escapes_quotes(void) {
 /* ── sched_load \uXXXX unescaping ───────────────────────────────────── */
 
 static void sched_load_unescapes_unicode(void) {
-    const char *path = "/tmp/hu_test_sched_unicode.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_unicode.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_TRUE(f != NULL);
     fprintf(f, "{\"contact\":\"alice\",\"channel\":\"imessage\","
@@ -3444,7 +3450,8 @@ static void sched_load_unescapes_unicode(void) {
 }
 
 static void sched_load_unescapes_tab_and_cr(void) {
-    const char *path = "/tmp/hu_test_sched_tab.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_tab.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_TRUE(f != NULL);
     fprintf(f, "{\"contact\":\"bob\",\"channel\":\"\","
@@ -4624,7 +4631,8 @@ static void phrase_banks_missing_file_leaves_defaults(void) {
 
 /* Corrupt JSON must fail and leave the defaults in effect. */
 static void phrase_banks_corrupt_file_leaves_defaults(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_corrupt.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_corrupt.json"));
     write_phrase_banks_file(path, "{ this is not valid json !!");
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
@@ -4639,7 +4647,8 @@ static void phrase_banks_corrupt_file_leaves_defaults(void) {
 
 /* A file without the requested channel key must fail and keep defaults. */
 static void phrase_banks_missing_channel_leaves_defaults(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_wrong_channel.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_wrong_channel.json"));
     write_phrase_banks_file(path,
                             "{\"slack\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
     hu_allocator_t alloc = hu_system_allocator();
@@ -4656,7 +4665,8 @@ static void phrase_banks_missing_channel_leaves_defaults(void) {
 /* Loaded bank wins over DEFAULT_BACKCHANNEL_PHRASES: with a single-entry
  * bank, every seed must return the mined phrase, which is not a default. */
 static void phrase_banks_backchannel_uses_bank_not_default(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_bc.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_bc.json"));
     write_phrase_banks_file(path,
                             "{\"imessage\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
     hu_allocator_t alloc = hu_system_allocator();
@@ -4676,7 +4686,8 @@ static void phrase_banks_backchannel_uses_bank_not_default(void) {
 
 /* Loaded filler bank wins over DEFAULT_FILLERS in the injector (LIVE mode). */
 static void phrase_banks_fillers_used_by_injector(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_fillers.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_fillers.json"));
     write_phrase_banks_file(path, "{\"imessage\":{\"fillers\":[{\"text\":\"zzz \",\"freq\":12}]}}");
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
@@ -4708,7 +4719,8 @@ static void phrase_banks_farewells_suppress_double_text(void) {
     bool before = hu_conversation_should_double_text("peace out", 9, NULL, 0, 12, 7u, 1.0f);
     HU_ASSERT_TRUE(before);
 
-    const char *path = "/tmp/hu_test_phrase_banks_farewell.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_farewell.json"));
     write_phrase_banks_file(path,
                             "{\"imessage\":{\"farewells\":[{\"text\":\"peace out\",\"freq\":7}]}}");
     hu_allocator_t alloc = hu_system_allocator();

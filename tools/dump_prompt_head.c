@@ -66,6 +66,11 @@ int main(int argc, char **argv) {
     /* Per-contact relationship tone, same shared helper as both turn paths. */
     hu_agent_apply_relationship_tone(agent, &head, &head_len);
 
+    /* Same finalizer as both turn paths: the measured ABSOLUTE RULES block
+     * (style-card rule 2, emoji rate included) lands last, inside budget —
+     * so a head measured through this tool carries what production serves. */
+    hu_agent_finalize_system_prompt(agent, &head, &head_len, 0);
+
     fwrite(head, 1, head_len, stdout);
     alloc.free(alloc.ctx, head, head_len + 1);
     free(agent);
