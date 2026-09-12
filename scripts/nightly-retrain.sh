@@ -43,6 +43,13 @@ SKIP_BASE_TRAINING=0
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+# Keep the Mac awake for the whole window. 2026-09-11: Maintenance-Sleep /
+# DarkWake cycles from 03:00 to 03:48 stretched a 5-minute base training to 85
+# minutes and pushed the candidate stage past the arena guard (rc=1). -w $$
+# ties the assertion to this script's lifetime.
+if [[ "${HU_RETRAIN_STAGE_TEST:-0}" != "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -is -w $$ >/dev/null 2>&1 &
+fi
 
 # sha256 of a file, bare digest on stdout. Non-zero (and silent) when the file
 # is missing or no digest tool exists, so every caller must treat "" as
@@ -218,6 +225,30 @@ run_mlxtune_candidate_stage() {
     local why
     if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
         log "mlx-tune candidate stage: adapter real: $candidate_dir — $why"
+        # Did it LEARN? A real adapter can still be a no-op: 2026-09-06..12 every
+        # SimPO run's loss sat at 0.69-0.72 for all 400 steps (beta 0.05 pinned it
+        # at ln2) and the 7-minute scoring measured the raw base five times. Read
+        # the trainer's own "Step N/M | Loss:" lines; refuse to score when the
+        # last tenth is not below the first tenth by HU_RETRAIN_MIN_LOSS_DROP.
+        local train_log; train_log=$(ls -t "$HOME/.human/logs/train-glm-${mlxtune_tag}"-*.log 2>/dev/null | head -1)
+        local loss_drop_min="${HU_RETRAIN_MIN_LOSS_DROP:-0.02}"
+        if [[ -n "$train_log" ]]; then
+            local loss_summary
+            loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+                { l[NR]=$NF } END {
+                    if (NR < 10) { print "INSUFFICIENT n=" NR; exit }
+                    k=int(NR/10); if (k<1) k=1; a=0; b=0
+                    for (i=1;i<=k;i++) a+=l[i]; for (i=NR-k+1;i<=NR;i++) b+=l[i]
+                    a/=k; b/=k; printf "%s first=%.4f last=%.4f drop=%.4f", (a-b>=min?"LEARNED":"NO_LEARNING"), a, b, a-b }')
+            log "mlx-tune candidate stage: loss check: $loss_summary (min drop $loss_drop_min, $train_log)"
+            if [[ "$loss_summary" == NO_LEARNING* ]]; then
+                log "mlx-tune candidate stage: candidate did not learn — staged at $candidate_dir, NOT scored (scoring a no-op adapter measures the base, not the candidate)"
+                printf '%s\n' "$loss_summary" > "$candidate_dir/NO_LEARNING"
+                return 0
+            fi
+        else
+            log "mlx-tune candidate stage: WARNING no train log matching train-glm-${mlxtune_tag}-*.log — cannot check that training learned"
+        fi
     else
         log "mlx-tune candidate stage: adapter FAILED the real-adapter guard: $why"
         log "mlx-tune candidate stage: quarantining $candidate_dir -> $candidate_dir.rejected-$(date +%s)"

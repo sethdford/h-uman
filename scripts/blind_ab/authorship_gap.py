@@ -36,7 +36,9 @@ def other_senders(chatdb, min_texts=10, max_senders=60, seed=0):
     by = {}
     for hid, txt, blob in con.execute(
             "SELECT handle_id, text, attributedBody FROM message WHERE is_from_me=0 "
-            "AND COALESCE(associated_message_type,0)=0 AND handle_id IS NOT NULL ORDER BY date DESC LIMIT 60000"):
+            # 250k (was 60k): with 60k the qualifying-sender count sat at exactly the
+            # 20 floor and dipped to 19 on 2026-09-07, refusing that night's score.
+            "AND COALESCE(associated_message_type,0)=0 AND handle_id IS NOT NULL ORDER BY date DESC LIMIT 250000"):
         s = None
         if txt:
             s = txt.decode("utf-8", "replace")
