@@ -20,6 +20,7 @@
 
 #include "evaluation_dataset_loader.h"
 #include "evaluation_internal.h"
+#include "human/core/time.h"
 #include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
@@ -265,7 +266,7 @@ static bool locomo_available(void *ctx) {
 }
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 /* Materialise the working set from the on-disk corpus, falling back to

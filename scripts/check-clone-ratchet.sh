@@ -32,14 +32,8 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-# Rebase resolution 2026-07-27: three baselines collided here — main's 11514
-# (reliable.c extras_model dedup), this branch's 11507 (MLX endpoint) and 11505
-# (token-ratio consolidation). Every one was measured against a tree missing the
-# others' dedup, so none is valid for the merged tree. Take the HIGHEST: the gate
-# stays green, and ratchet_autolock re-measures on the next run and tightens to
-# the real number. A ratchet may only tighten, so no gain is lost — locking it is
-# just deferred by one run.
-CLONE_BASELINE=11446   # 2026-09-06: persona writer + doctor check share hu_file_slurp
+CLONE_BASELINE=11147   # 2026-09-12: #include lines no longer count (metric change, not comparable to
+                       # earlier baselines); channel mock harness + clock + JSON-locator copies folded
 # prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
                        # helpers with their callers retired three windows
 # prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser
@@ -84,6 +78,7 @@ trap "rm -f '$tmp_normalized'" EXIT
                 /^[[:space:]]*\/\// { next }              # C++ comments
                 /^[[:space:]]*\*/ { next }                # block comment lines
                 /^[[:space:]]*\/\*/ { next }              # block comment start
+                /^[[:space:]]*#include/ { next }          # include blocks are not clones (2026-09-12)
                 {
                     # Normalize: strip whitespace, collapse internal spaces
                     $0 = $0

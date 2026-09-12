@@ -9,12 +9,13 @@
  * slots are all read from `hu_signal_channel_config_t`.
  */
 #include "human/channels/signal.h"
+#include "human/channels/channel_mock.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,13 +48,7 @@ typedef struct hu_signal_ctx {
     char *group_policy;
     size_t group_policy_len;
 #if HU_IS_TEST
-    char last_message[4096];
-    size_t last_message_len;
-    struct {
-        char session_key[128];
-        char content[4096];
-    } mock_msgs[8];
-    size_t mock_count;
+    hu_channel_mock_t mock;
 #endif
 #if !HU_IS_TEST && defined(HU_HTTP_CURL)
     pthread_mutex_t typing_mu;
@@ -298,11 +293,7 @@ static hu_error_t signal_send(void *ctx, const char *target, size_t target_len, 
 
 #if HU_IS_TEST
     {
-        size_t len = message_len > 4095 ? 4095 : message_len;
-        if (message && len > 0)
-            memcpy(c->last_message, message, len);
-        c->last_message[len] = '\0';
-        c->last_message_len = len;
+        hu_channel_mock_record_send(&c->mock, message, message_len);
         return HU_OK;
     }
 #else
@@ -445,20 +436,34 @@ static hu_error_t signal_react(void *ctx, const char *target, size_t target_len,
 
     const char *emoji = NULL;
     switch (reaction) {
-    case HU_REACTION_HEART:       emoji = "\xe2\x9d\xa4\xef\xb8\x8f"; break;
-    case HU_REACTION_THUMBS_UP:   emoji = "\xf0\x9f\x91\x8d"; break;
-    case HU_REACTION_THUMBS_DOWN: emoji = "\xf0\x9f\x91\x8e"; break;
-    case HU_REACTION_HAHA:        emoji = "\xf0\x9f\x98\x82"; break;
-    case HU_REACTION_EMPHASIS:    emoji = "\xe2\x9d\x97"; break;
-    case HU_REACTION_QUESTION:    emoji = "\xe2\x9d\x93"; break;
-    default: return HU_ERR_INVALID_ARGUMENT;
+    case HU_REACTION_HEART:
+        emoji = "\xe2\x9d\xa4\xef\xb8\x8f";
+        break;
+    case HU_REACTION_THUMBS_UP:
+        emoji = "\xf0\x9f\x91\x8d";
+        break;
+    case HU_REACTION_THUMBS_DOWN:
+        emoji = "\xf0\x9f\x91\x8e";
+        break;
+    case HU_REACTION_HAHA:
+        emoji = "\xf0\x9f\x98\x82";
+        break;
+    case HU_REACTION_EMPHASIS:
+        emoji = "\xe2\x9d\x97";
+        break;
+    case HU_REACTION_QUESTION:
+        emoji = "\xe2\x9d\x93";
+        break;
+    default:
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     hu_json_buf_t jbuf;
     hu_error_t err = hu_json_buf_init(&jbuf, c->alloc);
     if (err)
         return err;
-    hu_json_buf_append_raw(&jbuf, "{\"jsonrpc\":\"2.0\",\"method\":\"sendReaction\",\"params\":{", 50);
+    hu_json_buf_append_raw(&jbuf, "{\"jsonrpc\":\"2.0\",\"method\":\"sendReaction\",\"params\":{",
+                           50);
     hu_json_append_key_value(&jbuf, "account", 7, c->account, c->account_len);
     hu_json_buf_append_raw(&jbuf, ",\"recipient\":[", 14);
     hu_json_append_string(&jbuf, target, target_len);
@@ -701,15 +706,15 @@ hu_error_t hu_signal_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_l
     *out_count = 0;
 
 #if HU_IS_TEST
-    if (c->mock_count > 0) {
+    if (c->mock.count > 0) {
         (void)alloc;
-        size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
+        size_t n = c->mock.count < max_msgs ? c->mock.count : max_msgs;
         for (size_t i = 0; i < n; i++) {
-            memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
-            memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
+            memcpy(msgs[i].session_key, c->mock.msgs[i].session_key, 128);
+            memcpy(msgs[i].content, c->mock.msgs[i].content, 4096);
         }
         *out_count = n;
-        c->mock_count = 0;
+        c->mock.count = 0;
         return HU_OK;
     }
     return HU_OK;
@@ -744,18 +749,7 @@ hu_error_t hu_signal_test_inject_mock(hu_channel_t *ch, const char *session_key,
     if (!ch || !ch->ctx)
         return HU_ERR_INVALID_ARGUMENT;
     hu_signal_ctx_t *c = (hu_signal_ctx_t *)ch->ctx;
-    if (c->mock_count >= 8)
-        return HU_ERR_OUT_OF_MEMORY;
-    size_t i = c->mock_count++;
-    size_t sk = session_key_len > 127 ? 127 : session_key_len;
-    size_t ct = content_len > 4095 ? 4095 : content_len;
-    if (session_key && sk > 0)
-        memcpy(c->mock_msgs[i].session_key, session_key, sk);
-    c->mock_msgs[i].session_key[sk] = '\0';
-    if (content && ct > 0)
-        memcpy(c->mock_msgs[i].content, content, ct);
-    c->mock_msgs[i].content[ct] = '\0';
-    return HU_OK;
+    return hu_channel_mock_inject(&c->mock, session_key, session_key_len, content, content_len);
 }
 
 const char *hu_signal_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
@@ -763,8 +757,8 @@ const char *hu_signal_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
         return NULL;
     hu_signal_ctx_t *c = (hu_signal_ctx_t *)ch->ctx;
     if (out_len)
-        *out_len = c->last_message_len;
-    return c->last_message;
+        *out_len = c->mock.last_message_len;
+    return c->mock.last_message;
 }
 #endif
 

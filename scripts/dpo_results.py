@@ -173,6 +173,14 @@ def regression_verdict(
     return 'PASS'
 
 
+def history_excluding(results_file: Path, adapter_id: str, days_back: int = 28) -> List[Dict]:
+    """load_recent() minus the record of the run being judged. The gate appends
+    its own record before deciding, and 2026-09-07..12 it compared six nights
+    against themselves (delta 0 -> PASS every night, zero real comparisons)."""
+    return [r for r in load_recent(results_file, days_back=days_back)
+            if r.get('adapter_id') != adapter_id]
+
+
 def append_result(
     results_file: Path,
     timestamp: str,

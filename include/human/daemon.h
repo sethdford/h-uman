@@ -77,6 +77,28 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, struct hu_agent *a
  * hu_service_run_proactive_checkins; guarded by an in-memory msg-id dedup
  * ring AND a per-contact cooldown ledger (one bump per contact per 48h).
  * Implemented in src/daemon/daemon_followup_sched.c. */
+struct hu_channel_daemon_config;
+
+/* Per-channel daemon config block for a channel name (default block when the
+ * name is NULL or unknown). Was a daemon.c static until the 2026-09-12 carve-outs
+ * needed it from src/daemon/. */
+const struct hu_channel_daemon_config *
+hu_daemon_active_daemon_config(const struct hu_config *config, const char *ch_name);
+
+/* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_rich_media.c. */
+void hu_daemon_rich_media_tick(hu_allocator_t *alloc, struct hu_agent *agent,
+                               const struct hu_config *config, hu_service_channel_t *ch,
+                               const char *batch_key, size_t key_len, const char *combined,
+                               size_t combined_len, hu_channel_history_entry_t *history_entries,
+                               size_t history_count, bool gif_sent_this_turn);
+
+/* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_voice_reply.c. */
+bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
+                           const struct hu_config *config, hu_service_channel_t *ch,
+                           const char *batch_key, size_t key_len, const char *combined,
+                           size_t combined_len, const char *response, size_t response_len,
+                           int bth_hour);
+
 void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t *channels,
                                    size_t channel_count);
 

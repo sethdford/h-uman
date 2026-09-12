@@ -1131,8 +1131,38 @@ VAL_SET_MOD = 10
 VAL_SET_CAP = 64
 
 
+def frozen_val_path(source_jsonl) -> Path:
+    """The validation set is FROZEN beside the source corpus after the first run,
+    so val loss is comparable night to night. The 2026-09-06 content-keyed split
+    was stable only while no appended row hashed into the candidate set; with a
+    10% hit rate the id changed almost every night (5 ids in 6 nights) and the
+    regression gate never had two comparable records."""
+    return Path(str(source_jsonl) + ".valid-frozen.jsonl")
+
+
+def split_train_valid_frozen(lines, frozen_lines, min_present_frac=0.5, mod=VAL_SET_MOD,
+                             cap=VAL_SET_CAP):
+    """Hold out exactly the frozen rows that still exist in the corpus; everything
+    else trains. Returns (train, val, val_set_id, refrozen). If fewer than
+    min_present_frac of the frozen rows survive (corpus rebuilt), re-freeze from
+    the content-keyed split and flag it so the gate treats the night as FIRST_RUN."""
+    if frozen_lines:
+        present = set(lines)
+        val = [l for l in frozen_lines if l in present]  # noqa: E741
+        if len(val) >= max(1, int(len(frozen_lines) * min_present_frac)):
+            vset = set(val)
+            train = [l for l in lines if l not in vset]  # noqa: E741
+            if train:
+                import hashlib
+                vid = hashlib.sha256("\n".join(val).encode("utf-8")).hexdigest()[:12]
+                return train, val, vid, False
+    train, val, vid = split_train_valid(lines, mod=mod, cap=cap)
+    return train, val, vid, True
+
+
 def split_train_valid(lines, mod=VAL_SET_MOD, cap=VAL_SET_CAP):
-    """Deterministic, content-keyed train/valid split.
+    """Deterministic, content-keyed train/valid split (the FIRST-run rule; later
+    runs reuse the frozen file — see split_train_valid_frozen).
 
     The old positional split (every 10th line, capped) re-drew the validation
     set whenever the corpus grew by a row, so val loss was not comparable
@@ -1253,7 +1283,16 @@ def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
     train_data_dir = Path(tmpdir) / "data"
     train_data_dir.mkdir(parents=True)
     _all_lines = Path(sft_batch).read_text().splitlines()
-    _train, _val, _val_set_id = split_train_valid(_all_lines)
+    _frozen_path = frozen_val_path(os.environ.get("HU_TRAIN_SOURCE_JSONL") or sft_batch) \
+        if os.environ.get("HU_TRAIN_FROZEN_VAL", "1") == "1" else None
+    _frozen = []
+    if _frozen_path and _frozen_path.is_file():
+        _frozen = [l for l in _frozen_path.read_text().splitlines() if l.strip()]  # noqa: E741
+    _train, _val, _val_set_id, _refrozen = split_train_valid_frozen(_all_lines, _frozen)
+    if _frozen_path and (_refrozen or not _frozen) and _val:
+        _frozen_path.write_text("\n".join(_val) + "\n")
+        print(f"  validation set {'RE-' if _frozen else ''}frozen -> {_frozen_path} "
+              f"({len(_val)} rows); tonight is FIRST_RUN for val_set_id={_val_set_id}")
     (train_data_dir / "train.jsonl").write_text("\n".join(_train) + "\n")
     if _val:
         (train_data_dir / "valid.jsonl").write_text("\n".join(_val) + "\n")
@@ -1262,6 +1301,7 @@ def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
     Path(adapter_out).mkdir(parents=True, exist_ok=True)
     (Path(adapter_out) / "val_set.json").write_text(json.dumps({
         "val_set_id": _val_set_id, "n_valid": len(_val), "n_train": len(_train),
+        "frozen": bool(_frozen) and not _refrozen, "frozen_path": str(_frozen_path) if _frozen_path else None,
         "mod": VAL_SET_MOD, "cap": VAL_SET_CAP}) + "\n")
     print(f"  validation split: {len(_val)} rows, val_set_id={_val_set_id} "
           f"(content-hash; val loss is comparable only within one id)")
@@ -1425,6 +1465,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
                         model_id_override: str | None = None) -> int:
     """Phase C3 entry point. Returns process-style exit code (0 = OK)."""
     # Resolve the SERVING base + adapter up front (2026-07-26): production
+    os.environ["HU_TRAIN_SOURCE_JSONL"] = str(source_jsonl)  # frozen val set lives beside the corpus
     # flipped to GLM while this path hardcoded gemma, so every auto-trained
     # adapter was un-loadable dead weight.
     model, model_source = resolve_serving_base_model(override=model_id_override)
@@ -1667,7 +1708,13 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     # and "cannot judge" must block the swap, not wave it through — the
     # toothless-gate shape from the 2026-07-11 fleet lessons resurfaced on
     # 2026-07-26 ("Regression verdict: PASS (val_loss=None)").
-    history = dpo_results.load_recent(results_file)
+    # The current run's record was appended above; comparing against it made
+    # every night PASS with delta 0 (2026-09-07..12: six PASSes, zero real
+    # comparisons). Exclude it.
+    # (inline rather than dpo_results.history_excluding so the tests' stubbed
+    # dpo_results namespace keeps working; the helper is the tested contract)
+    history = [r for r in dpo_results.load_recent(results_file)
+               if r.get('adapter_id') != basename(str(adapter_out))]
     if val_loss is None:
         verdict = 'INCONCLUSIVE'
     else:

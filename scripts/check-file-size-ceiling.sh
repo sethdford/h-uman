@@ -15,11 +15,7 @@ else
     ratchet_autolock() { :; }
 fi
 
-# Rebase resolution 2026-07-27: keep main's 14082 (it carved daemon.c further
-# than the 14132 this branch was written against). This branch contributed the
-# auto-lock wiring above, not a baseline change — the two edits collided only
-# because they touch adjacent lines.
-MAX_BASELINE=12313   # src/daemon.c, measured 2026-09-05 on merge of #377 + consecutive-limiter carve (slices A+B of the batch-reply
+MAX_BASELINE=11760   # src/daemon.c, measured 2026-09-12 after the rich-media + voice-reply carves
                      # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
                      # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
 

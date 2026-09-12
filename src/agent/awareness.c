@@ -1,17 +1,12 @@
 #include "human/agent/awareness.h"
 #include "human/core/string.h"
+#include "human/core/time.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t now_ms(void) {
-#ifdef HU_IS_TEST
-    return 1000000;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
-#endif
+    return (uint64_t)hu_time_wall_ms();
 }
 
 static void track_channel(hu_awareness_state_t *s, const char *channel) {
@@ -102,18 +97,17 @@ char *hu_awareness_context(const hu_awareness_t *aw, hu_allocator_t *alloc, size
         pos = sizeof(buf) - 1;
 
     if (s->health_degraded) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                              "- WARNING: System health is degraded\n");
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- WARNING: System health is degraded\n");
         if (pos >= sizeof(buf))
             pos = sizeof(buf) - 1;
     }
 
     if (has_stats) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- Session stats: %llu msgs received, %llu sent, %llu tool calls\n",
-                             (unsigned long long)s->messages_received,
-                             (unsigned long long)s->messages_sent,
-                             (unsigned long long)s->tool_calls);
+        pos =
+            hu_buf_appendf(buf, sizeof(buf), pos,
+                           "- Session stats: %llu msgs received, %llu sent, %llu tool calls\n",
+                           (unsigned long long)s->messages_received,
+                           (unsigned long long)s->messages_sent, (unsigned long long)s->tool_calls);
         if (pos >= sizeof(buf))
             pos = sizeof(buf) - 1;
     }
@@ -142,9 +136,8 @@ char *hu_awareness_context(const hu_awareness_t *aw, hu_allocator_t *alloc, size
                           : HU_AWARENESS_MAX_RECENT_ERRORS;
         for (size_t i = 0; i < nerr && pos < sizeof(buf) - 300; i++) {
             size_t idx = (s->error_write_idx + HU_AWARENESS_MAX_RECENT_ERRORS - nerr + i) %
-                        HU_AWARENESS_MAX_RECENT_ERRORS;
-            pos = hu_buf_appendf(buf, sizeof(buf), pos, "  - %s\n",
-                                 s->recent_errors[idx].text);
+                         HU_AWARENESS_MAX_RECENT_ERRORS;
+            pos = hu_buf_appendf(buf, sizeof(buf), pos, "  - %s\n", s->recent_errors[idx].text);
             if (pos >= sizeof(buf))
                 pos = sizeof(buf) - 1;
         }

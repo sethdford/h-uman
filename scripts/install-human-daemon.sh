@@ -33,7 +33,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 
-BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
+# Default to the `prod` preset's tree (dev feature set, no ASan, RelWithDebInfo).
+# build/ is the ASan dev tree; installing it shipped a sanitized Debug daemon
+# to prod for months (432 asan.log files, 1.15 GB RSS). Override with
+# BUILD_DIR=... only on purpose.
+BUILD_DIR="${BUILD_DIR:-$ROOT/build-prod}"
+if [[ ! -d "$BUILD_DIR" && -d "$ROOT/build" ]]; then
+    echo "error: $BUILD_DIR does not exist. Configure it first:" >&2
+    echo "       cmake --preset prod && cmake --build --preset prod --target human" >&2
+    echo "       (or set BUILD_DIR explicitly to install a different tree)" >&2
+    exit 1
+fi
 PREFIX="${PREFIX:-$HOME/.local}"
 INSTALL_BIN="$PREFIX/bin/human-daemon"
 PLIST_PATH="$HOME/Library/LaunchAgents/ai.human.service-loop.plist"

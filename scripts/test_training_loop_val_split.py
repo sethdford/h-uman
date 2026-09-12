@@ -74,3 +74,46 @@ def test_read_val_set_id_roundtrip_and_absent():
         assert tl.read_val_set_id(p) == "abc123abc123"
         (p / "val_set.json").write_text("not json")
         assert tl.read_val_set_id(p) is None
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-12: frozen validation set (the content-keyed id churned 5x in 6 nights)
+# ---------------------------------------------------------------------------
+def test_frozen_reuses_the_frozen_rows_and_keeps_the_id_across_appends():
+    base = _rows(200)
+    train0, val0, vid0 = tl.split_train_valid(base)
+    frozen = list(val0)
+    t1, v1, vid1, refrozen1 = tl.split_train_valid_frozen(base, frozen)
+    assert (v1, vid1, refrozen1) == (frozen, vid0, False)
+    assert not set(t1) & set(v1) and sorted(t1 + v1) == sorted(base)
+    # append 120 rows: the held-out set and its id do not move, new rows all train
+    bigger = base + _rows(120, tag="new")
+    t2, v2, vid2, refrozen2 = tl.split_train_valid_frozen(bigger, frozen)
+    assert v2 == frozen and vid2 == vid0 and refrozen2 is False
+    assert len(t2) == len(bigger) - len(frozen)
+
+
+def test_frozen_refreezes_when_the_corpus_was_rebuilt():
+    base = _rows(200)
+    _, val0, vid0 = tl.split_train_valid(base)
+    rebuilt = _rows(200, tag="rebuilt")            # none of the frozen rows survive
+    t, v, vid, refrozen = tl.split_train_valid_frozen(rebuilt, val0)
+    assert refrozen is True and v and vid != vid0 and not set(t) & set(v)
+    # partial survival above the floor keeps the surviving rows, same contract
+    half = base[:100] + _rows(100, tag="x")
+    t, v, vid, refrozen = tl.split_train_valid_frozen(half, val0)
+    surviving = [l for l in val0 if l in set(half)]
+    if len(surviving) >= len(val0) // 2:
+        assert refrozen is False and v == surviving
+    else:
+        assert refrozen is True
+
+
+def test_frozen_with_no_frozen_rows_falls_back_to_content_keyed_split():
+    base = _rows(150)
+    t, v, vid, refrozen = tl.split_train_valid_frozen(base, [])
+    assert refrozen is True and (t, v, vid) == tl.split_train_valid(base)
+
+
+def test_frozen_val_path_sits_beside_the_source():
+    assert str(tl.frozen_val_path("/x/y/m3-outcomes.jsonl")) == "/x/y/m3-outcomes.jsonl.valid-frozen.jsonl"

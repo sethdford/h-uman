@@ -1079,7 +1079,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             bi->voice_cfg.openai_api_key || (bi->cfg.voice.mode && bi->cfg.voice.mode[0])) {
             hu_agent_set_voice_config(&bi->agent, &bi->voice_cfg);
         }
-        bi->agent.chain_of_thought = true;
+        bi->agent.chain_of_thought = bi->cfg.agent.chain_of_thought;
         bi->agent.agent_pool = bi->agent_pool;
         bi->agent.scheduler = (struct hu_cron_scheduler *)bi->cron;
         hu_agent_set_mailbox(&bi->agent, bi->mailbox);
@@ -1099,6 +1099,19 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (!bi->cfg.agent.context_engine_type ||
             strcmp(bi->cfg.agent.context_engine_type, "legacy") == 0 ||
             bi->cfg.agent.context_engine_type[0] == '\0') {
+            hu_context_engine_t *ce =
+                (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
+            if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)
+                bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
+            else if (ce)
+                alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
+        } else {
+            /* Only "legacy" is wired. A silently-NULL engine was the 2026-09-10
+             * review's most misleading finding: "rag" parsed fine and did less
+             * than the default. Fall back loudly. */
+            hu_log_warn("bootstrap", NULL,
+                        "agent.context_engine='%s' is not implemented; using legacy engine",
+                        bi->cfg.agent.context_engine_type);
             hu_context_engine_t *ce =
                 (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
             if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)

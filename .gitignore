@@ -177,3 +177,6 @@ yntp_holdout_30.jsonl
 tests/_tmp/proofs/
 adapters/
 
+
+# committed CMake output once escaped the build-*/ glob by name
+bld/

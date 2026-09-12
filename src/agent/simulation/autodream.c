@@ -1,5 +1,6 @@
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
+#include "human/core/time.h"
 #include "human/memory/belief.h"
 #include "human/memory/conflict_resolver.h"
 #include "human/memory/hyperedge.h"
@@ -19,7 +20,7 @@
 /* Only referenced from the SQLite paths below — gate to silence
  * -Werror=unused-function in no-sqlite / minimal builds. */
 static int64_t wall_now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 #endif
 

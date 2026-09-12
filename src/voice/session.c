@@ -1,5 +1,6 @@
 #include "human/voice/session.h"
 #include "human/core/log.h"
+#include "human/core/time.h"
 #include "human/voice/provider.h"
 #include <math.h>
 #include <stdio.h>
@@ -7,14 +8,7 @@
 #include <time.h>
 
 static int64_t voice_session_now_ms(void) {
-#if HU_IS_TEST
-    return 1;
-#else
-    struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-        return 0;
-    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
-#endif
+    return (int64_t)hu_time_wall_ms();
 }
 
 static void latency_reset_marks(hu_voice_session_t *session) {
@@ -337,9 +331,8 @@ hu_error_t hu_voice_session_recv_event(hu_voice_session_t *session, hu_allocator
         session->latency_first_byte_pending = false;
         session->latency.measurements++;
         double n = (double)session->latency.measurements;
-        session->latency.avg_first_byte_ms =
-            session->latency.avg_first_byte_ms * ((n - 1.0) / n) +
-            (double)session->latency.first_byte_ms / n;
+        session->latency.avg_first_byte_ms = session->latency.avg_first_byte_ms * ((n - 1.0) / n) +
+                                             (double)session->latency.first_byte_ms / n;
     }
     return err;
 }
