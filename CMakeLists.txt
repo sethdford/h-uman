@@ -1155,7 +1155,6 @@ set(HU_CORE_SOURCES
     src/memory/connections.c
     src/memory/knowledge.c
     src/memory/cognitive.c
-    src/memory/deep_memory.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
     src/visual/content.c
@@ -3822,15 +3821,12 @@ tests/test_imessage_action_telemetry.c
     tests/test_salience.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
-    tests/test_prospective.c
-    tests/test_prospective_memory.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_usage.c
     tests/test_cognitive.c
-    tests/test_deep_memory.c
     tests/test_compression.c
     tests/test_proactive_ext.c
     tests/test_degradation.c
@@ -3968,11 +3964,11 @@ if(HU_ENABLE_CURL)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_memory_features.c)
-list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_world_model_graph.c tests/test_mcts_planner.c)
+list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_mcts_planner.c)
 list(APPEND HU_TEST_SOURCES tests/test_orchestrator.c)
 list(APPEND HU_TEST_SOURCES tests/test_swarm_execution.c tests/test_dynamic_decomposition.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_matching.c tests/test_agent_communication.c)
-list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c tests/test_world_context.c)
+list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)

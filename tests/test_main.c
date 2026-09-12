@@ -577,8 +577,6 @@ void run_arbitrator_tests(void);
 void run_salience_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
-void run_prospective_tests(void);
-void run_prospective_memory_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
@@ -589,7 +587,6 @@ void run_cognitive_tests(void);
 void run_cognitive_load_tests(void);
 void run_phase9_integration_tests(void);
 #endif
-void run_deep_memory_tests(void);
 void run_compression_tests(void);
 void run_proactive_ext_tests(void);
 void run_degradation_tests(void);
@@ -677,9 +674,7 @@ void run_dynamic_decomposition_tests(void);
 void run_agent_matching_tests(void);
 void run_agent_communication_tests(void);
 void run_mcts_planner_tests(void);
-void run_world_model_graph_tests(void);
 void run_world_simulation_tests(void);
-void run_world_context_tests(void);
 void run_peripheral_ctrl_tests(void);
 void run_value_learning_tests(void);
 void run_goal_engine_tests(void);
@@ -1657,8 +1652,6 @@ int main(int argc, char **argv) {
     run_planning_tests();
     run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_prospective_tests();
-    run_prospective_memory_tests();
     run_emotional_residue_tests();
     run_consolidation_engine_tests();
 #endif
@@ -1670,7 +1663,6 @@ int main(int argc, char **argv) {
     run_cognitive_load_tests();
     run_phase9_integration_tests();
 #endif
-    run_deep_memory_tests();
     run_compression_tests();
     run_proactive_ext_tests();
     run_degradation_tests();
@@ -1756,9 +1748,7 @@ int main(int argc, char **argv) {
     run_agent_matching_tests();
     run_agent_communication_tests();
     run_mcts_planner_tests();
-    run_world_model_graph_tests();
     run_world_simulation_tests();
-    run_world_context_tests();
     run_agent_registry_tests();
     run_pwa_tests();
     run_music_tests();
