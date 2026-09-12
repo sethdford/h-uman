@@ -21,7 +21,7 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11103   # 2026-09-12: reactive recorder consolidated into hu_daemon_record_delivered_reply (same metric as 11147)
+CLONE_BASELINE=11103   # 2026-09-12 after the housekeeping carve merged with main
                        # earlier baselines); channel mock harness + clock + JSON-locator copies folded
 # prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
                        # helpers with their callers retired three windows

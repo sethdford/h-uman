@@ -24,7 +24,7 @@
 
 set -eu
 
-MAX_FN_BASELINE=9534    # hu_service_run, src/daemon.c, after the 2026-09-12 rich-media + voice-reply carves
+MAX_FN_BASELINE=8943    # hu_agent_turn, src/agent/agent_turn.c — hu_service_run fell below it after the 2026-09-12 housekeeping carve
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

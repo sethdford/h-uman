@@ -1305,6 +1305,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_followup_sched.c
     src/daemon/daemon_voice_reply.c
     src/daemon/daemon_rich_media.c
+    src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
     src/daemon/cron.c
     src/daemon/crontab.c
