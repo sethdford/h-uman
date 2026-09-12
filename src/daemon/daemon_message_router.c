@@ -16,6 +16,7 @@
 #define _GNU_SOURCE
 #endif
 #include "human/agent.h"
+#include "human/agent/persona_eval.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
@@ -67,11 +68,14 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
-hu_error_t hu_daemon_dispatch_imessage_reply(
+hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
-    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
+    bool *out_text_sent) {
+    if (out_text_sent)
+        *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -88,7 +92,10 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                         "set true in config to enable threaded replies / tapback");
         }
         if (ch->vtable->send) {
-            return ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            hu_error_t e = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            if (out_text_sent)
+                *out_text_sent = (e == HU_OK);
+            return e;
         }
         return HU_ERR_NOT_SUPPORTED;
     }
@@ -254,6 +261,13 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
         }
         break;
     }
+
+    /* Text reached the contact unless the dispatch ended as a bare tapback or
+     * failed. The reply loop records production_outcomes from this flag, so a
+     * tapback-only turn never lands in the table as a "sent reply" (the
+     * 2026-09-06 "Who is this?" turn recorded two texts, delivered neither). */
+    if (out_text_sent)
+        *out_text_sent = (err == HU_OK && actual_style != HU_REPLY_STYLE_TAPBACK);
 
     /* Native read receipt (2026-07-21). Replying without marking the thread
      * read leaves every inbound message permanently "unread" on the sender's
@@ -526,13 +540,23 @@ hu_reply_style_t hu_daemon_demote_stale_tapback_style(hu_reply_style_t style,
     return HU_REPLY_STYLE_FLAT; /* reaction dropped; the text still flows */
 }
 
-hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
-                                                 const struct hu_agent *agent,
-                                                 const struct hu_config *config, const char *target,
-                                                 size_t target_len,
-                                                 const struct hu_channel_loop_msg *msg,
-                                                 const char *body, size_t body_len) {
+hu_error_t hu_daemon_dispatch_imessage_reply(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
+    return hu_daemon_dispatch_imessage_reply_ex(ch, persona, agent, config, target, target_len,
+                                                parent_msg_guid, parent_guid_len, body, body_len,
+                                                snapshot, inferred_message_id_for_react, NULL);
+}
+
+hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
+    void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
+    const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
+    size_t body_len, bool *out_text_sent) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
+    if (out_text_sent)
+        *out_text_sent = false;
 
     /* Parrot guard: never ship a bubble that verbatim-echoes the inbound
      * message it answers (2026-07-25 Dermot incident — the F40 quote fallback
@@ -550,8 +574,45 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
 
     hu_conversation_snapshot_t snap = hu_daemon_snapshot_for_msg(m ? m->timestamp_sec : 0);
     const char *guid = (m && m->guid[0]) ? m->guid : NULL;
-    return hu_daemon_dispatch_imessage_reply(
+    return hu_daemon_dispatch_imessage_reply_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
-        (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0);
+        (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
+        out_text_sent);
+}
+
+hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
+                                                 const struct hu_agent *agent,
+                                                 const struct hu_config *config, const char *target,
+                                                 size_t target_len,
+                                                 const struct hu_channel_loop_msg *msg,
+                                                 const char *body, size_t body_len) {
+    return hu_daemon_dispatch_imessage_reply_msg_ex(ch, persona, agent, config, target, target_len,
+                                                    msg, body, body_len, NULL);
+}
+
+/* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
+
+hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
+                                            const char *target, size_t target_len,
+                                            const char *prompt, size_t prompt_len, const char *text,
+                                            size_t text_len) {
+    if (!agent || !agent->sota.sota_initialized)
+        return HU_OK; /* no collector (tests, SOTA off): nothing to record */
+    if (!ch_name || !ch_name[0] || !target || target_len == 0 || !text || text_len == 0)
+        return HU_OK;
+    if (!prompt || prompt_len == 0)
+        return HU_OK; /* the table's join needs a prompt; a media-only turn has none */
+    /* Sprint 46 R5.3 — P(Seth) from the in-process PersonaEval classifier;
+     * 0.5 when no model is loaded, stored as-is. */
+    double p_seth = hu_persona_eval_score(agent->persona_eval, text, text_len);
+    hu_error_t err = hu_dpo_record_outbound(&agent->sota.dpo_collector, ch_name, strlen(ch_name),
+                                            target, target_len, NULL, 0, /* ref attached later */
+                                            prompt, prompt_len, text, text_len, p_seth,
+                                            /* alternatives_json — L5 best-of-N not in prod */
+                                            NULL, 0);
+    if (err != HU_OK)
+        hu_log_warn("daemon", agent->observer, "production_outcomes record_outbound failed: %s",
+                    hu_error_string(err));
+    return err;
 }

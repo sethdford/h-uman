@@ -8689,46 +8689,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "silent to users");
                     } else if (err == HU_OK && response_len > 0) {
                         g_empty_agent_response_streak = 0;
-                        /* AGI-C1b — record outbound to production_outcomes
-                         * for the self-improvement loop. Outcome columns
-                         * fill in later when reactions arrive (handled
-                         * in reaction_handler.c). The pair (channel,
-                         * target, message_ref) is the join key; until
-                         * iMessage send returns the actual message
-                         * ref, we use batch_key as a best-effort
-                         * proxy (batch_key encodes channel+chat).
-                         *
-                         * Best-effort: SQLite-disabled builds get
-                         * HU_OK (no-op); transient IO errors are logged
-                         * but don't fail the turn. See
-                         * docs/plans/2026-05-19-agi-path.md. */
-                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
-                            ch->channel->vtable && ch->channel->vtable->name) {
-                            const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
-                            if (ch_name) {
-                                /* Sprint 46 R5.3 — score the response with the
-                                 * in-process PersonaEval classifier. When the
-                                 * agent has no model loaded (file missing at
-                                 * init), score returns 0.5 — record_outbound
-                                 * stores that as-is. */
-                                double p_seth = hu_persona_eval_score(agent->persona_eval, response,
-                                                                      response_len);
-                                hu_error_t out_err = hu_dpo_record_outbound(
-                                    &agent->sota.dpo_collector, ch_name, strlen(ch_name), batch_key,
-                                    key_len, NULL, 0, /* message_ref unknown here */
-                                    combined, combined_len, response, response_len, p_seth,
-                                    /* alternatives_json — Sprint 46 R5.2. NULL today since
-                                     * production doesn't run L5 best-of-N yet. Sprint 47
-                                     * will populate this when the L5 path lands. */
-                                    NULL, 0);
-                                if (out_err != HU_OK) {
-                                    hu_log_warn("human", agent->observer,
-                                                "production_outcomes record_outbound "
-                                                "failed: %s",
-                                                hu_error_string(out_err));
-                                }
-                            }
-                        }
+                        /* production_outcomes is written from the send funnel
+                         * below (hu_daemon_record_delivered_reply) with the text
+                         * as DELIVERED — not here, where the reply is still
+                         * ungoverned and may yet be retried, aborted or sent as
+                         * a tapback (2026-09-12). */
                     }
                     /* Hex dump first 80 bytes of response for encoding diagnostics */
                     if (err == HU_OK && response && response_len > 0) {
@@ -10496,6 +10461,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};
+                        bool delivered_recorded = false; /* one production_outcomes row per reply */
                         bool use_choreography = false;
                         if (agent && agent->frontiers.initialized) {
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
@@ -10536,18 +10502,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
                                         : NULL;
+                                bool seg_text_sent = false;
                                 if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
                                     config && config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
                                         send_target, send_target_len, &msgs[batch_start],
                                         choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len);
+                                        choreo_plan.segments[seg].text_len, &seg_text_sent);
                                 } else {
-                                    ch->channel->vtable->send(
-                                        ch->channel->ctx, send_target, send_target_len,
-                                        choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len, pv_ptr, pv_cnt);
+                                    seg_text_sent =
+                                        ch->channel->vtable->send(
+                                            ch->channel->ctx, send_target, send_target_len,
+                                            choreo_plan.segments[seg].text,
+                                            choreo_plan.segments[seg].text_len, pv_ptr,
+                                            pv_cnt) == HU_OK;
+                                }
+                                if (seg_text_sent && !delivered_recorded) {
+                                    delivered_recorded = true;
+                                    hu_daemon_record_delivered_reply(
+                                        agent, ch_name_choreo, send_target, send_target_len,
+                                        combined, combined_len, response, response_len);
                                 }
 #if defined(HU_ENABLE_RL_FULL)
                                 /* Choreography route added ~2026-05-28 without
@@ -10643,20 +10618,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 ch->channel->vtable->name
                                                     ? ch->channel->vtable->name(ch->channel->ctx)
                                                     : NULL;
+                                            bool dt_text_sent = false;
                                             if (ch_name_f2b &&
                                                 strcmp(ch_name_f2b, "imessage") == 0 && config &&
                                                 config->channels.imessage.action_surface_v2
                                                     .enabled) {
-                                                (void)hu_daemon_dispatch_imessage_reply_msg(
+                                                (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                                     ch->channel, agent ? agent->persona : NULL,
                                                     agent, config, batch_key, key_len,
-                                                    &msgs[batch_start], dt_chunks[dt], dt_len);
+                                                    &msgs[batch_start], dt_chunks[dt], dt_len,
+                                                    &dt_text_sent);
                                             } else {
-                                                ch->channel->vtable->send(ch->channel->ctx,
-                                                                          batch_key, key_len,
-                                                                          dt_chunks[dt], dt_len,
-                                                                          (dt == 0) ? pv_ptr : NULL,
-                                                                          (dt == 0) ? pv_cnt : 0);
+                                                dt_text_sent = ch->channel->vtable->send(
+                                                                   ch->channel->ctx, batch_key,
+                                                                   key_len, dt_chunks[dt], dt_len,
+                                                                   (dt == 0) ? pv_ptr : NULL,
+                                                                   (dt == 0) ? pv_cnt : 0) == HU_OK;
+                                            }
+                                            if (dt_text_sent && !delivered_recorded) {
+                                                delivered_recorded = true;
+                                                hu_daemon_record_delivered_reply(
+                                                    agent, ch_name_f2b, batch_key, key_len,
+                                                    combined, combined_len, response, response_len);
                                             }
                                         }
                                     }
@@ -10669,17 +10652,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         ch->channel->vtable->name
                                             ? ch->channel->vtable->name(ch->channel->ctx)
                                             : NULL;
+                                    bool frag_text_sent = false;
                                     if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
                                         config &&
                                         config->channels.imessage.action_surface_v2.enabled) {
-                                        (void)hu_daemon_dispatch_imessage_reply_msg(
+                                        (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                             ch->channel, agent ? agent->persona : NULL, agent,
                                             config, batch_key, key_len, &msgs[batch_start],
-                                            fragments[f].text, fragments[f].text_len);
+                                            fragments[f].text, fragments[f].text_len,
+                                            &frag_text_sent);
                                     } else {
-                                        ch->channel->vtable->send(
-                                            ch->channel->ctx, batch_key, key_len, fragments[f].text,
-                                            fragments[f].text_len, pv_ptr, pv_cnt);
+                                        frag_text_sent =
+                                            ch->channel->vtable->send(ch->channel->ctx, batch_key,
+                                                                      key_len, fragments[f].text,
+                                                                      fragments[f].text_len, pv_ptr,
+                                                                      pv_cnt) == HU_OK;
+                                    }
+                                    if (frag_text_sent && !delivered_recorded) {
+                                        delivered_recorded = true;
+                                        hu_daemon_record_delivered_reply(
+                                            agent, ch_name_f2b, batch_key, key_len, combined,
+                                            combined_len, response, response_len);
                                     }
                                 }
 #if defined(HU_ENABLE_RL_FULL)
@@ -10748,16 +10741,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
                                         : NULL;
+                                bool whole_text_sent = false;
                                 if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
                                     config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg(
+                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
                                         send_target, send_target_len, &msgs[batch_start], send_text,
-                                        send_text_len);
+                                        send_text_len, &whole_text_sent);
                                 } else {
-                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                              send_target_len, send_text,
-                                                              send_text_len, pv_ptr, pv_cnt);
+                                    whole_text_sent =
+                                        ch->channel->vtable->send(
+                                            ch->channel->ctx, send_target, send_target_len,
+                                            send_text, send_text_len, pv_ptr, pv_cnt) == HU_OK;
+                                }
+                                if (whole_text_sent && !delivered_recorded) {
+                                    delivered_recorded = true;
+                                    hu_daemon_record_delivered_reply(
+                                        agent, ch_name_f2c, send_target, send_target_len, combined,
+                                        combined_len, send_text, send_text_len);
                                 }
                                 if (fmt_text)
                                     alloc->free(alloc->ctx, fmt_text, fmt_len + 1);
