@@ -2,14 +2,15 @@
  * Gmail channel — READ-ONLY ingest via Gmail REST API with OAuth2.
  * Polls unread emails, extracts From/Subject/body, marks as read.
  */
-#include "human/core/log.h"
 #include "human/channels/gmail.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
+#include "human/channels/channel_mock.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,13 +38,7 @@ typedef struct hu_gmail_ctx {
     char last_user_send_to[256];
     size_t last_user_send_to_len;
 #if HU_IS_TEST
-    char last_message[4096];
-    size_t last_message_len;
-    struct {
-        char session_key[128];
-        char content[4096];
-    } mock_msgs[8];
-    size_t mock_count;
+    hu_channel_mock_t mock;
 #endif
 } hu_gmail_ctx_t;
 
@@ -115,7 +110,7 @@ static hu_error_t refresh_access_token(hu_gmail_ctx_t *c) {
     if (resp.status_code < 200 || resp.status_code >= 300) {
         int blen = resp.body_len > 500 ? 500 : (int)resp.body_len;
         hu_log_info("gmail", NULL, "token refresh HTTP %ld: %.*s", (long)resp.status_code, blen,
-                resp.body ? resp.body : "(null)");
+                    resp.body ? resp.body : "(null)");
         if (resp.owned && resp.body)
             hu_http_response_free(c->alloc, &resp);
         return HU_ERR_PROVIDER_AUTH;
@@ -327,14 +322,11 @@ static hu_error_t gmail_send(void *ctx, const char *target, size_t target_len, c
         return HU_ERR_INVALID_ARGUMENT;
 
 #if HU_IS_TEST
-    size_t len = message_len > 4095 ? 4095 : message_len;
-    if (len > 0)
-        memcpy(c->last_message, message, len);
-    c->last_message[len] = '\0';
-    c->last_message_len = len;
+    hu_channel_mock_record_send(&c->mock, message, message_len);
     {
-        size_t tl = target_len < sizeof(c->last_user_send_to) - 1 ? target_len
-                                                                  : sizeof(c->last_user_send_to) - 1;
+        size_t tl = target_len < sizeof(c->last_user_send_to) - 1
+                        ? target_len
+                        : sizeof(c->last_user_send_to) - 1;
         if (target && tl > 0)
             memcpy(c->last_user_send_to, target, tl);
         c->last_user_send_to[tl] = '\0';
@@ -386,8 +378,7 @@ static hu_error_t gmail_send(void *ctx, const char *target, size_t target_len, c
         c->alloc->free(c->alloc->ctx, raw, raw_cap);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    size_t b64_len =
-        base64url_encode((const unsigned char *)raw, raw_len, b64, b64_cap);
+    size_t b64_len = base64url_encode((const unsigned char *)raw, raw_len, b64, b64_cap);
     c->alloc->free(c->alloc->ctx, raw, raw_cap);
 
     /* JSON body: {"raw": "<base64url>"} — escape quotes in b64? No, base64url has no quotes */
@@ -421,8 +412,8 @@ static hu_error_t gmail_send(void *ctx, const char *target, size_t target_len, c
     if (resp.owned && resp.body)
         hu_http_response_free(c->alloc, &resp);
     {
-        size_t tl = to_len < sizeof(c->last_user_send_to) - 1 ? to_len
-                                                                : sizeof(c->last_user_send_to) - 1;
+        size_t tl =
+            to_len < sizeof(c->last_user_send_to) - 1 ? to_len : sizeof(c->last_user_send_to) - 1;
         memcpy(c->last_user_send_to, target, tl);
         c->last_user_send_to[tl] = '\0';
         c->last_user_send_to_len = tl;
@@ -745,14 +736,14 @@ hu_error_t hu_gmail_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_lo
     *out_count = 0;
 
 #if HU_IS_TEST
-    if (c->mock_count > 0) {
-        size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
+    if (c->mock.count > 0) {
+        size_t n = c->mock.count < max_msgs ? c->mock.count : max_msgs;
         for (size_t i = 0; i < n; i++) {
-            memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
-            memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
+            memcpy(msgs[i].session_key, c->mock.msgs[i].session_key, 128);
+            memcpy(msgs[i].content, c->mock.msgs[i].content, 4096);
         }
         *out_count = n;
-        c->mock_count = 0;
+        c->mock.count = 0;
         return HU_OK;
     }
     return HU_OK;
@@ -913,25 +904,14 @@ hu_error_t hu_gmail_test_inject_mock(hu_channel_t *ch, const char *session_key,
     if (!ch || !ch->ctx)
         return HU_ERR_INVALID_ARGUMENT;
     hu_gmail_ctx_t *c = (hu_gmail_ctx_t *)ch->ctx;
-    if (c->mock_count >= 8)
-        return HU_ERR_OUT_OF_MEMORY;
-    size_t i = c->mock_count++;
-    size_t sk = session_key_len > 127 ? 127 : session_key_len;
-    size_t ct = content_len > 4095 ? 4095 : content_len;
-    if (session_key && sk > 0)
-        memcpy(c->mock_msgs[i].session_key, session_key, sk);
-    c->mock_msgs[i].session_key[sk] = '\0';
-    if (content && ct > 0)
-        memcpy(c->mock_msgs[i].content, content, ct);
-    c->mock_msgs[i].content[ct] = '\0';
-    return HU_OK;
+    return hu_channel_mock_inject(&c->mock, session_key, session_key_len, content, content_len);
 }
 const char *hu_gmail_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
     hu_gmail_ctx_t *c = (hu_gmail_ctx_t *)ch->ctx;
     if (out_len)
-        *out_len = c->last_message_len;
-    return c->last_message;
+        *out_len = c->mock.last_message_len;
+    return c->mock.last_message;
 }
 #endif

@@ -192,6 +192,13 @@ else()
 endif()
 option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
+# Two finished features that no build could turn on until 2026-09-12: the
+# macros were tested in src/ but defined by no option.
+option(HU_ENABLE_VISION_OCR "Apple Vision OCR bridge for the vision_ocr tool (macOS only)" OFF)
+option(HU_ENABLE_VOICE_VAD_TIMING "Randomised 200-500 ms filler-to-reply delay on voice channels" OFF)
+if(HU_ENABLE_VOICE_VAD_TIMING)
+    add_compile_definitions(HU_ENABLE_VOICE_VAD_TIMING=1)
+endif()
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
 else()
@@ -1255,6 +1262,7 @@ set(HU_CORE_SOURCES
     src/channels/behavior_class.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
+    src/channels/channel_mock.c
     src/channels/channel_http.c
     src/channels/webhook.c
     src/security/policy_engine.c
@@ -2106,6 +2114,16 @@ if(APPLE)
     # New CBLAS headers; avoids -Wdeprecated-declarations on cblas_sgemm (macOS 13.3+).
     target_compile_definitions(human_core PRIVATE ACCELERATE_NEW_LAPACK=1)
 endif()
+if(HU_ENABLE_VISION_OCR)
+    if(APPLE)
+        enable_language(OBJC)
+        target_sources(human_core PRIVATE src/tools/vision_ocr_apple.m)
+        target_compile_definitions(human_core PRIVATE HU_ENABLE_VISION_OCR=1)
+        target_link_libraries(human_core PRIVATE "-framework Vision" "-framework AppKit" "-framework Foundation")
+    else()
+        message(WARNING "HU_ENABLE_VISION_OCR=ON has no effect off macOS (Apple Vision framework)")
+    endif()
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(X11 QUIET)
     if(X11_FOUND AND TARGET X11::Xtst)
@@ -2868,11 +2886,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
         target_compile_options(human PRIVATE -fvisibility=hidden)
         target_compile_options(human_core PRIVATE -fvisibility=hidden)
     endif()
-    if(APPLE)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
-    elseif(UNIX)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
-    endif()
+endif()
+
+# Dead-strip the product binary in EVERY build type. The 2026-09-10 review
+# found 1,038 exported functions unreachable from main() shipping in the
+# deployed daemon because only Release builds stripped them, while prod is
+# built from the dev preset. human_core already compiles with
+# -ffunction-sections, so this is free.
+if(APPLE)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+elseif(UNIX)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---
@@ -3369,6 +3393,7 @@ set(HU_TEST_SOURCES
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
+    tests/test_channel_mock.c
     tests/test_declarative_tools.c
     tests/test_skill_trust.c
     tests/test_agent_modules.c
@@ -4127,6 +4152,7 @@ list(APPEND HU_TEST_SOURCES
     # on the molora-daemon-wiring track; this de-registration unblocks the
     # configure step (the file no longer exists on disk).
     tests/test_contact_send_recency.c
+    tests/test_contact_send_recency_daemon.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are
     # de-registered here. All three were ghost-tests: present in

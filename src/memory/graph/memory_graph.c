@@ -2,9 +2,10 @@
  * AGI-S5 Multi-Graph Memory (MAGMA Pattern).
  * memory_nodes + memory_edges with semantic, temporal, entity, causal graph types.
  */
+#include "human/memory/memory_graph.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/memory_graph.h"
+#include "human/core/time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +17,7 @@
 #define HU_MEMORY_GRAPH_BFS_MAX 256
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 /* Simple content hash: first 32 bytes as hex (64 chars). If shorter, pad with sum. */
@@ -264,8 +265,8 @@ hu_error_t hu_memory_graph_find_bridges(hu_memory_graph_t *g, int64_t node_a, in
     const char *neighbor_sql = "SELECT target_id FROM memory_edges WHERE source_id = ?";
 
     for (int hop = 0; hop < 3; hop++) {
-        size_t na =
-            (qa_tail >= qa_head) ? (qa_tail - qa_head) : (HU_MEMORY_GRAPH_BFS_MAX - qa_head + qa_tail);
+        size_t na = (qa_tail >= qa_head) ? (qa_tail - qa_head)
+                                         : (HU_MEMORY_GRAPH_BFS_MAX - qa_head + qa_tail);
         for (size_t i = 0; i < na && from_a_count < HU_MEMORY_GRAPH_BFS_MAX; i++) {
             int64_t cur = qa[qa_head++];
             if (qa_head >= HU_MEMORY_GRAPH_BFS_MAX)
@@ -294,8 +295,8 @@ hu_error_t hu_memory_graph_find_bridges(hu_memory_graph_t *g, int64_t node_a, in
             sqlite3_finalize(stmt);
         }
 
-        size_t nb =
-            (qb_tail >= qb_head) ? (qb_tail - qb_head) : (HU_MEMORY_GRAPH_BFS_MAX - qb_head + qb_tail);
+        size_t nb = (qb_tail >= qb_head) ? (qb_tail - qb_head)
+                                         : (HU_MEMORY_GRAPH_BFS_MAX - qb_head + qb_tail);
         for (size_t i = 0; i < nb && from_b_count < HU_MEMORY_GRAPH_BFS_MAX; i++) {
             int64_t cur = qb[qb_head++];
             if (qb_head >= HU_MEMORY_GRAPH_BFS_MAX)
@@ -381,7 +382,7 @@ const char *hu_memory_graph_type_name(hu_memory_graph_type_t type) {
 }
 
 hu_error_t hu_memory_graph_ingest(hu_memory_graph_t *g, const char *content, size_t content_len,
-                                   int64_t timestamp) {
+                                  int64_t timestamp) {
     if (!g || !g->db || !content || content_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -394,8 +395,8 @@ hu_error_t hu_memory_graph_ingest(hu_memory_graph_t *g, const char *content, siz
     int64_t window = 5 * 60 * 1000;
     int64_t cutoff = timestamp > window ? timestamp - window : 0;
 
-    const char *recent_sql =
-        "SELECT id FROM memory_nodes WHERE id != ? AND created_at >= ? ORDER BY created_at DESC LIMIT 5";
+    const char *recent_sql = "SELECT id FROM memory_nodes WHERE id != ? AND created_at >= ? ORDER "
+                             "BY created_at DESC LIMIT 5";
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(g->db, recent_sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(stmt, 1, new_id);
@@ -438,8 +439,8 @@ hu_error_t hu_memory_graph_ingest(hu_memory_graph_t *g, const char *content, siz
 }
 
 hu_error_t hu_memory_graph_build_context(hu_memory_graph_t *g, hu_allocator_t *alloc,
-                                          int64_t node_id, int max_hops,
-                                          char **out, size_t *out_len) {
+                                         int64_t node_id, int max_hops, char **out,
+                                         size_t *out_len) {
     if (!g || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -450,17 +451,19 @@ hu_error_t hu_memory_graph_build_context(hu_memory_graph_t *g, hu_allocator_t *a
     size_t total = 0;
 
     /* Traverse each graph type and collect results */
-    hu_memory_graph_type_t types[] = {HU_GRAPH_SEMANTIC, HU_GRAPH_TEMPORAL,
-                                       HU_GRAPH_ENTITY, HU_GRAPH_CAUSAL};
+    hu_memory_graph_type_t types[] = {HU_GRAPH_SEMANTIC, HU_GRAPH_TEMPORAL, HU_GRAPH_ENTITY,
+                                      HU_GRAPH_CAUSAL};
     for (int t = 0; t < 4 && total < 32; t++) {
         hu_memory_node_t buf[8];
         size_t count = 0;
-        if (hu_memory_graph_traverse(g, node_id, types[t], max_hops, buf,
-                                      8, &count) == HU_OK) {
+        if (hu_memory_graph_traverse(g, node_id, types[t], max_hops, buf, 8, &count) == HU_OK) {
             for (size_t i = 0; i < count && total < 32; i++) {
                 bool dup = false;
                 for (size_t j = 0; j < total; j++)
-                    if (results[j].id == buf[i].id) { dup = true; break; }
+                    if (results[j].id == buf[i].id) {
+                        dup = true;
+                        break;
+                    }
                 if (!dup)
                     results[total++] = buf[i];
             }
@@ -482,8 +485,8 @@ hu_error_t hu_memory_graph_build_context(hu_memory_graph_t *g, hu_allocator_t *a
     size_t pos = 0;
     for (size_t i = 0; i < total; i++) {
         int n = snprintf(buf + pos, cap - pos + 1, "- [%s] %.*s\n",
-                         hu_memory_graph_type_name(results[i].type),
-                         (int)results[i].preview_len, results[i].content_preview);
+                         hu_memory_graph_type_name(results[i].type), (int)results[i].preview_len,
+                         results[i].content_preview);
         if (n > 0 && pos + (size_t)n < cap)
             pos += (size_t)n;
     }
