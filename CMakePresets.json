@@ -32,6 +32,17 @@
             }
         },
         {
+            "name": "prod",
+            "displayName": "Production daemon (dev feature set, no ASan, RelWithDebInfo)",
+            "description": "What scripts/install-human-daemon.sh installs. Same feature set as `dev` so every doctor check and gate behaves identically; differs only in build type and no sanitizer. Until 2026-09-12 prod ran the `dev` binary (Debug + AddressSanitizer: 432 asan.log files, 1.15 GB RSS).",
+            "inherits": "dev",
+            "binaryDir": "${sourceDir}/build-prod",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "HU_ENABLE_ASAN": "OFF"
+            }
+        },
+        {
             "name": "test",
             "displayName": "Fast iteration (no ASan)",
             "binaryDir": "${sourceDir}/build-test",
@@ -155,6 +166,11 @@
         {
             "name": "dev",
             "configurePreset": "dev",
+            "jobs": 0
+        },
+        {
+            "name": "prod",
+            "configurePreset": "prod",
             "jobs": 0
         },
         {

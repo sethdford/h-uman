@@ -24,7 +24,7 @@
 
 set -eu
 
-MAX_FN_BASELINE=10087   # hu_service_run, src/daemon.c, measured 2026-09-12
+MAX_FN_BASELINE=9534    # hu_service_run, src/daemon.c, after the 2026-09-12 rich-media + voice-reply carves
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

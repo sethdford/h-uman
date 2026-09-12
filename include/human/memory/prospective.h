@@ -25,19 +25,11 @@ typedef struct hu_prospective_entry {
     int64_t created_at;
 } hu_prospective_entry_t;
 
-hu_error_t hu_prospective_store(sqlite3 *db, const char *trigger_type, size_t tt_len,
-                                const char *trigger_value, size_t tv_len,
-                                const char *action, size_t action_len,
-                                const char *contact_id, size_t cid_len, int64_t expires_at,
-                                int64_t *out_id);
-
 hu_error_t hu_prospective_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
-                                        const char *trigger_type, const char *trigger_value,
-                                        size_t tv_len, const char *contact_id, size_t cid_len,
-                                        int64_t now_ts, hu_prospective_entry_t **out,
-                                        size_t *out_count);
-
-hu_error_t hu_prospective_mark_fired(sqlite3 *db, int64_t id);
+                                         const char *trigger_type, const char *trigger_value,
+                                         size_t tv_len, const char *contact_id, size_t cid_len,
+                                         int64_t now_ts, hu_prospective_entry_t **out,
+                                         size_t *out_count);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Prospective tasks — time/event-triggered scheduled actions
@@ -54,19 +46,6 @@ typedef struct hu_prospective_task {
     int64_t created_at;
     int64_t fired_at;
 } hu_prospective_task_t;
-
-hu_error_t hu_prospective_schedule(sqlite3 *db, const char *description, size_t desc_len,
-                                   const char *trigger_type, size_t tt_len,
-                                   const char *trigger_value, size_t tv_len,
-                                   double priority, int64_t *out_id);
-
-hu_error_t hu_prospective_task_check_triggers(hu_allocator_t *alloc, sqlite3 *db,
-                                              const char *trigger_type,
-                                              const char *trigger_value, size_t tv_len,
-                                              int64_t now_ts, hu_prospective_task_t **out,
-                                              size_t *out_count);
-
-hu_error_t hu_prospective_task_mark_fired(sqlite3 *db, int64_t id);
 
 #endif /* HU_ENABLE_SQLITE */
 
