@@ -319,6 +319,8 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         hu_json_get_bool(obj, "prompt_cache", cfg->agent.prompt_cache_enabled);
     cfg->agent.agent_comm_enabled =
         hu_json_get_bool(obj, "agent_comm", cfg->agent.agent_comm_enabled);
+    cfg->agent.chain_of_thought =
+        hu_json_get_bool(obj, "chain_of_thought", cfg->agent.chain_of_thought);
     const char *ce_type = hu_json_get_string(obj, "context_engine");
     if (ce_type) {
         if (cfg->agent.context_engine_type)

@@ -201,6 +201,7 @@ typedef struct hu_agent_config {
     bool agent_comm_enabled;
     uint32_t best_of_n;        /* best-of-N candidates (0 or 1 = disabled, max 5) */
     char *context_engine_type; /* "legacy" (default) or "rag" */
+    bool chain_of_thought;     /* inject reasoning instructions into the prompt (default true) */
     /* Claude Code feature integration */
     uint8_t permission_level;       /* 0=ReadOnly, 1=WorkspaceWrite, 2=DangerFullAccess */
     bool session_auto_save;         /* auto-save session after each turn */

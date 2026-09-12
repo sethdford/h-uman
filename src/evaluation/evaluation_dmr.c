@@ -7,8 +7,9 @@
  * regression gate's recall@10 threshold (3pt drop) can be exercised offline.
  */
 
-#include "human/evaluation/evaluation.h"
 #include "evaluation_internal.h"
+#include "human/core/time.h"
+#include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -19,7 +20,7 @@
 #include <string.h>
 #include <time.h>
 
-#define DMR_DIM 8
+#define DMR_DIM     8
 #define DMR_INDEX_N 20
 #define DMR_QUERY_N 5
 
@@ -130,7 +131,7 @@ static bool dmr_available(void *ctx) {
 }
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 static hu_error_t dmr_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {
@@ -159,11 +160,14 @@ static hu_error_t dmr_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_re
     double r10 = (double)hit_at_10 / (double)DMR_QUERY_N;
 
     err = hu_evaluation_report_add_metric(alloc, out, "recall_at_1", r1, DMR_QUERY_N);
-    if (err != HU_OK) goto fail;
+    if (err != HU_OK)
+        goto fail;
     err = hu_evaluation_report_add_metric(alloc, out, "recall_at_5", r5, DMR_QUERY_N);
-    if (err != HU_OK) goto fail;
+    if (err != HU_OK)
+        goto fail;
     err = hu_evaluation_report_add_metric(alloc, out, "recall_at_10", r10, DMR_QUERY_N);
-    if (err != HU_OK) goto fail;
+    if (err != HU_OK)
+        goto fail;
 
     out->prompts_total = DMR_QUERY_N;
     out->prompts_passed = hit_at_1; /* count "completely correct" by recall@1 */

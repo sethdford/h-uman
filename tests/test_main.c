@@ -90,6 +90,7 @@ void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
+void run_channel_mock_tests(void);
 /* Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers. */
 void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
@@ -995,6 +996,17 @@ void run_channel_overlay_apply_tests(void);
 #endif
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
+/* 2026-09-10 review: these six suites were compiled (or, for the last two,
+ * not even listed in CMake) but never called from main(). */
+void run_sse_parser_tests(void);
+void run_contact_send_recency_daemon_tests(void);
+#ifdef HU_ENABLE_ML
+void run_ml_scripts_dir_tests(void);
+#endif
+#ifdef HU_ENABLE_RL_FULL
+void run_daemon_reaction_poll_production_tests(void);
+void run_persona_rollout_tests(void);
+#endif
 #ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
 #endif
@@ -1009,7 +1021,10 @@ void run_sprint3_hybrid_recall_tests(void);
  * Activated briefly during merge resolution; produced 11 failures in
  * minimal-build (8 from missing parsers + 3 from cross-test state
  * pollution on the dedup channel). Re-add when the underlying
- * features land. */
+ * features land.
+ * allow-uncalled-suite: run_config_identity_links_tests: parsers not implemented (PR #115)
+ * allow-uncalled-suite: run_memory_session_scoping_tests: feature not implemented (PR #115)
+ * allow-uncalled-suite: run_imessage_outbound_dedup_tests: cross-test state pollution (PR #115) */
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1194,6 +1209,7 @@ int main(int argc, char **argv) {
     run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
+    run_channel_mock_tests();
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_imessage_caps_tests();
@@ -2035,6 +2051,15 @@ int main(int argc, char **argv) {
 #endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
+    run_sse_parser_tests();
+    run_contact_send_recency_daemon_tests();
+#ifdef HU_ENABLE_ML
+    run_ml_scripts_dir_tests();
+#endif
+#ifdef HU_ENABLE_RL_FULL
+    run_daemon_reaction_poll_production_tests();
+    run_persona_rollout_tests();
+#endif
 #ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
 #endif

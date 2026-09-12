@@ -65,6 +65,7 @@ for f in $FILES; do
             }
             if (gate > 0) {
                 gate++
+                if (match(line, "HU_SKIP_IF") || line ~ /^}/) { gate=0; next }  # honest skip / fn end
                 if (match(line, "HU_ASSERT")) {
                     printf("%s:%d: silent-pass antipattern — assertion gated on %s\n  gate: %s\n  assert: %s\n", FILENAME, gate_line, "(see .claude/rules/tests-that-pin-bugs.md)", gate_text, $0)
                     gate=0

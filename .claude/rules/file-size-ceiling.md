@@ -47,6 +47,17 @@ After a successful refactor that shrinks the largest file:
    is one commit behind the actual file size, locked at the moment the refactor
    landed.
 
+## Function length is a separate ratchet (added 2026-09-12)
+
+A file ceiling cannot see what is inside the file: when `src/daemon.c` was
+frozen at 12,313 lines, 10,087 of them were ONE function (`hu_service_run`,
+lines 2222-12308) and `hu_agent_turn` was 8,943. `scripts/check-function-length-ceiling.sh`
+measures the longest function body with clang's AST (brace counting is wrong
+by 20x here because of unbalanced braces across `#if` arms) and holds
+`MAX_FN_BASELINE`, lowered in the same commit as any refactor that shrinks
+the largest function. Wired into `.githooks/pre-commit` next to this gate;
+advisory when `build/compile_commands.json` is absent. Target: 300 lines.
+
 ## Related
 
 - `docs/plans/2026-05-29-ddd-bounded-contexts/phase-E2-daemon-service-lifecycle.md` — the

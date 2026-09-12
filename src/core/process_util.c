@@ -30,8 +30,12 @@ bool hu_process_self_exe_path(char *buf, size_t cap) {
     free(resolved);
     return ok;
 #elif defined(__linux__)
+    /* readlink() silently truncates; a result that fills the buffer is not a
+     * path we can trust. Reject it like the macOS arm does (n < cap). Found
+     * by test_self_exe_path_rejects_tiny_buffer the first time the RL test
+     * surface ran on Linux CI (2026-09-12). */
     ssize_t n = readlink("/proc/self/exe", buf, cap - 1);
-    if (n <= 0) {
+    if (n <= 0 || (size_t)n >= cap - 1) {
         buf[0] = '\0';
         return false;
     }
