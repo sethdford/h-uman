@@ -2,6 +2,27 @@
 
 **Status:** measurement shipped, prompt rule gated OFF (2026-09-06).
 
+## Nightly trend and the recorder cutover (2026-09-12)
+
+| night | n | JSD | twin neutral | intensity | top |
+|---|---|---|---|---|---|
+| 09-06 | 28 | 0.174 | 0.75 | 0.09 | sympathy |
+| 09-07 | 34 | 0.163 | 0.74 | 0.11 | sympathy |
+| 09-08 | 39 | 0.138 | 0.72 | 0.11 | sympathy |
+| 09-09 | 42 | 0.138 | 0.74 | 0.11 | sympathy |
+| 09-10 | 52 | 0.116 | 0.69 | 0.12 | amusement |
+| 09-12 | 76 | 0.122 | 0.70 | 0.14 | amusement |
+
+(09-11 deferred: judge down.) Converging toward the card (0.58 neutral,
+0.20 intensity, amusement first) with the rule OFF. Keep it OFF.
+
+Found while checking this: `production_outcomes.chosen` was the model's
+draft, recorded before the style governor and the send decision — some
+rows were never delivered at all. Fixed 2026-09-12 (the daemon records
+the delivered text from the send funnel). Verdicts above measure drafts;
+emotion labels barely move with casing/punctuation, but do not compare a
+pre- and post-cutover window as one series.
+
 ## First measurement (2026-09-06, judge GLM-4.5-Air-4bit on :8741)
 
 Seth's card: 60-day window, 964 messages in window, 300 judged, n=299

@@ -61,7 +61,7 @@ BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries can
 # any NEW discard still fails. Override the table only for the guard's own
 # smoke test.
 DISCARD_BASELINE_FILES=" src/agent/inspiration.c src/app/main_wasi.c src/context/context_engine_rag.c src/daemon/daemon_followup_sched.c src/daemon/daemon_proactive.c "
-DISCARD_BASELINE_COUNTS="${HU_SILENT_SUCCESS_COUNTS:- src/daemon.c:17 }"
+DISCARD_BASELINE_COUNTS="${HU_SILENT_SUCCESS_COUNTS:- src/daemon.c:16 }"
 
 fail=0
 

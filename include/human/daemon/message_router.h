@@ -104,6 +104,40 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
                                                  const struct hu_channel_loop_msg *msg,
                                                  const char *body, size_t body_len);
 
+/* Same, reporting whether TEXT reached the contact: false when the dispatch
+ * ended as a bare tapback, was dropped by the parrot guard, or failed. The
+ * underlying form (hu_daemon_dispatch_imessage_reply in human/daemon.h) has
+ * the same _ex variant. */
+hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
+    void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
+    const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
+    size_t body_len, bool *out_text_sent);
+struct hu_channel;
+struct hu_persona;
+struct hu_conversation_snapshot;
+hu_error_t hu_daemon_dispatch_imessage_reply_ex(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
+    bool *out_text_sent);
+
+/* Record one production_outcomes row for a reply that was actually DELIVERED,
+ * with the text exactly as sent (after the shaping stages and the dispatch
+ * decision). Until 2026-09-12 the reactive loop wrote this row when the model
+ * returned — before the quality retry, the style governor, the pre-send abort
+ * and the tapback/text dispatch — so `chosen` was ungoverned model text and
+ * turns that sent no text (or generated twice) still landed as replies; every
+ * consumer (DPO/KTO miners, eval_emotion_register, live-style queries) read it
+ * as delivered text. Call from the send funnel, BEFORE
+ * hu_daemon_register_reply_for_reactions (which attaches the message_ref to
+ * this row). HU_OK no-op when the agent has no collector, the text or prompt
+ * is empty; the SQLite write error otherwise (logged). */
+hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
+                                            const char *target, size_t target_len,
+                                            const char *prompt, size_t prompt_len, const char *text,
+                                            size_t text_len);
+
 #ifdef __cplusplus
 }
 #endif
