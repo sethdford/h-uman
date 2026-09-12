@@ -999,10 +999,14 @@ void run_contact_send_recency_tests(void);
 /* 2026-09-10 review: these six suites were compiled (or, for the last two,
  * not even listed in CMake) but never called from main(). */
 void run_sse_parser_tests(void);
+void run_contact_send_recency_daemon_tests(void);
+#ifdef HU_ENABLE_ML
 void run_ml_scripts_dir_tests(void);
+#endif
+#ifdef HU_ENABLE_RL_FULL
 void run_daemon_reaction_poll_production_tests(void);
 void run_persona_rollout_tests(void);
-void run_contact_send_recency_daemon_tests(void);
+#endif
 #ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
 #endif
@@ -2048,10 +2052,14 @@ int main(int argc, char **argv) {
     run_filler_recency_tests();
     run_contact_send_recency_tests();
     run_sse_parser_tests();
+    run_contact_send_recency_daemon_tests();
+#ifdef HU_ENABLE_ML
     run_ml_scripts_dir_tests();
+#endif
+#ifdef HU_ENABLE_RL_FULL
     run_daemon_reaction_poll_production_tests();
     run_persona_rollout_tests();
-    run_contact_send_recency_daemon_tests();
+#endif
 #ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
 #endif
