@@ -9177,17 +9177,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     turing_rejected_resp = NULL;
                 }
 
-                /* Text naturalizer: lowercase first char, strip trailing period */
-                if (err == HU_OK && response && response_len > 0) {
-                    if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
-                        response[1] >= 'a' && response[1] <= 'z' && response[0] != 'I') {
-                        response[0] = (char)(response[0] + 32);
-                    }
-                    if (response_len > 1 && response[response_len - 1] == '.') {
-                        response[response_len - 1] = '\0';
-                        response_len--;
-                    }
-                }
+                /* The old unconditional "text naturalizer" (lowercase the first
+                 * letter, strip every trailing period) was removed 2026-09-12:
+                 * casing and terminal punctuation are owned by the style
+                 * governor (hu_daemon_shape_text_inplace, below) at the rates
+                 * measured on the persona's style card. */
 
                 /* Replay learning: analyze conversation and store insights for future prompts.
                  * Skip in llm_decides mode — post-turn analysis is too slow. */
