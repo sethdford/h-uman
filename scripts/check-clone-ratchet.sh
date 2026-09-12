@@ -21,7 +21,8 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11447   # measured 2026-09-05 on merge of #386 (hybrid RRF key fix) with main
+CLONE_BASELINE=11147   # 2026-09-12: #include lines no longer count (metric change, not comparable to
+                       # earlier baselines); channel mock harness + clock + JSON-locator copies folded
 # prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
                        # helpers with their callers retired three windows
 # prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser
@@ -66,6 +67,7 @@ trap "rm -f '$tmp_normalized'" EXIT
                 /^[[:space:]]*\/\// { next }              # C++ comments
                 /^[[:space:]]*\*/ { next }                # block comment lines
                 /^[[:space:]]*\/\*/ { next }              # block comment start
+                /^[[:space:]]*#include/ { next }          # include blocks are not clones (2026-09-12)
                 {
                     # Normalize: strip whitespace, collapse internal spaces
                     $0 = $0

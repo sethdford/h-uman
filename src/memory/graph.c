@@ -1,6 +1,7 @@
 #include "human/memory/graph.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/core/time.h"
 #include "human/memory/conflict_resolver.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/graph_state.h"
@@ -42,7 +43,7 @@ struct hu_graph {
 #ifdef HU_ENABLE_SQLITE
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0

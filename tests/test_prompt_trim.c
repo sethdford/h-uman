@@ -235,8 +235,8 @@ static char *build_over_budget_prompt(size_t head_bytes, size_t recall_bytes, si
 
 static void test_cap_apply_keeps_reserved_rules_tail_and_fits_budget(void) {
     size_t len = 0;
-    /* 15,500 B head + 1,200 B recall + rules > 16,384 B budget. */
-    char *buf = build_over_budget_prompt(15500, 1200, &len);
+    /* (budget - 884) B head + 1,200 B recall + rules > budget, whatever the budget is. */
+    char *buf = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
     HU_ASSERT_GT((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
     size_t new_len =
         hu_prompt_positional_cap_apply(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);
@@ -310,7 +310,7 @@ static void test_cap_with_tail_appends_when_under_budget(void) {
 static void test_cap_with_tail_over_budget_cuts_middle_keeps_guard_then_rules(void) {
     hu_allocator_t a = hu_system_allocator();
     size_t len = 0;
-    char *tmp = build_over_budget_prompt(15500, 1200, &len);
+    char *tmp = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
     char *buf = owned_copy(&a, tmp, len);
     free(tmp);
     HU_ASSERT_GT((long)len, (long)HU_PROMPT_TRIM_BUDGET_BYTES);
@@ -351,7 +351,7 @@ static void test_cap_with_tail_skips_when_block_already_present(void) {
 static void test_cap_with_tail_null_tail_matches_plain_cap_apply(void) {
     hu_allocator_t a = hu_system_allocator();
     size_t len = 0;
-    char *tmp = build_over_budget_prompt(15500, 1200, &len);
+    char *tmp = build_over_budget_prompt((size_t)HU_PROMPT_TRIM_BUDGET_BYTES - 884, 1200, &len);
     char *expect = strdup(tmp);
     size_t elen =
         hu_prompt_positional_cap_apply(expect, len, HU_PROMPT_TRIM_BUDGET_BYTES, K_RULES_LEN);

@@ -41,6 +41,7 @@ void run_init_outcome_tests(void);
 void run_init_dpo_bridge_tests(void);
 void run_prompt_budget_tests(void);
 void run_prompt_budget_snapshot_tests(void);
+void run_daemon_maintenance_tests(void);
 void run_config_gated_subsystems_tests(void);
 void run_silent_disable_compliance_tests(void);
 void run_io_secure_tests(void);
@@ -89,6 +90,7 @@ void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
+void run_channel_mock_tests(void);
 /* Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers. */
 void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
@@ -373,6 +375,8 @@ void run_imessage_dispatcher_tests(void);
 void run_imessage_sticker_tests(void);
 void run_follow_up_tests(void);
 void run_followup_compose_tests(void);
+void run_persona_creator_preserve_tests(void);
+void run_check_persona_integrity_tests(void);
 void run_follow_up_daemon_integration_tests(void);
 void run_daemon_aloop_smoke_tests(void);
 void run_intelligence_tests(void);
@@ -461,6 +465,7 @@ void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
+void run_contact_insights_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
 void run_emotional_residue_repo_tests(void);
 void run_emotional_state_repo_tests(void);
@@ -572,8 +577,6 @@ void run_arbitrator_tests(void);
 void run_salience_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
-void run_prospective_tests(void);
-void run_prospective_memory_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
@@ -584,7 +587,6 @@ void run_cognitive_tests(void);
 void run_cognitive_load_tests(void);
 void run_phase9_integration_tests(void);
 #endif
-void run_deep_memory_tests(void);
 void run_compression_tests(void);
 void run_proactive_ext_tests(void);
 void run_degradation_tests(void);
@@ -672,9 +674,7 @@ void run_dynamic_decomposition_tests(void);
 void run_agent_matching_tests(void);
 void run_agent_communication_tests(void);
 void run_mcts_planner_tests(void);
-void run_world_model_graph_tests(void);
 void run_world_simulation_tests(void);
-void run_world_context_tests(void);
 void run_peripheral_ctrl_tests(void);
 void run_value_learning_tests(void);
 void run_goal_engine_tests(void);
@@ -812,6 +812,9 @@ void run_relationship_tone_tests(void);
 void run_persona_head_gate_tests(void);
 void run_state_file_tests(void);
 void run_daemon_followup_sched_tests(void);
+void run_daemon_rich_media_tests(void);
+void run_daemon_voice_reply_tests(void);
+void run_prospective_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
@@ -984,11 +987,24 @@ void run_persona_encryption_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
 void run_style_card_tests(void);
+void run_card_file_tests(void);
+void run_emotion_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
 #endif
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
+/* 2026-09-10 review: these six suites were compiled (or, for the last two,
+ * not even listed in CMake) but never called from main(). */
+void run_sse_parser_tests(void);
+void run_contact_send_recency_daemon_tests(void);
+#ifdef HU_ENABLE_ML
+void run_ml_scripts_dir_tests(void);
+#endif
+#ifdef HU_ENABLE_RL_FULL
+void run_daemon_reaction_poll_production_tests(void);
+void run_persona_rollout_tests(void);
+#endif
 #ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
 #endif
@@ -1003,7 +1019,10 @@ void run_sprint3_hybrid_recall_tests(void);
  * Activated briefly during merge resolution; produced 11 failures in
  * minimal-build (8 from missing parsers + 3 from cross-test state
  * pollution on the dedup channel). Re-add when the underlying
- * features land. */
+ * features land.
+ * allow-uncalled-suite: run_config_identity_links_tests: parsers not implemented (PR #115)
+ * allow-uncalled-suite: run_memory_session_scoping_tests: feature not implemented (PR #115)
+ * allow-uncalled-suite: run_imessage_outbound_dedup_tests: cross-test state pollution (PR #115) */
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1139,6 +1158,7 @@ int main(int argc, char **argv) {
     run_init_dpo_bridge_tests();
     run_prompt_budget_tests();
     run_prompt_budget_snapshot_tests();
+    run_daemon_maintenance_tests();
     run_config_gated_subsystems_tests();
     run_silent_disable_compliance_tests();
     run_io_secure_tests();
@@ -1187,6 +1207,7 @@ int main(int argc, char **argv) {
     run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
+    run_channel_mock_tests();
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_imessage_caps_tests();
@@ -1442,6 +1463,8 @@ int main(int argc, char **argv) {
     run_imessage_sticker_tests();
     run_follow_up_tests();
     run_followup_compose_tests();
+    run_persona_creator_preserve_tests();
+    run_check_persona_integrity_tests();
     run_follow_up_daemon_integration_tests();
     run_daemon_aloop_smoke_tests();
     run_intelligence_tests();
@@ -1527,6 +1550,7 @@ int main(int argc, char **argv) {
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
+    run_contact_insights_repo_tests();
     run_emotional_moments_repo_tests();
     run_emotional_residue_repo_tests();
     run_emotional_state_repo_tests();
@@ -1631,8 +1655,6 @@ int main(int argc, char **argv) {
     run_planning_tests();
     run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_prospective_tests();
-    run_prospective_memory_tests();
     run_emotional_residue_tests();
     run_consolidation_engine_tests();
 #endif
@@ -1644,7 +1666,6 @@ int main(int argc, char **argv) {
     run_cognitive_load_tests();
     run_phase9_integration_tests();
 #endif
-    run_deep_memory_tests();
     run_compression_tests();
     run_proactive_ext_tests();
     run_degradation_tests();
@@ -1730,9 +1751,7 @@ int main(int argc, char **argv) {
     run_agent_matching_tests();
     run_agent_communication_tests();
     run_mcts_planner_tests();
-    run_world_model_graph_tests();
     run_world_simulation_tests();
-    run_world_context_tests();
     run_agent_registry_tests();
     run_pwa_tests();
     run_music_tests();
@@ -1850,6 +1869,9 @@ int main(int argc, char **argv) {
     run_persona_head_gate_tests();
     run_state_file_tests();
     run_daemon_followup_sched_tests();
+    run_daemon_rich_media_tests();
+    run_daemon_voice_reply_tests();
+    run_prospective_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();
@@ -2018,11 +2040,22 @@ int main(int argc, char **argv) {
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
     run_style_card_tests();
+    run_card_file_tests();
+    run_emotion_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();
 #endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
+    run_sse_parser_tests();
+    run_contact_send_recency_daemon_tests();
+#ifdef HU_ENABLE_ML
+    run_ml_scripts_dir_tests();
+#endif
+#ifdef HU_ENABLE_RL_FULL
+    run_daemon_reaction_poll_production_tests();
+    run_persona_rollout_tests();
+#endif
 #ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
 #endif

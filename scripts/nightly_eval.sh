@@ -56,6 +56,7 @@ RETAIN=30
 MULTITURN="${REPO}/scripts/eval_multiturn_local.py"
 FIDELITY="${REPO}/scripts/eval_fidelity_nightly.py"
 BLIND_AB="${REPO}/scripts/eval_blinded_ab.py"
+EMOTION_REGISTER="${REPO}/scripts/eval_emotion_register.py"
 BLIND_AB_GATE="${REPO}/docs/evaluation/blind_ab_gate.json"
 GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
 
@@ -255,7 +256,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
   log "  binoc-dpo:     HU_NIGHTLY_BINOCULARS_DPO=$HU_NIGHTLY_BINOCULARS_DPO (0=off, 1=shadow, 2=live)"
   log "  fidelity mode: $(fidelity_mode)"
-  log "  plan: [1/3] multiturn (needs :8741), [2/3] fidelity (served via :8741; in-process only if DOWN), [3/3] blind-ab gate refresh (REAL measurement), serial"
+  log "  plan: [1/4] multiturn (needs :8741), [2/4] fidelity (served via :8741; in-process only if DOWN), [3/4] blind-ab gate refresh (REAL measurement), [4/4] emotion register (local judge on :8741), serial"
   exit 0
 fi
 
@@ -281,7 +282,7 @@ log "=== nightly_eval start (smoke=$SMOKE) ==="
 # ---- 1) rung-3 multi-turn coherence (uses :8741) ----------------------------
 MT_OUT="${LOG_DIR}/eval-multiturn-local.json"
 if server_up; then
-  log "[1/3] multi-turn: :8741 UP — running"
+  log "[1/4] multi-turn: :8741 UP — running"
   MT_ARGS=(--server-url "$SERVER_URL" --output-json "$MT_OUT")
   if [ "$SMOKE" -eq 1 ]; then
     MT_ARGS+=(--limit-scenarios 1 --max-turns 3)
@@ -290,10 +291,10 @@ if server_up; then
   set +e
   "$PY" "$MULTITURN" "${MT_ARGS[@]}"; mt_rc=$?
   set -e
-  log "[1/3] multi-turn exit=$mt_rc ($(case $mt_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED-server-down;;3)echo SKIPPED-judge;;*)echo "rc=$mt_rc";;esac))"
+  log "[1/4] multi-turn exit=$mt_rc ($(case $mt_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED-server-down;;3)echo SKIPPED-judge;;*)echo "rc=$mt_rc";;esac))"
   archive_verdict multiturn "$MT_OUT"
 else
-  log "[1/3] multi-turn: :8741 DOWN — deferring (mlx-server not running)"
+  log "[1/4] multi-turn: :8741 DOWN — deferring (mlx-server not running)"
 fi
 
 # ---- 2) persona-fidelity SOTA gate (served through :8741; serial after #1) --
@@ -306,17 +307,17 @@ fi
 # in-process beside a live server; this wrapper adds the trainer check for the
 # server-DOWN case, a resource sampler, and a restore safety net.
 if [ "$SMOKE" -eq 1 ]; then
-  log "[2/3] fidelity: skipped (--smoke)"
+  log "[2/4] fidelity: skipped (--smoke)"
 else
   FID_OUT="${LOG_DIR}/eval-fidelity-nightly-latest.json"
   fid_mode=$(fidelity_mode)
   if [ "$fid_mode" = "skip-trainer" ]; then
     fid_rc=3
-    log "[2/3] fidelity: SKIPPED FIDELITY_SKIP — :8741 is down but a trainer holds the model (never two loaders)"
+    log "[2/4] fidelity: SKIPPED FIDELITY_SKIP — :8741 is down but a trainer holds the model (never two loaders)"
   else
     fid_base_url=""
     [ "$fid_mode" = "served" ] && fid_base_url="$SERVER_URL"
-    log "[2/3] fidelity: mode=$fid_mode serving-adapter=${ADAPTER:-'(unresolved)'} — running"
+    log "[2/4] fidelity: mode=$fid_mode serving-adapter=${ADAPTER:-'(unresolved)'} — running"
     start_resource_sampler
     set +e
     HU_MLX_BASE_URL="$fid_base_url" "$PY" "$FIDELITY" \
@@ -325,21 +326,21 @@ else
       --log-dir "$LOG_DIR"; fid_rc=$?
     set -e
     fid_resources=$(stop_resource_sampler)
-    log "[2/3] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
-    log "[2/3] fidelity resources: ${fid_resources:-'(no samples)'}"
+    log "[2/4] fidelity exit=$fid_rc ($(case $fid_rc in 0)echo PASS;;1)echo FAIL;;2)echo DEFERRED;;3)echo SKIP-see-FIDELITY_SKIP-marker;;*)echo "rc=$fid_rc";;esac))"
+    log "[2/4] fidelity resources: ${fid_resources:-'(no samples)'}"
     peak=${fid_resources#peak_wired_gb=}; peak=${peak%% *}
     loaders=${fid_resources##*max_loaders=}
     if [ -n "$fid_resources" ] && { awk -v p="${peak:-0}" 'BEGIN{exit !(p>=75)}' || [ "${loaders:-0}" -gt 1 ]; }; then
-      log "[2/3] fidelity: RESOURCE_BREACH peak_wired_gb=$peak max_loaders=$loaders (limit: <75 GB, 1 loader)"
+      log "[2/4] fidelity: RESOURCE_BREACH peak_wired_gb=$peak max_loaders=$loaders (limit: <75 GB, 1 loader)"
     fi
     # Restore safety net — read the ARTIFACT (verdict JSON), not the log.
     if [ "$fid_mode" = "served" ] && [ -f "$FID_OUT" ] && \
        python3 -c 'import json,sys; g=json.load(open(sys.argv[1])).get("generation") or {}; sys.exit(0 if g.get("adapter_restored") is False else 1)' "$FID_OUT" 2>/dev/null; then
-      log "[2/3] fidelity: FIDELITY_RESTORE_FAILED reported by the harness — retrying restore of $ADAPTER from the wrapper"
+      log "[2/4] fidelity: FIDELITY_RESTORE_FAILED reported by the harness — retrying restore of $ADAPTER from the wrapper"
       if restore_serving_adapter "$ADAPTER"; then
-        log "[2/3] fidelity: serving adapter restored + verified by wrapper"
+        log "[2/4] fidelity: serving adapter restored + verified by wrapper"
       else
-        log "[2/3] fidelity: RESTORE STILL FAILED — :8741 may be serving the zero adapter; restore by hand: curl -X POST ${SERVER_URL}/v1/adapters/swap -d '{\"adapter_path\": \"$ADAPTER\"}'"
+        log "[2/4] fidelity: RESTORE STILL FAILED — :8741 may be serving the zero adapter; restore by hand: curl -X POST ${SERVER_URL}/v1/adapters/swap -d '{\"adapter_path\": \"$ADAPTER\"}'"
       fi
     fi
     archive_verdict fidelity "$FID_OUT"
@@ -359,33 +360,33 @@ fi
 # agent turn through the daemon, which builds the persona itself. Generation
 # still lands on :8741 underneath, so server_up remains a precondition.
 if [ "$SMOKE" -eq 1 ]; then
-  log "[3/3] blind-ab: skipped (--smoke)"
+  log "[3/4] blind-ab: skipped (--smoke)"
 else
   # Pre-flight: ground truth pairs, :8741 health, judge credentials
   stage3_skip=0
   if ! ground_truth_exists; then
-    log "[3/3] blind-ab: SKIPPED — ground truth missing or < ${GROUND_TRUTH_MIN_PAIRS} pairs (run scripts/extract_imessage_pairs.py)"
+    log "[3/4] blind-ab: SKIPPED — ground truth missing or < ${GROUND_TRUTH_MIN_PAIRS} pairs (run scripts/extract_imessage_pairs.py)"
     log "           path: $GROUND_TRUTH"
     log "           generate with: python3 $REPO/scripts/extract_imessage_pairs.py"
     stage3_skip=1
   fi
   if [ "$stage3_skip" -eq 0 ] && ! server_up; then
-    log "[3/3] blind-ab: SKIPPED — :8741 server not responding"
+    log "[3/4] blind-ab: SKIPPED — :8741 server not responding"
     stage3_skip=1
   fi
   if [ "$stage3_skip" -eq 0 ] && ! gateway_up; then
-    log "[3/3] blind-ab: SKIPPED — daemon gateway not responding at $(gateway_url)"
+    log "[3/4] blind-ab: SKIPPED — daemon gateway not responding at $(gateway_url)"
     log "           the gate measures the product via --gateway; start the daemon"
     log "           with --with-gateway, or set HU_GATEWAY_URL."
     stage3_skip=1
   fi
   if [ "$stage3_skip" -eq 0 ] && ! judge_creds_present; then
-    log "[3/3] blind-ab: SKIPPED — judge credentials unavailable (no GEMINI_API_KEY, no ADC)"
+    log "[3/4] blind-ab: SKIPPED — judge credentials unavailable (no GEMINI_API_KEY, no ADC)"
     stage3_skip=1
   fi
 
   if [ "$stage3_skip" -eq 0 ]; then
-    log "[3/3] blind-ab: all preconditions met — running REAL gate measurement"
+    log "[3/4] blind-ab: all preconditions met — running REAL gate measurement"
     # Capture the gate file state BEFORE the run
     gate_before=""
     [ -f "$BLIND_AB_GATE" ] && gate_before=$(cat "$BLIND_AB_GATE")
@@ -398,7 +399,7 @@ else
     "$PY" "$BLIND_AB" --gate --gateway $binoc_flag; ab_rc=$?
     set -e
 
-    log "[3/3] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"
+    log "[3/4] blind-ab exit=$ab_rc ($(case $ab_rc in 0)echo PASS;;1)echo FAIL;;*)echo "rc=$ab_rc";;esac))"
 
     # ---- Binoculars -> DPO miner (advisory; OFF by default) -----------------
     # Reads the per-trial scores eval_blinded_ab.py --binoculars merged into the
@@ -410,39 +411,62 @@ else
         dpo_mode_args="--live"
         dpo_mode_name="LIVE"
       fi
-      log "[3/3] binoc-dpo: mining in $dpo_mode_name mode"
+      log "[3/4] binoc-dpo: mining in $dpo_mode_name mode"
       set +e
       # shellcheck disable=SC2086  # dpo_mode_args is intentionally word-split
       "$PY" "$BINOC_DPO" --pairs "$BLIND_AB_RESULTS" $dpo_mode_args 2>&1 \
-        | while IFS= read -r line; do log "[3/3] binoc-dpo: $line"; done
+        | while IFS= read -r line; do log "[3/4] binoc-dpo: $line"; done
       set -e
     elif [ "$HU_NIGHTLY_BINOCULARS_DPO" -eq 0 ]; then
-      log "[3/3] binoc-dpo: OFF (HU_NIGHTLY_BINOCULARS_DPO=0)"
+      log "[3/4] binoc-dpo: OFF (HU_NIGHTLY_BINOCULARS_DPO=0)"
     fi
 
     # Auto-commit if the gate file changed
     if [ "$HU_NIGHTLY_AUTOPUSH" -eq 1 ] && [ -f "$BLIND_AB_GATE" ]; then
       gate_after=$(cat "$BLIND_AB_GATE")
       if [ "$gate_before" != "$gate_after" ]; then
-        log "[3/3] blind-ab: gate artifact changed — staging auto-commit"
+        log "[3/4] blind-ab: gate artifact changed — staging auto-commit"
         if git -C "$REPO" add "$BLIND_AB_GATE" 2>/dev/null; then
           if git -C "$REPO" commit -m "chore(eval): nightly blind-ab gate refresh" 2>/dev/null; then
             if git -C "$REPO" push origin main 2>/dev/null; then
-              log "[3/3] blind-ab: committed + pushed $BLIND_AB_GATE"
+              log "[3/4] blind-ab: committed + pushed $BLIND_AB_GATE"
             else
-              log "[3/3] blind-ab: committed but push failed — may need rebase"
+              log "[3/4] blind-ab: committed but push failed — may need rebase"
             fi
           else
-            log "[3/3] blind-ab: staging succeeded but commit failed (dirty tree?)"
+            log "[3/4] blind-ab: staging succeeded but commit failed (dirty tree?)"
           fi
         else
-          log "[3/3] blind-ab: could not stage $BLIND_AB_GATE"
+          log "[3/4] blind-ab: could not stage $BLIND_AB_GATE"
         fi
       else
-        log "[3/3] blind-ab: gate artifact unchanged, no commit needed"
+        log "[3/4] blind-ab: gate artifact unchanged, no commit needed"
       fi
     fi
   fi
+fi
+
+# ---- 4) emotional register vs the persona's emotion card (local judge) -------
+# Labels the twin's SENT iMessage replies (memory.db production_outcomes) with
+# the same :8741 judge that built ~/.human/personas/<persona>.emotion-card.json
+# and writes the Jensen-Shannon divergence + axis deltas. Measurement only —
+# it feeds the HU_EMOTION_REGISTER activation decision, never a gate. HTTP to
+# :8741 only (no second loader). exit 0=MEASURED 2=DEFERRED 3=REFUSED (no
+# card / judge mismatch / n < min) — all are "ran"; 2 and 3 write nothing.
+if [ "$SMOKE" -eq 1 ]; then
+  log "[4/4] emotion-register: skipped (--smoke)"
+elif ! [ -f "$EMOTION_REGISTER" ]; then
+  log "[4/4] emotion-register: SKIPPED — missing $EMOTION_REGISTER"
+elif server_up; then
+  ER_OUT="${LOG_DIR}/eval-emotion-register-latest.json"
+  log "[4/4] emotion-register: :8741 UP — running"
+  set +e
+  "$PY" "$EMOTION_REGISTER" --output-json "$ER_OUT"; er_rc=$?
+  set -e
+  log "[4/4] emotion-register exit=$er_rc ($(case $er_rc in 0)echo MEASURED;;2)echo DEFERRED-judge-down;;3)echo REFUSED-see-stderr;;*)echo "rc=$er_rc";;esac))"
+  [ "$er_rc" -eq 0 ] && archive_verdict emotion-register "$ER_OUT"
+else
+  log "[4/4] emotion-register: :8741 DOWN — deferring"
 fi
 
 log "=== nightly_eval done ==="

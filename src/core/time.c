@@ -32,3 +32,10 @@ void hu_time_set_test_override_ms(int64_t ms) {
     override_active = (ms > 0) ? 1 : 0;
 }
 #endif
+
+int64_t hu_time_wall_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+        return (int64_t)time(NULL) * 1000;
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}

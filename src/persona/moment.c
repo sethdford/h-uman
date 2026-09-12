@@ -405,34 +405,6 @@ static int64_t decide_defer_send(const hu_moment_t *m, const char *last_inbound_
     return next_8am_local_s(now_s, contact_tz);
 }
 
-/* Public agent-bridging wrapper.
- *
- * STATUS: stub. The plan assumed accessors like `hu_agent_persona`,
- * `hu_persona_overlay_for_channel`, `hu_agent_recent_history`,
- * `hu_contact_tz` would exist; an audit-verify-before-allege pass (per
- * ~/.claude/rules/audit-verify-before-allege.md) found none of these
- * symbols in the codebase, and there is no `hu_contact_t` type at all —
- * only `hu_contact_profile`, `hu_contact_baseline`, etc. The real bridge
- * to the daemon's reactive path lives in Phase 3 Task 3.2 (agent_turn.c
- * integration), where the call site has full context to pick the right
- * existing accessors (`hu_contact_send_recency_last_ts`, history loaded
- * via `load_conversation_history` in daemon.c, persona from the agent's
- * already-loaded state, etc.).
- *
- * Until Phase 3 lands, callers should use `hu_moment_compose_from_inputs`
- * directly. That entry point is the actual contract; this wrapper exists
- * only to satisfy the public header signature. */
-hu_error_t hu_moment_compose(const struct hu_agent_t *agent, const struct hu_contact_t *contact,
-                             const char *channel_id, int64_t now_s, hu_moment_t *out) {
-    (void)agent;
-    (void)contact;
-    (void)channel_id;
-    (void)now_s;
-    if (out == NULL)
-        return HU_ERR_INVALID_ARGUMENT;
-    return HU_ERR_NOT_SUPPORTED;
-}
-
 hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_persona_overlay_t *overlay,
                                          const struct hu_conversation_history_t *history,

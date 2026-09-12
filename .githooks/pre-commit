@@ -250,6 +250,18 @@ if [ -n "$staged_src_c" ] && [ -x "scripts/check-file-size-ceiling.sh" ]; then
     fi
 fi
 
+# Function-length ratchet (2026-09-12): the file-size gate cannot see a
+# 10,087-line function inside a frozen file. Advisory when clang or
+# build/compile_commands.json is missing.
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-function-length-ceiling.sh" ]; then
+    if ! sh scripts/check-function-length-ceiling.sh $staged_src_c; then
+        echo ""
+        echo "Pre-commit blocked: a function exceeds the function-length ratchet."
+        echo "Split it — see .claude/rules/file-size-ceiling.md."
+        exit 1
+    fi
+fi
+
 if [ -n "$staged_src_c" ] && [ -x "scripts/check-no-new-root-files.sh" ]; then
     if ! bash scripts/check-no-new-root-files.sh; then
         echo ""

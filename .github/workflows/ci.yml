@@ -79,6 +79,10 @@ jobs:
           enable-asan: "true"
           enable-curl: "true"
           enable-all-channels: "true"
+          # Mirror the dev preset's feature set so the ML / feeds / Cartesia /
+          # RL test surface (~370 registered tests) runs somewhere in CI. Before
+          # 2026-09-10 every job left HU_ENABLE_ML at its OFF default.
+          extra-cmake-flags: -DHU_ENABLE_ML=ON -DHU_ENABLE_FEEDS=ON -DHU_ENABLE_CARTESIA=ON -DHU_ENABLE_RL_FULL=ON
       - uses: ./.github/actions/run-tests
         with:
           asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
@@ -105,7 +109,9 @@ jobs:
             echo "::error::Could not parse test count from human_tests output (expected 'N/M passed')"
             exit 1
           fi
-          BASELINE=9771
+          # 2026-09-10 review: the guard sat at 9,771 against ~11,300 (Linux) /
+          # ~12,100 (macOS) real counts, so >1,500 tests could vanish unseen.
+          BASELINE=11200
           if [ "$COUNT" -lt "$BASELINE" ]; then
             echo "::error::Test count regression: $COUNT < $BASELINE baseline"
             exit 1
@@ -974,6 +980,11 @@ jobs:
           python3 scripts/test_fidelity_differentiation.py
       - name: Style-card measurement pins (hermetic, stdlib-only)
         run: python3 scripts/test_measure_style_card.py
+      # Emotional-register axis: fake judge, temp sqlite, temp persona dir.
+      # Pins that every refusal path (no card, judge mismatch, n < min, judge
+      # down, parse failures) writes NOTHING, and the JSD/aggregate math.
+      - name: Emotion-register measurement pins (hermetic, stdlib-only)
+        run: python3 scripts/test_emotion_register.py
       # Not stdlib-only: this suite is written against pytest fixtures
       # (monkeypatch / tmp_path / capsys), so pytest is installed for it.
       # Main went red on 2026-09-05 when it landed without this step.

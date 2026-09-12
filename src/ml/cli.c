@@ -3419,9 +3419,9 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
             printf("Usage: human ml rl-train --algorithm {dpo|simpo|orpo|grpo2} "
                    "[other flags...]\n"
                    "  --algorithm dpo    Delegate to existing DPO trainer\n"
-                   "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
-                   "  --algorithm orpo   Train via ORPO loss head (US-11.5)\n"
-                   "  --algorithm grpo2  (not yet implemented — exit 2)\n");
+                   "  --algorithm simpo  (not yet implemented — returns NOT_SUPPORTED)\n"
+                   "  --algorithm orpo   (not yet implemented — returns NOT_SUPPORTED)\n"
+                   "  --algorithm grpo2  (not yet implemented — returns NOT_SUPPORTED)\n");
             return HU_OK;
         }
         const char *v = get_opt(argv, argc, i, "--algorithm");

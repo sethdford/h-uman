@@ -1,0 +1,305 @@
+{
+  "measured_at": "2026-09-06T13:22:26",
+  "n_pairs": 36,
+  "contacts": 9,
+  "seconds": 84.4,
+  "off_mean": 0.75,
+  "on_mean": 0.778,
+  "delta": 0.028,
+  "improved": 10,
+  "worse": 6,
+  "tied": 20,
+  "off_share_any": 0.472,
+  "on_share_any": 0.528,
+  "human_reference": 2.134,
+  "pairs": [
+    {
+      "contact": "+12393005206",
+      "msg": "\u0001I know you said no and I truly do understand and",
+      "off": "hey \u2014 no need to explain. honestly thanks for respecting the boundary",
+      "on": "hey no worries \u2014 really appreciate you saying that",
+      "off_score": 0,
+      "on_score": 1
+    },
+    {
+      "contact": "+12393005206",
+      "msg": "Hope you live a wonderful life & take care!",
+      "off": "hey \u2014 thanks \u2014 you too",
+      "on": "hey thanks \u2014 you too. love ya",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+12393005206",
+      "msg": "Sounds good",
+      "off": "yeah for sure",
+      "on": "yeah for sure",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+12393005206",
+      "msg": "Can you please help with $1,600",
+      "off": "what's this about",
+      "on": "ugh dude that's rough. wish i could help but honestly my capacity is tapped right now \u2014 can't swing the full amount",
+      "off_score": 1,
+      "on_score": 2
+    },
+    {
+      "contact": "+13857220896",
+      "msg": "https://www.instagram.com/reel/DZNFjCzOv1Q/",
+      "off": "yo what the hell is this",
+      "on": "ah the reel \u2014 yeah that's wild. what even is this thing",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+13857220896",
+      "msg": "With Butt Boy? Oh dear, no Butt Boys here",
+      "off": "lol what \u2014 who's this",
+      "on": "lol what no way \u2014 not inviting the Butt Boy to this party",
+      "off_score": 0,
+      "on_score": 2
+    },
+    {
+      "contact": "+13857220896",
+      "msg": "Its been sent",
+      "off": "got it",
+      "on": "got it",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+13857220896",
+      "msg": "Patsyxnj@aol.com is the email address it's coming from Seth.",
+      "off": "got it \u2014 patsyxnj@aol.com",
+      "on": "ah yeah patsy \u2014 got the patent info",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+14846784914",
+      "msg": "Any plans for you tonight",
+      "off": "just working on some side stuff. what about you",
+      "on": "nah just messing around at home. maybe dive into some code later",
+      "off_score": 2,
+      "on_score": 2
+    },
+    {
+      "contact": "+14846784914",
+      "msg": "\ufffcplaying beef guns now",
+      "off": "ah the classic. what's your loadout",
+      "on": "lol what are we even doing",
+      "off_score": 0,
+      "on_score": 1
+    },
+    {
+      "contact": "+14846784914",
+      "msg": "Oh so close this is tough for me to leave him here :(",
+      "off": "damn that's rough. what's the situation?",
+      "on": "damn that's rough. love the little ones too much",
+      "off_score": 1,
+      "on_score": 1
+    },
+    {
+      "contact": "+14846784914",
+      "msg": "He did! we snugged all night \ud83e\udd79\u2764\ufe0f",
+      "off": "damn that sounds amazing",
+      "on": "damn that's the best. love it",
+      "off_score": 2,
+      "on_score": 0
+    },
+    {
+      "contact": "+14848158444",
+      "msg": "Can you give me a call",
+      "off": "ah shoot \u2014 what's up.",
+      "on": "whats up \u2014 what's this about",
+      "off_score": 0,
+      "on_score": 1
+    },
+    {
+      "contact": "+14848158444",
+      "msg": "Great yay",
+      "off": "ha what's up",
+      "on": "ha what's up",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+14848158444",
+      "msg": "OK, would you like to talk tomorrow?",
+      "off": "yeah for sure \u2014 what time works best",
+      "on": "yeah sure \u2014 what time works for you",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+14848158444",
+      "msg": "I also wanted to ask you if you run out of this property if you would allow me to manage it for extra income every month",
+      "off": "lol what \u2014 you want me to move out so you can manage my place",
+      "on": "yeah for sure \u2014 you've been great with everything. just text me when you're ready",
+      "off_score": 1,
+      "on_score": 2
+    },
+    {
+      "contact": "+18018285260",
+      "msg": "The guys are here to install it and say the piece are t here",
+      "off": "got it the pieces are there",
+      "on": "damn that sucks \u2014 hope they find them",
+      "off_score": 1,
+      "on_score": 2
+    },
+    {
+      "contact": "+18018285260",
+      "msg": "We need to understand this mechanical bed",
+      "off": "what's the issue with it",
+      "on": "what's the issue with it",
+      "off_score": 1,
+      "on_score": 1
+    },
+    {
+      "contact": "+18018285260",
+      "msg": "Is this pieces to it",
+      "off": "what are you talking about",
+      "on": "what are you talking about",
+      "off_score": 2,
+      "on_score": 2
+    },
+    {
+      "contact": "+18018285260",
+      "msg": "That roll up",
+      "off": "lol what are you talking about",
+      "on": "Oh the roll up blind? Yeah should be done tonight.",
+      "off_score": 2,
+      "on_score": 0
+    },
+    {
+      "contact": "+18018983303",
+      "msg": "She figured it out. The movers were idiots.",
+      "off": "ugh that's the worst. what did they break this time",
+      "on": "lol classic. mindy to the rescue",
+      "off_score": 0,
+      "on_score": 1
+    },
+    {
+      "contact": "+18018983303",
+      "msg": "Isn't this cute?",
+      "off": "lol what is it",
+      "on": "whatcha showing me",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+18018983303",
+      "msg": "And we went swimming.  We had a nice vacation at Seths. Lol",
+      "off": "lol yeah the pool was perfect.",
+      "on": "lol yeah your parents seemed to really love it. the pool was perfect",
+      "off_score": 1,
+      "on_score": 1
+    },
+    {
+      "contact": "+18018983303",
+      "msg": "Does the black coffee table have a glass top?",
+      "off": "no it's solid wood",
+      "on": "no it's solid wood. the glass one is in the spare bedroom",
+      "off_score": 0,
+      "on_score": 2
+    },
+    {
+      "contact": "+18562546742",
+      "msg": "Good luck!!!",
+      "off": "thanks \u2014 you got this",
+      "on": "thanks \u2014 appreciate it",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+18562546742",
+      "msg": "Nail broke yesterday these need to be redone BADDD",
+      "off": "damn that sucks \u2014 when can you get them redone",
+      "on": "damn that sucks. when can you get them fixed",
+      "off_score": 2,
+      "on_score": 2
+    },
+    {
+      "contact": "+18562546742",
+      "msg": "Im wfh today maybe i could help the day go by",
+      "off": "ah the classic wfh day \u2014 what's the plan",
+      "on": "ah what's the plan \u2014 studying or just grinding",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+18562546742",
+      "msg": "Oh wow nice!",
+      "off": "ha thanks \u2014 what's up",
+      "on": "whats up",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+447914633409",
+      "msg": "\ufffcThe worlds shittest guard dog - neighbours cat literally walked up behind him in the door and all he did was snore louder",
+      "off": "lol my cat would probably offer the neighbor's cat a snack",
+      "on": "lol classic dermot's cat",
+      "off_score": 2,
+      "on_score": 1
+    },
+    {
+      "contact": "+447914633409",
+      "msg": "It's so much fun",
+      "off": "lol what are we even talking about",
+      "on": "lol what's the fun thing",
+      "off_score": 2,
+      "on_score": 0
+    },
+    {
+      "contact": "+447914633409",
+      "msg": "https://gremlins.io/",
+      "off": "yo what is this \u2014 some kinda chaos monkey playground",
+      "on": "lol what is this \u2014 some sorta gremlin summoning site",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "+447914633409",
+      "msg": "https://theagentictekton.com/",
+      "off": "yo what's this \u2014 looks like some agentic dev stuff",
+      "on": "yo what's this \u2014 looks like some agi dev stuff",
+      "off_score": 1,
+      "on_score": 1
+    },
+    {
+      "contact": "edisonsford@icloud.com",
+      "msg": "Yo are you fine with me getting a septum piercing?",
+      "off": "lol what \u2014 you want me to sign off on your septum piercing",
+      "on": "yeah it's cool. honestly kinda hot",
+      "off_score": 0,
+      "on_score": 0
+    },
+    {
+      "contact": "edisonsford@icloud.com",
+      "msg": "Is Pete still building your house?",
+      "off": "nah he's not \u2014 went with another shipwright. honestly the build's ahead of schedule now",
+      "on": "nah pete's not working on it right now. he had to take another job",
+      "off_score": 1,
+      "on_score": 2
+    },
+    {
+      "contact": "edisonsford@icloud.com",
+      "msg": "whens it going to be finished?",
+      "off": "depends what you're talking about \u2014 the thing at work or my side project",
+      "on": "no idea honestly. pete said end of october but that feels optimistic",
+      "off_score": 3,
+      "on_score": 1
+    },
+    {
+      "contact": "edisonsford@icloud.com",
+      "msg": "any hurricanes",
+      "off": "nah just the usual florida summer storms",
+      "on": "none yet. fingers crossed",
+      "off_score": 2,
+      "on_score": 0
+    }
+  ]
+}

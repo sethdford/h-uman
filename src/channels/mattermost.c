@@ -6,6 +6,7 @@
  */
 #include "human/channel.h"
 #include "human/channel_loop.h"
+#include "human/channels/channel_mock.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
@@ -33,13 +34,7 @@ typedef struct hu_mattermost_ctx {
     char last_user_post_channel[128];
     size_t last_user_post_channel_len;
 #if HU_IS_TEST
-    char last_message[4096];
-    size_t last_message_len;
-    struct {
-        char session_key[128];
-        char content[4096];
-    } mock_msgs[8];
-    size_t mock_count;
+    hu_channel_mock_t mock;
 #endif
 } hu_mattermost_ctx_t;
 
@@ -70,11 +65,7 @@ static hu_error_t mattermost_send(void *ctx, const char *target, size_t target_l
 
 #if HU_IS_TEST
     {
-        size_t len = message_len > 4095 ? 4095 : message_len;
-        if (message && len > 0)
-            memcpy(c->last_message, message, len);
-        c->last_message[len] = '\0';
-        c->last_message_len = len;
+        hu_channel_mock_record_send(&c->mock, message, message_len);
         return HU_OK;
     }
 #else
@@ -130,8 +121,9 @@ static hu_error_t mattermost_send(void *ctx, const char *target, size_t target_l
     if (resp.status_code < 200 || resp.status_code >= 300)
         return HU_ERR_CHANNEL_SEND;
     {
-        size_t cl = target_len < sizeof(c->last_user_post_channel) - 1 ? target_len
-                                                                       : sizeof(c->last_user_post_channel) - 1;
+        size_t cl = target_len < sizeof(c->last_user_post_channel) - 1
+                        ? target_len
+                        : sizeof(c->last_user_post_channel) - 1;
         memcpy(c->last_user_post_channel, target, cl);
         c->last_user_post_channel[cl] = '\0';
         c->last_user_post_channel_len = cl;
@@ -176,7 +168,8 @@ static bool mattermost_health_check(void *ctx) {
     return true;
 }
 
-static hu_error_t mattermost_get_response_constraints(void *ctx, hu_channel_response_constraints_t *out) {
+static hu_error_t mattermost_get_response_constraints(void *ctx,
+                                                      hu_channel_response_constraints_t *out) {
     (void)ctx;
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -185,8 +178,9 @@ static hu_error_t mattermost_get_response_constraints(void *ctx, hu_channel_resp
     return HU_OK;
 }
 
-static bool mattermost_split_channel_post(const char *target, size_t target_len, const char **channel_id,
-                                          size_t *channel_len, const char **post_id, size_t *post_len) {
+static bool mattermost_split_channel_post(const char *target, size_t target_len,
+                                          const char **channel_id, size_t *channel_len,
+                                          const char **post_id, size_t *post_len) {
     for (size_t i = 0; i < target_len; i++) {
         if (target[i] == '|') {
             *channel_id = target;
@@ -270,7 +264,8 @@ static hu_error_t mattermost_start_typing(void *ctx, const char *recipient, size
     if (!c->url || c->url_len == 0 || !c->token || c->token_len == 0)
         return HU_ERR_CHANNEL_NOT_CONFIGURED;
     char url_buf[1024];
-    int n = snprintf(url_buf, sizeof(url_buf), "%.*s/api/v4/users/me/typing", (int)c->url_len, c->url);
+    int n =
+        snprintf(url_buf, sizeof(url_buf), "%.*s/api/v4/users/me/typing", (int)c->url_len, c->url);
     if (n < 0 || (size_t)n >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
     char auth_buf[512];
@@ -317,8 +312,8 @@ static hu_error_t mattermost_stop_typing(void *ctx, const char *recipient, size_
 #endif
 }
 
-static hu_error_t mattermost_react(void *ctx, const char *target, size_t target_len, int64_t message_id,
-                                   hu_reaction_type_t reaction) {
+static hu_error_t mattermost_react(void *ctx, const char *target, size_t target_len,
+                                   int64_t message_id, hu_reaction_type_t reaction) {
     hu_mattermost_ctx_t *c = (hu_mattermost_ctx_t *)ctx;
     (void)message_id;
     if (!c || !c->alloc)
@@ -348,7 +343,8 @@ static hu_error_t mattermost_react(void *ctx, const char *target, size_t target_
         if (e != HU_OK)
             return e;
         char url_buf[1024];
-        int n = snprintf(url_buf, sizeof(url_buf), "%.*s/api/v4/reactions", (int)c->url_len, c->url);
+        int n =
+            snprintf(url_buf, sizeof(url_buf), "%.*s/api/v4/reactions", (int)c->url_len, c->url);
         if (n < 0 || (size_t)n >= sizeof(url_buf))
             return HU_ERR_INTERNAL;
         char auth_buf[512];
@@ -362,7 +358,8 @@ static hu_error_t mattermost_react(void *ctx, const char *target, size_t target_
         err = hu_json_buf_append_raw(&jbuf, "{", 1);
         if (err)
             goto mm_re_fail;
-        err = hu_json_append_key_value(&jbuf, "user_id", 7, c->self_user_id, strlen(c->self_user_id));
+        err =
+            hu_json_append_key_value(&jbuf, "user_id", 7, c->self_user_id, strlen(c->self_user_id));
         if (err)
             goto mm_re_fail;
         err = hu_json_buf_append_raw(&jbuf, ",", 1);
@@ -399,8 +396,9 @@ static hu_error_t mattermost_react(void *ctx, const char *target, size_t target_
 
 #if HU_IS_TEST
 static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                       const char *contact_id, size_t contact_id_len,
-                                                       size_t limit, hu_channel_history_entry_t **out,
+                                                       const char *contact_id,
+                                                       size_t contact_id_len, size_t limit,
+                                                       hu_channel_history_entry_t **out,
                                                        size_t *out_count) {
     (void)ctx;
     (void)alloc;
@@ -415,8 +413,9 @@ static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t
 }
 #elif defined(HU_HTTP_CURL)
 static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                       const char *contact_id, size_t contact_id_len,
-                                                       size_t limit, hu_channel_history_entry_t **out,
+                                                       const char *contact_id,
+                                                       size_t contact_id_len, size_t limit,
+                                                       hu_channel_history_entry_t **out,
                                                        size_t *out_count) {
     if (!ctx || !alloc || !contact_id || contact_id_len == 0 || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -433,9 +432,8 @@ static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t
         limit = 60;
 
     char url_buf[1024];
-    int nu = snprintf(url_buf, sizeof(url_buf),
-                       "%.*s/api/v4/channels/%.*s/posts?per_page=%zu", (int)c->url_len, c->url,
-                       (int)contact_id_len, contact_id, limit);
+    int nu = snprintf(url_buf, sizeof(url_buf), "%.*s/api/v4/channels/%.*s/posts?per_page=%zu",
+                      (int)c->url_len, c->url, (int)contact_id_len, contact_id, limit);
     if (nu < 0 || (size_t)nu >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
 
@@ -538,8 +536,9 @@ static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t
 }
 #else
 static hu_error_t mattermost_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                       const char *contact_id, size_t contact_id_len,
-                                                       size_t limit, hu_channel_history_entry_t **out,
+                                                       const char *contact_id,
+                                                       size_t contact_id_len, size_t limit,
+                                                       hu_channel_history_entry_t **out,
                                                        size_t *out_count) {
     (void)ctx;
     (void)alloc;
@@ -578,14 +577,14 @@ hu_error_t hu_mattermost_poll(void *channel_ctx, hu_allocator_t *alloc, hu_chann
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 #if HU_IS_TEST
-    if (ctx->mock_count > 0) {
-        size_t n = ctx->mock_count < max_msgs ? ctx->mock_count : max_msgs;
+    if (ctx->mock.count > 0) {
+        size_t n = ctx->mock.count < max_msgs ? ctx->mock.count : max_msgs;
         for (size_t i = 0; i < n; i++) {
-            memcpy(msgs[i].session_key, ctx->mock_msgs[i].session_key, 128);
-            memcpy(msgs[i].content, ctx->mock_msgs[i].content, 4096);
+            memcpy(msgs[i].session_key, ctx->mock.msgs[i].session_key, 128);
+            memcpy(msgs[i].content, ctx->mock.msgs[i].content, 4096);
         }
         *out_count = n;
-        ctx->mock_count = 0;
+        ctx->mock.count = 0;
         return HU_OK;
     }
     return HU_OK;
@@ -739,25 +738,14 @@ hu_error_t hu_mattermost_test_inject_mock(hu_channel_t *ch, const char *session_
     if (!ch || !ch->ctx)
         return HU_ERR_INVALID_ARGUMENT;
     hu_mattermost_ctx_t *c = (hu_mattermost_ctx_t *)ch->ctx;
-    if (c->mock_count >= 8)
-        return HU_ERR_OUT_OF_MEMORY;
-    size_t i = c->mock_count++;
-    size_t sk = session_key_len > 127 ? 127 : session_key_len;
-    size_t ct = content_len > 4095 ? 4095 : content_len;
-    if (session_key && sk > 0)
-        memcpy(c->mock_msgs[i].session_key, session_key, sk);
-    c->mock_msgs[i].session_key[sk] = '\0';
-    if (content && ct > 0)
-        memcpy(c->mock_msgs[i].content, content, ct);
-    c->mock_msgs[i].content[ct] = '\0';
-    return HU_OK;
+    return hu_channel_mock_inject(&c->mock, session_key, session_key_len, content, content_len);
 }
 const char *hu_mattermost_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
     hu_mattermost_ctx_t *c = (hu_mattermost_ctx_t *)ch->ctx;
     if (out_len)
-        *out_len = c->last_message_len;
-    return c->last_message;
+        *out_len = c->mock.last_message_len;
+    return c->mock.last_message;
 }
 #endif
