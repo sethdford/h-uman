@@ -69,16 +69,20 @@ Signals: `SIGTERM` (graceful), `SIGINT` (fast shutdown).
 - Read `docs/standards/operations/monitoring.md` for metrics
 - Read `docs/standards/engineering/error-handling.md` for retry patterns
 
-## The deployed daemon is the dev-preset build (Debug + AddressSanitizer)
+## The deployed daemon is the `prod` preset (no ASan) — since 2026-09-12
 
-`scripts/install-human-daemon.sh` defaults `BUILD_DIR` to `build/`, which the
-`dev` preset configures with `CMAKE_BUILD_TYPE=Debug` and `HU_ENABLE_ASAN=ON`.
-The generated LaunchAgent plist sets `ASAN_OPTIONS=halt_on_error=0:...` so
-the daemon keeps running after a report. This is deliberate: between May and
-September 2026 the sanitizer captured 148 heap-use-after-free and 638
-attempting-free reports from real traffic in `~/.human/logs/asan.log.*`
-(plus the known Darwin stack-use-after-scope false positives, see
-`asan-pthread-stack-aliasing-darwin.md`). Cost: ~1.1 GB resident and no
-optimization. If you switch the install to the release preset, you lose that
-telemetry; say so in the commit.
+`scripts/install-human-daemon.sh` installs `build-prod/human`, configured by
+the `prod` CMake preset: the `dev` feature set, `RelWithDebInfo`, no
+sanitizer. Until 2026-09-12 it installed `build/` — the `dev` preset, Debug +
+AddressSanitizer with `ASAN_OPTIONS=halt_on_error=0` in the LaunchAgent plist —
+and prod ran that way from May to September (1.15 GB resident, no
+optimization). That run was not wasted: the sanitizer captured 148
+heap-use-after-free and 638 attempting-free reports from real traffic in
+`~/.human/logs/asan.log.*` (plus the Darwin stack-use-after-scope false
+positives in `asan-pthread-stack-aliasing-darwin.md`). Zero reports since the
+2026-09-06 deploy, which is what made the switch reasonable.
 
+Trade: prod no longer self-reports memory errors. If a crash class recurs,
+install the `dev` tree deliberately (`BUILD_DIR=build scripts/install-human-daemon.sh`)
+for a canary period and say so in the commit; the plist's `ASAN_OPTIONS` is
+inert under the prod binary and was left in place for that reason.

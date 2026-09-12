@@ -303,8 +303,8 @@ static const hu_daemon_config_entry_t k_daemon_configs[] = {
      offsetof(hu_channels_config_t, whatsapp) + offsetof(hu_whatsapp_channel_config_t, daemon)},
 };
 
-static const hu_channel_daemon_config_t *get_active_daemon_config(const hu_config_t *config,
-                                                                  const char *ch_name) {
+const hu_channel_daemon_config_t *hu_daemon_active_daemon_config(const hu_config_t *config,
+                                                                 const char *ch_name) {
     if (!config)
         return NULL;
     if (!ch_name)
@@ -322,7 +322,7 @@ static const hu_channel_daemon_config_t *get_active_daemon_config(const hu_confi
 #ifdef HU_IS_TEST
 const hu_channel_daemon_config_t *hu_daemon_test_get_active_daemon_config(const hu_config_t *config,
                                                                           const char *ch_name) {
-    return get_active_daemon_config(config, ch_name);
+    return hu_daemon_active_daemon_config(config, ch_name);
 }
 #endif
 
@@ -4722,7 +4722,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              ? ch->channel->vtable->name(ch->channel->ctx)
                                              : NULL;
                     const hu_channel_daemon_config_t *dcfg_ld =
-                        get_active_daemon_config(config, chn_ld);
+                        hu_daemon_active_daemon_config(config, chn_ld);
                     if (dcfg_ld && dcfg_ld->llm_decides)
                         llm_decides = true;
                 }
@@ -4752,7 +4752,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                  ? ch->channel->vtable->name(ch->channel->ctx)
                                                  : NULL;
                     const hu_channel_daemon_config_t *dcfg_rm =
-                        get_active_daemon_config(config, ch_name_rm);
+                        hu_daemon_active_daemon_config(config, ch_name_rm);
                     const char *rmode =
                         (dcfg_rm && dcfg_rm->response_mode && dcfg_rm->response_mode[0])
                             ? dcfg_rm->response_mode
@@ -5546,7 +5546,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                           ? ch->channel->vtable->name(ch->channel->ctx)
                                           : NULL;
                     const hu_channel_daemon_config_t *dcfg_hu =
-                        get_active_daemon_config(config, chn);
+                        hu_daemon_active_daemon_config(config, chn);
                     int window = 120;
                     if (dcfg_hu && dcfg_hu->user_response_window_sec > 0)
                         window = dcfg_hu->user_response_window_sec;
@@ -8568,9 +8568,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
+                        /* llm_decides replies run with the tool registry EMPTY, on
+                         * purpose: the reply turn is a lean local-model call, and
+                         * every registered tool (shell, file_write, git, cron,
+                         * send_message, ...) would otherwise be reachable from a
+                         * text any contact sends. That is a prompt-injection
+                         * surface, not a missing feature. The 2026-09-10 review
+                         * listed ~90 tools + LLMCompiler + MCTS as "unwired on
+                         * iMessage"; this is the wiring decision, made explicit
+                         * and logged once so nobody rediscovers it as a bug. */
                         size_t saved_tools = 0;
                         size_t saved_specs = 0;
                         if (llm_decides) {
+                            static atomic_bool noted_reply_tools_off = false;
+                            hu_log_info_once(&noted_reply_tools_off, "human", agent->observer,
+                                             "llm_decides: reply turns run with 0 of %zu tools "
+                                             "(by design — contact text must not reach tools)",
+                                             agent->tools_count);
                             saved_tools = agent->tools_count;
                             saved_specs = agent->tool_specs_count;
                             agent->tools_count = 0;
@@ -10141,7 +10155,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                    ? ch->channel->vtable->name(ch->channel->ctx)
                                                    : NULL;
                         const hu_channel_daemon_config_t *dcfg_ps =
-                            get_active_daemon_config(config, chn_name);
+                            hu_daemon_active_daemon_config(config, chn_name);
                         int window = 120;
                         if (dcfg_ps && dcfg_ps->user_response_window_sec > 0)
                             window = dcfg_ps->user_response_window_sec;
@@ -10184,202 +10198,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     /* ── Voice decision: TTS when channel has voice_enabled ───── */
                     bool sent_voice = false;
-                    {
-                        const char *chn_voice = ch->channel->vtable->name
-                                                    ? ch->channel->vtable->name(ch->channel->ctx)
-                                                    : NULL;
-                        const hu_channel_daemon_config_t *dcfg_voice =
-                            get_active_daemon_config(config, chn_voice);
-                        bool voice_channel_ok = dcfg_voice && dcfg_voice->voice_enabled;
-
-                        /* Unified duplex + Realtime (`voice.mode`: "realtime" or legacy
-                         * `voice.tts_provider`: "realtime"). */
-                        hu_voice_session_t unified_voice = {0};
-                        bool unified_voice_active = false;
-                        bool cfg_realtime =
-                            config &&
-                            ((config->voice.mode && strcmp(config->voice.mode, "realtime") == 0) ||
-                             (config->voice.tts_provider &&
-                              strcmp(config->voice.tts_provider, "realtime") == 0));
-                        if (voice_channel_ok && config && chn_voice && cfg_realtime) {
-                            size_t chn_len = strlen(chn_voice);
-                            if (hu_voice_session_start(alloc, &unified_voice, chn_voice, chn_len,
-                                                       config) == HU_OK)
-                                unified_voice_active = true;
-                        }
-
-#if defined(HU_ENABLE_CARTESIA)
-                        if (voice_channel_ok && agent->persona &&
-                            agent->persona->voice.voice_id[0] &&
-                            agent->persona->voice_messages.enabled) {
-                            hu_voice_decision_t vdec = hu_voice_decision_classify(
-                                response, response_len, combined, combined_len,
-                                &agent->persona->voice_messages, true, bth_hour,
-                                (uint32_t)(time(NULL) ^ (uintptr_t)combined));
-                            if (vdec == HU_VOICE_SEND_VOICE) {
-                                const char *cartesia_key =
-                                    hu_config_get_provider_key(config, "cartesia");
-                                if (cartesia_key && cartesia_key[0]) {
-                                    char voice_transcript[4096];
-                                    size_t vt_len = response_len < sizeof(voice_transcript) - 64
-                                                        ? response_len
-                                                        : sizeof(voice_transcript) - 64;
-                                    memcpy(voice_transcript, response, vt_len);
-                                    voice_transcript[vt_len] = '\0';
-                                    vt_len = hu_conversation_inject_nonverbals(
-                                        voice_transcript, vt_len, sizeof(voice_transcript),
-                                        (uint32_t)time(NULL), agent->persona->voice.nonverbals);
-
-                                    const char *emo_str = hu_cartesia_emotion_from_context(
-                                        combined, combined_len, response, response_len,
-                                        (uint8_t)bth_hour);
-
-                                    /* Emotion voice map: detect emotion + derive expressive params
-                                     */
-                                    hu_voice_emotion_t detected_emotion = HU_VOICE_EMOTION_NEUTRAL;
-                                    float emotion_confidence = 0.0f;
-                                    hu_emotion_detect_from_text(response, response_len,
-                                                                &detected_emotion,
-                                                                &emotion_confidence);
-                                    hu_voice_params_t evo_params =
-                                        hu_emotion_voice_map(detected_emotion);
-                                    float base_speed = agent->persona->voice.default_speed > 0.f
-                                                           ? agent->persona->voice.default_speed
-                                                           : 0.95f;
-
-                                    hu_cartesia_tts_config_t tts_cfg = {
-                                        .model_id = agent->persona->voice.model[0]
-                                                        ? agent->persona->voice.model
-                                                        : "sonic-3-2026-01-12",
-                                        .voice_id = agent->persona->voice.voice_id,
-                                        .emotion = emo_str,
-                                        .speed = base_speed * evo_params.rate_factor,
-                                        .volume = 1.0f,
-                                        .nonverbals = agent->persona->voice.nonverbals,
-                                    };
-
-                                    const char *voice_fmt = hu_tts_format_for_channel(chn_voice);
-                                    unsigned char *audio_bytes = NULL;
-                                    size_t audio_len = 0;
-                                    hu_error_t tts_err = hu_cartesia_tts_synthesize(
-                                        alloc, cartesia_key, strlen(cartesia_key), voice_transcript,
-                                        vt_len, &tts_cfg, voice_fmt, &audio_bytes, &audio_len);
-                                    if (tts_err == HU_OK && audio_bytes && audio_len > 0) {
-                                        char audio_path[512];
-                                        hu_error_t pipe_err;
-                                        if (strcmp(voice_fmt, "caf") == 0) {
-                                            pipe_err =
-                                                hu_audio_mp3_to_caf(alloc, audio_bytes, audio_len,
-                                                                    audio_path, sizeof(audio_path));
-                                        } else {
-                                            const char *temp_ext = "mp3";
-                                            if (strcmp(voice_fmt, "wav") == 0)
-                                                temp_ext = "wav";
-                                            else if (strcmp(voice_fmt, "ogg") == 0)
-                                                /* Cartesia has no OGG; WAV on disk until Opus
-                                                 * encode */
-                                                temp_ext = "wav";
-                                            pipe_err = hu_audio_tts_bytes_to_temp(
-                                                alloc, audio_bytes, audio_len, temp_ext, audio_path,
-                                                sizeof(audio_path));
-                                        }
-                                        hu_cartesia_tts_free_bytes(alloc, audio_bytes, audio_len);
-                                        if (pipe_err == HU_OK) {
-                                            const char *media_paths[] = {audio_path};
-                                            hu_error_t send_err = ch->channel->vtable->send(
-                                                ch->channel->ctx, batch_key, key_len, "", 0,
-                                                media_paths, 1);
-                                            hu_audio_cleanup_temp(audio_path);
-                                            if (send_err == HU_OK)
-                                                sent_voice = true;
-                                        }
-                                    } else if (audio_bytes) {
-                                        hu_cartesia_tts_free_bytes(alloc, audio_bytes, audio_len);
-                                    }
-                                }
-                            }
-                        }
-#endif
-                        /* Fallback: unified voice pipeline when persona Cartesia path did not send.
-                         */
-                        if (!sent_voice && voice_channel_ok && !unified_voice_active && config) {
-                            hu_voice_config_t voice_cfg = {0};
-                            if (hu_voice_config_from_settings(config, &voice_cfg) == HU_OK &&
-                                voice_cfg.tts_provider && voice_cfg.tts_provider[0]) {
-                                void *audio = NULL;
-                                size_t audio_len = 0;
-                                hu_error_t tts_err = hu_voice_tts(alloc, &voice_cfg, response,
-                                                                  response_len, &audio, &audio_len);
-                                if (tts_err == HU_OK && audio && audio_len > 0) {
-                                    unsigned char *audio_bytes = (unsigned char *)audio;
-                                    char audio_path[512];
-                                    hu_error_t pipe_err = HU_ERR_IO;
-#if defined(HU_ENABLE_CARTESIA)
-                                    {
-                                        const char *voice_fmt =
-                                            hu_tts_format_for_channel(chn_voice);
-                                        if (strcmp(voice_fmt, "caf") == 0) {
-                                            pipe_err =
-                                                hu_audio_mp3_to_caf(alloc, audio_bytes, audio_len,
-                                                                    audio_path, sizeof(audio_path));
-                                        } else {
-                                            const char *temp_ext = "mp3";
-                                            if (strcmp(voice_fmt, "wav") == 0)
-                                                temp_ext = "wav";
-                                            else if (strcmp(voice_fmt, "ogg") == 0)
-                                                temp_ext = "wav";
-                                            pipe_err = hu_audio_tts_bytes_to_temp(
-                                                alloc, audio_bytes, audio_len, temp_ext, audio_path,
-                                                sizeof(audio_path));
-                                        }
-                                    }
-#else
-                                    {
-                                        char *tmp_dir = hu_platform_get_temp_dir(alloc);
-                                        if (tmp_dir) {
-                                            int np = snprintf(audio_path, sizeof(audio_path),
-                                                              "%s/human_dtts_%lld.mp3", tmp_dir,
-                                                              (long long)time(NULL));
-                                            size_t tdl = strlen(tmp_dir);
-                                            alloc->free(alloc->ctx, tmp_dir, tdl + 1);
-                                            if (np > 0 && (size_t)np < sizeof(audio_path)) {
-                                                FILE *tf = fopen(audio_path, "wb");
-                                                if (tf) {
-                                                    if (fwrite(audio_bytes, 1, audio_len, tf) ==
-                                                        audio_len)
-                                                        pipe_err = HU_OK;
-                                                    fclose(tf);
-                                                    if (pipe_err != HU_OK)
-                                                        (void)unlink(audio_path);
-                                                }
-                                            }
-                                        }
-                                    }
-#endif
-                                    alloc->free(alloc->ctx, audio, audio_len);
-                                    if (pipe_err == HU_OK) {
-                                        const char *media_paths[] = {audio_path};
-                                        hu_error_t send_err = ch->channel->vtable->send(
-                                            ch->channel->ctx, batch_key, key_len, "", 0,
-                                            media_paths, 1);
-#if defined(HU_ENABLE_CARTESIA)
-                                        hu_audio_cleanup_temp(audio_path);
-#else
-                                        (void)unlink(audio_path);
-#endif
-                                        if (send_err == HU_OK)
-                                            sent_voice = true;
-                                    }
-                                } else if (audio) {
-                                    alloc->free(alloc->ctx, audio, audio_len);
-                                }
-                            }
-                        }
-                        if (unified_voice_active) {
-                            hu_voice_session_warn_first_byte_latency_if_needed(&unified_voice);
-                            (void)hu_voice_session_stop(&unified_voice);
-                        }
-                    }
+                    sent_voice = hu_daemon_voice_reply(alloc, agent, config, ch, batch_key, key_len,
+                                                       combined, combined_len, response,
+                                                       response_len, bth_hour);
                     if (!sent_voice && !turn_out_state.text_delivered_via_bus) {
                         const char *eff_ch = ch->channel->vtable->name
                                                  ? ch->channel->vtable->name(ch->channel->ctx)
@@ -11424,383 +11245,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* Music teaser: share a song with 30s preview + artwork */
-                if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn) {
-                    float music_prob = 0.05f;
-                    if (agent->persona) {
-                        music_prob = agent->persona->humanization.gif_probability > 0.0f
-                                         ? agent->persona->humanization.gif_probability * 0.3f
-                                         : 0.05f;
-                    }
-                    /* Boost probability if taste hit rate is high for this contact */
-                    float taste_rate = hu_music_taste_hit_rate(batch_key, key_len);
-                    if (taste_rate > 0.5f && music_prob < 0.15f)
-                        music_prob = 0.15f;
-
-                    uint32_t music_seed =
-                        (uint32_t)time(NULL) * 16807u + (uint32_t)(uintptr_t)combined;
-                    if (hu_conversation_should_send_music(combined, combined_len, history_entries,
-                                                          history_count, music_seed, music_prob)) {
-                        const char *yt_key =
-                            config ? hu_config_get_provider_key(config, "youtube") : NULL;
-                        hu_inspiration_medium_t medium =
-                            hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);
-
-                        /* Build taste-enriched prompt */
-                        char taste_snippet[256] = {0};
-                        size_t taste_len = hu_music_taste_build_prompt(
-                            batch_key, key_len, taste_snippet, sizeof(taste_snippet));
-
-                        char music_prompt[768];
-                        size_t mp_len;
-                        if (medium == HU_INSPIRATION_MUSIC) {
-                            mp_len = hu_conversation_build_music_prompt(
-                                combined, combined_len, music_prompt, sizeof(music_prompt));
-                        } else {
-                            size_t clip = combined_len > 200 ? 200 : combined_len;
-                            int pn =
-                                snprintf(music_prompt, sizeof(music_prompt),
-                                         "Recent message context: \"%.*s\"", (int)clip, combined);
-                            mp_len = (pn > 0 && (size_t)pn < sizeof(music_prompt)) ? (size_t)pn : 0;
-                        }
-
-                        /* Append taste context to prompt if available */
-                        if (taste_len > 0 && mp_len > 0 &&
-                            mp_len + taste_len + 2 < sizeof(music_prompt)) {
-                            music_prompt[mp_len++] = '\n';
-                            memcpy(music_prompt + mp_len, taste_snippet, taste_len);
-                            mp_len += taste_len;
-                            music_prompt[mp_len] = '\0';
-                        }
-
-                        /* Persona voice hint → the human line sounds like the user */
-                        if (agent && agent->persona) {
-                            char vh[256];
-                            const char *form =
-                                agent->persona->overlays && agent->persona->overlays_count > 0
-                                    ? agent->persona->overlays[0].formality
-                                    : NULL;
-                            const char *trait = (agent->persona->traits_count > 0)
-                                                    ? agent->persona->traits[0]
-                                                    : NULL;
-                            size_t vlen =
-                                hu_inspiration_build_voice_hint(form, trait, vh, sizeof(vh));
-                            if (vlen > 0 && mp_len + vlen + 2 < sizeof(music_prompt)) {
-                                music_prompt[mp_len++] = '\n';
-                                memcpy(music_prompt + mp_len, vh, vlen);
-                                mp_len += vlen;
-                                music_prompt[mp_len] = '\0';
-                            }
-                        }
-
-                        if (mp_len > 0 && agent->provider.vtable &&
-                            agent->provider.vtable->chat_with_system) {
-                            char *music_suggestion = NULL;
-                            size_t music_suggestion_len = 0;
-                            const char *insp_sys = hu_inspiration_system_prompt(medium);
-                            size_t music_fb_len = 0;
-                            const char *music_fb = hu_daemon_fallback_model(config, &music_fb_len);
-                            const char *music_model =
-                                agent->model_name ? agent->model_name : music_fb;
-                            size_t music_model_len =
-                                agent->model_name ? agent->model_name_len : music_fb_len;
-                            (void)agent->provider.vtable->chat_with_system(
-                                agent->provider.ctx, alloc, insp_sys, strlen(insp_sys),
-                                music_prompt, mp_len, music_model, music_model_len, 0.9,
-                                &music_suggestion, &music_suggestion_len);
-
-                            hu_moderation_result_t music_mod = {0};
-                            if (hu_moderation_check_local(alloc, music_suggestion,
-                                                          music_suggestion_len,
-                                                          &music_mod) == HU_OK &&
-                                music_mod.flagged) {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "music teaser blocked by moderation");
-                            } else if (music_suggestion && music_suggestion_len > 0 &&
-                                       music_suggestion_len < 300) {
-                                char search_query[256];
-                                char casual_msg[256];
-                                bool parsed = hu_music_parse_suggestion(
-                                    music_suggestion, music_suggestion_len, search_query,
-                                    sizeof(search_query), casual_msg, sizeof(casual_msg));
-
-                                if (parsed && search_query[0] != '\0' &&
-                                    medium == HU_INSPIRATION_MUSIC) {
-                                    /* Detect user's streaming preference from history */
-                                    hu_music_source_t pref = HU_MUSIC_SOURCE_ITUNES;
-                                    if (history_entries && history_count > 0) {
-                                        enum { MUSIC_HIST_CAP = 20 };
-                                        char music_texts[MUSIC_HIST_CAP][512];
-                                        size_t music_lens[MUSIC_HIST_CAP];
-                                        const char *music_pref_ptrs[MUSIC_HIST_CAP];
-                                        size_t music_n = history_count < (size_t)MUSIC_HIST_CAP
-                                                             ? history_count
-                                                             : (size_t)MUSIC_HIST_CAP;
-                                        for (size_t mi = 0; mi < music_n; mi++) {
-                                            size_t tlen = strnlen(history_entries[mi].text, 511);
-                                            memcpy(music_texts[mi], history_entries[mi].text, tlen);
-                                            music_texts[mi][tlen] = '\0';
-                                            music_lens[mi] = tlen;
-                                            music_pref_ptrs[mi] = music_texts[mi];
-                                        }
-                                        pref = hu_music_detect_preference(music_pref_ptrs,
-                                                                          music_lens, music_n);
-                                    }
-
-                                    /* Always search iTunes (for the .m4a preview) */
-                                    hu_music_result_t song = {0};
-                                    size_t sq_len = strlen(search_query);
-                                    hu_error_t search_err =
-                                        hu_music_search(alloc, search_query, sq_len, &song);
-
-                                    /* If user prefers Spotify, try to get the Spotify share link */
-                                    hu_music_result_t spotify_song = {0};
-                                    bool has_spotify = false;
-                                    if (pref == HU_MUSIC_SOURCE_SPOTIFY) {
-                                        const char *sp_cred =
-                                            config ? hu_config_get_provider_key(config, "spotify")
-                                                   : NULL;
-                                        if (sp_cred) {
-                                            /* Expect "client_id:client_secret" format */
-                                            const char *colon = strchr(sp_cred, ':');
-                                            if (colon) {
-                                                char sp_id[128] = {0};
-                                                size_t id_len = (size_t)(colon - sp_cred);
-                                                if (id_len < sizeof(sp_id)) {
-                                                    memcpy(sp_id, sp_cred, id_len);
-                                                    has_spotify =
-                                                        hu_music_search_spotify(
-                                                            alloc, sp_id, colon + 1, search_query,
-                                                            sq_len, &spotify_song) == HU_OK;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    /* Use Spotify URL if available, iTunes preview for audio */
-                                    hu_music_result_t *link_song =
-                                        has_spotify ? &spotify_song : &song;
-
-                                    bool song_verified =
-                                        hu_music_result_matches(search_query, &song) ||
-                                        (has_spotify &&
-                                         hu_music_result_matches(search_query, &spotify_song));
-                                    if (search_err == HU_OK && song_verified &&
-                                        (song.track_view_url ||
-                                         (has_spotify && spotify_song.track_view_url))) {
-                                        /* Rich-link mode: when the channel auto-unfurls bare URLs
-                                         * (iMessage, Telegram, Discord, Slack, WhatsApp, Signal),
-                                         * send the URL alone in its own bubble. The platform
-                                         * renders the full rich card — album art, title, artist,
-                                         * play button — from the URL. No .m4a download, no JPG
-                                         * download, no caption (caption inline kills the unfurl).
-                                         *
-                                         * INVARIANT: the URL bubble body must be exactly the URL
-                                         * bytes — no preamble, no trailing whitespace, no caption.
-                                         * Pinned by tests/test_imessage_rich_link.c. */
-                                        bool rich_link =
-                                            hu_channel_supports_link_unfurl(ch->channel) &&
-                                            link_song->track_view_url != NULL;
-
-                                        if (rich_link) {
-                                            const char *url = link_song->track_view_url;
-
-                                            /* Same human-pacing delay as the legacy path so the
-                                             * share lands in a natural conversational rhythm. */
-                                            usleep(3000000 + (music_seed % 4000000));
-
-                                            if (hu_inspiration_send_two_bubble(
-                                                    ch->channel, batch_key, key_len, casual_msg,
-                                                    url, 1500000u + (music_seed % 1500000u))) {
-                                                hu_log_info("human", agent ? agent->observer : NULL,
-                                                            "sent music rich-link: %s - %s [%s]",
-                                                            song.artist_name ? song.artist_name
-                                                                             : "?",
-                                                            song.track_name ? song.track_name : "?",
-                                                            has_spotify ? "spotify" : "itunes");
-
-                                                hu_music_taste_record_send(batch_key, key_len,
-                                                                           song.artist_name,
-                                                                           song.track_name);
-                                                {
-                                                    static uint64_t last_taste_save_ms;
-                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
-                                                    if (tnow - last_taste_save_ms > 30000) {
-                                                        last_taste_save_ms = tnow;
-                                                        const char *th = getenv("HOME");
-                                                        if (th) {
-                                                            char tp[512];
-                                                            int tn2 = snprintf(
-                                                                tp, sizeof(tp),
-                                                                "%s/.human/music_taste.json", th);
-                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                                hu_music_taste_save(tp,
-                                                                                    (size_t)tn2);
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                hu_log_info("human", agent ? agent->observer : NULL,
-                                                            "music rich-link rejected by url "
-                                                            "validation: %s",
-                                                            url ? url : "(null)");
-                                            }
-                                        } else {
-                                            /* Legacy: channel doesn't unfurl URLs (SMS etc.).
-                                             * Build a text caption and attach the .m4a preview
-                                             * + JPG artwork so the recipient still gets media. */
-                                            char share_text[512];
-                                            size_t casual_len = strlen(casual_msg);
-                                            size_t st_len = hu_music_build_share_text(
-                                                link_song, casual_len > 0 ? casual_msg : NULL,
-                                                casual_len, share_text, sizeof(share_text));
-
-                                            char preview_path[256] = {0};
-                                            bool has_preview = false;
-                                            if (song.preview_url) {
-                                                has_preview =
-                                                    hu_music_download_preview(
-                                                        alloc, song.preview_url, preview_path,
-                                                        sizeof(preview_path)) == HU_OK;
-                                            }
-
-                                            char artwork_path[256] = {0};
-                                            bool has_artwork = false;
-                                            const char *art_url = link_song->artwork_url
-                                                                      ? link_song->artwork_url
-                                                                      : song.artwork_url;
-                                            if (art_url) {
-                                                has_artwork = hu_music_download_artwork(
-                                                                  alloc, art_url, artwork_path,
-                                                                  sizeof(artwork_path)) == HU_OK;
-                                            }
-
-                                            usleep(3000000 + (music_seed % 4000000));
-
-                                            if (st_len > 0) {
-                                                int media_count = 0;
-                                                const char *media[2];
-                                                if (has_preview)
-                                                    media[media_count++] = preview_path;
-                                                if (has_artwork)
-                                                    media[media_count++] = artwork_path;
-
-                                                hu_error_t mserr = ch->channel->vtable->send(
-                                                    ch->channel->ctx, batch_key, key_len,
-                                                    share_text, st_len,
-                                                    media_count > 0 ? media : NULL,
-                                                    (size_t)media_count);
-                                                if (mserr != HU_OK)
-                                                    hu_log_warn("human", NULL,
-                                                                "music send failed: %d",
-                                                                (int)mserr);
-                                                else
-                                                    hu_log_info(
-                                                        "human", agent ? agent->observer : NULL,
-                                                        "sent music %s: %s - %s [%s%s]",
-                                                        has_preview ? "preview" : "link",
-                                                        song.artist_name ? song.artist_name : "?",
-                                                        song.track_name ? song.track_name : "?",
-                                                        has_spotify ? "spotify" : "itunes",
-                                                        has_artwork ? "+art" : "");
-
-                                                hu_music_taste_record_send(batch_key, key_len,
-                                                                           song.artist_name,
-                                                                           song.track_name);
-                                                {
-                                                    static uint64_t last_taste_save_ms;
-                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
-                                                    if (tnow - last_taste_save_ms > 30000) {
-                                                        last_taste_save_ms = tnow;
-                                                        const char *th = getenv("HOME");
-                                                        if (th) {
-                                                            char tp[512];
-                                                            int tn2 = snprintf(
-                                                                tp, sizeof(tp),
-                                                                "%s/.human/music_taste.json", th);
-                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                                hu_music_taste_save(tp,
-                                                                                    (size_t)tn2);
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            if (has_preview)
-                                                (void)unlink(preview_path);
-                                            if (has_artwork)
-                                                (void)unlink(artwork_path);
-                                        }
-                                    } else {
-                                        hu_log_info(
-                                            "human", agent ? agent->observer : NULL,
-                                            "music share skipped (no verified match) for: %s",
-                                            search_query);
-                                    }
-                                    hu_music_result_free(alloc, &song);
-                                    if (has_spotify)
-                                        hu_music_result_free(alloc, &spotify_song);
-                                } else if (parsed && search_query[0] != '\0') {
-                                    /* YouTube / TikTok: resolve a VERIFIED url, then share it the
-                                     * same human two-bubble way (or a caption on non-unfurl
-                                     * channels). No verified url → silent skip. */
-                                    char share_url[1024] = {0};
-                                    bool have_url = false;
-                                    if (medium == HU_INSPIRATION_TIKTOK) {
-                                        have_url =
-                                            hu_tiktok_tag_url(search_query, strlen(search_query),
-                                                              share_url, sizeof(share_url)) > 0;
-                                    } else if (medium == HU_INSPIRATION_YOUTUBE) {
-                                        hu_youtube_result_t yt = {0};
-                                        if (hu_youtube_search(alloc, yt_key, search_query,
-                                                              strlen(search_query), &yt) == HU_OK &&
-                                            yt.watch_url) {
-                                            int un = snprintf(share_url, sizeof(share_url), "%s",
-                                                              yt.watch_url);
-                                            have_url = (un > 0 && (size_t)un < sizeof(share_url));
-                                        }
-                                        hu_youtube_result_free(alloc, &yt);
-                                    }
-
-                                    if (have_url) {
-                                        if (hu_channel_supports_link_unfurl(ch->channel)) {
-                                            usleep(3000000 + (music_seed % 4000000));
-                                            hu_inspiration_send_two_bubble(
-                                                ch->channel, batch_key, key_len, casual_msg,
-                                                share_url, 1500000u + (music_seed % 1500000u));
-                                        } else if (hu_tool_validate_url(share_url) == HU_OK) {
-                                            char cap[1280];
-                                            int cn =
-                                                (casual_msg[0] != '\0')
-                                                    ? snprintf(cap, sizeof(cap), "%s %s",
-                                                               casual_msg, share_url)
-                                                    : snprintf(cap, sizeof(cap), "%s", share_url);
-                                            if (cn > 0 && (size_t)cn < sizeof(cap) &&
-                                                ch->channel->vtable->send(
-                                                    ch->channel->ctx, batch_key, key_len, cap,
-                                                    (size_t)cn, NULL, 0) != HU_OK)
-                                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                                            "inspiration send failed");
-                                        }
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "sent %s inspiration: %s",
-                                                    medium == HU_INSPIRATION_YOUTUBE ? "youtube"
-                                                                                     : "tiktok",
-                                                    share_url);
-                                    } else {
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "inspiration skipped (no verified %s) for: %s",
-                                                    medium == HU_INSPIRATION_YOUTUBE ? "video"
-                                                                                     : "tiktok",
-                                                    search_query);
-                                    }
-                                }
-                            }
-                            if (music_suggestion)
-                                alloc->free(alloc->ctx, music_suggestion, music_suggestion_len + 1);
-                        }
-                    }
-                }
+                hu_daemon_rich_media_tick(alloc, agent, config, ch, batch_key, key_len, combined,
+                                          combined_len, history_entries, history_count,
+                                          gif_sent_this_turn);
 
                 /* Proactive image generation: occasionally create and send an image */
                 if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn &&
