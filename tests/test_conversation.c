@@ -574,6 +574,19 @@ static void quality_penalizes_service_language(void) {
     HU_ASSERT_TRUE(score.warmth < 5);
 }
 
+/* 2026-09-13: the retry guidance must name the tell, never ask for warmth or
+ * length — "show you care" became "I'm here for you" on a real turn, and
+ * "consider adding a bit more" fights the style card's 34-char mean. */
+static void quality_guidance_names_the_helper_tell_not_warmth(void) {
+    hu_quality_score_t score = hu_conversation_evaluate_quality(
+        "Certainly! I'd be happy to help you with that.", 47, NULL, 0, 300);
+    HU_ASSERT_TRUE(score.needs_revision);
+    HU_ASSERT_STR_CONTAINS(score.guidance, "helper bot");
+    HU_ASSERT_STR_CONTAINS(score.guidance, "friend");
+    HU_ASSERT_STR_NOT_CONTAINS(score.guidance, "care");
+    HU_ASSERT_STR_NOT_CONTAINS(score.guidance, "adding a bit more");
+}
+
 static void quality_good_casual_scores_high(void) {
     hu_quality_score_t score =
         hu_conversation_evaluate_quality("yeah that's wild lol", 20, NULL, 0, 300);
@@ -4806,6 +4819,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(quality_penalizes_exclamation_overuse);
     HU_RUN_TEST(quality_rewards_contractions);
     HU_RUN_TEST(quality_penalizes_service_language);
+    HU_RUN_TEST(quality_guidance_names_the_helper_tell_not_warmth);
     HU_RUN_TEST(quality_good_casual_scores_high);
 
     /* Awareness builder */

@@ -1648,16 +1648,24 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
         if (n <= 0 || (size_t)n >= sizeof(score.guidance))
             score.guidance[0] = '\0';
     } else if (score.needs_revision && ratio < 0.2 && response_len > 50) {
-        snprintf(
-            score.guidance, sizeof(score.guidance),
-            "Your response was much shorter than their typical depth. Consider adding a bit more.");
+        /* A short reply to a long message is Seth's normal shape (style card
+         * mean 34 chars); only a reply that is short AND cut off mid-thought
+         * needs more. Say that, not "add more". */
+        snprintf(score.guidance, sizeof(score.guidance),
+                 "If your reply stopped mid-thought, finish the thought. Short is fine.");
     } else if (score.needs_revision && gross_structural) {
+        /* warmth < 5 only ever means assistant tells ("I'd be happy to",
+         * "feel free", "certainly", "as an AI"). "Show you care" was the
+         * instruction that became "I'm here for you" (2026-09-12); name the
+         * tell instead. */
         if (score.warmth < 5 && score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant and formal. Drop the formality, show you care.");
+                     "That read like a helper bot: drop the helper phrasing and the formatting, "
+                     "answer like a friend texting.");
         } else if (score.warmth < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant. Show you care.");
+                     "That read like a helper bot ('happy to help', 'feel free', 'certainly'). "
+                     "Answer like a friend texting.");
         } else if (score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
                      "Your phrasing felt formal. Drop the formality.");
