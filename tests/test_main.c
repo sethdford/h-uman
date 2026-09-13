@@ -287,6 +287,7 @@ void run_json_extended_tests(void);
 void run_security_extended_tests(void);
 void run_security_pipeline_tests(void);
 void run_core_extended_tests(void);
+void run_paths_tests(void);
 void run_gateway_extended_tests(void);
 void run_gateway_auth_tests(void);
 void run_gateway_voice_tests(void);
@@ -1378,6 +1379,7 @@ int main(int argc, char **argv) {
     run_security_extended_tests();
     run_security_pipeline_tests();
     run_core_extended_tests();
+    run_paths_tests();
     run_gateway_extended_tests();
     run_gateway_auth_tests();
     run_gateway_voice_tests();

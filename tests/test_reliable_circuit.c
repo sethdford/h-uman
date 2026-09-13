@@ -24,7 +24,7 @@ typedef struct fake_provider {
     int calls;        /* every chat_with_system call, failing or not */
     int fail_first_n; /* calls 1..n fail with fail_err; later calls succeed */
     hu_error_t fail_err;
-    int empty_first_n; /* calls 1..n return HU_OK with NO content (2026-09-04) */
+    int empty_first_n;   /* calls 1..n return HU_OK with NO content (2026-09-04) */
     char seen_model[64]; /* model id of the most recent call */
 } fake_provider_t;
 
@@ -423,9 +423,9 @@ static void test_empty_reply_hands_fallback_provider_the_mapped_model(void) {
     g.extras[0].name = "fallback";
     g.extras[0].name_len = 8;
     g.extras[0].provider = fb;
-    HU_ASSERT_EQ(hu_reliable_create_ex(&g.alloc, prim, 2, 50, g.extras, 1, k_model_map, 1,
-                                       &g.reliable),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_reliable_create_ex(&g.alloc, prim, 2, 50, g.extras, 1, k_model_map, 1, &g.reliable),
+        HU_OK);
     char *out = NULL;
     size_t n = 0;
     HU_ASSERT_EQ(g.reliable.vtable->chat_with_system(g.reliable.ctx, &g.alloc, "sys", 3, "hi", 2,

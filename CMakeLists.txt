@@ -578,6 +578,8 @@ set(HU_CORE_SOURCES
     src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
+    src/core/tokens.c
+    src/core/paths.c
     src/core/io_secure.c
     src/core/file.c
     src/core/json.c
@@ -1680,6 +1682,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/celebration_repo_sqlite.c
         src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/forgetting_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
         src/memory/repos/contact_insights_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
@@ -3608,6 +3611,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c
     tests/test_core_extended.c
+    tests/test_paths.c
     tests/test_gateway_extended.c
     tests/test_gateway_voice.c
     tests/test_gateway_hula_traces.c

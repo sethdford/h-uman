@@ -47,7 +47,11 @@ fi
 # ones and fail on NEW ones, matching sqlite-includer-ratchet / clone-ratchet /
 # file-size-ceiling. is a live follow-up, not a false positive:
 # it wants the same UNIQUE-index treatment `opinions` got.
-BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries canvas_versions canvases causal_links comfort_patterns contact_baselines contact_identities contact_knowledge core_memory dpo_auto_extractions dpo_pair_hashes episodic_patterns frontier_state general_lessons hyperedge_members kv lancedb_memories memory_edges oauth_tokens opinions reaction_lookup reciprocity_scores reflection_surfacings shared_references skill_profiles social_graph strategy_weights style_fingerprints temporal_patterns tier_memory tom_user_expectations tool_prefs topic_baselines training_data_extractions "
+# current_events: its UNIQUE index (src/memory/engines/sqlite.c, idx_current_events_topic_summary)
+#   spans two adjacent literals; memories_vec_meta: `id TEXT PRIMARY KEY`
+#   (src/memory/engines/store_sqlite_vec.c) sits on the literal after the table name.
+#   Both constrained, both invisible to the line grep -- baselined 2026-09-06.
+BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries canvas_versions canvases causal_links comfort_patterns contact_baselines contact_identities contact_knowledge core_memory current_events dpo_auto_extractions dpo_pair_hashes episodic_patterns frontier_state general_lessons hyperedge_members kv lancedb_memories memory_edges memories_vec_meta oauth_tokens opinions reaction_lookup reciprocity_scores reflection_surfacings shared_references skill_profiles social_graph strategy_weights style_fingerprints temporal_patterns tier_memory tom_user_expectations tool_prefs topic_baselines training_data_extractions "
 
 # Check 2 baselines by FILE, not by count. A global count is wrong for a staged
 # subset: one NEW file with a single discard passes if 1 < the tree-wide total,

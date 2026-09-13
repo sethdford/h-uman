@@ -14,6 +14,7 @@
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/rand.h"
 #include "human/core/string.h"
@@ -192,7 +193,6 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 #include <unistd.h>
 #endif
 
-#define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
 
 /* Lightweight classification provider (e.g. Gemini Flash Lite) for hybrid routing.
@@ -704,10 +704,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
          * writes from a separate process, and the previous once-per-process
          * load left those entries invisible until the next daemon restart
          * (2026-07-27). Cheap: one stat() per pass, load only on change. */
-        const char *sched_home = getenv("HOME");
-        if (sched_home) {
+        {
             char sp[512];
-            int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sched_home);
+            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
             if (sn > 0 && (size_t)sn < sizeof(sp))
                 hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
         }
@@ -769,13 +768,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
                                              sched_msg, sched_len);
-                const char *sh = getenv("HOME");
-                if (sh) {
-                    char sp[512];
-                    int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sh);
-                    if (sn > 0 && (size_t)sn < sizeof(sp))
-                        hu_conversation_sched_save(sp, (size_t)sn);
-                }
+                char sp[512];
+                int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+                if (sn > 0 && (size_t)sn < sizeof(sp))
+                    hu_conversation_sched_save(sp, (size_t)sn);
             }
         }
     }
@@ -1823,13 +1819,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                     "scheduled morning message for %s: %.*s",
                                     cp->name ? cp->name : cp->contact_id, (int)greeting_len,
                                     greeting);
-                        const char *sh = getenv("HOME");
-                        if (sh) {
-                            char sp[512];
-                            int sn = snprintf(sp, sizeof(sp), "%s/.human/scheduled.json", sh);
-                            if (sn > 0 && (size_t)sn < sizeof(sp))
-                                hu_conversation_sched_save(sp, (size_t)sn);
-                        }
+                        char sp[512];
+                        int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+                        if (sn > 0 && (size_t)sn < sizeof(sp))
+                            hu_conversation_sched_save(sp, (size_t)sn);
                     }
                 }
             }
@@ -2313,10 +2306,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * rule: log once at info level whether config was loaded, and on
      * disable explain how to enable. */
     {
-        const char *home_ar = getenv("HOME");
         char ar_path[1024];
-        if (home_ar && home_ar[0] &&
-            snprintf(ar_path, sizeof(ar_path), "%s/.human/autoresponder.json", home_ar) > 0) {
+        if (hu_paths_state(ar_path, sizeof(ar_path), "autoresponder.json") > 0) {
             hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
             if (are == HU_OK && g_autoresponder_cfg.enabled) {
                 g_autoresponder_loaded = true;
@@ -2436,15 +2427,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     hu_keystore_t *daemon_keystore = NULL;
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[HU_MAX_PATH];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
-            if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                if (hu_graph_open(alloc, graph_path, (size_t)np, &graph) != HU_OK)
-                    hu_log_error("human", agent ? agent->observer : NULL, "graph open failed: %.*s",
-                                 np, graph_path);
-            }
+        char graph_path[HU_MAX_PATH];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path)) {
+            if (hu_graph_open(alloc, graph_path, (size_t)np, &graph) != HU_OK)
+                hu_log_error("human", agent ? agent->observer : NULL, "graph open failed: %.*s", np,
+                             graph_path);
         }
     }
     if (graph && agent && agent->retrieval_engine)
@@ -2461,53 +2449,50 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * If the directory exists and HU_KEYSTORE_PASSPHRASE is set, open
      * and unlock. Otherwise log a warning and continue in plaintext. */
     {
-        const char *home = getenv("HOME");
-        if (home && *home) {
-            char ks_dir[HU_MAX_PATH];
-            int kn = snprintf(ks_dir, sizeof(ks_dir), "%s/.human/keys", home);
-            if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
-                struct stat ks_st;
-                if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
-                    const char *uid = getenv("USER");
-                    if (!uid || !*uid)
-                        uid = "default";
-                    hu_error_t ks_err = hu_keystore_open(alloc, uid, &daemon_keystore);
-                    if (ks_err == HU_OK && daemon_keystore) {
-                        const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
-                        if (pp && *pp) {
-                            ks_err =
-                                hu_keystore_unlock_with_passphrase(daemon_keystore, pp, strlen(pp));
-                            if (ks_err == HU_OK) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "W15: keystore unlocked for user=%s", uid);
-                            } else {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "W15: keystore unlock failed (%s); "
-                                            "encryption inactive this session",
-                                            hu_error_string(ks_err));
-                                hu_keystore_close(daemon_keystore, alloc);
-                                daemon_keystore = NULL;
-                            }
+        char ks_dir[HU_MAX_PATH];
+        int kn = hu_paths_state(ks_dir, sizeof(ks_dir), "keys");
+        if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
+            struct stat ks_st;
+            if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
+                const char *uid = getenv("USER");
+                if (!uid || !*uid)
+                    uid = "default";
+                hu_error_t ks_err = hu_keystore_open(alloc, uid, &daemon_keystore);
+                if (ks_err == HU_OK && daemon_keystore) {
+                    const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
+                    if (pp && *pp) {
+                        ks_err =
+                            hu_keystore_unlock_with_passphrase(daemon_keystore, pp, strlen(pp));
+                        if (ks_err == HU_OK) {
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "W15: keystore unlocked for user=%s", uid);
                         } else {
                             hu_log_warn("human", agent ? agent->observer : NULL,
-                                        "W15: keystore directory exists but "
-                                        "HU_KEYSTORE_PASSPHRASE unset; "
-                                        "encryption inactive this session");
+                                        "W15: keystore unlock failed (%s); "
+                                        "encryption inactive this session",
+                                        hu_error_string(ks_err));
                             hu_keystore_close(daemon_keystore, alloc);
                             daemon_keystore = NULL;
                         }
                     } else {
                         hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "W15: keystore open failed (%s)", hu_error_string(ks_err));
+                                    "W15: keystore directory exists but "
+                                    "HU_KEYSTORE_PASSPHRASE unset; "
+                                    "encryption inactive this session");
+                        hu_keystore_close(daemon_keystore, alloc);
                         daemon_keystore = NULL;
                     }
                 } else {
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "W15: no keystore at %s; "
-                                "memory encryption not active "
-                                "(run `human keystore init` to enable)",
-                                ks_dir);
+                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                "W15: keystore open failed (%s)", hu_error_string(ks_err));
+                    daemon_keystore = NULL;
                 }
+            } else {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "W15: no keystore at %s; "
+                            "memory encryption not active "
+                            "(run `human keystore init` to enable)",
+                            ks_dir);
             }
         }
     }
@@ -2564,10 +2549,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (w14_canned_lb_path[0] == '\0') {
-                            const char *hm = getenv("HOME");
-                            (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path),
-                                           "%s/.human/eval/leaderboard_canned_20.json",
-                                           hm && hm[0] ? hm : "/tmp");
+                            (void)hu_paths_state_or(w14_canned_lb_path, sizeof(w14_canned_lb_path),
+                                                    "/tmp", "eval/leaderboard_canned_20.json");
                         }
                     }
 
@@ -2617,10 +2600,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (w14_prompt_fixture_path[0] == '\0') {
-                            const char *hm = getenv("HOME");
-                            (void)snprintf(w14_prompt_fixture_path, sizeof(w14_prompt_fixture_path),
-                                           "%s/.human/eval/persona_prompts.txt",
-                                           hm && hm[0] ? hm : "/tmp");
+                            (void)hu_paths_state_or(w14_prompt_fixture_path,
+                                                    sizeof(w14_prompt_fixture_path), "/tmp",
+                                                    "eval/persona_prompts.txt");
                         }
                     }
                     w14_lora_ctx.eval_prompt_fixture_path = w14_prompt_fixture_path;
@@ -2628,18 +2610,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
 #endif
             w14_lora_ctx.config_template = hu_learner_default_config();
-            {
-                const char *hm = getenv("HOME");
-                if (hm && hm[0]) {
-                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
-                                   sizeof(w14_lora_ctx.config_template.adapter_output_path),
-                                   "%s/.human/ml/w14_learner_adapter.lora", hm);
-                } else {
-                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
-                                   sizeof(w14_lora_ctx.config_template.adapter_output_path), "%s",
-                                   "/tmp/human_w14_learner_adapter.lora");
-                }
-            }
+            if (hu_paths_state(w14_lora_ctx.config_template.adapter_output_path,
+                               sizeof(w14_lora_ctx.config_template.adapter_output_path),
+                               "ml/w14_learner_adapter.lora") < 0)
+                (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
+                               sizeof(w14_lora_ctx.config_template.adapter_output_path), "%s",
+                               "/tmp/human_w14_learner_adapter.lora");
             if (hu_w14_scheduler_register_lora_runner(agent->w14_scheduler, &w14_lora_ctx) ==
                 HU_OK) {
                 w14_lora_wired = true;
@@ -2667,17 +2643,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 memset(&w14_td_ctx, 0, sizeof(w14_td_ctx));
                 w14_td_ctx.alloc = alloc;
                 w14_td_ctx.scheduler = agent->w14_scheduler;
-                const char *hm = getenv("HOME");
                 static char td_db_path[512];
                 static char td_out_dir[512];
-                if (hm && hm[0]) {
-                    (void)snprintf(td_db_path, sizeof(td_db_path), "%s/.human/memory.db", hm);
-                    (void)snprintf(td_out_dir, sizeof(td_out_dir), "%s/.human/ml/training_data",
-                                   hm);
-                } else {
+                if (hu_paths_state(td_db_path, sizeof(td_db_path), "memory.db") < 0)
                     (void)snprintf(td_db_path, sizeof(td_db_path), "/tmp/human_memory.db");
+                if (hu_paths_state(td_out_dir, sizeof(td_out_dir), "ml/training_data") < 0)
                     (void)snprintf(td_out_dir, sizeof(td_out_dir), "/tmp/human_training_data");
-                }
                 w14_td_ctx.memory_db_path = td_db_path;
                 w14_td_ctx.output_dir = td_out_dir;
                 hu_error_t tde = hu_w14_scheduler_register_training_data_runner(
@@ -2699,22 +2670,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 static char retrain_current_symlink[512];
                 static char retrain_pidfile[512];
                 memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
-                const char *hm2 = getenv("HOME");
-                if (hm2 && hm2[0]) {
-                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
-                                   "%s/.human/ml/seth-lora-candidate", hm2);
-                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
-                                   "%s/.human/ml/seth-lora-current", hm2);
-                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
-                                   "%s/.human/lora_retrain.pid", hm2);
-                } else {
+                if (hu_paths_state(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "ml/seth-lora-candidate") < 0)
                     (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
                                    "/tmp/human_seth_lora_candidate");
+                if (hu_paths_state(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "ml/seth-lora-current") < 0)
                     (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
                                    "/tmp/human_seth_lora_current");
+                if (hu_paths_state(retrain_pidfile, sizeof(retrain_pidfile), "lora_retrain.pid") <
+                    0)
                     (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
                                    "/tmp/human_lora_retrain.pid");
-                }
                 w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
                 w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
                 w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
@@ -2814,7 +2781,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             if (primary && strstr(primary, "mlx_local")) {
                 const char *mlx_url = getenv("HUMAN_MLX_URL");
                 if (!mlx_url || !mlx_url[0])
-                    mlx_url = "http://127.0.0.1:8741/v1";
+                    mlx_url = HU_MLX_DEFAULT_BASE_URL;
                 hu_mlx_admin_swap_result_t swap = {0};
                 bool already = false;
                 hu_error_t se =
@@ -9896,14 +9863,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             uint64_t gcnow = (uint64_t)time(NULL) * 1000ULL;
                             if (gcnow - last_gif_cal_save_ms > 30000) {
                                 last_gif_cal_save_ms = gcnow;
-                                const char *rh = getenv("HOME");
-                                if (rh) {
-                                    char rcp[512];
-                                    int rn = snprintf(rcp, sizeof(rcp),
-                                                      "%s/.human/gif_calibration.json", rh);
-                                    if (rn > 0 && (size_t)rn < sizeof(rcp))
-                                        hu_conversation_gif_cal_save(rcp, (size_t)rn);
-                                }
+                                char rcp[512];
+                                int rn = hu_paths_state(rcp, sizeof(rcp), "gif_calibration.json");
+                                if (rn > 0 && (size_t)rn < sizeof(rcp))
+                                    hu_conversation_gif_cal_save(rcp, (size_t)rn);
                             }
                         }
                     }
@@ -9925,25 +9888,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     static bool gif_cal_loaded;
                     if (!gif_cal_loaded) {
                         gif_cal_loaded = true;
-                        const char *gh = getenv("HOME");
-                        if (gh) {
-                            char gcp[512];
-                            int gn =
-                                snprintf(gcp, sizeof(gcp), "%s/.human/gif_calibration.json", gh);
-                            if (gn > 0 && (size_t)gn < sizeof(gcp))
-                                hu_conversation_gif_cal_load(gcp, (size_t)gn);
-                        }
+                        char gcp[512];
+                        int gn = hu_paths_state(gcp, sizeof(gcp), "gif_calibration.json");
+                        if (gn > 0 && (size_t)gn < sizeof(gcp))
+                            hu_conversation_gif_cal_load(gcp, (size_t)gn);
                     }
                     static bool music_taste_loaded;
                     if (!music_taste_loaded) {
                         music_taste_loaded = true;
-                        const char *mh = getenv("HOME");
-                        if (mh) {
-                            char mtp[512];
-                            int mn = snprintf(mtp, sizeof(mtp), "%s/.human/music_taste.json", mh);
-                            if (mn > 0 && (size_t)mn < sizeof(mtp))
-                                hu_music_taste_load(mtp, (size_t)mn);
-                        }
+                        char mtp[512];
+                        int mn = hu_paths_state(mtp, sizeof(mtp), "music_taste.json");
+                        if (mn > 0 && (size_t)mn < sizeof(mtp))
+                            hu_music_taste_load(mtp, (size_t)mn);
                     }
                 }
 
@@ -10033,16 +9989,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         hu_conversation_gif_cal_record_send(
                                             batch_key, key_len, gif_query, gif_query_len);
                                         {
-                                            const char *cal_home = getenv("HOME");
-                                            if (cal_home) {
-                                                char cal_path[512];
-                                                int cp_n = snprintf(
-                                                    cal_path, sizeof(cal_path),
-                                                    "%s/.human/gif_calibration.json", cal_home);
-                                                if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
-                                                    hu_conversation_gif_cal_save(cal_path,
-                                                                                 (size_t)cp_n);
-                                            }
+                                            char cal_path[512];
+                                            int cp_n = hu_paths_state(cal_path, sizeof(cal_path),
+                                                                      "gif_calibration.json");
+                                            if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
+                                                hu_conversation_gif_cal_save(cal_path,
+                                                                             (size_t)cp_n);
                                         }
                                         gif_sent_this_turn = true;
                                         hu_log_info("human", agent ? agent->observer : NULL,
@@ -10073,24 +10025,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (hu_conversation_should_send_sticker(combined, combined_len, last_resp,
                                                             last_resp_len, stk_seed,
                                                             sticker_prob)) {
-                        const char *home = getenv("HOME");
-                        if (home) {
-                            char stk_dir[512];
-                            int sd_n =
-                                snprintf(stk_dir, sizeof(stk_dir), "%s/.human/stickers", home);
-                            if (sd_n > 0 && (size_t)sd_n < sizeof(stk_dir)) {
-                                char stk_path[640];
-                                size_t sp_len = hu_conversation_select_sticker(
-                                    combined, combined_len, stk_seed, stk_dir, (size_t)sd_n,
-                                    stk_path, sizeof(stk_path));
-                                if (sp_len > 0 && access(stk_path, R_OK) == 0) {
-                                    usleep(1500000 + (stk_seed % 2000000));
-                                    const char *media[] = {stk_path};
-                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                              send_target_len, "", 0, media, 1);
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "sent sticker: %s", stk_path);
-                                }
+                        char stk_dir[512];
+                        int sd_n = hu_paths_state(stk_dir, sizeof(stk_dir), "stickers");
+                        if (sd_n > 0 && (size_t)sd_n < sizeof(stk_dir)) {
+                            char stk_path[640];
+                            size_t sp_len = hu_conversation_select_sticker(
+                                combined, combined_len, stk_seed, stk_dir, (size_t)sd_n, stk_path,
+                                sizeof(stk_path));
+                            if (sp_len > 0 && access(stk_path, R_OK) == 0) {
+                                usleep(1500000 + (stk_seed % 2000000));
+                                const char *media[] = {stk_path};
+                                ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                          send_target_len, "", 0, media, 1);
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "sent sticker: %s", stk_path);
                             }
                         }
                     }

@@ -8,7 +8,9 @@
 #include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
 #include "human/persona/taste.h"
@@ -6090,7 +6092,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_agent_m3_stash_behavior_metrics(
                 agent, &(hu_agent_behavior_stash_t){
                            .response_length_chars = (uint32_t)resp.content_len,
-                           .response_length_tokens_est = (uint32_t)(resp.content_len / 4),
+                           .response_length_tokens_est =
+                               (uint32_t)hu_tokens_estimate_len(resp.content_len),
                            .response_latency_ms = (uint32_t)llm_duration_ms,
                        });
             hu_agent_m3_on_provider_success(agent);
@@ -6338,7 +6341,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)gvr_stash_len,
-                               .response_length_tokens_est = (uint32_t)(gvr_stash_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(gvr_stash_len),
                                .response_latency_ms = (uint32_t)gvr_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -6820,7 +6824,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_agent_m3_stash_behavior_metrics(
                             agent, &(hu_agent_behavior_stash_t){
                                        .response_length_chars = (uint32_t)cn_stash_len,
-                                       .response_length_tokens_est = (uint32_t)(cn_stash_len / 4),
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(cn_stash_len),
                                        .response_latency_ms = (uint32_t)const_latency_ms,
                                    });
                         hu_agent_m3_on_provider_success(agent);
@@ -7007,12 +7012,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                          * metacog regen length + latency. Other metric
                          * fields not computed here. */
                         hu_agent_m3_stash_behavior_metrics(
-                            agent,
-                            &(hu_agent_behavior_stash_t){
-                                .response_length_chars = (uint32_t)mc_resp.content_len,
-                                .response_length_tokens_est = (uint32_t)(mc_resp.content_len / 4),
-                                .response_latency_ms = (uint32_t)mc_latency_ms,
-                            });
+                            agent, &(hu_agent_behavior_stash_t){
+                                       .response_length_chars = (uint32_t)mc_resp.content_len,
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(mc_resp.content_len),
+                                       .response_latency_ms = (uint32_t)mc_latency_ms,
+                                   });
                         hu_agent_m3_on_provider_success(agent);
                         /* B1 redefined (2026-05-17 r3): metacog regen is a
                          * fresh provider chat call (same model, augmented
@@ -7168,7 +7173,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         agent,
                                         &(hu_agent_behavior_stash_t){
                                             .response_length_chars = (uint32_t)retry_len,
-                                            .response_length_tokens_est = (uint32_t)(retry_len / 4),
+                                            .response_length_tokens_est =
+                                                (uint32_t)hu_tokens_estimate_len(retry_len),
                                             .response_latency_ms = (uint32_t)vc_retry_latency_ms,
                                         });
                                     hu_agent_m3_on_provider_success(agent);
@@ -7403,12 +7409,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                  * stash response_guard-retry length + latency.
                                  * Other metric fields not computed here. */
                                 hu_agent_m3_stash_behavior_metrics(
-                                    agent,
-                                    &(hu_agent_behavior_stash_t){
-                                        .response_length_chars = (uint32_t)retry_len,
-                                        .response_length_tokens_est = (uint32_t)(retry_len / 4),
-                                        .response_latency_ms = (uint32_t)ab_retry_latency_ms,
-                                    });
+                                    agent, &(hu_agent_behavior_stash_t){
+                                               .response_length_chars = (uint32_t)retry_len,
+                                               .response_length_tokens_est =
+                                                   (uint32_t)hu_tokens_estimate_len(retry_len),
+                                               .response_latency_ms = (uint32_t)ab_retry_latency_ms,
+                                           });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 r3 (2026-05-17): record outcome from the post-batch
                                  * response_guard retry path. turn_kind=2 (batch). */
@@ -8644,12 +8650,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
             /* Auto-save session after successful turn completion */
             if (agent->auto_save && agent->session_id[0] != '\0') {
-                const char *home = getenv("HOME");
                 char sdir[512];
-                if (home)
-                    snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-                else
-                    snprintf(sdir, sizeof(sdir), ".human/sessions");
+                hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
                 hu_session_persist_save(agent->alloc, agent, sdir, NULL);
             }
 

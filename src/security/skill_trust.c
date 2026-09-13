@@ -2,6 +2,7 @@
 #include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -189,10 +190,7 @@ static void fprint_json_string(FILE *f, const char *s) {
 }
 
 static int build_audit_path(char *out, size_t out_cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
-    int n = snprintf(out, out_cap, "%s/.human/skill_audit.log", home);
+    int n = hu_paths_state(out, out_cap, "skill_audit.log");
     if (n < 0 || (size_t)n >= out_cap)
         return -1;
     return 0;
@@ -235,10 +233,7 @@ hu_error_t hu_skill_trust_audit_record(hu_allocator_t *alloc, const hu_skill_aud
 
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
 static int build_publishers_path(char *out, size_t out_cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
-    int n = snprintf(out, out_cap, "%s/.human/trusted_publishers.json", home);
+    int n = hu_paths_state(out, out_cap, "trusted_publishers.json");
     if (n < 0 || (size_t)n >= out_cap)
         return -1;
     return 0;

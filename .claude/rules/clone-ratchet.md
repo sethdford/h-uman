@@ -1,5 +1,10 @@
 # Clone-Detection Ratchet — Duplication Windows May Only Decrease
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 The count of **duplicated code blocks** (6-line sliding windows appearing 2+ times in the src/ tree) is frozen at a baseline and may only **decrease**. This ratchet prevents the silent accumulation of copy-paste code that erodes the ability to refactor and maintain the codebase.
 
 ## The algorithm

@@ -29,6 +29,7 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
@@ -430,11 +431,8 @@ static void register_reply_for_reactions_rl(const struct hu_config *config, stru
         }
         if (!db) {
             static char home_db[512];
-            const char *hm = getenv("HOME");
-            if (hm && hm[0]) {
-                snprintf(home_db, sizeof(home_db), "%s/Library/Messages/chat.db", hm);
+            if (hu_paths_chatdb(home_db, sizeof(home_db)) > 0)
                 db = home_db;
-            }
         }
         if (db && hu_imessage_lookup_latest_sent_guid(db, thread, response, msg_ref,
                                                       sizeof(msg_ref)) != HU_OK)

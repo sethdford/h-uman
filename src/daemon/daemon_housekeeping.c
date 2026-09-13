@@ -10,6 +10,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/rand.h"
 #include "human/daemon.h"
 #include "human/daemon/common.h"
@@ -545,20 +546,14 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
                     /* Prepare training data from conversations */
                     const char *data_dir = "/tmp/hu_ml_data";
                     size_t msg_processed = 0;
-                    const char *home = getenv("HOME");
                     char chat_path[512], mem_path[512];
-                    if (home) {
-                        snprintf(chat_path, sizeof(chat_path), "%s/.human/chat.db", home);
-                        snprintf(mem_path, sizeof(mem_path), "%s/.human/memory.db", home);
-                    } else {
-                        snprintf(chat_path, sizeof(chat_path), ".human/chat.db");
-                        snprintf(mem_path, sizeof(mem_path), ".human/memory.db");
-                    }
+                    hu_paths_state_or(chat_path, sizeof(chat_path), ".", "chat.db");
+                    hu_paths_state_or(mem_path, sizeof(mem_path), ".", "memory.db");
                     /* Load BPE tokenizer; skip ML if no vocab available */
                     hu_bpe_tokenizer_t *tok = NULL;
                     char vocab_path[512];
-                    snprintf(vocab_path, sizeof(vocab_path), "%s/.human/models/tokenizer.vocab",
-                             home ? home : ".");
+                    hu_paths_state_or(vocab_path, sizeof(vocab_path), ".",
+                                      "models/tokenizer.vocab");
                     if (hu_bpe_tokenizer_create(alloc, &tok) == HU_OK) {
                         if (hu_bpe_tokenizer_load(tok, vocab_path) != HU_OK) {
                             hu_bpe_tokenizer_deinit(tok);
@@ -615,12 +610,8 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
             } else if (agent && agent->persona_name && agent->persona_name_len > 0 &&
                        hu_persona_refresh_should_run(true, (int64_t)t, last_persona_refresh)) {
                 last_persona_refresh = (int64_t)t;
-                const char *pr_home = getenv("HOME");
                 char pr_db[512];
-                if (pr_home && pr_home[0])
-                    snprintf(pr_db, sizeof(pr_db), "%s/.human/memory.db", pr_home);
-                else
-                    snprintf(pr_db, sizeof(pr_db), ".human/memory.db");
+                hu_paths_state_or(pr_db, sizeof(pr_db), ".", "memory.db");
                 size_t pr_total = 0;
                 hu_error_t pr_err = hu_persona_refresh_example_banks(
                     alloc, agent->persona_name, agent->persona_name_len, pr_db,

@@ -1,5 +1,10 @@
 # File-Size Ceiling Ratchet — No `src/*.c` File May Exceed the Current Largest
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 The count of lines in the largest `src/*.c` file is frozen at a baseline and may
 only **decrease**. This ratchet prevents the silent erosion of code organization
 that let `src/daemon.c` grow ~830 LOC during a phase with no size gate.

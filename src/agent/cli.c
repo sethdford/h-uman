@@ -6,8 +6,10 @@
 #include "human/agent/spawn.h"
 #include "human/agent/tui.h"
 #include "human/channels/cli.h"
+#include "human/core/endpoints.h"
 #include "human/core/file.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #ifdef HU_HAS_VOICE_CHANNEL
 #include "human/channels/voice_channel.h"
 #endif
@@ -139,7 +141,7 @@ static bool mlx_auto_serve(const char *prov_name) {
         return true;
     if (strcmp(prov_name, "mlx_local") != 0 && strcmp(prov_name, "mlx-local") != 0)
         return true;
-    if (mlx_port_is_open(8741))
+    if (mlx_port_is_open(HU_MLX_DEFAULT_PORT))
         return true;
 
     hu_log_info("human", NULL, "MLX server not running — auto-starting...");
@@ -157,7 +159,7 @@ static bool mlx_auto_serve(const char *prov_name) {
      * so a fresh install resolves to the canonical location. */
     char candidates[4][HU_CLI_MAX_PATH];
     size_t ncand = 0;
-    snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/.human/bin/human-serve.sh", home);
+    hu_paths_state(candidates[ncand++], HU_CLI_MAX_PATH, "bin/human-serve.sh");
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Projects/h-uman/scripts/human-serve.sh",
              home);
     snprintf(candidates[ncand++], HU_CLI_MAX_PATH, "%s/Documents/h-uman/scripts/human-serve.sh",
@@ -200,7 +202,7 @@ static bool mlx_auto_serve(const char *prov_name) {
 
     /* Verify the port is now open */
     for (int i = 0; i < 5; i++) {
-        if (mlx_port_is_open(8741))
+        if (mlx_port_is_open(HU_MLX_DEFAULT_PORT))
             return true;
         usleep(500000);
     }
@@ -870,13 +872,10 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     hu_agent_set_retrieval_engine(agent_p, &retrieval_engine);
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
-            if (np > 0 && (size_t)np < sizeof(graph_path))
-                (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
-        }
+        char graph_path[1024];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path))
+            (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
     }
     if (cli_graph) {
         hu_retrieval_set_graph(&retrieval_engine, cli_graph);
@@ -913,10 +912,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
      * or generate a session ID so auto_save works for new sessions. */
     {
         char sessions_dir[512];
-        const char *home = getenv("HOME");
-        if (home)
-            snprintf(sessions_dir, sizeof(sessions_dir), "%s/.human/sessions", home);
-        else
+        if (hu_paths_state(sessions_dir, sizeof(sessions_dir), "sessions") < 0)
             snprintf(sessions_dir, sizeof(sessions_dir), ".human/sessions");
         if (parsed_args.session_id && parsed_args.session_id[0]) {
             size_t sid_len = strlen(parsed_args.session_id);

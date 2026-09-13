@@ -10,6 +10,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/daemon.h"
 #include "human/daemon_routing.h"
 #include "human/inspiration.h"
@@ -212,15 +213,11 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                         uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
                                         if (tnow - last_taste_save_ms > 30000) {
                                             last_taste_save_ms = tnow;
-                                            const char *th = getenv("HOME");
-                                            if (th) {
-                                                char tp[512];
-                                                int tn2 =
-                                                    snprintf(tp, sizeof(tp),
-                                                             "%s/.human/music_taste.json", th);
-                                                if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                    hu_music_taste_save(tp, (size_t)tn2);
-                                            }
+                                            char tp[512];
+                                            int tn2 =
+                                                hu_paths_state(tp, sizeof(tp), "music_taste.json");
+                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                hu_music_taste_save(tp, (size_t)tn2);
                                         }
                                     }
                                 } else {
@@ -290,15 +287,11 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                         uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
                                         if (tnow - last_taste_save_ms > 30000) {
                                             last_taste_save_ms = tnow;
-                                            const char *th = getenv("HOME");
-                                            if (th) {
-                                                char tp[512];
-                                                int tn2 =
-                                                    snprintf(tp, sizeof(tp),
-                                                             "%s/.human/music_taste.json", th);
-                                                if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
-                                                    hu_music_taste_save(tp, (size_t)tn2);
-                                            }
+                                            char tp[512];
+                                            int tn2 =
+                                                hu_paths_state(tp, sizeof(tp), "music_taste.json");
+                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                hu_music_taste_save(tp, (size_t)tn2);
                                         }
                                     }
                                 }

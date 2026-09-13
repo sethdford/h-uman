@@ -24,6 +24,7 @@
 #include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -185,7 +186,7 @@ static bool locomo_judge_init(locomo_ctx_t *c, hu_allocator_t *alloc) {
 
     const char *base_url = getenv("HU_EVAL_LLM_JUDGE_URL");
     if (!base_url || !base_url[0])
-        base_url = "http://localhost:8741/v1";
+        base_url = HU_MLX_DEFAULT_BASE_URL;
 
     hu_error_t err = hu_provider_create(alloc, provider_name, strlen(provider_name), "none", 4,
                                         base_url, strlen(base_url), &c->judge_provider);

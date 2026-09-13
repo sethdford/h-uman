@@ -1,4 +1,5 @@
 #include "human/memory/factory.h"
+#include "human/core/paths.h"
 #include "human/memory/engines.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,12 +23,9 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
         if (env_path && env_path[0])
             path = env_path;
         if (!path) {
-            const char *home = getenv("HOME");
-            if (home) {
-                int n = snprintf(buf, sizeof(buf), "%s/.human/memory.db", home);
-                if (n > 0 && (size_t)n < sizeof(buf))
-                    path = buf;
-            }
+            int n = hu_paths_state(buf, sizeof(buf), "memory.db");
+            if (n > 0 && (size_t)n < sizeof(buf))
+                path = buf;
         }
         if (path)
             return hu_sqlite_memory_create(alloc, path);
@@ -48,12 +46,9 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
 #ifdef HU_HAS_LANCEDB_ENGINE
     if (strcmp(backend, "lancedb") == 0) {
         char buf2[HU_MEM_PATH_MAX];
-        const char *home = getenv("HOME");
-        if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.human/lancedb", home);
-            if (n > 0 && (size_t)n < sizeof(buf2))
-                return hu_lancedb_memory_create(alloc, buf2);
-        }
+        int n = hu_paths_state(buf2, sizeof(buf2), "lancedb");
+        if (n > 0 && (size_t)n < sizeof(buf2))
+            return hu_lancedb_memory_create(alloc, buf2);
         return hu_lancedb_memory_create(alloc, ".human/lancedb");
     }
 #endif
@@ -61,12 +56,9 @@ hu_memory_t hu_memory_create_from_config(hu_allocator_t *alloc, const hu_config_
 #ifdef HU_HAS_LUCID_ENGINE
     if (strcmp(backend, "lucid") == 0) {
         char buf2[HU_MEM_PATH_MAX];
-        const char *home = getenv("HOME");
-        if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.human/lucid.db", home);
-            if (n > 0 && (size_t)n < sizeof(buf2))
-                return hu_lucid_memory_create(alloc, buf2, ws);
-        }
+        int n = hu_paths_state(buf2, sizeof(buf2), "lucid.db");
+        if (n > 0 && (size_t)n < sizeof(buf2))
+            return hu_lucid_memory_create(alloc, buf2, ws);
         return hu_lucid_memory_create(alloc, ".human/lucid.db", ws);
     }
 #endif

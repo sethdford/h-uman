@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/paths.h"
 #include "human/ml/ml.h"
 #include "human/ml/tokenizer_ml.h"
 #include <stdio.h>
@@ -168,26 +169,7 @@ hu_error_t hu_ml_prepare_load_default_tokenizer(hu_allocator_t *alloc, const cha
     if (err != HU_OK)
         return err;
 
-    /* Try data_dir first so per-experiment vocab can shadow the global one. */
-    char path[1024];
-    int loaded = 0;
-    if (data_dir && data_dir[0]) {
-        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
-        if (n > 0 && (size_t)n < sizeof(path) &&
-            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
-            loaded = 1;
-        }
-    }
-    if (!loaded) {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
-            if (n > 0 && (size_t)n < sizeof(path))
-                (void)hu_bpe_tokenizer_load(tok, path);
-        }
-        /* On both failures, tok keeps its default 256-byte byte-level vocab —
-         * every token is one byte, BPB is well-defined. */
-    }
+    (void)hu_bpe_tokenizer_load_default(tok, data_dir); /* default byte vocab on a miss */
 
     int32_t *bytes = NULL;
     size_t n = 0;
