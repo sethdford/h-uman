@@ -31,21 +31,22 @@ hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *conf
                                                          struct hu_agent *agent);
 
 struct hu_prompt_budget;
+struct hu_verifier_metrics;
 
-/** Minimum gap between two prompt-budget snapshot flushes. The maintenance
- *  tick fires once per wall-clock minute, so this must stay well below
- *  60 000 ms: a 60 s gate evaluated on 60 s ticks skipped every tick whose
- *  monotonic gap landed a few ms short, halving the effective cadence and
- *  letting doctor's 120 s freshness check trip on a healthy daemon
- *  (2026-09-06). */
-#define HU_DAEMON_PB_FLUSH_MIN_GAP_MS 30000
+/** Minimum gap between two flushes of a once-per-minute heartbeat file
+ *  (prompt-budget snapshot, verifier metrics). The maintenance tick fires
+ *  once per wall-clock minute, so this must stay well below 60 000 ms: a
+ *  60 s gate evaluated on 60 s ticks skipped every tick whose monotonic gap
+ *  landed a few ms short, halving the effective cadence and letting
+ *  doctor's 120 s freshness check trip on a healthy daemon (2026-09-06). */
+#define HU_DAEMON_FLUSH_MIN_GAP_MS 30000
 
 /** Persist the prompt-budget snapshot when due. `*last_flush_ms` is the
  *  caller-owned cadence state (0 = never flushed by this process) and is
  *  advanced to `now_ms` on every attempted flush. Flushes on the very first
  *  call, so a restarted daemon refreshes the on-disk file at its first
  *  tick instead of letting the previous process's file age past doctor's
- *  threshold, and then on every call at least HU_DAEMON_PB_FLUSH_MIN_GAP_MS
+ *  threshold, and then on every call at least HU_DAEMON_FLUSH_MIN_GAP_MS
  *  after the previous flush. A failed save is logged once per process.
  *  Returns true when a flush was attempted, false when it was not due or
  *  `budget` is NULL. Unconditional (not cron/test gated) so the cadence
@@ -53,6 +54,16 @@ struct hu_prompt_budget;
  *  under HU_IS_TEST. */
 bool hu_daemon_prompt_budget_flush(struct hu_prompt_budget *budget, int64_t now_ms,
                                    int64_t *last_flush_ms);
+
+/** Persist the W4 verifier counters to ~/.human/verifier_metrics.json when
+ *  due. Same cadence contract as hu_daemon_prompt_budget_flush: flush on the
+ *  first call, then on every call at least HU_DAEMON_FLUSH_MIN_GAP_MS after
+ *  the previous flush; `*last_flush_ms` is caller-owned state advanced on
+ *  every attempted flush. `snap` is copied before save() stamps
+ *  last_update_epoch, so the caller's struct is not mutated. A failed save
+ *  is logged once per process. Returns true when a flush was attempted. */
+bool hu_daemon_verifier_metrics_flush(const struct hu_verifier_metrics *snap, int64_t now_ms,
+                                      int64_t *last_flush_ms);
 
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 

@@ -66,17 +66,20 @@ hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *conf
     return cfg;
 }
 
+/* Cadence gate shared by the once-per-minute heartbeat flushes. First call
+ * always flushes: the tick fires on service-loop entry, so a restarted
+ * daemon replaces the previous process's file immediately instead of
+ * letting it age through doctor's 120 s window. After that the gap is
+ * deliberately half the tick period — a gate equal to the period skips
+ * every tick whose monotonic delta lands a few ms short (the 2026-09-06
+ * alternate-minute skip). */
+static bool heartbeat_flush_due(int64_t now_ms, const int64_t *last_flush_ms) {
+    return *last_flush_ms == 0 || now_ms - *last_flush_ms >= HU_DAEMON_FLUSH_MIN_GAP_MS;
+}
+
 bool hu_daemon_prompt_budget_flush(hu_prompt_budget_t *budget, int64_t now_ms,
                                    int64_t *last_flush_ms) {
-    if (!budget || !last_flush_ms)
-        return false;
-    /* First call always flushes: the tick fires on service-loop entry, so a
-     * restarted daemon replaces the previous process's file immediately
-     * instead of letting it age through doctor's 120 s window. After that
-     * the gap is deliberately half the tick period — a gate equal to the
-     * period skips every tick whose monotonic delta lands a few ms short
-     * (the 2026-09-06 alternate-minute skip). */
-    if (*last_flush_ms != 0 && now_ms - *last_flush_ms < HU_DAEMON_PB_FLUSH_MIN_GAP_MS)
+    if (!budget || !last_flush_ms || !heartbeat_flush_due(now_ms, last_flush_ms))
         return false;
     hu_error_t err = hu_prompt_budget_save_snapshot(budget);
     if (err != HU_OK) {
@@ -84,6 +87,23 @@ bool hu_daemon_prompt_budget_flush(hu_prompt_budget_t *budget, int64_t now_ms,
         hu_log_warn_once(&warned, "human", NULL,
                          "prompt_budget snapshot flush failed: %s — doctor will report "
                          "~/.human/prompt_budget.snapshot.json stale until a flush succeeds",
+                         hu_error_string(err));
+    }
+    *last_flush_ms = now_ms;
+    return true;
+}
+
+bool hu_daemon_verifier_metrics_flush(const hu_verifier_metrics_t *snap, int64_t now_ms,
+                                      int64_t *last_flush_ms) {
+    if (!snap || !last_flush_ms || !heartbeat_flush_due(now_ms, last_flush_ms))
+        return false;
+    hu_verifier_metrics_t copy = *snap; /* save() stamps last_update_epoch */
+    hu_error_t err = hu_verifier_metrics_save(&copy);
+    if (err != HU_OK) {
+        static atomic_bool warned = false;
+        hu_log_warn_once(&warned, "human", NULL,
+                         "verifier metrics flush failed: %s — `human doctor verifier` will "
+                         "report ~/.human/verifier_metrics.json stale until a flush succeeds",
                          hu_error_string(err));
     }
     *last_flush_ms = now_ms;
@@ -100,7 +120,10 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
      * dashboard) can show the last known hallucination rate even
      * when the daemon is offline. 60s cadence is a heartbeat, not
      * a real-time stream; the file is small (~150B) and overwritten
-     * in place, so cost is negligible. Skipped under HU_IS_TEST
+     * in place, so cost is negligible. Flushes on the first tick
+     * and on every tick thereafter (gate in
+     * hu_daemon_verifier_metrics_flush, pinned by
+     * tests/test_daemon_maintenance.c). Skipped under HU_IS_TEST
      * because the test harness has its own ad-hoc HOME and the
      * shared metrics file would race across parallel tests. */
     if (agent) {
@@ -108,18 +131,13 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
         struct timespec ts_vf;
         clock_gettime(CLOCK_MONOTONIC, &ts_vf);
         int64_t now_vf_ms = (int64_t)ts_vf.tv_sec * 1000 + ts_vf.tv_nsec / 1000000;
-        if (last_verifier_flush_ms == 0)
-            last_verifier_flush_ms = now_vf_ms;
-        if (now_vf_ms - last_verifier_flush_ms >= 60000) {
-            hu_verifier_metrics_t snap = {
-                .total_runs = agent->verifier_runs,
-                .total_claims_extracted = agent->verifier_claims_total,
-                .total_claims_flagged = agent->verifier_claims_flagged,
-                .last_update_epoch = 0, /* set by save() */
-            };
-            (void)hu_verifier_metrics_save(&snap);
-            last_verifier_flush_ms = now_vf_ms;
-        }
+        hu_verifier_metrics_t snap = {
+            .total_runs = agent->verifier_runs,
+            .total_claims_extracted = agent->verifier_claims_total,
+            .total_claims_flagged = agent->verifier_claims_flagged,
+            .last_update_epoch = 0, /* set by save() */
+        };
+        (void)hu_daemon_verifier_metrics_flush(&snap, now_vf_ms, &last_verifier_flush_ms);
         /* prompt_budget snapshot flush — operator visibility for
          * the B3 Phase 1 accumulator. Flushes on the first tick and
          * on every tick thereafter (gate in hu_daemon_prompt_budget_flush,

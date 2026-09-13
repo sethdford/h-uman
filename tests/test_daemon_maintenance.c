@@ -1,6 +1,8 @@
-/* Contract tests for hu_daemon_prompt_budget_flush — the cadence gate the
- * once-per-minute maintenance tick (src/daemon/daemon_maintenance.c) uses to
- * persist ~/.human/prompt_budget.snapshot.json for the doctor CLI.
+/* Contract tests for hu_daemon_prompt_budget_flush and
+ * hu_daemon_verifier_metrics_flush — the cadence gates the once-per-minute
+ * maintenance tick (src/daemon/daemon_maintenance.c) uses to persist
+ * ~/.human/prompt_budget.snapshot.json and ~/.human/verifier_metrics.json
+ * for the doctor CLI.
  *
  * The tick itself is compiled out under HU_IS_TEST, so the gate is extracted
  * and pinned here. Pins the 2026-09-06 doctor false alarm ("prompt_budget
@@ -11,21 +13,27 @@
  * whose gap landed a few ms short.
  *
  *   (a) the first call flushes immediately (restart refreshes the file)
- *   (b) a call inside HU_DAEMON_PB_FLUSH_MIN_GAP_MS does not flush
+ *   (b) a call inside HU_DAEMON_FLUSH_MIN_GAP_MS does not flush
  *   (c) a >60 s tick with ZERO new observations rewrites the file (mtime
  *       advances, content is regenerated)
  *   (d) minute ticks whose monotonic gap is a few ms short of 60 s still
  *       flush — no alternate-minute skipping
  *   (e) NULL budget / NULL state are no-ops
+ *
+ * The verifier-metrics flush shared the same inline gate shape and is pinned
+ * to the same contract (f-i below); its writer keys on $HOME, so those tests
+ * pin HOME to a private tmp dir the way tests/test_verifier_metrics.c does.
  */
 
 #include "human/agent/prompt_budget.h"
+#include "human/agent/verifier_metrics.h"
 #include "human/core/allocator.h"
 #include "human/daemon_maintenance.h"
 #include "test_framework.h"
 #include "test_tmpdir.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -89,7 +97,7 @@ static void test_pb_flush_skips_inside_min_gap(void) {
     HU_ASSERT_TRUE(hu_daemon_prompt_budget_flush(f.budget, 1000, &last));
     HU_ASSERT_EQ(unlink(f.path), 0);
 
-    int64_t inside = 1000 + HU_DAEMON_PB_FLUSH_MIN_GAP_MS - 1;
+    int64_t inside = 1000 + HU_DAEMON_FLUSH_MIN_GAP_MS - 1;
     HU_ASSERT_FALSE(hu_daemon_prompt_budget_flush(f.budget, inside, &last));
     HU_ASSERT_EQ(file_size(f.path), -1L);
     HU_ASSERT_EQ(last, (int64_t)1000); /* state untouched when not due */
@@ -152,6 +160,124 @@ static void test_pb_flush_null_inputs_are_noops(void) {
     pb_fixture_teardown(&f);
 }
 
+/* ── verifier metrics ─────────────────────────────────────────────────── */
+
+typedef struct vm_fixture {
+    char home[256];
+    char path[320];
+    char *prev_home;
+} vm_fixture_t;
+
+static void vm_fixture_setup(vm_fixture_t *f) {
+    memset(f, 0, sizeof(*f));
+    HU_ASSERT_TRUE(hu_test_mkdtemp("/tmp/hu_daemon_vm_flush_", f->home, sizeof(f->home)));
+    snprintf(f->path, sizeof(f->path), "%s/.human/verifier_metrics.json", f->home);
+    const char *prev = getenv("HOME");
+    f->prev_home = prev ? strdup(prev) : NULL;
+    setenv("HOME", f->home, 1);
+}
+
+static void vm_fixture_teardown(vm_fixture_t *f) {
+    if (f->prev_home) {
+        setenv("HOME", f->prev_home, 1);
+        free(f->prev_home);
+    } else {
+        unsetenv("HOME");
+    }
+    hu_test_rm_rf(f->home);
+}
+
+static const hu_verifier_metrics_t vm_sample = {.total_runs = 7,
+                                                .total_claims_extracted = 21,
+                                                .total_claims_flagged = 3,
+                                                .last_update_epoch = 0};
+
+static void test_vm_flush_first_tick_writes_file(void) {
+    vm_fixture_t f;
+    vm_fixture_setup(&f);
+    int64_t last = 0;
+    hu_verifier_metrics_t snap = vm_sample;
+
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+    HU_ASSERT_TRUE(hu_daemon_verifier_metrics_flush(&snap, 1000, &last));
+    HU_ASSERT(file_size(f.path) > 0);
+    HU_ASSERT_EQ(last, (int64_t)1000);
+    /* The caller's snapshot is not mutated by save()'s epoch stamp. */
+    HU_ASSERT_EQ(snap.last_update_epoch, (int64_t)0);
+
+    hu_verifier_metrics_t back;
+    HU_ASSERT_EQ(hu_verifier_metrics_load(&back), HU_OK);
+    HU_ASSERT_EQ(back.total_runs, (uint64_t)7);
+    HU_ASSERT_EQ(back.total_claims_flagged, (uint64_t)3);
+    HU_ASSERT(back.last_update_epoch > 0);
+
+    vm_fixture_teardown(&f);
+}
+
+static void test_vm_flush_skips_inside_min_gap(void) {
+    vm_fixture_t f;
+    vm_fixture_setup(&f);
+    int64_t last = 0;
+    HU_ASSERT_TRUE(hu_daemon_verifier_metrics_flush(&vm_sample, 1000, &last));
+    HU_ASSERT_EQ(unlink(f.path), 0);
+
+    int64_t inside = 1000 + HU_DAEMON_FLUSH_MIN_GAP_MS - 1;
+    HU_ASSERT_FALSE(hu_daemon_verifier_metrics_flush(&vm_sample, inside, &last));
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+    HU_ASSERT_EQ(last, (int64_t)1000);
+
+    vm_fixture_teardown(&f);
+}
+
+static void test_vm_flush_rewrites_after_60s_tick_with_zero_turns(void) {
+    vm_fixture_t f;
+    vm_fixture_setup(&f);
+    int64_t last = 0;
+    HU_ASSERT_TRUE(hu_daemon_verifier_metrics_flush(&vm_sample, 1000, &last));
+    int64_t first_mtime = mtime_ns(f.path);
+    HU_ASSERT(first_mtime > 0);
+
+    FILE *fp = fopen(f.path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    fclose(fp);
+    HU_ASSERT_EQ(file_size(f.path), 0L);
+
+    /* Counters unchanged — an idle daemon must still refresh the heartbeat. */
+    HU_ASSERT_TRUE(hu_daemon_verifier_metrics_flush(&vm_sample, 1000 + 60001, &last));
+    HU_ASSERT(file_size(f.path) > 0);
+    HU_ASSERT(mtime_ns(f.path) >= first_mtime);
+    HU_ASSERT_EQ(last, (int64_t)(1000 + 60001));
+
+    vm_fixture_teardown(&f);
+}
+
+static void test_vm_flush_minute_ticks_with_short_gap_never_skip(void) {
+    vm_fixture_t f;
+    vm_fixture_setup(&f);
+    int64_t last = 0;
+    const int64_t ticks[] = {5000, 5000 + 59990, 5000 + 59990 + 59995,
+                             5000 + 59990 + 59995 + 60003};
+    for (size_t i = 0; i < sizeof(ticks) / sizeof(ticks[0]); i++) {
+        if (i > 0)
+            HU_ASSERT_EQ(unlink(f.path), 0);
+        HU_ASSERT_TRUE(hu_daemon_verifier_metrics_flush(&vm_sample, ticks[i], &last));
+        HU_ASSERT(file_size(f.path) > 0);
+        HU_ASSERT_EQ(last, ticks[i]);
+    }
+    vm_fixture_teardown(&f);
+}
+
+static void test_vm_flush_null_inputs_are_noops(void) {
+    vm_fixture_t f;
+    vm_fixture_setup(&f);
+    int64_t last = 0;
+    HU_ASSERT_FALSE(hu_daemon_verifier_metrics_flush(NULL, 1000, &last));
+    HU_ASSERT_EQ(last, (int64_t)0);
+    HU_ASSERT_FALSE(hu_daemon_verifier_metrics_flush(&vm_sample, 1000, NULL));
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+    vm_fixture_teardown(&f);
+}
+
 void run_daemon_maintenance_tests(void);
 void run_daemon_maintenance_tests(void) {
     HU_TEST_SUITE("daemon-maintenance");
@@ -160,4 +286,9 @@ void run_daemon_maintenance_tests(void) {
     HU_RUN_TEST(test_pb_flush_rewrites_after_60s_tick_with_zero_turns);
     HU_RUN_TEST(test_pb_flush_minute_ticks_with_short_gap_never_skip);
     HU_RUN_TEST(test_pb_flush_null_inputs_are_noops);
+    HU_RUN_TEST(test_vm_flush_first_tick_writes_file);
+    HU_RUN_TEST(test_vm_flush_skips_inside_min_gap);
+    HU_RUN_TEST(test_vm_flush_rewrites_after_60s_tick_with_zero_turns);
+    HU_RUN_TEST(test_vm_flush_minute_ticks_with_short_gap_never_skip);
+    HU_RUN_TEST(test_vm_flush_null_inputs_are_noops);
 }
