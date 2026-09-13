@@ -7,6 +7,7 @@
  * delay without touching the send path. See
  * include/human/daemon/reply_delay.h for the full contract.
  */
+#include "human/core/paths.h"
 #include "human/daemon/reply_delay.h"
 
 #include "human/core/allocator.h"
@@ -241,8 +242,7 @@ static const char *hu_reply_delay_default_model_path(char *buf, size_t buf_cap) 
         snprintf(buf, buf_cap, "%s", override);
         return buf;
     }
-    const char *home = getenv("HOME");
-    snprintf(buf, buf_cap, "%s/.human/reply_delay_model.json", home ? home : "/tmp");
+    hu_paths_state_or(buf, buf_cap, "/tmp", "reply_delay_model.json");
     return buf;
 }
 

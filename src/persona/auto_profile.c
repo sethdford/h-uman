@@ -1,6 +1,7 @@
 #include "human/persona/auto_profile.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/persona.h"
 #include <stdio.h>
@@ -83,12 +84,13 @@ hu_error_t hu_persona_auto_profile(hu_allocator_t *alloc, const char *contact_id
 #endif
 
 #if defined(HU_ENABLE_SQLITE)
+    /* Kept: no HOME is NOT_FOUND here, while a helper failure below is INVALID_ARGUMENT. */
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return HU_ERR_NOT_FOUND;
 
     char db_path[512];
-    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb(db_path, sizeof(db_path));
     if (n < 0 || (size_t)n >= sizeof(db_path))
         return HU_ERR_INVALID_ARGUMENT;
 

@@ -4,6 +4,7 @@
 #include "human/core/file.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/filler_recency.h"
@@ -1648,16 +1649,24 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
         if (n <= 0 || (size_t)n >= sizeof(score.guidance))
             score.guidance[0] = '\0';
     } else if (score.needs_revision && ratio < 0.2 && response_len > 50) {
-        snprintf(
-            score.guidance, sizeof(score.guidance),
-            "Your response was much shorter than their typical depth. Consider adding a bit more.");
+        /* A short reply to a long message is Seth's normal shape (style card
+         * mean 34 chars); only a reply that is short AND cut off mid-thought
+         * needs more. Say that, not "add more". */
+        snprintf(score.guidance, sizeof(score.guidance),
+                 "If your reply stopped mid-thought, finish the thought. Short is fine.");
     } else if (score.needs_revision && gross_structural) {
+        /* warmth < 5 only ever means assistant tells ("I'd be happy to",
+         * "feel free", "certainly", "as an AI"). "Show you care" was the
+         * instruction that became "I'm here for you" (2026-09-12); name the
+         * tell instead. */
         if (score.warmth < 5 && score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant and formal. Drop the formality, show you care.");
+                     "That read like a helper bot: drop the helper phrasing and the formatting, "
+                     "answer like a friend texting.");
         } else if (score.warmth < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant. Show you care.");
+                     "That read like a helper bot ('happy to help', 'feel free', 'certainly'). "
+                     "Answer like a friend texting.");
         } else if (score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
                      "Your phrasing felt formal. Drop the formality.");
@@ -8981,8 +8990,7 @@ size_t hu_conversation_contact_photo_path(const char *contact_id, size_t cid_len
                 int blob_len = sqlite3_column_bytes(blob_stmt, 0);
                 if (blob && blob_len > 0) {
                     char cache_dir[512];
-                    int cd = snprintf(cache_dir, sizeof(cache_dir),
-                                      "%s/.human/cache/contact-photos", home);
+                    int cd = hu_paths_state(cache_dir, sizeof(cache_dir), "cache/contact-photos");
                     if (cd > 0 && (size_t)cd < sizeof(cache_dir)) {
                         (void)mkdir(cache_dir, 0700);
                         n = snprintf(out_path, out_cap, "%s/%lld.jpg", cache_dir,

@@ -22,7 +22,7 @@ The 18 private copies fell into two near-identical signatures:
 
 * **Dominant (12 callers):** `static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len)` — silently truncates, writes byte count to out param.
 * **Minority (5 callers):** `static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out_cap)` — returns 0 on overflow OR empty input.
-* **Outliers (1 caller):** `escape_sql_string(s, len, buf, cap, *out_len)` with custom buffer-truncation semantics.
+* **Outliers (1 caller):** `src/context/authentic.c` took `(char *out, size_t cap, const char *in, size_t in_len)` — source and destination in the *reverse* order of both shapes above, so a call copied from any sibling file silently swapped them. Normalized 2026-07-27 to the minority `(src, src_len, dst, dst_cap)` shape; there is now no reversed variant.
 
 The canonical helper is `hu_sql_quote_escape_into` in `include/human/core/string.h` /
 `src/core/string.c`. Behavior contract is pinned by 7 unit tests in

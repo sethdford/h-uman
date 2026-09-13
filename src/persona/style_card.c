@@ -7,18 +7,15 @@
  * is a fact in the service log rather than a mystery. */
 #include "human/persona/style_card.h"
 
-#include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/persona.h"
+#include "human/persona/card_file.h"
 
 #include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
-
-#define HU_STYLE_CARD_MAX_BYTES ((size_t)256 * 1024)
-#define HU_STYLE_CARD_PATH_MAX  512
 
 /* Last measurement taken when this default was edited. scripts/
  * measure_style_card.py, 2026-09-03, window 2026-07-05..2026-09-03,
@@ -54,31 +51,20 @@ static bool read_axis(const hu_json_value_t *axes, const char *name, double *out
     return true;
 }
 
-static void copy_date(char *dst, size_t cap, const hu_json_value_t *obj, const char *key) {
-    const char *s = obj ? hu_json_get_string(obj, key) : NULL;
-    if (!s)
-        return;
-    snprintf(dst, cap, "%s", s);
-}
-
 hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t len,
                                hu_style_card_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     hu_style_card_default(out);
-    if (!alloc || !json)
-        return HU_ERR_INVALID_ARGUMENT;
-
     hu_json_value_t *root = NULL;
-    hu_error_t err = hu_json_parse(alloc, json, len, &root);
+    hu_error_t err = hu_persona_card_parse_object(alloc, json, len, &root);
     if (err != HU_OK)
         return err;
 
     hu_style_card_t card;
     hu_style_card_default(&card);
     err = HU_ERR_INVALID_ARGUMENT;
-    const hu_json_value_t *axes =
-        root->type == HU_JSON_OBJECT ? hu_json_object_get(root, "axes") : NULL;
+    const hu_json_value_t *axes = hu_json_object_get(root, "axes");
     if (axes && axes->type == HU_JSON_OBJECT &&
         read_axis(axes, "lowercase_start_rate", &card.lowercase_start_rate) &&
         read_axis(axes, "no_terminal_punct_rate", &card.no_terminal_punct_rate) &&
@@ -87,11 +73,8 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
         read_axis(axes, "emoji_rate", &card.emoji_rate)) {
         double n = hu_json_get_number(root, "n", 0.0);
         card.n = n > 0.0 ? (unsigned)n : 0u;
-        const hu_json_value_t *window = hu_json_object_get(root, "window");
-        if (window && window->type == HU_JSON_OBJECT) {
-            copy_date(card.window_start, sizeof(card.window_start), window, "start");
-            copy_date(card.window_end, sizeof(card.window_end), window, "end");
-        }
+        hu_persona_card_copy_window(root, card.window_start, sizeof(card.window_start),
+                                    card.window_end, sizeof(card.window_end));
         card.from_card = true;
         *out = card;
         err = HU_OK;
@@ -105,20 +88,9 @@ hu_error_t hu_style_card_load_for_persona(hu_allocator_t *alloc, const char *nam
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     hu_style_card_default(out);
-    if (!alloc || !name || name_len == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    char base[HU_STYLE_CARD_PATH_MAX];
-    if (!hu_persona_base_dir(base, sizeof(base)))
-        return HU_ERR_NOT_FOUND;
-    char path[HU_STYLE_CARD_PATH_MAX];
-    int n = snprintf(path, sizeof(path), "%s/%.*s.style-card.json", base, (int)name_len, name);
-    if (n <= 0 || (size_t)n >= sizeof(path))
-        return HU_ERR_INVALID_ARGUMENT;
-
     char *buf = NULL;
     size_t got = 0;
-    hu_error_t err = hu_file_slurp(alloc, path, HU_STYLE_CARD_MAX_BYTES, &buf, &got);
+    hu_error_t err = hu_persona_card_slurp(alloc, name, name_len, ".style-card.json", &buf, &got);
     if (err != HU_OK)
         return err;
     err = hu_style_card_parse(alloc, buf, got, out);

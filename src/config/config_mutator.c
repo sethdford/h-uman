@@ -1,6 +1,7 @@
 #include "human/config_mutator.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -255,7 +256,7 @@ hu_error_t hu_config_mutator_default_path(hu_allocator_t *alloc, char **out_path
     char *p = (char *)alloc->alloc(alloc->ctx, n);
     if (!p)
         return HU_ERR_OUT_OF_MEMORY;
-    int pn = snprintf(p, n, "%s/.human/config.json", home);
+    int pn = hu_paths_state_or(p, n, ".", "config.json");
     if (pn < 0 || (size_t)pn >= n) {
         alloc->free(alloc->ctx, p, n);
         return HU_ERR_INVALID_ARGUMENT;
@@ -581,8 +582,7 @@ hu_error_t hu_config_mutator_mutate(hu_allocator_t *alloc, hu_mutation_action_t 
                      * 0600 mode so a backup doesn't accidentally
                      * become world-readable. */
                     FILE *bak = NULL;
-                    if (hu_io_secure_open(backup_path, HU_IO_PERM_SECRET, "wb", &bak) ==
-                            HU_OK &&
+                    if (hu_io_secure_open(backup_path, HU_IO_PERM_SECRET, "wb", &bak) == HU_OK &&
                         bak) {
                         (void)fwrite(content, 1, content_len, bak);
                         fclose(bak);

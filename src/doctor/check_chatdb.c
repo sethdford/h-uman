@@ -1,5 +1,6 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/paths.h"
 #include "human/doctor/check.h"
 #include <errno.h>
 #include <stdio.h>
@@ -34,14 +35,10 @@ static hu_doctor_check_result_t check_chatdb_readable(hu_doctor_check_t *self, v
     /* Platform not applicable on non-macOS systems */
     return (hu_doctor_check_result_t){HU_DOCTOR_NA, "", NULL};
 #else
-    const char *home = getenv("HOME");
-    if (!home || !*home) {
-        home = "/tmp"; /* fallback — unlikely to have chat.db there, but better than crash */
-    }
 
     /* Build path: ~/Library/Messages/chat.db */
     char path_buf[1024];
-    int n = snprintf(path_buf, sizeof(path_buf), "%s/Library/Messages/chat.db", home);
+    int n = hu_paths_chatdb_or(path_buf, sizeof(path_buf), "/tmp");
     if (n < 0 || n >= (int)sizeof(path_buf)) {
         snprintf(s_reason_missing, sizeof(s_reason_missing), "path too long");
         return (hu_doctor_check_result_t){HU_DOCTOR_FAIL, s_reason_missing, NULL};

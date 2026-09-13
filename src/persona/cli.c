@@ -1,6 +1,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/persona.h"
 #include "human/persona/eval.h"
@@ -303,6 +304,22 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         if (err == HU_OK && prompt) {
             fprintf(stdout, "%s", prompt);
             alloc->free(alloc->ctx, prompt, prompt_len + 1);
+            /* The ABSOLUTE RULES block is not part of hu_persona_build_prompt:
+             * hu_agent_finalize_system_prompt appends it last, formality-aware
+             * from the channel overlay. Until 2026-09-13 `show <name> <channel>`
+             * omitted it, so every harness that evals "the production prompt"
+             * through this command (humanness nightly, distress register) was
+             * measuring a prompt without the casing/punctuation/register rules
+             * the daemon actually sends. Same builder, same overlay lookup. */
+            if (ch) {
+                const hu_persona_overlay_t *ov = hu_persona_find_overlay(&p, ch, strlen(ch));
+                char rules[2048];
+                size_t rules_len = 0;
+                if (hu_persona_build_absolute_rules_fmt(&p, ov ? ov->formality : NULL, rules,
+                                                        sizeof(rules), &rules_len) == HU_OK &&
+                    rules_len > 0)
+                    fprintf(stdout, "\n\n%s", rules);
+            }
         }
         hu_persona_deinit(alloc, &p);
         return err;
@@ -805,13 +822,10 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         {
             const char *override = getenv("HU_PERSONA_DIR");
             if (!override || !override[0]) {
-                const char *home = getenv("HOME");
-                if (home && home[0]) {
-                    char parent[HU_PERSONA_PATH_MAX];
-                    int pn = snprintf(parent, sizeof(parent), "%s/.human", home);
-                    if (pn > 0 && (size_t)pn < sizeof(parent))
-                        (void)mkdir(parent, 0755);
-                }
+                char parent[HU_PERSONA_PATH_MAX];
+                int pn = hu_paths_state_dir(parent, sizeof(parent));
+                if (pn > 0 && (size_t)pn < sizeof(parent))
+                    (void)mkdir(parent, 0755);
             }
             if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
                 fprintf(stderr, "Could not create persona directory\n");
@@ -1048,13 +1062,10 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         {
             const char *override = getenv("HU_PERSONA_DIR");
             if (!override || !override[0]) {
-                const char *home = getenv("HOME");
-                if (home && home[0]) {
-                    char parent[HU_PERSONA_PATH_MAX];
-                    int pp = snprintf(parent, sizeof(parent), "%s/.human", home);
-                    if (pp > 0 && (size_t)pp < sizeof(parent))
-                        (void)mkdir(parent, 0755);
-                }
+                char parent[HU_PERSONA_PATH_MAX];
+                int pp = hu_paths_state_dir(parent, sizeof(parent));
+                if (pp > 0 && (size_t)pp < sizeof(parent))
+                    (void)mkdir(parent, 0755);
             }
             if (mkdir(base, 0755) != 0 && errno != EEXIST)
                 return HU_ERR_IO;
@@ -1067,13 +1078,15 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
 
         if (args->from_imessage) {
 #if defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+            /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently.
+             */
             const char *home = getenv("HOME");
             if (!home || !home[0]) {
                 fprintf(stderr, "HOME not set\n");
                 return HU_ERR_NOT_FOUND;
             }
             char db_path[HU_PERSONA_PATH_MAX];
-            int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+            int n = hu_paths_chatdb(db_path, sizeof(db_path));
             if (n <= 0 || (size_t)n >= sizeof(db_path))
                 return HU_ERR_INVALID_ARGUMENT;
             sqlite3 *db = NULL;

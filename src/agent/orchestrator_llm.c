@@ -1,52 +1,24 @@
 #include "human/agent/orchestrator_llm.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/util/llm_json.h"
 #include <stdio.h>
 #include <string.h>
 
 #define HU_ORCH_LLM_CAPABILITY_SIZE 64
 
 __attribute__((unused))
-static void extract_json_from_response(const char *s, size_t len, const char **out_ptr,
-                                       size_t *out_len) {
-    const char *p = s;
-    const char *end = s + len;
-
-    while (p + 3 <= end && memcmp(p, "```", 3) == 0) {
-        p += 3;
-        while (p < end && (*p == ' ' || *p == '\t'))
-            p++;
-        if (p + 4 <= end && (memcmp(p, "json", 4) == 0 || memcmp(p, "JSON", 4) == 0))
-            p += 4;
-        while (p < end && *p != '\n')
-            p++;
-        if (p < end)
-            p++;
-    }
-
-    while (p < end && *p != '{')
-        p++;
-    if (p >= end) {
+/* Shared locator (string-aware, strips <think> blocks and fences). The private
+ * brace-counter this replaced broke on a "}" inside a JSON string. */
+static void
+extract_json_from_response(const char *s, size_t len, const char **out_ptr, size_t *out_len) {
+    if (!hu_llm_json_locate(s, len, out_ptr, out_len)) {
         *out_ptr = s;
         *out_len = len;
-        return;
     }
-    const char *start = p;
-    int depth = 1;
-    p++;
-    while (p < end && depth > 0) {
-        if (*p == '{')
-            depth++;
-        else if (*p == '}')
-            depth--;
-        p++;
-    }
-    *out_ptr = start;
-    *out_len = (size_t)(p - start);
 }
 
-__attribute__((unused))
-static bool validate_decomposition_json(hu_json_value_t *root) {
+__attribute__((unused)) static bool validate_decomposition_json(hu_json_value_t *root) {
     if (!root || root->type != HU_JSON_OBJECT)
         return false;
     hu_json_value_t *tasks = hu_json_object_get(root, "tasks");
@@ -72,15 +44,14 @@ static bool contains_substr(const char *haystack, size_t hlen, const char *needl
     return false;
 }
 
-static bool agent_matches_capability(const hu_agent_capability_t *agent,
-                                      const char *capability, size_t cap_len) {
+static bool agent_matches_capability(const hu_agent_capability_t *agent, const char *capability,
+                                     size_t cap_len) {
     if (!capability || cap_len == 0)
         return true;
     if (agent->skills_len > 0 &&
         contains_substr(agent->skills, agent->skills_len, capability, cap_len))
         return true;
-    if (agent->role_len > 0 &&
-        contains_substr(agent->role, agent->role_len, capability, cap_len))
+    if (agent->role_len > 0 && contains_substr(agent->role, agent->role_len, capability, cap_len))
         return true;
     return false;
 }
@@ -93,11 +64,11 @@ static size_t safe_strnlen(const char *s, size_t maxlen) {
 }
 
 hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *provider,
-                                           const char *model, size_t model_len,
-                                           const char *goal, size_t goal_len,
-                                           const hu_agent_capability_t *capabilities,
-                                           size_t capability_count,
-                                           struct hu_decomposition *result) {
+                                          const char *model, size_t model_len, const char *goal,
+                                          size_t goal_len,
+                                          const hu_agent_capability_t *capabilities,
+                                          size_t capability_count,
+                                          struct hu_decomposition *result) {
     if (!alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
     memset(result, 0, sizeof(*result));
@@ -115,8 +86,7 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
     result->tasks[0].status = HU_TASK_UNASSIGNED;
     result->tasks[0].depends_on = 0;
     result->tasks[0].priority = 1.0;
-    strncpy(result->tasks[0].description, "research",
-            sizeof(result->tasks[0].description) - 1);
+    strncpy(result->tasks[0].description, "research", sizeof(result->tasks[0].description) - 1);
     result->tasks[0].description[sizeof(result->tasks[0].description) - 1] = '\0';
     result->tasks[0].description_len = 8;
 
@@ -126,8 +96,7 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
     result->tasks[1].status = HU_TASK_UNASSIGNED;
     result->tasks[1].depends_on = 1; /* 1 = index of dependency (task 0) */
     result->tasks[1].priority = 1.0;
-    strncpy(result->tasks[1].description, "synthesize",
-            sizeof(result->tasks[1].description) - 1);
+    strncpy(result->tasks[1].description, "synthesize", sizeof(result->tasks[1].description) - 1);
     result->tasks[1].description[sizeof(result->tasks[1].description) - 1] = '\0';
     result->tasks[1].description_len = 10;
 
@@ -167,15 +136,14 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
     for (size_t i = 0; i < capability_count && capabilities; i++) {
         const hu_agent_capability_t *c = &capabilities[i];
         int n = snprintf(prompt + pos, prompt_cap - (size_t)pos, "[%.*s: role=%.*s skills=%.*s] ",
-                         (int)c->agent_id_len, c->agent_id,
-                         (int)c->role_len, c->role,
+                         (int)c->agent_id_len, c->agent_id, (int)c->role_len, c->role,
                          (int)c->skills_len, c->skills);
         if (n > 0 && pos + n < (int)prompt_cap)
             pos += n;
     }
 
-    int n = snprintf(prompt + pos, prompt_cap - (size_t)pos, " Goal: %.*s",
-                     (int)goal_len, goal && goal_len > 0 ? goal : "");
+    int n = snprintf(prompt + pos, prompt_cap - (size_t)pos, " Goal: %.*s", (int)goal_len,
+                     goal && goal_len > 0 ? goal : "");
     if (n > 0 && pos + n < (int)prompt_cap)
         pos += n;
 
@@ -190,8 +158,7 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
 
     hu_error_t err = provider->vtable->chat_with_system(
         provider->ctx, alloc, sys, 55, prompt, (size_t)pos,
-        model && model_len > 0 ? model : "gpt-4o-mini",
-        model && model_len > 0 ? model_len : 11,
+        model && model_len > 0 ? model : "gpt-4o-mini", model && model_len > 0 ? model_len : 11,
         0.2, &llm_out, &llm_out_len);
 
     alloc->free(alloc->ctx, prompt, prompt_cap);
@@ -220,9 +187,8 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
         return HU_ERR_PARSE;
     }
 
-    const char *reasoning_str = root && root->type == HU_JSON_OBJECT
-                                   ? hu_json_get_string(root, "reasoning")
-                                   : NULL;
+    const char *reasoning_str =
+        root && root->type == HU_JSON_OBJECT ? hu_json_get_string(root, "reasoning") : NULL;
     if (reasoning_str) {
         result->reasoning = hu_strndup(alloc, reasoning_str, strlen(reasoning_str));
         result->reasoning_len = result->reasoning ? strlen(reasoning_str) : 0;
@@ -262,7 +228,8 @@ hu_error_t hu_orchestrator_decompose_goal(hu_allocator_t *alloc, hu_provider_t *
         const char *cap = hu_json_get_string(task_val, "capability");
         if (cap) {
             size_t clen = strlen(cap);
-            size_t copy = clen < HU_ORCH_LLM_CAPABILITY_SIZE - 1 ? clen : HU_ORCH_LLM_CAPABILITY_SIZE - 1;
+            size_t copy =
+                clen < HU_ORCH_LLM_CAPABILITY_SIZE - 1 ? clen : HU_ORCH_LLM_CAPABILITY_SIZE - 1;
             strncpy(result->capabilities[result->task_count], cap, copy);
             result->capabilities[result->task_count][copy] = '\0';
         }
@@ -298,9 +265,8 @@ static void decomposition_result_from_orchestrator(const hu_decomposition_t *dec
                                                    hu_decomposition_result_t *result) {
     memset(result, 0, sizeof(*result));
     result->strategy = strategy;
-    result->task_count = decomp->task_count < HU_DECOMP_MAX_TASKS
-                             ? decomp->task_count
-                             : HU_DECOMP_MAX_TASKS;
+    result->task_count =
+        decomp->task_count < HU_DECOMP_MAX_TASKS ? decomp->task_count : HU_DECOMP_MAX_TASKS;
     for (size_t i = 0; i < result->task_count; i++) {
         size_t copy = decomp->tasks[i].description_len < sizeof(result->tasks[i].description) - 1
                           ? decomp->tasks[i].description_len
@@ -313,9 +279,8 @@ static void decomposition_result_from_orchestrator(const hu_decomposition_t *dec
 }
 #endif
 
-hu_error_t hu_decompose_task(hu_allocator_t *alloc, hu_provider_t *provider,
-                             const char *model, size_t model_len,
-                             const char *prompt, size_t prompt_len,
+hu_error_t hu_decompose_task(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
+                             size_t model_len, const char *prompt, size_t prompt_len,
                              hu_decomposition_strategy_t strategy,
                              hu_decomposition_result_t *result) {
     if (!alloc || !result)
@@ -359,8 +324,8 @@ hu_error_t hu_decompose_task(hu_allocator_t *alloc, hu_provider_t *provider,
 #else
     if (provider && provider->vtable && provider->vtable->chat_with_system) {
         hu_decomposition_t decomp = {0};
-        hu_error_t err = hu_orchestrator_decompose_goal(alloc, provider, model, model_len,
-                                                        prompt, prompt_len, NULL, 0, &decomp);
+        hu_error_t err = hu_orchestrator_decompose_goal(alloc, provider, model, model_len, prompt,
+                                                        prompt_len, NULL, 0, &decomp);
         if (err == HU_OK && decomp.task_count > 0) {
             decomposition_result_from_orchestrator(&decomp, strategy, result);
             hu_decomposition_free(alloc, &decomp);
@@ -394,12 +359,12 @@ hu_error_t hu_decompose_task(hu_allocator_t *alloc, hu_provider_t *provider,
 }
 
 hu_error_t hu_decompose_with_replan(hu_allocator_t *alloc, hu_provider_t *provider,
-                                     const char *model, size_t model_len,
-                                     const char *original_prompt, size_t original_prompt_len,
-                                     const char *failed_task, size_t failed_task_len,
-                                     const char *failure_reason, size_t failure_reason_len,
-                                     hu_decomposition_strategy_t strategy,
-                                     hu_decomposition_result_t *result) {
+                                    const char *model, size_t model_len,
+                                    const char *original_prompt, size_t original_prompt_len,
+                                    const char *failed_task, size_t failed_task_len,
+                                    const char *failure_reason, size_t failure_reason_len,
+                                    hu_decomposition_strategy_t strategy,
+                                    hu_decomposition_result_t *result) {
     if (!alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -438,21 +403,20 @@ hu_error_t hu_decompose_with_replan(hu_allocator_t *alloc, hu_provider_t *provid
         return HU_ERR_OUT_OF_MEMORY;
 
     int pos = snprintf(replan_prompt, prompt_cap,
-        "Re-decompose this task. A previous subtask failed.\n"
-        "Original goal: %.*s\n"
-        "Failed subtask: %.*s\n"
-        "Failure reason: %.*s\n"
-        "Create a new plan that works around this failure.",
-        (int)(original_prompt_len < 1000 ? original_prompt_len : 1000),
-        original_prompt ? original_prompt : "",
-        (int)(failed_task_len < 500 ? failed_task_len : 500),
-        failed_task ? failed_task : "",
-        (int)(failure_reason_len < 500 ? failure_reason_len : 500),
-        failure_reason ? failure_reason : "");
+                       "Re-decompose this task. A previous subtask failed.\n"
+                       "Original goal: %.*s\n"
+                       "Failed subtask: %.*s\n"
+                       "Failure reason: %.*s\n"
+                       "Create a new plan that works around this failure.",
+                       (int)(original_prompt_len < 1000 ? original_prompt_len : 1000),
+                       original_prompt ? original_prompt : "",
+                       (int)(failed_task_len < 500 ? failed_task_len : 500),
+                       failed_task ? failed_task : "",
+                       (int)(failure_reason_len < 500 ? failure_reason_len : 500),
+                       failure_reason ? failure_reason : "");
 
-    hu_error_t err = hu_decompose_task(alloc, provider, model, model_len,
-                                        replan_prompt, pos > 0 ? (size_t)pos : 0,
-                                        strategy, result);
+    hu_error_t err = hu_decompose_task(alloc, provider, model, model_len, replan_prompt,
+                                       pos > 0 ? (size_t)pos : 0, strategy, result);
     alloc->free(alloc->ctx, replan_prompt, prompt_cap);
     return err;
 #endif
@@ -463,7 +427,7 @@ static int tolower_orch(int c) {
 }
 
 bool hu_decomposition_check_coverage(const char *goal, size_t goal_len,
-                                      const hu_decomposition_result_t *result) {
+                                     const hu_decomposition_result_t *result) {
     if (!goal || goal_len == 0 || !result || result->task_count == 0)
         return false;
 
@@ -476,12 +440,14 @@ bool hu_decomposition_check_coverage(const char *goal, size_t goal_len,
     while (p < end) {
         while (p < end && (*p == ' ' || *p == '\t' || *p == '\n'))
             p++;
-        if (p >= end) break;
+        if (p >= end)
+            break;
         const char *ws = p;
         while (p < end && *p != ' ' && *p != '\t' && *p != '\n')
             p++;
         size_t wlen = (size_t)(p - ws);
-        if (wlen <= 3) continue; /* skip short words */
+        if (wlen <= 3)
+            continue; /* skip short words */
         goal_words++;
 
         /* Check if this word appears in any subtask */
@@ -489,7 +455,8 @@ bool hu_decomposition_check_coverage(const char *goal, size_t goal_len,
         for (size_t t = 0; t < result->task_count && !found; t++) {
             const char *desc = result->tasks[t].description;
             size_t dlen = result->tasks[t].description_len;
-            if (dlen == 0) continue;
+            if (dlen == 0)
+                continue;
             for (size_t d = 0; d + wlen <= dlen; d++) {
                 bool match = true;
                 for (size_t j = 0; j < wlen; j++) {
@@ -499,7 +466,10 @@ bool hu_decomposition_check_coverage(const char *goal, size_t goal_len,
                         break;
                     }
                 }
-                if (match) { found = true; break; }
+                if (match) {
+                    found = true;
+                    break;
+                }
             }
         }
         if (found)
@@ -513,7 +483,7 @@ bool hu_decomposition_check_coverage(const char *goal, size_t goal_len,
 }
 
 hu_error_t hu_orchestrator_auto_assign(hu_orchestrator_t *orch,
-                                        const hu_decomposition_t *decomposition) {
+                                       const hu_decomposition_t *decomposition) {
     if (!orch || !decomposition || decomposition->task_count == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -526,7 +496,7 @@ hu_error_t hu_orchestrator_auto_assign(hu_orchestrator_t *orch,
     }
 
     hu_error_t err = hu_orchestrator_propose_split(orch, "", 0, subtasks, subtask_lens,
-                                                    decomposition->task_count);
+                                                   decomposition->task_count);
     if (err != HU_OK)
         return err;
 

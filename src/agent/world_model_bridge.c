@@ -16,6 +16,7 @@
 #include "human/agent/tom_scenario.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/world_model.h"
+#include "human/core/paths.h"
 #include "human/memory/belief.h"
 #include "human/memory/memory.h"
 #include "human/ml/lora_retrain_runner.h"
@@ -1377,10 +1378,7 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
 bool hu_w14_scheduler_status_path(char *out_path, size_t cap) {
     if (!out_path || cap == 0)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        return false;
-    int n = snprintf(out_path, cap, "%s/.human/scheduler.status", home);
+    int n = hu_paths_state(out_path, cap, "scheduler.status");
     return n > 0 && (size_t)n < cap;
 }
 

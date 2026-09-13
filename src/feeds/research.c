@@ -17,7 +17,6 @@
 #include "human/feeds/findings.h"
 #include "human/feeds/processor.h"
 #include "human/intelligence/cycle.h"
-#include <sqlite3.h>
 #include <time.h>
 #endif
 

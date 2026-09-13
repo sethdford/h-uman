@@ -58,24 +58,6 @@ hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc, hu_authentic_beha
                                         const char *life_context, size_t ctx_len, char **out,
                                         size_t *out_len);
 
-/* F114: Life thread — persistent narrative.
- * P3-2 (2026-05-16) — scoped per-contact. NULL/zero contact_id means
- * the empty scope (""), matching the conservative migration default. */
-hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_life_thread_insert_sql(const char *contact_id, size_t contact_id_len,
-                                     const char *thread, size_t thread_len, uint64_t timestamp,
-                                     char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_life_thread_query_active_sql(const char *contact_id, size_t contact_id_len, char *buf,
-                                           size_t cap, size_t *out_len);
-
-/* F115: Bad day recovery */
-bool hu_authentic_is_bad_day(bool bad_day_active, uint64_t bad_day_start, uint64_t now_ms,
-                             uint32_t duration_hours);
-hu_error_t hu_bad_day_build_directive(hu_allocator_t *alloc, char **out, size_t *out_len);
-
-const char *hu_authentic_behavior_str(hu_authentic_behavior_t b);
-void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s);
-
 /* F104: Physical Embodiment — schedule-based physical state */
 typedef enum {
     HU_PHYSICAL_NORMAL = 0,
@@ -110,28 +92,17 @@ const char *hu_error_injection_prompt(void);
 const char *hu_mundane_complaint_prompt(int hour, int day_of_week,
                                         hu_physical_state_t physical_state, const char *weather);
 
-/* F109: Medium awareness */
-const char *hu_medium_awareness_prompt(bool was_typo, int burst_count, int message_length,
-                                       int wall_of_text_threshold);
-
 /* F110: Resistance/Disengagement */
 typedef struct {
     float disengage_probability;
     const char *disengage_style;
 } hu_disengage_decision_t;
 
-hu_disengage_decision_t hu_should_disengage(float cognitive_capacity, float topic_interest,
-                                            bool is_emotional_context,
-                                            const char *relationship_level);
-
 /* F111: Existential curiosity */
 typedef struct {
     const char *question;
     const char *trigger;
 } hu_curiosity_candidate_t;
-
-bool hu_existential_curiosity_check(const char *relationship_level, int hour_of_day,
-                                    int days_since_last, hu_curiosity_candidate_t *out);
 
 /* F112: Contradiction tolerance */
 typedef struct {
@@ -142,27 +113,10 @@ typedef struct {
     int expressed_b_count;
 } hu_contradiction_t;
 
-const char *hu_contradiction_select_position(const hu_contradiction_t *contradiction,
-                                             float mood_valence, float cognitive_capacity);
-
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 
-hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic, const char *position_a,
-                                   const char *position_b, int64_t now);
-int hu_contradiction_get(sqlite3 *db, const char *topic, hu_contradiction_t *out);
-
-hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type, const char *description,
-                                     float shareability_score, int64_t now);
-
 int hu_narration_events_unsent(sqlite3 *db, float min_shareability, int64_t *out_ids, int max_out);
-
-hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id, const char *contact_id,
-                                          int64_t now);
-
-/* F107: Gossip */
-int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out);
-const char *hu_gossip_prompt(const char *shared_contact, const char *observation);
 
 /* F108: Random thoughts */
 typedef struct {
@@ -170,16 +124,6 @@ typedef struct {
     const char *seed_content;
 } hu_random_thought_t;
 
-bool hu_random_thought_generate(int hour, int day_of_week, int thoughts_this_week,
-                                hu_random_thought_t *out);
-
-/* F113: Guilt check — counts open threads for a contact via SQLite */
-int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out);
-
-/* F114: Thread management */
-hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id, const char *topic, int64_t now);
-hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id);
-int hu_thread_list_open(sqlite3 *db, const char *contact_id, char topics[][128], int max_out);
 int hu_thread_needs_followup(sqlite3 *db, const char *contact_id, int64_t min_age_sec,
                              int64_t max_age_sec, int64_t now);
 

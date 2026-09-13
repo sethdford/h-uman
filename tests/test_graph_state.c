@@ -209,8 +209,122 @@ static void test_state_format_month_utc(void) {
     HU_ASSERT_EQ((int)hu_graph_state_format_month(T_NOW, buf, 4), 0);
 }
 
+/* Held-out changed-facts gate (docs/plans/2026-09-06-better-than-human item 2).
+ *
+ * The ten tests above each pin one semantic. This one is the measurement the
+ * plan gates on: MANY supersession chains, mixed types, interleaved subjects,
+ * input order shuffled, resolved at several moments — and EVERY lookup must
+ * return the version that held at that moment, with `prev` naming the state it
+ * replaced. A resolver that passes the hand-picked cases but drifts on a
+ * chain of four, or on a subject whose rows are scattered through the set,
+ * fails here. Deterministic (seeded LCG), so a failure names the chain. */
+#define HELDOUT_SUBJECTS     24
+#define HELDOUT_MAX_STATES   4
+#define HELDOUT_HALF_YEAR_MS (183LL * 24 * 3600 * 1000)
+
+static uint32_t heldout_lcg(uint32_t *s) {
+    *s = *s * 1664525u + 1013904223u;
+    return *s;
+}
+
+static void test_state_heldout_chains_resolve_right_version(void) {
+    hu_allocator_t *a = sys_alloc();
+    hu_graph_relation_t rels[HELDOUT_SUBJECTS * HELDOUT_MAX_STATES];
+    size_t n = 0;
+    size_t chain_len[HELDOUT_SUBJECTS];
+    int64_t chain_start[HELDOUT_SUBJECTS][HELDOUT_MAX_STATES];
+    int64_t chain_target[HELDOUT_SUBJECTS][HELDOUT_MAX_STATES];
+
+    /* Build: subject i has k=2..4 states; each state ends exactly when the
+     * next begins; only the last is open; each links its predecessor. */
+    for (size_t i = 0; i < HELDOUT_SUBJECTS; i++) {
+        size_t k = 2 + (i % 3);
+        chain_len[i] = k;
+        hu_relation_type_t type = (i % 2 == 0) ? HU_REL_WORKS_AT : HU_REL_LIVES_IN;
+        int64_t src = 100 + (int64_t)i;
+        int64_t prev_id = 0;
+        for (size_t j = 0; j < k; j++) {
+            int64_t id = (int64_t)i * 10 + (int64_t)j + 1;
+            int64_t start = T_2024 + (int64_t)j * HELDOUT_HALF_YEAR_MS + (int64_t)i * 3600000LL;
+            int64_t end = (j + 1 < k) ? start + HELDOUT_HALF_YEAR_MS : 0;
+            int64_t tgt = 1000 + (int64_t)i * 10 + (int64_t)j;
+            chain_start[i][j] = start;
+            chain_target[i][j] = tgt;
+            rels[n++] = rel(id, src, tgt, type, start, end, prev_id);
+            prev_id = id;
+        }
+    }
+
+    /* Shuffle so no subject's rows are adjacent or in chronological order. */
+    uint32_t seed = 20260906u;
+    for (size_t i = n - 1; i > 0; i--) {
+        size_t j = heldout_lcg(&seed) % (i + 1);
+        hu_graph_relation_t t = rels[i];
+        rels[i] = rels[j];
+        rels[j] = t;
+    }
+
+    /* Moment 1: now — every subject's OPEN head, prev = the state before it. */
+    hu_graph_state_entry_t *out = NULL;
+    size_t out_n = 0;
+    HU_ASSERT_EQ(hu_graph_state_resolve(a, rels, n, T_NOW, &out, &out_n), HU_OK);
+    size_t current_seen = 0;
+    for (size_t e = 0; e < out_n; e++) {
+        if (!out[e].current)
+            continue;
+        current_seen++;
+        size_t i = (size_t)(out[e].rel->source_id - 100);
+        size_t last = chain_len[i] - 1;
+        HU_ASSERT_EQ(out[e].rel->target_id, chain_target[i][last]);
+        HU_ASSERT_EQ(out[e].rel->event_end, (int64_t)0);
+        HU_ASSERT_NOT_NULL(out[e].prev);
+        HU_ASSERT_EQ(out[e].prev->target_id, chain_target[i][last - 1]);
+    }
+    HU_ASSERT_EQ(current_seen, (size_t)HELDOUT_SUBJECTS); /* exactly one head each */
+    a->free(a->ctx, out, out_n * sizeof(*out));
+
+    /* Moment 2: mid-chain — as of one day into each subject's SECOND state,
+     * that state (not the open one, not the first) must be the head. */
+    for (size_t i = 0; i < HELDOUT_SUBJECTS; i++) {
+        int64_t as_of = chain_start[i][1] + 24LL * 3600 * 1000;
+        out = NULL;
+        out_n = 0;
+        HU_ASSERT_EQ(hu_graph_state_resolve(a, rels, n, as_of, &out, &out_n), HU_OK);
+        bool found = false;
+        for (size_t e = 0; e < out_n; e++) {
+            if (!out[e].current || out[e].rel->source_id != 100 + (int64_t)i)
+                continue;
+            HU_ASSERT_FALSE(found); /* a second current row for the subject = drift */
+            found = true;
+            HU_ASSERT_EQ(out[e].rel->target_id, chain_target[i][1]);
+            HU_ASSERT_NOT_NULL(out[e].prev);
+            HU_ASSERT_EQ(out[e].prev->target_id, chain_target[i][0]);
+        }
+        HU_ASSERT_TRUE(found);
+        a->free(a->ctx, out, out_n * sizeof(*out));
+    }
+
+    /* Moment 3: the exact cutover instant belongs to the NEW state, never the
+     * old one (event_end is exclusive) — for every chain with >= 3 states. */
+    for (size_t i = 0; i < HELDOUT_SUBJECTS; i++) {
+        if (chain_len[i] < 3)
+            continue;
+        int64_t as_of = chain_start[i][2];
+        out = NULL;
+        out_n = 0;
+        HU_ASSERT_EQ(hu_graph_state_resolve(a, rels, n, as_of, &out, &out_n), HU_OK);
+        for (size_t e = 0; e < out_n; e++) {
+            if (!out[e].current || out[e].rel->source_id != 100 + (int64_t)i)
+                continue;
+            HU_ASSERT_EQ(out[e].rel->target_id, chain_target[i][2]);
+        }
+        a->free(a->ctx, out, out_n * sizeof(*out));
+    }
+}
+
 void run_graph_state_tests(void) {
     HU_TEST_SUITE("Graph state view");
+    HU_RUN_TEST(test_state_heldout_chains_resolve_right_version);
     HU_RUN_TEST(test_state_is_current_honors_event_window);
     HU_RUN_TEST(test_state_resolve_single_valued_keeps_only_open_head);
     HU_RUN_TEST(test_state_resolve_as_of_returns_historical_head);

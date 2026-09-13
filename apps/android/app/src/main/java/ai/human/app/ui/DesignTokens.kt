@@ -116,7 +116,7 @@ object HUTokens {
         val surfaceContainerHighest = Color(0xFFE8E7E4)
         val surfaceDim = Color(0xFFE5E4E1)
         val text = Color(0xFF2D2A26)
-        val textFaint = Color(0xFF9A9490)
+        val textFaint = Color(0xFF726C65)
         val textMuted = Color(0xFF6B655E)
         val textSecondary = Color(0xFF4A4540)
         val textTertiary = Color(0xFF6B655E)

@@ -146,9 +146,9 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
                 hu_error_t cerr = HU_ERR_INVALID_ARGUMENT;
                 if (hu_followup_compose_directive(cp->contact_id, warmth, age_h, "imessage",
                                                   directive, sizeof(directive)) > 0)
-                    cerr =
-                        hu_followup_compose_text(agent->alloc, agent->persona, &agent->provider,
-                                                 "imessage", directive, composed, sizeof(composed));
+                    cerr = hu_followup_compose_text(
+                        agent->alloc, agent->persona, &agent->provider, agent->model_name,
+                        agent->model_name_len, "imessage", directive, composed, sizeof(composed));
                 if (cmode == HU_GATE_SHADOW && cerr == HU_OK)
                     hu_log_info("human", agent->observer,
                                 "[followup-compose] shadow: would send \"%s\" to %s "

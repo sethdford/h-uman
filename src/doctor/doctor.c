@@ -3,6 +3,7 @@
 #include "human/agent/verifier_metrics.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/skill_registry.h"
@@ -806,13 +807,14 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
      * matches what the daemon experiences, we attempt a real sqlite open
      * (read-only) and run a no-op query. Without sqlite at build time we
      * fall back to access() and explicitly disclaim the limitation. */
+    /* Kept: the guard owns the "$HOME is not set" diagnostic; the helper fails silently. */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR,
                          "[doctor] iMessage: $HOME is not set; cannot locate chat.db");
     } else {
         char db_path[768];
-        int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+        int n = hu_paths_chatdb(db_path, sizeof(db_path));
         if (n > 0 && (size_t)n < sizeof(db_path)) {
 #ifdef HU_ENABLE_SQLITE
             sqlite3 *probe = NULL;
@@ -1374,13 +1376,14 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
     if (!alloc || !items || !count || !cap)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Kept: the guard owns the "$HOME unset" line; the helper's failure reads "path overflow". */
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
                                 "[doctor] scheduler: $HOME unset");
 
     char path[512];
-    int pn = snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    int pn = hu_paths_state(path, sizeof(path), "scheduler.status");
     if (pn <= 0 || (size_t)pn >= sizeof(path))
         return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
                                 "[doctor] scheduler: path overflow");
@@ -1548,10 +1551,7 @@ static int resolve_state_dir(char *out, size_t cap) {
         memcpy(out, override, len + 1);
         return 0;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
-    int n = snprintf(out, cap, "%s/.human", home);
+    int n = hu_paths_state_dir(out, cap);
     if (n <= 0 || (size_t)n >= cap)
         return -1;
     return 0;

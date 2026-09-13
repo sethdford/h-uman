@@ -1,5 +1,10 @@
 # Edge-Context Isolation — Channels Depend on Contracts, Not Each Other
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 A concrete channel implementation may include the channel vtable contract and
 shared infra, but must not take on a **new** dependency on a *different*
 channel's header.

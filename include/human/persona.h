@@ -1002,4 +1002,10 @@ hu_error_t hu_persona_refresh_example_banks(hu_allocator_t *alloc, const char *p
  * AND (never run before OR ≥24h since last run). */
 bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_run_unix);
 
+/* Pure cadence predicate for the per-turn style reanalyze in agent_turn.c:
+ * gated on the SAME learning.persona_refresh_enabled switch as the daemon
+ * refresh tick (both persist the persona through the struct-only writer), then
+ * every 10 turns up to 20, every 25 up to 100, every 50 after. Never at 0. */
+bool hu_persona_style_reanalyze_due(bool enabled, size_t history_count);
+
 #endif /* HU_PERSONA_H */

@@ -57,6 +57,18 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# 1b. test-suite honesty gates (2026-09-10 review: these lived only in the
+# bypassable pre-commit hook). Repo-wide, cheap, no build needed.
+info "Step 1b: test-suite honesty gates..."
+if scripts/check-disabled-test-registration.sh --suites \
+   && scripts/check-test-silent-pass.sh $(ls tests/test_*.c); then
+    info "  suite registration + silent-pass: pass"
+    PASS=$((PASS + 1))
+else
+    warn "  suite registration + silent-pass: fail"
+    FAIL=$((FAIL + 1))
+fi
+
 # 2 & 3. cmake configure and build
 info "Step 2/5: cmake configure..."
 BUILD_DIR="build-check"

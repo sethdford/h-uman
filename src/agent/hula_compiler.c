@@ -2,6 +2,7 @@
 #include "human/agent/hula_emergence.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/util/llm_json.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -26,43 +27,14 @@ static const char HULA_COMPILER_TOOLS[] = "\n\nTools (use exact \"tool\" names i
 static const char HULA_COMPILER_SUFFIX[] =
     "\n\nRespond with only valid JSON matching the schema above.";
 
+/* Shared locator (string-aware, strips <think> blocks and fences). The private
+ * brace-counter this replaced broke on a "}" inside a JSON string. */
 static void extract_json_from_response(const char *s, size_t len, const char **out_ptr,
                                        size_t *out_len) {
-    const char *p = s;
-    const char *end = s + len;
-
-    while (p + 3 <= end && memcmp(p, "```", 3) == 0) {
-        p += 3;
-        while (p < end && (*p == ' ' || *p == '\t'))
-            p++;
-        if (p + 4 <= end && (memcmp(p, "json", 4) == 0 || memcmp(p, "JSON", 4) == 0))
-            p += 4;
-        while (p < end && *p != '\n')
-            p++;
-        if (p < end)
-            p++;
-    }
-
-    const char *start = p;
-    while (p < end && *p != '{')
-        p++;
-    if (p >= end) {
+    if (!hu_llm_json_locate(s, len, out_ptr, out_len)) {
         *out_ptr = s;
         *out_len = len;
-        return;
     }
-    start = p;
-    int depth = 1;
-    p++;
-    while (p < end && depth > 0) {
-        if (*p == '{')
-            depth++;
-        else if (*p == '}')
-            depth--;
-        p++;
-    }
-    *out_ptr = start;
-    *out_len = (size_t)(p - start);
 }
 
 static const char *template_lookup(const hu_json_value_t *obj, const char *key, size_t key_len,
@@ -519,9 +491,9 @@ hu_error_t hu_hula_compiler_chat_compile_execute(
 
         char diag[768];
         size_t dpos = 0;
-        dpos = hu_buf_appendf(
-            diag, sizeof(diag), dpos,
-            "\n\nThe program failed validation. Fix and respond with JSON only.\n");
+        dpos =
+            hu_buf_appendf(diag, sizeof(diag), dpos,
+                           "\n\nThe program failed validation. Fix and respond with JSON only.\n");
         for (size_t di = 0; di < hv.diag_count && di < HU_HULA_MAX_DIAGS && dpos + 2 < sizeof(diag);
              di++) {
             const char *m = hv.diags[di].message ? hv.diags[di].message : "?";
@@ -593,8 +565,8 @@ hu_error_t hu_hula_compiler_chat_compile_execute(
                                             pjl, saved_compile_json, saved_compile_json_len);
                 hu_str_free(alloc, pj);
             } else {
-                (void)hu_hula_trace_persist(alloc, NULL, tr, trl, hcp.name, hcp.name_len, hok, NULL, 0,
-                                            saved_compile_json, saved_compile_json_len);
+                (void)hu_hula_trace_persist(alloc, NULL, tr, trl, hcp.name, hcp.name_len, hok, NULL,
+                                            0, saved_compile_json, saved_compile_json_len);
             }
         }
         if (hok && done_fn)

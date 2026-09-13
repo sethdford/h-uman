@@ -96,7 +96,33 @@ class RunCli(unittest.TestCase):
         return msc.parse_args([
             "--persona", "test", "--out", out, "--min-n", "300", "--n-resamples", "50",
             "--end", (T0 + datetime.timedelta(days=1)).date().isoformat(), "--days", "2",
+            "--substantive-days", "0",  # hermetic: never read chat.db for the pair axis
         ])
+
+    def test_substantive_axis_from_given_pairs_is_judge_free_and_exact(self):
+        pairs = [("long question about the lease, what do you think of the terms?", "Yes"),
+                 ("x" * 160, "idk, probably fine"),
+                 ("another long inbound " * 8, "I'll send it over tonight."),
+                 ("do you want to postpone tennis tonight since family is in?", "No")]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            rc = msc.run(self._args(out), messages=synthetic_corpus(400), substantive_pairs=pairs)
+            self.assertEqual(rc, 0)
+            card = json.load(open(out))
+            sr = card["substantive_reply"]
+            self.assertEqual(sr["n"], 4)
+            self.assertEqual(sr["median_chars"], 18)  # sorted lens 2, 3, 18, 48 -> index 2
+            self.assertAlmostEqual(sr["share_le_60_chars"], 1.0)
+            self.assertAlmostEqual(sr["answer_first_rate"], 0.75)
+            self.assertEqual(sr["min_n"], msc.SUBSTANTIVE_MIN_N)
+            for _, reply in pairs:  # no reply text on the card
+                self.assertNotIn(reply, json.dumps(card))
+
+    def test_no_pairs_given_and_axis_disabled_writes_no_axis(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            self.assertEqual(msc.run(self._args(out), messages=synthetic_corpus(400)), 0)
+            self.assertNotIn("substantive_reply", json.load(open(out)))
 
     def test_refusal_writes_nothing_and_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as d:

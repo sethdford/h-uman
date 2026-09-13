@@ -10,10 +10,10 @@
  * PASS. */
 
 #include "human/agent/output_validator.h"
-#include "human/core/string.h"
 #include "human/agent/validators/builtin.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/string.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -36,6 +36,50 @@ static const char *const COLLAPSE_PATTERNS[] = {
 };
 static const size_t N_PATTERNS = sizeof(COLLAPSE_PATTERNS) / sizeof(COLLAPSE_PATTERNS[0]);
 
+/* A reply that IS an assistant opener and nothing else has no turn boundary
+ * for the split check below to find. 2026-09-07 the model answered a
+ * contact with exactly "How can I help you?" and it passed this chain (a
+ * real reply superseded it before delivery, but the guard was blind).
+ * Matched against the whole trimmed reply, terminal ?/!/. dropped, so an
+ * in-character "how can I help with the move?" is untouched. */
+static const char *const BARE_OPENERS[] = {
+    "how can i help you",   "how can i help",       "how may i help you",
+    "how can i assist you", "how may i assist you", "what can i do for you",
+};
+static const size_t N_BARE_OPENERS = sizeof(BARE_OPENERS) / sizeof(BARE_OPENERS[0]);
+
+static bool is_ws(char c) {
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+/* True when the whole reply, trimmed of whitespace and terminal punctuation,
+ * equals one of BARE_OPENERS (case-insensitive). */
+static bool is_bare_assistant_opener(const char *s, size_t len) {
+    size_t a = 0, b = len;
+    while (a < b && is_ws(s[a]))
+        a++;
+    while (b > a && (is_ws(s[b - 1]) || s[b - 1] == '?' || s[b - 1] == '!' || s[b - 1] == '.'))
+        b--;
+    size_t n = b - a;
+    if (n == 0)
+        return false;
+    for (size_t p = 0; p < N_BARE_OPENERS; p++) {
+        size_t plen = strlen(BARE_OPENERS[p]);
+        if (plen != n)
+            continue;
+        bool eq = true;
+        for (size_t i = 0; i < n && eq; i++) {
+            char c = s[a + i];
+            if (c >= 'A' && c <= 'Z')
+                c = (char)(c + 32);
+            eq = (c == BARE_OPENERS[p][i]);
+        }
+        if (eq)
+            return true;
+    }
+    return false;
+}
+
 /* --------------------------------------------------------------------------
  * Helpers
  * -------------------------------------------------------------------------- */
@@ -52,6 +96,20 @@ static hu_error_t role_consistency_validate(void *ctx, hu_allocator_t *alloc,
     (void)ctx;
     (void)vctx;
     memset(out, 0, sizeof(*out));
+
+    if (is_bare_assistant_opener(response, response_len)) {
+        static const char BARE_REASON[] = "role-collapse: reply is a bare assistant opener";
+        size_t rlen = sizeof(BARE_REASON) - 1;
+        char *reason = (char *)alloc->alloc(alloc->ctx, rlen + 1);
+        if (!reason)
+            return HU_ERR_OUT_OF_MEMORY;
+        memcpy(reason, BARE_REASON, rlen + 1);
+        out->decision = HU_VALIDATOR_REJECT;
+        out->reason = reason;
+        out->reason_len = rlen;
+        out->reason_owned = true;
+        return HU_OK;
+    }
 
     /* Find the first occurrence of "\n\n". */
     const char *split = NULL;

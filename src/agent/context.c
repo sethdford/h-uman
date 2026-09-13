@@ -2,6 +2,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,8 +100,8 @@ hu_error_t hu_context_format_messages(hu_allocator_t *alloc, const hu_owned_mess
 uint32_t hu_context_estimate_tokens(const hu_chat_message_t *messages, size_t messages_count) {
     uint32_t total = 0;
     for (size_t i = 0; i < messages_count; i++) {
-        total += (uint32_t)((messages[i].content_len + 3) / 4);
-        total += 4; /* overhead per message */
+        total += (uint32_t)hu_tokens_estimate_text(messages[i].content, messages[i].content_len);
+        total += 4; /* chat formatting overhead per message — not part of the ratio */
     }
     return total;
 }
@@ -183,9 +184,9 @@ size_t hu_chat_messages_drop_oversized_parts(hu_chat_message_t *msgs, size_t cou
 
 /* Estimate tokens for a single text string (rough: ~4 chars per token for English). */
 size_t hu_estimate_tokens_text(const char *text, size_t len) {
-    if (!text)
-        return 0;
-    return (len + 3) / 4;
+    /* Thin alias kept for its existing callers; the ratio and the measurement
+     * behind it live in human/core/tokens.h. */
+    return hu_tokens_estimate_text(text, len);
 }
 
 bool hu_context_check_pressure(hu_context_pressure_t *p, float pressure_warn,

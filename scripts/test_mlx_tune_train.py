@@ -415,3 +415,58 @@ def test_main_rejects_invalid_train_mode():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-13: held-out SimPO loss (the learning signal the step trend cannot give)
+# ---------------------------------------------------------------------------
+def _tiny_llama_trainer():
+    mx = pytest.importorskip("mlx.core")
+    nn = pytest.importorskip("mlx.nn")
+    from mlx_lm.models.llama import Model, ModelArgs
+    from mlx_tune.rl_trainers import common_prefix_length
+    mx.random.seed(0)
+    model = Model(ModelArgs(model_type="llama", hidden_size=32, num_hidden_layers=2, intermediate_size=64,
+                            num_attention_heads=2, num_key_value_heads=2, rms_norm_eps=1e-5, vocab_size=64,
+                            head_dim=16, max_position_embeddings=128))
+    mx.eval(model.parameters())
+
+    class Tok:
+        def encode(self, s):            # deterministic byte tokenizer, vocab 64
+            return [b % 64 for b in s.encode()]
+
+    class T:                             # the two trainer methods heldout_simpo_loss relies on
+        def __init__(self): self.model, self.tokenizer, self.max_seq_length = model, Tok(), 128
+        def _tokenize_pair(self, sample):
+            c = self.tokenizer.encode(sample["prompt"] + sample["chosen"])[: self.max_seq_length]
+            r = self.tokenizer.encode(sample["prompt"] + sample["rejected"])[: self.max_seq_length]
+            return {"chosen_ids": c, "rejected_ids": r, "chosen_length": len(c), "rejected_length": len(r),
+                    "prompt_length": common_prefix_length(c, r)}
+        def _pad(self, ids, length, pad_id=0): return ids + [pad_id] * (length - len(ids))
+    return T()
+
+
+PAIRS = [{"prompt": f"user {i} says hello there ", "chosen": "ok sure", "rejected": "I would be delighted to help"}
+         for i in range(6)]
+
+
+def test_heldout_simpo_loss_is_finite_deterministic_and_counts_pairs():
+    tr = _tiny_llama_trainer()
+    m1, n1 = mt.heldout_simpo_loss(tr, PAIRS, beta=2.0, gamma=0.5)
+    m2, n2 = mt.heldout_simpo_loss(tr, PAIRS, beta=2.0, gamma=0.5)
+    # Metal reductions are not bit-deterministic; two scorings of the same model agree to ~1e-3
+    assert n1 == n2 == 6 and abs(m1 - m2) < 0.01 and 0.0 < m1 < 10.0
+    assert mt.heldout_simpo_loss(tr, PAIRS, beta=2.0, gamma=0.5, max_pairs=2)[1] == 2
+    assert mt.heldout_simpo_loss(tr, [{"prompt": "x"}], beta=2.0, gamma=0.5) == (None, 0)
+
+
+def test_heldout_simpo_loss_moves_when_the_model_moves():
+    mx = pytest.importorskip("mlx.core")
+    tr = _tiny_llama_trainer()
+    before, _ = mt.heldout_simpo_loss(tr, PAIRS, beta=2.0, gamma=0.5)
+    # perturb every parameter: the held-out loss must change (it reads the model, not a cache)
+    from mlx.utils import tree_map
+    tr.model.update(tree_map(lambda p: p + 0.05, tr.model.parameters()))
+    mx.eval(tr.model.parameters())
+    after, _ = mt.heldout_simpo_loss(tr, PAIRS, beta=2.0, gamma=0.5)
+    assert after != before

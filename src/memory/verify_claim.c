@@ -6,12 +6,23 @@
 
 /* Claim-language patterns to detect in responses */
 static const char *const CLAIM_PATTERNS[] = {
-    "I remember when you",   "I remember you",        "you told me",
-    "you mentioned",         "you said",              "last time we",
-    "you once told",         "you shared",            "we talked about",
-    "we discussed",          "you explained",         "you described",
-    "as you mentioned",      "from our conversation", "I recall you",
-    "I recall that you",     NULL,
+    "I remember when you",
+    "I remember you",
+    "you told me",
+    "you mentioned",
+    "you said",
+    "last time we",
+    "you once told",
+    "you shared",
+    "we talked about",
+    "we discussed",
+    "you explained",
+    "you described",
+    "as you mentioned",
+    "from our conversation",
+    "I recall you",
+    "I recall that you",
+    NULL,
 };
 
 bool hu_memory_has_claim_language(const char *text, size_t text_len) {
@@ -26,7 +37,6 @@ bool hu_memory_has_claim_language(const char *text, size_t text_len) {
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/episodic.h"
-#include <sqlite3.h>
 
 hu_error_t hu_memory_verify_claim(hu_allocator_t *alloc, void *db, const char *contact_id,
                                   size_t contact_id_len, const char *claim_text,
@@ -43,7 +53,7 @@ hu_error_t hu_memory_verify_claim(hu_allocator_t *alloc, void *db, const char *c
     size_t cid_len = contact_id ? contact_id_len : 0;
 
     hu_error_t err = hu_episode_associative_recall(alloc, (sqlite3 *)db, claim_text, claim_text_len,
-                                                    cid, cid_len, 5, &episodes, &ep_count);
+                                                   cid, cid_len, 5, &episodes, &ep_count);
     if (err != HU_OK)
         return err;
 
@@ -60,7 +70,7 @@ hu_error_t hu_memory_verify_claim(hu_allocator_t *alloc, void *db, const char *c
     size_t best_idx = 0;
     for (size_t i = 0; i < ep_count; i++) {
         uint32_t sim = hu_similarity_score(claim_text, claim_text_len, episodes[i].summary,
-                                            episodes[i].summary_len);
+                                           episodes[i].summary_len);
         double d = (double)sim / 100.0;
         if (d > best_sim) {
             best_sim = d;
@@ -68,8 +78,8 @@ hu_error_t hu_memory_verify_claim(hu_allocator_t *alloc, void *db, const char *c
         }
         /* Also check key_moments */
         if (episodes[i].key_moments_len > 0) {
-            uint32_t km_sim = hu_similarity_score(claim_text, claim_text_len, episodes[i].key_moments,
-                                                   episodes[i].key_moments_len);
+            uint32_t km_sim = hu_similarity_score(
+                claim_text, claim_text_len, episodes[i].key_moments, episodes[i].key_moments_len);
             double km_d = (double)km_sim / 100.0;
             if (km_d > best_sim) {
                 best_sim = km_d;
@@ -83,8 +93,8 @@ hu_error_t hu_memory_verify_claim(hu_allocator_t *alloc, void *db, const char *c
     /* Verify contact_id matches */
     if (cid_len > 0 && episodes[best_idx].contact_id[0] != '\0') {
         size_t ep_cid_len = strlen(episodes[best_idx].contact_id);
-        out->contact_match = (ep_cid_len == cid_len &&
-                              memcmp(episodes[best_idx].contact_id, cid, cid_len) == 0);
+        out->contact_match =
+            (ep_cid_len == cid_len && memcmp(episodes[best_idx].contact_id, cid, cid_len) == 0);
     } else {
         out->contact_match = (cid_len == 0);
     }
@@ -145,8 +155,7 @@ hu_error_t hu_memory_hedge_claim(hu_allocator_t *alloc, const char *text, size_t
 
     while (i < text_len && pos < max_len - 1) {
         /* Check for "I remember" pattern */
-        if (!hedged && i + 10 <= text_len &&
-            hu_str_contains_ci_cstr(text + i, 10, "I remember")) {
+        if (!hedged && i + 10 <= text_len && hu_str_contains_ci_cstr(text + i, 10, "I remember")) {
             const char *replacement = "I think I remember";
             size_t rep_len = 18;
             if (pos + rep_len < max_len) {
@@ -158,8 +167,7 @@ hu_error_t hu_memory_hedge_claim(hu_allocator_t *alloc, const char *text, size_t
             }
         }
         /* Check for "you told me" */
-        if (!hedged && i + 11 <= text_len &&
-            hu_str_contains_ci_cstr(text + i, 11, "you told me")) {
+        if (!hedged && i + 11 <= text_len && hu_str_contains_ci_cstr(text + i, 11, "you told me")) {
             const char *replacement = "I believe you told me";
             size_t rep_len = 21;
             if (pos + rep_len < max_len) {

@@ -11,6 +11,7 @@
  * Keeping them adjacent makes the wiring symmetry obvious. */
 
 #include "human/daemon_imessage_observer.h"
+#include "human/core/paths.h"
 
 #include "human/channels/imessage_balloon_decode.h"
 #include "human/channels/imessage_ingest.h"
@@ -243,15 +244,9 @@ static int process_row(sqlite3_stmt *st, hu_personal_model_t *pm) {
 static const char *resolve_chatdb_path(const hu_config_t *cfg) {
     if (cfg && cfg->reaction_collection.chatdb_path[0])
         return cfg->reaction_collection.chatdb_path;
-    const char *env = getenv("HU_CHATDB");
-    if (env && env[0])
-        return env;
+    /* hu_paths_chatdb honors HU_CHATDB itself and yields <0 when unresolvable. */
     static char home_path[512];
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    snprintf(home_path, sizeof(home_path), "%s/Library/Messages/chat.db", home);
-    return home_path;
+    return hu_paths_chatdb(home_path, sizeof(home_path)) > 0 ? home_path : NULL;
 }
 
 hu_error_t hu_daemon_imessage_observer_tick(const hu_config_t *cfg, int64_t since_unix,

@@ -12,6 +12,7 @@
 #include "human/config.h"
 #include "human/context_engine.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/data/loader.h"
 #include "human/hook.h"
 #include "human/memory.h"
@@ -823,13 +824,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t reg_err = hu_agent_registry_create(alloc, &bi->agent_registry);
         if (reg_err == HU_OK) {
             bi->agent_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char agents_dir[512];
-                int n = snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
-                if (n > 0 && (size_t)n < sizeof(agents_dir))
-                    hu_agent_registry_discover(&bi->agent_registry, agents_dir);
-            }
+            char agents_dir[512];
+            int n = hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
+            if (n > 0 && (size_t)n < sizeof(agents_dir))
+                hu_agent_registry_discover(&bi->agent_registry, agents_dir);
             ctx->agent_registry = &bi->agent_registry;
         }
     }
@@ -839,13 +837,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t pwa_err = hu_pwa_driver_registry_init(&bi->pwa_driver_registry);
         if (pwa_err == HU_OK) {
             bi->pwa_driver_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char pwa_dir[512];
-                int n = snprintf(pwa_dir, sizeof(pwa_dir), "%s/.human/pwa", home);
-                if (n > 0 && (size_t)n < sizeof(pwa_dir))
-                    hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
-            }
+            char pwa_dir[512];
+            int n = hu_paths_state(pwa_dir, sizeof(pwa_dir), "pwa");
+            if (n > 0 && (size_t)n < sizeof(pwa_dir))
+                hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
             hu_pwa_set_global_registry(&bi->pwa_driver_registry);
         }
     }
@@ -1084,7 +1079,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             bi->voice_cfg.openai_api_key || (bi->cfg.voice.mode && bi->cfg.voice.mode[0])) {
             hu_agent_set_voice_config(&bi->agent, &bi->voice_cfg);
         }
-        bi->agent.chain_of_thought = true;
+        bi->agent.chain_of_thought = bi->cfg.agent.chain_of_thought;
         bi->agent.agent_pool = bi->agent_pool;
         bi->agent.scheduler = (struct hu_cron_scheduler *)bi->cron;
         hu_agent_set_mailbox(&bi->agent, bi->mailbox);
@@ -1104,6 +1099,19 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (!bi->cfg.agent.context_engine_type ||
             strcmp(bi->cfg.agent.context_engine_type, "legacy") == 0 ||
             bi->cfg.agent.context_engine_type[0] == '\0') {
+            hu_context_engine_t *ce =
+                (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
+            if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)
+                bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
+            else if (ce)
+                alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
+        } else {
+            /* Only "legacy" is wired. A silently-NULL engine was the 2026-09-10
+             * review's most misleading finding: "rag" parsed fine and did less
+             * than the default. Fall back loudly. */
+            hu_log_warn("bootstrap", NULL,
+                        "agent.context_engine='%s' is not implemented; using legacy engine",
+                        bi->cfg.agent.context_engine_type);
             hu_context_engine_t *ce =
                 (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
             if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)

@@ -1775,57 +1775,75 @@ function generateCHeader(tokens: TokenMap): string {
     ["light.link", "LINK"],
   ];
 
+  /* Emit a run of consecutive #defines padded the way clang-format's
+   * AlignConsecutiveMacros does (values start one space after the longest
+   * name in the run). The pre-commit hook clang-formats staged headers and
+   * check-drift.sh diffs the raw generator output, so the two must agree
+   * byte-for-byte; a fixed padEnd(40) failed every token commit (2026-09-06). */
+  function alignMacros(pairs: Array<[string, string]>): string[] {
+    const w = Math.max(...pairs.map(([m]) => m.length));
+    return pairs.map(([m, v]) => `#define ${m.padEnd(w)} ${v}`);
+  }
+
   function emitColorMacros(
     entries: Array<[string, string]>,
     prefix: string,
     section: string,
   ): string {
     const lines: string[] = [];
-    lines.push(`/* ${section} — ANSI 256-color foreground */`);
-    for (const [key, name] of entries) {
-      const macro = `${prefix}${name}`;
+    const rgbOf = (key: string) => {
       const val = tokens[key];
-      const rgb = typeof val === "string" ? hexToRGB(val) : null;
-      const code = rgb ? hexToAnsi256(val as string) : 7;
-      lines.push(`#define ${macro.padEnd(40)} "\\033[38;5;${code}m"`);
-    }
+      return typeof val === "string" ? { val, rgb: hexToRGB(val) } : null;
+    };
+    lines.push(`/* ${section} — ANSI 256-color foreground */`);
+    lines.push(
+      ...alignMacros(
+        entries.map(([key, name]) => {
+          const c = rgbOf(key);
+          const code = c && c.rgb ? hexToAnsi256(c.val) : 7;
+          return [`${prefix}${name}`, `"\\033[38;5;${code}m"`];
+        }),
+      ),
+    );
     lines.push("");
     lines.push(`/* ${section} — truecolor (24-bit) foreground */`);
-    for (const [key, name] of entries) {
-      const macro = `${prefix}${name}_TC`;
-      const val = tokens[key];
-      const rgb = typeof val === "string" ? hexToRGB(val) : null;
-      if (rgb) {
-        lines.push(
-          `#define ${macro.padEnd(40)} "\\033[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m"`,
-        );
-      } else {
-        lines.push(`#define ${macro.padEnd(40)} "\\033[38;5;7m"`);
-      }
-    }
+    lines.push(
+      ...alignMacros(
+        entries.map(([key, name]) => {
+          const c = rgbOf(key);
+          const v =
+            c && c.rgb
+              ? `"\\033[38;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`
+              : `"\\033[38;5;7m"`;
+          return [`${prefix}${name}_TC`, v];
+        }),
+      ),
+    );
     lines.push("");
     lines.push(`/* ${section} — truecolor (24-bit) background */`);
-    for (const [key, name] of entries) {
-      const macro = `${prefix}BG_${name}_TC`;
-      const val = tokens[key];
-      const rgb = typeof val === "string" ? hexToRGB(val) : null;
-      if (rgb) {
-        lines.push(
-          `#define ${macro.padEnd(40)} "\\033[48;2;${rgb[0]};${rgb[1]};${rgb[2]}m"`,
-        );
-      } else {
-        lines.push(`#define ${macro.padEnd(40)} "\\033[48;5;7m"`);
-      }
-    }
+    lines.push(
+      ...alignMacros(
+        entries.map(([key, name]) => {
+          const c = rgbOf(key);
+          const v =
+            c && c.rgb
+              ? `"\\033[48;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`
+              : `"\\033[48;5;7m"`;
+          return [`${prefix}BG_${name}_TC`, v];
+        }),
+      ),
+    );
     lines.push("");
     lines.push(`/* ${section} — ANSI 256-color background */`);
-    for (const [key, name] of entries) {
-      const macro = `${prefix}BG_${name}`;
-      const val = tokens[key];
-      const rgb = typeof val === "string" ? hexToRGB(val) : null;
-      const code = rgb ? hexToAnsi256(val as string) : 7;
-      lines.push(`#define ${macro.padEnd(40)} "\\033[48;5;${code}m"`);
-    }
+    lines.push(
+      ...alignMacros(
+        entries.map(([key, name]) => {
+          const c = rgbOf(key);
+          const code = c && c.rgb ? hexToAnsi256(c.val) : 7;
+          return [`${prefix}BG_${name}`, `"\\033[48;5;${code}m"`];
+        }),
+      ),
+    );
     return lines.join("\n");
   }
 
@@ -1841,9 +1859,9 @@ function generateCHeader(tokens: TokenMap): string {
     ["HU_COLOR_MUTED", "HU_COLOR_TEXT_MUTED"],
     ["HU_COLOR_FAINT", "HU_COLOR_TEXT_FAINT"],
   ];
-  const aliasLines = legacyAliases
-    .map(([old, cur]) => `#define ${old.padEnd(40)} ${cur}`)
-    .join("\n");
+  const aliasLines = alignMacros(
+    legacyAliases.map(([old, cur]) => [old, cur] as [string, string]),
+  ).join("\n");
 
   return `/* Auto-generated from design-tokens/ — do not edit manually */
 #ifndef HU_DESIGN_TOKENS_H
@@ -1868,12 +1886,12 @@ ${lightSection}
 ${aliasLines}
 
 /* Formatting */
-#define HU_COLOR_RESET               "\\033[0m"
-#define HU_COLOR_BOLD                "\\033[1m"
-#define HU_COLOR_DIM                 "\\033[2m"
-#define HU_COLOR_ITALIC              "\\033[3m"
-#define HU_COLOR_UNDERLINE           "\\033[4m"
-#define HU_COLOR_STRIKETHROUGH       "\\033[9m"
+#define HU_COLOR_RESET         "\\033[0m"
+#define HU_COLOR_BOLD          "\\033[1m"
+#define HU_COLOR_DIM           "\\033[2m"
+#define HU_COLOR_ITALIC        "\\033[3m"
+#define HU_COLOR_UNDERLINE     "\\033[4m"
+#define HU_COLOR_STRIKETHROUGH "\\033[9m"
 
 /* Box-drawing characters (UTF-8) */
 #define HU_BOX_VERT  "\\xe2\\x94\\x82"

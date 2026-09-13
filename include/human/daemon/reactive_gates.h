@@ -55,6 +55,11 @@ typedef enum hu_ai_tell_action {
 
 hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried);
 
+/* The repair hint prepended to the conversation context on HU_AI_TELL_RETRY.
+ * Describes the persona's MEASURED register for a sad/frustrated text and
+ * names the scaffolds as bans; deliberately offers no phrases to copy. */
+const char *hu_reactive_ai_tell_retry_hint(void);
+
 /* ── Consecutive-reply limiter (rewritten 2026-09-04) ───────────────────
  * `count` replies have gone out to this contact since the real user last
  * stepped in; `cap` is behavior.max_consecutive_replies (0 = no cap). Before

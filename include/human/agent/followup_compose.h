@@ -97,10 +97,19 @@ typedef hu_error_t (*hu_followup_compose_llm_fn_t)(void *ctx, const char *system
 void hu_followup_compose_set_llm_for_test(hu_followup_compose_llm_fn_t fn, void *ctx);
 
 /* Compose the nudge. Writes a validated single-line message to `out` on HU_OK;
- * on any error `out` is an empty string and the caller must NOT send. */
+ * on any error `out` is an empty string and the caller must NOT send.
+ *
+ * `model` is REQUIRED (non-empty). An earlier version passed NULL meaning
+ * "provider default" — that convention does not exist. The mlx_local path
+ * ignores the model name so it appeared to work, but the reliability chain
+ * falls back to Gemini, which interpolates the name verbatim and produced
+ * `.../models/:generateContent` -> 404 whenever :8741 was down. Every sibling
+ * chat_with_system caller passes an explicit model; so does this. Callers
+ * hand in the agent's routed model (agent->model_name). */
 hu_error_t hu_followup_compose_text(hu_allocator_t *alloc, const hu_persona_t *persona,
-                                    hu_provider_t *provider, const char *channel,
-                                    const char *directive, char *out, size_t cap);
+                                    hu_provider_t *provider, const char *model, size_t model_len,
+                                    const char *channel, const char *directive, char *out,
+                                    size_t cap);
 
 /* Decide what to actually send. PURE — the whole activation policy in one
  * testable predicate (.claude/rules/security-predicate-extraction.md).

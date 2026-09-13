@@ -43,6 +43,13 @@ SKIP_BASE_TRAINING=0
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+# Keep the Mac awake for the whole window. 2026-09-11: Maintenance-Sleep /
+# DarkWake cycles from 03:00 to 03:48 stretched a 5-minute base training to 85
+# minutes and pushed the candidate stage past the arena guard (rc=1). -w $$
+# ties the assertion to this script's lifetime.
+if [[ "${HU_RETRAIN_STAGE_TEST:-0}" != "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -is -w $$ >/dev/null 2>&1 &
+fi
 
 # sha256 of a file, bare digest on stdout. Non-zero (and silent) when the file
 # is missing or no digest tool exists, so every caller must treat "" as
@@ -218,6 +225,37 @@ run_mlxtune_candidate_stage() {
     local why
     if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
         log "mlx-tune candidate stage: adapter real: $candidate_dir — $why"
+        # Did it LEARN? A real adapter can still be a no-op: 2026-09-06..12 every
+        # SimPO run's loss sat at 0.69-0.72 for all 400 steps (beta 0.05 pinned it
+        # at ln2) and the 7-minute scoring measured the raw base five times. Read
+        # the trainer's own "Step N/M | Loss:" lines; refuse to score when the
+        # last tenth is not below the first tenth by HU_RETRAIN_MIN_LOSS_DROP.
+        local train_log; train_log=$(ls -t "$HOME/.human/logs/train-glm-${mlxtune_tag}"-*.log 2>/dev/null | head -1)
+        local loss_drop_min="${HU_RETRAIN_MIN_LOSS_DROP:-0.02}"
+        if [[ -n "$train_log" ]]; then
+            local loss_summary
+            # Preferred signal: the held-out SimPO loss mlx_tune_train.py scores on
+            # valid.jsonl before and after training (same pairs twice — immune to the
+            # ~0.3 per-sample sd that makes the step trend below unreadable). Fall
+            # back to the step trend only when that line is absent.
+            loss_summary=$(grep -a -oE 'held-out simpo loss: before=[0-9.]+ after=[0-9.]+ delta=[-+0-9.]+ n=[0-9]+' "$train_log" | tail -1 | awk -v min="$loss_drop_min" '
+                { for (i=1;i<=NF;i++){ split($i,kv,"="); v[kv[1]]=kv[2] }
+                  d=v["before"]-v["after"]; printf "%s held-out first=%.4f last=%.4f drop=%.4f n=%s", (d>=min?"LEARNED":"NO_LEARNING"), v["before"], v["after"], d, v["n"] }')
+            [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+                { l[NR]=$NF } END {
+                    if (NR < 10) { print "INSUFFICIENT n=" NR; exit }
+                    k=int(NR/10); if (k<1) k=1; a=0; b=0
+                    for (i=1;i<=k;i++) a+=l[i]; for (i=NR-k+1;i<=NR;i++) b+=l[i]
+                    a/=k; b/=k; printf "%s first=%.4f last=%.4f drop=%.4f", (a-b>=min?"LEARNED":"NO_LEARNING"), a, b, a-b }')
+            log "mlx-tune candidate stage: loss check: $loss_summary (min drop $loss_drop_min, $train_log)"
+            if [[ "$loss_summary" == NO_LEARNING* ]]; then
+                log "mlx-tune candidate stage: candidate did not learn — staged at $candidate_dir, NOT scored (scoring a no-op adapter measures the base, not the candidate)"
+                printf '%s\n' "$loss_summary" > "$candidate_dir/NO_LEARNING"
+                return 0
+            fi
+        else
+            log "mlx-tune candidate stage: WARNING no train log matching train-glm-${mlxtune_tag}-*.log — cannot check that training learned"
+        fi
     else
         log "mlx-tune candidate stage: adapter FAILED the real-adapter guard: $why"
         log "mlx-tune candidate stage: quarantining $candidate_dir -> $candidate_dir.rejected-$(date +%s)"
@@ -504,7 +542,18 @@ elif [[ -f "$SOURCE_JSONL" ]]; then
     staged="$ADAPTER_OUT"
     [[ -d "$staged" ]] || staged=$(ls -d "${ADAPTER_OUT}"-* 2>/dev/null | head -1)
     if [[ "$train_rc" != "0" ]]; then
-        log "  training FAILED rc=$train_rc — see the lines above; NO adapter was produced tonight"
+        # rc!=0 means one of two very different things: the trainer crashed and
+        # produced nothing, or it trained a REAL adapter and its own quality
+        # gate refused promotion. On 2026-09-06 the gate FAILed (val loss 3.548
+        # vs best-of-history 3.384, rc=1) and this line reported "NO adapter was
+        # produced" over a real 556 MB one. Tell them apart by looking.
+        if [[ -n "$staged" && -d "$staged" ]] && why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
+            gate_line="$(grep -a -E '\[quality-gate\] Regression verdict:' "$LOG" 2>/dev/null | tail -1 | sed 's/^ *//')"
+            log "  training exited rc=$train_rc but a REAL adapter was staged: $staged — $why"
+            log "  training_loop's quality gate refused promotion (${gate_line:-no verdict line found}); adapter stays STAGED, NOT promoted"
+        else
+            log "  training FAILED rc=$train_rc — see the lines above; NO real adapter was produced tonight"
+        fi
     elif [[ -z "$staged" || ! -d "$staged" ]]; then
         log "  WARNING: rc=0 but no adapter dir at $ADAPTER_OUT — treating as failure"
         train_rc=3

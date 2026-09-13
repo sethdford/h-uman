@@ -14,11 +14,15 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/ml/dpo.h"
 #include "human/persona.h"
 #include "test_framework.h"
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#if defined(HU_ENABLE_SQLITE)
+#include <sqlite3.h>
+#endif
 
 /* Test counters for mock vtable calls. */
 static int reply_calls = 0;
@@ -358,6 +362,175 @@ static void flat_style_routes_to_send(void) {
     HU_ASSERT(send_calls >= 1);
 }
 
+/* ── text-sent reporting + delivered-reply recording (2026-09-12) ──────────
+ * production_outcomes used to be written when the model returned, so a turn
+ * that ended as a tapback, was parrot-dropped or generated twice still landed
+ * as a "sent reply" with ungoverned text. The reply loop now records from
+ * the send funnel, gated on the dispatcher's text-sent flag. */
+
+static hu_error_t mock_send_refuses(void *ctx, const char *target, size_t target_len,
+                                    const char *message, size_t message_len,
+                                    const char *const *media, size_t media_count) {
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message;
+    (void)message_len;
+    (void)media;
+    (void)media_count;
+    send_calls++;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+static void text_sent_true_on_flat_send_false_when_send_refuses(void) {
+    setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
+    hu_conversation_snapshot_t snap = {0};
+    snap.conv_density_msgs_per_min = 20.0f;
+    snap.parent_seconds_ago = 5;
+    bool sent = true;
+    hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+        (const struct hu_conversation_snapshot *)&snap, 6, &sent);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(sent);
+    HU_ASSERT(send_calls >= 1);
+
+    setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
+    mock_vtable.send = mock_send_refuses;
+    sent = true;
+    err = hu_daemon_dispatch_imessage_reply_ex(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+        (const struct hu_conversation_snapshot *)&snap, 6, &sent);
+    HU_ASSERT_NEQ((int)err, (int)HU_OK);
+    HU_ASSERT_FALSE(sent);
+}
+
+static void text_sent_true_when_feature_disabled_falls_back_to_flat(void) {
+    setup_mocks();
+    mock_config.channels.imessage.action_surface_v2.enabled = false;
+    hu_conversation_snapshot_t snap = {0};
+    bool sent = false;
+    hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID", 4, "hi", 2,
+        (const struct hu_conversation_snapshot *)&snap, 1, &sent);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(sent);
+    HU_ASSERT_EQ(send_calls, 1);
+}
+
+/* A bare tapback is not text: the flag must be false exactly when the emoji
+ * went out and no send() happened. Sweeps seeds the way
+ * fresh_parent_still_reacts_tapback_sometimes does, and checks BOTH outcomes. */
+static void text_sent_false_on_bare_tapback_true_on_text(void) {
+    bool saw_tapback = false, saw_text = false;
+    for (int64_t mid = 1; mid <= 400 && !(saw_tapback && saw_text); mid++) {
+        setup_mocks();
+        mock_vtable.reply = NULL; /* no threaded slot: text goes out flat */
+        hu_conversation_snapshot_t snap = {0};
+        snap.conv_density_msgs_per_min = 20.0f;
+        snap.parent_seconds_ago = 5;
+        bool sent = true;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        if (react_emoji_calls > 0 && send_calls == 0) {
+            HU_ASSERT_FALSE(sent);
+            saw_tapback = true;
+        } else if (send_calls > 0) {
+            HU_ASSERT_TRUE(sent);
+            saw_text = true;
+        }
+    }
+    HU_ASSERT_TRUE(saw_tapback);
+    HU_ASSERT_TRUE(saw_text);
+}
+
+static void msg_ex_parrot_guard_reports_no_text_sent(void) {
+    setup_mocks();
+    hu_channel_loop_msg_t m;
+    memset(&m, 0, sizeof(m));
+    /* The parrot predicate ignores bubbles under 16 bytes ("ok", "lol" are
+     * legitimate echoes); use a real sentence. */
+    const char *echo = "did you get the wrong chat";
+    snprintf(m.content, sizeof(m.content), "%s", echo);
+    bool sent = true;
+    hu_error_t err = hu_daemon_dispatch_imessage_reply_msg_ex(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12,
+        (const struct hu_channel_loop_msg *)&m, echo, strlen(echo), &sent);
+    HU_ASSERT_EQ((int)err, (int)HU_OK); /* dropped, not failed */
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(send_calls + reply_calls + react_emoji_calls, 0);
+}
+
+static void record_delivered_reply_noops_without_collector(void) {
+    static hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent)); /* sota_initialized == false */
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(NULL, "imessage", "+1", 2, "p", 1, "t", 1),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+1", 2, "p", 1, "t", 1),
+                 HU_OK);
+}
+
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
+static int count_rows(sqlite3 *db) {
+    sqlite3_stmt *st = NULL;
+    int n = -1;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM production_outcomes", -1, &st, NULL) ==
+            SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW)
+        n = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return n;
+}
+
+static void record_delivered_reply_stores_the_text_as_sent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 64, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    static hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.sota.dpo_collector = col;
+    agent.sota.sota_initialized = true;
+
+    /* Shaped, delivered text — capitalized by the governor, no trailing
+     * period — is what lands, not the model's draft. */
+    const char *delivered = "Need more details first";
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15555551212", 12,
+                                                  "can you do 4300?", 16, delivered,
+                                                  strlen(delivered)),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 1);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT chosen, channel, target FROM production_outcomes",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 0), delivered);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 1), "imessage");
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 2), "+15555551212");
+    sqlite3_finalize(st);
+
+    /* No prompt (media-only turn) and empty text: no row, no error. */
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15555551212", 12, "", 0,
+                                                  delivered, strlen(delivered)),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_daemon_record_delivered_reply(&agent, "imessage", "+15555551212", 12, "p", 1, "", 0),
+        HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 1);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+#endif
+
 /* ── BUG #3: threaded-reply parent-match predicate ──────────────────────
  * hu_imessage_desc_prefix_match must match the parent prefix only when it
  * begins at a word boundary (kills the wrong-parent mid-token false match),
@@ -544,6 +717,14 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(pacing_enforces_minimum_delay);
     HU_RUN_TEST(all_paths_fail_returns_send_error);
     HU_RUN_TEST(flat_style_routes_to_send);
+    HU_RUN_TEST(text_sent_true_on_flat_send_false_when_send_refuses);
+    HU_RUN_TEST(text_sent_true_when_feature_disabled_falls_back_to_flat);
+    HU_RUN_TEST(text_sent_false_on_bare_tapback_true_on_text);
+    HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
+    HU_RUN_TEST(record_delivered_reply_noops_without_collector);
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
+    HU_RUN_TEST(record_delivered_reply_stores_the_text_as_sent);
+#endif
     HU_RUN_TEST(demote_stale_tapback_style_truth_table);
     HU_RUN_TEST(snapshot_age_sec_handles_unknown_and_future);
     HU_RUN_TEST(stale_parent_never_reacts_tapback);

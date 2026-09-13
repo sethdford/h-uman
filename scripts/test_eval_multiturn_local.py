@@ -594,6 +594,50 @@ def test_run_scenario_persists_persona_system_prompt():
     print("✓ run_scenario_persists_persona_system_prompt")
 
 
+def _sv(name, ret, first, last, verdict, lat=True, skipped=False):
+    vd = {"skipped": True} if skipped else {"first_third_score": first, "last_third_score": last,
+                                            "last_third_verdict": verdict}
+    v_ok = None if skipped else mt.voice_drift_ok(mt.voice_normalize(first), mt.voice_normalize(last),
+                                                  mt.VOICE_DRIFT_TOL, any_hard_ai=(verdict == "AI"))
+    return mt.scenario_verdict(name, ret, v_ok, vd, lat,
+                               {"ceiling_ms": 1.0, "ceiling_violations": [], "growth": 0.0,
+                                "max_growth": 1.0, "series_ms": [1.0]})
+
+
+def test_aggregate_repeats_scores_by_means_and_majority_hard_ai():
+    runs = [[_sv("debate", 1.0, 8, 3, "AI")], [_sv("debate", 0.67, 4, 9, "HUMAN")],
+            [_sv("debate", 1.0, 6, 6, "BORDERLINE")]]
+    out = mt.aggregate_repeats(runs)
+    assert len(out) == 1 and out[0]["scenario"] == "debate"
+    v = out[0]["voice"]
+    assert abs(v["first_third_score"] - 6.0) < 1e-9 and abs(v["last_third_score"] - 6.0) < 1e-9
+    assert v["hard_ai_repeats"] == 1 and v["repeats"] == 3
+    assert v["last_third_verdict"] != "AI"          # 1 of 3 is not a majority
+    assert v["passed"] is True                      # no drift on the means, no majority AI
+    assert abs(out[0]["retention"]["rate"] - (1.0 + 0.67 + 1.0) / 3) < 1e-9
+    assert len(out[0]["repeats"]) == 3
+    print("✓ aggregate_repeats_scores_by_means_and_majority_hard_ai")
+
+
+def test_aggregate_repeats_majority_ai_fails_voice_and_single_run_is_identity():
+    runs = [[_sv("news", 1.0, 8, 3, "AI")], [_sv("news", 1.0, 7, 4, "AI")],
+            [_sv("news", 1.0, 6, 8, "HUMAN")]]
+    v = mt.aggregate_repeats(runs)[0]["voice"]
+    assert v["hard_ai_repeats"] == 2 and v["last_third_verdict"] == "AI" and v["passed"] is False
+    one = _sv("casual", 1.0, 8, 7, "BORDERLINE")
+    agg = mt.aggregate_repeats([[one]])[0]
+    assert agg["passed"] == one["passed"] and agg["voice"]["last_third_score"] == 7
+    print("✓ aggregate_repeats_majority_ai_fails_voice_and_single_run_is_identity")
+
+
+def test_aggregate_repeats_keeps_voice_skipped_when_judge_was_off():
+    runs = [[_sv("advice", 1.0, 0, 0, "AI", skipped=True)],
+            [_sv("advice", 1.0, 0, 0, "AI", skipped=True)]]
+    agg = mt.aggregate_repeats(runs)[0]
+    assert agg["voice"].get("skipped") is True and agg["voice"]["passed"] is None
+    print("✓ aggregate_repeats_keeps_voice_skipped_when_judge_was_off")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

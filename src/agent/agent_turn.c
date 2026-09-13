@@ -8,7 +8,9 @@
 #include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
 #include "human/persona/taste.h"
@@ -1032,13 +1034,15 @@ hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, siz
     hu_error_t err =
         hu_prompt_cap_with_tail(agent->alloc, prompt, prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES,
                                 guard_tail_reserved, rules_len ? rules : NULL, rules_len);
-    /* Prompt-size budget guard: MLX backends return empty responses past
-     * ~28 KB (2026-05-19), so the cap is real and fires on every turn whose
-     * assembled prompt exceeds the budget. Log once per process. */
+    /* Prompt-size budget guard. The budget is a latency/attention choice now,
+     * not a server cliff (see HU_PROMPT_TRIM_BUDGET_BYTES for the 2026-09-06
+     * re-measurement); it still fires on any turn whose assembled prompt
+     * exceeds it, and whatever it drops is context the model never sees.
+     * Log once per process. */
     if (before > HU_PROMPT_TRIM_BUDGET_BYTES) {
         static atomic_bool warned_prompt_budget = false;
         hu_log_warn_once(&warned_prompt_budget, "agent", NULL,
-                         "system prompt truncated from %zu to %zu bytes (MLX backend cap; "
+                         "system prompt truncated from %zu to %zu bytes (prompt budget cap; "
                          "%zu-byte guard tail reserved, %zu-byte rules block appended last); "
                          "some context dropped",
                          before, *prompt_len, guard_tail_reserved, rules_len);
@@ -6088,7 +6092,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_agent_m3_stash_behavior_metrics(
                 agent, &(hu_agent_behavior_stash_t){
                            .response_length_chars = (uint32_t)resp.content_len,
-                           .response_length_tokens_est = (uint32_t)(resp.content_len / 4),
+                           .response_length_tokens_est =
+                               (uint32_t)hu_tokens_estimate_len(resp.content_len),
                            .response_latency_ms = (uint32_t)llm_duration_ms,
                        });
             hu_agent_m3_on_provider_success(agent);
@@ -6336,7 +6341,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)gvr_stash_len,
-                               .response_length_tokens_est = (uint32_t)(gvr_stash_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(gvr_stash_len),
                                .response_latency_ms = (uint32_t)gvr_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -6818,7 +6824,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_agent_m3_stash_behavior_metrics(
                             agent, &(hu_agent_behavior_stash_t){
                                        .response_length_chars = (uint32_t)cn_stash_len,
-                                       .response_length_tokens_est = (uint32_t)(cn_stash_len / 4),
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(cn_stash_len),
                                        .response_latency_ms = (uint32_t)const_latency_ms,
                                    });
                         hu_agent_m3_on_provider_success(agent);
@@ -7005,12 +7012,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                          * metacog regen length + latency. Other metric
                          * fields not computed here. */
                         hu_agent_m3_stash_behavior_metrics(
-                            agent,
-                            &(hu_agent_behavior_stash_t){
-                                .response_length_chars = (uint32_t)mc_resp.content_len,
-                                .response_length_tokens_est = (uint32_t)(mc_resp.content_len / 4),
-                                .response_latency_ms = (uint32_t)mc_latency_ms,
-                            });
+                            agent, &(hu_agent_behavior_stash_t){
+                                       .response_length_chars = (uint32_t)mc_resp.content_len,
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(mc_resp.content_len),
+                                       .response_latency_ms = (uint32_t)mc_latency_ms,
+                                   });
                         hu_agent_m3_on_provider_success(agent);
                         /* B1 redefined (2026-05-17 r3): metacog regen is a
                          * fresh provider chat call (same model, augmented
@@ -7166,7 +7173,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         agent,
                                         &(hu_agent_behavior_stash_t){
                                             .response_length_chars = (uint32_t)retry_len,
-                                            .response_length_tokens_est = (uint32_t)(retry_len / 4),
+                                            .response_length_tokens_est =
+                                                (uint32_t)hu_tokens_estimate_len(retry_len),
                                             .response_latency_ms = (uint32_t)vc_retry_latency_ms,
                                         });
                                     hu_agent_m3_on_provider_success(agent);
@@ -7401,12 +7409,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                  * stash response_guard-retry length + latency.
                                  * Other metric fields not computed here. */
                                 hu_agent_m3_stash_behavior_metrics(
-                                    agent,
-                                    &(hu_agent_behavior_stash_t){
-                                        .response_length_chars = (uint32_t)retry_len,
-                                        .response_length_tokens_est = (uint32_t)(retry_len / 4),
-                                        .response_latency_ms = (uint32_t)ab_retry_latency_ms,
-                                    });
+                                    agent, &(hu_agent_behavior_stash_t){
+                                               .response_length_chars = (uint32_t)retry_len,
+                                               .response_length_tokens_est =
+                                                   (uint32_t)hu_tokens_estimate_len(retry_len),
+                                               .response_latency_ms = (uint32_t)ab_retry_latency_ms,
+                                           });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 r3 (2026-05-17): record outcome from the post-batch
                                  * response_guard retry path. turn_kind=2 (batch). */
@@ -8023,25 +8031,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                memory_ctx_len > 100 ? 0.8 : 0.4);
 
             /* Style learning: adaptive schedule — early sessions learn faster,
-             * then settle into a steady cadence. Also triggers on corrections. */
+             * then settle into a steady cadence.
+             *
+             * Gated on learning.persona_refresh_enabled (default false), the same
+             * switch as the daemon refresh tick. hu_persona_style_reanalyze saves
+             * through hu_persona_creator_write, which serializes only hu_persona_t
+             * fields; on 2026-09-06 06:01 this call rewrote the live persona
+             * without contacts / proactive / life_events / style_rules, killing
+             * every proactive path until a manual restore. Do not un-gate without
+             * a writer that preserves unknown keys (.claude/rules/persona.md). */
             {
-                bool should_reanalyze = false;
-                if (agent->persona_name && agent->persona_name_len > 0 && agent->memory) {
-                    if (agent->history_count <= 20 && agent->history_count % 10 == 0 &&
-                        agent->history_count > 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 20 && agent->history_count <= 100 &&
-                             agent->history_count % 25 == 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 100 && agent->history_count % 50 == 0)
-                        should_reanalyze = true;
-                }
+                bool pr_enabled = agent->config && agent->config->learning.persona_refresh_enabled;
+                bool should_reanalyze =
+                    agent->persona_name && agent->persona_name_len > 0 && agent->memory &&
+                    hu_persona_style_reanalyze_due(pr_enabled, agent->history_count);
                 if (should_reanalyze) {
                     const char *ch = agent->active_channel ? agent->active_channel : "cli";
                     size_t ch_len = agent->active_channel_len ? agent->active_channel_len : 3;
                     const char *cid = agent->memory_session_id ? agent->memory_session_id : "";
                     size_t cid_len =
                         agent->memory_session_id_len ? agent->memory_session_id_len : 0;
+                    hu_log_info("agent_turn", agent->observer,
+                                "persona style reanalyze: rewriting persona '%.*s' from history "
+                                "(history_count=%zu, learning.persona_refresh_enabled=true)",
+                                (int)agent->persona_name_len, agent->persona_name,
+                                agent->history_count);
                     (void)hu_persona_style_reanalyze(
                         agent->alloc, &agent->provider, agent->model_name, agent->model_name_len,
                         agent->memory, agent->persona_name, agent->persona_name_len, ch, ch_len,
@@ -8636,12 +8650,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
             /* Auto-save session after successful turn completion */
             if (agent->auto_save && agent->session_id[0] != '\0') {
-                const char *home = getenv("HOME");
                 char sdir[512];
-                if (home)
-                    snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-                else
-                    snprintf(sdir, sizeof(sdir), ".human/sessions");
+                hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
                 hu_session_persist_save(agent->alloc, agent, sdir, NULL);
             }
 

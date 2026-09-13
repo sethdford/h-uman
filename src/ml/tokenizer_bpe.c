@@ -3,17 +3,18 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/paths.h"
 #include "human/ml/tokenizer_ml.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#define HBPE_MAGIC 0x45504248 /* "HBPE" in little-endian */
-#define HBPE_VERSION 1
-#define HU_BPE_MAX_VOCAB (1u << 20)  /* 1M tokens max */
-#define HU_BPE_MAX_MERGES (1u << 20) /* 1M merges max */
-#define BPE_INITIAL_VOCAB 256
+#define HBPE_MAGIC            0x45504248 /* "HBPE" in little-endian */
+#define HBPE_VERSION          1
+#define HU_BPE_MAX_VOCAB      (1u << 20) /* 1M tokens max */
+#define HU_BPE_MAX_MERGES     (1u << 20) /* 1M merges max */
+#define BPE_INITIAL_VOCAB     256
 #define BPE_INITIAL_MERGE_CAP 256
 #define BPE_INITIAL_VOCAB_CAP 512
 
@@ -32,8 +33,7 @@ struct hu_bpe_tokenizer {
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
 
-static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t need)
-{
+static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t need) {
     if (need <= tok->vocab_capacity)
         return HU_OK;
     size_t cap = tok->vocab_capacity ? tok->vocab_capacity * 2 : BPE_INITIAL_VOCAB_CAP;
@@ -42,22 +42,17 @@ static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t nee
     size_t old_cap = tok->vocab_capacity;
 
     uint8_t **new_bytes = (uint8_t **)tok->alloc->realloc(
-        tok->alloc->ctx, tok->vocab_bytes,
-        old_cap * sizeof(uint8_t *),
-        cap * sizeof(uint8_t *));
+        tok->alloc->ctx, tok->vocab_bytes, old_cap * sizeof(uint8_t *), cap * sizeof(uint8_t *));
     if (!new_bytes)
         return HU_ERR_OUT_OF_MEMORY;
     tok->vocab_bytes = new_bytes;
 
     size_t *new_lens = (size_t *)tok->alloc->realloc(
-        tok->alloc->ctx, tok->vocab_lens,
-        old_cap * sizeof(size_t),
-        cap * sizeof(size_t));
+        tok->alloc->ctx, tok->vocab_lens, old_cap * sizeof(size_t), cap * sizeof(size_t));
     if (!new_lens) {
-        uint8_t **rb = (uint8_t **)tok->alloc->realloc(
-            tok->alloc->ctx, tok->vocab_bytes,
-            cap * sizeof(uint8_t *),
-            old_cap * sizeof(uint8_t *));
+        uint8_t **rb =
+            (uint8_t **)tok->alloc->realloc(tok->alloc->ctx, tok->vocab_bytes,
+                                            cap * sizeof(uint8_t *), old_cap * sizeof(uint8_t *));
         if (rb)
             tok->vocab_bytes = rb;
         return HU_ERR_OUT_OF_MEMORY;
@@ -67,8 +62,7 @@ static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t nee
     return HU_OK;
 }
 
-static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t need)
-{
+static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t need) {
     if (need <= tok->merge_capacity)
         return HU_OK;
     size_t cap = tok->merge_capacity ? tok->merge_capacity * 2 : BPE_INITIAL_MERGE_CAP;
@@ -77,22 +71,16 @@ static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t nee
     size_t old_cap = tok->merge_capacity;
 
     int32_t *new_a = (int32_t *)tok->alloc->realloc(
-        tok->alloc->ctx, tok->merge_a,
-        old_cap * sizeof(int32_t),
-        cap * sizeof(int32_t));
+        tok->alloc->ctx, tok->merge_a, old_cap * sizeof(int32_t), cap * sizeof(int32_t));
     if (!new_a)
         return HU_ERR_OUT_OF_MEMORY;
     tok->merge_a = new_a;
 
     int32_t *new_b = (int32_t *)tok->alloc->realloc(
-        tok->alloc->ctx, tok->merge_b,
-        old_cap * sizeof(int32_t),
-        cap * sizeof(int32_t));
+        tok->alloc->ctx, tok->merge_b, old_cap * sizeof(int32_t), cap * sizeof(int32_t));
     if (!new_b) {
         int32_t *rb = (int32_t *)tok->alloc->realloc(
-            tok->alloc->ctx, tok->merge_a,
-            cap * sizeof(int32_t),
-            old_cap * sizeof(int32_t));
+            tok->alloc->ctx, tok->merge_a, cap * sizeof(int32_t), old_cap * sizeof(int32_t));
         if (rb)
             tok->merge_a = rb;
         return HU_ERR_OUT_OF_MEMORY;
@@ -104,8 +92,7 @@ static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t nee
 
 /* ─── Create ────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_bpe_tokenizer_create(hu_allocator_t *alloc, hu_bpe_tokenizer_t **out)
-{
+hu_error_t hu_bpe_tokenizer_create(hu_allocator_t *alloc, hu_bpe_tokenizer_t **out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -156,17 +143,15 @@ typedef struct {
     size_t count;
 } pair_count_t;
 
-static int pair_find(pair_count_t *pairs, size_t n, int32_t a, int32_t b)
-{
+static int pair_find(pair_count_t *pairs, size_t n, int32_t a, int32_t b) {
     for (size_t i = 0; i < n; i++)
         if (pairs[i].a == a && pairs[i].b == b)
             return (int)i;
     return -1;
 }
 
-static void pair_add_or_inc(pair_count_t **pairs, size_t *count, size_t *cap,
-                            hu_allocator_t *alloc, int32_t a, int32_t b)
-{
+static void pair_add_or_inc(pair_count_t **pairs, size_t *count, size_t *cap, hu_allocator_t *alloc,
+                            int32_t a, int32_t b) {
     int idx = pair_find(*pairs, *count, a, b);
     if (idx >= 0) {
         (*pairs)[idx].count++;
@@ -175,9 +160,7 @@ static void pair_add_or_inc(pair_count_t **pairs, size_t *count, size_t *cap,
     if (*count >= *cap) {
         size_t new_cap = *cap ? *cap * 2 : 256;
         pair_count_t *new_pairs = (pair_count_t *)alloc->realloc(
-            alloc->ctx, *pairs,
-            *cap * sizeof(pair_count_t),
-            new_cap * sizeof(pair_count_t));
+            alloc->ctx, *pairs, *cap * sizeof(pair_count_t), new_cap * sizeof(pair_count_t));
         if (!new_pairs)
             return;
         *pairs = new_pairs;
@@ -189,16 +172,13 @@ static void pair_add_or_inc(pair_count_t **pairs, size_t *count, size_t *cap,
     (*count)++;
 }
 
-static void count_pairs(const int32_t *ids, size_t n, pair_count_t **pairs,
-                        size_t *pair_count, size_t *pair_cap,
-                        hu_allocator_t *alloc)
-{
+static void count_pairs(const int32_t *ids, size_t n, pair_count_t **pairs, size_t *pair_count,
+                        size_t *pair_cap, hu_allocator_t *alloc) {
     for (size_t i = 0; i + 1 < n; i++)
         pair_add_or_inc(pairs, pair_count, pair_cap, alloc, ids[i], ids[i + 1]);
 }
 
-static size_t find_max_pair(pair_count_t *pairs, size_t n)
-{
+static size_t find_max_pair(pair_count_t *pairs, size_t n) {
     size_t best = 0;
     for (size_t i = 1; i < n; i++)
         if (pairs[i].count > pairs[best].count)
@@ -207,8 +187,7 @@ static size_t find_max_pair(pair_count_t *pairs, size_t n)
 }
 
 /* Replace all occurrences of (a,b) with new_id in ids, in-place. */
-static void replace_pairs(int32_t *ids, size_t *n, int32_t a, int32_t b, int32_t new_id)
-{
+static void replace_pairs(int32_t *ids, size_t *n, int32_t a, int32_t b, int32_t new_id) {
     size_t j = 0;
     for (size_t i = 0; i < *n; i++) {
         if (i + 1 < *n && ids[i] == a && ids[i + 1] == b) {
@@ -223,10 +202,8 @@ static void replace_pairs(int32_t *ids, size_t *n, int32_t a, int32_t b, int32_t
 
 /* ─── Train ─────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_bpe_tokenizer_train(hu_bpe_tokenizer_t *tok, const char **texts,
-                                  size_t texts_count, size_t vocab_size,
-                                  const char *pattern)
-{
+hu_error_t hu_bpe_tokenizer_train(hu_bpe_tokenizer_t *tok, const char **texts, size_t texts_count,
+                                  size_t vocab_size, const char *pattern) {
     (void)pattern;
     if (!tok || !texts || vocab_size <= BPE_INITIAL_VOCAB)
         return HU_ERR_INVALID_ARGUMENT;
@@ -339,10 +316,8 @@ hu_error_t hu_bpe_tokenizer_train(hu_bpe_tokenizer_t *tok, const char **texts,
 
 /* ─── Encode ────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *text,
-                                   size_t text_len, int32_t **ids_out,
-                                   size_t *ids_count)
-{
+hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *text, size_t text_len,
+                                   int32_t **ids_out, size_t *ids_count) {
     if (!tok || !text || !ids_out || !ids_count)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -367,8 +342,8 @@ hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *te
     for (size_t i = 0; i < text_len; i++) {
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            int32_t *new_ids = (int32_t *)alloc->realloc(
-                alloc->ctx, ids, cap * sizeof(int32_t), new_cap * sizeof(int32_t));
+            int32_t *new_ids = (int32_t *)alloc->realloc(alloc->ctx, ids, cap * sizeof(int32_t),
+                                                         new_cap * sizeof(int32_t));
             if (!new_ids) {
                 alloc->free(alloc->ctx, ids, cap * sizeof(int32_t));
                 return HU_ERR_OUT_OF_MEMORY;
@@ -395,9 +370,7 @@ hu_error_t hu_bpe_tokenizer_encode(const hu_bpe_tokenizer_t *tok, const char *te
 /* ─── Decode ────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_bpe_tokenizer_decode(const hu_bpe_tokenizer_t *tok, const int32_t *ids,
-                                   size_t ids_count, char **text_out,
-                                   size_t *text_len_out)
-{
+                                   size_t ids_count, char **text_out, size_t *text_len_out) {
     if (!tok || !ids || !text_out || !text_len_out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -450,8 +423,7 @@ hu_error_t hu_bpe_tokenizer_decode(const hu_bpe_tokenizer_t *tok, const int32_t 
 
 /* ─── Vocab size ─────────────────────────────────────────────────────────── */
 
-size_t hu_bpe_tokenizer_vocab_size(const hu_bpe_tokenizer_t *tok)
-{
+size_t hu_bpe_tokenizer_vocab_size(const hu_bpe_tokenizer_t *tok) {
     if (!tok)
         return 0;
     return ((const struct hu_bpe_tokenizer *)tok)->vocab_size;
@@ -459,9 +431,7 @@ size_t hu_bpe_tokenizer_vocab_size(const hu_bpe_tokenizer_t *tok)
 
 /* ─── Token byte length ──────────────────────────────────────────────────── */
 
-size_t hu_bpe_tokenizer_token_byte_length(const hu_bpe_tokenizer_t *tok,
-                                          int32_t token_id)
-{
+size_t hu_bpe_tokenizer_token_byte_length(const hu_bpe_tokenizer_t *tok, int32_t token_id) {
     if (!tok)
         return 0;
     const struct hu_bpe_tokenizer *t = (const struct hu_bpe_tokenizer *)tok;
@@ -472,8 +442,7 @@ size_t hu_bpe_tokenizer_token_byte_length(const hu_bpe_tokenizer_t *tok,
 
 /* ─── Save ──────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path)
-{
+hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path) {
     if (!tok || !path)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -491,10 +460,8 @@ hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path
     uint32_t vsz = (uint32_t)t->vocab_size;
     uint32_t mcount = (uint32_t)t->merge_count;
 
-    if (fwrite(&magic, sizeof(magic), 1, f) != 1 ||
-        fwrite(&version, sizeof(version), 1, f) != 1 ||
-        fwrite(&vsz, sizeof(vsz), 1, f) != 1 ||
-        fwrite(&mcount, sizeof(mcount), 1, f) != 1) {
+    if (fwrite(&magic, sizeof(magic), 1, f) != 1 || fwrite(&version, sizeof(version), 1, f) != 1 ||
+        fwrite(&vsz, sizeof(vsz), 1, f) != 1 || fwrite(&mcount, sizeof(mcount), 1, f) != 1) {
         fclose(f);
         return HU_ERR_IO;
     }
@@ -526,8 +493,7 @@ hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path
 
 /* ─── Load ──────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_bpe_tokenizer_load(hu_bpe_tokenizer_t *tok, const char *path)
-{
+hu_error_t hu_bpe_tokenizer_load(hu_bpe_tokenizer_t *tok, const char *path) {
     if (!tok || !path)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -539,10 +505,8 @@ hu_error_t hu_bpe_tokenizer_load(hu_bpe_tokenizer_t *tok, const char *path)
         return HU_ERR_IO;
 
     uint32_t magic, version, vsz, mcount;
-    if (fread(&magic, sizeof(magic), 1, f) != 1 ||
-        fread(&version, sizeof(version), 1, f) != 1 ||
-        fread(&vsz, sizeof(vsz), 1, f) != 1 ||
-        fread(&mcount, sizeof(mcount), 1, f) != 1) {
+    if (fread(&magic, sizeof(magic), 1, f) != 1 || fread(&version, sizeof(version), 1, f) != 1 ||
+        fread(&vsz, sizeof(vsz), 1, f) != 1 || fread(&mcount, sizeof(mcount), 1, f) != 1) {
         fclose(f);
         return HU_ERR_PARSE;
     }
@@ -611,10 +575,27 @@ hu_error_t hu_bpe_tokenizer_load(hu_bpe_tokenizer_t *tok, const char *path)
     return HU_OK;
 }
 
+hu_error_t hu_bpe_tokenizer_load_default(hu_bpe_tokenizer_t *tok, const char *data_dir) {
+    if (!tok)
+        return HU_ERR_INVALID_ARGUMENT;
+    char path[1024];
+    /* A per-experiment vocab in data_dir shadows the global one. */
+    if (data_dir && data_dir[0]) {
+        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
+        if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK)
+            return HU_OK;
+    }
+    int n = hu_paths_state(path, sizeof(path), "models/tokenizer.vocab");
+    if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK)
+        return HU_OK;
+    /* On both misses the caller keeps the default 256-entry byte-level vocab —
+     * every token is one byte, so bits-per-byte stays well-defined. */
+    return HU_ERR_NOT_FOUND;
+}
+
 /* ─── Deinit ───────────────────────────────────────────────────────────── */
 
-void hu_bpe_tokenizer_deinit(hu_bpe_tokenizer_t *tok)
-{
+void hu_bpe_tokenizer_deinit(hu_bpe_tokenizer_t *tok) {
     if (!tok)
         return;
 

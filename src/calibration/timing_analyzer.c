@@ -1,4 +1,6 @@
+#include "calibration_chatdb.h"
 #include "human/calibration.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 
 #include <stdint.h>
@@ -118,25 +120,7 @@ static void hu_calib_fill_percentiles(hu_calibration_latency_percentiles_t *out,
 }
 
 static hu_error_t hu_calib_resolve_db_path(const char *db_path, char *out, size_t cap) {
-    if (db_path && db_path[0]) {
-        size_t len = strlen(db_path);
-        if (len + 1 > cap)
-            return HU_ERR_INVALID_ARGUMENT;
-        memcpy(out, db_path, len + 1);
-        return HU_OK;
-    }
-#if defined(__APPLE__) && defined(__MACH__)
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_NOT_FOUND;
-    int n = snprintf(out, cap, "%s/Library/Messages/chat.db", home);
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    return HU_OK;
-#else
-    (void)out;
-    return HU_ERR_NOT_SUPPORTED;
-#endif
+    return hu_calibration_resolve_chatdb(db_path, out, cap);
 }
 
 static hu_calib_contact_buf_t *hu_calib_find_contact(hu_calib_contact_buf_t *cts, size_t *n_ct,

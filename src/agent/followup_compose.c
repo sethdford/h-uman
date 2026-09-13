@@ -131,12 +131,18 @@ void hu_followup_compose_set_llm_for_test(hu_followup_compose_llm_fn_t fn, void 
 }
 
 hu_error_t hu_followup_compose_text(hu_allocator_t *alloc, const hu_persona_t *persona,
-                                    hu_provider_t *provider, const char *channel,
-                                    const char *directive, char *out, size_t cap) {
+                                    hu_provider_t *provider, const char *model, size_t model_len,
+                                    const char *channel, const char *directive, char *out,
+                                    size_t cap) {
     if (!out || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
     out[0] = '\0';
     if (!directive || !directive[0])
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Refuse an empty model up front rather than let a provider interpolate it
+     * into a URL. Checked before the test seam so the contract is pinned even
+     * where no provider is ever reached. */
+    if (!model || model_len == 0 || !model[0])
         return HU_ERR_INVALID_ARGUMENT;
 
     if (s_test_llm) {
@@ -173,10 +179,10 @@ hu_error_t hu_followup_compose_text(hu_allocator_t *alloc, const hu_persona_t *p
     char *resp = NULL;
     size_t resp_len = 0;
     /* Temperature 0.7: a bump wants natural variance, not determinism — a
-     * deterministic composer would just be a slower hardcoded string. Model
-     * NULL -> provider default (the router's conversational tier). */
+     * deterministic composer would just be a slower hardcoded string. */
     err = provider->vtable->chat_with_system(provider->ctx, alloc, sys, sys_len, directive,
-                                             strlen(directive), NULL, 0, 0.7, &resp, &resp_len);
+                                             strlen(directive), model, model_len, 0.7, &resp,
+                                             &resp_len);
     alloc->free(alloc->ctx, sys, sys_len + 1);
     if (err != HU_OK || !resp || resp_len == 0) {
         if (resp)

@@ -10,6 +10,17 @@
 # occurrences, report number of windows appearing 2+ times.
 set -euo pipefail
 
+# Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
+# Sourced defensively: this gate must keep working — and keep BLOCKING growth —
+# even in a tree where the helper is absent, so a missing helper degrades to
+# "no auto-lock" rather than to "commit refused".
+_hu_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -r "$_hu_root/scripts/lib/ratchet.sh" ]; then
+    . "$_hu_root/scripts/lib/ratchet.sh"
+else
+    ratchet_autolock() { :; }
+fi
+
 # Measured 2026-05-31 at the start of Phase 0 (11766); re-measured and
 # lowered 2026-07-12 after switching enumeration to git-tracked files —
 # untracked/ignored generated blobs (e.g. stale embed-data output under
@@ -21,7 +32,8 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11447   # measured 2026-09-05 on merge of #386 (hybrid RRF key fix) with main
+CLONE_BASELINE=11103   # 2026-09-12 after the housekeeping carve merged with main
+                       # earlier baselines); channel mock harness + clock + JSON-locator copies folded
 # prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
                        # helpers with their callers retired three windows
 # prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser
@@ -66,6 +78,7 @@ trap "rm -f '$tmp_normalized'" EXIT
                 /^[[:space:]]*\/\// { next }              # C++ comments
                 /^[[:space:]]*\*/ { next }                # block comment lines
                 /^[[:space:]]*\/\*/ { next }              # block comment start
+                /^[[:space:]]*#include/ { next }          # include blocks are not clones (2026-09-12)
                 {
                     # Normalize: strip whitespace, collapse internal spaces
                     $0 = $0
@@ -121,12 +134,14 @@ END {
 
 echo "Scanning src/**/*.c for code duplication (window=$WINDOW)..."
 echo "Clone groups found: $clone_count (ceiling $CLONE_BASELINE)"
+ratchet_autolock CLONE_BASELINE "${clone_count}" "scripts/check-clone-ratchet.sh"
 
 if [ "$clone_count" -gt "$CLONE_BASELINE" ]; then
     echo "FAIL: new clone blocks detected. Baseline: $CLONE_BASELINE, current: $clone_count" >&2
     echo "      Run deduplication to lower the count, then update CLONE_BASELINE." >&2
     fail=1
 elif [ "$clone_count" -lt "$CLONE_BASELINE" ]; then
+    [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
     echo "NOTE: clone count dropped to $clone_count — lower CLONE_BASELINE to lock the gain." >&2
 fi
 

@@ -56,6 +56,7 @@ MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}"
 # forking this script, so every run keeps the same guards.
 CONFIG=/Users/sethford/.human/training-data/glm-v62-sft-config.yaml
 ORPO_BETA=0.05
+BETA_EXPLICIT=0           # set by --beta; otherwise SimPO gets mlx_tune's own default below
 GAMMA=0.5                 # mlx_tune SimPO's target reward margin only
 TAG=v62-sft
 TRAINER=mlx_lm            # mlx_lm (SFT, known-good) | mlx_lm_lora (preference modes) | mlx_tune (SimPO/KTO/ORPO, per-expert MoE LoRA)
@@ -67,7 +68,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)    DRY_RUN=1; shift ;;
     --config)     CONFIG=$2; shift 2 ;;
-    --beta)       ORPO_BETA=$2; shift 2 ;;
+    --beta)       ORPO_BETA=$2; BETA_EXPLICIT=1; shift 2 ;;
     --tag)        TAG=$2; shift 2 ;;
     --trainer)    TRAINER=$2; shift 2 ;;
     --train-mode) TRAIN_MODE=$2; shift 2 ;;
@@ -279,6 +280,16 @@ if [ "$REBALANCE_CASING" = "1" ]; then
   say "casing rebalance done -- training from $CONFIG (stats: $REBAL_DIR/train.rebalance_stats.json)"
 fi
 
+# SimPO's reward is a per-token log-prob (|r_c - r_r| ~ 0.1-1 nat), so its beta
+# is ~2 (mlx_tune default 2.0, paper 2.0-2.5). The ORPO-scale 0.05 fed to SimPO
+# gives logits = 0.05*(delta - 0.5) ~ 0 -> loss pinned at ln2 = 0.693 and ~zero
+# gradient: five nights (2026-09-06..12) trained 400 steps each with the loss
+# flat at 0.69-0.72 and every candidate scoring like the raw base. Pass --beta
+# to override; HU_RETRAIN_MLXTUNE_BETA=0.05 reproduces the old runs.
+if [ "$TRAINER" = "mlx_tune" ] && [ "${TRAIN_MODE:-}" = "simpo" ] && [ "$BETA_EXPLICIT" != "1" ]; then
+  ORPO_BETA=2.0
+  say "simpo beta not given -- using mlx_tune's default 2.0 (ORPO-scale 0.05 pins the loss at ln2)"
+fi
 say "training -> $ADAPTER"
 say "log      -> $LOG"
 # --train-mode and --beta MUST be CLI flags. mlx_lm_lora applies a YAML key only

@@ -22,6 +22,7 @@
  * dispatcher safety contract. */
 
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 
 #include <stdbool.h>
@@ -55,7 +56,7 @@ void hu_mlx_admin_swap_result_free(hu_allocator_t *alloc, hu_mlx_admin_swap_resu
 /* POST {adapter_path: ...} to <base_url>/adapters/swap.
  *
  * `base_url` should point at the MLX server's v1 root (e.g.
- * "http://127.0.0.1:8741/v1"). The "/adapters/swap" suffix is appended
+ * HU_MLX_DEFAULT_BASE_URL). The "/adapters/swap" suffix is appended
  * by this function.
  *
  * `adapter_path` is the absolute (or ~-expandable, server-side) path
