@@ -70,6 +70,20 @@ static void test_ai_tell_incident_phrases_detected(void) {
     HU_ASSERT_NOT_NULL(hit);
 }
 
+static void test_ai_tell_support_register_on_distress_detected(void) {
+    /* 2026-09-12 15:18 retry that passed the old table. */
+    HU_ASSERT_NOT_NULL(
+        hu_reactive_response_ai_tell("I understand this is frustrating. How can I help you?"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("How can I help you with this situation"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("I'm sorry you're dealing with that"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("that sounds really tough"));
+    /* Seth's own replies to the same inputs stay clean. */
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("Haha, true!"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("Yes you can"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("how can I help with the move?"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("I understand, my bad"));
+}
+
 static void test_ai_tell_is_case_insensitive_and_names_phrase(void) {
     const char *hit = hu_reactive_response_ai_tell("i APOLOGIZE FOR THE DELAY, got busy");
     HU_ASSERT_NOT_NULL(hit);
@@ -145,6 +159,7 @@ void run_reactive_gates_tests(void) {
     HU_RUN_TEST(test_ai_tell_clean_reply_is_null);
     HU_RUN_TEST(test_ai_tell_legacy_phrases_still_detected);
     HU_RUN_TEST(test_ai_tell_incident_phrases_detected);
+    HU_RUN_TEST(test_ai_tell_support_register_on_distress_detected);
     HU_RUN_TEST(test_ai_tell_is_case_insensitive_and_names_phrase);
     HU_RUN_TEST(test_ai_tell_does_not_flag_human_sorry);
     HU_RUN_TEST(test_consecutive_limit_cap_zero_never_fires);

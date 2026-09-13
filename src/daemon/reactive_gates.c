@@ -58,6 +58,17 @@ static const char *const k_ai_tells[] = {
     "please clarify",
     "delay in responding",
     "experiencing these feelings",
+    /* 2026-09-12 15:18: a contact sent "😓"; the model produced "I'm sorry to
+     * hear that. How can I help you with this…" (caught above) and, on the
+     * retry, "I understand this is frustrating. How can I help you…" — which
+     * passed. Seth's real replies to sad/frustrated texts (chat.db, n=11):
+     * "Haha, true!", "Answer?", "Yes you can" — never the support register. */
+    "I understand this is",
+    "I understand that this",
+    "How can I help you",
+    "I'm sorry you're",
+    "I am sorry you're",
+    "that sounds really",
 };
 
 hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried) {
