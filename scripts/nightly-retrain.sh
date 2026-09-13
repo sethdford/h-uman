@@ -234,7 +234,14 @@ run_mlxtune_candidate_stage() {
         local loss_drop_min="${HU_RETRAIN_MIN_LOSS_DROP:-0.02}"
         if [[ -n "$train_log" ]]; then
             local loss_summary
-            loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+            # Preferred signal: the held-out SimPO loss mlx_tune_train.py scores on
+            # valid.jsonl before and after training (same pairs twice — immune to the
+            # ~0.3 per-sample sd that makes the step trend below unreadable). Fall
+            # back to the step trend only when that line is absent.
+            loss_summary=$(grep -a -oE 'held-out simpo loss: before=[0-9.]+ after=[0-9.]+ delta=[-+0-9.]+ n=[0-9]+' "$train_log" | tail -1 | awk -v min="$loss_drop_min" '
+                { for (i=1;i<=NF;i++){ split($i,kv,"="); v[kv[1]]=kv[2] }
+                  d=v["before"]-v["after"]; printf "%s held-out first=%.4f last=%.4f drop=%.4f n=%s", (d>=min?"LEARNED":"NO_LEARNING"), v["before"], v["after"], d, v["n"] }')
+            [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
                 { l[NR]=$NF } END {
                     if (NR < 10) { print "INSUFFICIENT n=" NR; exit }
                     k=int(NR/10); if (k<1) k=1; a=0; b=0
