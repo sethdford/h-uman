@@ -37,6 +37,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -471,6 +472,36 @@ def load_persona_system_prompt(persona_dir=None):
     return _persona_to_system_prompt(persona)
 
 
+def _default_human_bin():
+    here = Path(__file__).resolve().parent.parent
+    for rel in ("build-prod/human", "build/human"):
+        cand = here / rel
+        if os.access(cand, os.X_OK):
+            return str(cand)
+    return "human"
+
+
+def load_production_system_prompt(human_bin=None, persona="seth", channel="imessage"):
+    """The daemon's own system prompt for `persona` on `channel`, rendered by
+    `human persona show <persona> <channel>`: overlay, example bank, and (since
+    2e5c609b8) the ABSOLUTE RULES block, with every HU_* prompt gate read from
+    this process's environment. Refuses rather than falling back to the
+    reconstructed prompt — a silent fallback would make an off/live A/B compare
+    the same text twice and report "no effect"."""
+    import subprocess
+
+    human_bin = human_bin or _default_human_bin()
+    try:
+        r = subprocess.run([human_bin, "persona", "show", persona, channel],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"REFUSED: could not run {human_bin} persona show: {e}")
+    if r.returncode != 0 or not r.stdout.strip():
+        raise SystemExit(f"REFUSED: {human_bin} persona show {persona} {channel} failed "
+                         f"(rc={r.returncode}): {r.stderr.strip()[:200]}")
+    return r.stdout
+
+
 def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=None):
     """Drive one deep conversation, time each turn, score the three axes.
 
@@ -591,11 +622,29 @@ def main(argv=None):
                     help="Run only the first N deep scenarios (smoke-test / fast-data knob)")
     ap.add_argument("--max-turns", type=int, default=None,
                     help="Cap each scenario to the first N user turns (fast-data knob)")
+    # 2026-09-13: the reconstructed prompt (default, what every nightly since
+    # 2026-05-28 measured) is a harness-authored subset of the persona JSON —
+    # no channel overlay, no example bank, no ABSOLUTE RULES block, so no
+    # measured style card and no emotional-register rule. `production` renders
+    # the daemon's own prompt via `human persona show <persona> <channel>`
+    # (rules appended, HU_* gates read from THIS process's env), which is what
+    # an off/live A/B of a prompt gate has to run against.
+    ap.add_argument("--persona-prompt", choices=("reconstructed", "production"),
+                    default="reconstructed",
+                    help="system prompt source (default: reconstructed from persona JSON)")
+    ap.add_argument("--human-bin", default=None,
+                    help="`human` binary for --persona-prompt production (default: build-prod/human, "
+                         "then build/human next to this repo)")
+    ap.add_argument("--persona", default="seth")
+    ap.add_argument("--channel", default="imessage")
     args = ap.parse_args(argv)
 
     backend = LocalBackend(args.server_url)
     judge_on = judge_available()
-    persona_prompt = load_persona_system_prompt()
+    if args.persona_prompt == "production":
+        persona_prompt = load_production_system_prompt(args.human_bin, args.persona, args.channel)
+    else:
+        persona_prompt = load_persona_system_prompt()
 
     scenarios = multiturn_scenarios_deep.DEEP_SCENARIOS
     if args.limit_scenarios is not None:
@@ -628,6 +677,12 @@ def main(argv=None):
 
     verdict = run_verdict(scenario_verdicts)
     verdict["judge"] = "OK" if judge_on else "SKIPPED"
+    verdict["persona_prompt"] = {
+        "source": args.persona_prompt,
+        "bytes": len(persona_prompt or ""),
+        "HU_EMOTION_REGISTER": os.environ.get("HU_EMOTION_REGISTER", ""),
+        "HU_STYLE_GOVERNOR": os.environ.get("HU_STYLE_GOVERNOR", ""),
+    }
     write_verdict(verdict, args.output_json)
 
     if not judge_on:
