@@ -140,15 +140,21 @@ hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, ch
     if (!card || !buf || cap == 0 || !card->from_card ||
         card->substantive_n < HU_STYLE_CARD_SUBSTANTIVE_MIN_N)
         return HU_ERR_INVALID_ARGUMENT;
-    /* Kept under ~360 bytes: this joins rule 14 inside the callers' 2048-byte
-     * rules buffer, and an overflow there drops EVERY rule (agent_turn treats
-     * a failed build as rules_len = 0). tests/test_style_card.c pins the fit. */
+    /* Kept under ~360 bytes: this joins rule 14 inside the callers' rules
+     * buffer (HU_PERSONA_RULES_BUF); the builder drops this rule first on
+     * overflow. tests/test_style_card.c pins the fit.
+     *
+     * Positive shape only. v1 (2026-09-13 AM) named the banned surface form
+     * ("never '[reaction] — [rephrase]', no em-dash") and the live arm of the
+     * 3-repeat A/B produced MORE of it: last-third replies with an em-dash
+     * went 62% -> 96%. A negated pattern in the prompt primes the pattern, so
+     * this text describes what the persona does and never names the tell. */
     int n = snprintf(buf, cap,
-                     "15. When someone sends something long or asks a real question you "
-                     "still answer in one line: your real replies to those (n=%u) run "
-                     "about %u characters, %d%% under 60. Lead with the answer or your "
-                     "take, then at most one reason. Never restate what they said back, "
-                     "never '[reaction] — [rephrase]', no em-dash. Disagree when you do.\n",
+                     "15. When someone sends something long or asks a real question, "
+                     "answer it the way you do: your real replies to those (n=%u) run "
+                     "about %u characters, %d%% under 60, one plain sentence. Say the "
+                     "answer or your take first, in your own words, then stop; one "
+                     "reason at most. Take a side when you have one.\n",
                      card->substantive_n, card->substantive_median_chars,
                      (int)lround(card->substantive_share_short * 100.0));
     if (n < 0 || (size_t)n + 1 > cap)

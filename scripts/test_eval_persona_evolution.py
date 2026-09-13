@@ -835,3 +835,10 @@ def test_trailing_days_explicit_start_warns_and_is_overridden(monkeypatch, capsy
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_has_dash_em_and_en():
+    assert epe.has_dash("yeah — always good") is True
+    assert epe.has_dash("smart – figure it out") is True
+    assert epe.has_dash("St Pete - 100 Central Ave") is False
+    assert epe.has_dash("") is False

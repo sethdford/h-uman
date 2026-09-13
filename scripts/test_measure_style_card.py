@@ -32,6 +32,7 @@ def synthetic_corpus(n=400):
       i % 20 == 2  -> ends with "!"     ( 5%)   [exclaim]
       everything else has no terminal punctuation -> 60%
       i % 8 == 3   -> contains an emoji (12.5%)
+      i % 40 == 7  -> contains an em-dash (2.5%)
     """
     out = []
     for i in range(n):
@@ -39,6 +40,8 @@ def synthetic_corpus(n=400):
         body = head + " sounds good"
         if i % 8 == 3:
             body += " 😂"
+        if i % 40 == 7:
+            body += " \u2014 really"
         if i % 4 == 0:
             body += "."
         elif i % 10 == 1:
@@ -65,6 +68,7 @@ class BuildCard(unittest.TestCase):
         self.assertAlmostEqual(ax["exclamation_rate"]["value"], 0.05, places=9)
         self.assertAlmostEqual(ax["no_terminal_punct_rate"]["value"], 0.60, places=9)
         self.assertAlmostEqual(ax["emoji_rate"]["value"], 0.125, places=9)
+        self.assertAlmostEqual(ax["dash_rate"]["value"], 0.025, places=9)
         for name in msc.CARD_AXES:
             entry = ax[name]
             self.assertLessEqual(entry["ci_lo"], entry["value"], name)

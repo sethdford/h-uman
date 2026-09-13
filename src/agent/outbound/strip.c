@@ -1,7 +1,7 @@
 /* outbound/strip.c — character-normalization stage.
  *
  * Strips problematic codepoints in-place and returns REWRITE if any
- * were removed, SEND otherwise.
+ * were removed, SEND otherwise. Also normalizes dashes (below).
  *
  * Codepoints stripped (rationale per codepoint):
  *
@@ -40,6 +40,25 @@
  *   REJECT   — never (this stage is non-judgmental; it just normalizes)
  */
 
+/* Dashes (U+2014 EM DASH, U+2013 EN DASH — UTF-8: E2 80 94 / E2 80 93)
+ *
+ *   Measured 2026-09-13: the persona's own typed texts contain an em-dash
+ *   in 0 of 954 (chat.db, is_from_me; the 4 hits in 958 are h-uman rating
+ *   prompts sent to himself). The model's substantive replies carry one in
+ *   62–96% of turns ("yeah — always good to leverage"), and the multi-turn
+ *   judge names that shape as the AI tell. Telling the model not to use
+ *   them made it worse (see hu_style_card_render_substantive_rule), so the
+ *   dash is normalized here, deterministically, like the codepoints above:
+ *
+ *     "a — b" / "a—b" / "a – b"  ->  "a, b"
+ *     "— b" / "a —"              ->  "b" / "a"      (leading / trailing: dropped)
+ *     "a. — b" / "a — , b"       ->  "a. b" / "a, b" (never doubles punctuation)
+ *
+ *   Hyphen-minus is untouched: "St Pete - 100 Central Ave" is real persona
+ *   text. Each consumed unit (3-byte dash + surrounding spaces) is longer
+ *   than what replaces it (", " at most), so the in-place rewrite stays safe.
+ */
+
 #include "human/agent/outbound_pipeline.h"
 
 #include <stddef.h>
@@ -60,6 +79,14 @@ static inline int is_u_202e(const unsigned char *s) {
 
 static inline int is_u_200b(const unsigned char *s) {
     return s[0] == 0xE2 && s[1] == 0x80 && s[2] == 0x8B;
+}
+
+static inline int is_dash(const unsigned char *s) {
+    return s[0] == 0xE2 && s[1] == 0x80 && (s[2] == 0x94 || s[2] == 0x93);
+}
+
+static inline int is_clause_punct(unsigned char c) {
+    return c == ',' || c == '.' || c == ';' || c == ':' || c == '!' || c == '?';
 }
 
 static inline int is_u_200d(const unsigned char *s) {
@@ -106,6 +133,23 @@ static size_t strip_codepoints(unsigned char *buf, size_t len) {
     size_t w = 0;
     while (r < len) {
         unsigned char b = buf[r];
+        if (r + 3 <= len && is_dash(buf + r)) {
+            /* Consume the dash and the spaces on both sides of it. */
+            while (w > 0 && buf[w - 1] == ' ')
+                w--;
+            r += 3;
+            while (r < len && buf[r] == ' ')
+                r++;
+            if (w == 0 || r >= len)
+                continue; /* leading or trailing dash: nothing to join */
+            if (is_clause_punct(buf[w - 1])) {
+                buf[w++] = ' '; /* "a. — b" -> "a. b" */
+            } else if (!is_clause_punct(buf[r])) {
+                buf[w++] = ',';
+                buf[w++] = ' ';
+            } /* else "a — , b" -> "a, b": the following punctuation stands */
+            continue;
+        }
         if (r + 3 <= len && (b & 0xF0) == 0xE0) {
             int drop = 0;
             if (is_u_fffc(buf + r) || is_u_202e(buf + r) || is_u_200b(buf + r)) {
@@ -126,8 +170,8 @@ static size_t strip_codepoints(unsigned char *buf, size_t len) {
     return w;
 }
 
-static hu_outbound_verdict_t strip_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
-                                       hu_outbound_context_t *ctx) {
+static hu_outbound_verdict_t strip_run(hu_outbound_pipeline_stage_t *self,
+                                       hu_outbound_message_t *msg, hu_outbound_context_t *ctx) {
     (void)self;
     if (!msg || !msg->content || msg->content_len == 0)
         return hu_outbound_verdict_send();

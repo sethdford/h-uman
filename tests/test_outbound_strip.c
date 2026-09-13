@@ -54,7 +54,8 @@ static hu_outbound_verdict_t run_strip(const char *content_literal) {
     ctx.path = HU_OUTBOUND_PATH_PROACTIVE;
     ctx.regenerate_budget = 1;
 
-    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
+    hu_outbound_verdict_t v =
+        hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
 
     alloc->free(alloc->ctx, msg.content, n + 1);
     return v;
@@ -81,7 +82,8 @@ static void test_strip_null_content_returns_send(void) {
     hu_outbound_message_t msg = {0};
     hu_outbound_context_t ctx = {0};
     ctx.alloc = test_alloc();
-    hu_outbound_verdict_t v = hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
+    hu_outbound_verdict_t v =
+        hu_outbound_pipeline_stage_strip.run(&hu_outbound_pipeline_stage_strip, &msg, &ctx);
     HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
 }
 
@@ -181,6 +183,55 @@ static void test_strip_adjacent_codepoints_rewrites(void) {
     hu_outbound_verdict_clear(&v, test_alloc());
 }
 
+/* ----------------------------------------------------------------- */
+/* Dash normalization (2026-09-13). Persona: 0/954 own texts carry an  */
+/* em-dash; the model: 62–96% of substantive replies. See strip.c.     */
+/* ----------------------------------------------------------------- */
+
+static void assert_rewrite(const char *in, const char *want) {
+    hu_outbound_verdict_t v = run_strip(in);
+    HU_ASSERT_EQ(v.kind, HU_OUTBOUND_REWRITE);
+    HU_ASSERT_NOT_NULL(v.replacement);
+    HU_ASSERT_STR_EQ(v.replacement, want);
+    HU_ASSERT_EQ(v.replacement_len, strlen(want));
+    hu_outbound_verdict_clear(&v, test_alloc());
+}
+
+static void test_strip_spaced_em_dash_becomes_comma(void) {
+    /* The exact shape the multi-turn judge flagged on nearly every turn. */
+    assert_rewrite("yeah \xE2\x80\x94 always good to leverage", "yeah, always good to leverage");
+    assert_rewrite("fuck yeah \xE2\x80\x94 when \xE2\x80\x94 where", "fuck yeah, when, where");
+}
+
+static void test_strip_unspaced_and_en_dash_become_comma(void) {
+    assert_rewrite("no question\xE2\x80\x94"
+                   "five days is brutal",
+                   "no question, five days is brutal");
+    assert_rewrite("smart \xE2\x80\x93 figure out the real work",
+                   "smart, figure out the real work");
+}
+
+static void test_strip_leading_and_trailing_dash_dropped(void) {
+    assert_rewrite("\xE2\x80\x94 gotta see the crew", "gotta see the crew");
+    assert_rewrite("gotta see the crew \xE2\x80\x94", "gotta see the crew");
+    assert_rewrite("\xE2\x80\x94", "");
+}
+
+static void test_strip_dash_never_doubles_punctuation(void) {
+    assert_rewrite("worth a shot. \xE2\x80\x94 they might not want to lose you",
+                   "worth a shot. they might not want to lose you");
+    assert_rewrite("good call \xE2\x80\x94 , at least you know", "good call, at least you know");
+    assert_rewrite("good call \xE2\x80\x94 ?", "good call?");
+}
+
+static void test_strip_hyphen_minus_and_emoji_untouched(void) {
+    hu_outbound_verdict_t v = run_strip("Chase downtown St Pete - 100 Central Ave 😂");
+    HU_ASSERT_EQ(v.kind, HU_OUTBOUND_SEND);
+    hu_outbound_verdict_clear(&v, test_alloc());
+    /* A dash next to an emoji keeps the emoji intact. */
+    assert_rewrite("lol \xE2\x80\x94 \xF0\x9F\x98\x82 same", "lol, \xF0\x9F\x98\x82 same");
+}
+
 void run_outbound_strip_tests(void) {
     HU_TEST_SUITE("outbound_strip");
     HU_RUN_TEST(test_strip_plain_ascii_passes_through);
@@ -195,4 +246,9 @@ void run_outbound_strip_tests(void) {
     HU_RUN_TEST(test_strip_corpus_pass_cases_send);
     HU_RUN_TEST(test_strip_lone_u_fffc_rewrites_to_empty);
     HU_RUN_TEST(test_strip_adjacent_codepoints_rewrites);
+    HU_RUN_TEST(test_strip_spaced_em_dash_becomes_comma);
+    HU_RUN_TEST(test_strip_unspaced_and_en_dash_become_comma);
+    HU_RUN_TEST(test_strip_leading_and_trailing_dash_dropped);
+    HU_RUN_TEST(test_strip_dash_never_doubles_punctuation);
+    HU_RUN_TEST(test_strip_hyphen_minus_and_emoji_untouched);
 }

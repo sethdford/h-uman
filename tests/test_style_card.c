@@ -278,7 +278,7 @@ static void parse_reads_substantive_axis_and_tolerates_its_absence(void) {
                  HU_ERR_INVALID_ARGUMENT); /* not measured: nothing to render */
 }
 
-static void render_substantive_rule_states_card_numbers_and_the_bans(void) {
+static void render_substantive_rule_states_card_numbers_positively(void) {
     test_alloc = hu_system_allocator();
     hu_style_card_t c;
     HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
@@ -288,9 +288,13 @@ static void render_substantive_rule_states_card_numbers_and_the_bans(void) {
     HU_ASSERT_TRUE(strncmp(buf, "15. ", 4) == 0);
     HU_ASSERT_STR_CONTAINS(buf, "(n=63)");
     HU_ASSERT_STR_CONTAINS(buf, "about 27 characters, 73% under 60");
-    HU_ASSERT_STR_CONTAINS(buf, "Never restate what they said back");
-    HU_ASSERT_STR_CONTAINS(buf, "Disagree when you do");
-    HU_ASSERT_TRUE(len < 400); /* must stay small: shares the 2048-byte rules buffer */
+    HU_ASSERT_STR_CONTAINS(buf, "Take a side when you have one");
+    /* Positive shape only: naming the tell primed it (dash share 62% -> 96%
+     * in the v1 live arm). The rule must not contain the dash or a "never". */
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "\xE2\x80\x94");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "ever ");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "no em-dash");
+    HU_ASSERT_TRUE(len < 400); /* must stay small: shares the rules buffer */
     c.substantive_n = HU_STYLE_CARD_SUBSTANTIVE_MIN_N - 1;
     HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, buf, sizeof(buf), NULL),
                  HU_ERR_INVALID_ARGUMENT);
@@ -374,7 +378,7 @@ static void rules_14_and_15_live_together_fit_the_production_buffer(void) {
 void run_style_card_tests(void) {
     HU_TEST_SUITE("style_card");
     HU_RUN_TEST(parse_reads_substantive_axis_and_tolerates_its_absence);
-    HU_RUN_TEST(render_substantive_rule_states_card_numbers_and_the_bans);
+    HU_RUN_TEST(render_substantive_rule_states_card_numbers_positively);
     HU_RUN_TEST(substantive_gate_defaults_off_shadow_hides_live_appends);
     HU_RUN_TEST(rules_14_and_15_live_together_fit_the_production_buffer);
     HU_RUN_TEST(default_card_is_marked_fallback_with_sane_rates);

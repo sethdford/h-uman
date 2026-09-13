@@ -78,8 +78,10 @@ hu_error_t hu_style_card_render_casual_rules(const hu_style_card_t *card, char *
  * nightly's debate / news / advice scenarios end judged "AI" for two named
  * reasons: every reply is "[reaction] — [rephrase of what they said]" and the
  * twin agrees with everything. The persona's real replies to a long or
- * question-bearing text answer first, take a position, and stay short. Only
- * renders from a card with substantive_n >= HU_STYLE_CARD_SUBSTANTIVE_MIN_N;
+ * question-bearing text answer first, take a position, and stay short. The
+ * rendered text states that shape POSITIVELY and never names the tell: the
+ * v1 wording that banned the dash by name raised the dash share 62% -> 96%.
+ * Only renders from a card with substantive_n >= HU_STYLE_CARD_SUBSTANTIVE_MIN_N;
  * HU_ERR_INVALID_ARGUMENT otherwise. Gated by hu_substantive_register_mode. */
 hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, char *buf, size_t cap,
                                                  size_t *out_len);
