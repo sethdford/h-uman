@@ -2,6 +2,38 @@
 
 **Status:** measurement shipped, prompt rule gated OFF (2026-09-06).
 
+## Multi-turn A/B on the production prompt (2026-09-13)
+
+`scripts/eval_multiturn_local.py --persona-prompt production` (new: the
+daemon's own prompt with the rules block, gates from the environment) run
+once per arm, six 30-turn scenarios, Gemini voice judge, real sampling:
+
+| scenario | off: voice first→last | live: voice first→last |
+|---|---|---|
+| casual_catchup | 8→7 borderline | 4→9 human |
+| emotional_escalation | 3→9 human | 8→7 borderline |
+| debate_opinions | 9→3 AI | 6→4 AI |
+| banter_humor | 3→8 human | 3→3 AI |
+| news_reaction_chain | 4→4 AI | 8→3 AI |
+| advice_seeking | 6→4 AI | 3→3 AI |
+| **mean last third / hard-AI** | **5.83 / 3** | **4.83 / 4** |
+
+Verdict: no evidence the rule helps over long conversations, and the
+measurement cannot say much either way at n=1 per arm: identical prompts
+except rule 14 score 8 vs 4 on the *first* third of the same scenario, so
+the judge-plus-sampling noise is larger than any effect. What is
+consistent across both arms and the week of nightlies: the substantive
+scenarios (debate, news reaction, advice) end judged AI; the casual and
+emotional ones mostly do not. That is a register finding, not an
+emotion-rule finding. Rule 14 stays SHADOW. A decisive multi-turn A/B
+needs ≥3 runs per arm and should be scored by last-third mean, not the
+pass/fail count.
+
+Also fixed today, from the same transcript: the AI-tell retry hint used to
+prescribe four sympathy formulas the model parroted ("damn that's rough");
+it now describes the measured register and bans the scaffolds
+(66ef31cc4, deployed).
+
 ## Direction-aware rule 14 and its first measurement (2026-09-13)
 
 The 2026-09-12 15:18 turn showed the mechanism behind the sympathy gap: to
