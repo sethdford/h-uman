@@ -621,6 +621,9 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         messages.append({"role": "user", "content": user_msg})
         content, first_token_ms, total_ms = backend.chat(messages)  # may raise BackendUnreachable
         messages.append({"role": "assistant", "content": content})
+        # The server emits a leading newline before the reply; production trims
+        # it in the validator chain. Judge what a contact would see.
+        content = (content or "").strip()
         exchanges.append((user_msg, content))
         first_token_series.append(first_token_ms)
         total_series.append(total_ms)
