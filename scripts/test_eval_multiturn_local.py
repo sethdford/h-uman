@@ -594,9 +594,11 @@ def test_run_scenario_persists_persona_system_prompt():
     print("✓ run_scenario_persists_persona_system_prompt")
 
 
-def _sv(name, ret, first, last, verdict, lat=True, skipped=False):
+def _sv(name, ret, first, last, verdict, lat=True, skipped=False, agree=None):
     vd = {"skipped": True} if skipped else {"first_third_score": first, "last_third_score": last,
                                             "last_third_verdict": verdict}
+    if agree is not None:
+        vd["last_third_agreement_opener_rate"] = agree
     v_ok = None if skipped else mt.voice_drift_ok(mt.voice_normalize(first), mt.voice_normalize(last),
                                                   mt.VOICE_DRIFT_TOL, any_hard_ai=(verdict == "AI"))
     return mt.scenario_verdict(name, ret, v_ok, vd, lat,
@@ -678,3 +680,26 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_agreement_opener_rate_is_judge_free_and_counts_reflexive_openers_only():
+    from reply_pairs import agreement_opener_rate, is_agreement_opener
+    assert is_agreement_opener("yeah the office forces you to step away")
+    assert is_agreement_opener("lol yeah pretty much")
+    assert is_agreement_opener("100%. it's about energy")
+    assert is_agreement_opener("fr. no way 5 days is better")
+    assert not is_agreement_opener("no way 5 days in office is better")   # a position
+    assert not is_agreement_opener("Yes")                                # an answer
+    assert not is_agreement_opener("idk, probably fine")
+    assert agreement_opener_rate(["yeah", "nah", "exactly", "I think so"]) == 0.5
+    assert agreement_opener_rate([]) == 0.0
+
+
+def test_aggregate_repeats_means_the_agreement_rate_and_tolerates_absence():
+    runs = [[_sv("debate", 1.0, 8, 3, "AI", agree=0.5)],
+            [_sv("debate", 1.0, 4, 9, "HUMAN", agree=0.25)],
+            [_sv("debate", 1.0, 6, 6, "BORDERLINE", agree=0.75)]]
+    out = mt.aggregate_repeats(runs)
+    assert abs(out[0]["voice"]["last_third_agreement_opener_rate"] - 0.5) < 1e-9
+    old = [[_sv("debate", 1.0, 8, 3, "AI")]]
+    assert mt.aggregate_repeats(old)[0]["voice"]["last_third_agreement_opener_rate"] is None

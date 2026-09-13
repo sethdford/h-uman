@@ -118,6 +118,7 @@ class RunCli(unittest.TestCase):
             self.assertEqual(sr["median_chars"], 18)  # sorted lens 2, 3, 18, 48 -> index 2
             self.assertAlmostEqual(sr["share_le_60_chars"], 1.0)
             self.assertAlmostEqual(sr["answer_first_rate"], 0.75)
+            self.assertAlmostEqual(sr["agreement_opener_rate"], 0.0)  # "Yes"/"No" answer, not agree
             self.assertEqual(sr["min_n"], msc.SUBSTANTIVE_MIN_N)
             for _, reply in pairs:  # no reply text on the card
                 self.assertNotIn(reply, json.dumps(card))

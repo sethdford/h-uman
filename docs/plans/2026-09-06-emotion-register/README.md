@@ -77,6 +77,58 @@ does not move it. The next lever is not prompt wording: the opinion-hold
 directive (HU_OPINION_HOLD, live) and the persona's own stances are the
 place to look for why a stated position never surfaces in these turns.
 
+### The agreement tell: where the stances were supposed to come from (2026-09-13 PM)
+
+Chasing "the twin agrees with everything" through the product path:
+
+- **The A/B never had a stance in the loop.** The multi-turn harness posts
+  the `persona show` prompt straight to the server. The daemon's evolved-
+  opinions block and the opinion-hold directive (`HU_OPINION_HOLD`, LIVE in
+  the plist) are built in the reactive prompt and never reach the harness.
+- **Opinion-hold has fired zero times in production, ever** (0 hits across
+  all 27 service logs). Its only stance source is `evolved_opinions`, and
+  that table held two rows in four months, both harvested by the extractor
+  from the twin's OWN replies and both identity slips: "I think I just
+  glitched for a second" (2026-05-12) and "I think you might be confusing
+  me with someone else" (2026-05-17). Conviction 0.5 clears the 0.4
+  injection floor, so every live prompt since May has carried *"On 'I just
+  glitched for a': you tentatively believe 'I think I just glitched for a
+  second' (shaped by 1 conversations)"* as a position arrived at through
+  experience (today's salience log: `kept [evolved_opinion]` at 10:01,
+  10:02, 16:36). Fixed: rows purged (backup table
+  `evolved_opinions_purged_20260913` + `memory.db.bak-20260913-evolved-opinions-rows`),
+  and `hu_evolved_opinion_stance_is_usable` now rejects a topic that opens
+  on a pronoun or a sentence carrying an AI/identity slip; the two real
+  rows are pinned as rejected in `tests/test_opinions_persistence.c`.
+- **The persona has no debatable stances anywhere.** `seth.json` carries a
+  values list (nouns) and the prompt says "You have STRONG OPINIONS. Pick a
+  side" with nothing to pick. Seth's own texts state a position in 1.5% of
+  messages (14/946), and those are logistics ("I think renting for a year
+  is ideal"), not hot takes. The prompt asks for a register the corpus does
+  not show.
+- **What the corpus does show, judge-free:** reflexive agreement as the
+  first word. `reply_pairs.agreement_opener_rate` (yeah / exactly / totally
+  / 100% / fr / fair…, with bare yes/no/ok excluded as answers):
+
+  | who | agreement-opener rate |
+  |---|---|
+  | Seth, substantive replies (n=65) | **0.06** |
+  | twin, last third, off AM / live v1 | 0.50 / 0.46 |
+  | twin, last third, off PM / live v2 | 0.54 / 0.62 |
+
+  A 10× gap, stable across arms, and it is now on the style card
+  (`substantive_reply.agreement_opener_rate`) and in every multi-turn
+  verdict (`last_third_agreement_opener_rate`, meaned over repeats), so the
+  nightly tracks it without the judge.
+
+Next lever, in order: (1) rule 15 v3 states the measured opener fact
+("you open on agreement about 1 in 16 times; usually you just say the
+thing") — same 3-repeat A/B, read the judge-free rate first, the judge
+second; (2) give the harness the product path (the daemon's reactive
+prompt builder, or at least the opinion block) so opinion-hold is
+measurable at all; (3) only then a real stance source, mined from Seth's
+own texts with provenance, never from the twin's output.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the

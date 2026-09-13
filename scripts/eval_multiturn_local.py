@@ -261,6 +261,8 @@ def aggregate_repeats(runs):
         l_mean = statistics.mean(sv["voice"]["last_third_score"] for sv in same)
         hard_ai = sum(1 for sv in same if sv["voice"]["last_third_verdict"] == "AI")
         majority_ai = hard_ai * 2 > len(same)
+        agree_rates = [sv["voice"]["last_third_agreement_opener_rate"] for sv in same
+                       if "last_third_agreement_opener_rate" in sv["voice"]]
         v_ok = voice_drift_ok(voice_normalize(f_mean), voice_normalize(l_mean),
                               VOICE_DRIFT_TOL, any_hard_ai=majority_ai)
         sv_out = scenario_verdict(
@@ -269,6 +271,8 @@ def aggregate_repeats(runs):
                           "last_third_verdict": "AI" if majority_ai else
                           ("HUMAN" if l_mean >= 7 else "BORDERLINE"),
                           "hard_ai_repeats": hard_ai, "repeats": len(same),
+                          "last_third_agreement_opener_rate":
+                              statistics.mean(agree_rates) if agree_rates else None,
                           "last_third_judge": same[-1]["voice"].get("last_third_judge"),
                           "last_third_exchanges": same[-1]["voice"].get("last_third_exchanges")},
             latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
@@ -661,6 +665,11 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
 
     # Voice drift: judge first-third and last-third windows.
     first_ex, last_ex = _thirds(exchanges)
+    # Judge-free companion to the voice score: reflexive-agreement openers
+    # ("yeah", "exactly", "totally") in the last third. The judge's remaining
+    # named tell in the substantive scenarios once dashes were gone (2026-09-13).
+    from reply_pairs import agreement_opener_rate
+    agree_rate = agreement_opener_rate(ai for _, ai in last_ex)
     first_score, _ = judge_voice_window(scenario["name"], first_ex)
     last_detail = {}
     last_score, last_verdict = judge_voice_window(scenario["name"], last_ex, detail_out=last_detail)
@@ -671,6 +680,7 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         name=scenario["name"], retention=rate, voice_pass=v_ok,
         voice_detail={"first_third_score": first_score, "last_third_score": last_score,
                       "last_third_verdict": last_verdict,
+                      "last_third_agreement_opener_rate": agree_rate,
                       "last_third_judge": last_detail,
                       "last_third_exchanges": _trim_exchanges(last_ex)},
         latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)

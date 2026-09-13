@@ -1,3 +1,7 @@
+/* Covers src/memory/evolved_opinions.c (hu_evolved_opinion_* below). The
+ * check-test-references name heuristic resolves "opinions" to
+ * src/memory/opinions.c, a different module — hence the opt-out. */
+// @covers-none
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -255,6 +259,44 @@ static void extract_no_opinions_in_factual(void) {
     teardown_db();
 }
 
+/* The two rows production actually stored (memory.db, 2026-05-12 and
+ * 2026-05-17): the twin's own identity slips, harvested as "opinions" and
+ * injected into every live prompt until 2026-09-13. Must store nothing. */
+static void extract_rejects_the_twins_identity_slips(void) {
+    setup_db();
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *slips[] = {"lol wait. I think I just glitched for a second. what were we saying",
+                           "I think you might be confusing me with someone else. I never said that",
+                           "As an AI language model I think that is a fair point.", NULL};
+    for (int k = 0; slips[k]; k++)
+        hu_evolved_opinions_extract_and_store(s_db, slips[k], strlen(slips[k]), 1000);
+    hu_evolved_opinion_t *ops = NULL;
+    size_t count = 0;
+    hu_evolved_opinions_get(&alloc, s_db, 0.0, 10, &ops, &count);
+    HU_ASSERT_EQ(count, 0);
+    teardown_db();
+}
+
+static void stance_predicate_truth_table(void) {
+    /* topic opens on a pronoun -> not a position about anything */
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable(
+        "I just glitched for a", 21, "I think I just glitched for a second", 36));
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable("you might be confusing me", 25,
+                                                        "I think you might be confusing me", 33));
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable("it's fine", 9, "I think it's fine", 17));
+    /* an AI slip anywhere in the stance */
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable(
+        "remote work is fine", 19, "I think remote work is fine, as an AI", 37));
+    /* a real position survives, including one that mentions "you" later */
+    HU_ASSERT_TRUE(hu_evolved_opinion_stance_is_usable(
+        "remote work is generally better", 31,
+        "I think remote work is generally better for deep focus", 54));
+    HU_ASSERT_TRUE(hu_evolved_opinion_stance_is_usable(
+        "hybrid beats full remote", 24, "I think hybrid beats full remote for you", 40));
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable(NULL, 0, "x", 1));
+    HU_ASSERT_FALSE(hu_evolved_opinion_stance_is_usable("x", 1, NULL, 0));
+}
+
 static void extract_null_args(void) {
     setup_db();
     hu_error_t err = hu_evolved_opinions_extract_and_store(NULL, "test", 4, 1000);
@@ -303,6 +345,8 @@ int run_opinions_persistence_tests(void) {
     HU_RUN_TEST(extract_no_opinions_in_factual);
     HU_RUN_TEST(extract_null_args);
     HU_RUN_TEST(extract_repeated_topic_blends);
+    HU_RUN_TEST(extract_rejects_the_twins_identity_slips);
+    HU_RUN_TEST(stance_predicate_truth_table);
 #endif
     return 0;
 }
