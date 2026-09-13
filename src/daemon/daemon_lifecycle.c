@@ -13,6 +13,7 @@
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/daemon.h"
+#include "human/daemon/common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,6 @@
 #endif
 
 #define HU_DAEMON_PID_FILE "human.pid"
-#define HU_MAX_PATH        1024
 
 /* ── Path validation ─────────────────────────────────────────────────── */
 

@@ -29,7 +29,8 @@ static const char card_json[] =
     "{\"emotion\":\"interest\",\"share\":0.1},"
     "{\"emotion\":\"satisfaction\",\"share\":0.06},"
     "{\"emotion\":\"calmness\",\"share\":0.03},"
-    "{\"emotion\":\"joy\",\"share\":0.02}]}";
+    "{\"emotion\":\"joy\",\"share\":0.02}],"
+    "\"distress_reply\":{\"n\":11,\"median_chars\":17,\"scaffold_rate\":0.0,\"min_n\":10}}";
 
 static char g_tmpdir[256];
 
@@ -82,6 +83,23 @@ static void parse_v1_card_reads_axes_top_and_provenance(void) {
     HU_ASSERT_STR_EQ(c.top[3].emotion, "calmness");
     HU_ASSERT_STR_EQ(c.window_start, "2026-07-07");
     HU_ASSERT_STR_EQ(c.window_end, "2026-09-05");
+    HU_ASSERT_EQ(c.distress_n, 11u);
+    HU_ASSERT_EQ(c.distress_median_chars, 17u);
+    HU_ASSERT_FLOAT_EQ(c.distress_scaffold_rate, 0.0, 1e-9);
+}
+
+static void parse_tolerates_missing_or_malformed_distress_axis(void) {
+    test_alloc = hu_system_allocator();
+    hu_emotion_card_t c;
+    const char *none = "{\"n\":50,\"neutral_share\":{\"value\":0.5},"
+                       "\"mean_intensity\":{\"value\":0.2},\"valence_mean\":{\"value\":0.1}}";
+    HU_ASSERT_EQ(hu_emotion_card_parse(&test_alloc, none, strlen(none), &c), HU_OK);
+    HU_ASSERT_EQ(c.distress_n, 0u);
+    const char *bad = "{\"n\":50,\"neutral_share\":{\"value\":0.5},"
+                      "\"mean_intensity\":{\"value\":0.2},\"valence_mean\":{\"value\":0.1},"
+                      "\"distress_reply\":{\"n\":4,\"median_chars\":20,\"scaffold_rate\":1.5}}";
+    HU_ASSERT_EQ(hu_emotion_card_parse(&test_alloc, bad, strlen(bad), &c), HU_OK);
+    HU_ASSERT_EQ(c.distress_n, 0u); /* scaffold_rate out of range: axis ignored, card kept */
 }
 
 static void parse_rejects_missing_axis_zero_n_and_out_of_range(void) {
@@ -164,6 +182,24 @@ static void render_rule_states_card_numbers(void) {
     HU_ASSERT_STR_CONTAINS(buf, "amusement, interest and satisfaction");
     HU_ASSERT_STR_NOT_CONTAINS(buf, "calmness"); /* only the top 3 are named */
     HU_ASSERT_STR_CONTAINS(buf, "2 out of 10");
+    /* Direction-aware: the support scaffolds are banned by name, and the
+     * measured distress replies are stated with their n and length. */
+    HU_ASSERT_STR_CONTAINS(buf, "never 'sorry to hear that'");
+    HU_ASSERT_STR_CONTAINS(buf, "'how can I help you'");
+    HU_ASSERT_STR_CONTAINS(buf, "(n=11) run about 17 characters");
+    /* The old wording pushed the wrong way for a twin that is already flat. */
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "Match that");
+}
+
+static void render_omits_distress_length_below_min_n(void) {
+    test_alloc = hu_system_allocator();
+    hu_emotion_card_t c;
+    HU_ASSERT_EQ(hu_emotion_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
+    c.distress_n = HU_EMOTION_CARD_DISTRESS_MIN_N - 1;
+    char buf[1024];
+    HU_ASSERT_EQ(hu_emotion_card_render_rule(&c, buf, sizeof(buf), NULL), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "characters");
+    HU_ASSERT_STR_CONTAINS(buf, "never 'sorry to hear that'"); /* the ban always renders */
 }
 
 static void render_without_top_says_rare_and_refuses_unmeasured(void) {
@@ -271,12 +307,14 @@ void run_emotion_card_tests(void) {
     HU_TEST_SUITE("emotion_card");
     HU_RUN_TEST(parse_v1_card_reads_axes_top_and_provenance);
     HU_RUN_TEST(parse_rejects_missing_axis_zero_n_and_out_of_range);
+    HU_RUN_TEST(parse_tolerates_missing_or_malformed_distress_axis);
     HU_RUN_TEST(parse_skips_malformed_top_entries);
     HU_RUN_TEST(parse_rejects_malformed_json);
     HU_RUN_TEST(load_missing_card_returns_not_found);
     HU_RUN_TEST(resolve_reads_card_from_persona_dir);
     HU_RUN_TEST(render_rule_states_card_numbers);
     HU_RUN_TEST(render_without_top_says_rare_and_refuses_unmeasured);
+    HU_RUN_TEST(render_omits_distress_length_below_min_n);
     HU_RUN_TEST(gate_defaults_off_and_parses_the_three_states);
     HU_RUN_TEST(absolute_rules_omit_register_when_gate_off);
     HU_RUN_TEST(absolute_rules_omit_register_in_shadow);

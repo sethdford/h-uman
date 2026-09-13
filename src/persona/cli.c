@@ -304,6 +304,22 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         if (err == HU_OK && prompt) {
             fprintf(stdout, "%s", prompt);
             alloc->free(alloc->ctx, prompt, prompt_len + 1);
+            /* The ABSOLUTE RULES block is not part of hu_persona_build_prompt:
+             * hu_agent_finalize_system_prompt appends it last, formality-aware
+             * from the channel overlay. Until 2026-09-13 `show <name> <channel>`
+             * omitted it, so every harness that evals "the production prompt"
+             * through this command (humanness nightly, distress register) was
+             * measuring a prompt without the casing/punctuation/register rules
+             * the daemon actually sends. Same builder, same overlay lookup. */
+            if (ch) {
+                const hu_persona_overlay_t *ov = hu_persona_find_overlay(&p, ch, strlen(ch));
+                char rules[2048];
+                size_t rules_len = 0;
+                if (hu_persona_build_absolute_rules_fmt(&p, ov ? ov->formality : NULL, rules,
+                                                        sizeof(rules), &rules_len) == HU_OK &&
+                    rules_len > 0)
+                    fprintf(stdout, "\n\n%s", rules);
+            }
         }
         hu_persona_deinit(alloc, &p);
         return err;

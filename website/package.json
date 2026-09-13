@@ -35,6 +35,9 @@
     "typescript": "~6.0.3",
     "vitest": "^4.1.10"
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "overrides": {
     "esbuild": "^0.28.1"
   }

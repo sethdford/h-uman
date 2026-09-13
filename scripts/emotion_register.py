@@ -23,6 +23,7 @@ import json
 import math
 import random
 import re
+import sqlite3
 import urllib.error
 import urllib.request
 
@@ -277,6 +278,98 @@ def jsd(p_dist: dict, q_dist: dict) -> float:
         return sum(x * math.log2(x / y) for x, y in zip(a, b) if x > 0)
 
     return 0.5 * kl(p, m) + 0.5 * kl(q, m)
+
+
+# ── Distress replies: how the user answers a sad / frustrated text ───────
+#
+# The 2026-09-12 twin failure was register, not label: to "😓" the model
+# produced "I'm sorry to hear that. How can I help you with this…" and, on
+# retry, "I understand this is frustrating. How can I help you…". The user's
+# own replies to the same kind of inbound (chat.db, 120 days) are short and
+# never the support register. This axis measures that directly, with no
+# judge: inbound texts carrying a distress marker → the user's next reply in
+# the same chat within DISTRESS_REPLY_WINDOW_S.
+
+DISTRESS_MARKERS = re.compile(
+    r"(😓|😢|😭|😞|😔|💔|🥺|\bugh\b|\bsad\b|\bstressed\b|\bfrustrat|\bsucks\b|\bworst\b|"
+    r"\bcrying\b|\btired\b|\bhard day\b|\bbad day\b|\bexhausted\b|\bmiss you\b|\bhate\b)",
+    re.I,
+)
+# The support-agent scaffolds the daemon's AI-tell table also retries on
+# (src/daemon/reactive_gates.c); one regex so the card and the eval agree.
+SUPPORT_SCAFFOLDS = re.compile(
+    r"(sorry to hear|i understand (this|that|how|you)|how can i help you|that must be|"
+    r"i'?m here for you|i am here for you|that sounds (really|so) (hard|tough|frustrating)|"
+    r"i'?m sorry you'?re)",
+    re.I,
+)
+DISTRESS_REPLY_WINDOW_S = 30 * 60
+DISTRESS_MIN_N = 10  # below this the card omits the axis and the prompt says nothing
+
+
+def fetch_distress_pairs(db_path: str, days: int = 120):
+    """(inbound_text, user_reply) pairs from chat.db, read-only + immutable.
+    Uses eval_persona_evolution's attributedBody decoder for rows whose
+    `text` is NULL (most of them on recent macOS)."""
+    from eval_persona_evolution import decode_attributed_body  # local, stdlib
+
+    con = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT m.date, m.text, m.attributedBody, m.is_from_me, c.chat_id
+            FROM message m JOIN chat_message_join c ON c.message_id = m.ROWID
+            WHERE (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
+              AND COALESCE(m.associated_message_type, 0) = 0
+              AND m.date > (strftime('%s','now') - ? * 86400 - 978307200) * 1000000000
+            ORDER BY c.chat_id, m.date
+            """,
+            (int(days),),
+        ).fetchall()
+    finally:
+        con.close()
+
+    def text_of(t, blob):
+        if t and t.strip():
+            return t.strip()
+        return (decode_attributed_body(blob) or "").strip() if blob is not None else ""
+
+    by_chat = {}
+    for date, t, blob, me, chat in rows:
+        by_chat.setdefault(chat, []).append((date, t, blob, me))
+    pairs = []
+    for msgs in by_chat.values():
+        for i, (date, t, blob, me) in enumerate(msgs):
+            if me:
+                continue
+            inbound = text_of(t, blob)
+            if not inbound or not DISTRESS_MARKERS.search(inbound):
+                continue
+            for date2, t2, blob2, me2 in msgs[i + 1:i + 6]:
+                if not me2:
+                    continue
+                if date2 - date > DISTRESS_REPLY_WINDOW_S * 10**9:
+                    break
+                reply = text_of(t2, blob2)
+                if reply and reply != "\ufffc":
+                    pairs.append((inbound, reply))
+                break
+    return pairs
+
+
+def distress_stats(pairs) -> dict:
+    """n, median reply length, support-scaffold rate. Empty when n == 0."""
+    n = len(pairs)
+    if n == 0:
+        return {"n": 0}
+    lengths = sorted(len(r) for _, r in pairs)
+    scaffolds = sum(1 for _, r in pairs if SUPPORT_SCAFFOLDS.search(r))
+    return {
+        "n": n,
+        "median_chars": lengths[n // 2],
+        "scaffold_rate": scaffolds / n,
+        "window_seconds": DISTRESS_REPLY_WINDOW_S,
+    }
 
 
 def check_judge_match(card: dict, judge_identity: str) -> None:

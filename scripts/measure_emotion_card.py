@@ -37,12 +37,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from emotion_register import (  # noqa: E402
     DEFAULT_MLX_URL,
+    DISTRESS_MIN_N,
     PROMPT_SHA,
     TAXONOMY_VERSION,
     JudgeUnavailable,
     LocalJudge,
     MeasurementRefused,
     aggregate,
+    distress_stats,
+    fetch_distress_pairs,
     label_texts,
 )
 
@@ -118,6 +121,18 @@ def build_card(labels, persona: str, window_start, window_end, n_window: int,
     }
 
 
+def attach_distress(card: dict, pairs, days: int) -> dict:
+    """Add the judge-free distress_reply axis (see emotion_register.py).
+    Below DISTRESS_MIN_N the axis is written with its n so the refusal is
+    visible, and the C loader renders nothing from it."""
+    stats = distress_stats(pairs)
+    stats["days"] = days
+    stats["min_n"] = DISTRESS_MIN_N
+    stats["source"] = "chat.db inbound with a distress marker -> the user's next reply in-chat"
+    card["distress_reply"] = stats
+    return card
+
+
 def write_card(card: dict, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = f"{path}.tmp-{os.getpid()}"
@@ -145,6 +160,11 @@ def parse_args(argv=None):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", default=None,
                    help="card path (default: $HU_PERSONA_DIR or ~/.human/personas/<persona>.emotion-card.json)")
+    p.add_argument("--distress-days", type=int, default=120,
+                   help="lookback for the judge-free distress_reply axis (chat.db keeps ~30-120 days)")
+    p.add_argument("--distress-only", action="store_true",
+                   help="re-measure only distress_reply into the EXISTING card (no judge run); "
+                        "refuses when the card is missing")
     p.add_argument("--dry-run", action="store_true", help="print the card, write nothing")
     return p.parse_args(argv)
 
@@ -155,8 +175,32 @@ def _window(args):
     return end - datetime.timedelta(days=args.days), end
 
 
-def run(args, messages=None, judge=None) -> int:
+def run(args, messages=None, judge=None, distress_pairs=None) -> int:
     start, end = _window(args)
+    if distress_pairs is None:
+        distress_pairs = fetch_distress_pairs(args.db, args.distress_days)
+    if args.distress_only:
+        path = args.out or default_card_path(args.persona)
+        try:
+            with open(path, encoding="utf-8") as f:
+                card = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.stderr.write(f"REFUSED: --distress-only needs an existing card at {path} ({e}); "
+                             "wrote nothing.\n")
+            return 3
+        if card.get("schema") != SCHEMA:
+            sys.stderr.write(f"REFUSED: {path} is not {SCHEMA}; wrote nothing.\n")
+            return 3
+        attach_distress(card, distress_pairs, args.distress_days)
+        if args.dry_run:
+            print(json.dumps(card["distress_reply"], indent=2))
+            return 0
+        write_card(card, path)
+        d = card["distress_reply"]
+        print(f"updated {path}: distress_reply n={d['n']}"
+              + (f" median_chars={d['median_chars']} scaffold_rate={d['scaffold_rate']:.2f}"
+                 if d["n"] else ""))
+        return 0
     if messages is None:
         from eval_persona_evolution import fetch_outbound_messages  # noqa: E402
         messages = fetch_outbound_messages(args.db, start, end)
@@ -182,6 +226,7 @@ def run(args, messages=None, judge=None) -> int:
                           min_n=args.min_n,
                           max_parse_failure_rate=args.max_parse_failure_rate,
                           n_resamples=args.n_resamples, seed=args.seed)
+        attach_distress(card, distress_pairs, args.distress_days)
     except JudgeUnavailable as e:
         sys.stderr.write(f"DEFERRED: judge failed mid-run ({e}); wrote nothing.\n")
         return 2
