@@ -71,6 +71,23 @@ static const char *const k_ai_tells[] = {
     "that sounds really",
 };
 
+/* Measured, not authored (2026-09-13): Seth's real replies to a sad or
+ * frustrated text (chat.db, n=11) run ~17 chars and are a reaction, a pushback
+ * or a pivot — "Haha, true!", "Answer?", "Yes you can" — never a consolation
+ * formula. The previous hint listed four sympathy phrases ("damn I'm sorry",
+ * "that's rough") and the model parroted them; on 2026-09-12 the retry still
+ * produced "I understand this is frustrating. How can I help you…". */
+const char *hu_reactive_ai_tell_retry_hint(void) {
+    static const char hint[] =
+        "[REJECTED: that read like a support agent consoling a customer. Seth never "
+        "does that. Reply the way you actually text a friend who's having a bad time: "
+        "one short plain line, a reaction, a bit of pushback or a change of subject — "
+        "often dry, sometimes a question back, under 10 words. NOT 'sorry to hear', "
+        "NOT 'I understand', NOT 'how can I help', NOT 'here for you', NOT 'that "
+        "sounds'. No sympathy formula at all.]";
+    return hint;
+}
+
 hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried) {
     if (!ai_tell)
         return HU_AI_TELL_SEND;

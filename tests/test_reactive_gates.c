@@ -84,6 +84,18 @@ static void test_ai_tell_support_register_on_distress_detected(void) {
     HU_ASSERT_NULL(hu_reactive_response_ai_tell("I understand, my bad"));
 }
 
+static void test_ai_tell_retry_hint_describes_register_without_formulas(void) {
+    const char *hint = hu_reactive_ai_tell_retry_hint();
+    HU_ASSERT_NOT_NULL(hint);
+    HU_ASSERT_STR_CONTAINS(hint, "NOT 'sorry to hear'");
+    HU_ASSERT_STR_CONTAINS(hint, "NOT 'how can I help'");
+    HU_ASSERT_STR_CONTAINS(hint, "under 10 words");
+    /* No phrases to parrot: the old hint's formulas came back verbatim. */
+    HU_ASSERT_STR_NOT_CONTAINS(hint, "damn I'm sorry");
+    HU_ASSERT_STR_NOT_CONTAINS(hint, "that's rough");
+    HU_ASSERT_STR_NOT_CONTAINS(hint, "Pick ONE");
+}
+
 static void test_ai_tell_is_case_insensitive_and_names_phrase(void) {
     const char *hit = hu_reactive_response_ai_tell("i APOLOGIZE FOR THE DELAY, got busy");
     HU_ASSERT_NOT_NULL(hit);
@@ -160,6 +172,7 @@ void run_reactive_gates_tests(void) {
     HU_RUN_TEST(test_ai_tell_legacy_phrases_still_detected);
     HU_RUN_TEST(test_ai_tell_incident_phrases_detected);
     HU_RUN_TEST(test_ai_tell_support_register_on_distress_detected);
+    HU_RUN_TEST(test_ai_tell_retry_hint_describes_register_without_formulas);
     HU_RUN_TEST(test_ai_tell_is_case_insensitive_and_names_phrase);
     HU_RUN_TEST(test_ai_tell_does_not_flag_human_sorry);
     HU_RUN_TEST(test_consecutive_limit_cap_zero_never_fires);
