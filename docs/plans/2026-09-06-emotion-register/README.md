@@ -2,6 +2,46 @@
 
 **Status:** measurement shipped, prompt rule gated OFF (2026-09-06).
 
+## Substantive register — rule 15, measured and A/B'd (2026-09-13)
+
+The register finding below (substantive scenarios end judged AI, casual
+ones do not) got the same treatment as distress: a judge-free card axis
+and a rule that states the measurement. `scripts/reply_pairs.py` is the
+shared reader for both axes (inbound matching a predicate → Seth's next
+in-chat reply within 30 min). `substantive_reply` = inbound ≥150 chars or
+a real question ≥60 chars (small talk excluded); 120 d, n=63: median 27
+chars, 73% under 60, median 1 sentence, answer-first 0.33. Rule 15 renders
+from those numbers behind `HU_SUBSTANTIVE_REGISTER` (same ladder as 14);
+`HU_PERSONA_RULES_BUF` grew to 3072 because 14+15 live overflowed 2048,
+and the builder now drops 15, then 14, rather than dropping every rule.
+
+The gating measurement is the harness change made for it: the nightly's
+multi-turn stage now runs the production prompt with 3 repeats per
+scenario and scores by last-third mean (majority vote for the hard-AI
+verdict). Off vs live on the three substantive scenarios, 3 repeats each,
+sampling fixed (see the correction above), Gemini voice judge:
+
+| scenario | off: first→last (hard-AI) | live: first→last (hard-AI) | opinion off/live | flow off/live |
+|---|---|---|---|---|
+| debate_opinions | 5.7→5.7 (2/3) | 5.0→7.7 (1/3) | 4/9 | 3/9 |
+| news_reaction_chain | 7.3→8.3 (0/3) | 4.3→9.0 (0/3) | 8/7 | 8/9 |
+| advice_seeking | 7.0→4.7 (3/3) | 7.3→6.0 (2/3) | 3/8 | 5/6 |
+| **last-third mean, all repeats (n=9)** | **6.22, hard-AI 5/9** | **7.56, hard-AI 3/9** | | |
+
+Direction right on every scenario and on the pooled mean (+1.3), so the
+gate goes to SHADOW in the plist. Not LIVE: this is a synthetic judge, and
+the ladder's LIVE step needs a human-judged round.
+
+What the judge still flags, and the next lever: the remaining AI tell in
+every arm is structural — "[short affirmation] — [brief comment]" on
+nearly every turn. Rule 15 names that shape and says "no em-dash", and the
+live arm produced MORE of it: last-third replies containing an em-dash
+went 62% → 96% (15/24 → 23/24). A negated pattern in the prompt primes
+the pattern. The next variant should describe the positive shape (one
+clause, or two sentences) and not mention the dash at all; re-run the
+same 3-repeat A/B before touching the gate again. Rule 15 text lives in
+`hu_style_card_render_substantive_rule` (src/persona/style_card.c).
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the
