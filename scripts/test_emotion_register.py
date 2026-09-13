@@ -71,6 +71,17 @@ class DownJudge:
         raise er.JudgeUnavailable("connection refused")
 
 
+_orig_run = mec.run
+
+
+def _run_no_chatdb(args, messages=None, judge=None, distress_pairs=None):
+    return _orig_run(args, messages=messages, judge=judge,
+                     distress_pairs=distress_pairs if distress_pairs is not None else [])
+
+
+mec.run = _run_no_chatdb
+
+
 def messages(spec):
     """spec: list of (emotion, intensity) -> synthetic (ts, text) pairs."""
     out = []
@@ -96,11 +107,19 @@ def seth_spec(n=200):
     return spec
 
 
+DISTRESS_PAIRS = [("ugh worst day 😓", "Haha, true!"), ("so tired", "Nope"),
+                  ("I hate coconut water", "What?"), ("😢 you didn't answer", "Answer?"),
+                  ("stressed about rent", "Yes you can"), ("bad day", "come see me"),
+                  ("miss you", "then visit"), ("exhausted", "same"), ("sad", "nah"),
+                  ("frustrated", "lol why"), ("crying", "Oh no! let's do it")]
+
+
 def card_args(tmp, **over):
     a = argparse.Namespace(db="/nonexistent", persona="cardtest", days=60, end="2026-09-01",
                            min_n=100, max_n=300, max_parse_failure_rate=0.10,
                            mlx_url="fake://judge", n_resamples=200, seed=1,
-                           out=os.path.join(tmp, "cardtest.emotion-card.json"), dry_run=False)
+                           out=os.path.join(tmp, "cardtest.emotion-card.json"), dry_run=False,
+                           distress_days=120, distress_only=False)
     for k, v in over.items():
         setattr(a, k, v)
     return a
@@ -213,6 +232,69 @@ class JsdTests(unittest.TestCase):
         c = {"neutral": {"share": 0.7}, "joy": {"share": 0.3}}
         self.assertAlmostEqual(er.jsd(a, c), er.jsd(c, a))
         self.assertTrue(0.0 < er.jsd(a, c) < 1.0)
+
+
+class DistressTests(unittest.TestCase):
+    def test_markers_and_scaffolds(self):
+        self.assertTrue(er.DISTRESS_MARKERS.search("ugh this week 😓"))
+        self.assertFalse(er.DISTRESS_MARKERS.search("see you at 6"))
+        self.assertTrue(er.SUPPORT_SCAFFOLDS.search("I understand this is frustrating. How can I help you?"))
+        self.assertTrue(er.SUPPORT_SCAFFOLDS.search("I'm sorry to hear that"))
+        self.assertFalse(er.SUPPORT_SCAFFOLDS.search("Haha, true!"))
+        self.assertFalse(er.SUPPORT_SCAFFOLDS.search("how can I help with the move?"))
+
+    def test_stats_exact_and_empty(self):
+        pairs = [("sad", "ok"), ("sad", "I understand this is hard"), ("sad", "lol nope")]
+        s = er.distress_stats(pairs)
+        self.assertEqual(s["n"], 3)
+        self.assertEqual(s["median_chars"], 8)  # sorted lengths 2, 8, 25
+        self.assertAlmostEqual(s["scaffold_rate"], 1 / 3)
+        self.assertEqual(er.distress_stats([]), {"n": 0})
+
+    def test_fetch_pairs_from_a_synthetic_chat_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "chat.db")
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE message(ROWID INTEGER PRIMARY KEY, date INTEGER, text TEXT, "
+                        "attributedBody BLOB, is_from_me INTEGER, associated_message_type INTEGER)")
+            con.execute("CREATE TABLE chat_message_join(chat_id INTEGER, message_id INTEGER)")
+            now = int((datetime.datetime.now() - datetime.datetime(2001, 1, 1)).total_seconds())
+            rows = [(1, now - 600, "ugh worst day", 0), (2, now - 500, "Haha, true!", 1),
+                    (3, now - 400, "see you at 6", 0), (4, now - 300, "ok", 1),
+                    (5, now - 200, "so sad 😢", 0), (6, now - 200 + 3600, "too late", 1)]
+            for rid, ts, text, me in rows:
+                con.execute("INSERT INTO message VALUES(?,?,?,NULL,?,0)", (rid, ts * 10**9, text, me))
+                con.execute("INSERT INTO chat_message_join VALUES(1,?)", (rid,))
+            con.commit(); con.close()
+            pairs = er.fetch_distress_pairs(db, days=30)
+            self.assertEqual(pairs, [("ugh worst day", "Haha, true!")])  # 2nd reply is > 30 min
+
+    def test_card_carries_the_axis_and_distress_only_updates_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = card_args(tmp)
+            rc = mec.run(args, messages=messages(seth_spec(200)), judge=FakeJudge(),
+                         distress_pairs=DISTRESS_PAIRS)
+            self.assertEqual(rc, 0)
+            card = json.load(open(args.out))
+            d = card["distress_reply"]
+            self.assertEqual(d["n"], 11)
+            self.assertEqual(d["scaffold_rate"], 0.0)
+            self.assertEqual(d["min_n"], er.DISTRESS_MIN_N)
+            # --distress-only: no judge, rewrites only the axis
+            args2 = card_args(tmp, distress_only=True)
+            judge = DownJudge()
+            rc = mec.run(args2, messages=None, judge=judge, distress_pairs=DISTRESS_PAIRS[:3])
+            self.assertEqual(rc, 0)
+            card2 = json.load(open(args.out))
+            self.assertEqual(card2["distress_reply"]["n"], 3)
+            self.assertEqual(card2["n"], card["n"])
+            self.assertEqual(card2["judge"], card["judge"])
+
+    def test_distress_only_refuses_without_a_card(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = card_args(tmp, distress_only=True)
+            self.assertEqual(mec.run(args, messages=None, judge=DownJudge(), distress_pairs=[]), 3)
+            self.assertFalse(os.path.exists(args.out))
 
 
 class CardTests(unittest.TestCase):

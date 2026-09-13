@@ -35,6 +35,10 @@ extern "C" {
 
 #define HU_EMOTION_CARD_TOP_MAX  4
 #define HU_EMOTION_CARD_NAME_MAX 32
+/* distress_reply is rendered only from this many real pairs; below it the
+ * prompt says nothing about reply length (the scaffold ban is register-
+ * independent and always renders). Mirrors emotion_register.DISTRESS_MIN_N. */
+#define HU_EMOTION_CARD_DISTRESS_MIN_N 10
 
 typedef struct hu_emotion_card_top {
     char emotion[HU_EMOTION_CARD_NAME_MAX]; /* taxonomy label, e.g. "amusement" */
@@ -47,9 +51,15 @@ typedef struct hu_emotion_card {
     double valence_mean;   /* mean fixed per-category valence, [-1, 1] */
     hu_emotion_card_top_t top[HU_EMOTION_CARD_TOP_MAX]; /* most frequent non-neutral */
     unsigned top_count;
-    unsigned n;            /* texts labeled (> 0 for a real card) */
-    bool from_card;        /* true = loaded from a card file */
-    char window_start[16]; /* YYYY-MM-DD */
+    unsigned n; /* texts labeled (> 0 for a real card) */
+    /* Judge-free axis: how the persona answers a sad / frustrated text
+     * (chat.db inbound with a distress marker -> the persona's next reply).
+     * distress_n == 0 when the card predates the axis or measured nothing. */
+    unsigned distress_n;
+    unsigned distress_median_chars;
+    double distress_scaffold_rate; /* share of those replies in the support register */
+    bool from_card;                /* true = loaded from a card file */
+    char window_start[16];         /* YYYY-MM-DD */
     char window_end[16];
 } hu_emotion_card_t;
 

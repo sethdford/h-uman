@@ -127,13 +127,13 @@ hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, cons
          * HU_EMOTION_REGISTER to live without a measurement showing the rule
          * moves the twin TOWARD the card. OFF renders nothing; SHADOW logs
          * once what it would send; only LIVE reaches the prompt. */
-        char rule14[512];
+        char rule14[768];
         rule14[0] = '\0';
         hu_gate_mode_t em = hu_emotion_register_mode();
         if (em != HU_GATE_OFF) {
             hu_emotion_card_t ecard;
             if (hu_emotion_card_resolve(pname, pname_len, &ecard)) {
-                char rendered[512];
+                char rendered[768];
                 if (hu_emotion_card_render_rule(&ecard, rendered, sizeof(rendered), NULL) ==
                     HU_OK) {
                     if (em == HU_GATE_LIVE) {

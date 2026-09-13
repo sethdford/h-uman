@@ -4,6 +4,13 @@
 Labels the twin's recently SENT iMessage replies (memory.db
 production_outcomes — real deliveries, not harness output) with the same
 local judge that built the persona's emotion card, and reports the
+
+Provenance note: rows written before 2026-09-12 hold the model's draft
+(recorded before the style governor and the send decision, so some were
+never delivered); from that date the daemon records the delivered text
+(hu_daemon_record_delivered_reply). Emotion labels barely move with
+casing/punctuation, so the pre-cutover verdicts stand as measurements of
+the draft, but a window straddling the cutover mixes the two.
 Jensen-Shannon divergence between the two category distributions plus
 deltas on neutral share, mean intensity and valence.
 

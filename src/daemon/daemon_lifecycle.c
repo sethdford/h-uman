@@ -7,11 +7,12 @@
  *   - hu_daemon_install/uninstall/logs (launchd on macOS, systemd on Linux)
  *   - Internal helpers: validate_home, get_pid_path
  */
-#include "human/core/log.h"
 #include "human/daemon_lifecycle.h"
-#include "human/daemon.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/log.h"
+#include "human/daemon.h"
+#include "human/daemon/common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,6 @@
 
 #define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
-#define HU_MAX_PATH        1024
 
 /* ── Path validation ─────────────────────────────────────────────────── */
 

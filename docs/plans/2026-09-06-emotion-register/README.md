@@ -2,6 +2,60 @@
 
 **Status:** measurement shipped, prompt rule gated OFF (2026-09-06).
 
+## Direction-aware rule 14 and its first measurement (2026-09-13)
+
+The 2026-09-12 15:18 turn showed the mechanism behind the sympathy gap: to
+"😓" the model wrote "I'm sorry to hear that. How can I help you with
+this…" and, on retry, "I understand this is frustrating. How can I help
+you…" (neither delivered: AI-tell retry, then pre-send abort). Seth's own
+replies to sad/frustrated texts (chat.db, 120 d, n=11): median 17 chars,
+zero support scaffolds ("Haha, true!", "Answer?", "Yes you can").
+
+That became a measured axis on the card (`distress_reply`, judge-free)
+and rule 14 now names the feelings that are there, bans the scaffolds by
+name, and states the measured reply length. `scripts/eval_distress_register.py`
+is the off/live harness: the 11 real distress inbounds, the product's
+prompt (`persona show seth imessage`, rules block now appended), the
+serving model on :8741.
+
+| arm | scaffold rate | median chars | sympathy | amusement | neutral |
+|---|---|---|---|---|---|
+| Seth (n=11) | 0.00 | 17 | | | |
+| off | 0.00 | 39 | 0.27 | 0.18 | 0.18 |
+| live | 0.00 | 41 | 0.18 | 0.36 | 0.18 |
+
+Caveats that bound the result: :8741 decodes greedily (all 4 "samples"
+per inbound were byte-identical), so n is 11 distinct outputs per arm;
+5 of 11 changed under the rule, all toward Seth's register ("damn
+that's rough. been there" → "lol yeah no kidding"); length did not move;
+and the bare prompt never produced the support register in either arm,
+so the 15:18 failure needs the daemon's full turn context (22-message
+history) to reproduce. Verdict: direction right, magnitude small, human
+judgement absent → **SHADOW** (renders and logs on the real turn, sends
+nothing). LIVE waits on a ≥20-row human preference sheet where the two
+arms differ, which needs more distress pairs than chat.db holds today.
+
+## Nightly trend and the recorder cutover (2026-09-12)
+
+| night | n | JSD | twin neutral | intensity | top |
+|---|---|---|---|---|---|
+| 09-06 | 28 | 0.174 | 0.75 | 0.09 | sympathy |
+| 09-07 | 34 | 0.163 | 0.74 | 0.11 | sympathy |
+| 09-08 | 39 | 0.138 | 0.72 | 0.11 | sympathy |
+| 09-09 | 42 | 0.138 | 0.74 | 0.11 | sympathy |
+| 09-10 | 52 | 0.116 | 0.69 | 0.12 | amusement |
+| 09-12 | 76 | 0.122 | 0.70 | 0.14 | amusement |
+
+(09-11 deferred: judge down.) Converging toward the card (0.58 neutral,
+0.20 intensity, amusement first) with the rule OFF. Keep it OFF.
+
+Found while checking this: `production_outcomes.chosen` was the model's
+draft, recorded before the style governor and the send decision — some
+rows were never delivered at all. Fixed 2026-09-12 (the daemon records
+the delivered text from the send funnel). Verdicts above measure drafts;
+emotion labels barely move with casing/punctuation, but do not compare a
+pre- and post-cutover window as one series.
+
 ## First measurement (2026-09-06, judge GLM-4.5-Air-4bit on :8741)
 
 Seth's card: 60-day window, 964 messages in window, 300 judged, n=299
