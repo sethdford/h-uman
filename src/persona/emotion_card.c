@@ -71,6 +71,19 @@ hu_error_t hu_emotion_card_parse(hu_allocator_t *alloc, const char *json, size_t
     if (ok) {
         card.n = (unsigned)n;
         read_top(root, &card);
+        /* Optional (emotion-card/v1 cards written before 2026-09-13 lack it);
+         * malformed values leave distress_n at 0 rather than failing the card. */
+        const hu_json_value_t *dr = hu_json_object_get(root, "distress_reply");
+        if (dr && dr->type == HU_JSON_OBJECT) {
+            double dn = hu_json_get_number(dr, "n", 0.0);
+            double med = hu_json_get_number(dr, "median_chars", NAN);
+            double sc = hu_json_get_number(dr, "scaffold_rate", NAN);
+            if (dn >= 1.0 && med >= 0.0 && sc >= 0.0 && sc <= 1.0) {
+                card.distress_n = (unsigned)dn;
+                card.distress_median_chars = (unsigned)lround(med);
+                card.distress_scaffold_rate = sc;
+            }
+        }
         hu_persona_card_copy_window(root, card.window_start, sizeof(card.window_start),
                                     card.window_end, sizeof(card.window_end));
         card.from_card = true;
@@ -148,13 +161,28 @@ hu_error_t hu_emotion_card_render_rule(const hu_emotion_card_t *card, char *buf,
         return HU_ERR_INVALID_ARGUMENT;
     char top[3 * HU_EMOTION_CARD_NAME_MAX + 16];
     fmt_top(card, top, sizeof(top));
+    /* Direction-aware (2026-09-13). The first nightly verdicts showed the
+     * twin FLATTER than the persona and sympathy-heavy (14% vs ~0), and the
+     * 2026-09-12 transcript showed why: to "😓" the model wrote support-agent
+     * consolation twice. So the rule names the feelings that ARE there, bans
+     * the support scaffolds outright, and — when the card measured enough
+     * real distress replies — states how short those replies actually run. */
+    char distress[160];
+    distress[0] = '\0';
+    if (card->distress_n >= HU_EMOTION_CARD_DISTRESS_MIN_N)
+        snprintf(distress, sizeof(distress),
+                 " Your real replies to those (n=%u) run about %u characters: a short plain "
+                 "reaction, often a bit dry, then move on.",
+                 card->distress_n, card->distress_median_chars);
     int n = snprintf(buf, cap,
                      "14. Emotional register is MEASURED (%u of your texts): about %d%% read "
-                     "as neutral or matter-of-fact; when feeling shows it is mostly %s, and "
-                     "it stays low-key (about %d out of 10). Match that. Don't perform "
-                     "feelings you wouldn't actually text.\n",
+                     "as neutral or matter-of-fact; when feeling shows it is mostly %s, "
+                     "low-key (about %d out of 10). When someone texts you something sad or "
+                     "frustrated you don't console like a support agent: never 'sorry to hear "
+                     "that', 'I understand this is frustrating', 'how can I help you', 'I'm "
+                     "here for you'.%s\n",
                      card->n, (int)lround(card->neutral_share * 100.0), top,
-                     (int)lround(card->mean_intensity * 10.0));
+                     (int)lround(card->mean_intensity * 10.0), distress);
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)
