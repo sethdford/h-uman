@@ -75,6 +75,21 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
         card.n = n > 0.0 ? (unsigned)n : 0u;
         hu_persona_card_copy_window(root, card.window_start, sizeof(card.window_start),
                                     card.window_end, sizeof(card.window_end));
+        /* Optional (cards written before 2026-09-13 lack it); malformed values
+         * leave substantive_n at 0 rather than failing the card. */
+        const hu_json_value_t *sr = hu_json_object_get(root, "substantive_reply");
+        if (sr && sr->type == HU_JSON_OBJECT) {
+            double sn = hu_json_get_number(sr, "n", 0.0);
+            double med = hu_json_get_number(sr, "median_chars", NAN);
+            double sh = hu_json_get_number(sr, "share_le_60_chars", NAN);
+            double af = hu_json_get_number(sr, "answer_first_rate", NAN);
+            if (sn >= 1.0 && med >= 0.0 && sh >= 0.0 && sh <= 1.0 && af >= 0.0 && af <= 1.0) {
+                card.substantive_n = (unsigned)sn;
+                card.substantive_median_chars = (unsigned)lround(med);
+                card.substantive_share_short = sh;
+                card.substantive_answer_first_rate = af;
+            }
+        }
         card.from_card = true;
         *out = card;
         err = HU_OK;
@@ -118,6 +133,33 @@ void hu_style_card_resolve(const char *name, size_t name_len, hu_style_card_t *o
                      "--persona %.*s to write %.*s.style-card.json",
                      (int)name_len, name, err == HU_ERR_NOT_FOUND ? "missing" : "unreadable",
                      (int)err, (int)name_len, name, (int)name_len, name);
+}
+
+hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, char *buf, size_t cap,
+                                                 size_t *out_len) {
+    if (!card || !buf || cap == 0 || !card->from_card ||
+        card->substantive_n < HU_STYLE_CARD_SUBSTANTIVE_MIN_N)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Kept under ~360 bytes: this joins rule 14 inside the callers' 2048-byte
+     * rules buffer, and an overflow there drops EVERY rule (agent_turn treats
+     * a failed build as rules_len = 0). tests/test_style_card.c pins the fit. */
+    int n = snprintf(buf, cap,
+                     "15. When someone sends something long or asks a real question you "
+                     "still answer in one line: your real replies to those (n=%u) run "
+                     "about %u characters, %d%% under 60. Lead with the answer or your "
+                     "take, then at most one reason. Never restate what they said back, "
+                     "never '[reaction] — [rephrase]', no em-dash. Disagree when you do.\n",
+                     card->substantive_n, card->substantive_median_chars,
+                     (int)lround(card->substantive_share_short * 100.0));
+    if (n < 0 || (size_t)n + 1 > cap)
+        return HU_ERR_OUT_OF_MEMORY;
+    if (out_len)
+        *out_len = (size_t)n;
+    return HU_OK;
+}
+
+hu_gate_mode_t hu_substantive_register_mode(void) {
+    return hu_gate_mode_from_env("HU_SUBSTANTIVE_REGISTER", HU_GATE_OFF);
 }
 
 /* "about 1 in 8 texts" / "almost never" / "about 55% of texts". */

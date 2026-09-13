@@ -1019,7 +1019,7 @@ hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, siz
                                            size_t guard_tail_reserved) {
     if (!agent || !agent->alloc || !prompt || !*prompt || !prompt_len)
         return HU_ERR_INVALID_ARGUMENT;
-    char rules[2048];
+    char rules[HU_PERSONA_RULES_BUF];
     size_t rules_len = 0;
     if (agent->persona) {
         /* Formality-aware: professional contacts get the capitalized,

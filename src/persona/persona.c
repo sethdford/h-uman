@@ -146,8 +146,44 @@ hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, cons
                 }
             }
         }
-        n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
-                     hu_rules_tail, rule14);
+        /* Rule 15 — the MEASURED substantive register, from the style card's
+         * substantive_reply axis. Same ladder as rule 14; the gating
+         * measurement is the 3-repeat multi-turn A/B (see style_card.h). */
+        char rule15[512];
+        rule15[0] = '\0';
+        hu_gate_mode_t sm = hu_substantive_register_mode();
+        if (sm != HU_GATE_OFF) {
+            char rendered15[512];
+            if (hu_style_card_render_substantive_rule(&card, rendered15, sizeof(rendered15),
+                                                      NULL) == HU_OK) {
+                if (sm == HU_GATE_LIVE) {
+                    snprintf(rule15, sizeof(rule15), "%s", rendered15);
+                } else {
+                    static atomic_bool shadow15_logged = false;
+                    hu_log_info_once(&shadow15_logged, "persona", NULL,
+                                     "substantive register SHADOW (HU_SUBSTANTIVE_REGISTER): "
+                                     "would append to the casual rules: %s",
+                                     rendered15);
+                }
+            }
+        }
+        n = snprintf(buf, cap, "%s%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail, rule14, rule15);
+        /* The measured rules are optional; the base rules are not. A caller
+         * with a smaller buffer gets the base rules rather than nothing
+         * (agent_turn treats a failed build as "no rules at all"). */
+        if (n >= 0 && (size_t)n + 1 > cap && rule15[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 15", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail, rule14);
+        }
+        if (n >= 0 && (size_t)n + 1 > cap && rule14[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 14", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail);
+        }
     }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
