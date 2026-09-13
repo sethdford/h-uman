@@ -1,8 +1,22 @@
 ---
 title: Item 4 — sleep-time consolidation into a Seth-wiki
-status: design (not started)
+status: built 2026-09-13 (deterministic v1, HU_WIKI_HEAD gated off)
 date: 2026-09-06
 ---
+
+> **Built 2026-09-13.** `scripts/consolidate_wiki.py` (pages + lint, pytest
+> `tests/test_consolidate_wiki.py`), `src/memory/wiki_page.c` + the loader block in
+> `src/agent/memory_loader.c` behind `HU_WIKI_HEAD` (`tests/test_wiki_page.c`),
+> `scripts/launchd/ai.human.wiki-nightly.plist` (05:20). Deviations from the design
+> below, on purpose: (1) **no model call** — the page is a deterministic select /
+> dedupe / rank over the rows, so provenance and no-invention hold by construction
+> and the lint is a check, not a hope; a local-GLM rewrite is a follow-up only if
+> the token-Jaccard dedupe proves too weak. (2) **graph state heads are not on the
+> page yet** — the live graph is too noisy for a page that is read verbatim ("user
+> works_at a job with back-to-back meetings", "lives_in couch"); the *now* section
+> uses the authored persona identity instead, and graph heads return once the
+> state-first read path's extraction-noise ceiling is addressed. (3) `reflection_runs`
+> summaries are global, not per contact, so they are not an input. Gate unchanged.
 
 # Item 4 — sleep-time consolidation into a linted Seth-wiki
 
