@@ -190,12 +190,133 @@ def parse_prospective(text, max_notes):
     return out
 
 
+# Keyword quality (2026-09-13). The model was free to pick any 4+ letter word, and
+# picked "work" on 18 open rows (7 intentions for ONE contact), so a single inbound
+# "take off work" cued seven reminders. A cue must be (1) not a stop word, (2) rare
+# in THIS contact's own inbound texts — a word in more than KEYWORD_MAX_SHARE of
+# their last KEYWORD_SAMPLE texts is a topic, not a cue — and (3) back exactly one
+# open intention per contact. The C matcher is whole-word too (prospective.c).
+KEYWORD_STOP = {
+    "work", "home", "house", "today", "tomorrow", "tonight", "yesterday", "week", "weekend",
+    "morning", "night", "time", "thing", "things", "stuff", "good", "great", "nice", "okay",
+    "yeah", "sure", "love", "like", "want", "need", "know", "think", "feel", "feeling",
+    "going", "coming", "back", "later", "soon", "still", "just", "really", "maybe", "sorry",
+    "thanks", "thank", "please", "hello", "there", "here", "what", "when", "where", "which",
+    "this", "that", "them", "they", "your", "with", "have", "been", "will", "would", "could",
+    "should", "about", "after", "before", "call", "text", "talk", "chat", "meet", "plan",
+    "plans", "dinner", "lunch", "food", "money", "people", "family", "friend", "friends",
+    "school", "class", "phone", "photo", "photos", "picture", "pictures", "video", "haha",
+}
+KEYWORD_MAX_SHARE = 0.05
+KEYWORD_SAMPLE = 200
+
+
+def keyword_pattern(kw):
+    return re.compile(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])")
+
+
+def inbound_texts(db, contact_id, n=KEYWORD_SAMPLE):
+    rows = db.execute(
+        "SELECT content FROM messages WHERE session_id = ? AND role = 'user' "
+        "ORDER BY id DESC LIMIT ?", (contact_id, n)).fetchall()
+    return [(r[0] or "").lower() for r in rows if r[0]]
+
+
+def keyword_share(kw, texts):
+    """Fraction of the contact's inbound texts containing kw as a whole word/phrase."""
+    if not texts:
+        return 0.0
+    pat = keyword_pattern(kw)
+    return sum(1 for t in texts if pat.search(t)) / len(texts)
+
+
+def keyword_reject_reason(kw, texts, max_share=KEYWORD_MAX_SHARE):
+    if kw in KEYWORD_STOP:
+        return "stop word"
+    if not re.search(r"[a-z]", kw):
+        return "no letters"
+    share = keyword_share(kw, texts)
+    if share > max_share:
+        return f"generic ({share:.0%} of their texts)"
+    return None
+
+
+def filter_keywords(kws, texts, open_cues, action):
+    """open_cues: {keyword: action} of this contact's live triggers. Returns
+    (kept, dropped[(kw, reason)]). A keyword already cueing a DIFFERENT open
+    intention is dropped so one cue maps to one reminder; the same intention
+    keeps its own cue (idempotent rerun)."""
+    kept, dropped = [], []
+    for kw in kws:
+        reason = keyword_reject_reason(kw, texts)
+        if reason is None and kw in open_cues and open_cues[kw] != action:
+            reason = f"already cues '{open_cues[kw]}'"
+        if reason:
+            dropped.append((kw, reason))
+        else:
+            kept.append(kw)
+    return kept, dropped
+
+
+def open_cues_for(db, contact_id):
+    rows = db.execute(
+        "SELECT trigger_value, action FROM prospective_memories WHERE trigger_type='keyword' "
+        "AND fired=0 AND contact_id=? ORDER BY id", (contact_id,)).fetchall()
+    cues = {}
+    for kw, action in rows:
+        cues.setdefault(kw, action)
+    return cues
+
+
+def prune_pass(db, targets, write):
+    """Retire already-written open triggers that fail the keyword rules: fired=2
+    (a real fire is 1) so the rows stay auditable. Reports intentions left with
+    no live cue. Read-only unless write=True."""
+    retired = orphaned = 0
+    for cid in targets:
+        texts = inbound_texts(db, cid)
+        rows = db.execute(
+            "SELECT id, trigger_value, action FROM prospective_memories WHERE fired=0 AND "
+            "trigger_type='keyword' AND contact_id=? ORDER BY id", (cid,)).fetchall()
+        if not rows:
+            continue
+        owner = {}
+        drop, live_actions, all_actions = [], set(), set()
+        for rid, kw, action in rows:
+            all_actions.add(action)
+            reason = keyword_reject_reason(kw, texts)
+            if reason is None:
+                if kw in owner and owner[kw] != action:
+                    reason = f"already cues '{owner[kw]}'"
+                else:
+                    owner.setdefault(kw, action)
+            if reason:
+                drop.append((rid, kw, action, reason))
+            else:
+                live_actions.add(action)
+        for rid, kw, action, reason in drop:
+            print(f"    {cid}: retire '{kw}' -> {action}: {reason}")
+        lost = all_actions - live_actions
+        print(f"{cid}: {len(rows)} open rows, retire {len(drop)}, "
+              f"{len(lost)} intentions left without a cue")
+        retired += len(drop)
+        orphaned += len(lost)
+        if write and drop:
+            db.executemany("UPDATE prospective_memories SET fired=2 WHERE id=? AND fired=0",
+                           [(d[0],) for d in drop])
+            db.commit()
+    print(f"prune {'applied' if write else 'dry-run'}: {retired} retired, "
+          f"{orphaned} intentions orphaned")
+    return {"retired": retired, "orphaned": orphaned}
+
+
 def prospective_pass(db, a, identity, contacts, targets, now_ms):
     """Item 5: deferred intentions -> prospective_memories keyword triggers, which
     the reactive prompt already checks (daemon_reactive_prompt.c) and renders as
     "[PROSPECTIVE MEMORY: Remember to: ...]" when the contact's next text
-    contains the keyword. Keywords are stored lowercase; the trigger match is
-    case-folded on the C side."""
+    contains the keyword as a whole word. Keywords are stored lowercase; the
+    trigger match is case-folded on the C side and each surfaced intention is
+    retired (fired=1) after one render."""
     total = 0
     for cid in targets:
         meta = contacts.get(cid, {"name": cid, "relationship": ""})
@@ -213,9 +334,19 @@ def prospective_pass(db, a, identity, contacts, targets, now_ms):
             print(f"{cid} ({meta['name']}): model error {e}")
             continue
         items = parse_prospective(raw, a.max_notes)
+        texts = inbound_texts(db, cid)
+        open_cues = open_cues_for(db, cid)
         print(f"{cid} ({meta['name']}): {len(items)} open intentions")
         for it in items:
-            print(f"    [{it['days']:2d}d] {it['action']}  <- {', '.join(it['keywords'])}")
+            kept, dropped = filter_keywords(it["keywords"], texts, open_cues, it["action"])
+            for kw, reason in dropped:
+                print(f"         drop '{kw}': {reason}")
+            it["keywords"] = kept
+            for kw in kept:
+                open_cues.setdefault(kw, it["action"])
+            print(f"    [{it['days']:2d}d] {it['action']}  <- "
+                  f"{', '.join(kept) if kept else '(no usable cue, skipped)'}")
+        items = [it for it in items if it["keywords"]]
         if a.write and items:
             before = db.total_changes
             rows = []
@@ -246,6 +377,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prospective", action="store_true",
                     help="extract open intentions into prospective_memories instead of insights")
+    ap.add_argument("--prune-triggers", action="store_true",
+                    help="retire open prospective triggers whose keyword is generic, a stop "
+                         "word, or already cues another intention (fired=2); no model call; "
+                         "dry-run unless --write")
     ap.add_argument("--contact")
     ap.add_argument("--turns", type=int, default=80)
     ap.add_argument("--min-turns", type=int, default=20)
@@ -264,6 +399,9 @@ def main():
     db.executescript(SCHEMA)
     targets = [a.contact] if a.contact else list(contacts)
     now_ms = int(time.time() * 1000)
+    if a.prune_triggers:
+        prune_pass(db, targets, a.write)
+        return 0
     if a.prospective:
         prospective_pass(db, a, identity, contacts, targets, now_ms)
         return 0
