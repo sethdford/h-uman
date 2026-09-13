@@ -428,13 +428,38 @@ referencing it, or at minimum not contradicting it)? A reply that forgets or
 contradicts the fact is NOT retained.
 
 Return JSON: {{"retained": true|false, "why": "..."}}"""
-    raw = call_gemini(prompt).strip()
+    raw = _with_judge_retries("retention judge", lambda: call_gemini(prompt)).strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
     try:
         return bool(json.loads(raw)["retained"])
     except (ValueError, KeyError, TypeError) as e:
         raise JudgeUnavailable(f"retention judge returned unparseable output: {e}") from e
+
+
+# One Gemini timeout used to end the qualitative half of a whole night
+# (2026-09-13: a 3-repeat run, 18 scenario-runs of generation, degraded to
+# latency-only on one 30 s read timeout). Retry the judge before giving up.
+JUDGE_RETRIES = 3
+JUDGE_RETRY_BACKOFF_S = (5, 15)
+
+
+def _with_judge_retries(what, fn):
+    """Call fn() up to JUDGE_RETRIES times; None or an exception is a miss.
+    Raises JudgeUnavailable(with the last error) after the final miss."""
+    last = f"{what}: judge returned nothing"
+    for attempt in range(JUDGE_RETRIES):
+        try:
+            result = fn()
+            if result is not None:
+                return result
+        except JudgeUnavailable:
+            raise
+        except Exception as e:  # noqa: BLE001 — transport/ADC/parse: retry
+            last = f"{what}: {type(e).__name__}: {e}"
+        if attempt + 1 < JUDGE_RETRIES:
+            time.sleep(JUDGE_RETRY_BACKOFF_S[min(attempt, len(JUDGE_RETRY_BACKOFF_S) - 1)])
+    raise JudgeUnavailable(last)
 
 
 def judge_voice_window(scenario_name, exchanges_window, detail_out=None):
@@ -446,9 +471,8 @@ def judge_voice_window(scenario_name, exchanges_window, detail_out=None):
     per-dimension notes and reasoning (2026-09-13: a verdict that says only
     "AI" cannot be acted on; the notes are what name the register problem).
     """
-    result = evaluate_conversation(scenario_name, exchanges_window)
-    if not result:
-        raise JudgeUnavailable(f"voice judge returned no result for {scenario_name!r}")
+    result = _with_judge_retries(f"voice judge for {scenario_name!r}",
+                                 lambda: evaluate_conversation(scenario_name, exchanges_window))
     if detail_out is not None:
         dims = result.get("dimensions") or {}
         detail_out["dimensions"] = {k: v for k, v in dims.items() if isinstance(v, dict)}

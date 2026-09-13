@@ -638,6 +638,27 @@ def test_aggregate_repeats_keeps_voice_skipped_when_judge_was_off():
     print("✓ aggregate_repeats_keeps_voice_skipped_when_judge_was_off")
 
 
+def test_judge_retries_then_succeeds_and_gives_up_after_three():
+    calls = {"n": 0}
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("read timed out")
+        return {"overall_score": 7.0, "overall_verdict": "BORDERLINE"}
+    with mock.patch.object(mt.time, "sleep", lambda s: None), \
+         mock.patch.object(mt, "evaluate_conversation", side_effect=lambda *a: flaky()):
+        score, verdict = mt.judge_voice_window("x", [("hi", "yo")])
+    assert (score, verdict) == (7.0, "BORDERLINE") and calls["n"] == 3
+    with mock.patch.object(mt.time, "sleep", lambda s: None), \
+         mock.patch.object(mt, "evaluate_conversation", return_value=None):
+        try:
+            mt.judge_voice_window("x", [("hi", "yo")])
+            assert False, "expected JudgeUnavailable"
+        except mt.JudgeUnavailable as e:
+            assert "returned nothing" in str(e)
+    print("✓ judge_retries_then_succeeds_and_gives_up_after_three")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
