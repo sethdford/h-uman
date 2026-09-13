@@ -42,6 +42,41 @@ clause, or two sentences) and not mention the dash at all; re-run the
 same 3-repeat A/B before touching the gate again. Rule 15 text lives in
 `hu_style_card_render_substantive_rule` (src/persona/style_card.c).
 
+### Rule 15 v2 + dash strip, and the noise floor (2026-09-13 PM)
+
+Seth's own typed texts carry an em-dash in 0 of 954 (chat.db; the 4 hits
+in 958 are h-uman rating prompts sent to himself). Two levers landed in
+b6c07c3fa: rule 15 v2 states the shape positively and never names the
+dash or a "never"; the outbound strip stage maps U+2014/U+2013 plus their
+spaces to ", " (dropped when leading/trailing, never doubling punctuation),
+and the style card gains `dash_rate`. Same 3-repeat A/B, plus a re-run of
+the off arm to measure the noise between identical prompts:
+
+| run | last-third mean (n=9) | hard-AI | last-third replies with an em-dash |
+|---|---|---|---|
+| off, AM | 6.22 | 5/9 | 15/24 (62%) |
+| live v1 (names the dash) | 7.56 | 3/9 | 23/24 (96%) |
+| off, PM re-run | 5.11 | 7/9 | 24/24 (100%) |
+| live v2 (positive shape) | 5.56 | 5/9 | 8/24 (33%) |
+
+Read it in two halves. **Judge-free:** the positive wording cut the dash
+share from 100% to 33% against its own off arm (and from 96% under v1) —
+the priming finding holds, and the strip stage takes the rest to zero on
+the real send path (the harness posts to the server directly, so the strip
+is not in this loop). **Judge:** two runs of the identical off prompt sit
+1.1 apart, so neither +1.3 (v1) nor +0.45 (v2) clears the floor. Gate stays
+SHADOW. A delta under ~1.5 on the nightly's 3-repeat mean is noise; a
+decisive read needs more repeats or a paired design where both arms see
+the same contact turns.
+
+What the judge names once the dashes are gone: the twin is a "yes-man"
+(opinion_strength 2–3 in every live-v2 scenario; debate ends with the twin
+accepting "agree to disagree" after agreeing with every point). That is
+the second reason in the original finding and rule 15's "take a side" line
+does not move it. The next lever is not prompt wording: the opinion-hold
+directive (HU_OPINION_HOLD, live) and the persona's own stances are the
+place to look for why a stated position never surfaces in these turns.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the
