@@ -248,8 +248,11 @@ def score_twin_arm(arm_name: str, rows, results, ids, args, tmpdir: str) -> Opti
                "--seed", str(args.seed), "--chatdb", os.path.expanduser(args.chatdb)]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         if proc.returncode != 0 or not os.path.isfile(out_path):
-            print(f"  [warn] authorship_gap.py rc={proc.returncode} for {arm_name}: "
-                  f"{proc.stderr.strip()[-400:]}", file=sys.stderr, flush=True)
+            # surface the refusal line, not the HF-hub warning that happens to be last
+            reason = [l for l in (proc.stderr + proc.stdout).splitlines()
+                      if "REFUS" in l or "Error" in l or "Traceback" in l] or [proc.stderr.strip()[-200:]]
+            print(f"  [warn] authorship_gap.py rc={proc.returncode} for {arm_name}: {' | '.join(reason)[:400]}",
+                  file=sys.stderr, flush=True)
             return None
         gap = json.load(open(out_path))
         return {
