@@ -283,9 +283,17 @@ log "=== nightly_eval start (smoke=$SMOKE) ==="
 MT_OUT="${LOG_DIR}/eval-multiturn-local.json"
 if server_up; then
   log "[1/4] multi-turn: :8741 UP — running"
-  MT_ARGS=(--server-url "$SERVER_URL" --output-json "$MT_OUT")
+  # 2026-09-13: measure the daemon's OWN prompt (`human persona show`, rules
+  # block appended, HU_* gates from this environment) instead of the harness's
+  # reconstructed subset, and score by per-scenario means over 3 repeats — with
+  # real sampling one run scored the same scenario's first third 8 vs 4, so a
+  # single run cannot separate an effect from judge noise. The series has a
+  # step here: every verdict before this date measured the reconstructed
+  # prompt once.
+  MT_ARGS=(--server-url "$SERVER_URL" --output-json "$MT_OUT"
+           --persona-prompt production --repeats 3)
   if [ "$SMOKE" -eq 1 ]; then
-    MT_ARGS+=(--limit-scenarios 1 --max-turns 3)
+    MT_ARGS+=(--limit-scenarios 1 --max-turns 3 --repeats 1)
   fi
   # exit 0=PASS 1=FAIL 2=server-unreachable 3=judge-SKIPPED — all are "ran".
   set +e

@@ -225,6 +225,62 @@ def scenario_verdict(name, retention, voice_pass, voice_detail, latency_pass,
     }
 
 
+def aggregate_repeats(runs):
+    """runs: list (one per repeat) of scenario-verdict lists, same scenario
+    order. Returns one scenario-verdict list scored by MEANS: retention =
+    mean rate, voice = drift on mean first/last-third scores, hard-AI counts
+    as present when a majority of repeats ended "AI", latency passes only if
+    every repeat passed. One repeat aggregates to itself (2026-09-13: with
+    real sampling and a Gemini judge, single runs of the same prompt scored a
+    scenario's first third 8 vs 4, so a nightly needs >= 3 repeats and a mean).
+    Per-repeat details are kept under "repeats"."""
+    if not runs:
+        return []
+    n_rep = len(runs)
+    out = []
+    for i, first in enumerate(runs[0]):
+        same = [r[i] for r in runs if i < len(r) and r[i]["scenario"] == first["scenario"]]
+        ret = statistics.mean(sv["retention"]["rate"] for sv in same)
+        lat_ok = all(sv["latency"]["passed"] for sv in same)
+        lat_detail = dict(same[-1]["latency"])
+        lat_detail.pop("passed", None)
+        empties = {"count": sum(sv["empty_replies"]["count"] for sv in same),
+                   "turns": [], "rate": statistics.mean(sv["empty_replies"]["rate"] for sv in same)}
+        if any(sv["voice"].get("skipped") for sv in same):
+            # judge unavailable on at least one repeat: voice axis skipped, as a
+            # single run reports it (voice_pass None, detail {"skipped": True}).
+            sv_out = scenario_verdict(name=first["scenario"], retention=ret, voice_pass=None,
+                                      voice_detail={"skipped": True, "repeats": len(same)},
+                                      latency_pass=lat_ok, latency_detail=lat_detail,
+                                      empty_replies=empties)
+            sv_out["repeats"] = [{"retention": sv["retention"]["rate"], "passed": sv["passed"]}
+                                 for sv in same]
+            out.append(sv_out)
+            continue
+        f_mean = statistics.mean(sv["voice"]["first_third_score"] for sv in same)
+        l_mean = statistics.mean(sv["voice"]["last_third_score"] for sv in same)
+        hard_ai = sum(1 for sv in same if sv["voice"]["last_third_verdict"] == "AI")
+        majority_ai = hard_ai * 2 > len(same)
+        v_ok = voice_drift_ok(voice_normalize(f_mean), voice_normalize(l_mean),
+                              VOICE_DRIFT_TOL, any_hard_ai=majority_ai)
+        sv_out = scenario_verdict(
+            name=first["scenario"], retention=ret, voice_pass=v_ok,
+            voice_detail={"first_third_score": f_mean, "last_third_score": l_mean,
+                          "last_third_verdict": "AI" if majority_ai else
+                          ("HUMAN" if l_mean >= 7 else "BORDERLINE"),
+                          "hard_ai_repeats": hard_ai, "repeats": len(same),
+                          "last_third_judge": same[-1]["voice"].get("last_third_judge"),
+                          "last_third_exchanges": same[-1]["voice"].get("last_third_exchanges")},
+            latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
+        sv_out["repeats"] = [{"retention": sv["retention"]["rate"],
+                              "first_third_score": sv["voice"]["first_third_score"],
+                              "last_third_score": sv["voice"]["last_third_score"],
+                              "last_third_verdict": sv["voice"]["last_third_verdict"],
+                              "passed": sv["passed"]} for sv in same]
+        out.append(sv_out)
+    return out
+
+
 def run_verdict(scenario_verdicts):
     """Aggregate scenario verdicts into the run-level verdict.
 
@@ -381,17 +437,27 @@ Return JSON: {{"retained": true|false, "why": "..."}}"""
         raise JudgeUnavailable(f"retention judge returned unparseable output: {e}") from e
 
 
-def judge_voice_window(scenario_name, exchanges_window):
+def judge_voice_window(scenario_name, exchanges_window, detail_out=None):
     """Score a window of (user, ai) exchanges. Returns (overall_score_1_10, verdict).
 
-    Reuses eval_multiturn.evaluate_conversation. Raises JudgeUnavailable on judge
-    error rather than returning a falsely-low (0.0, 'AI') score — a swallowed
-    failure would manufacture a spurious voice-drift FAIL, masking the real cause.
+    Raises JudgeUnavailable when the judge returns nothing, so a cloud-judge
+    error surfaces as SKIPPED rather than a falsely-low (0.0, 'AI') score.
+    When `detail_out` (a dict) is given it is filled with the judge's
+    per-dimension notes and reasoning (2026-09-13: a verdict that says only
+    "AI" cannot be acted on; the notes are what name the register problem).
     """
     result = evaluate_conversation(scenario_name, exchanges_window)
     if not result:
         raise JudgeUnavailable(f"voice judge returned no result for {scenario_name!r}")
+    if detail_out is not None:
+        dims = result.get("dimensions") or {}
+        detail_out["dimensions"] = {k: v for k, v in dims.items() if isinstance(v, dict)}
+        detail_out["reasoning"] = str(result.get("reasoning", ""))[:1200]
     return result.get("overall_score", 0.0), result.get("overall_verdict", "AI")
+
+
+def _trim_exchanges(exchanges, max_turns=8, max_chars=240):
+    return [{"user": u[:max_chars], "ai": (a or "")[:max_chars]} for u, a in exchanges[-max_turns:]]
 
 
 # --- Persona system prompt (voice-axis fidelity) ------------------------------
@@ -569,14 +635,17 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
     # Voice drift: judge first-third and last-third windows.
     first_ex, last_ex = _thirds(exchanges)
     first_score, _ = judge_voice_window(scenario["name"], first_ex)
-    last_score, last_verdict = judge_voice_window(scenario["name"], last_ex)
+    last_detail = {}
+    last_score, last_verdict = judge_voice_window(scenario["name"], last_ex, detail_out=last_detail)
     v_ok = voice_drift_ok(voice_normalize(first_score), voice_normalize(last_score),
                           VOICE_DRIFT_TOL, any_hard_ai=(last_verdict == "AI"))
 
     return scenario_verdict(
         name=scenario["name"], retention=rate, voice_pass=v_ok,
         voice_detail={"first_third_score": first_score, "last_third_score": last_score,
-                      "last_third_verdict": last_verdict},
+                      "last_third_verdict": last_verdict,
+                      "last_third_judge": last_detail,
+                      "last_third_exchanges": _trim_exchanges(last_ex)},
         latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
 
 
@@ -637,6 +706,11 @@ def main(argv=None):
                          "then build/human next to this repo)")
     ap.add_argument("--persona", default="seth")
     ap.add_argument("--channel", default="imessage")
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="run every scenario N times and score by per-scenario MEANS "
+                         "(nightly uses 3: one run cannot separate an effect from judge noise)")
+    ap.add_argument("--scenarios", default=None,
+                    help="comma-separated scenario names to run (default: all)")
     args = ap.parse_args(argv)
 
     backend = LocalBackend(args.server_url)
@@ -647,13 +721,25 @@ def main(argv=None):
         persona_prompt = load_persona_system_prompt()
 
     scenarios = multiturn_scenarios_deep.DEEP_SCENARIOS
+    if args.scenarios:
+        wanted = {n.strip() for n in args.scenarios.split(",") if n.strip()}
+        scenarios = [sc for sc in scenarios if sc["name"] in wanted]
+        if not scenarios:
+            print(f"REFUSED: no scenario matches --scenarios {args.scenarios!r}")
+            return 3
     if args.limit_scenarios is not None:
         scenarios = scenarios[:args.limit_scenarios]
+    repeats = max(1, args.repeats)
 
     scenario_verdicts = []
+    runs = []
     try:
-        run_all_scenarios(scenarios, backend, judge_on, persona_prompt,
-                          args.max_turns, scenario_verdicts)
+        for _ in range(repeats):
+            this_run = []
+            run_all_scenarios(scenarios, backend, judge_on, persona_prompt,
+                              args.max_turns, this_run)
+            runs.append(this_run)
+        scenario_verdicts = aggregate_repeats(runs)
     except BackendUnreachable as e:
         write_verdict({"run_passed": False, "backend": "UNREACHABLE", "error": str(e),
                        "scenarios": scenario_verdicts}, args.output_json)
@@ -677,6 +763,8 @@ def main(argv=None):
 
     verdict = run_verdict(scenario_verdicts)
     verdict["judge"] = "OK" if judge_on else "SKIPPED"
+    verdict["repeats"] = repeats
+    verdict["scoring"] = "per-scenario means over repeats; hard-AI by majority" if repeats > 1 else "single run"
     verdict["persona_prompt"] = {
         "source": args.persona_prompt,
         "bytes": len(persona_prompt or ""),
