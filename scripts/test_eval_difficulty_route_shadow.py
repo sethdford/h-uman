@@ -309,3 +309,19 @@ def test_main_refuses_when_twin_unscorable_and_writes_nothing(monkeypatch, tmp_p
     monkeypatch.setattr(us8, "score_twin_arm", lambda *a, **k: None)
     out = tmp_path / "out.json"
     assert us8.main(["--corpus", corpus, "--output", str(out), "-n", "22"]) == 2 and not out.exists()
+
+
+def test_ci_aware_companion_promotes_when_twin_dip_is_inside_the_interval():
+    g = us8.decide_gate_ci_aware(0.848, 0.955, 0.655, 0.642, [0.527, 0.744], [0.54, 0.755], 24)
+    assert g["rule"] == "ci_aware" and g["verdict"] == "PROMOTE" and g["twin_regressed_ci_distinguishable"] is False
+    # contract verdict on the same numbers is still HOLD
+    assert us8.decide_gate(0.848, 0.955, 0.655, 0.642, 24)["verdict"] == "HOLD"
+
+
+def test_ci_aware_companion_holds_on_a_distinguishable_twin_regression_or_composite_drop():
+    g = us8.decide_gate_ci_aware(0.848, 0.955, 0.655, 0.55, [0.6, 0.7], [0.50, 0.60], 24)
+    assert g["verdict"] == "HOLD" and g["twin_regressed_ci_distinguishable"] is True
+    g = us8.decide_gate_ci_aware(0.900, 0.850, 0.655, 0.66, [0.6, 0.7], [0.6, 0.72], 24)
+    assert g["verdict"] == "HOLD"
+    assert us8.decide_gate_ci_aware(0.8, 0.9, 0.6, 0.6, None, None, 24)["verdict"] == "INCONCLUSIVE"
+    assert us8.decide_gate_ci_aware(0.8, 0.9, 0.6, 0.6, [0, 1], [0, 1], 5)["verdict"] == "INCONCLUSIVE"

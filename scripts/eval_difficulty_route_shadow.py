@@ -324,6 +324,32 @@ def decide_gate(composite_on_device: Optional[float],
     return result
 
 
+def decide_gate_ci_aware(composite_on_device, composite_cloud, twin_on_device, twin_cloud,
+                         twin_ci_on_device, twin_ci_cloud, n_paired, tolerance=DEFAULT_TOLERANCE):
+    """Companion verdict, REPORTED ONLY (the AC-8.4 contract verdict is decide_gate):
+    the twin axis counts as a regression only when it is CI-distinguishable — the
+    cloud twin's ci95 upper bound below the on-device point mean — mirroring the
+    US-2 promotion gate after its critic fix. 2026-09-06: HOLD came from a
+    -0.013 twin delta inside a ~0.10 half-width while composite rose +0.107."""
+    base = decide_gate(composite_on_device, composite_cloud, twin_on_device, twin_cloud,
+                       n_paired, tolerance)
+    if base["verdict"] == "INCONCLUSIVE":
+        return dict(base, rule="ci_aware")
+    try:
+        lo, hi = float(twin_ci_cloud[0]), float(twin_ci_cloud[1])
+    except (TypeError, ValueError, IndexError):
+        return {"verdict": "INCONCLUSIVE", "reason": "missing cloud twin ci95", "rule": "ci_aware",
+                "n_paired": n_paired}
+    twin_regressed = hi < twin_on_device
+    composite_ok = (composite_cloud - composite_on_device) >= -tolerance
+    verdict = "PROMOTE" if (composite_ok and not twin_regressed) else "HOLD"
+    return {"verdict": verdict, "rule": "ci_aware", "n_paired": n_paired,
+            "reason": (f"composite_delta={composite_cloud - composite_on_device:.4f} (tol={tolerance}), "
+                       f"twin_delta={twin_cloud - twin_on_device:.4f}, cloud twin ci95=[{lo:.3f},{hi:.3f}] "
+                       f"{'BELOW' if twin_regressed else 'overlaps'} on-device mean {twin_on_device:.3f}"),
+            "twin_regressed_ci_distinguishable": twin_regressed}
+
+
 # ---------------------------------------------------------------------------
 # Preflights
 # ---------------------------------------------------------------------------
@@ -476,6 +502,10 @@ def main(argv=None):
                        len(ids), args.tolerance)
     if gate["verdict"] == "INCONCLUSIVE":
         return refuse(f"gate could not decide: {gate['reason']}")
+    gate_ci = decide_gate_ci_aware(od_sum["composite"], cl_sum["composite"],
+                                   od_twin["twin_seth_vs_adapter"]["mean"], cl_twin["twin_seth_vs_adapter"]["mean"],
+                                   od_twin["twin_seth_vs_adapter"].get("ci95"), cl_twin["twin_seth_vs_adapter"].get("ci95"),
+                                   len(ids), args.tolerance)
 
     try:
         git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True,
@@ -488,6 +518,7 @@ def main(argv=None):
         "git_commit": git_commit,
         "gate": "HU_DIFFICULTY_ROUTE shadow->live (ANALYTICAL treatment for substantive CONVERSATIONAL turns)",
         "verdict": gate["verdict"], "reason": gate["reason"],
+        "verdict_ci_aware": gate_ci,   # reported only; the contract (AC-8.4) verdict is above
         "n_contexts": len(rows), "n_paired": len(ids),
         "on_device_fail_reasons": od_fail, "cloud_fail_reasons": cl_fail,
         "arms": {"on_device": {"server": args.server, "model": args.on_device_model},
@@ -504,6 +535,7 @@ def main(argv=None):
     with open(args.output, "w") as f:
         json.dump(doc, f, indent=2)
     print(f"\nDIFFICULTY ROUTE SHADOW VERDICT: {gate['verdict']} — {gate['reason']}")
+    print(f"  (ci-aware companion, reported only: {gate_ci['verdict']} — {gate_ci['reason']})")
     print(f"  composite on_device {od_sum['composite']:.3f} -> cloud {cl_sum['composite']:.3f}; "
           f"EI {od_sum['ei_mean']:.2f} -> {cl_sum['ei_mean']:.2f}; "
           f"twin {od_twin['twin_seth_vs_adapter']['mean']:.3f} -> {cl_twin['twin_seth_vs_adapter']['mean']:.3f}")
