@@ -24,8 +24,29 @@ serving model on :8741.
 | off | 0.00 | 39 | 0.27 | 0.18 | 0.18 |
 | live | 0.00 | 41 | 0.18 | 0.36 | 0.18 |
 
-Caveats that bound the result: :8741 decodes greedily (all 4 "samples"
-per inbound were byte-identical), so n is 11 distinct outputs per arm;
+**Correction, same day, after fixing the server:** the "greedy" server was
+a frozen sampler — mlx_lm's `@mx.compile`d sampler captures the main
+thread's RNG state and never advances on the admission-queue worker
+thread, so every token of every generation drew one fixed key
+(gemma-realtime-1 commits 56488f5 + d11a7ec, restarted 03:5x). Re-run
+with real samples (4 per inbound, 2–4 distinct each, n=44 per arm):
+
+| arm | scaffold | median chars | sympathy | amusement |
+|---|---|---|---|---|
+| off | 0.00 | 31 | 0.36 | 0.25 |
+| live | 0.00 | 30 | 0.27 | 0.32 |
+
+Same direction and size as the single-draw run. The product path replayed
+with the contact's real 12-message history (gateway, no delivery) answers
+"damn that's rough" / "you're right, this is a risky situation" — the
+sympathetic-validation register, not the support scaffold; the literal
+"sorry to hear that" of the 15:18 turn still needs the daemon's memory /
+director / retry-hint context to reproduce. Every :8741 number before
+2026-09-13 (best-of-N, retries, arena, blind A/B trials, fidelity) was a
+single draw.
+
+Caveats that bounded the first run: :8741 was effectively greedy (all 4
+"samples" per inbound were byte-identical), so n was 11 distinct outputs per arm;
 5 of 11 changed under the rule, all toward Seth's register ("damn
 that's rough. been there" → "lol yeah no kidding"); length did not move;
 and the bare prompt never produced the support register in either arm,
