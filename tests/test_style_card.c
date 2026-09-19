@@ -29,6 +29,7 @@ static const char card_json[] =
     "\"emoji_rate\":{\"value\":0.126,\"ci_lo\":0.10,\"ci_hi\":0.15,\"n\":977},"
     "\"length_chars\":{\"value\":31.2,\"ci_lo\":29.0,\"ci_hi\":33.5,\"n\":977}},"
     "\"substantive_reply\":{\"n\":63,\"median_chars\":27,\"share_le_60_chars\":0.73,"
+    "\"agreement_opener_rate\":0.06,"
     "\"median_sentences\":1,\"answer_first_rate\":0.33,\"min_n\":20}}";
 
 static char g_tmpdir[256];
@@ -289,12 +290,21 @@ static void render_substantive_rule_states_card_numbers_positively(void) {
     HU_ASSERT_STR_CONTAINS(buf, "(n=63)");
     HU_ASSERT_STR_CONTAINS(buf, "about 27 characters, 73% under 60");
     HU_ASSERT_STR_CONTAINS(buf, "Take a side when you have one");
+    HU_ASSERT_STR_CONTAINS(buf, "about 1 in 17 of them"); /* 1/0.06 rounds to 17 */
+    HU_ASSERT_STR_CONTAINS(buf, "usually you just say the thing");
+    /* A card without the axis renders the rule without the opener clause. */
+    c.substantive_agreement_opener_rate = -1.0;
+    char nb[512];
+    HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, nb, sizeof(nb), NULL), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(nb, "open on agreement");
+    HU_ASSERT_STR_CONTAINS(nb, "one plain sentence. Say the answer");
+    c.substantive_agreement_opener_rate = 0.06;
     /* Positive shape only: naming the tell primed it (dash share 62% -> 96%
      * in the v1 live arm). The rule must not contain the dash or a "never". */
     HU_ASSERT_STR_NOT_CONTAINS(buf, "\xE2\x80\x94");
     HU_ASSERT_STR_NOT_CONTAINS(buf, "ever ");
     HU_ASSERT_STR_NOT_CONTAINS(buf, "no em-dash");
-    HU_ASSERT_TRUE(len < 400); /* must stay small: shares the rules buffer */
+    HU_ASSERT_TRUE(len < 480); /* must stay small: shares the rules buffer */
     c.substantive_n = HU_STYLE_CARD_SUBSTANTIVE_MIN_N - 1;
     HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, buf, sizeof(buf), NULL),
                  HU_ERR_INVALID_ARGUMENT);

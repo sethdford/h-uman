@@ -39,8 +39,11 @@ typedef struct hu_style_card {
     unsigned substantive_median_chars;
     double substantive_share_short;       /* share of those replies <= 60 chars */
     double substantive_answer_first_rate; /* share opening with yes/no/sure/idk… */
-    bool from_card;                       /* true = loaded from a card file */
-    char window_start[16];                /* YYYY-MM-DD, empty for the default */
+    /* Share opening on reflexive agreement (yeah / exactly / totally…); -1 when
+     * the card predates the axis (2026-09-13: persona 0.06, twin 0.46–0.62). */
+    double substantive_agreement_opener_rate;
+    bool from_card;        /* true = loaded from a card file */
+    char window_start[16]; /* YYYY-MM-DD, empty for the default */
     char window_end[16];
 } hu_style_card_t;
 
