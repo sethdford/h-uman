@@ -769,3 +769,17 @@ def test_main_reports_partial_when_the_judge_dies_on_one_scenario_only():
     judged = [sv for sv in verdict["scenarios"] if not sv["voice"].get("skipped")]
     assert verdict["scenarios_total"] == len(judged) and len(judged) == len(verdict["scenarios"]) - 1
     assert code in (0, 1)  # gated on the judged scenarios, never exit 3
+
+
+def test_verdict_carries_the_contacts_own_agreement_rate_beside_the_twins():
+    # A scripted contact that opens on agreement every turn is the reference the
+    # twin's rate is read against; the verdict must carry both.
+    backend = mock.Mock()
+    backend.chat.side_effect = [("yeah same", 100.0, 200.0)] * 40
+    scenario = {"name": "s", "turns": ["yeah ok", "exactly", "totally"] * 3, "anchors": []}
+    with mock.patch.object(mt, "judge_voice_window", return_value=(7.0, "BORDERLINE")):
+        sv = mt.run_scenario(scenario, backend, judge_on=True)
+    assert sv["voice"]["last_third_agreement_opener_rate"] == 1.0
+    assert sv["voice"]["last_third_contact_agreement_opener_rate"] == 1.0
+    agg = mt.aggregate_repeats([[sv], [sv]])
+    assert agg[0]["voice"]["last_third_contact_agreement_opener_rate"] == 1.0
