@@ -176,7 +176,11 @@ run_mlxtune_candidate_stage() {
     # never measures. The nightly candidate path always wants this; a
     # standalone `bash scripts/train-glm-adapter.sh` invocation does not
     # unless the caller opts in (default 0 — see that script).
-    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 \
+    # HU_RETRAIN_REBALANCE_CASING=0 for an SFT corpus of real Seth replies: the
+    # rebalancer rewrites genuine text toward the style card's aggregate rates,
+    # which is right for a biased preference corpus and wrong for supervision on
+    # the author's own words (2026-09-19 SFT experiment).
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING="${HU_RETRAIN_REBALANCE_CASING:-1}" \
       HU_TRAIN_MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}" bash "$REPO/scripts/train-glm-adapter.sh" \
         --config "$config" --trainer "$trainer" --train-mode "$mode" ${beta_args[@]+"${beta_args[@]}"} \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
@@ -241,6 +245,9 @@ run_mlxtune_candidate_stage() {
             loss_summary=$(grep -a -oE 'held-out simpo loss: before=[0-9.]+ after=[0-9.]+ delta=[-+0-9.]+ n=[0-9]+' "$train_log" | tail -1 | awk -v min="$loss_drop_min" '
                 { for (i=1;i<=NF;i++){ split($i,kv,"="); v[kv[1]]=kv[2] }
                   d=v["before"]-v["after"]; printf "%s held-out first=%.4f last=%.4f drop=%.4f n=%s", (d>=min?"LEARNED":"NO_LEARNING"), v["before"], v["after"], d, v["n"] }')
+            # mlx_lm SFT (trainer=mlx_lm) reports a periodic held-out "Val loss"; first vs last.
+            [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Iter [0-9]+: Val loss [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+                { v[NR]=$NF } END { if (NR < 2) exit; d=v[1]-v[NR]; printf "%s val-loss first=%.4f last=%.4f drop=%.4f n=%d", (d>=min?"LEARNED":"NO_LEARNING"), v[1], v[NR], d, NR }')
             [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
                 { l[NR]=$NF } END {
                     if (NR < 10) { print "INSUFFICIENT n=" NR; exit }
