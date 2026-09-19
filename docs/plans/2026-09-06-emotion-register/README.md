@@ -129,6 +129,70 @@ prompt builder, or at least the opinion block) so opinion-hold is
 measurable at all; (3) only then a real stance source, mined from Seth's
 own texts with provenance, never from the twin's output.
 
+### 2026-09-19 — the judge outages, rule 15 v3, and what three prompt variants proved
+
+**Nightly stage 1 has produced nothing usable since 09-13.** Two causes.
+The shared checkout launchd runs from is still at e9c7ceae2 (behind main
+since 09-13), so every night ran the OLD stage: reconstructed prompt, one
+repeat, no agreement metric. And three of six nights (09-14/15/16) were
+`SKIPPED-judge`: one Gemini 429 on one scenario, three retries spanning
+20 s, then the run-level fallback threw away the five scenarios the judge
+had already scored. Fixed in eefa4c79d: 5 retries at 5/20/45/90 s honoring
+Retry-After (cap 120 s); a judge outage now costs ONE scenario's
+qualitative axes (re-driven latency-only, `judge_skipped`), the rest keep
+judging; `aggregate_repeats` means over judged repeats; the run reports
+`judge: PARTIAL` with `judge_skipped_scenarios` and gates on the judged
+scenarios with the pass floor scaled to their count. None of it runs until
+the shared checkout is pulled.
+
+**Rule 15 v3** adds the measured opener fact from the card
+(`substantive_reply.agreement_opener_rate`, persona 0.06): "You open on
+agreement (yeah, exactly, totally) about 1 in 16 of them; usually you just
+say the thing." Same 3-repeat A/B, off vs live:
+
+| arm | last-third mean (n=9) | hard-AI | agreement-opener (last third) | em-dash |
+|---|---|---|---|---|
+| off | 6.11 | 5/9 | 0.47 | 8/24 |
+| live v3 | 4.89 | 6/9 | 0.49 | 15/24 |
+
+The judge-free number did not move at all. Across three prompt variants
+(v1 ban, v2 positive shape, v3 stated fact) and five arms, the twin's
+agreement-opener rate on the substantive scenarios sits at 0.46–0.62 with
+the persona at 0.06. Stating the measurement in the prompt does not change
+the behavior. The judge delta (−1.2) is inside the 1.1–1.5 noise band, and
+its reasoning names the same two tells as before ("every response begins
+with yeah/true/exactly", "em-dash in all 10"). Gate stays SHADOW; the v3
+clause is a candidate for removal, not promotion. The lever is not prompt
+wording: it is the adapter/corpus (the v6 ORPO corpus's chosen side is
+what taught "yeah — [comment]") and, for the dash, the strip stage that
+already runs on the real send path.
+
+**Dash strip in production (item 5):** since the 09-13 deploy the daemon
+made 21 turns; 0 of them produced a dash before shaping and 0 of 304
+delivered rows carry one (the 2 that do are rating prompts Seth sent
+himself). The stage is wired and tested; production has not yet presented
+it a dash to strip.
+
+**Product path in the harness (item 3) — deferred, with the reason.** The
+daemon's full prompt comes from `hu_daemon_reactive_prompt_build`, which
+needs a live agent + memory and has side effects (consumes the pending
+comfort record, advances the drift counter, writes the inner-thought
+store). Rendering it from the harness against production state would
+mutate production; against a scratch state it renders exactly the
+`persona show` prompt plus an opinion block that is EMPTY today (0 rows
+after the purge). A `--persona-prompt reactive` mode would measure nothing
+new until a real stance source exists. Do the stance source first
+(mined from Seth's own texts with provenance), then the harness mode.
+
+**Human-judged round (item 4) — built, needs Seth.**
+`scripts/build_rule_preference_sheet.py` (6ccb94c83) wrote
+`~/.human/blind_ab_preference/rules-2026-09-19/`: 54 rows (14 rule-14
+distress inbounds, 40 rule-15 substantive inbounds, 1 identical pair
+skipped), each a real inbound answered OFF vs LIVE by the serving model on
+:8741 with the product prompt, sides randomised, key = side of the LIVE
+reply, scored by `score_preference.py` unchanged (win rate = share where
+the rule helped). The 2026-09-05 preference sheet is also still unrated.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the
