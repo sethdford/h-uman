@@ -594,9 +594,11 @@ def test_run_scenario_persists_persona_system_prompt():
     print("✓ run_scenario_persists_persona_system_prompt")
 
 
-def _sv(name, ret, first, last, verdict, lat=True, skipped=False):
+def _sv(name, ret, first, last, verdict, lat=True, skipped=False, agree=None):
     vd = {"skipped": True} if skipped else {"first_third_score": first, "last_third_score": last,
                                             "last_third_verdict": verdict}
+    if agree is not None:
+        vd["last_third_agreement_opener_rate"] = agree
     v_ok = None if skipped else mt.voice_drift_ok(mt.voice_normalize(first), mt.voice_normalize(last),
                                                   mt.VOICE_DRIFT_TOL, any_hard_ai=(verdict == "AI"))
     return mt.scenario_verdict(name, ret, v_ok, vd, lat,
@@ -638,6 +640,27 @@ def test_aggregate_repeats_keeps_voice_skipped_when_judge_was_off():
     print("✓ aggregate_repeats_keeps_voice_skipped_when_judge_was_off")
 
 
+def test_judge_retries_then_succeeds_and_gives_up_after_three():
+    calls = {"n": 0}
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("read timed out")
+        return {"overall_score": 7.0, "overall_verdict": "BORDERLINE"}
+    with mock.patch.object(mt.time, "sleep", lambda s: None), \
+         mock.patch.object(mt, "evaluate_conversation", side_effect=lambda *a: flaky()):
+        score, verdict = mt.judge_voice_window("x", [("hi", "yo")])
+    assert (score, verdict) == (7.0, "BORDERLINE") and calls["n"] == 3
+    with mock.patch.object(mt.time, "sleep", lambda s: None), \
+         mock.patch.object(mt, "evaluate_conversation", return_value=None):
+        try:
+            mt.judge_voice_window("x", [("hi", "yo")])
+            assert False, "expected JudgeUnavailable"
+        except mt.JudgeUnavailable as e:
+            assert "returned nothing" in str(e)
+    print("✓ judge_retries_then_succeeds_and_gives_up_after_three")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
@@ -657,3 +680,92 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_agreement_opener_rate_is_judge_free_and_counts_reflexive_openers_only():
+    from reply_pairs import agreement_opener_rate, is_agreement_opener
+    assert is_agreement_opener("yeah the office forces you to step away")
+    assert is_agreement_opener("lol yeah pretty much")
+    assert is_agreement_opener("100%. it's about energy")
+    assert is_agreement_opener("fr. no way 5 days is better")
+    assert not is_agreement_opener("no way 5 days in office is better")   # a position
+    assert not is_agreement_opener("Yes")                                # an answer
+    assert not is_agreement_opener("idk, probably fine")
+    assert agreement_opener_rate(["yeah", "nah", "exactly", "I think so"]) == 0.5
+    assert agreement_opener_rate([]) == 0.0
+
+
+def test_aggregate_repeats_means_the_agreement_rate_and_tolerates_absence():
+    runs = [[_sv("debate", 1.0, 8, 3, "AI", agree=0.5)],
+            [_sv("debate", 1.0, 4, 9, "HUMAN", agree=0.25)],
+            [_sv("debate", 1.0, 6, 6, "BORDERLINE", agree=0.75)]]
+    out = mt.aggregate_repeats(runs)
+    assert abs(out[0]["voice"]["last_third_agreement_opener_rate"] - 0.5) < 1e-9
+    old = [[_sv("debate", 1.0, 8, 3, "AI")]]
+    assert mt.aggregate_repeats(old)[0]["voice"]["last_third_agreement_opener_rate"] is None
+
+
+def test_retry_delay_honors_retry_after_and_caps_it():
+    class _E(Exception):
+        def __init__(self, ra):
+            self.headers = {"Retry-After": ra}
+    assert mt._retry_delay(0, None) == 5
+    assert mt._retry_delay(1, TimeoutError()) == 20
+    assert mt._retry_delay(0, _E("60")) == 60          # server asked for longer: honored
+    assert mt._retry_delay(3, _E("10")) == 90          # backoff already longer: kept
+    assert mt._retry_delay(0, _E("900")) == mt.JUDGE_RETRY_AFTER_CAP_S
+    assert mt._retry_delay(0, _E("soon")) == 5         # junk header: ignored
+    assert mt.JUDGE_RETRIES == 5 and sum(mt.JUDGE_RETRY_BACKOFF_S) >= 150
+
+
+def test_run_all_scenarios_degrades_one_scenario_and_keeps_judging_the_rest():
+    calls = []
+    def fake_run(scenario, backend, judge_on, persona_prompt=None, max_turns=None):
+        calls.append((scenario["name"], judge_on))
+        if judge_on and scenario["name"] == "a":
+            raise mt.JudgeUnavailable("HTTP Error 429")
+        return _sv(scenario["name"], 1.0, 5, 8, "HUMAN", skipped=not judge_on)
+    out = []
+    with mock.patch.object(mt, "run_scenario", side_effect=fake_run):
+        mt.run_all_scenarios([{"name": "a"}, {"name": "b"}], mock.Mock(), True, None, None, out)
+    assert [sv["scenario"] for sv in out] == ["a", "b"]
+    assert out[0]["voice"].get("skipped") is True and out[0].get("judge_skipped") is True
+    assert out[1]["voice"]["last_third_score"] == 8 and "judge_skipped" not in out[1]
+    assert calls == [("a", True), ("a", False), ("b", True)]
+
+
+def test_aggregate_means_over_judged_repeats_when_one_repeat_lost_its_judge():
+    runs = [[_sv("debate", 1.0, 0, 0, "AI", skipped=True)],
+            [_sv("debate", 1.0, 4, 8, "HUMAN")],
+            [_sv("debate", 1.0, 6, 8, "HUMAN")]]
+    out = mt.aggregate_repeats(runs)
+    v = out[0]["voice"]
+    assert not v.get("skipped") and v["last_third_score"] == 8 and v["first_third_score"] == 5
+    assert v["repeats"] == 3 and v["judged_repeats"] == 2 and v["hard_ai_repeats"] == 0
+    assert out[0]["repeats"][0]["last_third_score"] is None
+    all_skipped = mt.aggregate_repeats([[_sv("d", 1.0, 0, 0, "AI", skipped=True)]] * 2)
+    assert all_skipped[0]["voice"].get("skipped") is True
+
+
+def test_main_reports_partial_when_the_judge_dies_on_one_scenario_only():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 100.0, 200.0)] * 2000
+    state = {"n": 0}
+    def anchor(*a, **k):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise mt.JudgeUnavailable("HTTP Error 429: Too Many Requests")
+        return True
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=True), \
+             mock.patch.object(mt, "judge_anchor_retention", side_effect=anchor), \
+             mock.patch.object(mt, "judge_voice_window", return_value=(8.0, "HUMAN")):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        verdict = json.loads(out.read_text())
+    assert verdict["judge"] == "PARTIAL", verdict["judge"]
+    assert len(verdict["judge_skipped_scenarios"]) == 1
+    judged = [sv for sv in verdict["scenarios"] if not sv["voice"].get("skipped")]
+    assert verdict["scenarios_total"] == len(judged) and len(judged) == len(verdict["scenarios"]) - 1
+    assert code in (0, 1)  # gated on the judged scenarios, never exit 3

@@ -2,6 +2,133 @@
 
 **Status:** measurement shipped, prompt rule gated OFF (2026-09-06).
 
+## Substantive register — rule 15, measured and A/B'd (2026-09-13)
+
+The register finding below (substantive scenarios end judged AI, casual
+ones do not) got the same treatment as distress: a judge-free card axis
+and a rule that states the measurement. `scripts/reply_pairs.py` is the
+shared reader for both axes (inbound matching a predicate → Seth's next
+in-chat reply within 30 min). `substantive_reply` = inbound ≥150 chars or
+a real question ≥60 chars (small talk excluded); 120 d, n=63: median 27
+chars, 73% under 60, median 1 sentence, answer-first 0.33. Rule 15 renders
+from those numbers behind `HU_SUBSTANTIVE_REGISTER` (same ladder as 14);
+`HU_PERSONA_RULES_BUF` grew to 3072 because 14+15 live overflowed 2048,
+and the builder now drops 15, then 14, rather than dropping every rule.
+
+The gating measurement is the harness change made for it: the nightly's
+multi-turn stage now runs the production prompt with 3 repeats per
+scenario and scores by last-third mean (majority vote for the hard-AI
+verdict). Off vs live on the three substantive scenarios, 3 repeats each,
+sampling fixed (see the correction above), Gemini voice judge:
+
+| scenario | off: first→last (hard-AI) | live: first→last (hard-AI) | opinion off/live | flow off/live |
+|---|---|---|---|---|
+| debate_opinions | 5.7→5.7 (2/3) | 5.0→7.7 (1/3) | 4/9 | 3/9 |
+| news_reaction_chain | 7.3→8.3 (0/3) | 4.3→9.0 (0/3) | 8/7 | 8/9 |
+| advice_seeking | 7.0→4.7 (3/3) | 7.3→6.0 (2/3) | 3/8 | 5/6 |
+| **last-third mean, all repeats (n=9)** | **6.22, hard-AI 5/9** | **7.56, hard-AI 3/9** | | |
+
+Direction right on every scenario and on the pooled mean (+1.3), so the
+gate goes to SHADOW in the plist. Not LIVE: this is a synthetic judge, and
+the ladder's LIVE step needs a human-judged round.
+
+What the judge still flags, and the next lever: the remaining AI tell in
+every arm is structural — "[short affirmation] — [brief comment]" on
+nearly every turn. Rule 15 names that shape and says "no em-dash", and the
+live arm produced MORE of it: last-third replies containing an em-dash
+went 62% → 96% (15/24 → 23/24). A negated pattern in the prompt primes
+the pattern. The next variant should describe the positive shape (one
+clause, or two sentences) and not mention the dash at all; re-run the
+same 3-repeat A/B before touching the gate again. Rule 15 text lives in
+`hu_style_card_render_substantive_rule` (src/persona/style_card.c).
+
+### Rule 15 v2 + dash strip, and the noise floor (2026-09-13 PM)
+
+Seth's own typed texts carry an em-dash in 0 of 954 (chat.db; the 4 hits
+in 958 are h-uman rating prompts sent to himself). Two levers landed in
+b6c07c3fa: rule 15 v2 states the shape positively and never names the
+dash or a "never"; the outbound strip stage maps U+2014/U+2013 plus their
+spaces to ", " (dropped when leading/trailing, never doubling punctuation),
+and the style card gains `dash_rate`. Same 3-repeat A/B, plus a re-run of
+the off arm to measure the noise between identical prompts:
+
+| run | last-third mean (n=9) | hard-AI | last-third replies with an em-dash |
+|---|---|---|---|
+| off, AM | 6.22 | 5/9 | 15/24 (62%) |
+| live v1 (names the dash) | 7.56 | 3/9 | 23/24 (96%) |
+| off, PM re-run | 5.11 | 7/9 | 24/24 (100%) |
+| live v2 (positive shape) | 5.56 | 5/9 | 8/24 (33%) |
+
+Read it in two halves. **Judge-free:** the positive wording cut the dash
+share from 100% to 33% against its own off arm (and from 96% under v1) —
+the priming finding holds, and the strip stage takes the rest to zero on
+the real send path (the harness posts to the server directly, so the strip
+is not in this loop). **Judge:** two runs of the identical off prompt sit
+1.1 apart, so neither +1.3 (v1) nor +0.45 (v2) clears the floor. Gate stays
+SHADOW. A delta under ~1.5 on the nightly's 3-repeat mean is noise; a
+decisive read needs more repeats or a paired design where both arms see
+the same contact turns.
+
+What the judge names once the dashes are gone: the twin is a "yes-man"
+(opinion_strength 2–3 in every live-v2 scenario; debate ends with the twin
+accepting "agree to disagree" after agreeing with every point). That is
+the second reason in the original finding and rule 15's "take a side" line
+does not move it. The next lever is not prompt wording: the opinion-hold
+directive (HU_OPINION_HOLD, live) and the persona's own stances are the
+place to look for why a stated position never surfaces in these turns.
+
+### The agreement tell: where the stances were supposed to come from (2026-09-13 PM)
+
+Chasing "the twin agrees with everything" through the product path:
+
+- **The A/B never had a stance in the loop.** The multi-turn harness posts
+  the `persona show` prompt straight to the server. The daemon's evolved-
+  opinions block and the opinion-hold directive (`HU_OPINION_HOLD`, LIVE in
+  the plist) are built in the reactive prompt and never reach the harness.
+- **Opinion-hold has fired zero times in production, ever** (0 hits across
+  all 27 service logs). Its only stance source is `evolved_opinions`, and
+  that table held two rows in four months, both harvested by the extractor
+  from the twin's OWN replies and both identity slips: "I think I just
+  glitched for a second" (2026-05-12) and "I think you might be confusing
+  me with someone else" (2026-05-17). Conviction 0.5 clears the 0.4
+  injection floor, so every live prompt since May has carried *"On 'I just
+  glitched for a': you tentatively believe 'I think I just glitched for a
+  second' (shaped by 1 conversations)"* as a position arrived at through
+  experience (today's salience log: `kept [evolved_opinion]` at 10:01,
+  10:02, 16:36). Fixed: rows purged (backup table
+  `evolved_opinions_purged_20260913` + `memory.db.bak-20260913-evolved-opinions-rows`),
+  and `hu_evolved_opinion_stance_is_usable` now rejects a topic that opens
+  on a pronoun or a sentence carrying an AI/identity slip; the two real
+  rows are pinned as rejected in `tests/test_opinions_persistence.c`.
+- **The persona has no debatable stances anywhere.** `seth.json` carries a
+  values list (nouns) and the prompt says "You have STRONG OPINIONS. Pick a
+  side" with nothing to pick. Seth's own texts state a position in 1.5% of
+  messages (14/946), and those are logistics ("I think renting for a year
+  is ideal"), not hot takes. The prompt asks for a register the corpus does
+  not show.
+- **What the corpus does show, judge-free:** reflexive agreement as the
+  first word. `reply_pairs.agreement_opener_rate` (yeah / exactly / totally
+  / 100% / fr / fair…, with bare yes/no/ok excluded as answers):
+
+  | who | agreement-opener rate |
+  |---|---|
+  | Seth, substantive replies (n=65) | **0.06** |
+  | twin, last third, off AM / live v1 | 0.50 / 0.46 |
+  | twin, last third, off PM / live v2 | 0.54 / 0.62 |
+
+  A 10× gap, stable across arms, and it is now on the style card
+  (`substantive_reply.agreement_opener_rate`) and in every multi-turn
+  verdict (`last_third_agreement_opener_rate`, meaned over repeats), so the
+  nightly tracks it without the judge.
+
+Next lever, in order: (1) rule 15 v3 states the measured opener fact
+("you open on agreement about 1 in 16 times; usually you just say the
+thing") — same 3-repeat A/B, read the judge-free rate first, the judge
+second; (2) give the harness the product path (the daemon's reactive
+prompt builder, or at least the opinion block) so opinion-hold is
+measurable at all; (3) only then a real stance source, mined from Seth's
+own texts with provenance, never from the twin's output.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the

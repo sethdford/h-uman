@@ -636,7 +636,7 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 
     /* P6-5: shared absolute-rules block — same source of truth as the
      * reactive path (src/agent/agent_stream.c). Last-position weight. */
-    char absolute_rules_buf[2048];
+    char absolute_rules_buf[HU_PERSONA_RULES_BUF];
     size_t absolute_rules_len = 0;
     if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
                                         sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)

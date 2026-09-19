@@ -91,6 +91,30 @@ def fetch_reply_pairs(db_path: str, days: int, predicate, window_s: int = REPLY_
 
 _SENTENCE_END = re.compile(r"[.!?]+(\s|$)")
 _ANSWER_FIRST = re.compile(r"^(yes|yeah|yep|yup|no|nah|nope|sure|idk|ok|okay|maybe|probably)\b", re.I)
+# Reflexive agreement as the FIRST word (an optional "lol"/"haha"/"ok" before
+# it): the shape the multi-turn judge calls "yes-man". Bare yes/no/ok/sure
+# are answers to a question, not agreement, and are not counted here.
+_AGREE_OPENER = re.compile(
+    r"^(?:(?:lol|haha|hahaha|ok|okay)\s+)?"
+    r"(yeah|yea|yep|yup|true|exactly|totally|100%|fr|for sure|fair|agreed|same|right|def|definitely)"
+    r"(?![A-Za-z0-9'])",  # not \b: "100%." has no word boundary after the %
+    re.I,
+)
+
+
+def is_agreement_opener(reply: str) -> bool:
+    return bool(_AGREE_OPENER.match(reply.strip()))
+
+
+def agreement_opener_rate(replies) -> float:
+    """Share of replies that open on reflexive agreement. Judge-free.
+    Measured 2026-09-13: the persona's substantive replies 0.06 (n=65); the
+    twin's last-third replies in the substantive scenarios 0.46-0.62 (four
+    3-repeat runs, off and live arms alike)."""
+    replies = list(replies)
+    if not replies:
+        return 0.0
+    return sum(1 for r in replies if is_agreement_opener(r)) / len(replies)
 
 
 def reply_stats(pairs) -> dict:
@@ -107,6 +131,7 @@ def reply_stats(pairs) -> dict:
         "share_le_60_chars": sum(1 for l in lengths if l <= 60) / n,
         "median_sentences": statistics.median(sentences),
         "answer_first_rate": sum(1 for _, r in pairs if _ANSWER_FIRST.match(r)) / n,
+        "agreement_opener_rate": agreement_opener_rate(r for _, r in pairs),
         "median_reply_to_inbound_ratio": statistics.median(len(r) / max(1, len(i)) for i, r in pairs),
         "window_seconds": REPLY_WINDOW_S,
     }

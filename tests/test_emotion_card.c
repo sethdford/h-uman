@@ -273,7 +273,7 @@ static void absolute_rules_append_register_when_live_and_fit_production_buffer(v
     HU_ASSERT_TRUE(r13 < r14);
     /* agent_turn.c and daemon_proactive.c hand this builder a 2048-byte
      * buffer; the live rule must still fit with room to spare. */
-    HU_ASSERT_TRUE(len + 1 <= 2048);
+    HU_ASSERT_TRUE(len + 1 <= HU_PERSONA_RULES_BUF);
     cleanup_tmpdir();
 }
 

@@ -27,7 +27,10 @@ static const char card_json[] =
     "\"question_rate\":{\"value\":0.099,\"ci_lo\":0.08,\"ci_hi\":0.12,\"n\":977},"
     "\"exclamation_rate\":{\"value\":0.039,\"ci_lo\":0.028,\"ci_hi\":0.051,\"n\":977},"
     "\"emoji_rate\":{\"value\":0.126,\"ci_lo\":0.10,\"ci_hi\":0.15,\"n\":977},"
-    "\"length_chars\":{\"value\":31.2,\"ci_lo\":29.0,\"ci_hi\":33.5,\"n\":977}}}";
+    "\"length_chars\":{\"value\":31.2,\"ci_lo\":29.0,\"ci_hi\":33.5,\"n\":977}},"
+    "\"substantive_reply\":{\"n\":63,\"median_chars\":27,\"share_le_60_chars\":0.73,"
+    "\"agreement_opener_rate\":0.06,"
+    "\"median_sentences\":1,\"answer_first_rate\":0.33,\"min_n\":20}}";
 
 static char g_tmpdir[256];
 
@@ -50,8 +53,12 @@ static void cleanup_tmpdir(void) {
     char path[512];
     snprintf(path, sizeof(path), "%s/cardtest.style-card.json", g_tmpdir);
     unlink(path);
+    snprintf(path, sizeof(path), "%s/cardtest.emotion-card.json", g_tmpdir);
+    unlink(path);
     rmdir(g_tmpdir);
     unsetenv("HU_PERSONA_DIR");
+    unsetenv("HU_SUBSTANTIVE_REGISTER");
+    unsetenv("HU_EMOTION_REGISTER");
 }
 
 /* ── default ───────────────────────────────────────────────────────── */
@@ -250,8 +257,140 @@ static void formal_register_carries_no_card_numbers(void) {
     cleanup_tmpdir();
 }
 
+/* ── rule 15: the measured substantive register ─────────────────────── */
+
+static void parse_reads_substantive_axis_and_tolerates_its_absence(void) {
+    test_alloc = hu_system_allocator();
+    hu_style_card_t c;
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
+    HU_ASSERT_EQ(c.substantive_n, 63u);
+    HU_ASSERT_EQ(c.substantive_median_chars, 27u);
+    HU_ASSERT_FLOAT_EQ(c.substantive_share_short, 0.73, 1e-9);
+    HU_ASSERT_FLOAT_EQ(c.substantive_answer_first_rate, 0.33, 1e-9);
+    const char *old = "{\"schema\":\"style-card/v2\",\"n\":500,\"axes\":{"
+                      "\"lowercase_start_rate\":{\"value\":0.1},"
+                      "\"no_terminal_punct_rate\":{\"value\":0.8},"
+                      "\"question_rate\":{\"value\":0.1},"
+                      "\"exclamation_rate\":{\"value\":0.04},\"emoji_rate\":{\"value\":0.1}}}";
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, old, strlen(old), &c), HU_OK);
+    HU_ASSERT_EQ(c.substantive_n, 0u);
+    char buf[512];
+    HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, buf, sizeof(buf), NULL),
+                 HU_ERR_INVALID_ARGUMENT); /* not measured: nothing to render */
+}
+
+static void render_substantive_rule_states_card_numbers_positively(void) {
+    test_alloc = hu_system_allocator();
+    hu_style_card_t c;
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
+    char buf[512];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_TRUE(strncmp(buf, "15. ", 4) == 0);
+    HU_ASSERT_STR_CONTAINS(buf, "(n=63)");
+    HU_ASSERT_STR_CONTAINS(buf, "about 27 characters, 73% under 60");
+    HU_ASSERT_STR_CONTAINS(buf, "Take a side when you have one");
+    HU_ASSERT_STR_CONTAINS(buf, "about 1 in 17 of them"); /* 1/0.06 rounds to 17 */
+    HU_ASSERT_STR_CONTAINS(buf, "usually you just say the thing");
+    /* A card without the axis renders the rule without the opener clause. */
+    c.substantive_agreement_opener_rate = -1.0;
+    char nb[512];
+    HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, nb, sizeof(nb), NULL), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(nb, "open on agreement");
+    HU_ASSERT_STR_CONTAINS(nb, "one plain sentence. Say the answer");
+    c.substantive_agreement_opener_rate = 0.06;
+    /* Positive shape only: naming the tell primed it (dash share 62% -> 96%
+     * in the v1 live arm). The rule must not contain the dash or a "never". */
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "\xE2\x80\x94");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "ever ");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "no em-dash");
+    HU_ASSERT_TRUE(len < 480); /* must stay small: shares the rules buffer */
+    c.substantive_n = HU_STYLE_CARD_SUBSTANTIVE_MIN_N - 1;
+    HU_ASSERT_EQ(hu_style_card_render_substantive_rule(&c, buf, sizeof(buf), NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void substantive_gate_defaults_off_shadow_hides_live_appends(void) {
+    make_tmpdir();
+    write_card("cardtest", card_json);
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "cardtest";
+    p.name_len = 8;
+    char buf[4096];
+    size_t len = 0;
+    unsetenv("HU_SUBSTANTIVE_REGISTER");
+    HU_ASSERT_EQ(hu_substantive_register_mode(), HU_GATE_OFF);
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "15. When someone sends");
+    setenv("HU_SUBSTANTIVE_REGISTER", "shadow", 1);
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "15. When someone sends");
+    setenv("HU_SUBSTANTIVE_REGISTER", "live", 1);
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_CONTAINS(buf, "15. When someone sends");
+    HU_ASSERT_STR_CONTAINS(buf, "(n=63)");
+    HU_ASSERT_TRUE(strstr(buf, "13. One topic per message") < strstr(buf, "15. When someone"));
+    /* formal register never carries it */
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, "professional", buf, sizeof(buf), &len),
+                 HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "15. When someone sends");
+    cleanup_tmpdir();
+}
+
+/* Both measured rules live at once must still fit the 2048-byte buffer
+ * agent_turn.c / daemon_proactive.c hand this builder — an overflow there
+ * drops EVERY rule, silently. */
+static void rules_14_and_15_live_together_fit_the_production_buffer(void) {
+    make_tmpdir();
+    write_card("cardtest", card_json);
+    {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/cardtest.emotion-card.json", g_tmpdir);
+        FILE *f = fopen(path, "wb");
+        HU_ASSERT_NOT_NULL(f);
+        fputs(
+            "{\"schema\":\"emotion-card/v1\",\"n\":299,"
+            "\"neutral_share\":{\"value\":0.58},\"mean_intensity\":{\"value\":0.2},"
+            "\"valence_mean\":{\"value\":0.3},"
+            "\"top\":[{\"emotion\":\"amusement\",\"share\":0.06},"
+            "{\"emotion\":\"interest\",\"share\":0.06},{\"emotion\":\"confusion\",\"share\":0.04}],"
+            "\"distress_reply\":{\"n\":11,\"median_chars\":17,\"scaffold_rate\":0.0}}",
+            f);
+        fclose(f);
+    }
+    setenv("HU_SUBSTANTIVE_REGISTER", "live", 1);
+    setenv("HU_EMOTION_REGISTER", "live", 1);
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "cardtest";
+    p.name_len = 8;
+    char buf[4096];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_CONTAINS(buf, "14. Emotional register");
+    HU_ASSERT_STR_CONTAINS(buf, "15. When someone sends");
+    HU_ASSERT_TRUE(len + 1 <= HU_PERSONA_RULES_BUF);
+    /* A caller with the OLD 2048-byte buffer gets the base rules plus rule
+     * 14 (15 dropped), never a failure that would drop every rule. */
+    char small[2048];
+    size_t slen = 0;
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, small, sizeof(small), &slen), HU_OK);
+    HU_ASSERT_STR_CONTAINS(small, "13. One topic per message");
+    HU_ASSERT_STR_NOT_CONTAINS(small, "15. When someone sends");
+    char tiny[1400];
+    HU_ASSERT_EQ(hu_persona_build_absolute_rules_fmt(&p, NULL, tiny, sizeof(tiny), &slen), HU_OK);
+    HU_ASSERT_STR_CONTAINS(tiny, "13. One topic per message");
+    HU_ASSERT_STR_NOT_CONTAINS(tiny, "14. Emotional register");
+    cleanup_tmpdir();
+}
+
 void run_style_card_tests(void) {
     HU_TEST_SUITE("style_card");
+    HU_RUN_TEST(parse_reads_substantive_axis_and_tolerates_its_absence);
+    HU_RUN_TEST(render_substantive_rule_states_card_numbers_positively);
+    HU_RUN_TEST(substantive_gate_defaults_off_shadow_hides_live_appends);
+    HU_RUN_TEST(rules_14_and_15_live_together_fit_the_production_buffer);
     HU_RUN_TEST(default_card_is_marked_fallback_with_sane_rates);
     HU_RUN_TEST(parse_v2_card_reads_every_axis_and_provenance);
     HU_RUN_TEST(parse_rejects_card_missing_an_axis);

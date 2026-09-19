@@ -246,9 +246,11 @@ def aggregate_repeats(runs):
         lat_detail.pop("passed", None)
         empties = {"count": sum(sv["empty_replies"]["count"] for sv in same),
                    "turns": [], "rate": statistics.mean(sv["empty_replies"]["rate"] for sv in same)}
-        if any(sv["voice"].get("skipped") for sv in same):
-            # judge unavailable on at least one repeat: voice axis skipped, as a
-            # single run reports it (voice_pass None, detail {"skipped": True}).
+        judged = [sv for sv in same if not sv["voice"].get("skipped")]
+        if not judged:
+            # judge unavailable on EVERY repeat: voice axis skipped, as a single
+            # run reports it (voice_pass None, detail {"skipped": True}). A repeat
+            # the judge did score counts; the mean is over judged repeats only.
             sv_out = scenario_verdict(name=first["scenario"], retention=ret, voice_pass=None,
                                       voice_detail={"skipped": True, "repeats": len(same)},
                                       latency_pass=lat_ok, latency_detail=lat_detail,
@@ -257,10 +259,12 @@ def aggregate_repeats(runs):
                                  for sv in same]
             out.append(sv_out)
             continue
-        f_mean = statistics.mean(sv["voice"]["first_third_score"] for sv in same)
-        l_mean = statistics.mean(sv["voice"]["last_third_score"] for sv in same)
-        hard_ai = sum(1 for sv in same if sv["voice"]["last_third_verdict"] == "AI")
-        majority_ai = hard_ai * 2 > len(same)
+        f_mean = statistics.mean(sv["voice"]["first_third_score"] for sv in judged)
+        l_mean = statistics.mean(sv["voice"]["last_third_score"] for sv in judged)
+        hard_ai = sum(1 for sv in judged if sv["voice"]["last_third_verdict"] == "AI")
+        majority_ai = hard_ai * 2 > len(judged)
+        agree_rates = [sv["voice"]["last_third_agreement_opener_rate"] for sv in judged
+                       if "last_third_agreement_opener_rate" in sv["voice"]]
         v_ok = voice_drift_ok(voice_normalize(f_mean), voice_normalize(l_mean),
                               VOICE_DRIFT_TOL, any_hard_ai=majority_ai)
         sv_out = scenario_verdict(
@@ -269,13 +273,16 @@ def aggregate_repeats(runs):
                           "last_third_verdict": "AI" if majority_ai else
                           ("HUMAN" if l_mean >= 7 else "BORDERLINE"),
                           "hard_ai_repeats": hard_ai, "repeats": len(same),
+                          "judged_repeats": len(judged),
+                          "last_third_agreement_opener_rate":
+                              statistics.mean(agree_rates) if agree_rates else None,
                           "last_third_judge": same[-1]["voice"].get("last_third_judge"),
                           "last_third_exchanges": same[-1]["voice"].get("last_third_exchanges")},
             latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
         sv_out["repeats"] = [{"retention": sv["retention"]["rate"],
-                              "first_third_score": sv["voice"]["first_third_score"],
-                              "last_third_score": sv["voice"]["last_third_score"],
-                              "last_third_verdict": sv["voice"]["last_third_verdict"],
+                              "first_third_score": sv["voice"].get("first_third_score"),
+                              "last_third_score": sv["voice"].get("last_third_score"),
+                              "last_third_verdict": sv["voice"].get("last_third_verdict"),
                               "passed": sv["passed"]} for sv in same]
         out.append(sv_out)
     return out
@@ -428,13 +435,60 @@ referencing it, or at minimum not contradicting it)? A reply that forgets or
 contradicts the fact is NOT retained.
 
 Return JSON: {{"retained": true|false, "why": "..."}}"""
-    raw = call_gemini(prompt).strip()
+    raw = _with_judge_retries("retention judge", lambda: call_gemini(prompt)).strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
     try:
         return bool(json.loads(raw)["retained"])
     except (ValueError, KeyError, TypeError) as e:
         raise JudgeUnavailable(f"retention judge returned unparseable output: {e}") from e
+
+
+# One Gemini timeout used to end the qualitative half of a whole night
+# (2026-09-13: a 3-repeat run, 18 scenario-runs of generation, degraded to
+# latency-only on one 30 s read timeout). Retry the judge before giving up.
+JUDGE_RETRIES = 5
+# 2026-09-19: three of six nightlies (09-14/15/16) lost every qualitative axis
+# to ONE Gemini 429 on one scenario — three tries spanning 20 s cannot outlast a
+# per-minute quota, and the run-level fallback threw away the five scenarios
+# the judge had already scored. Longer, header-aware backoff; per-scenario
+# degrade (see run_all_scenarios).
+JUDGE_RETRY_BACKOFF_S = (5, 20, 45, 90)
+JUDGE_RETRY_AFTER_CAP_S = 120
+
+
+def _retry_delay(attempt, exc=None):
+    """Seconds to wait before retry `attempt`+1: the backoff step, or the
+    server's Retry-After when it is longer, capped at JUDGE_RETRY_AFTER_CAP_S."""
+    base = JUDGE_RETRY_BACKOFF_S[min(attempt, len(JUDGE_RETRY_BACKOFF_S) - 1)]
+    retry_after = 0.0
+    headers = getattr(exc, "headers", None)
+    if headers is not None:
+        try:
+            retry_after = float(headers.get("Retry-After") or 0)
+        except (TypeError, ValueError, AttributeError):
+            retry_after = 0.0
+    return min(max(base, retry_after), JUDGE_RETRY_AFTER_CAP_S)
+
+
+def _with_judge_retries(what, fn):
+    """Call fn() up to JUDGE_RETRIES times; None or an exception is a miss.
+    Raises JudgeUnavailable(with the last error) after the final miss."""
+    last = f"{what}: judge returned nothing"
+    for attempt in range(JUDGE_RETRIES):
+        exc = None
+        try:
+            result = fn()
+            if result is not None:
+                return result
+        except JudgeUnavailable:
+            raise
+        except Exception as e:  # noqa: BLE001 — transport/ADC/parse/429: retry
+            exc = e
+            last = f"{what}: {type(e).__name__}: {e}"
+        if attempt + 1 < JUDGE_RETRIES:
+            time.sleep(_retry_delay(attempt, exc))
+    raise JudgeUnavailable(last)
 
 
 def judge_voice_window(scenario_name, exchanges_window, detail_out=None):
@@ -446,9 +500,8 @@ def judge_voice_window(scenario_name, exchanges_window, detail_out=None):
     per-dimension notes and reasoning (2026-09-13: a verdict that says only
     "AI" cannot be acted on; the notes are what name the register problem).
     """
-    result = evaluate_conversation(scenario_name, exchanges_window)
-    if not result:
-        raise JudgeUnavailable(f"voice judge returned no result for {scenario_name!r}")
+    result = _with_judge_retries(f"voice judge for {scenario_name!r}",
+                                 lambda: evaluate_conversation(scenario_name, exchanges_window))
     if detail_out is not None:
         dims = result.get("dimensions") or {}
         detail_out["dimensions"] = {k: v for k, v in dims.items() if isinstance(v, dict)}
@@ -597,6 +650,9 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         messages.append({"role": "user", "content": user_msg})
         content, first_token_ms, total_ms = backend.chat(messages)  # may raise BackendUnreachable
         messages.append({"role": "assistant", "content": content})
+        # The server emits a leading newline before the reply; production trims
+        # it in the validator chain. Judge what a contact would see.
+        content = (content or "").strip()
         exchanges.append((user_msg, content))
         first_token_series.append(first_token_ms)
         total_series.append(total_ms)
@@ -634,6 +690,11 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
 
     # Voice drift: judge first-third and last-third windows.
     first_ex, last_ex = _thirds(exchanges)
+    # Judge-free companion to the voice score: reflexive-agreement openers
+    # ("yeah", "exactly", "totally") in the last third. The judge's remaining
+    # named tell in the substantive scenarios once dashes were gone (2026-09-13).
+    from reply_pairs import agreement_opener_rate
+    agree_rate = agreement_opener_rate(ai for _, ai in last_ex)
     first_score, _ = judge_voice_window(scenario["name"], first_ex)
     last_detail = {}
     last_score, last_verdict = judge_voice_window(scenario["name"], last_ex, detail_out=last_detail)
@@ -644,6 +705,7 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         name=scenario["name"], retention=rate, voice_pass=v_ok,
         voice_detail={"first_third_score": first_score, "last_third_score": last_score,
                       "last_third_verdict": last_verdict,
+                      "last_third_agreement_opener_rate": agree_rate,
                       "last_third_judge": last_detail,
                       "last_third_exchanges": _trim_exchanges(last_ex)},
         latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
@@ -673,6 +735,17 @@ def run_all_scenarios(scenarios, backend, judge_on, persona_prompt, max_turns, o
             try:
                 out.append(run_scenario(scenario, backend, judge_on=judge_on,
                                         persona_prompt=persona_prompt, max_turns=max_turns))
+                break
+            except JudgeUnavailable as e:
+                # 2026-09-19: one scenario's judge outage must cost ONE scenario's
+                # qualitative axes, not the whole night's. Re-drive it latency-only
+                # (voice/retention marked skipped) and keep judging the rest —
+                # a 429 is usually over by the time the next 30 turns have run.
+                print(f"WARN: judge unavailable for {scenario.get('name', '?')} ({e}); "
+                      f"scoring that scenario latency-only and continuing.")
+                out.append(run_scenario(scenario, backend, judge_on=False,
+                                        persona_prompt=persona_prompt, max_turns=max_turns))
+                out[-1]["judge_skipped"] = True
                 break
             except BackendUnreachable as e:
                 if attempt == 0 and wait_for_backend(backend):
@@ -762,7 +835,27 @@ def main(argv=None):
         judge_on = False  # fall through to the SKIPPED accounting below
 
     verdict = run_verdict(scenario_verdicts)
-    verdict["judge"] = "OK" if judge_on else "SKIPPED"
+    skipped_scen = [sv["scenario"] for sv in scenario_verdicts if sv["voice"].get("skipped")]
+    if judge_on and skipped_scen and len(skipped_scen) == len(scenario_verdicts):
+        judge_on = False  # every scenario lost its judge: the SKIPPED accounting below
+    if judge_on and skipped_scen:
+        # PARTIAL: gate on the scenarios the judge scored; a skipped scenario
+        # contributes only its latency verdict. Never counts a skipped scenario
+        # as a failed one (that was the phantom-FAIL shape) or as a passed one.
+        judged_only = run_verdict([sv for sv in scenario_verdicts if not sv["voice"].get("skipped")])
+        for k in ("scenarios_passed", "scenarios_total", "hard_floor_veto"):
+            verdict[k] = judged_only[k]
+        # The pass floor scales with what was judged (5 of 6 -> 4 of 5), so one
+        # lost scenario does not make the night unpassable by construction.
+        verdict["min_to_pass"] = max(1, round(RUN_PASS_MIN_SCENARIOS * judged_only["scenarios_total"]
+                                              / max(1, len(scenario_verdicts))))
+        verdict["run_passed"] = (judged_only["scenarios_passed"] >= verdict["min_to_pass"]
+                                 and not judged_only["hard_floor_veto"]
+                                 and all(sv["latency"]["passed"] for sv in scenario_verdicts
+                                         if sv["voice"].get("skipped")))
+        verdict["scenarios"] = scenario_verdicts
+    verdict["judge"] = "SKIPPED" if not judge_on else ("PARTIAL" if skipped_scen else "OK")
+    verdict["judge_skipped_scenarios"] = skipped_scen
     verdict["repeats"] = repeats
     verdict["scoring"] = "per-scenario means over repeats; hard-AI by majority" if repeats > 1 else "single run"
     verdict["persona_prompt"] = {

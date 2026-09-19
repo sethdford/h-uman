@@ -68,6 +68,7 @@ CARD_AXES = (
     "question_rate",
     "exclamation_rate",
     "emoji_rate",
+    "dash_rate",
     "length_chars",
 )
 

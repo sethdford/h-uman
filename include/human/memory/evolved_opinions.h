@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/humanness.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -24,9 +25,22 @@ hu_error_t hu_evolved_opinion_upsert(sqlite3 *db, const char *topic, size_t topi
                                      const char *stance, size_t stance_len, double conviction,
                                      int64_t now_ts);
 
+/* Is an extracted (topic, stance) a position about the world, or the model
+ * talking about itself? Measured 2026-09-13: in four months the extractor
+ * stored exactly two rows, both from the twin's own replies and both
+ * identity slips — "I think I just glitched for a second", "I think you
+ * might be confusing me with someone else" — and both were then injected
+ * into every live prompt as "positions you've arrived at through
+ * experience". Rejects a topic that opens on a pronoun (the sentence is
+ * about I/you, not a subject) and a stance carrying an AI/identity-slip
+ * phrase. Pure; tests/test_opinions_persistence.c pins the two real rows. */
+bool hu_evolved_opinion_stance_is_usable(const char *topic, size_t topic_len, const char *stance,
+                                         size_t stance_len);
+
 /* Extract opinionated statements from a response and upsert them.
  * Scans for "I think", "I believe", "I prefer", etc. and stores
- * the surrounding clause as topic+stance with moderate conviction. */
+ * the surrounding clause as topic+stance with moderate conviction.
+ * Candidates that fail hu_evolved_opinion_stance_is_usable are skipped. */
 hu_error_t hu_evolved_opinions_extract_and_store(sqlite3 *db, const char *response,
                                                  size_t response_len, int64_t now_ts);
 

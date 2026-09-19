@@ -613,6 +613,12 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
  * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
  * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
  * would exceed cap. */
+/* Buffer size callers hand hu_persona_build_absolute_rules(_fmt). Sized for
+ * the base rules plus BOTH measured rules (14 emotional, 15 substantive) with
+ * headroom; the builder degrades (drops 15, then 14) rather than failing when
+ * a caller passes less. 2026-09-13: both live overflowed the old 2048. */
+#define HU_PERSONA_RULES_BUF 3072
+
 hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
                                            size_t *out_len);
 

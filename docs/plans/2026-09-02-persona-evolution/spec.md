@@ -458,6 +458,42 @@ from tonight. The running daemon keeps the previous adapter id only as a
 provenance label until its next restart (the id is read at startup and
 SIGHUP does not reload it); the server itself serves the new adapter now.
 
+### 2026-09-13: human sheet seeded, still unrated; cross-family judge on it
+
+**Human sheet.** `~/.human/blind_ab_human/` was reseeded 2026-09-06 08:00
+for the promoted adapter: 48 detection rows on FRESH contexts (chat.db
+Aug 5–Sep 6, 20 contacts; every context on any prior rated sheet, in the
+cycle-4 set, or in the v6.1 training corpus excluded — 17 of the 09-06
+probe's 37 contexts were on the 07-27 rated sheet, so probe trials were not
+reused). Generated on the product path (`triples_orpo1_promoted_2026-09-06.json`
+carries provenance). As of 2026-09-13: **0 of 48 rated**. The drip sent 7
+questions (rows `orpo1-39`, `orpo1-34` skipped after three unanswered asks
+each; `orpo1-27` pending since 09-12 17:11); chat.db shows those 7 outbound
+messages and no replies. The promotion gate and doctor's `blind_ab_gate`
+read only the human key, so the adapter remains uncertified.
+
+**Same-model judge (2026-09-13, not usable).** `synthetic_judge.py` against
+:8741 — i.e. the promoted adapter judging its own output — scored 41/48
+(7 parse failures) at detection **0.098** [0.039, 0.225]: it called its own
+reply "the real Seth" in 90% of pairs. Written to the gate's `synthetic`
+slot only (`score.py --rater synthetic`; human key untouched). Recorded as
+the limit case of the shared-blindspot caveat, not as evidence.
+
+**Cross-family judge (2026-09-13).** `llm_judge_tier.py` (gemini-3.1-pro-preview
+via Vertex ADC, A/B order seeded per row, record at
+`~/.human/logs/llm-judge-orpo1-sheet-2026-09-13.json`, ids and votes only):
+
+| | promoted adapter, 48 fresh pairs | nightly judge, 37-prompt set, same adapter |
+|---|---|---|
+| detection (judge picked Seth's real reply) | **0.417** [0.288, 0.557] | 0.297 (09-08), 0.297 (09-10), 0.351 (09-12) |
+| AUC from stated confidence | 0.341 | 0.209 / 0.213 / 0.224 |
+
+Passes the proxy criterion (detection ≤ 0.60) and is not circular. Two
+caveats: an AUC below 0.5 means the judge is confidently wrong more often
+than right — its rubric rewards lowercase and no punctuation, which the
+adapter over-delivers (68% lowercase-start vs Seth's 8.6%) — and it is a
+proxy; the human sheet above is the certification.
+
 ## 4. Persona comparison: does the prompt's style card match current (post-event) Seth?
 
 The persona carries measured-style numbers in three places. File:line
