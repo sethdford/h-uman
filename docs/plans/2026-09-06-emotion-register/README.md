@@ -193,6 +193,55 @@ skipped), each a real inbound answered OFF vs LIVE by the serving model on
 reply, scored by `score_preference.py` unchanged (win rate = share where
 the rule helped). The 2026-09-05 preference sheet is also still unrated.
 
+### 2026-09-19 — the corpus measured: the agreement tell is a harness artifact
+
+The obvious next lever after three prompt variants failed was the corpus
+(the emoji gap was found that way: chosen 0.5% vs rejected 7.3%). Measured
+with the shipped definitions (`reply_pairs.is_agreement_opener`,
+`eval_persona_evolution.has_dash`), chosen / rejected side:
+
+| corpus | n pairs | agreement-opener | dash |
+|---|---|---|---|
+| serving adapter's (`glm-v61-pref`, ORPO 09-05) | 426 | 0.10 / 0.05 | 0.00 / 0.03 |
+| nightly base (`glm-v6-merged-20260906`) | 1290 | 0.05 / 0.06 | 0.00 / 0.03 |
+| every nightly casing rebalance 09-07 → 09-19 | 1290 | 0.05 / 0.06 | 0.00 / 0.03 |
+
+The chosen side does not carry the tell; if anything the rejected side
+carries the dash. Contrast on both axes is a few points, so no adapter
+trained on this corpus learns them in either direction. Then the two
+numbers that settle it:
+
+| where | n | agreement-opener | dash |
+|---|---|---|---|
+| Seth, substantive replies | 65 | 0.06 | 0.00 |
+| **the twin, real production turns since 09-01** | **101** | **0.09** | **0.00** |
+| the harness twin, last third, five arms | 24 each | 0.46–0.62 | 0.33–1.00 |
+| the harness's scripted contact, last third, debate / advice | 10 each | 0.30 | — |
+
+In real use the twin opens on agreement 9% of the time and has emitted no
+dash in 101 turns. The 50% rate — and the judge's "yes-man" verdict, and
+the "[affirmation] — [comment]" shape — exist only inside the harness: a
+30-turn scripted exchange with a contact who itself opens on agreement a
+third of the time in the substantive scenarios, posted to :8741 with a
+single system prompt, no daemon context, no history budget, no outbound
+pipeline. The model mirrors the script. Everything measured on this axis
+since 09-13 (rules 15 v1–v3, the dash strip's motivation, the 4-arm A/Bs)
+was measuring the harness's conversation dynamics, not the product. The
+strip stage is harmless and correct (Seth 0/954) but has had nothing to
+strip; rule 15's substantive-length facts still stand (those were measured
+on Seth's texts, not the harness).
+
+What changes: (1) every multi-turn verdict now carries the scripted
+contact's own agreement-opener rate beside the twin's
+(`last_third_contact_agreement_opener_rate`) so the number is never read
+without its reference; (2) the judge's "AI" verdicts on the substantive
+scenarios are not evidence about production until the harness either
+scripts a contact that pushes back like a real one or is replaced by real
+production turns as the measured artifact — `production_outcomes` already
+holds 101 of them with the delivered text, and the judge-free rates above
+took one query. The next measurement of "substantive register" should be
+run on those, not on scripted synthetic contacts.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the

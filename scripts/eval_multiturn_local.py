@@ -276,6 +276,8 @@ def aggregate_repeats(runs):
                           "judged_repeats": len(judged),
                           "last_third_agreement_opener_rate":
                               statistics.mean(agree_rates) if agree_rates else None,
+                          "last_third_contact_agreement_opener_rate":
+                              judged[-1]["voice"].get("last_third_contact_agreement_opener_rate"),
                           "last_third_judge": same[-1]["voice"].get("last_third_judge"),
                           "last_third_exchanges": same[-1]["voice"].get("last_third_exchanges")},
             latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
@@ -695,6 +697,12 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
     # named tell in the substantive scenarios once dashes were gone (2026-09-13).
     from reply_pairs import agreement_opener_rate
     agree_rate = agreement_opener_rate(ai for _, ai in last_ex)
+    # The scripted contact's own rate on the same window: the reference the
+    # twin's number must be read against. 2026-09-19: the twin ran 0.46-0.62
+    # here against 0.09 on 101 real production turns — the scripted contact
+    # opens on agreement 0.30 of its last-third turns in debate/advice and the
+    # model mirrors it. A twin number without this beside it misleads.
+    contact_agree_rate = agreement_opener_rate(u for u, _ in last_ex)
     first_score, _ = judge_voice_window(scenario["name"], first_ex)
     last_detail = {}
     last_score, last_verdict = judge_voice_window(scenario["name"], last_ex, detail_out=last_detail)
@@ -706,6 +714,7 @@ def run_scenario(scenario, backend, judge_on, persona_prompt=None, max_turns=Non
         voice_detail={"first_third_score": first_score, "last_third_score": last_score,
                       "last_third_verdict": last_verdict,
                       "last_third_agreement_opener_rate": agree_rate,
+                      "last_third_contact_agreement_opener_rate": contact_agree_rate,
                       "last_third_judge": last_detail,
                       "last_third_exchanges": _trim_exchanges(last_ex)},
         latency_pass=lat_ok, latency_detail=lat_detail, empty_replies=empties)
