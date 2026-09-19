@@ -44,6 +44,12 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
  * include/human/memory/contact_insights_repo.h. Do not flip to live without
  * the specificity measurement (scripts/specificity_score.py) moving. */
 hu_gate_mode_t hu_memory_loader_insight_mode(void);
+
+/* The insight block's budget. Shared with the overuse scan so it can re-render
+ * the exact lines this loader injected for the turn (same query, same order). */
+#define HU_INSIGHT_MAX_ITEMS      8
+#define HU_INSIGHT_MAX_BYTES      900
+#define HU_INSIGHT_MIN_CONFIDENCE 0.5
 /* Test seam: force a mode; -1 reverts to reading the env. */
 void hu_memory_loader_set_insight_mode_for_test(int mode);
 

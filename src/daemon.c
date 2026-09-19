@@ -73,6 +73,7 @@
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/identity_graph.h"
+#include "human/daemon/insight_overuse.h"
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
@@ -9246,6 +9247,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (pk_err != HU_OK)
                                 hu_log_warn("daemon", agent ? agent->observer : NULL,
                                             "promise-keeper scan failed (%d)", (int)pk_err);
+                        }
+                        /* Insight overuse (PAS counter-metric, arXiv 2609.04676):
+                         * one log line per reply, never changes the send.
+                         * HU_INSIGHT_OVERUSE gated OFF; promotion of any closed
+                         * loop is gated on the Seth-baseline comparison in
+                         * scripts/insight_overuse_report.py. */
+                        if (agent && agent->memory && send_len > 0) {
+                            hu_gate_mode_t io_mode = hu_insight_overuse_mode();
+                            hu_error_t io_err = hu_daemon_insight_overuse_scan(
+                                agent->memory, alloc, batch_key, key_len, combined, combined_len,
+                                send_ptr, send_len, io_mode, agent->observer, NULL);
+                            if (io_err != HU_OK)
+                                hu_log_warn("daemon", agent->observer,
+                                            "insight-overuse scan failed (%d)", (int)io_err);
                         }
 #endif
                         /* Split response into natural multi-message fragments */
