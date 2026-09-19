@@ -13,6 +13,7 @@
 #include "human/core/allocator.h"
 #include "human/memory/wiki_page.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,11 @@ static void fixture_up(wiki_fixture_t *fx) {
     snprintf(wiki, sizeof(wiki), "%s/wiki", fx->dir);
     HU_ASSERT_EQ(mkdir(wiki, 0700), 0);
     snprintf(fx->page_path, sizeof(fx->page_path), "%s/%s.md", wiki, k_contact);
-    FILE *f = fopen(fx->page_path, "wb");
+    /* 0600: a fixture page must not be world-writable (CodeQL
+     * cpp/world-writable-file-creation on the fopen("wb") form). */
+    int fd = open(fx->page_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    HU_ASSERT_TRUE(fd >= 0);
+    FILE *f = fdopen(fd, "wb");
     HU_ASSERT_NOT_NULL(f);
     fwrite(k_page, 1, sizeof(k_page) - 1, f);
     fclose(f);
